@@ -2079,7 +2079,9 @@ lint:
 deny:
     cargo deny check
 
-# The five fuzz recipes the overnight run takes, in the order it takes them.
+# The five fuzz recipes the overnight run starts. They run together, so this is
+# the order they are started and waited on and not the order they get the
+# machine — but it is still the order the summary line names them in.
 #
 # Recipe names rather than fuzz-target names, because what each target wants on
 # its command line is the recipe's business and not this list's.
@@ -2103,22 +2105,27 @@ systemd_user_dir := env_var_or_default("RCAD_SYSTEMD_USER", env_var("HOME") / ".
 # hand, which is a thing somebody decided rather than a thing that accrued.
 fuzz_corpus_root := env_var_or_default("RCAD_FUZZ_CORPUS", env_var("HOME") / "rcad-fuzz-corpus")
 
-# Fuzz every target in turn, inside a fixed window, unattended.
+# Fuzz every target at once, inside a fixed window, unattended.
 #
-# `window` is seconds, and it is a *deadline* and not a budget: each target gets
-# an equal share of whatever is left when its turn comes, so a slow build or a
-# target that stops early is paid for out of the same window rather than added
-# to the end of it. The 08:10 in `rcad-fuzz.timer` is that deadline, and it is
-# real because the arithmetic is done against the clock each time round.
+# `window` is seconds, and it is a *deadline* and not a budget: the window is
+# measured against the clock once the build is done, so a slow build is paid for
+# out of the same window rather than added to the end of it. The 08:10 in
+# `rcad-fuzz.timer` is that deadline.
+#
+# **All five together, each for the whole window.** Until 2026-09-18 they ran in
+# turn on a fifth of the window each, which put one core of 24 to work and left
+# the other 23 idle for eight hours. Nothing is shared between the five, so the
+# only thing sequencing bought was politeness, and `Nice=10` buys that already.
 #
 # A crash does not end the night. `cargo fuzz` exits non-zero and writes the
 # input to `fuzz/artifacts/<target>/` (ignored, so it survives a `git clean`
 # without dirtying anything), and a crash in the reader is no reason to cost the
 # fuse its hours — so each target is reported and the run carries on, failing at
-# the end if anything failed.
+# the end if anything failed. A crash still ends *that* target's night, which is
+# the next thing to fix.
 #
 # Same nightly-compiler caveat as `fuzz` below.
-[doc("Fuzz all five targets in turn, inside a window in seconds. What the timer runs.")]
+[doc("Fuzz all five targets at once, inside a window in seconds. What the timer runs.")]
 fuzz-overnight window="28800":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2233,62 +2240,105 @@ fuzz-overnight window="28800":
         exit 1
     fi
 
+    # The input a target found is kept beside the log that describes it, because
+    # `fuzz/artifacts/` is the wrong place to leave the only copy of anything
+    # (§91). Two reasons, and each one lost a finding.
+    #
+    # **libFuzzer never reads that directory back as a seed.** So the next night
+    # starts from a corpus without the crash in it, rolls a fresh seed, and does
+    # not re-find it: on 2026-09-13 a night reported "nothing found" on the very
+    # commit the night before had crashed on, and nothing had been fixed in
+    # between.
+    #
+    # **It lives in this worktree, and `.gitignore` hides it.** §89's slow unit
+    # sat there as its only copy for three days in a tree that had been unlocked
+    # and was due to be reclaimed.
+    #
+    # `-n` makes the repeat cheap and keeps the first copy of a name that
+    # libFuzzer rewrites.
+    copy_out() {
+        [ -d fuzz/artifacts ] || return 0
+        mkdir -p "$night/artifacts"
+        cp -Rn fuzz/artifacts/. "$night/artifacts/" 2>/dev/null || true
+    }
+
+    # **On a clock, and not at each target's end, because the ends are all in
+    # the same minute now.** The reason §91 wanted this at all is a night killed
+    # from outside, and the sequential loop got its protection for free: four
+    # target boundaries spread across the night, about ninety minutes apart. Run
+    # together, the five targets finish within seconds of each other and there
+    # are no boundaries left before the deadline — so a night killed at 04:00
+    # would keep nothing, which is worse than what this replaced rather than
+    # better. An interval so a test can afford one.
+    copy_every="${RCAD_FUZZ_COPY_EVERY:-300}"
+    ( while sleep "$copy_every"; do copy_out; done ) &
+    copier=$!
+    trap 'kill "$copier" 2>/dev/null || true' EXIT
+
+    # **Every target for the whole window, all five at once, rather than a fifth
+    # of the window each.** One target at a time was one core of 24 (§81), and
+    # the night of 2026-09-18 spent 8 core-hours of the 192 it could have had.
+    # Nothing here is shared: each target has its own corpus directory, its own
+    # log, and its own `RCAD_FUZZ_TIMINGS/<target>/` — so the five are
+    # independent processes that happen to start together, and peak resident was
+    # 689 MB apiece against 125 GB.
+    #
+    # `Nice=10` and `IOSchedulingClass=idle` in `rcad-fuzz.service` are what make
+    # this polite rather than rude, and children inherit both: a lane compiling
+    # at three in the morning still wins every core it asks for.
+    #
+    # The five `cargo fuzz run`s serialise for a few seconds at startup on the
+    # build directory lock, each doing the no-op build that `cargo fuzz build`
+    # above already did. That is the whole cost of not having a flag to skip it.
     recipes=({{fuzz_all}})
-    left=${#recipes[@]}
     to_look_at=()
+    left=$(( deadline - $(date +%s) ))
+    pids=()
+    started=()
     for recipe in "${recipes[@]}"; do
-        slice=$(( (deadline - $(date +%s)) / left ))
-        left=$(( left - 1 ))
         # No floor beyond "there is time left". A minimum worth starting would
         # be a number nobody can defend — an 18 MB corpus takes seconds just to
         # load, so the honest floor depends on the target — and it would make
         # the window untestable at any size a test can afford to wait for.
-        if [ "$slice" -lt 1 ]; then
-            echo "$recipe: skipped, $slice s left in the window" | tee -a "$night/$recipe.log"
+        if [ "$left" -lt 1 ]; then
+            echo "$recipe: skipped, $left s left in the window" | tee -a "$night/$recipe.log"
             to_look_at+=("$recipe:no-time")
             continue
         fi
-        echo "$recipe: $slice s"
+        echo "$recipe: $left s"
         # libFuzzer's own `-timeout` bounds one input and not the process, and a
         # target wedged outside the fuzzer's control would eat the whole night.
         # The grace is for the corpus write on the way out.
+        timeout --kill-after=60 "$(( left + 300 ))" \
+            {{just_executable()}} "$recipe" "$left" "{{fuzz_corpus_root}}" \
+            >"$night/$recipe.log" 2>&1 &
+        pids+=("$!")
+        started+=("$recipe")
+    done
+
+    # Waited in the order they were started, which is not the order they finish.
+    # It costs nothing: they were all given the same deadline, so the last wait
+    # returns within seconds of the first however they are ordered, and reading
+    # them in a fixed order keeps the summary's list stable night to night.
+    for i in "${!started[@]}"; do
+        recipe="${started[$i]}"
         status=0
-        timeout --kill-after=60 "$(( slice + 300 ))" \
-            {{just_executable()}} "$recipe" "$slice" "{{fuzz_corpus_root}}" \
-            >"$night/$recipe.log" 2>&1 || status=$?
+        wait "${pids[$i]}" || status=$?
         case "$status" in
             0) ;;
             124|137)
-                echo "$recipe: overran its slice and was killed"
+                echo "$recipe: overran the window and was killed"
                 to_look_at+=("$recipe:overran") ;;
             *)
                 echo "$recipe: exited $status — see $night/$recipe.log"
                 to_look_at+=("$recipe:crash") ;;
         esac
-
-        # The input a target found is kept beside the log that describes it,
-        # because `fuzz/artifacts/` is the wrong place to leave the only copy of
-        # anything (§91). Two reasons, and each one lost a finding.
-        #
-        # **libFuzzer never reads that directory back as a seed.** So the next
-        # night starts from a corpus without the crash in it, rolls a fresh seed,
-        # and does not re-find it: on 2026-09-13 a night reported "nothing found"
-        # on the very commit the night before had crashed on, and nothing had
-        # been fixed in between.
-        #
-        # **It lives in this worktree, and `.gitignore` hides it.** §89's slow
-        # unit sat there as its only copy for three days in a tree that had been
-        # unlocked and was due to be reclaimed.
-        #
-        # Copied after each target rather than once at the end, so a night killed
-        # from outside still keeps what the targets that did run found. `-n`
-        # makes the repeat cheap and keeps the first copy of a name that libFuzzer
-        # rewrites.
-        if [ -d fuzz/artifacts ]; then
-            mkdir -p "$night/artifacts"
-            cp -Rn fuzz/artifacts/. "$night/artifacts/"
-        fi
+        copy_out
     done
+
+    kill "$copier" 2>/dev/null || true
+    trap - EXIT
+    copy_out
 
     # Counted after the loop and named in the summary, because a copy nobody is
     # told about is very nearly as lost as the original was. A clean night writes
@@ -2444,21 +2494,28 @@ fuzz-target target duration corpus_root="" max_len="":
 
 # Pins `fuzz-overnight` against a `cargo` it brings with it, because the real one
 # wants a sanitizer build and eight hours before it says anything at all. The
-# stub sleeps for exactly the time it was granted, so the clock the recipe
-# divides is a real clock and the whole thing still runs in about thirteen
-# seconds.
+# stub sleeps half the time it was granted and logs when it started, so both the
+# clock the recipe runs against and the order it starts things in are real, and
+# the whole thing still runs in about thirty seconds.
 #
-# Four things, and the first is the one that would otherwise cost a night in
-# silence: **the window is a deadline, not a budget.** A recipe that handed each
-# target the full window would pass every other assertion here and run four
-# times as long as it was told to, which nobody would notice until the fuzzer
-# was still going at lunch.
+# Two things about the window, and neither can be seen from the clock alone.
+# **It is a deadline and not a budget**: a recipe that gave each of five targets
+# a fresh window would run five times as long as it was told to, which nobody
+# would notice until the fuzzer was still going at lunch. And **every target
+# gets the whole of it**, at once — which is the same sentence read the other
+# way, and is why the pair has to be asserted on what each target was *told*
+# (arm one) and on when each one *started* (arm four) rather than on how long
+# the night took. Running in turn on a fifth each and running together on the
+# whole each take about the same wall-clock time; that is exactly how the first
+# of them went unquestioned for nine nights while 23 of 24 cores sat idle.
 #
-# The other three are each a way the night could quietly do nothing: a crash in
-# one target taking the other three down with it, the run reporting success
-# after a target died, and — the reason the hub case is here rather than trusted
-# to `check-hub` — a timer left pointing at the one tree whose owner cannot be
-# written down, where `just lanes` would show `free` all night (§60).
+# The rest are each a way the night could quietly do nothing: a crash in one
+# target taking the other four down with it, one target's overrun starving them,
+# the run reporting success after a target died, a finding left in a gitignored
+# directory in a tree due to be reclaimed (§91), and — the reason the hub case is
+# here rather than trusted to `check-hub` — a timer left pointing at the one tree
+# whose owner cannot be written down, where `just lanes` would show `free` all
+# night (§60).
 [private]
 check-fuzz-overnight-selftest:
     #!/usr/bin/env bash
@@ -2492,7 +2549,12 @@ check-fuzz-overnight-selftest:
     cat >"$dir/bin/cargo" <<'STUB'
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '%s [timings=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" >>"$STUB_LOG"
+    # `at=` is when this target started, and it is the only thing in the log that
+    # can say whether the five ran together. Elapsed time cannot: the night is as
+    # long as its slowest target however the rest are arranged, so a recipe that
+    # started one target, waited for it, and then ran the other four at once
+    # would spend about what a correct one spends.
+    printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$(date +%s)" >>"$STUB_LOG"
     case " $* " in
         *" build "*) exit 0 ;;
     esac
@@ -2516,12 +2578,21 @@ check-fuzz-overnight-selftest:
         echo "what a target found" >"artifacts/$target/crash-$STUB_ARTIFACT_TAG"
     fi
 
+    # `STUB_OVERRUN_TARGET` aims the overrun at one target and leaves the other
+    # four alone, which is the only way to ask whether an overrun costs them
+    # anything. While the five ran in turn it could not be asked: an overrun in
+    # the first one spent the window, and that was the whole of the old arm.
+    overrun=0
+    if [ -n "${STUB_OVERRUN:-}" ] \
+        && { [ -z "${STUB_OVERRUN_TARGET:-}" ] || [ "$target" = "$STUB_OVERRUN_TARGET" ]; }; then
+        overrun="$STUB_OVERRUN"
+    fi
     for arg in "$@"; do
         case "$arg" in
             -max_total_time=*)
                 half=$(( ${arg#*=} / 2 ))
                 [ "$half" -ge 1 ] || half=1
-                sleep "$(( half + ${STUB_OVERRUN:-0} ))"
+                sleep "$(( half + overrun ))"
                 ;;
         esac
     done
@@ -2559,15 +2630,19 @@ check-fuzz-overnight-selftest:
     }
 
     # One: five targets inside a twelve-second window, with the second of them
-    # dying. Every one still runs, the run ends inside the window rather than
-    # five times past it, and it reports the failure rather than swallowing it.
+    # dying. Every one still runs, every one is given the whole window, the run
+    # ends inside it rather than five times past it, and it reports the failure
+    # rather than swallowing it.
     #
-    # A correct recipe spends about 9 s here and the budget mutation about 24 s,
-    # so 16 separates them with room on both sides. There is deliberately no
-    # assertion on the sum of the granted slices: that sum legitimately exceeds
-    # the window, because a target finishing early hands what it did not use to
-    # the ones after it. It only looked like an invariant while the stub was
-    # consuming every second it was given.
+    # **The clock alone cannot say whether they ran together**, and that is why
+    # the `-max_total_time` assertions below are here rather than a tighter
+    # bound. A correct recipe spends about 6 s, running five targets that each
+    # sleep half of twelve; the recipe this replaced spent about 9 s, running
+    # five targets that each slept half of a fifth. Both sit inside any bound
+    # wide enough to survive a loaded machine. What separates them exactly is
+    # what each target was *told*: one window, five times over, against five
+    # shares that shrink. 16 still catches the mutation the clock can see —
+    # handing every target the whole window and then running them in turn.
     : >"$dir/log"
     started=$(date +%s)
     status=0
@@ -2580,6 +2655,17 @@ check-fuzz-overnight-selftest:
     [ "$elapsed" -le 16 ] || fail "a twelve-second window took $elapsed s, so the window is a budget and not a deadline"
     grep -q 'TO LOOK AT.*fuzz-reader' "$dir/logs/latest" \
         || fail "the summary line does not name the target that died"
+
+    # Every target got the same number of seconds, and that number is the window
+    # and not a fifth of it. Distinct values, not a sum: the old recipe's five
+    # shares were all different, so one distinct value is the property, and the
+    # size check is what stops a recipe that divides equally by five from
+    # satisfying it.
+    granted=$(grep -o 'max_total_time=[0-9]*' "$dir/log" | cut -d= -f2 | sort -un)
+    [ "$(wc -l <<<"$granted")" -eq 1 ] \
+        || fail "the five targets were given different windows, so the window is still being divided: $(tr '\n' ' ' <<<"$granted")"
+    [ "$granted" -ge 8 ] \
+        || fail "each target was given $granted s of a twelve-second window, so it is still getting a share and not the whole of it"
 
     # Every target is told where to write its per-run timings, and the place is
     # this night's own directory. A target that was not told keeps nothing, and
@@ -2644,23 +2730,42 @@ check-fuzz-overnight-selftest:
     [ "$(git rev-parse HEAD)" = "$head_before" ] \
         || fail "the night moved the tree it ran in, from $head_before to $(git rev-parse HEAD)"
 
-    # Four: when a target overruns, what is left of the window is what the rest
-    # get — and when that is nothing, they are skipped and said to be skipped,
-    # rather than each starting a fresh hour past the deadline.
+    # Four: an overrun in one target costs the other four nothing.
     #
-    # The overrun has to clear the whole window on its own, or the arithmetic
-    # leaves a second behind and the last target runs on it, which is right and
-    # is not what this case is about. Six and eight, so the first target is nine
-    # seconds into a six-second window when it returns.
+    # This is the arm the change of 2026-09-18 turned round, and it is worth
+    # saying what it used to assert: that an overrun in the first target spent
+    # the window and the remaining four were skipped and said to be skipped.
+    # That was correct of a recipe that ran them in turn, and it was the single
+    # worst property of that recipe — one slow target could take four others'
+    # hours with it. Run together they cannot, so the same fixture now asks the
+    # opposite question and the old assertion is what would fail.
+    #
+    # Six and eight, so the overrunner is eleven seconds into a six-second
+    # window when it returns while the other four have been done since three.
+    # The skip path it used to reach on the way is arm Nine's now.
     : >"$dir/log"
     started=$(date +%s)
     status=0
-    STUB_OVERRUN=8 run 6 || status=$?
+    STUB_OVERRUN=8 STUB_OVERRUN_TARGET=where_two_surfaces_cross run 6 || status=$?
     elapsed=$(( $(date +%s) - started ))
-    [ "$status" -ne 0 ] || fail "three targets were skipped and the night reported success"
-    [ "$elapsed" -le 18 ] || fail "an overrun in the first target let the rest run on for $elapsed s"
-    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 1 ] \
-        || fail "the window was spent by the first target and the rest ran anyway"
+    [ "$status" -eq 0 ] \
+        || fail "one target overran and the night reported $status for the other four"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 5 ] \
+        || fail "one target overran and took the rest of the window with it"
+    [ "$elapsed" -le 20 ] || fail "one eight-second overrun cost the night $elapsed s"
+
+    # And they started together, which is the assertion the clock above cannot
+    # make. A night is as long as its slowest target however the rest are
+    # arranged, so total elapsed time is satisfied by a recipe that runs one
+    # target, waits for it, and only then starts the other four. What is not
+    # satisfied by that recipe is five start times inside the same few seconds.
+    #
+    # Three, and not zero: the five `just` invocations are five processes to
+    # fork, and `date +%s` truncates to whole seconds either side.
+    starts=$(grep -o 'fuzz run .*\[at=[0-9]*\]' "$dir/log" | grep -o 'at=[0-9]*' | cut -d= -f2 | sort -n)
+    spread=$(( $(tail -1 <<<"$starts") - $(head -1 <<<"$starts") ))
+    [ "$spread" -le 3 ] \
+        || fail "the five targets started $spread s apart, so they are still waiting for each other"
 
     # Five: the hub is refused before anything is built, so a timer pointed at
     # it fails on the first night rather than on the night it matters.
@@ -2813,6 +2918,58 @@ check-fuzz-overnight-selftest:
     fi
     grep -q 'BUILD FAILED' "$dir/logs/latest" \
         || fail "a night that could not build did not say BUILD FAILED in the summary line"
+
+    # Nine: a window with nothing left in it skips every target and says so,
+    # rather than starting five fresh eight-hour runs past the deadline.
+    #
+    # Arm four used to reach this path on its way past an overrun, and cannot
+    # any more: the five no longer wait for each other, so there is no longer a
+    # way for one of them to spend the window before the others are started.
+    # A window of zero is what is left of that case, and it is the whole of it.
+    : >"$dir/log"
+    status=0
+    run 0 || status=$?
+    [ "$status" -ne 0 ] || fail "every target was skipped and the night reported success"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "a window with no seconds in it still started a target"
+    grep -q 'TO LOOK AT.*no-time' "$dir/logs/latest" \
+        || fail "a night that skipped every target did not say so: $(cat "$dir/logs/latest")"
+
+    # Ten: what a target found is carried out of the worktree on a clock, and
+    # not only when a target finishes.
+    #
+    # §91's reason for copying at all is a night killed from outside, and while
+    # the five ran in turn the copy rode along on four target boundaries spread
+    # across the night. Run together, every target finishes in the same minute
+    # at the far end of the window, so those boundaries are gone and a copy that
+    # waited for them would keep nothing from a night killed at 04:00 — strictly
+    # worse than what it replaced.
+    #
+    # Its own log root, because the arms above have already written this date's
+    # artifacts into `$dir/logs` and the question here is whether *this* run
+    # copied anything yet. Four seconds into a twelve-second window: the targets
+    # are six seconds from returning, so nothing but the clock can have done it.
+    : >"$dir/log"
+    copier_logs="$dir/logs-copier"
+    RCAD_FUZZ_COPY_EVERY=1 STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        STUB_ARTIFACT_TAG="$tag" RCAD_FUZZ_ALREADY_ADVANCED=1 \
+        RCAD_FUZZ_LOGS="$copier_logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 12 >"$dir/out" 2>&1 &
+    night_pid=$!
+    sleep 4
+    # Guarded, and not left to `find` to report: with nothing copied the
+    # directory does not exist at all, `find` exits 1, and `pipefail` takes the
+    # recipe down before the assertion below can say which arm failed or why.
+    # Which is what happened the first time this arm was run against a night
+    # with its copier taken out — the test failed, correctly, and said nothing.
+    carried=0
+    copier_night="$copier_logs/$(date +%Y-%m-%d)/artifacts"
+    if [ -d "$copier_night" ]; then
+        carried=$(find "$copier_night" -name "crash-$tag" | wc -l)
+    fi
+    wait "$night_pid" || fail "the night under the copier exited non-zero: $(cat "$dir/out")"
+    [ "$carried" -ge 1 ] \
+        || fail "four seconds into a twelve-second window nothing had been carried out of the worktree, so a night killed before its targets finish keeps nothing"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed,

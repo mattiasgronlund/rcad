@@ -43,7 +43,17 @@ ExecStart=%h/.local/bin/mise exec -- just fuzz-overnight 28800
 TimeoutStartSec=29400
 TimeoutStopSec=120
 
-# Lanes compile at night too. One target at a time is one core of 24, but it is
-# a core somebody else may want more.
+# Lanes compile at night too, and these two lines are what make the night's
+# share of the machine a loan rather than a claim.
+#
+# **They carried almost nothing until 2026-09-18 and they carry the whole
+# argument now.** The night ran one target at a time — one core of 24, polite by
+# arithmetic, with these lines settling only which core. It runs all five at
+# once now, so politeness is entirely theirs: a lane that wants a core at three
+# in the morning takes it, and the fuzzer gets what is left. Children inherit
+# both, so this covers the five `cargo fuzz run`s and not just the shell.
+#
+# Taking them out does not slow a lane down a little. It puts five sanitizer
+# builds at ordinary priority against whatever somebody is compiling.
 Nice=10
 IOSchedulingClass=idle
