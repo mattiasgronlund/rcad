@@ -2671,8 +2671,15 @@ mod tests {
     /// land on the same `f64` leave a difference of exactly zero. Below, two
     /// unit normals one `f64` apart — both straight out of
     /// [`Plane::from_point_and_normal`], so both are triples a model really
-    /// holds — cross to `(0, 0, 0)` in `f64` with a true first component near
-    /// `5.2e-17`.
+    /// holds — cross to `(0, 0, 0)` in `f64` with a true second component near
+    /// `−2.1e-17` and a third near `1.8e-17`.
+    ///
+    /// The pair was `(1, 2, 6)` against `(1, 2, 6.next_up())` until §121 rounded
+    /// the stored normal correctly; those two then crossed to `5.6e-17` in `f64`
+    /// and stopped witnessing anything. `(2, 6, 7)` against
+    /// `(2, 6, 7.next_up())` is one of the twenty-odd pairs of whole numbers
+    /// under ten that still do it, so **the defect did not move with its
+    /// witness.**
     ///
     /// What that leaves standing is the argument in
     /// `where_a_plane_cuts_a_torus`'s own doc: the two families it separates are
@@ -2685,8 +2692,8 @@ mod tests {
                 .expect("a normal with length")
                 .normal()
         };
-        let one = unit(Vector::new(1.0, 2.0, 6.0));
-        let other = unit(Vector::new(1.0, 2.0, 6.0f64.next_up()));
+        let one = unit(Vector::new(2.0, 6.0, 7.0));
+        let other = unit(Vector::new(2.0, 6.0, 7.0f64.next_up()));
 
         assert_ne!(one, other, "these are two different unit triples");
         assert_eq!(
