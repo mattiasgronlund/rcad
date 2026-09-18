@@ -2295,6 +2295,30 @@ fuzz-overnight window="28800":
     left=$(( deadline - $(date +%s) ))
     pids=()
     started=()
+
+    # The machine, split five ways, because all five run at once. `nproc` and not
+    # a number in the file: 24 here, and a recipe carrying `4` would quietly
+    # under-use a bigger machine and thrash a smaller one. A floor of 1, since
+    # `-fork=1` still isolates the crash even where there is no parallelism left
+    # to win — and `-fork=0` would mean "don't fork", which is a different night.
+    fork=$(( $(nproc) / ${#recipes[@]} ))
+    [ "$fork" -ge 1 ] || fork=1
+
+    # Which artifacts are **this night's**, as opposed to every night's.
+    #
+    # `fuzz/artifacts/` is gitignored, so it survives across nights in the tree
+    # the timer keeps checked out, and `copy_out` below copies all of it. The
+    # count in the summary has always been carry-over for that reason. It could
+    # stay a wart while the count was only ever *reported*; now that a crash file
+    # is what says a night failed (§131), a five-day-old crash would fail every
+    # night from here on, which is the same "night nobody believes" §91 exists to
+    # prevent, running the other way.
+    #
+    # `-newer` against a file made now, rather than a listing taken now and
+    # diffed: libFuzzer writes an artifact once and never rewrites it, so mtime
+    # answers exactly this question and costs one `touch`.
+    since="$night/.started"
+    : >"$since"
     for recipe in "${recipes[@]}"; do
         # No floor beyond "there is time left". A minimum worth starting would
         # be a number nobody can defend — an 18 MB corpus takes seconds just to
@@ -2310,7 +2334,7 @@ fuzz-overnight window="28800":
         # target wedged outside the fuzzer's control would eat the whole night.
         # The grace is for the corpus write on the way out.
         timeout --kill-after=60 "$(( left + 300 ))" \
-            {{just_executable()}} "$recipe" "$left" "{{fuzz_corpus_root}}" \
+            {{just_executable()}} "$recipe" "$left" "{{fuzz_corpus_root}}" "$fork" \
             >"$night/$recipe.log" 2>&1 &
         pids+=("$!")
         started+=("$recipe")
@@ -2320,18 +2344,40 @@ fuzz-overnight window="28800":
     # It costs nothing: they were all given the same deadline, so the last wait
     # returns within seconds of the first however they are ordered, and reading
     # them in a fixed order keeps the summary's list stable night to night.
+    # **Under `-fork` the exit status says nothing about the night**, in either
+    # direction, and reading it as "crash" is how a night stops being believed.
+    #
+    # libFuzzer's fork parent keeps one `ExitCode`, overwrites it with each job it
+    # collects, never resets it, and exits with it — `FuzzerFork.cpp:400-461` and
+    # the `exit(ExitCode)` at 490, under the comment *"Use the exit code from the
+    # last child process"*. Every fate the night is built to survive leaves it
+    # non-zero, so **70 is a timeout in the last job of forty thousand** and not a
+    # crash; two runs of the same command on the same corpus exited 70 and 0,
+    # differing only in which job happened to land last (§130.7). And the other
+    # direction is worse: a crash in job 3 of 40 000 exits **0**, so a status
+    # mapping that trusted zero would call that night clean.
+    #
+    # What is left that the status can still answer is the one thing no child
+    # decides: `timeout` killing the whole target from outside.
     for i in "${!started[@]}"; do
         recipe="${started[$i]}"
         status=0
         wait "${pids[$i]}" || status=$?
         case "$status" in
-            0) ;;
             124|137)
                 echo "$recipe: overran the window and was killed"
                 to_look_at+=("$recipe:overran") ;;
             *)
-                echo "$recipe: exited $status — see $night/$recipe.log"
-                to_look_at+=("$recipe:crash") ;;
+                # The fuzzer ran, and ran to the end. `INFO: exiting:` is the last
+                # line `FuzzWithFork` prints before `exit`, so it is present
+                # exactly when the fork loop finished of its own accord — which is
+                # the question the exit status used to be asked and can no longer
+                # answer. A target whose build or launch failed prints nothing of
+                # the sort, and that is a night that fuzzed four targets while
+                # reporting five.
+                grep -q '^INFO: exiting:' "$night/$recipe.log" \
+                    || { echo "$recipe: never got fuzzing (exited $status) — see $night/$recipe.log"
+                         to_look_at+=("$recipe:no-run"); } ;;
         esac
         copy_out
     done
@@ -2350,6 +2396,37 @@ fuzz-overnight window="28800":
     fi
     artifacts=""
     [ "$kept" -eq 0 ] || artifacts="  $kept artifacts in $night/artifacts"
+
+    # **What failed the night, now that the exit status cannot say.** libFuzzer
+    # names every input it writes for what happened to it (`FuzzerLoop.cpp`), and
+    # four of those five names are a bug: `crash-`, `oom-`, `leak-`, `timeout-`.
+    #
+    # `slow-unit-` is the fifth and is deliberately not among them. It means an
+    # input was slower than the rest, not that anything is wrong, and the night of
+    # 2026-09-13 wrote three while being an entirely good night.
+    #
+    # Read out of the worktree rather than out of `$night/artifacts`, and against
+    # `$since`, because the copy is made with `cp -Rn` and carries no useful mtime
+    # while the original has libFuzzer's own. **`timeout-` is here on today's
+    # meaning and item 2 has to revisit it**: with a per-input `-timeout` short
+    # enough to be worth setting, §91.3's six landed slow units would write one
+    # every night on the corpus replay alone, and a standing population cannot be
+    # what fails a night.
+    #
+    # Guarded rather than left to `find` to report: a night where no target wrote
+    # anything has no `fuzz/artifacts` at all, `find` exits 1, and `pipefail`
+    # takes the recipe down before the summary is written — the same trap arm Ten
+    # of the selftest records falling into.
+    found=0
+    if [ -d fuzz/artifacts ]; then
+        found=$(find fuzz/artifacts -type f -newer "$since" \
+            \( -name 'crash-*' -o -name 'oom-*' -o -name 'leak-*' -o -name 'timeout-*' \) \
+            | wc -l)
+    fi
+    if [ "$found" -gt 0 ]; then
+        echo "$found crash-class artifacts written tonight — see $night/artifacts"
+        to_look_at+=("crashed:$found")
+    fi
 
     if [ "${#to_look_at[@]}" -eq 0 ]; then
         printf '%s  %s (%d days old, %s behind main)  %d targets, nothing found%s  %s\n' \
@@ -2426,7 +2503,7 @@ fuzz-watermark:
 # property over the same decoder, in
 # `crates/rcad-geom/tests/every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs`.
 [doc("Fuzz the predicates over a pair of surfaces. Needs a nightly compiler.")]
-fuzz duration="60" corpus_root="": (fuzz-target "where_two_surfaces_cross" duration corpus_root "71")
+fuzz duration="60" corpus_root="" fork="0": (fuzz-target "where_two_surfaces_cross" duration corpus_root "71" fork)
 
 # The Part 21 reader, over arbitrary bytes (docs/decisions.md §42.12 criterion 5).
 #
@@ -2437,7 +2514,7 @@ fuzz duration="60" corpus_root="": (fuzz-target "where_two_surfaces_cross" durat
 # No `-max_len`, unlike `fuzz`: the reader's promise is about any length of
 # anything, and the truncation cases live at every length there is.
 [doc("Fuzz the Part 21 reader over arbitrary bytes.")]
-fuzz-reader duration="60" corpus_root="": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root)
+fuzz-reader duration="60" corpus_root="" fork="0": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root "" fork)
 
 # The Part 21 writer, over an arbitrary `Model` (docs/decisions.md §42.12).
 #
@@ -2447,7 +2524,7 @@ fuzz-reader duration="60" corpus_root="": (fuzz-target "no_step_file_makes_the_r
 # whatever `Model` comes out, sound or not, goes straight into
 # `rcad_step::write`, which owes an `Err` and never a panic either way.
 [doc("Fuzz the Part 21 writer over an arbitrary Model.")]
-fuzz-writer duration="60" corpus_root="": (fuzz-target "no_model_makes_the_writer_panic" duration corpus_root)
+fuzz-writer duration="60" corpus_root="" fork="0": (fuzz-target "no_model_makes_the_writer_panic" duration corpus_root "" fork)
 
 # The fuse, over two arbitrary `Model`s (docs/decisions.md §17).
 #
@@ -2457,7 +2534,7 @@ fuzz-writer duration="60" corpus_root="": (fuzz-target "no_model_makes_the_write
 # `fuzz/fuzz_targets/two_solids_fused_by_a_stranger.rs` for why two `Model`s
 # and not one cross-fused pair.
 [doc("Fuzz the fuse over two arbitrary Models.")]
-fuzz-fuse duration="60" corpus_root="": (fuzz-target "two_solids_fused_by_a_stranger" duration corpus_root)
+fuzz-fuse duration="60" corpus_root="" fork="0": (fuzz-target "two_solids_fused_by_a_stranger" duration corpus_root "" fork)
 
 # A cone or a torus crossing another surface, over its own byte decoder.
 #
@@ -2466,7 +2543,7 @@ fuzz-fuse duration="60" corpus_root="": (fuzz-target "two_solids_fused_by_a_stra
 # pair is this decoder's worst case, at 1 byte of choice plus two 8-byte
 # doubles for each of a torus's five numbers, so 81 and not `fuzz`'s 71.
 [doc("Fuzz the predicates over a cone or a torus and another surface.")]
-fuzz-cones-and-tori duration="60" corpus_root="": (fuzz-target "where_a_cone_or_a_torus_crosses" duration corpus_root "81")
+fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a_cone_or_a_torus_crosses" duration corpus_root "81" fork)
 
 # The one place that knows how to start a fuzz target. The five recipes above
 # are its five call sites and differ only in the name and `-max_len`.
@@ -2478,8 +2555,13 @@ fuzz-cones-and-tori duration="60" corpus_root="": (fuzz-target "where_a_cone_or_
 # argument and writes to the tracked `fuzz/corpus/<target>` as it always has.
 # With one, that directory becomes the *second* argument and libFuzzer treats it
 # as a read-only seed, writing only to the first (§81).
+#
+# `fork` is how many jobs libFuzzer runs at once, and **0 means don't fork at
+# all**, which is what a hand-run `just fuzz 60` wants: one crash, one report, and
+# the run stops so you can read it. Only the night asks for a number, because only
+# the night would rather lose the report than lose the other eight hours (§131).
 [private]
-fuzz-target target duration corpus_root="" max_len="":
+fuzz-target target duration corpus_root="" max_len="" fork="0":
     #!/usr/bin/env bash
     set -euo pipefail
     cd fuzz
@@ -2488,9 +2570,24 @@ fuzz-target target duration corpus_root="" max_len="":
         mkdir -p "{{corpus_root}}/{{target}}"
         corpus=("{{corpus_root}}/{{target}}" "corpus/{{target}}")
     fi
+
+    # `-ignore_crashes=1` is the flag that buys the night: without it the first
+    # crash calls `StopJobs()` and the target is done for the evening, however
+    # many hours were left (`FuzzerFork.cpp:441-450`).
+    #
+    # `-ignore_timeouts=1` and `-ignore_ooms=1` are already libFuzzer's defaults
+    # (`FuzzerFlags.def:66-67`) and are passed anyway, because the night now
+    # *depends* on them rather than merely tolerating them: with a per-input
+    # `-timeout` the slow units of §91.3 time out on the corpus replay, and a
+    # default that changed under us would end every target in its first minute.
+    fork_flags=()
+    if [ "{{fork}}" -gt 0 ]; then
+        fork_flags=(-fork={{fork}} -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1)
+    fi
     RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run {{target}} ${corpus[@]+"${corpus[@]}"} -- \
-        -max_total_time={{duration}} {{ if max_len == "" { "" } else { "-max_len=" + max_len } }}
+        -max_total_time={{duration}} {{ if max_len == "" { "" } else { "-max_len=" + max_len } }} \
+        ${fork_flags[@]+"${fork_flags[@]}"}
 
 # Pins `fuzz-overnight` against a `cargo` it brings with it, because the real one
 # wants a sanitizer build and eight hours before it says anything at all. The
@@ -2528,7 +2625,7 @@ check-fuzz-overnight-selftest:
     # is unique per run, two lanes can gate at once, and the trap takes away
     # exactly what this run put there and nothing a real night left.
     tag="overnight-selftest-$$-${RANDOM}"
-    trap 'rm -rf "$dir"; rm -f fuzz/artifacts/*/crash-"$tag"' EXIT
+    trap 'rm -rf "$dir"; rm -f fuzz/artifacts/*/crash-"$tag" fuzz/artifacts/*/slow-unit-"$tag"' EXIT
     mkdir -p "$dir/bin"
 
     # Logs its whole command line, then sleeps **half** the slice it was given.
@@ -2573,9 +2670,19 @@ check-fuzz-overnight-selftest:
         fi
         prev="$arg"
     done
+    #
+    # **`slow-unit-` by default, and `crash-` only when an arm asks.** A clean
+    # night writes slow units — the night of 2026-09-13 wrote three and correctly
+    # said "nothing found" — so that is what an unremarkable target leaves behind.
+    # Since §131 a crash file is what fails a night, and a stub that wrote one
+    # every time would leave no fixture able to express a good night at all.
+    kind="${STUB_ARTIFACT_KIND:-slow-unit-}"
+    if [ -n "${STUB_ARTIFACT_KIND_TARGET:-}" ] && [ "$target" != "$STUB_ARTIFACT_KIND_TARGET" ]; then
+        kind="slow-unit-"
+    fi
     if [ -n "$target" ] && [ -n "${STUB_ARTIFACT_TAG:-}" ]; then
         mkdir -p "artifacts/$target"
-        echo "what a target found" >"artifacts/$target/crash-$STUB_ARTIFACT_TAG"
+        echo "what a target found" >"artifacts/$target/$kind$STUB_ARTIFACT_TAG"
     fi
 
     # `STUB_OVERRUN_TARGET` aims the overrun at one target and leaves the other
@@ -2596,8 +2703,19 @@ check-fuzz-overnight-selftest:
                 ;;
         esac
     done
+    # The line libFuzzer's fork parent prints last, which since §131 is what says
+    # the target got as far as fuzzing. `STUB_NO_EXITING_TARGET` withholds it from
+    # one target, which is how an arm asks for a target that never got going —
+    # the failure the exit status used to carry and can no longer.
+    if [ "$target" != "${STUB_NO_EXITING_TARGET:-}" ]; then
+        echo "INFO: exiting: 0 time: 1s"
+    fi
+
+    # Exits non-zero while still having fuzzed the whole window, which is fork
+    # mode's ordinary ending and not a failure: the code is whichever of forty
+    # thousand jobs happened to be collected last (§130.7).
     for arg in "$@"; do
-        if [ "$arg" = "${STUB_CRASH:-}" ]; then exit 1; fi
+        if [ "$arg" = "${STUB_CRASH:-}" ]; then exit "${STUB_CRASH_CODE:-70}"; fi
     done
     exit 0
     STUB
@@ -2630,9 +2748,16 @@ check-fuzz-overnight-selftest:
     }
 
     # One: five targets inside a twelve-second window, with the second of them
-    # dying. Every one still runs, every one is given the whole window, the run
-    # ends inside it rather than five times past it, and it reports the failure
-    # rather than swallowing it.
+    # never getting as far as fuzzing. Every one still runs, every one is given
+    # the whole window, the run ends inside it rather than five times past it, and
+    # it reports the failure rather than swallowing it.
+    #
+    # **The second target fails by printing no `INFO: exiting:`, not by exiting
+    # non-zero**, and that is §131: under `-fork` a non-zero status is the last of
+    # forty thousand jobs and says nothing about the night, so the fixture that
+    # used to express "this target died" by `exit 1` now expresses a target that
+    # exited 70 and was fine. Arm Eleven is that case, and this one is the failure
+    # the status used to carry — a target whose build or launch never happened.
     #
     # **The clock alone cannot say whether they ran together**, and that is why
     # the `-max_total_time` assertions below are here rather than a tighter
@@ -2646,11 +2771,11 @@ check-fuzz-overnight-selftest:
     : >"$dir/log"
     started=$(date +%s)
     status=0
-    STUB_CRASH=no_step_file_makes_the_reader_panic run 12 || status=$?
+    STUB_NO_EXITING_TARGET=no_step_file_makes_the_reader_panic run 12 || status=$?
     elapsed=$(( $(date +%s) - started ))
-    [ "$status" -ne 0 ] || fail "a target exited 1 and the night reported success"
+    [ "$status" -ne 0 ] || fail "a target never got fuzzing and the night reported success"
     ran=$(grep -c 'fuzz run' "$dir/log" || true)
-    [ "$ran" -eq 5 ] || fail "a crash in the second target left $ran of 5 targets run"
+    [ "$ran" -eq 5 ] || fail "a failure in the second target left $ran of 5 targets run"
     [ "$elapsed" -ge 4 ] || fail "a twelve-second window was over in $elapsed s, so nothing was fuzzed"
     [ "$elapsed" -le 16 ] || fail "a twelve-second window took $elapsed s, so the window is a budget and not a deadline"
     grep -q 'TO LOOK AT.*fuzz-reader' "$dir/logs/latest" \
@@ -2685,9 +2810,23 @@ check-fuzz-overnight-selftest:
     for target in where_two_surfaces_cross no_step_file_makes_the_reader_panic \
             no_model_makes_the_writer_panic two_solids_fused_by_a_stranger \
             where_a_cone_or_a_torus_crosses; do
-        [ -f "$night/artifacts/$target/crash-$tag" ] \
+        [ -f "$night/artifacts/$target/slow-unit-$tag" ] \
             || fail "$target's artifact was left in the worktree instead of kept in $night/artifacts"
     done
+
+    # Every target forks, and every one is told to survive a crash. Without
+    # `-ignore_crashes=1` the first crash calls `StopJobs()` and that target's
+    # night ends there, which is the whole of what §131 bought; without `-fork`
+    # the flag is not even read. The number is the machine split five ways and so
+    # cannot be asserted exactly, but it can be asserted to be one number, shared,
+    # and at least 1 — a recipe handing out 0 would silently stop forking.
+    forked=$(grep -o 'fork=[0-9]*' "$dir/log" | cut -d= -f2 | sort -un)
+    [ "$(wc -l <<<"$forked")" -eq 1 ] \
+        || fail "the five targets were given different fork counts: $(tr '\n' ' ' <<<"$forked")"
+    [ "$forked" -ge 1 ] \
+        || fail "the night asked for -fork=$forked, so nothing is isolated and one crash still ends a target"
+    [ "$(grep -c 'ignore_crashes=1' "$dir/log")" -eq 5 ] \
+        || fail "a target forks without -ignore_crashes=1, so its first crash still ends its night"
 
     # And the morning is told, because a copy nobody is told about is very nearly
     # as lost as the original. This arm's night also failed, so it proves the
@@ -2965,11 +3104,61 @@ check-fuzz-overnight-selftest:
     carried=0
     copier_night="$copier_logs/$(date +%Y-%m-%d)/artifacts"
     if [ -d "$copier_night" ]; then
-        carried=$(find "$copier_night" -name "crash-$tag" | wc -l)
+        carried=$(find "$copier_night" -name "slow-unit-$tag" | wc -l)
     fi
     wait "$night_pid" || fail "the night under the copier exited non-zero: $(cat "$dir/out")"
     [ "$carried" -ge 1 ] \
         || fail "four seconds into a twelve-second window nothing had been carried out of the worktree, so a night killed before its targets finish keeps nothing"
+
+    # Eleven: exit 70 is not a crash. This is §130.7 as an arm, and it is the one
+    # the recipe this replaced would fail: every target fuzzed the whole window,
+    # found nothing, and exited 70 because the last of its jobs happened to time
+    # out. Two real runs of the same command on the same corpus exited 70 and 0,
+    # so a night that read the status would have called one of them a find.
+    : >"$dir/log"
+    status=0
+    STUB_CRASH=run run 8 || status=$?
+    [ "$status" -eq 0 ] \
+        || fail "every target exited 70 after fuzzing its whole window and the night reported $status: $(cat "$dir/logs/latest")"
+    grep -q 'nothing found' "$dir/logs/latest" \
+        || fail "a night whose targets exited 70 did not say it found nothing: $(cat "$dir/logs/latest")"
+
+    # Twelve: a crash is found by what it wrote, not by what anything exited.
+    # **The night exits 0 everywhere here** — which is fork mode's other half and
+    # the more dangerous one: a crash in job 3 of 40 000 leaves the parent's
+    # `ExitCode` holding whichever job was collected last, so a status mapping
+    # that trusted zero would report this night clean.
+    : >"$dir/log"
+    status=0
+    STUB_ARTIFACT_KIND=crash- STUB_ARTIFACT_KIND_TARGET=two_solids_fused_by_a_stranger \
+        run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a target wrote a crash artifact and the night reported success: $(cat "$dir/logs/latest")"
+    grep -q 'TO LOOK AT.*crashed:' "$dir/logs/latest" \
+        || fail "the summary line does not say a crash was written: $(cat "$dir/logs/latest")"
+    rm -f fuzz/artifacts/two_solids_fused_by_a_stranger/crash-"$tag"
+
+    # Thirteen: and it is **tonight's** crash that fails tonight, not one from a
+    # week ago. `fuzz/artifacts/` is gitignored and never cleaned, so it
+    # accumulates in the tree the timer keeps; a night that counted all of it
+    # would fail every night from the first crash onwards and stop being read,
+    # which is §91's failure with the sign flipped.
+    #
+    # Dated a day back rather than merely written before the run: the marker is
+    # made seconds before the targets start, and a file written in the same second
+    # cannot be told from one written just after it.
+    : >"$dir/log"
+    mkdir -p fuzz/artifacts/where_two_surfaces_cross
+    stale="fuzz/artifacts/where_two_surfaces_cross/crash-stale-$tag"
+    echo "what last week found" >"$stale"
+    touch -d "1 day ago" "$stale"
+    status=0
+    run 8 || status=$?
+    rm -f "$stale"
+    [ "$status" -eq 0 ] \
+        || fail "a crash left over from an earlier night failed this one: $(cat "$dir/logs/latest")"
+    grep -q 'nothing found' "$dir/logs/latest" \
+        || fail "a carried-over crash artifact was reported as tonight's find: $(cat "$dir/logs/latest")"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed,
