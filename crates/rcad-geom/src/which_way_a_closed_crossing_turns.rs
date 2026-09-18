@@ -4,7 +4,7 @@
 use rcad_predicates::Decision;
 
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly};
-use crate::exact::Exact;
+use crate::exact::{Exact, binary_exponent, multiplied_by_a_power_of_two};
 use crate::point::Vector;
 
 /// Which way the wire round a closed crossing turns against the frame of the
@@ -55,10 +55,29 @@ use crate::point::Vector;
 /// taken exactly, and anything that enclosure cannot prove goes to
 /// [`exactly_which_way_a_closed_crossing_turns`] below, which is the cascade's
 /// third level and has no rounding in it at all (§122).
-/// [`Decision::Undecidable`] is what is left when even that cannot run — which
-/// takes numbers whose products fall off the ends of the `f64` range — and it is
-/// a result here and not a failure: it is the caller that has to turn it into one
-/// (§2.1, §4.1).
+///
+/// # And once more on a copy written at a workable size
+///
+/// The exact level declines rather than rounds, and what it declines is a
+/// product that would fall off either end of the `f64` range. A crossing written
+/// small enough that its products vanish is refused for the way it is *written*
+/// and not for anything about its shape, which is a gap and not a limit (§16.10,
+/// §122.4). So where both levels give up, both run again on a copy of the four
+/// vectors with each one multiplied by its own power of two.
+///
+/// That is sound because both references are **multilinear** in the four
+/// vectors — degree one in `outward[0]`, `outward[1]` and `axis`, and one or two
+/// in `gradient`. Scaling one of them by `s > 0` multiplies the answer by a
+/// power of `s`, which is positive, so the sign is the sign of the input's. The
+/// scaling itself is exact or it does not happen: a copy whose entries left the
+/// normal range is not the same geometry and is thrown away rather than read.
+///
+/// [`Decision::Undecidable`] is what is left when the retry cannot run either —
+/// which takes a vector whose *own* components are so far apart that no one
+/// exponent brings them all into range at once — and it is a result here and not
+/// a failure: it is the caller that has to turn it into one (§2.1, §4.1). The
+/// width it carries is the one measured on the numbers the caller wrote, because
+/// a width measured on the copy is a width in somebody else's units.
 ///
 /// **What neither level encloses** is the error already in `outward`,
 /// `gradient` and `axis`, which reached the caller as `f64` evaluations of
@@ -71,6 +90,28 @@ pub fn which_way_a_closed_crossing_turns(
     gradient: Vector,
     axis: Vector,
 ) -> Decision {
+    let as_written = both_levels_of_the_rule(outward, gradient, axis);
+    let Decision::Undecidable { .. } = as_written else {
+        return as_written;
+    };
+    let Some([first, second, gradient, axis]) =
+        each_vector_brought_into_range([outward[0], outward[1], gradient, axis])
+    else {
+        return as_written;
+    };
+    let from_the_copy = both_levels_of_the_rule([first, second], gradient, axis);
+    if matches!(from_the_copy, Decision::Undecidable { .. }) {
+        return as_written;
+    }
+    from_the_copy
+}
+
+/// The enclosure, and the exact level wherever the enclosure could not tell.
+///
+/// The refusal that comes back out is the enclosure's, because it is the one
+/// that carries a width: the exact level either names a sign or says nothing at
+/// all.
+fn both_levels_of_the_rule(outward: [Vector; 2], gradient: Vector, axis: Vector) -> Decision {
     let from_the_enclosure = enclosed_which_way_a_closed_crossing_turns(outward, gradient, axis);
     let Decision::Undecidable { .. } = from_the_enclosure else {
         return from_the_enclosure;
@@ -149,6 +190,57 @@ fn exactly_which_way_a_closed_crossing_turns(
     Some(Exact::dot_of_two_exact(&longitude, &walked_across_the_gradient)?.sign())
 }
 
+/// The four vectors, each multiplied by its own power of two, or `None` when
+/// there is nothing to retry.
+///
+/// Each one is scaled on its own, which multilinearity allows and which one
+/// shared exponent would waste: a gradient of ordinary size beside an axis
+/// written at `2^-900` is two separate problems and the rule reads it as two.
+///
+/// `None` means the retry is not worth taking — either because no vector moved,
+/// so the copy is the input and would be refused again, or because one of them
+/// has no exact copy at all.
+fn each_vector_brought_into_range(vectors: [Vector; 4]) -> Option<[Vector; 4]> {
+    let mut moved = vectors;
+    for vector in &mut moved {
+        *vector = brought_into_range(*vector)?;
+    }
+    (moved != vectors).then_some(moved)
+}
+
+/// `vector` multiplied by the power of two that puts its largest component in
+/// `[1, 2)`, or `None` when that multiplication is not exact for one of them.
+///
+/// The largest is what lands in range because it is the one that would overflow,
+/// and every other component then sits as far above the bottom of the range as
+/// this vector's own spread allows. **The spread is what is left**: components
+/// more than about `2^1992` apart have no exponent at all, because the one that
+/// lifts the smallest clear of the subnormals sends the largest past infinity.
+/// Such a vector keeps the refusal it earned, and that is a fact about `Exact`'s
+/// window rather than about the crossing (§122.4, §29).
+///
+/// A vector of all zeros has no largest component and is handed back as it is;
+/// it also makes every product it enters exactly zero, so nothing is lost.
+fn brought_into_range(vector: Vector) -> Option<Vector> {
+    let components = vector.components();
+    let largest = components.iter().copied().map(f64::abs).fold(0.0, f64::max);
+    if largest == 0.0 {
+        return Some(vector);
+    }
+    let exponent = -binary_exponent(largest);
+    let mut scaled = components;
+    for entry in &mut scaled {
+        if *entry == 0.0 {
+            continue;
+        }
+        *entry = multiplied_by_a_power_of_two(*entry, exponent);
+        if !entry.is_normal() {
+            return None;
+        }
+    }
+    Some(Vector::new(scaled[0], scaled[1], scaled[2]))
+}
+
 #[cfg(test)]
 mod tests {
     use rcad_predicates::Decision;
@@ -157,7 +249,7 @@ mod tests {
         enclosed_which_way_a_closed_crossing_turns, exactly_which_way_a_closed_crossing_turns,
         which_way_a_closed_crossing_turns,
     };
-    use crate::exact::Exact;
+    use crate::exact::{Exact, multiplied_by_a_power_of_two};
     use crate::point::Vector;
 
     /// A pipe crossing a ball squarely, which is as far from the hard cases as a
@@ -355,32 +447,125 @@ mod tests {
     }
 
     /// Coordinates too small for the exact level's products to stay exact, which
-    /// is the one way the third level declines.
+    /// is the one way the third level declines — and the retry that gets the
+    /// sign back anyway.
     ///
     /// The witness crossing with both gradients scaled by `2^-600`, so each
     /// product of two of them is around `2^-1200` — far below the `2^-969` where
-    /// a product's low half stops being a normal number. The enclosure cannot
-    /// tell either, because the same products flush to zero, so the whole rule
-    /// refuses.
+    /// a product's low half stops being a normal number. Neither the enclosure
+    /// nor the exact level can read it where it is written, and both of them
+    /// read it on a copy multiplied back up (§122.4).
     ///
-    /// **The sign is still there**, because scaling by a power of two cannot have
-    /// changed it, so this is a gap and not a limit and §122.4 books the fix.
+    /// The answer has to be the unscaled witness's, and the same test asserts
+    /// that: `2^-600` is a positive factor, and a positive factor cannot change a
+    /// sign.
     #[test]
-    fn a_crossing_written_far_too_small_to_multiply_is_still_refused() {
+    fn a_crossing_written_far_too_small_to_multiply_is_settled_on_a_copy_scaled_up() {
         let tiny = 2f64.powi(-600);
         let round = Vector::new(0.1 * tiny, 0.2 * tiny, 0.3 * tiny);
         let straight = Vector::new(0.3 * tiny, 0.6 * tiny, 0.9 * tiny);
-        assert_eq!(
-            exactly_which_way_a_closed_crossing_turns(
-                [round, straight],
-                round,
-                Vector::new(1.0, 0.0, 0.0)
+        let sideways = Vector::new(1.0, 0.0, 0.0);
+        assert!(
+            matches!(
+                enclosed_which_way_a_closed_crossing_turns([round, straight], round, sideways),
+                Decision::Undecidable { .. }
             ),
-            None
+            "the enclosure cannot read it where it is written"
         );
+        assert_eq!(
+            exactly_which_way_a_closed_crossing_turns([round, straight], round, sideways),
+            None,
+            "and neither can the exact level, so the retry is what answers"
+        );
+
+        assert_eq!(
+            which_way_a_closed_crossing_turns([round, straight], round, sideways),
+            Decision::Pos
+        );
+        assert_eq!(
+            which_way_a_closed_crossing_turns([round, straight], round, sideways),
+            which_way_a_closed_crossing_turns(
+                [Vector::new(0.1, 0.2, 0.3), Vector::new(0.3, 0.6, 0.9),],
+                Vector::new(0.1, 0.2, 0.3),
+                sideways,
+            ),
+            "a positive factor cannot have changed the sign"
+        );
+    }
+
+    /// What the retry still cannot reach: one vector spread across the whole
+    /// `f64` range, so that no exponent brings its own components into range
+    /// together.
+    ///
+    /// `Exact` multiplies two numbers only where the product stays exact, which
+    /// is the window from `2^-969` to the top of the range — about 1992 binades.
+    /// The axis here is written with components `2^2020` apart, which is wider
+    /// than that window, so against a gradient of ordinary size one of its two
+    /// products always falls off an end: lift the small one clear of the
+    /// subnormals and the large one overflows.
+    ///
+    /// **That is the whole family of fixes there is at this level**, and the
+    /// test walks it rather than arguing it: every exponent that has an exact
+    /// copy at all is tried — 26 of them — and the exact level declines on all
+    /// 26. The sign is still out there — these are finite numbers and their
+    /// determinant is a real number — so what is missing is arithmetic wider
+    /// than a pair of `f64`s per product, and not a better scale to read it at
+    /// (§16.10, §29).
+    ///
+    /// The copies that are *not* exact are skipped rather than counted as
+    /// refusals, and they have to be: at `2^-1100` the small component flushes
+    /// to zero and the rule answers [`Decision::Pos`] — for an axis with one
+    /// component gone, which is a different crossing and not this one.
+    #[test]
+    fn a_vector_spread_across_the_whole_range_has_no_scale_that_works() {
+        let round = Vector::new(0.1, 0.2, 0.3);
+        let straight = Vector::new(0.3, 0.6, 0.9);
+        let spread_axis = Vector::new(2f64.powi(1000), 0.0, 2f64.powi(-1020));
+
         assert!(matches!(
-            which_way_a_closed_crossing_turns([round, straight], round, Vector::new(1.0, 0.0, 0.0)),
+            which_way_a_closed_crossing_turns([round, straight], round, spread_axis),
             Decision::Undecidable { .. }
         ));
+
+        let mut exponents_with_an_exact_copy = 0;
+        for exponent in -1100..=1100 {
+            let moved = spread_axis.components().map(|entry| {
+                if entry == 0.0 {
+                    entry
+                } else {
+                    multiplied_by_a_power_of_two(entry, exponent)
+                }
+            });
+            let copy_is_exact =
+                spread_axis
+                    .components()
+                    .iter()
+                    .zip(moved)
+                    .all(|(written, moved)| {
+                        if *written == 0.0 {
+                            moved == 0.0
+                        } else {
+                            moved.is_normal()
+                        }
+                    });
+            if !copy_is_exact {
+                continue;
+            }
+            exponents_with_an_exact_copy += 1;
+            assert_eq!(
+                exactly_which_way_a_closed_crossing_turns(
+                    [round, straight],
+                    round,
+                    Vector::new(moved[0], moved[1], moved[2]),
+                ),
+                None,
+                "an exact copy of the axis at 2^{exponent} settled it after all"
+            );
+        }
+        assert_eq!(
+            exponents_with_an_exact_copy, 26,
+            "the exact copies are `2^-2` to `2^23`: below that the small \
+             component leaves the normal range and above it the large one does"
+        );
     }
 }
