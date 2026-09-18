@@ -28,9 +28,10 @@
 //! the pipe. Nothing here is an inequality with room in it.
 //!
 //! **Two spellings of one direction are never compared against each other.**
-//! `Axis::new` divides by the widest component before it divides by the length,
-//! so `(1, 1, 0)` and `(3, 3, 0)` store the same bits and a test that compared
-//! them would pass while both were wrong. Every assertion is against the
+//! `Axis::new` scales by the exact power of two that puts the widest component
+//! in `[1, 2)` before it divides by the length, so `(1, 1, 0)` and `(3, 3, 0)`
+//! store the same bits and a test that compared them would pass while both were
+//! wrong. Every assertion is against the
 //! geometry: a line that really does lie on the pipe's wall, and a point that is
 //! really on its skin.
 //!

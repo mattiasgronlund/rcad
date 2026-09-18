@@ -45,8 +45,9 @@ fn along(x: f64, y: f64, z: f64) -> Vector {
 
 /// A direction written at another scale is the same axis, bit for bit.
 ///
-/// `Vector::scaled_to_length_one_from_anywhere` divides by the largest
-/// component before it divides by the length, so two proportional directions
+/// `Vector::scaled_to_length_one_from_anywhere` multiplies by the exact power
+/// of two that puts the largest component in `[1, 2)` before it divides by the
+/// length. A power of two moves no mantissa bit, so two proportional directions
 /// reach the division as the same three numbers. §22.6 records the same fix for
 /// a plane's coefficients; this is the axis half of it, which nothing had
 /// asked.

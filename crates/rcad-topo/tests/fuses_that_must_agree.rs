@@ -2826,8 +2826,12 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
     // rounded 1/√2. Canonical and closest are not in tension — a correctly
     // rounded normalize is a function of the exact ray, so two proportional
     // spellings still store the same bits — and no ordering recovers this bit
-    // because ordering is the wrong family: carrying more of them does. §120
-    // books that as a gap, and fixing it moves the literal below by one ulp.
+    // because ordering is the wrong family: carrying more of them does.
+    //
+    // §120 fixed that for `Axis::new` and left `Plane` alone, so this literal
+    // did not move and is not meant to: a plane still divides by its largest
+    // component and then normalizes, which rounds twice. §121 books the plane
+    // half, and when it runs this is one of the numbers that moves.
     // What §22.6 was about is the two walls agreeing, and they do.
     let canonical = 0.707_106_781_186_547_5_f64;
     assert_eq!(plane_of(1.0)[0], canonical);

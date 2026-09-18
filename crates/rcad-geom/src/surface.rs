@@ -302,8 +302,10 @@ impl Surface {
     /// Sorting on the stored numbers is sound for exactly the reason §32.5's
     /// trap gives: two faces that are the same plane hold the same four numbers.
     /// Each of the five earns that for itself, and none of the five is left out:
-    /// a [`Plane`](crate::Plane)'s normal and an [`Axis`](crate::Axis)'s
-    /// direction are scaled to length one from the largest component, so two
+    /// a [`Plane`](crate::Plane)'s normal is divided by its largest component
+    /// and an [`Axis`](crate::Axis)'s direction rescaled by an exact power of
+    /// two, and then both are scaled to length one — either way from the ratios
+    /// between the components alone, so two
     /// spellings that differ only in how long the vector was written hold the
     /// same bits, and a [`Sphere`]'s centre has nothing to scale. A pipe, a cone
     /// and a bend take theirs from the axis they sit on.

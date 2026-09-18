@@ -1356,10 +1356,12 @@ mod tests {
     /// `2^(2·smallest − 53)` and the square's at about `2^-104`, and their
     /// product has to stay above the `2^-969` [`product_is_exact`] wants.
     ///
-    /// So a triple spread wider than about nine hundred binades has no scale
-    /// that carries this comparison, and comes back `None` rather than being
-    /// decided in `f64`. That is the same wall `exact::WIDEST_SQUARABLE_SPREAD`
-    /// names, a little further up.
+    /// So a triple spread wider than nine hundred binades has no scale that
+    /// carries this comparison, and comes back `None` rather than being decided
+    /// in `f64`. Nine hundred is the `lift > 500` below against a lift target of
+    /// `2^-400`, and it is this struct's own wall — `exact::WIDEST_SQUARABLE
+    /// _SPREAD` is a different number for a different question, 995 binades of
+    /// spread inside one expansion, and nothing here consults it.
     struct ExactFrame {
         components: [f64; 3],
         lift: i32,
@@ -1545,9 +1547,10 @@ mod tests {
     /// which sorts `-0.0` first.
     ///
     /// The scaling turns none of these back up, and the count says so rather
-    /// than a sentence: [`Vector::scaled_to_length_one_from_anywhere`] divides
-    /// by the largest magnitude and then by a length, and neither divisor is
-    /// ever negative, so every sign that goes in comes out.
+    /// than a sentence: [`Vector::scaled_to_length_one_from_anywhere`]
+    /// multiplies by a power of two and then divides by a length, and neither a
+    /// power of two nor a length is ever negative, so every sign that goes in
+    /// comes out.
     #[test]
     fn an_axis_holds_the_same_bits_however_its_zeros_were_signed() {
         let plain = Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0)).unwrap();
