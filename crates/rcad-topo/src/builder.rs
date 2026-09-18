@@ -990,11 +990,7 @@ mod tests {
         let builder = a_tube_whose_hole_is_exactly_as_wide_as_its_wall();
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let refused = builder
-            .build(
-                &mut model,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
+            .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
             .expect_err("a hole exactly as wide as its own wall cannot be cut into triangles");
         assert!(
             // Position 2: the bottom cap, described right after the two
