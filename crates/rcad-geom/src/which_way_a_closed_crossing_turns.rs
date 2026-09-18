@@ -4,6 +4,7 @@
 use rcad_predicates::Decision;
 
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly};
+use crate::exact::Exact;
 use crate::point::Vector;
 
 /// Which way the wire round a closed crossing turns against the frame of the
@@ -51,17 +52,36 @@ use crate::point::Vector;
 /// the sign read off it was a coin toss dressed as a fact (§109.7, §111).
 ///
 /// So the whole chain runs in interval arithmetic over the caller's numbers
-/// taken exactly, and the answer is whatever that enclosure can prove.
-/// [`Decision::Undecidable`] is a result here and not a failure — it is the
-/// caller that has to turn it into one (§2.1, §4.1).
+/// taken exactly, and anything that enclosure cannot prove goes to
+/// [`exactly_which_way_a_closed_crossing_turns`] below, which is the cascade's
+/// third level and decides every one of these signs that exists (§122).
+/// [`Decision::Undecidable`] is what is left when even that cannot run, and it
+/// is a result here and not a failure — it is the caller that has to turn it
+/// into one (§2.1, §4.1).
 ///
-/// **What this still does not enclose** is the error already in `outward`,
+/// **What neither level encloses** is the error already in `outward`,
 /// `gradient` and `axis`, which reached the caller as `f64` evaluations of
 /// exact formulas and carry about an ulp each. Those are taken as exact, so
 /// what is proved is a fact about the numbers handed over. Every certified
-/// answer this now gives is one the old comparison also gave; what has gone is
-/// the answers it gave that its own arithmetic could not support.
+/// answer this gives is one the old comparison against `0.0` also gave; what has
+/// gone is the answers it gave that its own arithmetic could not support.
 pub fn which_way_a_closed_crossing_turns(
+    outward: [Vector; 2],
+    gradient: Vector,
+    axis: Vector,
+) -> Decision {
+    let from_the_enclosure = enclosed_which_way_a_closed_crossing_turns(outward, gradient, axis);
+    let Decision::Undecidable { .. } = from_the_enclosure else {
+        return from_the_enclosure;
+    };
+    match exactly_which_way_a_closed_crossing_turns(outward, gradient, axis) {
+        Some(settled @ (Decision::Pos | Decision::Neg | Decision::Zero)) => settled,
+        _ => from_the_enclosure,
+    }
+}
+
+/// The rule in interval arithmetic: cheap, and right whenever it commits.
+fn enclosed_which_way_a_closed_crossing_turns(
     outward: [Vector; 2],
     gradient: Vector,
     axis: Vector,
@@ -79,11 +99,63 @@ pub fn which_way_a_closed_crossing_turns(
     along_the_longitude.sign()
 }
 
+/// The same rule with no rounding in it at all, or `None` when the exact
+/// arithmetic cannot run on these numbers.
+///
+/// Both references are polynomials in the nine stored doubles — degree four
+/// along the longitude and degree five along the latitude — so
+/// [`Exact`] settles either sign whenever its products stay in the range where
+/// they are exact. `None` means level 3 declined, not that the answer is zero,
+/// and the caller keeps the enclosure's refusal rather than inventing one.
+///
+/// # This level picks the reference as well as the sign, and has to
+///
+/// The rule reads the latitude only where the longitude says *exactly nothing*,
+/// so which reference answers **is** the question of whether the longitude's dot
+/// is zero — and that is a sign, decided here and nowhere cheaper. An enclosure
+/// that straddles zero has not said the dot is nonzero; it has said it does not
+/// know. So this level cannot be handed a reference chosen upstream and asked
+/// only to finish the sign: fed a longitude that is truly zero it would answer
+/// [`Decision::Zero`], which claims the two surfaces touch rather than cross,
+/// while the latitude was there with a direction all along. It re-asks both
+/// questions from the top instead, which costs one extra exact dot product on a
+/// path that already gave up once (§122).
+///
+/// # Why the latitude is written turned round
+///
+/// The rule's latitude is `walked · (gradient × longitude)`, and
+/// [`Exact::cross_of`] takes the stored triple on the right, not the left. A
+/// triple product is unchanged by cycling its three vectors, so the same number
+/// is `longitude · (walked × gradient)` — which puts `gradient` where the stored
+/// numbers go. Both forms are exact here, so this is spelling and not
+/// arithmetic.
+fn exactly_which_way_a_closed_crossing_turns(
+    outward: [Vector; 2],
+    gradient: Vector,
+    axis: Vector,
+) -> Option<Decision> {
+    let gradient = gradient.components();
+    let walked = Exact::cross_of(
+        &Exact::of_each(outward[0].components()),
+        outward[1].components(),
+    )?;
+    let longitude = Exact::cross_of(&Exact::of_each(axis.components()), gradient)?;
+    let along_the_longitude = Exact::dot_of_two_exact(&walked, &longitude)?;
+    if along_the_longitude.sign() != Decision::Zero {
+        return Some(along_the_longitude.sign());
+    }
+    let walked_across_the_gradient = Exact::cross_of(&walked, gradient)?;
+    Some(Exact::dot_of_two_exact(&longitude, &walked_across_the_gradient)?.sign())
+}
+
 #[cfg(test)]
 mod tests {
     use rcad_predicates::Decision;
 
-    use super::which_way_a_closed_crossing_turns;
+    use super::{
+        enclosed_which_way_a_closed_crossing_turns, exactly_which_way_a_closed_crossing_turns,
+        which_way_a_closed_crossing_turns,
+    };
     use crate::point::Vector;
 
     /// A pipe crossing a ball squarely, which is as far from the hard cases as a
@@ -140,7 +212,7 @@ mod tests {
         );
     }
 
-    /// A crossing the second level cannot settle, which a third level could.
+    /// A crossing the second level cannot settle and the third one does.
     ///
     /// `(0.1, 0.2, 0.3)` and `(0.3, 0.6, 0.9)` are a real crossing a third of an
     /// `f64` step wide, not a rounding: the doublings inside them are exact but
@@ -149,18 +221,104 @@ mod tests {
     /// component's true value is one ulp of the two products behind it, and an
     /// interval holds each of those to half an ulp.
     ///
-    /// **Refusing is therefore a gap and not a limit** (§16.10, §111.3). The sign
-    /// is a polynomial in the stored doubles and the cascade's third level always
-    /// decides such a thing; this predicate stops at the second. Left open on
-    /// purpose, and this test is where the next lane starts.
+    /// **Refusing it was a gap and not a limit** (§16.10, §111.3, §122): the sign
+    /// is a polynomial in the stored doubles, and the cascade's third level
+    /// decides such a thing whenever its products stay exact.
     #[test]
-    fn a_crossing_barely_one_f64_step_wide_has_no_sign_the_enclosure_can_prove() {
+    fn a_crossing_barely_one_f64_step_wide_is_settled_by_the_exact_level() {
         let round = Vector::new(0.1, 0.2, 0.3);
         let straight = Vector::new(0.3, 0.6, 0.9);
         assert_eq!(
             round.cross(straight).components(),
             [2.7755575615628914e-17, -1.3877787807814457e-17, 0.0],
             "f64 gets the exact cross product here, so the crossing is real"
+        );
+        assert!(
+            matches!(
+                enclosed_which_way_a_closed_crossing_turns(
+                    [round, straight],
+                    round,
+                    Vector::new(1.0, 0.0, 0.0)
+                ),
+                Decision::Undecidable { .. }
+            ),
+            "the interval level is still the one that cannot tell"
+        );
+        assert_eq!(
+            which_way_a_closed_crossing_turns([round, straight], round, Vector::new(1.0, 0.0, 0.0)),
+            Decision::Pos
+        );
+    }
+
+    /// The exact level is not allowed to quietly change an answer the enclosure
+    /// had already certified.
+    ///
+    /// Run over every case above that the enclosure settles, the two levels have
+    /// to agree — an enclosure is sound, so a level that disagreed with one would
+    /// be the level with the bug.
+    #[test]
+    fn the_exact_level_agrees_with_every_answer_the_enclosure_certifies() {
+        let up = Vector::new(0.0, 0.0, 1.0);
+        for (outward, gradient, axis) in [
+            (
+                [Vector::new(2.0, 0.0, 0.0), Vector::new(0.0, 0.0, 2.0)],
+                Vector::new(2.0, 0.0, 0.0),
+                up,
+            ),
+            (
+                [Vector::new(0.0, 0.0, 2.0), Vector::new(2.0, 0.0, 0.0)],
+                Vector::new(2.0, 0.0, 0.0),
+                up,
+            ),
+            (
+                [Vector::new(0.5, 0.25, 0.125), Vector::new(1.0, 0.5, 0.25)],
+                Vector::new(0.5, 0.25, 0.125),
+                up,
+            ),
+            (
+                [Vector::new(0.6, 0.8, 0.0), Vector::new(1.0, 0.0, 0.0)],
+                Vector::new(0.6, 0.8, 0.0),
+                up,
+            ),
+            (
+                [Vector::new(1.0, 0.0, 0.0), Vector::new(0.6, 0.8, 0.0)],
+                Vector::new(0.6, 0.8, 0.0),
+                up,
+            ),
+        ] {
+            let enclosed = enclosed_which_way_a_closed_crossing_turns(outward, gradient, axis);
+            assert!(
+                !matches!(enclosed, Decision::Undecidable { .. }),
+                "this test only says something about the cases the enclosure settles"
+            );
+            assert_eq!(
+                Some(enclosed),
+                exactly_which_way_a_closed_crossing_turns(outward, gradient, axis),
+                "the two levels disagree about {outward:?}, {gradient:?}, {axis:?}"
+            );
+        }
+    }
+
+    /// Coordinates too small for the exact level's products to stay exact, which
+    /// is the one way the third level declines.
+    ///
+    /// Every component is scaled by `2^-600`, so each product of two of them is
+    /// around `2^-1200` — far below the `2^-969` where a product's low half stops
+    /// being a normal number. The enclosure cannot tell either, because the same
+    /// products flush to zero, so the whole rule refuses and that refusal is a
+    /// real one.
+    #[test]
+    fn a_crossing_written_far_too_small_to_multiply_is_still_refused() {
+        let tiny = 2f64.powi(-600);
+        let round = Vector::new(0.1 * tiny, 0.2 * tiny, 0.3 * tiny);
+        let straight = Vector::new(0.3 * tiny, 0.6 * tiny, 0.9 * tiny);
+        assert_eq!(
+            exactly_which_way_a_closed_crossing_turns(
+                [round, straight],
+                round,
+                Vector::new(1.0, 0.0, 0.0)
+            ),
+            None
         );
         assert!(matches!(
             which_way_a_closed_crossing_turns([round, straight], round, Vector::new(1.0, 0.0, 0.0)),
