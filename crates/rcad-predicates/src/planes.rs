@@ -273,8 +273,8 @@ fn the_f64s_in(side: Interval, out: &mut [f64; HOW_MANY_F64_ARE_WORTH_TRYING]) -
         return None;
     }
     let mut at = lo;
-    for used in 0..HOW_MANY_F64_ARE_WORTH_TRYING {
-        out[used] = at;
+    for (used, slot) in out.iter_mut().enumerate() {
+        *slot = at;
         if at >= hi {
             return Some(used + 1);
         }
