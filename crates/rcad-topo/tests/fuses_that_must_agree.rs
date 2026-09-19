@@ -3968,16 +3968,43 @@ fn written_out(face: &Face) -> Vec<u64> {
     written
 }
 
+/// One ring, written down from two of its own corners, has to come back as one
+/// list.
+///
+/// The ring below goes through the origin twice, which is what a turned pair
+/// does when both inputs have a corner at the point the turn holds still.
+#[test]
+fn a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side() {
+    let here = [0.0, 0.0, 0.0];
+    let ring = [here, [1.0, 0.0, 0.0], here, [0.0, 1.0, 0.0]];
+    let from_the_other_side = [here, [0.0, 1.0, 0.0], here, [1.0, 0.0, 0.0]];
+    assert_eq!(
+        turned_to_its_smallest(&ring),
+        turned_to_its_smallest(&from_the_other_side),
+        "two walks that reach the repeated corner from different sides wrote \
+         the same ring down as two different lists"
+    );
+}
+
+/// A ring written down from whichever of its corners makes the smallest list.
+///
+/// **The smallest rotation, not the first smallest corner.** Starting at the
+/// first corner equal to the smallest one is a canonical form only while no
+/// ring visits a corner twice. A face ring that does — and a turned pair makes
+/// one, through the point the turn holds still — is written down as its two
+/// halves by the two orders, and the comparison above then reports a face that
+/// differs when the two answers are the same solid. `docs/decisions.md` §149
+/// is the counterexample that cost a session, §151 is this.
 fn turned_to_its_smallest(wire: &[[f64; 3]]) -> Vec<u64> {
     let corners: Vec<[u64; 3]> = wire.iter().map(|&at| at.map(bits)).collect();
-    let smallest = corners
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, corner)| **corner)
-        .map_or(0, |(position, _)| position);
     (0..corners.len())
-        .flat_map(|step| corners[(smallest + step) % corners.len()])
-        .collect()
+        .map(|start| -> Vec<u64> {
+            (0..corners.len())
+                .flat_map(|step| corners[(start + step) % corners.len()])
+                .collect()
+        })
+        .min()
+        .unwrap_or_default()
 }
 
 /// A number's bits, with the two zeroes counted as one.
