@@ -18,7 +18,8 @@
 use core::f64::consts::PI;
 
 use rcad_geom::{
-    Deflection, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Sphere, Surface, Vector,
+    Axis, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Sphere,
+    Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, DraftStep, Model, SolidBuilder, SolidKey};
@@ -59,6 +60,36 @@ fn a_quarter_of_a_ball_measures_the_same_whichever_step_its_skin_starts_at() {
 /// a boundary.
 #[test]
 fn a_wedge_of_a_ball_says_which_points_are_inside_it_wherever_it_sits() {
+    wedges_say_which_points_are_inside_them(&Isometry::identity());
+}
+
+/// Moved or turned, a wedge is the same wedge, so it must give the same answers
+/// about the same points moved with it (`docs/decisions.md` §168). Until §168 a
+/// turn or a shift made every one of them `CannotFollowAFacesTrimming`: the
+/// movement rounds the arc's two ends a hair off the plane of the half-space
+/// that picks it, and §167's route asked for them to be on it exactly.
+///
+/// The shift is by thirds and tenths, which no power of two holds, so the
+/// wall's offset and the corners round too; the turn is about an axis that
+/// misses the ball's centre and lies along none of the coordinate axes.
+#[test]
+fn a_moved_or_turned_wedge_of_a_ball_says_which_points_are_inside_it() {
+    let moved = Isometry::translation(Vector::new(0.1, -1.0 / 3.0, 2.7)).expect("a finite shift");
+    let turned = Isometry::rotation(
+        &Axis::new(Point::new(0.3, -0.2, 0.5), Vector::new(1.0, 2.0, 3.0))
+            .expect("an axis with a length"),
+        0.7,
+    )
+    .expect("a finite angle");
+    for movement in [moved, turned, moved.compose(&turned)] {
+        wedges_say_which_points_are_inside_them(&movement);
+    }
+}
+
+/// Every wedge [`a_wedge_of_a_ball`] is asked about here, placed by `movement`,
+/// answers ten points moved with it, and gets each one right with nothing
+/// written to the log.
+fn wedges_say_which_points_are_inside_them(movement: &Isometry) {
     let asked = [
         [0.35, 0.2, 0.0],
         [0.5, 0.2, 0.3],
@@ -82,15 +113,22 @@ fn a_wedge_of_a_ball_says_which_points_are_inside_it_wherever_it_sits() {
     ] {
         let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
         let wedge = a_wedge_of_a_ball(&mut model, between, 0, &policy);
+        model
+            .place_solid(wedge, movement)
+            .expect("this model made the key");
         let solid = model.solid(wedge).expect("this model made the key");
         for [x, y, z] in asked {
             let expected = where_it_is(between[0], fraction, [x, y, z]);
             let mut log = ProvenanceLog::new();
-            let answer = solid.classify_point(Point::new(x, y, z), &policy, &mut log);
+            let answer = solid.classify_point(
+                movement.apply_to_point(Point::new(x, y, z)),
+                &policy,
+                &mut log,
+            );
             assert_eq!(
                 answer,
                 expected,
-                "the wedge between {between:?} asked about {:?}",
+                "the wedge between {between:?}, placed by {movement:?}, asked about {:?}",
                 [x, y, z]
             );
             assert!(

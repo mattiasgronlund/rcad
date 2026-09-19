@@ -451,6 +451,19 @@ fn a_side_of_it_is_part_of_a_crossing(solid: SolidView<'_>, face: FaceView<'_>) 
 /// arc is the whole of its circle in front of that plane. Anything else is
 /// refused by name, as before.
 ///
+/// **All of that is asked of the face where it is stored, and only `point` is
+/// asked where it sits** (§168). Each step is a property a movement keeps —
+/// a plane holding two points, a plane through a centre, which way a wire runs
+/// against a cross product — but a movement *rounds*, and a turned wedge's arc
+/// ends land a hair off its picker's plane, so asking them of the placed face
+/// refused every turned wedge. Where the face is stored, those facts are exact.
+/// The face where it sits is then the moved image of a face shown to be the part
+/// in front of its cuts, so it is the part in front of the moved cuts, and
+/// `point` is asked against those as they read once moved — the same rounded
+/// surfaces every other face of a placed solid is asked against (§17.3). Every
+/// face across a side must be stored in the face's own frame for that to hold,
+/// which one shell's faces always are.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] outside that family, and
@@ -461,18 +474,19 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     point: PredicatePoint,
 ) -> Result<OnAFace> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let surface = face.surface();
+    let surface = face.stored_surface();
     let sides = the_sides_of(solid, face)?;
 
     let mut cuts: Vec<Cut> = Vec::new();
     for side in &sides {
         let kept = which_side_of_its_neighbour_a_side_keeps(face, &surface, side)?;
-        let corners = [side.start.key(), side.end.key()];
+        let corners = [side.start.key, side.end.key];
         match cuts.iter_mut().find(|known| known.surface == side.across) {
             Some(known) if known.kept == kept => known.corners_on_it.extend(corners),
             Some(_) => return Err(cannot()),
             None => cuts.push(Cut {
                 surface: side.across,
+                placed: side.across_placed,
                 kept,
                 corners_on_it: corners.to_vec(),
             }),
@@ -503,12 +517,22 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     }
 }
 
-/// One side of a face, located, with the surface of the face across it.
-struct Side<'m> {
+/// One side of a face in the frame the face is stored in, with the surface of
+/// the face across it there, and that surface as it reads once moved into
+/// place.
+struct Side {
     across: Surface,
-    start: crate::view::VertexView<'m>,
-    end: crate::view::VertexView<'m>,
+    across_placed: Surface,
+    start: Corner,
+    end: Corner,
     run: SideRun,
+}
+
+/// A corner of a face, where it is stored.
+#[derive(Clone, Copy)]
+struct Corner {
+    key: crate::VertexKey,
+    at: Point,
 }
 
 /// What a [`Side`] runs along between its ends.
@@ -520,10 +544,12 @@ enum SideRun {
     },
 }
 
-/// One surface cutting a face: which side of it the face keeps, and which of
-/// the face's corners are on it because an edge along it ends there.
+/// One surface cutting a face: which side of it the face keeps, which of the
+/// face's corners are on it because an edge along it ends there, and where it
+/// is once moved into place, which is the only thing the point is asked against.
 struct Cut {
     surface: Surface,
+    placed: Surface,
     kept: Decision,
     corners_on_it: Vec<crate::VertexKey>,
 }
@@ -538,8 +564,9 @@ enum Lies {
     Across,
 }
 
-/// Every side of `face` in the order its wires walk them, seams left out.
-fn the_sides_of<'m>(solid: SolidView<'m>, face: FaceView<'m>) -> Result<Vec<Side<'m>>> {
+/// Every side of `face` in the order its wires walk them, seams left out, in the
+/// frame the face is stored in.
+fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let mut sides = Vec::new();
     for coedge in face.wires().flat_map(WireView::coedges) {
@@ -547,11 +574,17 @@ fn the_sides_of<'m>(solid: SolidView<'m>, face: FaceView<'m>) -> Result<Vec<Side
         let Some(across) = the_face_across(solid, face, edge)? else {
             continue;
         };
-        let (start, end) = (coedge.start(), coedge.end());
-        let run = match edge.run() {
+        if across.location() != face.location() {
+            return Err(cannot());
+        }
+        let [start, end] = [coedge.start(), coedge.end()].map(|corner| Corner {
+            key: corner.key(),
+            at: where_it_is_stored(solid, corner.key()),
+        });
+        let run = match edge.stored_run() {
             EdgeRun::Straight => SideRun::Straight,
-            EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key() != end.key() => {
-                let ends = [start, end].map(|at| PredicatePoint::from(at.point().coordinates()));
+            EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key != end.key => {
+                let ends = [start, end].map(|corner| PredicatePoint::from(corner.at.coordinates()));
                 let picker = picked_by
                     .iter()
                     .find_map(|picker| match picker {
@@ -574,13 +607,23 @@ fn the_sides_of<'m>(solid: SolidView<'m>, face: FaceView<'m>) -> Result<Vec<Side
             }
         };
         sides.push(Side {
-            across: across.surface(),
+            across: across.stored_surface(),
+            across_placed: across.surface(),
             start,
             end,
             run,
         });
     }
     Ok(sides)
+}
+
+/// Where a corner of `solid` is in the frame its faces are stored in.
+///
+/// Read from the arena because [`crate::view::VertexView`] only hands out
+/// the corner moved into place, and moving it back would round it twice.
+fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
+    let model = solid.model();
+    model.data().vertices[corner.slot_in(model.id())].point
 }
 
 /// Whether the part of `surface` in front of every cut is connected and has
@@ -629,10 +672,10 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
 fn which_side_of_its_neighbour_a_side_keeps(
     face: FaceView<'_>,
     surface: &Surface,
-    side: &Side<'_>,
+    side: &Side,
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let at = side.start.point();
+    let at = side.start.at;
     let mut outward = gradient_at(surface, at).ok_or_else(cannot)?;
     if face.orientation().is_reversed() {
         outward = outward.map(core::ops::Neg::neg);
@@ -642,7 +685,7 @@ fn which_side_of_its_neighbour_a_side_keeps(
     let flat = [surface, &side.across].map(|one| one.as_plane().is_some());
     let runs = match &side.run {
         SideRun::Straight if flat == [true, true] => {
-            let to = side.end.point().coordinates();
+            let to = side.end.at.coordinates();
             let from = at.coordinates();
             let step = core::array::from_fn(|axis| {
                 Interval::exactly(to[axis]) - Interval::exactly(from[axis])
@@ -690,15 +733,12 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///
 /// Everything else is [`Lies::Across`]: an arc whose ends are not both on the
 /// plane may bulge across it, and nothing here builds the point where it would.
-fn where_a_side_lies(surface: &Surface, side: &Side<'_>, cut: &Cut) -> Lies {
-    let side_of_an_end = |end: crate::view::VertexView<'_>| {
-        if cut.corners_on_it.contains(&end.key()) {
+fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
+    let side_of_an_end = |end: Corner| {
+        if cut.corners_on_it.contains(&end.key) {
             Decision::Zero
         } else {
-            side_of_surface(
-                &cut.surface,
-                PredicatePoint::from(end.point().coordinates()),
-            )
+            side_of_surface(&cut.surface, PredicatePoint::from(end.at.coordinates()))
         }
     };
     let ends = [side_of_an_end(side.start), side_of_an_end(side.end)];
@@ -754,12 +794,12 @@ fn where_a_side_lies(surface: &Surface, side: &Side<'_>, cut: &Cut) -> Lies {
 fn held_in_front_of_all(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> {
     let mut on_its_boundary = false;
     for cut in cuts {
-        match side_of_surface(&cut.surface, point) {
+        match side_of_surface(&cut.placed, point) {
             Decision::Zero => on_its_boundary = true,
             settled if settled == cut.kept => (),
             Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
             Decision::Undecidable { enclosure } => {
-                return Err(gave_up_on_a_side(&cut.surface, point, enclosure));
+                return Err(gave_up_on_a_side(&cut.placed, point, enclosure));
             }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
@@ -777,12 +817,12 @@ fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
     let mut on_its_boundary = false;
     let mut undecided = None;
     for cut in cuts {
-        match side_of_surface(&cut.surface, point) {
+        match side_of_surface(&cut.placed, point) {
             settled if settled == cut.kept => return Ok(OnAFace::Held),
             Decision::Zero => on_its_boundary = true,
             Decision::Pos | Decision::Neg => (),
             Decision::Undecidable { enclosure } => {
-                undecided = Some(gave_up_on_a_side(&cut.surface, point, enclosure));
+                undecided = Some(gave_up_on_a_side(&cut.placed, point, enclosure));
             }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
