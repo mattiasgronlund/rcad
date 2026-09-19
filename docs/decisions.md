@@ -35285,6 +35285,15 @@ what §142.7 got right was refusing to write "no caller hits this" without a
 demonstration, and the demonstration is what overturned the guess that followed
 it.
 
+**The soundness argument above is falsified at its premise, too.** It rests on
+"wherever the picker was built at all, its normal came from a cross product with
+`towards`, so `towards ≠ 0`". §145's pair has `towards` exactly zero and a picker
+built anyway, from one of `through_a_point_square_to`'s fallbacks. The site is
+still safe, but by the second route in §145.3 and not by this paragraph's
+reasoning — and the paragraph was careful to offer itself "as an argument and
+not a proof", which is the only reason this reads as a correction rather than as
+a defect.
+
 ### 142.8 The three unmeasured rows, measured — all three refuse, all three are gaps
 
 §142.3's caution is discharged. Each row below is a pair built through the public
@@ -35331,9 +35340,17 @@ moved the first row was checked by running, not reasoned: the same test file on
 last digit. §140's fix changed how two lines are handed to `two_lines_told_apart`
 and this site loses them earlier, in the `out` the caller works out first. And
 the shape is not "radii at very different scales" — site 3 refuses at `1e-3`
-against `1.0005e-3`, site 2 at two lengths both about one. **The lever is
-distance from the origin, not the ratio of the radii**, and only site 1 has a
-wide ratio at all.
+against `1.0005e-3`, site 2 at two lengths both about one. Only site 1 has a wide
+ratio at all, so **the radius ratio is not the lever**, and that much is clean.
+
+**What the lever *is* does not generalise, and this paragraph claimed it did.**
+For sites 1 and 3 it is distance from the origin, and each has a control in the
+test file: the same plane and pipe, and the same ball and pipe, moved to the
+origin, are both named. Site 2 has no such control and could not have one —
+**its refusing pair is already at the origin**, a thin pipe through it against a
+fat axis one away. Site 2 is a standing counterexample to the general sentence,
+and it was caught by an audit asking what the evidence covered rather than
+whether it was true.
 
 **Where the fix comes from is not the sibling.** §142.3 guessed site 3 would be
 fixed by copying the exact pre-summation at `intersect.rs:1303-1318`; the
@@ -35481,16 +35498,26 @@ The band decides both ways round from `3.044037611241337e-139` to
 `5.4016709327697754e-8`. Below it the answer is `SurfaceMeet::Nothing`, and the
 kernel's flip to it sits within one step of a 6-bit mantissa of the exact
 cross-section criterion — `2·R₁·r₂ + r₂² − Z²` crosses from `−7.029884024601e12`
-to `+1.9461878483175e13` over that same step, against the analytic
+to `+6.215997229287e12` at `r₂ = 1.718831582209548e-139`, against the analytic
 `Z²/(2·R₁) = 1.712674258532773e-139`. Every sweep was run in both orders and no
 radius decided one way and refused the other.
 
 **What still refuses, named rather than rounded off.** Over 2 000 log-uniform
-radii asked both ways, 146 of 8 000 still refuse — 1.83% — and all 146 are the
+radii asked both ways, 62 of 4 000 still refuse — 1.55% — and all 62 are the
 same thing: `r₂²`'s roundoff half is nonzero and below `Exact::times`'s floor of
-`2.004168360008973e-292`, so the exact `E` cannot be formed at all and the old
-interval arm is what answers. Across roughly 13 000 asks the kernel was never
-*wrong*, only silent. That residue is the floor itself, not a new defect.
+`2.004168360008973e-292`, the largest of them `1.8467223357979438e-292`, so the
+exact `E` cannot be formed at all and the old interval arm is what answers.
+Across all 6 000 asks the file makes, the kernel was never *wrong*, only silent:
+every ask that was not a refusal came back `curves 2`. That residue is the floor
+itself, not a new defect.
+
+*Those figures read "146 of 8 000 — 1.83%" and "roughly 13 000 asks" for the
+length of one push.* The audit reproduced `146 of 8 000` exactly — by doubling
+the sample to 4 000 radii, which is not what the committed test draws. A number
+that is right about a run nobody kept is the hardest kind to catch, because it
+survives every check except re-running the thing it claims to describe. §142.6
+is the same failure one section earlier, and §142.3's caution is why this
+section was audited at all.
 
 **Amendment one — §143.5 understated family 1.** It is not the weaker of the two;
 it is **unusable at this site**. `Exact::square_minus` returns "a sign and never a
@@ -35515,10 +35542,20 @@ everything under it.
 §143.6 asked only whether the two compose. They do, and more: with both in place
 the band rows come back `Curves` with two runs, and reversing `33ea2c0a`'s
 `intersect.rs` hunk on top of this fix turns three of the four new tests red —
-including at `r₂ = 5.4016709327697754e-8`, §140's own pair. The fourth survives,
-and the exception is instructive: its thin axis sits exactly on the fat pipe's
-skin with no step along the axis-to-axis line to cancel, which is the one
-geometry §140's fix was not needed for.
+including at `r₂ = 5.4016709327697754e-8`, §140's own pair.
+
+**The fourth survives, and naming why took two goes.** It is not, as this
+section first said, that there is "no step along the axis-to-axis line to
+cancel" — in that test the step along the axis-to-axis line is `R₁`, the largest
+number in the file. What is missing is the step along the **pipe's own axis**.
+In the leaning test the fat axis is `(1,1,0)/√2` and the thin one sits at
+`(0, 0, R₁)`, so the picking normal is `(±0.7071, ∓0.7071, 0)` with its `z`
+component exactly zero: the big term lands entirely in the one coordinate slot
+the normal reads as nothing, and the small `±up·out` term lands where nothing
+large sits. In the other three the thin axis is at `(0, R₁, Z)` with
+`Z = 41581179`, the normal is `(0, 0, ±1)`, and `Z` shares its slot with `±out`
+— which is exactly where §140's defect lived. Right conclusion, wrong name for
+it, corrected by an audit that read the geometry rather than the sentence.
 
 **General `W₁`, and what the public API can actually reach.** `Axis::new`
 normalises, so the only non-unit `W₁` a caller can produce is one plus or minus a
@@ -35824,8 +35861,16 @@ Built through the public API alone — `Axis::new`, `Cylinder::new`, `intersect`
 and `intersect` gives `Err(CannotNameWhichPieceOfACrossingThisIs)` in **both**
 orders. The two axes are genuinely apart: `between × along` comes out
 `[-4.76837158203125e-7, 4.76837158203125e-7, 0.0]`, a separation of
-`6.743495761743046e-7` that the exact level certifies positive. Nothing about
-this pair is degenerate, and nothing about it is small.
+`6.743495761743046e-7`. Nothing about this pair is degenerate, and nothing about
+it is small.
+
+That the exact level *certified* that separation is **inferred, not read**. A
+fully certified outcome logs nothing by design, so the provenance log for this
+pair comes back empty; what stands in for a reading is that the pair gets
+**past** the crossing question, to
+`CannotNameWhichPieceOfACrossingThisIs`, where every pair whose axes really are
+within a rounding comes back `Err(Undecidable)` from that question instead. That
+is evidence and not a certificate, and it is written as the weaker of the two.
 
 ### 145.2 Why the step vanishes
 
@@ -35853,26 +35898,51 @@ zero, so `quotient_or_everything` takes its `ENTIRE` branch for `across` and for
 exactly zero at the same time. This pair does, and the two conditions are not
 independent — which is the part §142.7 could not see. `lines.sideways` **is**
 `towards.components()`, so `leaning = Exact::dot_of(picker_normal, [0,0,0])` is
-an exact zero whatever the picker turned out to be. In this caller `how_far ==
-ENTIRE` *implies* `leaning == 0`. §142.7's H2 — that the exact zero would be the
+an exact zero whatever the picker turned out to be.
+
+In this caller `how_far == ENTIRE` therefore *implies* `leaning == 0` — **for
+everything that gets here**, which is not the same as for everything the code
+allows. `quotient_or_everything` takes its `ENTIRE` branch whenever `apart`
+merely *contains* zero, and a `towards` whose components underflow does that
+without being exactly zero, which would leave `leaning` a small non-zero box.
+What closes the hole is §145.5's dead end rather than this paragraph: an
+underflowing `towards` never reaches `two_lines_between_two_pipes` at all,
+demonstrated on thirteen same-width pairs with gaps from `1e-100` down to
+`5e-324`, every one of which comes back `Err(Undecidable)` from the crossing
+question, against the same pairs at `1e-8`, `1e-16` and `1e-30` all named in two
+runs. The implication holds; it holds because of §145.5, and saying so is the
+difference between a demonstration and a sentence that happens to be true. §142.7's H2 — that the exact zero would be the
 hard half, a perpendicularity coincidence the fuzzer would never hit — is
 falsified: the exact zero is the easy half, and it is common away from the case
 as well. One step either side of this pair the picker normal is
 `[5.233967780575292e-7, -3.140380668345175e-7, 0]` against a `towards` of
 `[0, 0, 9.5367431640625e-7]`, dot exactly zero, with `how_far` perfectly finite.
 
-**And the annihilation buys nothing.** `middle` really does come back signed,
-soundly. But the same vanished length is what `sideways` is normalised by, so
-`up` is `ENTIRE`, so `either_way` is `ENTIRE`, and neither side of the picker can
-be signed after all. `out` stays tight — exactly the asymmetry §142.7 predicted
-would be the opening — and it does not matter. `quotient_or_everything`'s "turns
-into a refusal" survives here by a second route, not the promised one, and
-`enclosure.rs:102` now says so.
+**And the annihilation buys nothing — which is as well, because the argument
+that it is sound does not survive this pair.** §142.7 reasoned that the swallow
+was safe because "wherever the picker was built at all, its normal came from a
+cross product with `towards`, so `towards ≠ 0`" and the true quotient was
+therefore a finite real. Here `towards` **is** exactly zero, `along × towards` is
+zero with it, and `HalfSpace::through_a_point_square_to` builds the picker from
+one of its three fallbacks instead — its doc says `towards` "may be anything at
+all, zero included". So the picker exists and the premise does not, the divisor
+handed in is exactly zero, and the quotient the expression asks for is not a
+finite real at all. **§142.7's argument is falsified at its premise by the very
+pair that first reaches the case it was written about.**
+
+What saves the site is a second route, not the argument. The same vanished
+length is what `sideways` is normalised by, so `up` is `ENTIRE`, `either_way` is
+`ENTIRE`, and neither side of the picker can be signed. `out` stays tight —
+exactly the asymmetry §142.7 predicted would be the opening — and it does not
+matter. `quotient_or_everything`'s "turns into a refusal" survives here by that
+second route, and `enclosure.rs` now says so in those terms. This is why
+§145.6's "is there a pair with no second route" is the item on that list that
+would cost something.
 
 ### 145.4 The other caller cannot reach it, demonstrated
 
-`two_lines_told_apart` is private with exactly two call sites,
-`intersect.rs:444` and `intersect.rs:1040`, both reached from the public
+`two_lines_told_apart` is private with exactly two call sites, beginning at
+`intersect.rs:438` and `intersect.rs:1034`, both reached from the public
 `intersect`. That is the whole family, so §16.10's "check the public API" is
 discharged by checking two functions.
 
@@ -35881,8 +35951,8 @@ The other one cannot reach the case at all. In `two_lines_along_a_pipe`,
 `Plane`'s normal comes from `scaled_to_length_one_from_anywhere`
 (`plane.rs:190`), so that enclosure is a box around one and never contains zero.
 Demonstrated rather than argued: over a thousand planes built from coefficient
-triples spanning `0`, `±1`, `1e±8`, `1e±160`, `1e±300`, `f64::MIN_POSITIVE` and
-`5e-324`, the squared-length enclosure never contains zero.
+triples spanning `0`, `±1`, `3`, `1e-8`, `1e±160`, `1e±300`, `f64::MIN_POSITIVE`
+and `5e-324`, the squared-length enclosure never contains zero.
 
 ### 145.5 That it is a gap, and the dead end that looks like the way in
 
@@ -35921,8 +35991,13 @@ Not ruled out, listed rather than glossed:
 - Whether any pair reaches the annihilation **without** the second route. That is
   the case that would falsify `enclosure.rs:102` outright, and nobody has looked
   for it.
-- What this does to the refusal rates in `how_often_naming_a_crossing_refuses.rs`.
-  Unmeasured.
+- ~~What this does to the refusal rates in
+  `how_often_naming_a_crossing_refuses.rs`.~~ **Measured, and nothing moved.**
+  All thirteen tests pass on the fixed tree and every published rate holds: the
+  turned headline's half-space column at 0.05%, the quartic turned at 2.10%, the
+  band row at 3.17%, the somewhere-else row's sign column at 10.58%, and the
+  rest at zero. The two figures corrected in `023d3f57` were corrected before
+  this fix and survive it.
 
 ## 146. The hub goes stale in a way no check can see, fixed 2026-09-19
 

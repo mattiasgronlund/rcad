@@ -102,20 +102,28 @@ fn squared_is_exactly(root: f64, value: f64) -> bool {
 ///
 /// **One term escapes that, by being multiplied by an exact zero.**
 /// `two_lines_told_apart` forms `leaning * how_far` with a `leaning` that is
-/// analytically zero and summed exactly, and `[0,0] * ENTIRE` is `[0,0]`. The
-/// unknown really is swallowed there, and soundly: an exact zero is a
-/// certificate, and the true quotient is finite wherever the picking normal
-/// existed to be built at all.
+/// analytically zero and summed exactly, and `[0,0] * ENTIRE` is `[0,0]`, so
+/// the unknown is swallowed there rather than carried.
 ///
-/// **A refusal still follows at that site, by a second route.** The pair that
-/// reaches it has two axes whose step apart rounds to nothing in `f64`, and
-/// that same zero length is what `sideways` is divided by — so `up` comes back
-/// `ENTIRE` too, and neither side of the picker can be signed. The sentence
-/// above therefore still describes every caller there is, but at this one it is
-/// true for a reason it does not give. A new caller that swallows the unknown
-/// and has no second route would be the one that breaks it.
-/// §142.7 argued the soundness; §145 is the pair that reaches it, and the gap
-/// underneath it.
+/// **Do not read that as sound on its own.** The argument for it ran: an exact
+/// zero is a certificate, and the true quotient is finite wherever the picking
+/// normal existed to be built at all, because that normal came from a cross
+/// product with `towards`. **The premise is false.** At the one pair known to
+/// reach the case (§145) `towards` is exactly zero, the cross product with it
+/// is zero, and `HalfSpace::through_a_point_square_to` builds the picker from
+/// one of its fallbacks instead — so the picker exists, the divisor handed in
+/// is exactly zero, and the quotient the expression asks for is not a finite
+/// real at all.
+///
+/// What saves that site is a **second route**, not the argument: the same
+/// vanished length is what `sideways` is divided by, so `up` comes back
+/// `ENTIRE` too and the caller refuses anyway.
+///
+/// So the first paragraph holds at both callers of `two_lines_told_apart`,
+/// which are the only two that have been looked at. **It is not a claim about
+/// this function's other callers**, none of which has been checked. A caller
+/// that swallows an unknown and has no second route is the one that would break
+/// it. §142.7 has the measurement, §145 the pair and the gap underneath it.
 pub(crate) fn quotient_or_everything(over: Interval, under: Interval) -> Interval {
     if under.contains_zero() {
         return Interval::ENTIRE;
