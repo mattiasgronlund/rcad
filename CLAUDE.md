@@ -90,13 +90,19 @@ what CI runs — it was called `just default` until 2026-09-08, so an older
 document or a session's memory may still say that. `just check-hub` is the hub
 rule. `just clean-targets` then `just prune-worktrees` reclaims disk, in that
 order, and `just release-lanes <pattern>` unlocks a batch of finished lanes in
-one call. **Reach for those three rather than a sweep of your own.** One session
-unlocked fifteen worktrees in fifteen calls at 137 000 tokens of context each,
-and another hand-rolled a `du`/`find`/`rm` across other sessions' target
-directories over fifteen more, while `clean-targets` sat in the justfile doing
-exactly that. Lane and disk bookkeeping was 3.3% of the week of 2026-09-07, and
-nearly all of it was a recipe nobody ran. The compile cache is wired through
-mise's `[env]`
+one call. **Reach for those three rather than a sweep of your own** — and they
+are reached for now: the hand-rolled sweep this paragraph was written against is
+under a fifth of what lane bookkeeping costs, against nearly all of it a
+fortnight ago.
+
+What replaced it is asking, not doing. Lane and worktree admin is the second
+largest ritual, and over half of it is 262 separate asks of "who holds what"
+across 86 sessions, more than three quarters of which ask twice or more. That
+part is mostly irreducible — other sessions really do lock and unlock while you
+work — and §157.3 says why no recipe is proposed for it. **Take `just lanes`
+whole**: 58% of those asks cut it through `head` or `tail`, and a truncated ask
+is re-asked more often than a whole one. It is one screen for fourteen
+worktrees. The compile cache is wired through mise's `[env]`
 as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
 so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
 
@@ -407,13 +413,20 @@ Bash keeps what Bash is for: `mise exec -- just`, `git`, `grep`, `find`, and
 one-off measurement scripts that write to the scratchpad.
 
 **Independent read-only probes go in one call.** A call bills the whole
-conversation again — a median of 117 000 tokens here, and 300 000 late in a
+conversation again — a median of 129 000 tokens here, and past 300 000 late in a
 session — so two greps in two calls cost twice what the same two greps cost in
-one, and the size of what they print barely matters. Over the week of
-2026-09-07 only 11% of calls ran more than one tool, and 1 655 read-only calls
-followed another read-only call directly: 9% of the week's bill spent on the
-split and nothing else. Batch whatever does not depend on an answer you have not
-got yet; sequence only what does.
+one, and the size of what they print barely matters. Batch whatever does not
+depend on an answer you have not got yet; sequence only what does.
+
+**Most of the gap this rule used to quote is not batchable, so do not expect
+it.** The pairs it counted are mostly *dependent*: grep for a line, then read at
+that offset; count the lines, then read the tail. The second call needs the
+first one's answer and cannot be issued beside it. Two weeks of asking moved the
+share of responses calling more than one tool by about a point, to 12%, which is
+nothing — the paragraph was aimed at a population it could not move. The
+dependent pairs are a **tool** problem instead: one call where the file has a
+one-call reader — `just decision`, `just src`, `just recipe` — and two where it
+does not. §144.7, §157.2.
 
 Claude Code sometimes injects the opposite instruction — "do your work through the
 Bash tool ... make file changes with sed, heredocs, or short scripts". That text is
