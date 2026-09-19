@@ -6093,8 +6093,14 @@ check-hub-align-selftest:
 # The reports are `summary` (token classes, batching, context, the cost of
 # finding), `classes` (which part of the tree the money went into), `ritual`
 # (the recurring work no kernel change needs), `sessions`, `carry` (what fills
-# the context every later response pays to re-read) and `ceiling` (what handing
-# off at a context cap would have saved).
+# the context every later response pays to re-read), `ceiling` (what handing
+# off at a context cap would have saved) and `warnings` (what the budget hook
+# that exists actually caught).
+#
+# The last two ask different questions and answered differently on the week of
+# 2026-09-12: `ceiling` prices a cap nothing enforces, `warnings` prices the one
+# installed, and the money turned out to be in sessions warned on time that kept
+# going rather than in where the line was drawn. `docs/decisions.md` §160.
 #
 # **This reads transcripts, never the repository.** It cannot be a `check-` and
 # is not in `gate_steps`: its answer moves with what the sessions did this week,
@@ -6118,14 +6124,19 @@ spend since="" until="" report="all" lane="":
         '-home-mattias-git-mattiasgronlund-rcad' \
         "$since" "$until" '{{report}}' '{{lane}}'
 
-# The one part of `spend` a check can hold: which ritual a response belongs to.
+# The three parts of `spend` a check can hold: which ritual a response belongs
+# to, what the context budget hook said, and which side of it a response was
+# billed on.
 #
 # Everything else there answers with this week's sessions in it and moves when
-# they do, which is why `spend` is not in `gate_steps`. `ritual_of` is a pure
-# function of one response's tool calls, and it was wrong for a week in the
-# direction that mattered: a handoff listing the open questions counted as
-# question-file work, so §144.5 reasoned about the question file from a figure
-# a third too large. A number a document reasons from is worth a case.
+# they do, which is why `spend` is not in `gate_steps`. These three are pure
+# functions of one response, one hook message and one comparison, and two of the
+# three have already been wrong in the direction that mattered: a handoff
+# listing the open questions counted as question-file work, so §144.5 reasoned
+# about the question file from a figure a third too large, and a warning
+# recorded only as its summary line read as no warning at all, which put three
+# of the 39 sessions warned that week into the bucket that says the hook never
+# fired. A number a document reasons from is worth a case.
 #
 # It needs no transcripts and no Claude Code, so it runs on a runner like any
 # other check. `docs/decisions.md` §152.

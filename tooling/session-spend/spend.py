@@ -22,6 +22,16 @@ tool result of N tokens is paid once as a cache write and again on every later
 response in that session. That is why `classes` reports "carry" — result tokens
 times the responses that followed — rather than bytes returned. Bytes returned
 is what a result costs once; carry is what it costs in total.
+
+## Two ceilings, and they answer different questions
+
+`ceiling` prices a cap nothing enforces: what the week would have cost had no
+response ever been billed above one. `warnings` prices the ceiling that is
+actually installed — the `guardrails` context budget hook — by splitting the
+same spend into what was billed under the budget, inside the turn that crossed
+it, and after the session had been told. The first says what a dial is worth;
+the second says whether the dial is where the money is. On the week of
+2026-09-12 they disagreed, and `docs/decisions.md` §160 is the argument.
 """
 
 import collections
@@ -82,12 +92,19 @@ def transcript_files(root, repo):
 def load(root, repo, since, until, only=None):
     """Every API response in the window, plus the tool results they produced.
 
-    Returns (responses, results). A response carries the tools it called, so a
-    report can attribute its cost; `results` maps a tool_use id to what came
-    back, for the reports that care how large an answer was.
+    Returns (responses, results, warnings). A response carries the tools it
+    called, so a report can attribute its cost; `results` maps a tool_use id to
+    what came back, for the reports that care how large an answer was;
+    `warnings` maps a session to the times the context budget hook spoke to it.
+
+    Warnings are **not** filtered to the window, and the responses are. A
+    session that was warned on Sunday and went on spending on Monday is the
+    whole subject of the `warnings` report, and dropping the warning would move
+    that money into the bucket for sessions nothing ever told.
     """
     responses = []
     results = {}
+    warnings = collections.defaultdict(list)
     for path in transcript_files(root, repo):
         if only and only not in path:
             continue
@@ -100,7 +117,25 @@ def load(root, repo, since, until, only=None):
 
         grouped, order = {}, []
         for line in lines:
-            if '"assistant"' in line:
+            if '"attachment"' in line and "Context budget" in line:
+                record = _parse(line) or {}
+                attachment = record.get("attachment") or {}
+                said = warning_said(f"{attachment.get('stdout') or ''}"
+                                    f"{attachment.get('content') or ''}")
+                stamp = record.get("timestamp")
+                if said and stamp:
+                    said["when"] = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                    # One warning is recorded twice — once whole, once as its
+                    # summary line — and the two carry the same token count,
+                    # which no two real warnings can (the second would be on the
+                    # same rung and so would never be spoken).
+                    twin = next((w for w in warnings[session]
+                                 if w["tokens"] == said["tokens"]), None)
+                    if twin is None:
+                        warnings[session].append(said)
+                    elif twin["budget"] is None:
+                        twin["budget"] = said["budget"]
+            elif '"assistant"' in line:
                 record = _parse(line)
                 if not record or record.get("type") != "assistant":
                     continue
@@ -148,7 +183,48 @@ def load(root, repo, since, until, only=None):
             )
 
     responses.sort(key=lambda r: r["when"])
-    return responses, results
+    return responses, results, warnings
+
+
+# What the hook said about itself: the context it measured and the budget it was
+# holding at the time. Reading the budget out of the message rather than off
+# today's `context-budget.default` is what lets a window straddle a change to
+# the dial — the week of 2026-09-12 has both 250k and 200k in it.
+SAID = re.compile(r"Context budget (passed at|still growing:) (\d+) tokens")
+AGAINST = re.compile(r"past the ([\d,]+) budget")
+
+
+def warning_said(text):
+    """The hook's own account of one warning, or None if this is not one.
+
+    Only a hook attachment's own text is ever passed here. A transcript that
+    merely *quotes* the hook — a session reading `context-budget.sh`, which is
+    how this function came to be written — must not count as a warning
+    delivered.
+
+    A transcript records a hook two ways: `hook_success` carries the whole
+    stdout, and `hook_system_message` carries the one-line summary and nothing
+    else. Both are warnings; only the first names the budget, so `budget` is
+    None for the other and the report dates it off its neighbours instead.
+    """
+    said = SAID.search(text)
+    if not said:
+        return None
+    against = AGAINST.search(text)
+    return {
+        "tokens": int(said.group(2)),
+        "budget": int(against.group(1).replace(",", "")) if against else None,
+        "repeat": said.group(1) != "passed at",
+    }
+
+
+def bucket_of(context, when, budget, warned_at):
+    """Which side of the budget, and of the warning, one response was billed on."""
+    if context < budget:
+        return "under the budget"
+    if warned_at is None:
+        return "never warned"
+    return "before the warning" if when <= warned_at else "after the warning"
 
 
 def _parse(line):
@@ -526,13 +602,88 @@ def report_ceiling(responses, total):
     print()
 
 
+def report_warnings(responses, warnings, total):
+    print("=== the context budget warning, and what is billed past it ===")
+    print("    each session is measured against the budget the hook itself named,")
+    print("    so a window may straddle a change to the dial. Where no warning")
+    print("    named one, the budget is the nearest warning's, in time.")
+    print()
+    started = {}
+    for r in responses:
+        if not r["lane"]:
+            started[r["session"]] = min(started.get(r["session"], r["when"]), r["when"])
+    said = {s: sorted(ws, key=lambda w: w["when"])
+            for s, ws in warnings.items() if s in started}
+    dial = sorted((w["when"], w["budget"]) for ws in said.values() for w in ws
+                  if w["budget"])
+    if not dial:
+        print("  no warning in this window that named a budget: either nothing "
+              "crossed, or the hook was not running\n")
+        return
+    budgets = collections.Counter(b for _, b in dial)
+    usual = budgets.most_common(1)[0][0]
+
+    def in_force(when):
+        """The budget the hook was holding then, read off the warnings around it.
+
+        Two sessions out of three are measured this way: a session nothing ever
+        warned has no figure of its own, and neither does one whose transcript
+        recorded only the hook's one-line summary. The nearest warning before it
+        is the only witness in the transcripts; before the first warning of all,
+        that witness is the first one.
+        """
+        seen = [b for at, b in dial if at <= when]
+        return seen[-1] if seen else dial[0][1]
+
+    first = {s: ws[0]["when"] for s, ws in said.items()}
+    budget_of = {s: ws[0]["budget"] or in_force(ws[0]["when"]) for s, ws in said.items()}
+    spend = collections.Counter()
+    after = collections.Counter()
+    sessions = collections.defaultdict(set)
+    for r in responses:
+        if r["lane"]:
+            continue
+        budget = budget_of.get(r["session"]) or in_force(started[r["session"]])
+        bucket = bucket_of(r["context"], r["when"], budget, first.get(r["session"]))
+        spend[bucket] += r["cost"]
+        sessions[bucket].add(r["session"])
+        if bucket == "after the warning":
+            after[r["session"]] += 1
+    main = sum(spend.values())
+
+    print(f"  main sessions            ${main:8,.2f}   budget {usual // 1000}k"
+          f"{' (and ' + ', '.join(f'{b // 1000}k' for b in sorted(budgets) if b != usual) + ' earlier in the window)' if len(budgets) > 1 else ''}")
+    for bucket in ("under the budget", "before the warning", "after the warning",
+                   "never warned"):
+        count = len(sessions[bucket])
+        print(f"    {bucket:<20} ${spend[bucket]:8,.2f}  {100 * spend[bucket] / main:5.1f}%"
+              f"   {count:3d} session{'' if count == 1 else 's'}")
+    print("      'before the warning' is billed inside the turn that crossed the")
+    print("      budget: no Stop had run yet, so nothing could fire.")
+    print()
+
+    over = sorted(w["tokens"] - budget_of[s] for s, ws in said.items()
+                  for w in ws if not w["repeat"])
+    repeats = sum(1 for ws in said.values() for w in ws if w["repeat"])
+    if over:
+        print(f"  {len(over)} first warnings: median {over[len(over) // 2]:,} tokens past "
+              f"the budget, worst {over[-1]:,}")
+    tails = sorted(after.values())
+    if tails:
+        print(f"  {len(tails)} sessions kept going afterwards: median {tails[len(tails) // 2]} "
+              f"further responses, worst {tails[-1]}")
+    print(f"  {repeats} repeat warnings")
+    print()
+
+
 REPORTS = {
-    "summary": lambda rs, res, t: report_summary(rs, t),
-    "classes": lambda rs, res, t: report_classes(rs, t),
-    "ritual": lambda rs, res, t: report_ritual(rs, t),
-    "sessions": lambda rs, res, t: report_sessions(rs, t),
-    "carry": lambda rs, res, t: report_carry(rs, res, t),
-    "ceiling": lambda rs, res, t: report_ceiling(rs, t),
+    "summary": lambda rs, res, ws, t: report_summary(rs, t),
+    "classes": lambda rs, res, ws, t: report_classes(rs, t),
+    "ritual": lambda rs, res, ws, t: report_ritual(rs, t),
+    "sessions": lambda rs, res, ws, t: report_sessions(rs, t),
+    "carry": lambda rs, res, ws, t: report_carry(rs, res, t),
+    "ceiling": lambda rs, res, ws, t: report_ceiling(rs, t),
+    "warnings": lambda rs, res, ws, t: report_warnings(rs, ws, t),
 }
 
 
@@ -550,7 +701,7 @@ def main(argv):
         datetime.datetime.fromisoformat(since).replace(tzinfo=datetime.timezone.utc),
         datetime.datetime.fromisoformat(until).replace(tzinfo=datetime.timezone.utc),
     )
-    responses, results = load(root, repo, window[0], window[1], only)
+    responses, results, warnings = load(root, repo, window[0], window[1], only)
     if not responses:
         print("no transcripts in that window", file=sys.stderr)
         return 1
@@ -563,7 +714,7 @@ def main(argv):
         if name not in REPORTS:
             print(f"no report named {name!r}; have {', '.join(REPORTS)}", file=sys.stderr)
             return 2
-        REPORTS[name](responses, results, total)
+        REPORTS[name](responses, results, warnings, total)
     return 0
 
 
