@@ -7,6 +7,24 @@
 # original word boundaries, and `check-t-selftest` runs that exact example.
 set positional-arguments
 
+# Nothing moves the hub's HEAD on its own (docs/decisions.md §60.9), so the one
+# tree nobody works in is the one tree that goes stale — and it goes stale
+# invisibly, because its files match its own old commit and `check-hub` calls
+# that "parked and clean". `just decision 144.5` typed in a hub parked five days
+# back answers "no section 144.5", which is a property of that checkout and not
+# of this repository (§146, and §77.6 for the shape).
+#
+# `just` evaluates every top-level assignment before it runs a recipe, whether
+# or not the variable is used — measured on 1.42.4, not assumed — so this is the
+# one hook the file has that fires on `just t` as well as on a bare `just`. The
+# script exits within three git calls anywhere but a stale hub, so every lane
+# pays only that; `questions_root` below has been paying a backtick since long
+# before it.
+#
+# The value is unused and always empty. The work is the side effect, and what it
+# has to say it says on stderr, which `just` passes straight through.
+hub_aligned := shell('bash "$1/tooling/hub-align/align.sh" "$1" || true', justfile_directory())
+
 # `just` with no arguments runs the **first** recipe in this file, not one named
 # `default` — so putting the listing here is what makes a bare `just` show you
 # what there is, and `just gate` the thing you actually wait nine minutes for.
@@ -34,7 +52,7 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest lint test check-release-build check-t-selftest deny"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -715,8 +733,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "34" ]; then \
-        echo "found $n check-* recipes, expected 34"; \
+    if [ "$n" != "35" ]; then \
+        echo "found $n check-* recipes, expected 35"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -5605,6 +5623,118 @@ check-hub-selftest:
         || fail "differing content got neither the stale message nor the leftovers one"
     [ "$(cat "$dir/main/landed")" = "work nobody has committed" ] \
         || fail "the check itself changed the file it was asked about"
+
+# Pins `tooling/hub-align/align.sh` against a repository it builds itself.
+#
+# The script runs ahead of every recipe in this file, in every worktree, so the
+# cases that matter most are the ones where it must do **nothing**: a lone
+# checkout, a hub holding a branch, and a hub holding anything that is not on
+# `main`. A re-park deletes untracked files, so a wrong "yes" here deletes work,
+# which is why the fixture writes differing bytes under a name `main` also
+# carries (docs/decisions.md §60.10) and asserts they survive.
+#
+# Reading the live repository instead would prove nothing: it is in one of these
+# states at a time, and a script that had lost the ability to act would pass.
+[private]
+check-hub-align-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    align="{{ justfile_directory() }}/tooling/hub-align/align.sh"
+    [ -x "$align" ] || [ -f "$align" ] || { echo "no align.sh at $align"; exit 1; }
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/main"
+    commit() { git -C "$1" -c user.email=t@t -c user.name=t commit -q "${@:2}"; }
+    got=""
+    fail() {
+        echo "hub-align drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    run() {
+        got=$(bash "$align" "$dir/main" 2>&1) \
+            || fail "the script exited non-zero, which would take every recipe down with it"
+    }
+
+    commit "$dir/main" --allow-empty -m "root"
+    root=$(git -C "$dir/main" rev-parse HEAD)
+    echo one >"$dir/main/f"
+    git -C "$dir/main" add f
+    commit "$dir/main" -m "one"
+    one=$(git -C "$dir/main" rev-parse HEAD)
+
+    # A lone checkout is a checkout and not a hub, however far behind it is.
+    git -C "$dir/main" checkout -q --detach "$root"
+    run
+    [ -z "$got" ] || fail "a repository with one worktree was spoken to"
+    [ "$(git -C "$dir/main" rev-parse HEAD)" = "$root" ] \
+        || fail "a lone checkout was re-parked, and it is somebody's working directory"
+
+    # The same tree, once a second worktree makes it a hub.
+    git -C "$dir/main" worktree add -q "$dir/lane" -b lane
+    run
+    grep -qF "re-parked it detached" <<<"$got" || fail "a stale hub was left behind"
+    [ "$(git -C "$dir/main" rev-parse HEAD)" = "$(git -C "$dir/main" rev-parse main)" ] \
+        || fail "the script said it re-parked and the hub did not move"
+    [ "$(cat "$dir/main/f")" = "one" ] || fail "the file that main carries was not restored"
+    [ -z "$(git -C "$dir/main" status --porcelain)" ] || fail "the hub is dirty after a re-park"
+
+    run
+    [ -z "$got" ] || fail "a hub already on main was spoken to, and this runs before every recipe"
+
+    # Behind `main`, holding only files that have landed since. This is the
+    # shape `check-hub` calls stale rather than leftovers, and the one the whole
+    # feature exists for.
+    echo landed >"$dir/lane/landed"
+    git -C "$dir/lane" add landed
+    commit "$dir/lane" -m "landed"
+    git -C "$dir/main" branch -f main lane
+    echo landed >"$dir/main/landed"
+    run
+    grep -qF "re-parked it detached" <<<"$got" || fail "a hub behind main with only landed files was left"
+    [ "$(cat "$dir/main/landed")" = "landed" ] || fail "the re-park did not restore the file it removed"
+
+    # A justfile arriving with the re-park makes this run's recipes yesterday's.
+    printf 'a:\n    @echo one\n' >"$dir/lane/justfile"
+    git -C "$dir/lane" add justfile
+    commit "$dir/lane" -m "justfile"
+    git -C "$dir/main" branch -f main lane
+    run
+    grep -qF "run it again" <<<"$got" \
+        || fail "the justfile changed under a run in progress and nothing said so"
+
+    # Differing bytes under a name `main` also carries. Everything above passes
+    # with a name-only comparison; this is the case where a wrong answer runs a
+    # `clean -fd` over the only copy of somebody's work.
+    # Parked before `landed` existed, so the file below is untracked here and on
+    # `main` under the same name with different bytes — which is the branch of
+    # the script that compares content, and the one a name-only answer fails.
+    git -C "$dir/main" checkout -q --detach "$one"
+    printf 'work nobody has committed\n' >"$dir/main/landed"
+    [ "$(git -C "$dir/main" status --porcelain)" = "?? landed" ] \
+        || fail "the fixture meant to build an untracked file and did not"
+    run
+    grep -qF "left where it is" <<<"$got" || fail "a hub holding uncommitted work was re-parked"
+    [ "$(cat "$dir/main/landed")" = "work nobody has committed" ] \
+        || fail "content that is on no branch was deleted by the re-park"
+    [ "$(git -C "$dir/main" rev-parse HEAD)" = "$one" ] || fail "the hub moved anyway"
+
+    # A modified tracked file is the other half of that, and reaches it by a
+    # different branch of the script.
+    git -C "$dir/main" clean -fdq
+    echo changed >"$dir/main/f"
+    run
+    grep -qF "a modified file" <<<"$got" || fail "a hub with a modified file was not named as such"
+    [ "$(cat "$dir/main/f")" = "changed" ] || fail "a modified file was thrown away"
+
+    # A branch checked out in the hub is `check-hub`'s failure, and it names the
+    # fix. Detaching it here would move somebody off a branch without saying so.
+    git -C "$dir/main" checkout -q -- f
+    git -C "$dir/main" checkout -q -B parked "main^"
+    run
+    [ -z "$got" ] || fail "a hub holding a branch was spoken to by the wrong check"
+    [ "$(git -C "$dir/main" symbolic-ref --short HEAD)" = "parked" ] \
+        || fail "the script moved a hub off the branch it was holding"
 
 # What a stretch of sessions cost, and what it was spent on.
 #

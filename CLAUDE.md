@@ -148,6 +148,17 @@ worktree like any lane.
 and it is in `just gate`. A repository with one worktree is exempt, because a
 lone checkout is not a hub. `docs/decisions.md` §60.
 
+**A hub nobody works in goes stale, and `check-hub` cannot see it.** Its files
+match its own old commit, so `status` is empty and the check says "parked and
+clean" — while `just decision 144.5` typed there answers *"no section 144.5"*,
+which is true of that checkout and false of this repo. Since 2026-09-19 any
+`just` command run in the hub re-parks it on `main` first: `just` evaluates
+top-level assignments before every recipe, and `hub_aligned` spends three git
+calls anywhere else. It refuses to move a hub holding a branch, or anything not
+already on `main` byte for byte, because the re-park runs `clean -fd`. It aligns
+to local `main` and never fetches — a network round trip on every `just t` is
+§144's cost in another currency. `docs/decisions.md` §146.
+
 `docs/decisions.md` is 27 000 lines: `just decisions-toc` for the map, then
 `just decision 49` or `just decision 49.6`. Never guess a line range.
 
