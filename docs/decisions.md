@@ -29,18 +29,18 @@ transverse, 6 equal pipes whose axes cross**, closed by §118 and §119. §122�
 took the last three; §126's failure is **§149's — the oracle, not the kernel**.
 **§121 landed** 2026-09-18 as `912cd168`, on §129, §130, §132 and §136.
 
-**What is closed.** §140 — answered one way round, refused the other — with
-§141.6's band by §143.9 and three of §142's four sibling sites: 1 and 3 by
-**§154**, reading back the exact sum the caller already made. **§145** by §148,
-and its last question by **§155** — the annihilation has no caller that can
-reach it. **§150 is diagnosed** by §156: a picking plane rounded from its anchor.
+**What is closed.** §140 with §141.6's band by §143.9, and §142's sites 1 and 3
+by **§154**. **§145** by §148 and **§155**. **§150 is diagnosed** by §156: a
+picking plane rounded from its anchor. **§151.5** by **§163**: the oracle's
+sorts split nothing, and its wire sort merged a washer's rim with its hole.
 
 **What is open, and a lane is on each.** §142.8's **site 2**, a *size* where only
 the sign is exact, fully specified by §142.9 and owing a kernel measurement; the
 **`across` term** in `two_lines_between_two_pipes`, whose doc publishes a `2²⁶`
 bound nothing tests; and **§156.3's fix**, whose reach is every `HalfSpace` built
-through a far-out point. §151.5's is next and unclaimed. §124's, §136.4's and
-§125.6's are deferred, not open.
+through a far-out point. Next and unclaimed: **§163.4**, the oracle not
+recording which curve an edge runs along. §124's, §136.4's and §125.6's are
+deferred, not open.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
