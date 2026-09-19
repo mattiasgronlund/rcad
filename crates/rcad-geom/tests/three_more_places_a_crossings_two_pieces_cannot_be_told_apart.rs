@@ -23,6 +23,26 @@
 //! there the test never needs the root: it shows the value *under* the root
 //! already straddles zero, which is what makes `root_enclosing` clamp its low
 //! end to zero and hand back an enclosure that reaches nothing.
+//!
+//! # What §140's fix did to site one, measured rather than reasoned about
+//!
+//! Nothing. These five tests were run on `d67f958e`, the commit before
+//! `33ea2c0a`, and all five pass there with the same printed numbers to the
+//! last digit. §140's fix changed how the two lines are *handed to*
+//! `two_lines_told_apart`; site one loses them earlier than that, in the `out`
+//! the caller works out before it hands anything over, so the fix neither
+//! helped nor hurt here.
+//!
+//! # Two of the three refusals throw away a number the caller already had
+//!
+//! Site one's `n·o − d` is worked out exactly one function up, in the `exactly`
+//! half of the question that decides the plane cuts the pipe at all. Site
+//! three's `A` has a whole exact routine of its own, `how_far_off_an_axis_exactly`,
+//! and the caller calls it one question earlier to decide the centre is on the
+//! axis. Both are then worked out again in intervals and lost. Site two is not
+//! that shape: the sign it needs is decided exactly, but `clear` wants the
+//! *size* of `r_fat² − reach²` and not its sign, and no exact level hands a
+//! size back.
 
 #![forbid(unsafe_code)]
 
