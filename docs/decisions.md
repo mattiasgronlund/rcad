@@ -32,13 +32,15 @@ of a commutativity failure that **was real and is now unreproduced**: §126.6.
 **§121 has landed** on 2026-09-18 as `912cd168`, on §129's own run, §130's exact
 meet, §132's plane offset rounding once and §136's corner allowance.
 
-**What is left, and §140 is the live one.** A crossing that answers one way round
-and refuses the other — **the only known correctness defect on `main`**. §140.7
-gives it a lane, not the deferred list: §13 governs features, never correctness
-gaps. §140.5 is the lane's first question and open on purpose — a commutativity
-failure does not say *which* order is wrong, so the refusal may be the gap or the
-answering order unsound. Then §126.6's counterexample; §124's, §136.4's and
-§125.6's gaps are deferred, not open work.
+**What is left. §140 is closed.** A crossing answered one way round and refused the
+other; §141 settled §140.5 — the answer exists in exact rational arithmetic and the
+answering order earned its sign, so the refusal was §16.10's gap — and the fix
+landed as `33ea2c0a`, taking the "somewhere else" row's half-space refusals from
+3.95% to none. **It left two findings open:** §141.6's second band, 66 decades
+wide, where both orders return `Undecidable` with an infinite enclosure and the
+answer exists; and §142's four sibling sites, in the family that tests a raw
+`Interval` with no `ask` cascade behind it. Then §126.6's counterexample; §124's,
+§136.4's and §125.6's gaps are deferred, not open work.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
@@ -66,12 +68,10 @@ left. Audited 2026-09-15: 13 done, 7 partly, 5 todo. §106.
   §13's no-named-consumer rule. Fine deflection still costs ~2.9s.
 - §52.13 — unscored. The gate that was to score it, §53.7 charge 3, never ran;
   §104.6 carries it.
-- §124's gap — deferred by Mattias on 2026-09-18 on §128.3's finding, which is
-  that the gap is a whole family by construction with no transversal control to
-  fix it against. What is missing is a second witness, not an argument.
-- §136.4 — the fuse's corner re-check is tighter than `Model::validate`, the
-  direction §75.6 forbids. Parked by Mattias on 2026-09-18 under §13; the
-  `#[ignore]`d repro fails loudly the day a part a hundred metres across arrives.
+- §124's gap — Mattias deferred it on §128.3's finding: a whole family by
+  construction, no transversal control to fix against. Wants a witness, not an argument.
+- §136.4 — the fuse corner re-check is tighter than `Model::validate`, §75.6's
+  forbidden direction. Mattias parked it under §13; its repro fires at 100 m parts.
 
 This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
 status` prints it, `check-where-the-work-is` holds its shape, §102 says why here.
@@ -34984,6 +34984,10 @@ It was found while sweeping for something else and **was not diagnosed**. The la
 that found it said so rather than folding it into the verdict, which is the
 behaviour this record wants. It owes its own look, and has a lane running.
 
+*That lane reported. **§143** has it: a gap, its edge predicted by
+`product_is_exact`'s representability floor to the digit, and two mechanisms
+already in this repo that reach the sign. Still unfixed.*
+
 ### 141.7 The family of fixes, and what is not ruled out
 
 **Named, not built.** Form the side test in displacement coordinates rather than
@@ -35073,3 +35077,238 @@ A fix lane, running, against the named family and the reproducer already on
 §141.4 — a wide cancelling intermediate multiplied into a sign test, with nothing
 bounding its size against the signal — occurs anywhere else in the kernel is a
 sweep, also running. None of the three may write this file.
+
+*Both lanes reported, and both are written up: the sweep as §142, the band as
+§143. §140 itself is fixed and on `main` as `33ea2c0a` — §142.5 has the fix and
+what it cost.*
+
+## 142. The family that tells two named pieces apart has no exact level under it, swept 2026-09-19
+
+*§140 was not a one-off. Every ordinary shape decision in `intersect.rs` goes
+through `ask(...)`, the three-level cascade ending in exact arithmetic — which is
+why the file tolerates cancellation at all. The functions that decide **which of
+two already-named pieces a point falls into** do not call `ask()`. They test a raw
+`Interval` against zero with nothing underneath. §140 is that family's first
+measured casualty, and the sweep found four more sites with its shape.*
+
+### 142.1 The shape, stated so it can be searched for
+
+Not "a point built far from the origin" — that was the dispatcher's first
+version and §141.4 falsified it. The shape is:
+
+> a point or vector assembled from an intermediate that already carries a
+> cancellation, fed into a sign test against a plane or half-space, with nothing
+> bounding the intermediate's size relative to the quantity whose sign is wanted.
+
+The anchor is harmless because it enters as `Interval::exactly`, at zero width.
+What is not harmless is a *wide* intermediate multiplied into the same dot
+product, and the ratio that matters is that intermediate against the signal.
+
+### 142.2 The family, and why it is the family
+
+`two_lines_told_apart`, `two_loops_either_side_of_a_pipe` and
+`two_loops_either_side_of_a_ball` all decide which of two already-named pieces a
+point falls into, and **none of them calls `ask()`**. There is no exact level
+under them: a straddling enclosure is a refusal and there is nothing to escalate
+to. That is the structural reason §140 existed.
+
+Two siblings in the same family are hardened **by construction** and are the
+precedent for what right looks like here: `two_circles_round_a_shared_axis` and
+`two_meridian_circles`, where either the sideways contribution is proved exactly
+zero, or the margin is a plain linear product with no squared difference in it.
+
+### 142.3 The four sites
+
+| site | the wide intermediate, and what cancels | how far it was checked |
+| --- | --- | --- |
+| `intersect.rs:1016` `across` in `two_lines_between_two_pipes` | `(apart² + r₁² − r₂²)/(2·apart)`, cancelling when the radii are at very different scales | **measured** — the §140 reference row |
+| `intersect.rs:440` `out` in `two_lines_along_a_pipe` | `root_enclosing(skin² − in_front²)`, cancelling near tangency | dataflow traced in full, not reproduced |
+| `intersect.rs:1198` `clear` in `two_loops_either_side_of_a_pipe` | `root_enclosing(fat_radius² − reach²)`, `reach = apart + thin_radius` | read, not measured |
+| `intersect.rs:677-689` `reach`/`D₋` in `how_far_apart_two_loops_are` | three terms of comparable size, with no exact pre-summation — where the sibling at `:1303-1318` explicitly has one | inferred from the formula and the sibling's fix |
+
+**"Verified" in that table means the dataflow was read, not that a refusal was
+measured.** Only the first row has a number behind it. The distinction is the
+sweep's own and is kept because a row that says verified and was not is worse
+than no row.
+
+### 142.4 What the sweep could not see
+
+It read every row of `intersect`'s surface-pair match down to the leaves rather
+than grepping, and every `dot_enclosing(...) - Interval::exactly(...)` in
+`rcad-geom` and `rcad-topo` — `dot_enclosing` is defined in both
+(`enclosure.rs:110`, `classify.rs:745`).
+
+What it did not open: the ray-parameter solve feeding `march.rs`'s and
+`classify.rs`'s marched points. `where_it_lands`'s `t` (`classify.rs:653`) is
+solved outside `intersect.rs`, and whether *that* solve has a cancelling
+intermediate is unchecked. It is named here rather than left as a silent edge of
+the search.
+
+`along_a_crossing.rs` and `which_way_a_closed_crossing_turns.rs` were checked and
+are **not** in the family: both fall back from interval to exact
+(`both_levels_of_the_rule`), so a straddling enclosure there is caught.
+
+### 142.5 §140's fix, and the one row that moved
+
+`33ea2c0a`. `two_lines_told_apart` takes a `TwoLinesEitherSideOfThePicker`
+rather than two whole coordinates and forms the reading in pieces —
+`off_the_picker + leaning·how_far ± out·(normal·up)` — with the two small dots
+summed by `Exact` and an honest `dot_enclosing` fallback when `Exact` declines a
+product. Algebraically identical to what it replaced; only the grouping and the
+level changed.
+
+**The recipe's two "analytically zero" claims were both false in general**, and
+the lane measured them rather than writing them down. `dot(normal, here) −
+offset` is the picker's own offset rounding. `dot(normal, sideways)` is zero only
+when `through_a_point_square_to` used the asked-for `along × towards`; it has
+three fallback normals square to `along` and nothing else. On §140's pair both
+*are* exactly zero — that is the configuration, not the construction. Computing
+both is also what made the **second caller** safe: `two_lines_along_a_pipe`
+shares this callee and was converted in the same pass, rather than the callee
+being changed on one caller's assumptions.
+
+**The family property is preserved on purpose.** `two_lines_told_apart` still
+tests a raw `Interval` against zero with no cascade under it. What changed is
+what feeds the test, so it reaches further without certifying anything it has not
+got — §142.2's gap is narrowed here and not closed.
+
+One corner, recorded because it is a place the new code certifies where the old
+refused: `leaning * how_far` can now be `[0,0] * ENTIRE = [0,0]`. Sound — an
+exactly-zero real contribution stays zero against any finite multiple, and a
+truly zero divisor is a different branch — but it is a widening and not a
+rearrangement.
+
+Measured on both trees with the same command, half-space refusals on the
+"somewhere else" row of `how_often_naming_a_crossing_refuses` went **81 (3.95%)
+to 0**, every other count in the file byte-identical, including that row's 217
+want-of-a-sign refusals, which are a different question. `just gate` PASS at 2035
+tests on the merged tree, re-run by the dispatcher rather than taken from the
+lane, and the refusal row re-derived independently.
+
+### 142.6 Two published numbers that are wrong, and are nobody's lane yet
+
+Both in `crates/rcad-geom/tests/how_often_naming_a_crossing_refuses.rs`, both
+pre-existing, both surfaced by the fix lane and outside its write set:
+
+- `A_CROSSING_MAY_LACK_A_HALF_SPACE` publishes **"0.10% turned"** where both the
+  base and the fixed tree measure **0.05%** (1 of 2052).
+- Its prose calls the remainder "unclassified, not a limit" and does not mention
+  the "somewhere else" row at all — which is the row that just went to zero.
+
+§15.6 says a published bound owes a test. These are the inverse: a test whose
+prose has drifted from what it measures. Recorded rather than fixed, because
+changing a published sentence is not a thing to do in passing.
+
+## 143. §141.6's band is a gap, and its edge is `product_is_exact`'s floor, diagnosed 2026-09-19
+
+*The second refusal band §141.6 recorded is `Error::Undecidable` with an infinite
+enclosure, 66 decades wide, where the answer exists. It is a gap. The infinity
+comes from squaring a catastrophic cancellation, the band's top edge is the exact
+arm's own representability floor — predicted, and landing on the measured edge to
+the digit — and two mechanisms already in this repo reach the sign. **Not fixed.***
+
+### 143.1 The lead that was wrong
+
+The dispatcher pointed the lane at `quotient_or_everything`
+(`crates/rcad-geom/src/enclosure.rs:102`), which returns `Interval::ENTIRE` on a
+divisor that straddles zero. **There is no division anywhere in the refusing
+path.** `two_lines_between_two_pipes`, which does divide, is never reached. The
+lead cost two probes, and is written down because §141.9's point is that a
+hypothesis handed to a lane is worth what its falsification instruction is worth.
+
+### 143.2 Where the infinity is born
+
+`crates/rcad-geom/src/intersect.rs:1533`, the `room * room` in
+`how_deeply_two_side_by_side_pipes_overlap_enclosing`, term by term:
+
+```
+A                = [2.547872344971356e307, 2.5478723449713564e307]
+W1*(r1^2+r2^2)   = [2.547872344971356e307, 2.5478723449713564e307]
+room = A - that  = [-4.9896007738368e291, 4.9896007738368e291]
+room*room        = [-inf, inf]
+```
+
+`E = A − W₁(r₁²+r₂²)` is truly `Z² − r₂² ≈ 1.728994447030041e15`, but `Z²` sits
+292 decades below `ulp(R1²)` and is annihilated; squaring what is left overflows.
+The refusing record is the `edge` question at `intersect.rs:945-951`, whose `?` at
+951 becomes the `Error::Undecidable`.
+
+### 143.3 Why the band ends exactly where it does
+
+The exact arm is a **second, separate** failure, and it is what sets the edge.
+`how_much_room_two_side_by_side_pipes_leave_exactly` succeeds — `R1²` cancels
+exactly, leaving the two-entry expansion `[-r₂², Z²]`. What refuses is
+`room.times(&room)` at `intersect.rs:1550`: `Exact::times` (`exact.rs:275-287`)
+requires `product_is_exact` of every pair, which wants
+`|a·b| ≥ f64::MIN_POSITIVE · 2^53 = 2.004168360008973e-292`
+(`crates/rcad-predicates/src/expansion.rs:377-384`).
+
+The smallest entry squared is `r₂⁴`, so the arm needs
+`r2 ≥ 1.1898262617302253e-73`. The two representable radii straddling that are
+`6.411491535302116e-74`, which refuses, and `1.2822983070604231e-73`, which
+decides — **the measured edge, to the digit.** A predicted boundary and not a
+fitted one, which is the strongest evidence in this section.
+
+### 143.4 That it is a gap
+
+Written as `E = Z² − r₂²`, in the same `Interval` type, the enclosure is **0.2
+wide** against the current arm's ±`4.99e291` — 292 decades of information thrown
+away — and the sign is decided at every one of 320 swept radii. The Pos→Neg flip
+lands at `3.044037611241337e-139`, which is §141.5's row-1/row-2 boundary, and the
+analytic flip `Z²/(2·R1) = 1.712674258532773e-139` matches row 1's top to all 16
+digits. §16.10: **gap**.
+
+### 143.5 Two families that reach it, both already in this repo
+
+1. **`Exact::square_minus`** (`exact.rs:222-226`) — `self² − already_squared`
+   with both sides slid into the squarable window.
+   `how_deeply_two_side_by_side_pipes_overlap_exactly` hand-rolls
+   `room.times(&room).minus(…)` instead. Computed across the sweep it succeeds
+   from `r2 = 7.431732449319671e-143` up: the whole band, with four decades over.
+   Already called at `torus.rs:447` and `three_surfaces.rs:1781`.
+2. **`Exact::enclosure()` off the exact expansion** — the exact `room` succeeds
+   here, and its enclosure is the tight `[1728994447030040.8,
+   1728994447030041.0]`. The `map_or_else(…, Exact::enclosure)` pattern sits 20
+   lines away at `intersect.rs:1021-1032`. **The stronger of the two**: it also
+   decides the row below the band, where family 1 runs out once `r₂²` goes
+   subnormal.
+
+The dispatcher's `z²/(2·r₁)` against `r₂` candidate is correct but is not
+minimal — it is the Heron factor `E − 2r₁r₂W₁` divided by `2r₁`, and was verified
+against the scaled discriminant on every row rather than argued.
+
+### 143.6 What is not ruled out, listed rather than glossed
+
+- Whether either family is **order-independent**. Only today's answers were
+  checked both ways round, not the proposed formulations with the thin pipe
+  first, where `W₁` and the gap vector differ.
+- Whether family 2 is sound **in general**. The exact arm succeeds *for this
+  pair*; if `A` itself overflows there is nothing to take an enclosure from.
+- The **general-`W₁` algebra**. Every number here is for `W₁ = 1`.
+- The correct answer **below** the band after a fix. Family 2 returns `Pos`,
+  which should mean `Nothing`, but that was not followed through to a
+  `SurfaceMeet`, and the truth column was taken from a sibling lane on trust.
+- Whether `square_minus`'s window claim holds here — its constants were
+  recomputed by hand; the function is `pub(crate)` and was not called.
+- **Whether this fix and §140's compose.** §140's fix changes
+  `two_lines_told_apart`, downstream of a `Decision::Neg` this band never
+  reaches. If both land, these rows become `curves 2` rather than a refusal.
+  Unchecked.
+
+### 143.7 A decoder fact that will cost the next lane a probe
+
+**The fuzz decoder normalises directions.** `bytes_for` was handed `dx1 = 127`
+and the pair comes back with `direction [1,0,0]`, so `W₁ = 1`, not `16129`.
+Reasoning from the seed array's raw direction numbers puts every magnitude out by
+about four decades, which is what happened before the lane printed the decoded
+cylinders.
+
+### 143.8 The evidence, and where it lives
+
+The probes are committed on their own **unmerged** lane branches, because each
+would break `check-ignored` on `main` and because the worktrees that held them are
+reclaimable: `48824380` on `lane-140-undecidable` (this section's four probes),
+`322feb25` on `lane-140-family` (§141.5's boundaries), `cdafe474` on
+`lane-140-site` (the site probe that pinned §140 to `intersect.rs:1650`). Take
+what a fix needs from them and turn it into a real test; do not merge them as
+they stand.
