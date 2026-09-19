@@ -77,27 +77,68 @@ gate_log := "target/last-gate.log"
 # Each step's stderr is folded into stdout so that `tee` keeps one stream in the
 # order it happened. That is the shape a redirected run already had, and the
 # block is parsed back out of it.
-[doc("Everything, in the order CI runs it. ~9 minutes. Ends with a summary block.")]
-gate:
+#
+# **`just gate quiet` is the mode a tool call wants; bare `gate` is the mode a
+# terminal wants.** The block above was meant to end the second call that reads
+# the log back, and it did not, because a whole run is 300 KB — 75k tokens — and
+# no session can let that into a tool result. So 262 of the 272 gate runs in the
+# week of 2026-09-12 redirected stdout to a file, which is the right thing to do
+# with 300 KB and throws the block away with it; 122 of them then paid a second
+# whole-context call to read back the eight lines already printed. `quiet` puts
+# one line per step, the tail of whatever broke, and the block on stdout, and
+# sends the rest to the log — so one unredirected call answers the question.
+# `docs/decisions.md` §147.
+[doc("Everything, in the order CI runs it. `just gate quiet` prints only the summary.")]
+gate mode="loud":
     #!/usr/bin/env bash
     set -uo pipefail
+    mode='{{ mode }}'
+    # Named rather than defaulted, so a typo is a refusal and not a loud run.
+    case "$mode" in
+        loud|quiet) ;;
+        *) echo "just gate takes 'quiet' or nothing, not '$mode'" >&2; exit 2 ;;
+    esac
     log='{{ gate_log }}'
     mkdir -p "$(dirname "$log")"
     : >"$log"
     failed=""
     status=0
+    started_at=0
     for step in {{ gate_steps }}; do
-        {{ just_executable() }} "$step" 2>&1 | tee -a "$log"
-        # Read before anything else runs. `[` is a command, so it rewrites
-        # `PIPESTATUS` with its own 0 — which read as a clean gate over a step
-        # that had just failed, the first time this loop was run.
-        step_status=${PIPESTATUS[0]}
+        if [ "$mode" = quiet ]; then
+            # The one thing a truncated result still has to answer is how far
+            # the run got, which is why this costs a line even though nothing
+            # reads it until something goes wrong.
+            echo "· $step"
+            # Where this step's own output begins. A plain `tail` of the log
+            # would spend its lines on the step before, which on a gate whose
+            # previous step was `list` is forty lines of recipe names and one
+            # line of the error that actually stopped it.
+            started_at=$(wc -c <"$log")
+            {{ just_executable() }} "$step" >>"$log" 2>&1
+            step_status=$?
+        else
+            {{ just_executable() }} "$step" 2>&1 | tee -a "$log"
+            # Read before anything else runs. `[` is a command, so it rewrites
+            # `PIPESTATUS` with its own 0 — which read as a clean gate over a step
+            # that had just failed, the first time this loop was run.
+            step_status=${PIPESTATUS[0]}
+        fi
         if [ "$step_status" -ne 0 ]; then
             failed="$step"
             status=$step_status
             break
         fi
     done
+    # Only in `quiet`, and only before the block: `loud` has already shown these
+    # lines once, and the block stays last because `tail -6` is where a reader
+    # looks for it. Capped, because a step can fail with a megabyte behind it
+    # and `full log:` names where the rest is.
+    if [ "$mode" = quiet ] && [ "$status" -ne 0 ]; then
+        echo
+        echo "=== last 60 lines of $failed ==="
+        tail -c "+$((started_at + 1))" "$log" | tail -60
+    fi
     {{ just_executable() }} _gate-summary "$log" "$status" "$failed" | tee -a "$log"
     exit $status
 
@@ -163,6 +204,14 @@ _gate-summary log status failed="":
 # this recipe exists to remove), a failure that does not name the step that
 # broke, a log whose counts are behind colour codes, and a doc-test total read
 # off one crate's line rather than added up.
+#
+# `quiet` gets four more, because the thing it promises is what it leaves out: a
+# quiet pass that carried a step's own output into the result would be no better
+# than a loud one, and a quiet failure that left the failing lines in the log
+# would send the reader back for the second call this whole mode exists to
+# remove. The fourth is the typo — a mode that is neither word must refuse,
+# because a `quiet` misspelt into a 300 KB result is the defect wearing a
+# different hat.
 [private]
 check-gate-summary-selftest:
     #!/usr/bin/env bash
@@ -197,6 +246,39 @@ check-gate-summary-selftest:
         || fail "the block does not name the step that broke"
     [ "$(grep -c 'Everything this repo can do' "$dir/fail.log")" -eq 1 ] \
         || fail "the gate carried on past a failing step"
+
+    # A quiet pass. The step still runs and the log still gets everything; what
+    # must not appear on stdout is the step's own output.
+    got=$($j --set gate_steps list --set gate_log "$dir/quiet-pass.log" gate quiet 2>&1) \
+        || fail "a quiet gate whose every step passed exited non-zero"
+    grep -q '^gate: PASS$' <<<"$got" || fail "a passing quiet gate did not say so"
+    grep -q '^· list$' <<<"$got" || fail "a quiet gate did not say which step it was on"
+    grep -q 'Everything this repo can do' <<<"$got" \
+        && fail "a quiet gate put a step's own output in the result, which is the whole thing it exists not to do"
+    grep -q 'Everything this repo can do' "$dir/quiet-pass.log" \
+        || fail "a quiet gate dropped a step's output instead of logging it"
+
+    # A quiet failure. Naming the step is not enough here: loud mode has already
+    # shown the lines that explain it and quiet mode has not, so they come out
+    # with the block — and the block stays last.
+    got=$($j --set gate_steps 'list no-such-step list' --set gate_log "$dir/quiet-fail.log" gate quiet 2>&1) \
+        && fail "a quiet gate with a failing step exited 0"
+    grep -q '^gate: FAIL  first failure: no-such-step' <<<"$got" \
+        || fail "a quiet failing gate does not name the step that broke"
+    grep -q '=== last 60 lines of no-such-step ===' <<<"$got" \
+        || fail "a quiet failure sent the reader back to the log for the lines that explain it"
+    grep -q "Justfile does not contain recipe" <<<"$got" \
+        || fail "the failing tail named the step but carried none of its output"
+    grep -q 'Everything this repo can do' <<<"$got" \
+        && fail "the failing tail spent its lines on the step before the one that broke"
+    [ "$(tail -6 <<<"$got" | grep -c '=== gate summary ===')" -eq 1 ] \
+        || fail "the failing tail pushed the block off the end, where no reader looks for it"
+
+    # A mode that is neither word. Defaulting it to `loud` would answer a typed
+    # `quite` with the 300 KB this mode exists to avoid.
+    got=$($j --set gate_steps list --set gate_log "$dir/mode.log" gate quite 2>&1) \
+        && fail "a misspelt mode ran the gate anyway"
+    grep -q "not 'quite'" <<<"$got" || fail "a misspelt mode did not say what it was given"
 
     # The counts, read back out of a log written the way a runner writes one:
     # `CARGO_TERM_COLOR: always`, so every line arrives wrapped in escape codes.

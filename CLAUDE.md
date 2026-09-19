@@ -265,6 +265,31 @@ entry months after the fix landed.
 2026-09-07, so every `check-*` recipe is enforced on the runner too. Before that
 it ran four recipes and the `check-*` ones gated nothing but your own machine.
 
+**Run it as `just gate quiet`, in one plain Bash call, with `timeout` set to
+600000 and no redirect.** `quiet` prints one line per step, the failing step's
+own last sixty lines, and the summary block — about fifty lines in all — and
+sends the rest to `target/last-gate.log`. That is the whole answer, in the tool
+result, for one call. Bare `just gate` stays the terminal mode and CI's: it
+streams every line, which is 300 KB, and 300 KB is 75 000 tokens you cannot put
+in a result. **Do not redirect `quiet` to a file**; redirecting is what made the
+summary block useless. In the week of 2026-09-12, 262 of 272 gate runs sent
+stdout to a file — correctly, for 300 KB — and 122 of them then paid a second
+whole-context call to read back the eight lines the recipe had already printed.
+
+**Never pipe it through `tail` or `head`**: the exit code you get back is the
+pipe's last command's, so a failed gate reads as 0.
+
+**Never write a wait loop around it** — no `until ! pgrep -f 'just gate'`, no
+`sleep 240; tail`. A foreground call already waits, and the measurement says it
+fits: over 56 passing runs that week the median was 98 seconds and the slowest
+244, and not one of 171 foreground runs hit its timeout. Foreground `sleep` is
+**not** blocked in this harness, so this paragraph is the only thing stopping
+you. The one case that can reach the nine minutes the recipe's `[doc]` names is
+a cold tree — a fresh worktree, or just after `just clean-targets`. There, pass
+`run_in_background: true` and let the harness wake you when it exits; that costs
+two calls instead of one, which is still fewer than polling. `docs/decisions.md`
+§147.
+
 **Three arms are not the same there, and they are the only three.**
 `check-plugins`, the plugin arm of `check-hooks`, and `check-questions-selftest`
 each ask about something a runner does not have — Claude Code's own config, a
