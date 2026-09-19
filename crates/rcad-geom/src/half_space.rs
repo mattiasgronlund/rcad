@@ -92,10 +92,36 @@ impl HalfSpace {
     /// The half-space whose flat surface passes through `through` facing
     /// `facing`, with `facing` stored exactly as handed over.
     ///
-    /// The offset is one dot product and rounds once, so the surface passes
-    /// through `through` to within that rounding and not exactly. Which side of
-    /// it a point far along a direction square to `facing` sits is unaffected —
-    /// see the note on [`HalfSpace`].
+    /// The offset is `facing · through` rounded once, **from the exact dot and
+    /// not from the plain `f64` one**. It still rounds, so the surface passes
+    /// through `through` to within that rounding and not exactly, and which side
+    /// of it a point far along a direction square to `facing` sits is unaffected
+    /// either way — see the note on [`HalfSpace`].
+    ///
+    /// # Why the exact dot, when the offset is allowed to round
+    ///
+    /// A plain `f64` dot through a point a long way from the origin is large
+    /// products cancelling down to a small answer, so what it rounds by is set
+    /// by the size of the **coordinates** and not by the size of the answer.
+    /// §150's pair is two pipes with one axis `1e16` out along the direction
+    /// they share, where two products of about `1.8e15` cancel to about a
+    /// quarter: the plain dot came to `0.5` against a true `0.2865091987060316`,
+    /// which put the picking plane a third of a pipe radius out of place and on
+    /// the far side of both lines it was meant to separate, and the pair was
+    /// refused.
+    ///
+    /// Rounding from the exact dot is right rather than merely a fix for that
+    /// pair. The true `facing · through` does not change when `through` slides
+    /// along the flat surface it names, so it is an ordinary-sized number
+    /// however far out the point handed over sits, and one rounding of an
+    /// ordinary-sized number is an ordinary-sized error.
+    /// `the_pair_at_1e16_that_answers_one_way_round` is the measurement.
+    ///
+    /// [`Exact::dot_of`] declines rather than panicking when a product's low
+    /// half would be subnormal, which takes a component and a coordinate
+    /// multiplying out to under about `2⁻⁹⁶⁹`. The fallback is the plain dot,
+    /// which is what this always used to do: such a caller is no worse off than
+    /// before and gets none of the paragraph above.
     ///
     /// # Errors
     ///
@@ -107,7 +133,10 @@ impl HalfSpace {
                 what: "point on a half-space",
             });
         }
-        Self::new(facing, facing.dot(through - Point::origin()))
+        let offset = Exact::dot_of(facing.components(), through.coordinates())
+            .as_ref()
+            .map_or_else(|| facing.dot(through - Point::origin()), Exact::nearest_f64);
+        Self::new(facing, offset)
     }
 
     /// The half-space through `through` whose normal is **exactly** square to
