@@ -31,9 +31,7 @@
 
 #![forbid(unsafe_code)]
 
-use rcad_geom::{
-    Axis, Cylinder, Plane, Point, Sphere, Surface, SurfaceMeet, Vector, intersect,
-};
+use rcad_geom::{Axis, Cylinder, Plane, Point, Sphere, Surface, SurfaceMeet, Vector, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 /// How far out the two pairs are put: far enough that a dot product of the
