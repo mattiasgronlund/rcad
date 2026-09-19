@@ -31,16 +31,15 @@ took the last three; §126's failure is **§149's — the oracle, not the kernel
 
 **What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
 sites, 1 and 3 by §154, 2 by §142.9 (`37f24350`), `across` by **§164**. §145 by
-§148 and §155; §150 by §156; §151.5 by §163; §163.4 by §165. **§165.4's quarter
-ball** by **§166**: a lune's pole side was charged a whole turn. **§166.4's
-`classify_point` refusal** by **§167**: a face cut by half a circle is the part in
-front of every cut, or of any.
+§148 and §155; §150 by §156; §151.5 by §163; §163.4 by §165; §165.4 by §166;
+§166.4 by §167; **§167.4's placed wedge** by **§168**: proved where the face is
+stored, asked where the point sits.
 
-**Next and unclaimed: §167.4's placed wedge** — turn or move the quarter ball and
-`classify_point` refuses again, because an `Isometry` rounds the arc's ends off
-its picker's plane and nothing records by topology that they were on it. A gap on
-a sound solid, so §16.10 says fix it; §167.4 lists three more of the same kind
-(pie slice, fused arcs, cylinders and cones). §124, §136.4, §125.6: deferred.
+**Next and unclaimed: §168.4's pie slice** — its arc has one end on each
+radius's plane, so step 2 cannot tell which way it bulges; §168.4 sketches the
+lane. §124, §136.4, §125.6: deferred — though the 2026-09-19 triage timed five of
+§125's slow units at 90 s–5.5 min on `3b3949b2`, against §125.6's ~7 s, one run
+each and unexplained. None of that night's five crashes still fails.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
