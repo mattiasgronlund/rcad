@@ -2699,16 +2699,20 @@ check-fuzz-overnight-selftest:
     fi
 
     # **A barrier, and not a stopwatch** (§139). Armed only by `STUB_RENDEZVOUS`,
-    # because this stub is shared by every arm in the recipe and by `run 0`,
-    # which correctly starts no targets at all — either would wait out the
-    # deadline for five targets that were never coming.
+    # because this stub is shared by every arm in the recipe, and an arm that
+    # launches between one and four targets would wait out the deadline for
+    # targets that were never coming. (`run 0` is not that case: a recipe with
+    # under a second left is skipped before it is launched, so it never gets
+    # here — §139.7.)
     #
     # Each target appends its name and then waits for the file to hold five
     # lines. Run together, all five arrive and every one of them sees five. Run
     # in turn, the first blocks here and the other four are never launched, so
-    # the file ends at one line and no target sees five. That holds at *every*
-    # timeout, which is the whole point: loosening this deadline costs the check
-    # nothing, where loosening a bound on the launch spread cost it everything.
+    # the file ends at one line and no target sees five. That holds at every
+    # timeout *above the instant the five have arrived* — the deadline has a
+    # floor and no ceiling, where a bound on the launch spread had both and they
+    # met. Loosening this costs the check nothing; loosening that cost it
+    # everything.
     #
     # It sits after the `at=` printf above and before the sleep below. Before
     # the printf, the log would stop recording when a target launched and the
@@ -2719,7 +2723,9 @@ check-fuzz-overnight-selftest:
         want="${STUB_RENDEZVOUS_COUNT:-5}"
         # The deadline is a deadlock escape and not a tuning knob: without it a
         # recipe that launches one target hangs `just gate` instead of failing
-        # it. A correct recipe never reaches it.
+        # it. A correct recipe never reaches it, provided it is set above the
+        # time five targets take to arrive — at 0 even a correct recipe times
+        # out, which is the floor §139.7 records.
         deadline=$(( $(date +%s) + ${STUB_RENDEZVOUS_TIMEOUT:-15} ))
         while [ "$(grep -c '' "$STUB_RENDEZVOUS")" -lt "$want" ] \
             && [ "$(date +%s)" -lt "$deadline" ]; do
