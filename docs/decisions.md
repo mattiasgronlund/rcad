@@ -25774,7 +25774,7 @@ a knife-edge either.
 2^26 is a 67 m pipe against a 1 m one. That is reachable from the public API and
 not only from a fuzzer, which is what makes it a gap to fix rather than a limit
 to defer. **It is not fixed here.** This section records it, the seed is not
-landed (see 91.1 — it would kill the night), and the fix is a lane's.
+landed (see §91.1 — it would kill the night), and the fix is a lane's.
 
 ### 91.3 A seed that costs 63 seconds, landed anyway
 
@@ -26439,7 +26439,7 @@ the refusal is cheap and named: the new test fails without this change, with
 
 The new refusal is reachable from the public API and not only from a fuzzer — two
 pipes and a radius ratio is all it takes — so it is a published limit like any
-other, with the sweep in 94.2 behind it.
+other, with the sweep in §94.2 behind it.
 
 ## 95. Three fuzz corpora nobody had counted, replayed 2026-09-13
 
@@ -33567,7 +33567,7 @@ into, guarded by an advisory lock on a `lock` file beside it
 its own counters, so merging twice does not count twice.
 
 The run path no longer writes anything. A background thread ticks once a second
-and does the merging, which matters because of 133.1: at the old thirty-second
+and does the merging, which matters because of §133.1: at the old thirty-second
 interval most children would exit having merged nothing at all, and the loss
 would be the night rather than its edge. libFuzzer kills its children from
 outside, so there is no exit to hook — a process loses at most its last second,
