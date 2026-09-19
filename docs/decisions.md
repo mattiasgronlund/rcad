@@ -35074,7 +35074,7 @@ A fix lane, running, against the named family and the reproducer already on
 bounding its size against the signal — occurs anywhere else in the kernel is a
 sweep, also running. None of the three may write this file.
 
-## 142. What a week of sessions is spent on, measured, surveyed 2026-09-19
+## 144. What a week of sessions is spent on, measured, surveyed 2026-09-19
 
 *Mattias asked where the work in this repo could be made cheaper. The answer is
 not what the rules in `CLAUDE.md` assume. Almost the whole bill — measured over
@@ -35084,7 +35084,7 @@ A fifth of it is recurring ritual that no kernel change needs. This section is
 the register of what was found; each subsection below that says **lane** is one
 session's work, and none of them depends on any other.*
 
-### 142.1 How it was measured, and why no total is written here
+### 144.1 How it was measured, and why no total is written here
 
 `just spend` reads the Claude Code transcripts under `$CLAUDE_CONFIG_DIR` for
 this repo and every worktree of it. `tooling/session-spend/spend.py` is the whole
@@ -35111,7 +35111,7 @@ report**, because the number it was written against is two weeks old by then.
 Prices are in one table at the top of `spend.py` and dated; re-check them before
 quoting dollars, and prefer the shares, which move far more slowly.
 
-### 142.2 Nearly the whole bill is re-reading the conversation
+### 144.2 Nearly the whole bill is re-reading the conversation
 
 `just spend <window> summary`. Of the money, about two thirds is cache read, a
 fifth is cache write, and an eighth is output. **Output — the tokens that are the
@@ -35128,7 +35128,7 @@ shows that a result's true price is its size times the number of responses that
 come after it in the same session. A 15k-token file read in the first minute of a
 session that runs for 200 more responses is not a 15k-token expense.
 
-### 142.3 A context ceiling is the largest single lever, and nothing enforces one — lane
+### 144.3 A context ceiling is the largest single lever, and nothing enforces one — lane
 
 `just spend <window> ceiling` and `sessions`. Most of the bill is spent by the
 sessions that ran longest: the ones that passed 200k of context are a small
@@ -35155,7 +35155,7 @@ per session, which a lower ceiling improves trivially and meaninglessly.
 Write set: the `guardrails` plugin, which is in the marketplace repo and not this
 one. Nothing here changes.
 
-### 142.4 Finding is a third of the bill, and the lookup lane is barely used — lane
+### 144.4 Finding is a third of the bill, and the lookup lane is barely used — lane
 
 `just spend <window> summary`, the finding block. About a third of the money goes
 on responses that only looked something up and changed nothing. Week over week
@@ -35180,7 +35180,7 @@ finding share over the following week.
 
 Write set: `CLAUDE.md`, possibly `.claude/agents/lookup.md`.
 
-### 142.5 A fifth of the bill is ritual that no kernel change needs — lane, or three
+### 144.5 A fifth of the bill is ritual that no kernel change needs — lane, or three
 
 `just spend <window> ritual`. Six recurring shapes, none of which is kernel work,
 and together about a fifth of the money — all of it done by the strongest model
@@ -35201,20 +35201,30 @@ paragraph and nothing more.
 appended at the tail by whoever finishes first, from as many as four concurrent
 sessions; `check-decisions` catches a duplicate at the gate, which is late. The
 fix is to stop two lanes reaching for the same number, not to catch them after.
-The memory note already says to pick a number with `git log --all -S'## N. '`,
-which works and is not what a hurried session does.
+
+**This section lost that race while it was being written, which settles what
+the advice is worth.** It was drafted as §142 after checking `git log --all
+-S'## 142. '` and finding nothing on any branch — the check the memory note
+prescribes, run correctly, answering correctly. Forty minutes later `main` had
+§142 and §143, both from the `fuzz-triage-two-nights` lanes, and this had to be
+renumbered to §144. The check is not wrong; it is a read against a value another
+session is about to write, and nothing holds the answer for the time it takes to
+write a section. **So no rule addressed to the person picking can work**, and
+the lane should not write one. What is needed is a claim that outlives the read
+— the number taken at the moment of asking rather than at the moment of
+committing. That is a `justfile` recipe, and it is the whole of the work here.
 
 **The question file is the largest and the least obvious.** `just question-check`
 already names every violation precisely. Nothing applies them, so a session reads
 the list and hand-edits, at full context, repeatedly.
 
 What the lane does: take one of the three. They are independent and a session
-that takes all three will overrun, which is §142.8's whole finding.
+that takes all three will overrun, which is §144.8's whole finding.
 
 Write set: `CLAUDE.md` for the gate paragraph; the `justfile` for a renumber or
 question-fix recipe; the `questions` plugin if the fix belongs to the parser.
 
-### 142.6 Locating a line and then reading it, on the two files with a one-call reader — lane
+### 144.6 Locating a line and then reading it, on the two files with a one-call reader — lane
 
 The most common two-call shape in the week is: grep a file for a line number,
 then `Read` that file at that offset. Both calls are billed against the whole
@@ -35241,7 +35251,7 @@ problem, and it should be settled by reading transcripts, not by guessing.
 
 Write set: `justfile`, and `CLAUDE.md` if the wording is the half that is wrong.
 
-### 142.7 The batching rule asks for something that mostly cannot be done
+### 144.7 The batching rule asks for something that mostly cannot be done
 
 `CLAUDE.md` says independent read-only probes go in one call, and prices the
 split. The share of responses calling more than one tool moved by about one point
@@ -35256,13 +35266,13 @@ batchable, which is why two weeks of it produced no movement.
 
 Genuinely independent pairs do exist and batching them is still right. But the
 honest size of that lever is small, and the pairs the paragraph's own arithmetic
-was counting are largely §142.6's shape — which is fixed by a better single tool,
+was counting are largely §144.6's shape — which is fixed by a better single tool,
 not by asking for a batch.
 
 This is a correction to `CLAUDE.md`, not a lane: say what batching can deliver,
 and stop it competing for attention with the levers that pay.
 
-### 142.8 A lane's cost is set by re-entry, not by the work — evidence
+### 144.8 A lane's cost is set by re-entry, not by the work — evidence
 
 `just spend <window> classes fuzz-triage-two-nights`, against the same window
 without the filter.
@@ -35281,13 +35291,13 @@ the whole lane number two.
 
 This is the shape behind "fixing a gap always overruns". The gap is not what
 overruns. The gap is small — often a few lines, sometimes none. What overruns is
-the twelve re-entries and the ritual of §142.5, and both are counted against the
+the twelve re-entries and the ritual of §144.5, and both are counted against the
 gap because they happened in the lane that was fixing it.
 
-Nothing to build here. It is the evidence §142.3 and §142.5 are motivated by, and
+Nothing to build here. It is the evidence §144.3 and §144.5 are motivated by, and
 it is recorded so the next survey has something to compare against.
 
-### 142.9 Provenance is free when certified and not when refused, which is the path fuzzing takes — lane
+### 144.9 Provenance is free when certified and not when refused, which is the path fuzzing takes — lane
 
 `ProvenanceLog` says in its own doc comment that an empty log does not allocate,
 "so a certified operation pays nothing for carrying one". That is true and it is
@@ -35324,11 +35334,11 @@ that is enforceable, or only documented, is the lane's question.
 Write set: `crates/rcad-predicates/`, the fuzz targets, `justfile` if the gate
 gains a configuration.
 
-### 142.10 What it owes
+### 144.10 What it owes
 
-Five lanes, none blocking any other: §142.3 the context ceiling, §142.4 the
-lookup trigger, §142.5 one of its three rituals, §142.6 `just recipe`, §142.9 the
-provenance measurement. §142.7 is a `CLAUDE.md` correction and not a lane.
+Five lanes, none blocking any other: §144.3 the context ceiling, §144.4 the
+lookup trigger, §144.5 one of its three rituals, §144.6 `just recipe`, §144.9 the
+provenance measurement. §144.7 is a `CLAUDE.md` correction and not a lane.
 
 Each starts by re-running the report it names. A lane that quotes this section's
 motivation without re-measuring is reporting a fortnight-old number as today's,

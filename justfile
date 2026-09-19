@@ -5620,7 +5620,7 @@ check-hub-selftest:
 #
 # **This reads transcripts, never the repository.** It cannot be a `check-` and
 # is not in `gate_steps`: its answer moves with what the sessions did this week,
-# so there is no fixed thing for a check to hold. What it is for is §142 — every
+# so there is no fixed thing for a check to hold. What it is for is §144 — every
 # finding there names the report that measures it, because a number written into
 # a document is stale on the next session and a command is not.
 #
