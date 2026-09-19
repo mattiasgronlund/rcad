@@ -2698,6 +2698,37 @@ check-fuzz-overnight-selftest:
         echo "what a target found" >"artifacts/$target/$kind$STUB_ARTIFACT_TAG"
     fi
 
+    # **A barrier, and not a stopwatch** (§139). Armed only by `STUB_RENDEZVOUS`,
+    # because this stub is shared by every arm in the recipe and by `run 0`,
+    # which correctly starts no targets at all — either would wait out the
+    # deadline for five targets that were never coming.
+    #
+    # Each target appends its name and then waits for the file to hold five
+    # lines. Run together, all five arrive and every one of them sees five. Run
+    # in turn, the first blocks here and the other four are never launched, so
+    # the file ends at one line and no target sees five. That holds at *every*
+    # timeout, which is the whole point: loosening this deadline costs the check
+    # nothing, where loosening a bound on the launch spread cost it everything.
+    #
+    # It sits after the `at=` printf above and before the sleep below. Before
+    # the printf, the log would stop recording when a target launched and the
+    # paired `max_total_time`/`at=` check would lose its input; after the sleep,
+    # the five would have finished waiting for each other before they met.
+    if [ -n "${STUB_RENDEZVOUS:-}" ] && [ -n "$target" ]; then
+        echo "$target" >>"$STUB_RENDEZVOUS"
+        want="${STUB_RENDEZVOUS_COUNT:-5}"
+        # The deadline is a deadlock escape and not a tuning knob: without it a
+        # recipe that launches one target hangs `just gate` instead of failing
+        # it. A correct recipe never reaches it.
+        deadline=$(( $(date +%s) + ${STUB_RENDEZVOUS_TIMEOUT:-15} ))
+        while [ "$(grep -c '' "$STUB_RENDEZVOUS")" -lt "$want" ] \
+            && [ "$(date +%s)" -lt "$deadline" ]; do
+            sleep 0.1
+        done
+        printf 'rendezvous %s saw %s of %s\n' \
+            "$target" "$(grep -c '' "$STUB_RENDEZVOUS")" "$want" >>"$STUB_LOG"
+    fi
+
     # `STUB_OVERRUN_TARGET` aims the overrun at one target and leaves the other
     # four alone, which is the only way to ask whether an overrun costs them
     # anything. While the five ran in turn it could not be asked: an overrun in
@@ -2928,28 +2959,39 @@ check-fuzz-overnight-selftest:
     # window when it returns while the other four have been done since three.
     # The skip path it used to reach on the way is arm Nine's now.
     : >"$dir/log"
+    : >"$dir/rendezvous"
     started=$(date +%s)
     status=0
-    STUB_OVERRUN=8 STUB_OVERRUN_TARGET=where_two_surfaces_cross run 6 || status=$?
+    STUB_OVERRUN=8 STUB_OVERRUN_TARGET=where_two_surfaces_cross \
+        STUB_RENDEZVOUS="$dir/rendezvous" run 6 || status=$?
     elapsed=$(( $(date +%s) - started ))
     [ "$status" -eq 0 ] \
         || fail "one target overran and the night reported $status for the other four"
     [ "$(grep -c 'fuzz run' "$dir/log")" -eq 5 ] \
         || fail "one target overran and took the rest of the window with it"
-    [ "$elapsed" -le 20 ] || fail "one eight-second overrun cost the night $elapsed s"
-
-    # And they started together, which is the assertion the clock above cannot
-    # make. A night is as long as its slowest target however the rest are
+    # And all five were alive at one instant, which is the assertion the clock
+    # cannot make. A night is as long as its slowest target however the rest are
     # arranged, so total elapsed time is satisfied by a recipe that runs one
     # target, waits for it, and only then starts the other four. What is not
-    # satisfied by that recipe is five start times inside the same few seconds.
+    # satisfied by that recipe is five targets meeting at a barrier.
     #
-    # Three, and not zero: the five `just` invocations are five processes to
-    # fork, and `date +%s` truncates to whole seconds either side.
-    starts=$(grep -o 'fuzz run .*\[at=[0-9]*\]' "$dir/log" | grep -o 'at=[0-9]*' | cut -d= -f2 | sort -n)
-    spread=$(( $(tail -1 <<<"$starts") - $(head -1 <<<"$starts") ))
-    [ "$spread" -le 3 ] \
-        || fail "the five targets started $spread s apart, so they are still waiting for each other"
+    # **This replaced a bound on the launch spread, and the reason is §139.**
+    # `spread <= 3` had to sit between five `just` forks below and a sequential
+    # recipe's spread above, so a loaded runner failed it and raising the number
+    # deleted the check rather than weakening it. Worse, its margin came entirely
+    # from the overrun target leading `fuzz_all`: point `STUB_OVERRUN_TARGET`
+    # anywhere else and the adversary spread exactly 3, so the arm kept passing
+    # and stopped discriminating. A barrier does not care which target leads, and
+    # asserts the stronger property the comment above already claimed.
+    #
+    # **Before the clock below, and not after**, because a recipe that fails this
+    # one fails it by waiting out the barrier's deadline — which is itself time on
+    # the clock. Checked the other way round, every sequential recipe reports the
+    # elapsed bound, and the symptom buries the cause.
+    [ "$(grep -c '^rendezvous .* saw 5 of 5$' "$dir/log")" -eq 5 ] \
+        || fail "the five targets never met at one instant, so they are still waiting for each other: $(grep '^rendezvous ' "$dir/log" | tr '\n' ' ')"
+
+    [ "$elapsed" -le 20 ] || fail "one eight-second overrun cost the night $elapsed s"
 
     # Five: the hub is refused before anything is built, so a timer pointed at
     # it fails on the first night rather than on the night it matters.
