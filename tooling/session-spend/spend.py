@@ -261,7 +261,7 @@ def subject_of(path):
 # the week of 2026-09-12 against a true 445 and $53.68, and §144.5 reasoned from
 # the inflated figure. So each ritual now says which it reads: `address` is the
 # `file_path` of a file tool and the `command` of a shell call, and `content` is
-# the bytes an Edit or Write carries. `docs/decisions.md` §151.
+# the bytes an Edit or Write carries. `docs/decisions.md` §152.
 RITUALS = [
     ("question-file grammar",
      r"open-questions\.md$|question-check|just question\b", None),

@@ -35811,14 +35811,15 @@ for until `just gate quiet` existed, because a whole run is 300 KB. Gate
 babysitting is also the smallest of the six here and not the first, the six are
 not listed largest first, and sessions were not polling in a loop.
 
-**The question-file part is taken, and §151 says the paragraph above it is
+**The question-file part is taken, and §152 says the paragraph above it is
 wrong.** `question-check` found a violation 3 times in 174 runs, so there was no
 list to apply and no recipe to write: a hook had been running the same checker
 on every write since 2026-09-14 and saying nothing when it found nothing, and
-what the money bought was sessions asking a question already answered. §151 also
+what the money bought was sessions asking a question already answered. §152 also
 corrects the figure this section reasons from — $74.80 was $53.68, and the
 difference was handoff documents that listed the open questions. The renumber
-recipe is the one part still open.
+recipe is the one part still open — and §152 was written as §151 and lost the
+race to a lane, which is this section's own point made twice.
 
 ### 144.6 Locating a line and then reading it, on the two files with a one-call reader — lane
 
@@ -36547,6 +36548,11 @@ The lane's fourth test, `the_suites_ring_rule_still_tells_this_one_ring_from_its
 asserts **today's** behaviour on purpose, and its doc comment says the day the
 rotation change lands this test fails and what replaces it is deleting it.
 
+***That last claim is wrong, and §151.4 says why:*** the test holds its own copy
+of both rules, because a test binary cannot call into another one, so changing
+the suite would have left it passing and meaningless rather than red. The change
+itself landed as §151.
+
 `fuses_that_must_agree.rs` is untouched, and the regressions file was
 deliberately left at its committed state: committing that seed would turn `just
 gate` red over a false positive in the oracle.
@@ -36589,7 +36595,114 @@ and the reason for it is unknown. §140's diagnosis path — find which predicat
 sees a different sign with the arguments the other way round — is the obvious
 place to start, and nobody has walked it.
 
-## 151. The question file's cost was a call a hook had already answered, fixed 2026-09-19
+## 151. The fuse oracle compares rings by their smallest rotation, fixed 2026-09-19
+
+*§149's change, made. `turned_to_its_smallest` in `fuses_that_must_agree.rs`
+takes the smallest **rotation** of a ring instead of starting at the first
+corner equal to the smallest one. The two rules differ **only when the smallest
+corner occurs more than once**, so the suite's other forty-six tests cannot
+notice, and the gate says they do not. §149.4's prediction that the lane's
+fourth test would fail the day this landed was **wrong**, and the reason it was
+wrong is worth more than the change.*
+
+### 151.1 What was built
+
+```rust
+fn turned_to_its_smallest(wire: &[[f64; 3]]) -> Vec<u64> {
+    let corners: Vec<[u64; 3]> = wire.iter().map(|&at| at.map(bits)).collect();
+    (0..corners.len())
+        .map(|start| -> Vec<u64> {
+            (0..corners.len())
+                .flat_map(|step| corners[(start + step) % corners.len()])
+                .collect()
+        })
+        .min()
+        .unwrap_or_default()
+}
+```
+
+Every rotation is written out and the smallest wins. The rings are face wires,
+so `n` is small and the `n²` does not show in the suite's runtime — the gate's
+test step reads 27.3 s against 27.0 s before.
+
+Comparing the flattened `Vec<u64>` is the same comparison as comparing the
+sequence of corners, because every rotation is the same length and a corner is
+a fixed three numbers wide.
+
+### 151.2 Why the other forty-six tests cannot see it
+
+**The two rules differ only when the smallest corner occurs more than once.**
+If it occurs once, at position `p`, then every rotation starting anywhere else
+begins with a strictly larger corner and is therefore lexicographically larger,
+so the smallest rotation *is* the one starting at `p` — which is what the old
+rule returned. The old rule was right about every ring with a unique smallest
+corner, which is every ring the suite draws except the ones §149 is about.
+
+That is also why this was so hard to see: the oracle was correct on everything
+anyone looked at.
+
+### 151.3 The test, and that it discriminates
+
+`a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side`, in
+the file that owns the function. One four-corner ring through the origin twice,
+written down from each of its two repeated corners, has to come back as one
+list.
+
+**Checked by putting the old rule back and running it**, not by argument: it
+fails with
+
+```text
+left:  [0, 0, 0, 4607182418800017408, 0, 0, 0, 0, 0, 0, 4607182418800017408, 0]
+right: [0, 0, 0, 0, 4607182418800017408, 0, 0, 0, 0, 4607182418800017408, 0, 0]
+```
+
+and passes with the new rule. Those are the two halves of the one ring, which
+is §149.2 in twelve numbers.
+
+### 151.4 §149.4 was wrong about the lane's fourth test, and why that matters
+
+§149.4 said the lane's fourth test "asserts today's behaviour on purpose, and
+its doc comment says the day the rotation change lands this test fails". **It
+does not fail, and it never would have.**
+`the_turned_pair_whose_union_lost_a_face_one_way_round.rs` cannot call into
+another test binary, so it carried its **own copy** of both rules —
+`the_suites_starting_corner` beside its own `turned_to_its_smallest`. Changing
+the suite left that copy untouched, so the test would have gone on passing,
+green and meaningless, asserting a property of a rule nothing used any more.
+
+**A test named for another file's behaviour, holding its own copy of it, cannot
+notice that file changing.** It is the §77.6 shape once more — a check passing
+for a property of its own surroundings rather than of the thing it names — and
+the tell is the same: take away what the test supplies itself and see whether
+anything is left.
+
+So the deletion was done by reading, not by watching a test go red. Removed:
+the fourth test, the fifth, `the_suites_way`, `the_suites_starting_corner`, and
+the `ring` parameter that `fused_by` and `written_out` carried so that two rules
+could be run side by side — `fused_by` folded back into `fused` with it. The
+fifth test's surviving half, "the smallest rotation is canonical for a ring that
+repeats a corner", is §151.3 above, now asserted against the real function
+instead of a copy.
+
+What stays in that file is the pair itself and the three tests that are about
+the kernel: it unites and intersects to the same solid either way round, and its
+union really does have a ring through one corner twice while its intersection
+does not. Worth keeping, because the suite draws that pair about once in 2 300
+runs and these ask it every time.
+
+### 151.5 What this does not close
+
+The suite's `same_answer` is one canonical form among several this file builds
+by hand, and only the ring rule was checked. Face order, wire order and solid
+order are all `sort_unstable` over written-out lists, and none of them has a
+test of its own; whether any of *those* can tell one answer from itself has not
+been asked.
+
+§149's counterexample is the only ring-with-a-repeated-corner anyone has
+produced. That it took a turn about a point both solids have a corner at
+suggests the family is small, but nothing here bounds it.
+
+## 152. The question file's cost was a call a hook had already answered, fixed 2026-09-19
 
 *§144.5's second part, taken, and its premise did not survive the measurement.
 The section says `just question-check` names every violation precisely and
@@ -36600,7 +36713,7 @@ asking: a hook had run the same checker on every write since 2026-09-14, and
 said nothing when it found nothing, which looks exactly like a hook that is not
 installed.*
 
-### 151.1 What the bucket is actually made of
+### 152.1 What the bucket is actually made of
 
 `just spend 2026-09-12 2026-09-21 ritual` and a walk of the transcripts for the
 same window, classified by what each call addressed rather than by what its
@@ -36626,7 +36739,7 @@ aimed at the size of what is written is aimed at 1.6% of this bucket.
 2.66 calls a burst — and the commonest burst is exactly two, 80 of the 148: a
 write, then the check.
 
-### 151.2 Three found something, and the hook found the rest
+### 152.2 Three found something, and the hook found the rest
 
 `check-question-file.sh` has run the checker as a PostToolUse hook on every
 `Write` and `Edit` to `open-questions.md` since 2026-09-14. It blocked 13 times
@@ -36637,7 +36750,7 @@ That is not two checks disagreeing. It is one check running first and the other
 arriving at a file it has already cleaned. The recipe found three because the
 hook had found the rest.
 
-### 151.3 Why the round trip survived a hook built to remove it
+### 152.3 Why the round trip survived a hook built to remove it
 
 Two reasons, and neither is the session being careless.
 
@@ -36651,9 +36764,11 @@ checker in the same call"* — written before the hook existed and never revised
 Of 393 question-file responses that week, **not one** put the write and the
 check in the same response. The instruction was both obsolete and unfollowed.
 
-### 151.4 What landed
+### 152.4 What landed
 
-In the `guardrails` plugin, at `v0.3.0`:
+In the `guardrails` plugin, version `0.3.0`, which `.claude/settings.json` asks
+for as the marketplace tag `v0.3.1` — the tag moved once because this section
+did, and a tag that has been pushed is not moved a second time:
 
 - **A clean file says so**, in one line, through
   `hookSpecificOutput.additionalContext` — plain stdout on a PostToolUse hook
@@ -36684,7 +36799,7 @@ that the reason was real.
 11 new cases in `check-question-hook.sh`, 16 in all, including the five that say
 what must still pass.
 
-### 151.5 The `ritual` report was measuring handoffs
+### 152.5 The `ritual` report was measuring handoffs
 
 The figure §144.5 reasoned from was $74.80 over 570 responses. The true figure
 is $53.68 over 445. The difference is a bug in `spend.py`'s own classifier:
@@ -36719,7 +36834,7 @@ run cannot show. It needs no transcripts, so it runs on a runner like any other
 check — `spend` itself still cannot be a `check-`, for the reason its own
 comment gives.
 
-### 151.6 What is left, and why no recipe is coming
+### 152.6 What is left, and why no recipe is coming
 
 After the refusal, the file costs about $36 a week: writing questions, editing
 them, reading them back. Those are calls that do the work.
@@ -36738,6 +36853,18 @@ the whole file once rather than edit entry by entry. The `justfile`'s "there is
 deliberately no recipe that *writes* a question" stands unchanged.
 
 §144.5's third part, the renumber recipe, is still open.
+
+### 152.7 This section lost the same race §144.5 lost, while fixing §144.5
+
+It was written as §151 after `git log --all -S'## 151. '` came back empty —
+the check the memory note prescribes, run correctly, answering correctly. About
+an hour later `main` carried §151, from the lane that took §149's oracle, and
+this became §152.
+
+§144.5 made exactly this mistake while being written and drew the right
+conclusion from it: no rule addressed to the person picking can work, because
+the read is against a value another session is about to write. That part of it
+survives the measurement intact, and it is the part still open.
 
 The honest test of all this is the `ritual` report a week from now. The number
 to watch is `question-check` calls, which should be zero.

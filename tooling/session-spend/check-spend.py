@@ -74,7 +74,7 @@ CASES = [
     # look larger than it is, which is the number §144 reasons from.
     ("a kernel edit", [edit("crates/rcad-geom/src/meet.rs", "fn a", "fn b")], None),
     ("running the gate", [bash("mise exec -- just gate quiet")], None),
-    ("reading a decision", [bash("just decision 151")], None),
+    ("reading a decision", [bash("just decision 152")], None),
     ("a test file mentioning a worktree in a comment",
      [write("crates/rcad-geom/tests/walk.rs", "// see the worktree notes")], None),
 ]

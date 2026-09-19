@@ -21,10 +21,13 @@
 //! different lists. Compare the ring by its smallest **rotation** instead and
 //! the two orders agree bit for bit, on that tree and on this one.
 //!
-//! So what §126.5 saw was a false positive in the oracle, `turned_to_its_smallest`
-//! is not a canonical form for a ring that repeats a corner, and the fault is
-//! still there today: the tests below hold both halves of that on the tree they
-//! are committed to.
+//! So what §126.5 saw was a false positive in the oracle: starting a ring at
+//! the first corner equal to the smallest one is not a canonical form for a
+//! ring that repeats a corner. **§151 fixed that** — `fuses_that_must_agree`
+//! takes the smallest rotation now, and its own test holds the rule.
+//!
+//! What is left here is the pair itself, which is worth keeping: the suite
+//! draws it about once in 2 300 runs, and these tests ask it every time.
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -61,49 +64,6 @@ fn the_union_of_this_pair_has_a_ring_that_goes_through_one_corner_twice() {
     assert!(
         !a_ring_visits_one_corner_twice(&model, &[keys[0]], &[keys[1]], Rule::Intersection),
         "the intersection has grown one too, and it is the control"
-    );
-}
-
-/// §126.5's failure, still here, and it was never the kernel's.
-///
-/// `fuses_that_must_agree.rs`'s `turned_to_its_smallest` starts a ring at the
-/// **first** corner equal to the smallest one. Round the ring above that is the
-/// origin twice, and the two orders walk into it from different sides, so the
-/// two lists come out as one ring read from its two halves — the same ring, and
-/// not the same list. The comparison then reports a face that differs, which is
-/// what one session saw, blamed on §126, and could not reproduce once the seed
-/// was gone.
-///
-/// **The day `turned_to_its_smallest` takes the smallest rotation instead of the
-/// first smallest corner this test fails**, and what replaces it is deleting it.
-#[test]
-fn the_suites_ring_rule_still_tells_this_one_ring_from_itself() {
-    let (model, keys) = the_pair_that_disagreed().build();
-    let (one, other) = (keys[0], keys[1]);
-    let forwards = the_suites_way(&model, &[one], &[other], Rule::Union).expect("it answers");
-    let backwards = the_suites_way(&model, &[other], &[one], Rule::Union).expect("it answers too");
-    assert_ne!(
-        forwards, backwards,
-        "the suite's rule agrees about this pair now, so the false positive is gone"
-    );
-}
-
-/// The same defect with no kernel in it: one ring, written down from two of its
-/// own corners, comes back as two different lists.
-#[test]
-fn starting_a_ring_at_its_first_smallest_corner_tells_one_ring_from_itself() {
-    let here = [0.0, 0.0, 0.0];
-    let ring = [here, [1.0, 0.0, 0.0], here, [0.0, 1.0, 0.0]];
-    let rotated = [here, [0.0, 1.0, 0.0], here, [1.0, 0.0, 0.0]];
-    assert_ne!(
-        the_suites_starting_corner(&ring),
-        the_suites_starting_corner(&rotated),
-        "the suite's rule is canonical after all, and the counterexample is wrong"
-    );
-    assert_eq!(
-        turned_to_its_smallest(&ring),
-        turned_to_its_smallest(&rotated),
-        "the smallest rotation is not canonical either"
     );
 }
 
@@ -189,17 +149,19 @@ fn fused(
     tools: &[SolidKey],
     rule: Rule,
 ) -> Option<Vec<Vec<Face>>> {
-    fused_by(model, arguments, tools, rule, turned_to_its_smallest)
-}
-
-/// The same answer read through the rule `fuses_that_must_agree.rs` uses.
-fn the_suites_way(
-    model: &Model,
-    arguments: &[SolidKey],
-    tools: &[SolidKey],
-    rule: Rule,
-) -> Option<Vec<Vec<Face>>> {
-    fused_by(model, arguments, tools, rule, the_suites_starting_corner)
+    let mut model = model.clone();
+    let solids = model
+        .fuse(
+            arguments,
+            tools,
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .ok()?
+        .solids()
+        .to_vec();
+    Some(written_out(&model, &solids))
 }
 
 /// Whether any ring of the answer comes back to a corner it has already been to.
@@ -220,34 +182,8 @@ fn a_ring_visits_one_corner_twice(
     })
 }
 
-fn fused_by(
-    model: &Model,
-    arguments: &[SolidKey],
-    tools: &[SolidKey],
-    rule: Rule,
-    ring: fn(&[[f64; 3]]) -> Vec<u64>,
-) -> Option<Vec<Vec<Face>>> {
-    let mut model = model.clone();
-    let solids = model
-        .fuse(
-            arguments,
-            tools,
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .ok()?
-        .solids()
-        .to_vec();
-    Some(written_out(&model, &solids, ring))
-}
-
 /// Every face of every solid, in an order neither argument chose.
-fn written_out(
-    model: &Model,
-    solids: &[SolidKey],
-    ring: fn(&[[f64; 3]]) -> Vec<u64>,
-) -> Vec<Vec<Face>> {
+fn written_out(model: &Model, solids: &[SolidKey]) -> Vec<Vec<Face>> {
     let mut answer: Vec<Vec<Face>> = solids
         .iter()
         .map(|&solid| {
@@ -260,7 +196,9 @@ fn written_out(
                     let mut wires: Vec<Vec<u64>> = face
                         .wires()
                         .map(|wire| {
-                            ring(&wire.points().map(|at| at.coordinates()).collect::<Vec<_>>())
+                            turned_to_its_smallest(
+                                &wire.points().map(|at| at.coordinates()).collect::<Vec<_>>(),
+                            )
                         })
                         .collect();
                     wires.sort_unstable();
@@ -290,22 +228,6 @@ fn turned_to_its_smallest(wire: &[[f64; 3]]) -> Vec<u64> {
         .map(|start| written_from(&corners, start))
         .min()
         .unwrap_or_default()
-}
-
-/// The rule `fuses_that_must_agree.rs` uses: start at the **first** corner
-/// equal to the smallest one.
-///
-/// Two walks round the same ring that meet the smallest corner twice can pick
-/// different halves of it, and the two lists then differ although the ring does
-/// not. That is what §126.5 saw.
-fn the_suites_starting_corner(wire: &[[f64; 3]]) -> Vec<u64> {
-    let corners: Vec<[u64; 3]> = wire.iter().map(|&at| at.map(bits)).collect();
-    let smallest = corners
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, corner)| **corner)
-        .map_or(0, |(position, _)| position);
-    written_from(&corners, smallest)
 }
 
 /// The same ring as one list of numbers, read from `start`.

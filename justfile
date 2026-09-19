@@ -5862,7 +5862,7 @@ spend since="" until="" report="all" lane="":
 # a third too large. A number a document reasons from is worth a case.
 #
 # It needs no transcripts and no Claude Code, so it runs on a runner like any
-# other check. `docs/decisions.md` §151.
+# other check. `docs/decisions.md` §152.
 # `PYTHONDONTWRITEBYTECODE` because the cases import `spend` as a module, and a
 # `__pycache__` beside it is a directory the gate leaves behind in a tree the
 # hub rule expects to be clean. Ignoring it would be a second record of the same

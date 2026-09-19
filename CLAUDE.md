@@ -31,7 +31,7 @@ the fix landed here.
   budget that asks for a handoff, the one that runs the question checker when
   `open-questions.md` is written — **which is why `just question-check` is
   refused; the write already ran it, and a clean file now says so in one line**
-  (§151) — and the refusal itself.
+  (§152) — and the refusal itself.
 - **`practices`** — the nine shared skills, `code-quality` and `delegating`
   among them.
 
