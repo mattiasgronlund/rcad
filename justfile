@@ -5605,3 +5605,37 @@ check-hub-selftest:
         || fail "differing content got neither the stale message nor the leftovers one"
     [ "$(cat "$dir/main/landed")" = "work nobody has committed" ] \
         || fail "the check itself changed the file it was asked about"
+
+# What a stretch of sessions cost, and what it was spent on.
+#
+# `just spend` covers the last seven days and prints every report. A window and
+# one report narrow it: `just spend 2026-09-12 2026-09-20 ritual`, and a sixth
+# argument keeps only the lanes whose path contains it.
+#
+# The reports are `summary` (token classes, batching, context, the cost of
+# finding), `classes` (which part of the tree the money went into), `ritual`
+# (the recurring work no kernel change needs), `sessions`, `carry` (what fills
+# the context every later response pays to re-read) and `ceiling` (what handing
+# off at a context cap would have saved).
+#
+# **This reads transcripts, never the repository.** It cannot be a `check-` and
+# is not in `gate_steps`: its answer moves with what the sessions did this week,
+# so there is no fixed thing for a check to hold. What it is for is §142 — every
+# finding there names the report that measures it, because a number written into
+# a document is stale on the next session and a command is not.
+#
+# Transcripts live under `$CLAUDE_CONFIG_DIR/projects/<repo key>`, one directory
+# per worktree. They are swept by nothing, so the window can reach back further
+# than `/tmp` does — but a reboot takes the scratchpads and leaves these, which
+# is why the evidence for a finding belongs here rather than in a handoff.
+[doc("What a week of sessions cost and where it went: `just spend 2026-09-12 2026-09-20 ritual`.")]
+spend since="" until="" report="all" lane="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    since='{{since}}'; until='{{until}}'
+    [ -n "$since" ] || since=$(date -u -d '7 days ago' +%F)
+    [ -n "$until" ] || until=$(date -u -d 'tomorrow' +%F)
+    exec python3 tooling/session-spend/spend.py \
+        '{{claude_config}}/projects' \
+        '-home-mattias-git-mattiasgronlund-rcad' \
+        "$since" "$until" '{{report}}' '{{lane}}'
