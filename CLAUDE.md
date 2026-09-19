@@ -377,14 +377,27 @@ selftests. The justfile is 307 404 characters over 105 definitions and the mean
 answer is 2 934 of them — a hundredth of the file, in one call.
 `docs/decisions.md` §153.
 
-**Past two probes, hand the question to a lookup lane.** Finding things — `grep`,
-`Read`, `git log`, `just src`, `just decision` — was 41% of the week of
-2026-09-07, $481 of $1 163, and every one of those calls paid for the whole
-conversation in order to learn a few hundred tokens that mattered. A fresh lane
-starts at a 34 000-token floor rather than your 150 000 and bills at a fifth the
-rate, so the same answer costs about a tenth. `.claude/agents/lookup.md` is that
-lane: read-only, Sonnet, one question, and it dies with the answer. Two quick
-probes are still cheaper inline than a lane is; a hunt is not.
+**If you cannot name the file, it is a hunt — hand it to a lookup lane before
+the first grep.** Finding things is about a third of a week's bill, and most of
+that third is nobody's to delegate: probes made inside lanes, which are cheap
+already, and the ritual of asking about this session's own state. What is left
+is a sixth. Ask the one question you can answer *before* the first probe: can
+you name the file, the section or the recipe the answer is in? Then read it
+yourself — one call inline beats a lane. Are you about to search for *where*?
+Then dispatch `.claude/agents/lookup.md` — read-only, one question, and it dies
+with the answer.
+
+**"Past two probes" was the rule here until 2026-09-19, and it is measured to
+lose money.** Dispatching costs $0.13, the lane itself $0.25, carrying its
+answer a few cents more — against $0.10 for a probe you make yourself and $0.38
+for the median hunt. By the time a hunt is two probes old, what is left of it is
+worth less than the lane, so a trigger that fires mid-hunt is negative at every
+threshold. All the value is in delegating a hunt at its **first** probe, which
+is why the rule now asks something you can answer there. Never send a lane for
+`just lanes`, `just status` or the question file — that is your own state, and
+you need the answer in your own hands — and never dispatch one from inside a
+lane. `just spend <window> finding` is the report that measures all of this;
+`docs/decisions.md` §158 is the argument.
 
 **A call is billed the context it is made at, not what it prints.** That is the
 one rule the lookup lane, the batching rule under "Editing files" and `just
