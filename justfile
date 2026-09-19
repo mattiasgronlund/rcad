@@ -6091,10 +6091,17 @@ check-hub-align-selftest:
 # argument keeps only the lanes whose path contains it.
 #
 # The reports are `summary` (token classes, batching, context, the cost of
-# finding), `classes` (which part of the tree the money went into), `ritual`
-# (the recurring work no kernel change needs), `sessions`, `carry` (what fills
-# the context every later response pays to re-read) and `ceiling` (what handing
-# off at a context cap would have saved).
+# finding), `finding` (which of that a lookup lane could take, and what handing
+# it over would cost), `classes` (which part of the tree the money went into),
+# `ritual` (the recurring work no kernel change needs), `sessions`, `carry`
+# (what fills the context every later response pays to re-read) and `ceiling`
+# (what handing off at a context cap would have saved).
+#
+# **`summary`'s finding line is the one that gets misread**, and `finding`
+# exists because it was: it counts every probe, wherever made and whatever
+# about, and two thirds of what it counts is nobody's to delegate — probes
+# inside lanes, which are cheap already, and §144.5's ritual, which is a session
+# asking about its own state. `docs/decisions.md` §158.
 #
 # **This reads transcripts, never the repository.** It cannot be a `check-` and
 # is not in `gate_steps`: its answer moves with what the sessions did this week,
@@ -6118,14 +6125,20 @@ spend since="" until="" report="all" lane="":
         '-home-mattias-git-mattiasgronlund-rcad' \
         "$since" "$until" '{{report}}' '{{lane}}'
 
-# The one part of `spend` a check can hold: which ritual a response belongs to.
+# The part of `spend` a check can hold: how it classifies a response.
 #
 # Everything else there answers with this week's sessions in it and moves when
-# they do, which is why `spend` is not in `gate_steps`. `ritual_of` is a pure
-# function of one response's tool calls, and it was wrong for a week in the
-# direction that mattered: a handoff listing the open questions counted as
+# they do, which is why `spend` is not in `gate_steps`. The classifiers are pure
+# functions of a response's tool calls, and `ritual_of` was wrong for a week in
+# the direction that mattered: a handoff listing the open questions counted as
 # question-file work, so §144.5 reasoned about the question file from a figure
 # a third too large. A number a document reasons from is worth a case.
+#
+# `is_lookup`, `finding_runs` and `delegation_net` are held for the same reason
+# one step on. §158's argument is entirely which probes a lane could have taken
+# and what handing them over would have cost, and those three decide it — the
+# obvious wrong version of each is caught by a case, which was checked rather
+# than assumed.
 #
 # It needs no transcripts and no Claude Code, so it runs on a runner like any
 # other check. `docs/decisions.md` §152.
