@@ -82,6 +82,25 @@ impl Reached {
 /// back that `Model::validate` rejects.
 #[must_use]
 pub fn everything_one_file_is_put_through(bytes: &[u8]) -> Reached {
+    everything_one_file_is_put_through_keeping_the_provenance(bytes, &mut ProvenanceLog::new())
+}
+
+/// **The same draw, handing the provenance back instead of dropping it.**
+///
+/// The fuzz target calls [`everything_one_file_is_put_through`] and throws away
+/// the log the import and the sweep shared.
+/// `benches/what_the_provenance_log_costs_a_fuzz_night.rs` goes through here to
+/// count what a draw recorded, and this is the body both share so that the draw
+/// being measured is the draw being fuzzed (§144.9, §162).
+///
+/// # Panics
+///
+/// As [`everything_one_file_is_put_through`] does.
+#[must_use]
+pub fn everything_one_file_is_put_through_keeping_the_provenance(
+    bytes: &[u8],
+    log: &mut ProvenanceLog,
+) -> Reached {
     let mut reached = Reached {
         files: 1,
         ..Reached::default()
@@ -116,8 +135,7 @@ pub fn everything_one_file_is_put_through(bytes: &[u8]) -> Reached {
         }
     }
 
-    let mut log = ProvenanceLog::new();
-    let Ok(import) = Import::read(&file, &Policy::certified(), &mut log) else {
+    let Ok(import) = Import::read(&file, &Policy::certified(), log) else {
         reached.refused = 1;
         return reached;
     };
@@ -125,7 +143,7 @@ pub fn everything_one_file_is_put_through(bytes: &[u8]) -> Reached {
     reached.solids = import.solids().len();
     import
         .model()
-        .validate(&Policy::certified(), &mut log)
+        .validate(&Policy::certified(), log)
         .expect("a model this reader handed back has already been through the sweep");
     let _ = import.declared_unit();
     let _ = import.declared_uncertainty();
