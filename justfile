@@ -38,7 +38,10 @@ hub_aligned := shell('bash "$1/tooling/hub-align/align.sh" "$1" || true', justfi
 # every comment block here is an argument several paragraphs long — so the
 # listing was 35 rows of fragments torn out of mid-sentence, `check-decisions #
 # at merge time, which is the expensive place to find it.` among them.
-# `[private]` hides the nine `*-selftest` recipes, which nobody types.
+# `[private]` hides the `*-selftest` recipes, which nobody types — it said
+# "the nine" until 2026-09-19, when there were twenty-two of them. `just recipe`
+# with no argument is the listing that shows them, §77's rule about tallies
+# being the reason this sentence no longer carries one.
 [doc("Everything this repo can do, one line each. Bare `just` runs this.")]
 list:
     @{{ just_executable() }} --list --unsorted
@@ -52,7 +55,7 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -815,8 +818,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "36" ]; then \
-        echo "found $n check-* recipes, expected 36"; \
+    if [ "$n" != "37" ]; then \
+        echo "found $n check-* recipes, expected 37"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -1397,6 +1400,269 @@ check-src-selftest:
 
     if $j src 'fn beta' >/dev/null 2>&1; then
         echo "src accepted something that is not an item name"; exit 1
+    fi
+
+# Which file `recipe` below reads. A variable so `check-recipe-selftest` can
+# point it at a fixture: the subject here is a justfile, and a selftest that
+# read the real one would be pinned to whatever recipes happen to exist today.
+recipes_file := "justfile"
+
+# One recipe of this justfile, by name, with the whole comment block above it.
+#
+#     just recipe gate
+#     just recipe hub          no such recipe: lists the three whose names contain it
+#     just recipe              every definition, including the ones `list` hides
+#
+# `just --show <name>` already prints the attributes, the header and the body.
+# What it prints of the comment block is **one line**, because that is just's
+# own doc-comment rule — and in this file the comment block is where the
+# argument lives: 22 lines above `src`, 6 above `gate_steps`. So `--show`
+# truncates exactly the part a reader came for. And `just --show gate_steps`
+# answers `error: Justfile does not contain recipe`: the twenty `:=`
+# assignments are reachable by no reader at all. This prints both, whole.
+#
+# The habit it replaces is `grep -n '^check-hub' justfile` followed by a `Read`
+# at a guessed offset — the two-call shape §144.6 measured, on the file it
+# measured second. This justfile is 307 404 characters over 105 definitions, and
+# the mean answer here is 2 934 of them: a hundredth of the file, in one call.
+# The largest, `check-fuzz-overnight-selftest`, is 40 344.
+#
+# **The extent is exact rather than guessed**, which is the one place this beats
+# `just src`. `src` reads a Rust item's end off rustfmt's layout and fails when
+# the closing brace is not where rustfmt would put it. Here indentation *is*
+# just's grammar: a body is every following line that is blank or indented, and
+# no line inside one can begin at column 0. Nothing is guessed and there is no
+# way to run on to the end of the file.
+#
+# **A name that matches nothing fails**, as `decisions-find` does and for the
+# same reason: an empty answer reads as "this justfile has no such recipe", and
+# that is a claim a typo can forge. A name that is not exact but is contained in
+# several names lists them; contained in exactly one, it prints that one.
+#
+# **No name at all is the index rather than an error.** It is the only listing
+# that shows the `_`-prefixed and `[private]` definitions — `just list` hides
+# every selftest on purpose, and they are the ones nobody can find — and it is
+# where the selftest's sweep over the real file gets its single call.
+#
+# **A listed row's one line is the `[doc]` text, or the comment block's *first*
+# line — not its last, which is just's own rule.** `list` above records what the
+# last line gives here: "35 rows of fragments torn out of mid-sentence". Every
+# comment block in this file opens with its thesis, so the first line is a whole
+# sentence, and the `[private]` definitions — which carry no `[doc]` precisely
+# so `list` will hide them — get a description instead of nothing.
+#
+# Aliases are not resolved. This justfile has none, and §13 does not build a
+# part with no consumer; one would fail here loudly rather than answer wrongly.
+[doc("One recipe of this justfile by name, with its comment: `just recipe gate`.")]
+recipe want="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want="$1"
+    case "$want" in
+    *[!A-Za-z0-9_-]*)
+        echo "'$want' is not the name of a recipe or a variable" >&2
+        exit 2
+        ;;
+    esac
+
+    awk -v want="$want" -v path="{{recipes_file}}" '
+        function defname(s,   n, rest, c) {
+            sub(/^(export|unexport)[ \t]+/, "", s)
+            if (match(s, /^[A-Za-z_][A-Za-z0-9_-]*/) == 0) return ""
+            n = substr(s, 1, RLENGTH)
+            rest = substr(s, RLENGTH + 1)
+            if (rest ~ /^[ \t]*:=/) return n
+            c = index(rest, ":")
+            if (c == 0 || substr(rest, c + 1, 1) == "=") return ""
+            return n
+        }
+
+        function blockstart(h,   s) {
+            s = h
+            while (s > 1 && (a[s - 1] ~ /^\[/ || a[s - 1] ~ /^#/)) s--
+            return s
+        }
+
+        function blockend(h,   i, e) {
+            e = h
+            for (i = h + 1; i <= last; i++) {
+                if (a[i] ~ /^[ \t]/ || a[i] == "") { e = i; continue }
+                break
+            }
+            while (e > h && a[e] ~ /^[ \t]*$/) e--
+            return e
+        }
+
+        function oneline(h,   i, t, p, q, first) {
+            for (i = h - 1; i >= 1; i--) {
+                t = a[i]
+                if (t ~ /^\[doc\("/) {
+                    p = index(t, "\"")
+                    q = index(substr(t, p + 1), "\")]")
+                    if (q > 0) return substr(t, p + 1, q - 1)
+                }
+                if (t ~ /^\[/) continue
+                if (t ~ /^#/) {
+                    t = substr(t, 2); sub(/^ /, "", t)
+                    if (t != "") first = t
+                    continue
+                }
+                break
+            }
+            return first
+        }
+
+        function show(j,   s, e, i) {
+            s = blockstart(at[j]); e = blockend(at[j])
+            print path ":" at[j]
+            for (i = s; i <= e; i++) print a[i]
+        }
+
+        function row(j,   line) {
+            line = sprintf("  %-26s %-32s %s", path ":" at[j], name[j], oneline(at[j]))
+            sub(/[ \t]+$/, "", line)
+            print line
+        }
+
+        { a[NR] = $0; last = NR }
+
+        END {
+            for (i = 1; i <= last; i++) {
+                n = defname(a[i])
+                if (n == "") continue
+                k++
+                name[k] = n
+                at[k] = i
+                if (n == want) exact = k
+            }
+            if (want == "") {
+                for (j = 1; j <= k; j++) row(j)
+                exit 0
+            }
+            if (exact) { show(exact); exit 0 }
+            for (j = 1; j <= k; j++)
+                if (index(tolower(name[j]), tolower(want)) > 0) hit[++m] = j
+            if (m == 0) {
+                print "no recipe or variable in " path " is named " want ", or contains it" \
+                    > "/dev/stderr"
+                exit 1
+            }
+            if (m == 1) { show(hit[1]); exit 0 }
+            for (j = 1; j <= m; j++) row(hit[j])
+        }' "{{recipes_file}}"
+
+# Pins the extraction against a fixture rather than against this file, so it
+# stays proven on a day `gate` is rewritten — the same reason
+# `check-src-selftest` builds a fixture repo of its own.
+#
+# **The sweep at the end is the other half, and it is the half about silence.**
+# A definition the scanner cannot see does not announce itself: it drops out of
+# the index and out of every listing, and `just recipe <it>` then says the file
+# has no such recipe — the empty answer the recipe above refuses to give. So the
+# scanner's own list is held against two greps written a different way, which is
+# what makes a new header shape — an alias, an attribute, a colon inside a
+# default — fail here rather than disappear.
+[private]
+check-recipe-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    cat > "$dir/fixture" <<'JF'
+    # The first line of alpha's argument.
+    # The last line of alpha's argument.
+    [doc("Alpha does a thing.")]
+    alpha:
+        echo one
+
+        echo two
+
+    # The first line of beta's argument.
+    # The last line of beta's argument.
+    [private]
+    beta arg="x":
+        echo beta
+
+    # What the answer is measured against.
+    export answer := "42"
+
+    alpha-extra:
+        echo three
+    JF
+    j="{{just_executable()}} --justfile {{justfile()}} --set recipes_file $dir/fixture"
+    f="$dir/fixture"
+
+    got=$($j recipe alpha)
+    want=$(printf '%s\n' "$f:4" "# The first line of alpha's argument." \
+        "# The last line of alpha's argument." '[doc("Alpha does a thing.")]' \
+        "alpha:" "    echo one" "" "    echo two")
+    [ "$got" = "$want" ] || { echo "recipe alpha drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j recipe beta)
+    want=$(printf '%s\n' "$f:12" "# The first line of beta's argument." \
+        "# The last line of beta's argument." "[private]" \
+        'beta arg="x":' "    echo beta")
+    [ "$got" = "$want" ] || { echo "a [private] recipe drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j recipe answer)
+    want=$(printf '%s\n' "$f:16" "# What the answer is measured against." \
+        'export answer := "42"')
+    [ "$got" = "$want" ] || { echo "an exported assignment drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j recipe alph | awk '{ print $2 }')
+    want=$(printf '%s\n' "alpha" "alpha-extra")
+    [ "$got" = "$want" ] || { echo "an inexact name did not list both:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    $j recipe alph | grep -q 'Alpha does a thing.' || { \
+        echo "the listing dropped the [doc] text"; exit 1; }
+
+    # A `[private]` recipe has no [doc], so its row is the comment block's first
+    # line. just's own rule would take the last, which is `list`'s fragments.
+    row=$($j recipe | awk '$2 == "beta"')
+    case "$row" in
+    *"The first line of beta's argument."*) ;;
+    *) echo "a row without [doc] is not the comment block's first line: $row"; exit 1 ;;
+    esac
+
+    got=$($j recipe extra)
+    want=$(printf '%s\n' "$f:18" "alpha-extra:" "    echo three")
+    [ "$got" = "$want" ] || { echo "one inexact match did not print the recipe:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    got=$($j recipe | awk '{ print $2 }')
+    want=$(printf '%s\n' "alpha" "beta" "answer" "alpha-extra")
+    [ "$got" = "$want" ] || { echo "the index is not every definition in order:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
+
+    if $j recipe no_such_recipe >/dev/null 2>&1; then
+        echo "recipe found something that does not exist"; exit 1
+    fi
+
+    if $j recipe 'alpha beta' >/dev/null 2>&1; then
+        echo "recipe accepted something that is not a name"; exit 1
+    fi
+
+    # The sweep. Both sides name the real file; neither is allowed to be empty,
+    # because two empty lists compare equal and prove nothing.
+    got=$({{just_executable()}} --justfile {{justfile()}} recipe \
+        | awk '{ split($1, p, ":"); print p[2], $2 }' | sort -n)
+    want=$( { grep -nE '^(export[ \t]+)?[A-Za-z_][A-Za-z0-9_-]*[ \t]*:=' {{justfile()}}; \
+              grep -nE '^[A-Za-z_][A-Za-z0-9_-]*([ \t][^:]*)?:([^=]|$)' {{justfile()}}; } \
+        | sed -E 's/^([0-9]+):(export[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*).*/\1 \3/' | sort -n)
+    n=$(printf '%s\n' "$want" | grep -c .)
+    if [ "$n" -lt 80 ]; then
+        echo "the greps found $n definitions in {{justfile()}}, so the sweep compared nothing"
+        exit 1
+    fi
+    if [ "$got" != "$want" ]; then
+        echo "the scanner and a plain grep disagree about what this justfile defines:"
+        diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") || true
+        echo "a definition only one side sees is one the index drops in silence"
+        exit 1
     fi
 
 [doc("The whole test suite, and the doc tests.")]

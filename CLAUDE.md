@@ -359,6 +359,18 @@ once lists the places rather than printing all of them. Reach for it instead of
 grepping for a definition and then guessing a `Read` offset and limit — in
 `arrange.rs`, 330 509 characters, the mean item comes back in 1 961.
 
+**`just recipe <name>` does the same for this justfile** — and never grep it
+either. `just --show` exists and is not the thing: it prints **one line** of the
+comment block, because that is just's own doc-comment rule, while the argument
+above a recipe here runs to paragraphs, and `just --show gate_steps` answers
+`error: Justfile does not contain recipe` — the `:=` assignments are reachable
+by no other reader at all. A name that matches nothing fails; one that is not
+exact lists the names containing it, or prints the one it is contained in; **no
+name at all is the index**, the only listing that shows the `[private]`
+selftests. The justfile is 307 404 characters over 105 definitions and the mean
+answer is 2 934 of them — a hundredth of the file, in one call.
+`docs/decisions.md` §153.
+
 **Past two probes, hand the question to a lookup lane.** Finding things — `grep`,
 `Read`, `git log`, `just src`, `just decision` — was 41% of the week of
 2026-09-07, $481 of $1 163, and every one of those calls paid for the whole
