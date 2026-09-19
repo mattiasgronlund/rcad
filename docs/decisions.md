@@ -34483,3 +34483,102 @@ grants nothing there.
 Nor does any of this loosen the gate, the branch-per-change rule for test
 claims (§8.3), or `Model::validate` at the boundaries. Autonomy was granted over
 *asking*, not over *checking*.
+
+## 139. The night's selftest proves concurrency instead of measuring it, built 2026-09-19
+
+*§137.6 deferred this as work and not a limit, and named the design. `spread <= 3`
+asked that the five targets launched within three seconds of each other — a bound
+on a quantity the machine owns, pinned at both ends, and resting on an accident
+nothing stated. A barrier replaces it: each target says it has arrived and then
+waits for the other four. A correct recipe clears it at any timeout and a
+sequential one fails it at any timeout, so the number stops being a guess.*
+
+### 139.1 The two things wrong with the bound
+
+The first is §137's own failure a third time, and §137.6 has the arithmetic: the
+bound has to sit above five `just` forks and below the spread a sequential recipe
+produces, so a loaded runner fails it and **raising 3 to 30 deletes the check
+rather than weakening it**. There is no slack to give a slow machine.
+
+The second is worse because it is silent. The 11 s of margin the bound lived on
+existed only because `STUB_OVERRUN_TARGET` is `where_two_surfaces_cross`, which
+is what `fuzz` maps to, and `fuzz` is `fuzz_all`'s **first** entry. The overrunner
+led the chain, so the adversary's spread was its 11 s. Point the overrun anywhere
+else and a non-overrunning target leads, the adversary spreads exactly 3, and the
+arm keeps passing while it stops discriminating. Nothing in the recipe stated the
+coupling and nothing checked it.
+
+### 139.2 The barrier
+
+Armed by `STUB_RENDEZVOUS` and by nothing else. Each target appends its name to
+the named file, then polls until the file holds five lines or a deadline passes,
+and writes what it saw into the log. The arm asserts that **all five saw five**.
+
+Run together, all five arrive and each sees five. Run in turn, the first blocks
+at the barrier and the other four are never launched, so the file ends at one
+line and the first target sees one. The later four can still see five — they
+arrive after the first has already written its line — which is why the assertion
+is *every* target saw five and not *some* target did.
+
+It sits after the `at=` printf and before the sleep. Before the printf, the log
+would stop recording when a target launched and §137.2's paired
+`max_total_time`/`at=` check would lose its input; after the sleep, the five
+would have finished waiting for each other before they ever met.
+
+### 139.3 The asymmetry that makes this a different fix
+
+Loosening `spread <= N` costs all of the check's power, per §139.1. Loosening the
+barrier's deadline costs **none**: a correct recipe clears it instantly at any
+value and a sequential one fails it at every value. The guess is removed rather
+than re-tuned, which is what makes this a different family and not a better
+number — §16.10's distinction, applied to a test rather than to arithmetic.
+
+It also asserts something strictly stronger: that all five were alive at one
+instant, which is the property the comment above the arm already claimed to be
+testing, rather than that they started within three seconds of one another.
+
+### 139.4 The mutants, and which of them the arm actually owns
+
+| mutation | what fired | what it said |
+| --- | --- | --- |
+| fully sequential (`wait` after every launch) | arm One, not this one | a twelve-second window took 30 s, so the window is a budget and not a deadline |
+| the first target waited for, then the other four, **overrunner leading** | this arm | `where_two_surfaces_cross saw 1 of 5`, the other four `saw 5 of 5` |
+| the same, **overrunner last** | this arm | the same message, unchanged |
+
+The third row is the one worth having, and it is the reason the barrier was built
+rather than the bound re-tuned: **the arm does not care which target leads.** The
+first row is worth recording for the opposite reason — a fully sequential recipe
+never reaches this assertion, because the clock catches it four arms earlier. The
+adversary this arm owns is the one that keeps the elapsed time honest.
+
+**What is not measured here, and it is §137.6's arithmetic rather than a run.**
+That `spread <= 3` *passes* the third row was not reproduced directly: the same
+mutation against the pre-change recipe trips an earlier arm — all five targets
+skipped as `no-time` — so the run does not isolate the bound. The claim in §139.1
+is the arithmetic of §137.6 and stands on that, not on an observation. Anyone
+wanting it observed will need a mutation that leaves the earlier arms untouched.
+
+### 139.5 Why it is asserted before the clock
+
+A recipe that fails this arm fails it by waiting out the barrier's deadline, and
+that wait is itself time on the clock. Asserted after `elapsed <= 20`, every
+sequential recipe would report the elapsed bound instead, and the symptom would
+bury the cause. So the barrier is checked first and the clock second, which is
+the opposite of the order the two were written in.
+
+### 139.6 The costs, named in advance
+
+§137.6 named three and all three are real. The stub is shared by every arm and by
+`run 0`, which correctly starts no targets, so the barrier **must** be env-var
+armed or those arms wait out the deadline for targets that were never coming. The
+deadline is a deadlock escape and not a tuning knob: without it a recipe that
+launches one target hangs `just gate` rather than failing it. And the
+max-concurrency counter remains the weaker sibling — it still needs the sleeps to
+outlast the launch spread, which is the same machine-speed guess wearing a
+different hat.
+
+Commands run to reach this: `mise exec -- just check-fuzz-overnight-selftest`
+against the tree and against four mutations, one of them run twice with the
+overrun aimed at a leading and then a trailing target; `git checkout main --
+justfile` to put the pre-change recipe back for the attempt recorded in §139.4;
+`mise exec -- just gate`.
