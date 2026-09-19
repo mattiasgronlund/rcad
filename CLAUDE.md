@@ -199,7 +199,31 @@ These are the ones that are expensive to notice late.
   arithmetic could not reach it — defer a limit, fix a gap. `docs/decisions.md`
   §16.10.
 
-## Asking the user a decision
+## Decide it yourself, and land it
+
+**A green `just gate` on the merged tree is the authorisation to merge.** Not a
+sentence from Mattias — he has never blocked one, and a merge that turns out
+wrong is a revert on a branch that is still on disk. Waiting costs a round trip
+that lands at the end of a session with the prompt cache cold, which is the most
+expensive turn there is. Gate the tree you actually merged, and never write down
+a gate you have not read.
+
+**Where you would have asked a question carrying a recommendation, take the
+recommendation.** Say which way you went and why, and carry on. Ask only where a
+wrong answer is expensive to undo, or where what Mattias wants is not derivable
+from the record. A decision taken alone is still written down — the commit
+message for a small one, `docs/decisions.md` for one with an argument behind it,
+the handoff for one still running.
+
+**End finished, or end written down.** Run the work to complete, or write it
+into the handoff as postponed with what is done and what remains. Do not park a
+session on a question. `docs/decisions.md` §138.
+
+Still not yours to take: an action another session was **refused** permission
+for. Being the hands for someone else's refusal is not a decision, at any level
+of trust.
+
+### The questions that are still questions
 
 **Every question goes in `open-questions.md` in this session's scratchpad, the
 same turn you ask it in the terminal.** A question asked only in the terminal
