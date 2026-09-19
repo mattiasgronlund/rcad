@@ -29,8 +29,9 @@
 //!   not enter into it. Used where the two runs genuinely may cut the answer up
 //!   differently.
 //! - **The answer's geometry, bit for bit**: every face's plane, its outward
-//!   normal, and its wires as rings of corners, each ring turned to start at its
-//!   own smallest corner and the whole lot sorted. Used where the two runs must
+//!   normal, and its wires as rings of corners, each ring turned to its own
+//!   smallest rotation, the outline kept first and the holes and faces and
+//!   solids sorted (§151, §163). Used where the two runs must
 //!   produce *the same* partition and not merely the same solid.
 //!
 //! **Both comparisons are exact. There is no tolerance anywhere in this file**,
@@ -3928,8 +3929,8 @@ impl Answer {
     /// The answer written out in one fixed order, so that two answers agree
     /// exactly when the arena order is the only thing between them.
     ///
-    /// A ring of corners is turned to start at its own smallest corner rather
-    /// than sorted: which corner comes first is arbitrary, but which corner
+    /// A ring of corners is turned to its own smallest rotation rather than
+    /// sorted: which corner comes first is arbitrary, but which corner
     /// follows which is the winding, and the winding is part of the answer.
     fn canonical(&self) -> Vec<Vec<Vec<u64>>> {
         let mut solids: Vec<Vec<Vec<u64>>> = self
@@ -3950,22 +3951,262 @@ impl Answer {
     }
 }
 
+/// One face as numbers: its surface, which way round it is used, its outline,
+/// and then its holes in sorted order.
+///
+/// **The outline stays first and only the holes are sorted.** Which wire is
+/// first is part of the face in this kernel, and a round wire has no winding
+/// to carry it instead (§163).
 fn written_out(face: &Face) -> Vec<u64> {
     let mut written = face.sits.written_out();
     written.push(u64::from(face.reversed));
 
-    let mut wires: Vec<Vec<u64>> = face
-        .wires
-        .iter()
-        .map(|wire| turned_to_its_smallest(wire))
-        .collect();
-    wires.sort_unstable();
-    written.push(wires.len() as u64);
-    for wire in wires {
+    let mut wires = face.wires.iter().map(|wire| turned_to_its_smallest(wire));
+    let outline = wires.next().expect("a face has at least one wire");
+    let mut holes: Vec<Vec<u64>> = wires.collect();
+    holes.sort_unstable();
+    written.push(face.wires.len() as u64);
+    for wire in core::iter::once(outline).chain(holes) {
         written.push(wire.len() as u64);
         written.extend(wire);
     }
     written
+}
+
+/// §151.5's second question: a face whose hole is handed over as its outline is
+/// not the face it was, and the comparison has to say so.
+///
+/// **Which wire comes first means something in this kernel.** `FaceView::wires`
+/// documents the first as the outline and the rest as holes, the fuse's
+/// `rings_round` puts the outline first on purpose, and `holds.rs` counts a
+/// round wire as `+1` in first place and `-1` anywhere else. For a flat face of
+/// three corners or more the winding would give the swap away anyway, because
+/// `Model::validate` refuses an outline winding against the normal. **A round
+/// wire has one corner and no winding to read**, so for a washer the order is
+/// the only place the difference lives — and sorting every wire threw it away.
+#[test]
+fn a_washer_whose_hole_is_handed_over_as_its_outline_is_another_answer() {
+    let washer = |wires: Vec<Vec<[f64; 3]>>| Answer {
+        solids: vec![vec![Face {
+            sits: WhatItSitsOn::Flat([0.0, 0.0, 1.0, 0.0]),
+            reversed: false,
+            wires,
+        }]],
+    };
+    let rim = vec![[2.0, 0.0, 0.0]];
+    let hole = vec![[1.0, 0.0, 0.0]];
+    assert_ne!(
+        washer(vec![rim.clone(), hole.clone()]).canonical(),
+        washer(vec![hole, rim]).canonical(),
+        "a washer with its rim and its hole swapped wrote out as the same face"
+    );
+}
+
+/// What the comparison still forgets, pinned so that it is said rather than
+/// found: **a ring of two corners reads the same walked either way.**
+///
+/// Turning a ring to its smallest rotation keeps which corner follows which,
+/// and with two corners the ring walked backwards *is* a rotation of itself.
+/// A face bounded by two arcs between the same two corners is such a ring, and
+/// so is a one-corner round wire, which has no order at all. The edges' own
+/// runs are not written down either. `docs/decisions.md` §163.4 says why this
+/// is left open rather than fixed.
+#[test]
+fn a_ring_of_two_corners_reads_the_same_walked_either_way() {
+    let (one, other) = ([1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+    assert_eq!(
+        turned_to_its_smallest(&[one, other]),
+        turned_to_its_smallest(&[other, one])
+    );
+}
+
+/// §151.5's first question, over answers the kernel really gives: can the
+/// order things landed in the arena make one answer write out as two?
+///
+/// Every solid's faces, every face's holes and the solids themselves are dealt
+/// out in a new order, and every ring starts from a new corner. The outline
+/// stays first, because its place is part of the answer (see
+/// [`a_washer_whose_hole_is_handed_over_as_its_outline_is_another_answer`]).
+#[test]
+fn dealing_an_answer_out_in_another_order_does_not_change_it() {
+    let tally = over(
+        CASES,
+        (a_lattice_pair(), any::<u64>()),
+        |(configuration, seed), tally| {
+            let (model, keys) = configuration.build();
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                tally.meaning_to_compare();
+                let Some((fused_model, solids)) = fused(
+                    tally,
+                    Coordinates::AreExactlyRepresentable,
+                    &model,
+                    &[keys[0]],
+                    &[keys[1]],
+                    rule,
+                )?
+                .answer() else {
+                    continue;
+                };
+
+                tally.comparing();
+                let answer = answer_of(&fused_model, &solids);
+                same_answer(
+                    &answer,
+                    &dealt_out_again(&answer, seed),
+                    rule,
+                    "dealing the answer out in another order",
+                )?;
+            }
+            Ok(())
+        },
+    );
+    tally.report_what_it_compared("arena order, lattice pairs");
+}
+
+/// The same at one answer built by hand, so that every level is certain to be
+/// reached: two solids, three faces in one of them, a face with two holes, and
+/// rings of four corners.
+///
+/// A generated lattice pair only sometimes has two solids and almost never a
+/// face with two holes, so the property above can pass with a sort missing.
+/// This one cannot: taking out any one of the three sorts, or the turning of a
+/// ring, fails it (§163.3).
+#[test]
+fn every_order_of_one_answer_with_two_holes_in_a_face_writes_out_the_same() {
+    let answer = two_solids_one_with_a_face_holding_two_holes();
+    let written = answer.canonical();
+    for seed in 0..256 {
+        assert_eq!(
+            dealt_out_again(&answer, seed).canonical(),
+            written,
+            "dealing the answer out from seed {seed} changed how it wrote out"
+        );
+    }
+}
+
+/// Only data: the comparison reads numbers, so these faces need not close up
+/// into a solid, and they do not.
+fn two_solids_one_with_a_face_holding_two_holes() -> Answer {
+    let square = |x: f64, y: f64, side: f64| {
+        vec![
+            [x, y, 0.0],
+            [x + side, y, 0.0],
+            [x + side, y + side, 0.0],
+            [x, y + side, 0.0],
+        ]
+    };
+    let backwards = |mut ring: Vec<[f64; 3]>| {
+        ring.reverse();
+        ring
+    };
+    Answer {
+        solids: vec![
+            vec![
+                Face {
+                    sits: WhatItSitsOn::Flat([0.0, 0.0, 1.0, 0.0]),
+                    reversed: false,
+                    wires: vec![
+                        square(0.0, 0.0, 9.0),
+                        backwards(square(1.0, 1.0, 2.0)),
+                        backwards(square(5.0, 5.0, 2.0)),
+                    ],
+                },
+                Face {
+                    sits: WhatItSitsOn::Flat([1.0, 0.0, 0.0, -9.0]),
+                    reversed: false,
+                    wires: vec![vec![
+                        [9.0, 0.0, 0.0],
+                        [9.0, 9.0, 0.0],
+                        [9.0, 9.0, 1.0],
+                        [9.0, 0.0, 1.0],
+                    ]],
+                },
+                Face {
+                    sits: WhatItSitsOn::Ball([4.0, 4.0, 4.0], 1.0),
+                    reversed: true,
+                    wires: vec![vec![[4.0, 4.0, 5.0]]],
+                },
+            ],
+            vec![
+                Face {
+                    sits: WhatItSitsOn::Flat([0.0, 0.0, -1.0, 0.0]),
+                    reversed: false,
+                    wires: vec![backwards(square(20.0, 0.0, 1.0))],
+                },
+                Face {
+                    sits: WhatItSitsOn::Flat([0.0, 1.0, 0.0, 0.0]),
+                    reversed: false,
+                    wires: vec![vec![[20.0, 0.0, 0.0], [21.0, 0.0, 0.0], [21.0, 0.0, 1.0]]],
+                },
+            ],
+        ],
+    }
+}
+
+/// The same answer as an arena might have handed it over: every list whose
+/// order is arbitrary put in another order, and every ring started from another
+/// corner. `seed` picks which.
+fn dealt_out_again(answer: &Answer, seed: u64) -> Answer {
+    let mut dice = Dice(seed);
+    let mut solids: Vec<Vec<Face>> = answer
+        .solids
+        .iter()
+        .map(|faces| {
+            let mut faces: Vec<Face> = faces
+                .iter()
+                .map(|face| {
+                    let mut wires: Vec<Vec<[f64; 3]>> = face
+                        .wires
+                        .iter()
+                        .map(|ring| {
+                            let mut ring = ring.clone();
+                            let start = dice.below(ring.len());
+                            ring.rotate_left(start);
+                            ring
+                        })
+                        .collect();
+                    dice.deal(&mut wires[1..]);
+                    Face {
+                        wires,
+                        ..face.clone()
+                    }
+                })
+                .collect();
+            dice.deal(&mut faces);
+            faces
+        })
+        .collect();
+    dice.deal(&mut solids);
+    Answer { solids }
+}
+
+/// SplitMix64, which is all a shuffle here needs: an order no arena chose, the
+/// same one every time for the same seed.
+struct Dice(u64);
+
+impl Dice {
+    fn deal<T>(&mut self, items: &mut [T]) {
+        for last in (1..items.len()).rev() {
+            let pick = self.below(last + 1);
+            items.swap(last, pick);
+        }
+    }
+
+    /// # Panics
+    ///
+    /// If `count` is nought, since there is nothing below it to pick.
+    fn below(&mut self, count: usize) -> usize {
+        let count = u64::try_from(count).expect("a list length fits in 64 bits");
+        usize::try_from(self.roll() % count).expect("below a list length fits in a usize")
+    }
+
+    fn roll(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
 }
 
 /// One ring, written down from two of its own corners, has to come back as one
