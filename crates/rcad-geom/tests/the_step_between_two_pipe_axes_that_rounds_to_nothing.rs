@@ -9,11 +9,14 @@
 //! `[0, 0] * ENTIRE` is `[0, 0]` rather than `ENTIRE`. §142.7 wrote the
 //! measurement down and said what it could not say — whether any pair a caller
 //! can draw arrives with `how_far` being `ENTIRE` and `leaning` an exact zero at
-//! the same time. This pair does.
+//! the same time. This pair did, for as long as the step across was taken the
+//! way it reads. §145 stopped taking it that way, so the subtraction below still
+//! cancels and the kernel no longer runs it.
 //!
-//! # How a pair reaches it
+//! # How a pair reached it
 //!
-//! `two_lines_between_two_pipes` steps from its own axis to the other one with
+//! `two_lines_between_two_pipes` used to step from its own axis to the other
+//! one with
 //!
 //! ```text
 //! towards = between − along · (between·along / along·along)
@@ -39,23 +42,33 @@
 //! pipes are one width. That is the asymmetry §142.7 asked about: the exact arm
 //! keeps the separation and the enclosure arm loses it.
 //!
-//! # And it changes nothing
+//! # Reaching it changed nothing, which is why the step had to be the fix
 //!
-//! The annihilation is reached and the answer is still a refusal, by a second
-//! route rather than the promised one. The same zero-length step that empties
-//! `how_far` is also what the sideways direction is scaled by, so `up` is
-//! everything, so the either-side term is everything, and neither side of the
-//! picking plane can be signed. In this caller `how_far` being everything
-//! **always** drags `up` with it, because both come from dividing by the length
-//! of the one step.
+//! The annihilation was reached and the answer was a refusal anyway, by a
+//! second route rather than the promised one. The same zero-length step that
+//! empties `how_far` is also what the sideways direction is scaled by, so `up`
+//! is everything, so the either-side term is everything, and neither side of
+//! the picking plane can be signed. In that caller `how_far` being everything
+//! **always** dragged `up` with it, because both came from dividing by the
+//! length of the one step. So signing the product would not have named this
+//! pair; only a step that does not round away could.
 //!
-//! # The refusal is a gap and not a limit
+//! # The refusal was a gap and not a limit, and §145 closed it
 //!
 //! Move the second axis one ulp along `z` either way and the same pair is named
 //! in two straight runs, which is what
 //! [`a_pair_of_pipes_one_ulp_either_side_of_it_is_named_in_two_runs`] holds. The
-//! answer exists and the arithmetic could not reach it, which is §16.10's test
-//! for a gap. Reported, not fixed — `intersect.rs` is not this lane's to write.
+//! answer existed and the arithmetic could not reach it, which is §16.10's test
+//! for a gap. `the_step_across_to_the_other_axis` now works the step out
+//! multiplied by `along·along`, where nothing cancels, and divides the scale
+//! back off one component at a time — so the pair below is named in the same
+//! two runs as its neighbours, and this file's subject is an annihilation no
+//! caller is known to reach any more.
+//!
+//! `the_step_between_two_pipe_axes_taken_scaled.rs` is the fix's own file and
+//! measures what moved across eighteen reaches. This one keeps the anatomy:
+//! the plain subtraction still cancels to nothing, and what makes that harmless
+//! is only that nothing reads it.
 
 #![forbid(unsafe_code)]
 
@@ -125,13 +138,20 @@ fn the_step_between_two_pipe_axes_can_round_to_nothing_while_the_axes_stay_apart
 
     for first in [0, 1] {
         let met = what_the_pair_crosses_in(&pair, first);
-        assert!(
-            matches!(met, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
-            "pipe {first} asked first: two pipes of one width whose axes could \
-             not be told apart would be one surface, and a pair that never \
-             reached `two_lines_told_apart` would be named or empty — so this \
-             refusal is what says the product was formed, and that it certified \
-             nothing: {met:?}"
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!(
+                "pipe {first} asked first: everything above still holds — the \
+                 plain step cancels away and the axes stay apart — so the only \
+                 pair known to reach §142.7's annihilation is this one, and it \
+                 reaches it only if the kernel takes the plain step. Being \
+                 named is what says it does not: {met:?}"
+            );
+        };
+        assert_eq!(
+            runs.len(),
+            2,
+            "pipe {first} asked first: two pipes of one width running the same \
+             way, their axes a rounding apart, cross in two straight runs"
         );
     }
 }
