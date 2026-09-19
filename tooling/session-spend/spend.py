@@ -252,16 +252,61 @@ def subject_of(path):
 # The rituals that recur, and the shape each leaves in a tool call. First match
 # wins, so the order is the order of interest. Each is work that no kernel change
 # needs, which is the whole reason for counting them separately.
+#
+# **What a call addresses and what it says are different things, and matching
+# the two together was wrong.** The first version searched the whole tool input
+# as one blob, so a handoff document that *listed* the open questions counted as
+# question-file work — and since first match wins, it was taken off `handoff
+# writing` as well. That put the question file at 570 responses and $74.80 in
+# the week of 2026-09-12 against a true 445 and $53.68, and §144.5 reasoned from
+# the inflated figure. So each ritual now says which it reads: `address` is the
+# `file_path` of a file tool and the `command` of a shell call, and `content` is
+# the bytes an Edit or Write carries. `docs/decisions.md` §151.
 RITUALS = [
-    ("question-file grammar", r"question-check|just question\b|open-questions"),
-    ("lane / worktree admin", r"worktree (lock|unlock|add|remove|list)|release-lanes"
-                              r"|just lanes|prune-worktrees|check-hub|clean-targets"),
-    ("section renumbering", r"renumber|decisions-toc|check-decisions|^## 1[0-9][0-9]\. "),
-    ("gate babysitting", r"pgrep -f|until \[|until !|sleep \d+"),
-    ("merge-conflict surgery", r"<<<<<<<|>>>>>>>|--theirs|--ours|merge --abort"
-                               r"|git checkout (main|HEAD) --"),
-    ("handoff writing", r"handoff|rcad-handoff"),
+    ("question-file grammar",
+     r"open-questions\.md$|question-check|just question\b", None),
+    ("lane / worktree admin",
+     r"worktree (lock|unlock|add|remove|list)|release-lanes"
+     r"|just lanes|prune-worktrees|check-hub|clean-targets", None),
+    ("section renumbering",
+     r"renumber|decisions-toc|check-decisions", r"^## 1[0-9][0-9]\. "),
+    ("gate babysitting",
+     r"pgrep -f|until \[|until !|sleep \d+", None),
+    ("merge-conflict surgery",
+     r"--theirs|--ours|merge --abort|git checkout (main|HEAD) --",
+     r"<<<<<<<|>>>>>>>"),
+    ("handoff writing", r"handoff|rcad-handoff", None),
 ]
+
+FILE_TOOLS = ("Read", "Edit", "Write", "NotebookEdit")
+
+
+def ritual_of(tools):
+    """Which ritual a response's tool calls belong to, or None.
+
+    A response is counted once, under the first ritual any of its calls matches,
+    because the unit of billing is the response and not the call.
+    """
+    addresses, contents = [], []
+    for call in tools:
+        inp = call.get("input") or {}
+        name = call.get("name")
+        if name in FILE_TOOLS:
+            addresses.append(str(inp.get("file_path", "")))
+            contents.extend(str(inp.get(field, "")) for field in
+                            ("content", "old_string", "new_string"))
+        elif name == "Bash":
+            addresses.append(str(inp.get("command", "")))
+        else:
+            addresses.append(json.dumps(inp))
+    address = "\n".join(addresses)
+    content = "\n".join(contents)
+    for name, address_pattern, content_pattern in RITUALS:
+        if re.search(address_pattern, address, re.I | re.M):
+            return name
+        if content_pattern and re.search(content_pattern, content, re.I | re.M):
+            return name
+    return None
 
 
 # ------------------------------------------------------------------- reports
@@ -394,16 +439,12 @@ def report_ritual(responses, total):
     print("=== recurring ritual: work no kernel change needs ===")
     spend, count = collections.Counter(), collections.Counter()
     for r in responses:
-        blob = json.dumps([c.get("input") for c in r["tools"]])
-        if len(blob) < 5:
-            continue
-        for name, pattern in RITUALS:
-            if re.search(pattern, blob, re.I | re.M):
-                spend[name] += r["cost"]
-                count[name] += 1
-                break
+        name = ritual_of(r["tools"])
+        if name:
+            spend[name] += r["cost"]
+            count[name] += 1
     print(f"  {'ritual':26} {'responses':>10} {'cost':>10} {'share':>7}")
-    for name, _ in RITUALS:
+    for name, _, _ in RITUALS:
         print(f"  {name:26} {count[name]:10,d} ${spend[name]:9,.2f} {100 * spend[name] / total:6.1f}%")
     every = sum(spend.values())
     print(f"  {'TOTAL':26} {sum(count.values()):10,d} ${every:9,.2f} {100 * every / total:6.1f}%")

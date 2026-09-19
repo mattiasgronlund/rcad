@@ -27,9 +27,11 @@ the fix landed here.
 ```
 
 - **`questions`** — the parser, the status line, and the `asking-questions` skill.
-- **`guardrails`** — the three hooks: no in-place shell patching, the context
-  budget that asks for a handoff, and the one that runs the question checker when
-  `open-questions.md` is written.
+- **`guardrails`** — the four hooks: no in-place shell patching, the context
+  budget that asks for a handoff, the one that runs the question checker when
+  `open-questions.md` is written — **which is why `just question-check` is
+  refused; the write already ran it, and a clean file now says so in one line**
+  (§151) — and the refusal itself.
 - **`practices`** — the nine shared skills, `code-quality` and `delegating`
   among them.
 

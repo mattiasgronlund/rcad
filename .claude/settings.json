@@ -7,7 +7,7 @@
       "source": {
         "source": "github",
         "repo": "mattiasgronlund/claude-questions",
-        "ref": "v0.2.3"
+        "ref": "v0.3.0"
       }
     }
   },

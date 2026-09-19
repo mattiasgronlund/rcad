@@ -52,7 +52,7 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -815,8 +815,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "35" ]; then \
-        echo "found $n check-* recipes, expected 35"; \
+    if [ "$n" != "36" ]; then \
+        echo "found $n check-* recipes, expected 36"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -5851,3 +5851,22 @@ spend since="" until="" report="all" lane="":
         '{{claude_config}}/projects' \
         '-home-mattias-git-mattiasgronlund-rcad' \
         "$since" "$until" '{{report}}' '{{lane}}'
+
+# The one part of `spend` a check can hold: which ritual a response belongs to.
+#
+# Everything else there answers with this week's sessions in it and moves when
+# they do, which is why `spend` is not in `gate_steps`. `ritual_of` is a pure
+# function of one response's tool calls, and it was wrong for a week in the
+# direction that mattered: a handoff listing the open questions counted as
+# question-file work, so §144.5 reasoned about the question file from a figure
+# a third too large. A number a document reasons from is worth a case.
+#
+# It needs no transcripts and no Claude Code, so it runs on a runner like any
+# other check. `docs/decisions.md` §151.
+# `PYTHONDONTWRITEBYTECODE` because the cases import `spend` as a module, and a
+# `__pycache__` beside it is a directory the gate leaves behind in a tree the
+# hub rule expects to be clean. Ignoring it would be a second record of the same
+# thing; not writing it is one word.
+[private]
+check-spend-selftest:
+    @PYTHONDONTWRITEBYTECODE=1 python3 tooling/session-spend/check-spend.py
