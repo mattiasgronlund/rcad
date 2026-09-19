@@ -35740,7 +35740,7 @@ one. Nothing here changes.
 when this was written and catches the crossing within 3%, so there was no
 lateness to fix and the dial did not move. 22 of the 23 points billed above the
 budget are a warning that could not repeat itself and could not fire inside a
-turn; both are fixed in `guardrails` v0.3.4, and `just spend <window> warnings`
+turn; both are fixed in `guardrails` v0.3.5, and `just spend <window> warnings`
 is the report that measures it — this section's "re-run `ceiling`" was the wrong
 instrument, because `ceiling` prices a cap nothing enforces. Something did change
 here after all: that report, and its cases.
@@ -37729,7 +37729,7 @@ The two leaks above are 22 of the 23 points, and closing them costs no handoffs
 that were not already owed. That is the whole argument for leaving the number
 alone, and it is why this section is not the lane §144.3 described.
 
-### 160.5 What changed, in `guardrails` v0.3.2 through v0.3.4
+### 160.5 What changed, in `guardrails` v0.3.2 through v0.3.5
 
 **A rung, not a sentinel.** The warning repeats every 25 000 tokens of growth
 past the first warning. On that week's tail that is one extra warning in the
@@ -37764,17 +37764,30 @@ state **above** the quiet exit rather than below it, because the upgrading call
 is a quiet one and a write that only happens when the hook speaks would re-decide
 the baseline for ever. The case caught that second half; reading it did not.
 
+**And fixing the reader did not undo what the bad reader had written — v0.3.5.**
+v0.3.3 did not only misread the rung `3` as a baseline, it **persisted** it in the
+new two-field format, so v0.3.4's careful handling of the old shape never looked
+at it and the session was told `319,479 more than when you were first told`. The
+close is an invariant rather than another migration rule: the only baseline this
+script ever writes is one it has just found greater than the budget, so anything
+smaller came from somewhere else and the ladder restarts. One comparison, on the
+branch the upgrade already needed, and it closes the class rather than the
+instance. **A data fix is not a code fix, and a code fix is not a data fix** —
+three versions each corrected the reader while the file on disk stayed wrong.
+
 Three things are worth keeping from how all this was found. It took **two turns**
 each time, not a week, because the author was the subject — the fastest
 measurement in this file so far, and available only because the thing being
-changed acts on the session changing it. Every one of the three was in the
+changed acts on the session changing it. Every one of the four was in the
 mechanism §160.5 describes rather than in anything §160.1 measures, which is the
 division §77.6 draws: the numbers were right all afternoon and what was built on
-them was wrong three times. And all three shipped with cases that passed — the
+them was wrong four times. And all four shipped with cases that passed — the
 cases asserted what the code did on the paths its author was thinking about, so
 each new one is worth more than the ten before it, and the count is not the
 thing. A version that changes a file another version reads needs a case for
-**reading the old file**, which is the general form of the third.
+**reading the old file**, and one that has already shipped a bad write needs a
+case for **reading what it wrote**; those are the general forms of the third and
+fourth.
 
 **`PostToolUse` beside `Stop` and `UserPromptSubmit`.** `tail -n 400 | jq` costs
 14 ms on the largest transcript on this machine (3.4 MB), so the check can afford
@@ -37811,10 +37824,10 @@ That the repeat and the mid-turn warning will be **heeded** is unmeasured and
 unmeasurable in advance: the 13 points are what a session did after being told
 once, and nothing here proves it behaves differently on being told twice. The
 measurement that settles it is §144.3's own — cost per week at a steady amount of
-work — re-run on a week that ran entirely under v0.3.4, with `0 repeat warnings`
+work — re-run on a week that ran entirely under v0.3.5, with `0 repeat warnings`
 in the report being the first thing to check, since a week with none means the
 new path never ran.
 
 Write set: the `guardrails` plugin (marketplace, `c57c714`, `5cc6465` and
-`5eb22b9`, tagged `v0.3.2` to `v0.3.4`) and here `tooling/session-spend/`, its
+`5eb22b9` and `3e476a4`, tagged `v0.3.2` to `v0.3.5`) and here `tooling/session-spend/`, its
 cases, the `spend` recipe's doc, and the plugin ref in `.claude/settings.json`.
