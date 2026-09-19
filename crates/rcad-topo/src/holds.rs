@@ -41,10 +41,18 @@
 //! Where a face is trimmed by something else — an *arc* of a crossing, or one
 //! loop of a crossing that has two — this refuses by name rather than guessing.
 //! Both refusals are gaps and §35 names the consumer that calls each due.
+//!
+//! **One family of arcs is followed now** (§167): a wedge of a ball, whose skin
+//! and whose two half-discs are each bounded by half of a circle. Those faces are
+//! still the part of their surface on one side of everything that trims them —
+//! or, on the sphere, on one side of *any* of it — but only once that has been
+//! shown of the face in hand, and the side is read off the way the wire runs
+//! rather than off a corner, because every corner sits on every cut.
 
-use rcad_geom::{EdgeRun, Plane, Point, Surface, SurfaceMeet, intersect};
+use rcad_geom::{EdgeRun, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{
-    Decision, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog, Record,
+    Decision, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog,
+    Record,
 };
 
 use crate::classify::decide;
@@ -119,6 +127,9 @@ impl<'m> SolidView<'m> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<OnAFace> {
+        if a_side_of_it_is_part_of_a_crossing(self, face)? {
+            return what_a_face_cut_by_part_of_a_crossing_holds(self, face, point);
+        }
         let Surface::Plane(plane) = face.surface() else {
             return what_a_curved_face_holds(self, face, &face.surface(), point, policy, log);
         };
@@ -388,6 +399,434 @@ fn what_a_curved_face_holds(
     } else {
         OnAFace::Held
     })
+}
+
+/// Whether a side of `face` runs along only *part* of where its surface crosses
+/// the face across it — half of a circle rather than the whole of it.
+///
+/// A seam is left out: the same face lies on both sides of it, so it trims
+/// nothing, and a ball's seam is part of a crossing in exactly this sense.
+fn a_side_of_it_is_part_of_a_crossing(solid: SolidView<'_>, face: FaceView<'_>) -> Result<bool> {
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let is_a_piece = matches!(edge.stored_run(), EdgeRun::PartOfWhereItCrosses { .. })
+            && edge.start().key() != edge.end().key();
+        if is_a_piece && the_face_across(solid, face, edge)?.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether a face with part of a crossing among its sides holds `point`, which
+/// is taken as being on that face's surface (`docs/decisions.md` §167).
+///
+/// **The face is still the part of its surface on one side of everything that
+/// trims it**, as [`what_a_curved_face_holds`] reads it — but that is no longer
+/// true of every face, and here it is proved of this one before it is used. A
+/// quarter of a ball's skin is the part of the sphere in front of both walls; the
+/// three quarters are the part in front of *either*. So:
+///
+/// 1. **Which side of each neighbour the face keeps** is read off the way its
+///    wire runs, because nothing else in the model says it: both corners of a
+///    lune sit on both walls, so no corner is off either of them.
+/// 2. **Every side of the face must lie on that side of every other
+///    neighbour**. Then the face is exactly the part of its surface in front of
+///    all of them. Or, on a sphere, every side lies *behind* every other
+///    neighbour, and then the rest of the sphere is that part, and the face is
+///    the part in front of any of them.
+///
+/// Why that is enough: a face whose sides all lie in front of a neighbour
+/// cannot reach behind it, because the region behind is connected, holds none of
+/// the face's boundary, and borders the face's own side along that neighbour on
+/// the side the face does not keep. So the face sits inside the part in front
+/// of all of them; and that part is connected — a plane cut by half-planes and
+/// round discs, or a sphere cut by planes through its centre — with the face's
+/// boundary on its boundary, so the face is all of it.
+///
+/// **Only the family where each step of that is a sign is taken**: a flat face
+/// whose curved sides are arcs of a ball it lies inside, and a sphere face
+/// whose sides are arcs cut by planes through its centre. Each arc must be
+/// picked by a half-space whose plane holds both its ends exactly, so that the
+/// arc is the whole of its circle in front of that plane. Anything else is
+/// refused by name, as before.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] outside that family, and
+/// [`Error::Undecidable`] when a sign could not be settled.
+fn what_a_face_cut_by_part_of_a_crossing_holds(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let surface = face.surface();
+    let sides = the_sides_of(solid, face)?;
+
+    let mut cuts: Vec<Cut> = Vec::new();
+    for side in &sides {
+        let kept = which_side_of_its_neighbour_a_side_keeps(face, &surface, side)?;
+        let corners = [side.start.key(), side.end.key()];
+        match cuts.iter_mut().find(|known| known.surface == side.across) {
+            Some(known) if known.kept == kept => known.corners_on_it.extend(corners),
+            Some(_) => return Err(cannot()),
+            None => cuts.push(Cut {
+                surface: side.across,
+                kept,
+                corners_on_it: corners.to_vec(),
+            }),
+        }
+    }
+    if !is_a_family_this_follows(&surface, &cuts) {
+        return Err(cannot());
+    }
+
+    let mut in_front_of_all = true;
+    let mut behind_all = true;
+    for cut in &cuts {
+        for side in sides.iter().filter(|side| side.across != cut.surface) {
+            match where_a_side_lies(&surface, side, cut) {
+                Lies::On => {}
+                Lies::Beside(found) if found == cut.kept => behind_all = false,
+                Lies::Beside(_) => in_front_of_all = false,
+                Lies::Across => return Err(cannot()),
+            }
+        }
+    }
+    if in_front_of_all {
+        held_in_front_of_all(&cuts, point)
+    } else if behind_all && matches!(surface, Surface::Sphere(_)) {
+        held_in_front_of_any(&cuts, point)
+    } else {
+        Err(cannot())
+    }
+}
+
+/// One side of a face, located, with the surface of the face across it.
+struct Side<'m> {
+    across: Surface,
+    start: crate::view::VertexView<'m>,
+    end: crate::view::VertexView<'m>,
+    run: SideRun,
+}
+
+/// What a [`Side`] runs along between its ends.
+enum SideRun {
+    Straight,
+    /// The part of a circle in front of `picker`, whose plane holds both ends.
+    Arc {
+        picker: HalfSpace,
+    },
+}
+
+/// One surface cutting a face: which side of it the face keeps, and which of
+/// the face's corners are on it because an edge along it ends there.
+struct Cut {
+    surface: Surface,
+    kept: Decision,
+    corners_on_it: Vec<crate::VertexKey>,
+}
+
+/// Where the inside of one side lies against a surface cutting the face.
+enum Lies {
+    /// Along it, so on neither side.
+    On,
+    /// Strictly on this side of it, ends apart.
+    Beside(Decision),
+    /// Across it, or somewhere nothing here can tell.
+    Across,
+}
+
+/// Every side of `face` in the order its wires walk them, seams left out.
+fn the_sides_of<'m>(solid: SolidView<'m>, face: FaceView<'m>) -> Result<Vec<Side<'m>>> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let mut sides = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        let (start, end) = (coedge.start(), coedge.end());
+        let run = match edge.run() {
+            EdgeRun::Straight => SideRun::Straight,
+            EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key() != end.key() => {
+                let ends = [start, end].map(|at| PredicatePoint::from(at.point().coordinates()));
+                let picker = picked_by
+                    .iter()
+                    .find_map(|picker| match picker {
+                        Picker::InFrontOf(half) => ends
+                            .iter()
+                            .all(|&at| half.side_of_point(at) == Decision::Zero)
+                            .then_some(*half),
+                        Picker::OutsideABall(_)
+                        | Picker::OutsideAPipe(_)
+                        | Picker::InsideAPipe(_)
+                        | _ => None,
+                    })
+                    .ok_or_else(cannot)?;
+                SideRun::Arc { picker }
+            }
+            // A whole closed crossing among parts of others, or a kind of run
+            // this has not been taught.
+            EdgeRun::PartOfWhereItCrosses { .. } | EdgeRun::RightRoundWhereItsFacesCross | _ => {
+                return Err(cannot());
+            }
+        };
+        sides.push(Side {
+            across: across.surface(),
+            start,
+            end,
+            run,
+        });
+    }
+    Ok(sides)
+}
+
+/// Whether the part of `surface` in front of every cut is connected and has
+/// arcs of circles for sides — the two things
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`]'s argument rests on.
+///
+/// On a plane, that is half-planes and the insides of balls. On a sphere, it is
+/// planes through the centre: each cuts the sphere into two halves, and any
+/// number of halves meet in one piece, where planes that miss the centre can
+/// leave two caps with nothing between them.
+fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
+    match surface {
+        Surface::Plane(_) => cuts.iter().all(|cut| match cut.surface {
+            Surface::Plane(_) => true,
+            Surface::Sphere(_) => cut.kept == Decision::Neg,
+            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => false,
+        }),
+        Surface::Sphere(ball) => {
+            let centre = PredicatePoint::from(ball.centre().coordinates());
+            cuts.iter().all(|cut| {
+                cut.surface
+                    .as_plane()
+                    .is_some_and(|flat| flat.side_of_point(centre) == Decision::Zero)
+            })
+        }
+        Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => false,
+    }
+}
+
+/// Which side of the surface across `side` the face keeps, read off the way the
+/// wire runs.
+///
+/// A wire keeps its face's material on its left, and left of `∇S × ∇T` is always
+/// `T`'s negative side (§36.6, `a_closed_crossing_is_walked_the_way_it_is_stored`).
+/// So the face keeps `T`'s negative side exactly when the side runs along
+/// `∇S × ∇T` at its start, with `∇S` the face's own outward gradient. A straight
+/// side runs from its start to its end. An arc leaves its start into the front
+/// of its picker, whose plane holds that start, so the sign of the picker's
+/// normal against `∇S × ∇T` is the sign of the way it runs.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a straight side on a
+/// curved face or an arc between two planes, which are not sides of this
+/// family, and [`Error::Undecidable`] when the sign could not be settled.
+fn which_side_of_its_neighbour_a_side_keeps(
+    face: FaceView<'_>,
+    surface: &Surface,
+    side: &Side<'_>,
+) -> Result<Decision> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let at = side.start.point();
+    let mut outward = gradient_at(surface, at).ok_or_else(cannot)?;
+    if face.orientation().is_reversed() {
+        outward = outward.map(core::ops::Neg::neg);
+    }
+    let across = gradient_at(&side.across, at).ok_or_else(cannot)?;
+    let along_the_crossing = cross(outward, across);
+    let flat = [surface, &side.across].map(|one| one.as_plane().is_some());
+    let runs = match &side.run {
+        SideRun::Straight if flat == [true, true] => {
+            let to = side.end.point().coordinates();
+            let from = at.coordinates();
+            let step = core::array::from_fn(|axis| {
+                Interval::exactly(to[axis]) - Interval::exactly(from[axis])
+            });
+            dot(step, along_the_crossing)
+        }
+        SideRun::Arc { picker } if flat == [true, false] || flat == [false, true] => {
+            dot(exactly(picker.normal().components()), along_the_crossing)
+        }
+        SideRun::Straight | SideRun::Arc { .. } => return Err(cannot()),
+    };
+    match runs.sign() {
+        Decision::Pos => Ok(Decision::Neg),
+        Decision::Neg => Ok(Decision::Pos),
+        Decision::Zero => Err(cannot()),
+        Decision::Undecidable { enclosure } => Err(gave_up(
+            WHICH_SIDE_A_SIDE_KEEPS,
+            PredicatePoint::from(at.coordinates()),
+            Level::Interval,
+            enclosure,
+            Measures::Volume,
+        )),
+        other => panic!("a sign came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// The name reading which side of its neighbour a side keeps goes by in
+/// provenance records.
+const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
+
+/// Where the inside of `side` lies against `cut`, one of the other surfaces
+/// cutting the face.
+///
+/// **A corner of an edge along `cut` is on `cut` by topology**, and is read as
+/// on it rather than asked — §35.2's rule, for §19.1's reason.
+///
+/// - A straight side against a plane lies where its ends do.
+/// - A straight side against a ball it has both ends in or on is inside it,
+///   because a ball holds every segment between two of its points.
+/// - An arc against a plane that holds both its ends: the arc's own plane meets
+///   that plane, and its picker's, in one line — the one through the two ends —
+///   so across the arc's plane the two read the same sign or opposite signs
+///   everywhere. Which is the sign of `(n × p) · (h × p)`, the two lines'
+///   directions compared, and the arc is in front of its picker.
+///
+/// Everything else is [`Lies::Across`]: an arc whose ends are not both on the
+/// plane may bulge across it, and nothing here builds the point where it would.
+fn where_a_side_lies(surface: &Surface, side: &Side<'_>, cut: &Cut) -> Lies {
+    let side_of_an_end = |end: crate::view::VertexView<'_>| {
+        if cut.corners_on_it.contains(&end.key()) {
+            Decision::Zero
+        } else {
+            side_of_surface(
+                &cut.surface,
+                PredicatePoint::from(end.point().coordinates()),
+            )
+        }
+    };
+    let ends = [side_of_an_end(side.start), side_of_an_end(side.end)];
+    let settled = ends
+        .iter()
+        .all(|end| matches!(end, Decision::Zero | Decision::Pos | Decision::Neg));
+    if !settled {
+        return Lies::Across;
+    }
+    match &side.run {
+        SideRun::Straight => match cut.surface {
+            Surface::Plane(_) => {
+                let beside: Vec<Decision> = ends
+                    .into_iter()
+                    .filter(|end| *end != Decision::Zero)
+                    .collect();
+                match beside.as_slice() {
+                    [] => Lies::On,
+                    [one] => Lies::Beside(*one),
+                    [one, other] if one == other => Lies::Beside(*one),
+                    [..] => Lies::Across,
+                }
+            }
+            Surface::Sphere(_) if ends.iter().all(|end| *end != Decision::Pos) => {
+                Lies::Beside(Decision::Neg)
+            }
+            Surface::Sphere(_)
+            | Surface::Cylinder(_)
+            | Surface::Cone(_)
+            | Surface::Torus(_)
+            | _ => Lies::Across,
+        },
+        SideRun::Arc { picker } => {
+            let Surface::Plane(flat) = cut.surface else {
+                return Lies::Across;
+            };
+            let own_plane = surface.as_plane().or(side.across.as_plane());
+            let (Some(own_plane), [Decision::Zero, Decision::Zero]) = (own_plane, ends) else {
+                return Lies::Across;
+            };
+            let normal = exactly(own_plane.normal().components());
+            let cut_line = cross(exactly(flat.normal().components()), normal);
+            let picker_line = cross(exactly(picker.normal().components()), normal);
+            match dot(cut_line, picker_line).sign() {
+                found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
+                Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
+            }
+        }
+    }
+}
+
+/// The face is the part of its surface in front of every cut.
+fn held_in_front_of_all(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> {
+    let mut on_its_boundary = false;
+    for cut in cuts {
+        match side_of_surface(&cut.surface, point) {
+            Decision::Zero => on_its_boundary = true,
+            settled if settled == cut.kept => (),
+            Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(&cut.surface, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    Ok(if on_its_boundary {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::Held
+    })
+}
+
+/// The face is the part of its sphere in front of any cut: the rest of the
+/// sphere is behind all of them.
+fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> {
+    let mut on_its_boundary = false;
+    let mut undecided = None;
+    for cut in cuts {
+        match side_of_surface(&cut.surface, point) {
+            settled if settled == cut.kept => return Ok(OnAFace::Held),
+            Decision::Zero => on_its_boundary = true,
+            Decision::Pos | Decision::Neg => (),
+            Decision::Undecidable { enclosure } => {
+                undecided = Some(gave_up_on_a_side(&cut.surface, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    if let Some(refusal) = undecided {
+        return Err(refusal);
+    }
+    Ok(if on_its_boundary {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::NotHeld
+    })
+}
+
+/// The gradient of a plane or a ball at `at`, as a box, as the surface is
+/// stored; `None` for any other kind.
+fn gradient_at(surface: &Surface, at: Point) -> Option<[Interval; 3]> {
+    match surface {
+        Surface::Plane(flat) => Some(exactly(flat.normal().components())),
+        Surface::Sphere(ball) => {
+            let at = at.coordinates();
+            let centre = ball.centre().coordinates();
+            Some(core::array::from_fn(|axis| {
+                Interval::exactly(at[axis]) - Interval::exactly(centre[axis])
+            }))
+        }
+        Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => None,
+    }
+}
+
+fn exactly(value: [f64; 3]) -> [Interval; 3] {
+    value.map(Interval::exactly)
+}
+
+fn cross(u: [Interval; 3], v: [Interval; 3]) -> [Interval; 3] {
+    [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ]
+}
+
+fn dot(u: [Interval; 3], v: [Interval; 3]) -> Interval {
+    u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
 }
 
 /// The surfaces that trim `face`, each with how many edges of this face run

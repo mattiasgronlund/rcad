@@ -21,7 +21,7 @@ use rcad_geom::{
     Deflection, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Sphere, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
+use rcad_topo::{Containment, DraftStep, Model, SolidBuilder, SolidKey};
 
 #[test]
 fn a_quarter_of_a_ball_measures_a_quarter_of_a_ball_wherever_it_sits() {
@@ -44,6 +44,102 @@ fn a_quarter_of_a_ball_measures_a_quarter_of_a_ball_wherever_it_sits() {
 fn a_quarter_of_a_ball_measures_the_same_whichever_step_its_skin_starts_at() {
     for starting_at in 0..4 {
         a_wedge_measures_what_it_is([[1.0, 0.0], [0.0, 1.0]], starting_at, 0.25);
+    }
+}
+
+/// Inside and outside of a wedge of a ball are not in doubt anywhere away from
+/// its skin, so every point asked must come back one or the other, and the
+/// right one (`docs/decisions.md` §167). Until §167 every one of them came back
+/// `CannotFollowAFacesTrimming`: the sphere face and both half-discs are bounded
+/// by *half* of where their surfaces cross, and nothing could say which half.
+///
+/// The oracle is where the point is: inside the unit ball, and swept from the
+/// wedge's first half-plane by less than the wedge's own turn. Every point is
+/// held well clear of the skin, so reading that off `atan2` decides nothing near
+/// a boundary.
+#[test]
+fn a_wedge_of_a_ball_says_which_points_are_inside_it_wherever_it_sits() {
+    let asked = [
+        [0.35, 0.2, 0.0],
+        [0.5, 0.2, 0.3],
+        [-0.2, -0.35, 0.0],
+        [0.35, -0.15, 0.1],
+        [0.1, 0.6, -0.5],
+        [-0.4, 0.3, 0.2],
+        [0.2, -0.5, -0.4],
+        [-0.6, 0.1, -0.3],
+        [0.9, 0.9, 0.5],
+        [-0.1, -0.2, 1.3],
+    ];
+    let policy = Policy::certified();
+    let mut inside = 0;
+    let mut outside = 0;
+    for (between, fraction) in [
+        ([[1.0, 0.0], [0.0, 1.0]], 0.25),
+        ([[1.0, -1.0], [1.0, 1.0]], 0.25),
+        ([[-1.0, 1.0], [-1.0, -1.0]], 0.25),
+        ([[0.0, -1.0], [-1.0, 0.0]], 0.75),
+    ] {
+        let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
+        let wedge = a_wedge_of_a_ball(&mut model, between, 0, &policy);
+        let solid = model.solid(wedge).expect("this model made the key");
+        for [x, y, z] in asked {
+            let expected = where_it_is(between[0], fraction, [x, y, z]);
+            let mut log = ProvenanceLog::new();
+            let answer = solid.classify_point(Point::new(x, y, z), &policy, &mut log);
+            assert_eq!(
+                answer,
+                expected,
+                "the wedge between {between:?} asked about {:?}",
+                [x, y, z]
+            );
+            assert!(
+                log.is_empty(),
+                "a certified answer about an exact point records nothing"
+            );
+            match expected {
+                Containment::Inside => inside += 1,
+                Containment::Outside => outside += 1,
+                Containment::OnBoundary
+                | Containment::Undecidable { .. }
+                | Containment::CannotFollowAFacesTrimming { .. }
+                | Containment::CannotFireARayAtAFacesSurface { .. }
+                | _ => unreachable!("the oracle only says inside or outside, not {expected:?}"),
+            }
+        }
+    }
+    eprintln!("{inside} points inside a wedge and {outside} outside, every one answered");
+    assert!(
+        inside >= 10 && outside >= 10,
+        "the points should land on both sides often: {inside} inside, {outside} outside"
+    );
+}
+
+/// Inside or outside a wedge of the unit ball swept anticlockwise from `first`
+/// by `fraction` of a turn, for a point well clear of its skin.
+fn where_it_is(first: [f64; 2], fraction: f64, [x, y, z]: [f64; 3]) -> Containment {
+    let clear = 0.05;
+    let reach = (x * x + y * y + z * z).sqrt();
+    assert!(
+        (reach - 1.0).abs() > clear,
+        "{:?} is too near the sphere",
+        [x, y, z]
+    );
+    if reach > 1.0 {
+        return Containment::Outside;
+    }
+    let turn = 2.0 * PI;
+    let swept = (y.atan2(x) - first[1].atan2(first[0])).rem_euclid(turn);
+    let sweep = fraction * turn;
+    assert!(
+        swept.min(turn - swept) > clear && (swept - sweep).abs() > clear,
+        "{:?} is too near a half-disc",
+        [x, y, z]
+    );
+    if swept < sweep {
+        Containment::Inside
+    } else {
+        Containment::Outside
     }
 }
 
