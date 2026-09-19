@@ -29,17 +29,15 @@ transverse, 6 equal pipes whose axes cross**, closed by §118 and §119. §122�
 took the last three; §126's failure is **§149's — the oracle, not the kernel**.
 **§121 landed** 2026-09-18 as `912cd168`, on §129, §130, §132 and §136.
 
-**What is closed.** §140 with §141.6's band by §143.9, and **all four** of
-§142's sites: 1 and 3 by **§154**, site 2 by §142.9's rationalisation
-(`37f24350`), and the **`across` term** by **§164** — the published `2²⁶` bound
-was about a line of code that is not there, and the real defect a leaning
-picking plane anchored on an axis. **§145** by §148 and **§155**. **§150**
-diagnosed by §156, fixed by §156.3's patch (`1cfbd60e`). **§151.5** by **§163**,
-and **§163.4** by **§165**: the oracle writes each edge's run now.
+**What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
+sites, 1 and 3 by §154, 2 by §142.9 (`37f24350`), `across` by **§164**. §145 by
+§148 and §155; §150 by §156; §151.5 by §163; §163.4 by §165. **§165.4's quarter
+ball** by **§166**: a lune's pole side was charged a whole turn.
 
-**Next and unclaimed: §165.4's quarter ball** — `validate` accepts it, yet it
-measures five times its volume; `a_wedge_of_a_ball` rebuilds it. §124's,
-§136.4's and §125.6's are deferred, not open.
+**Next and unclaimed: §166.4's `classify_point` refusal** — the quarter and three
+quarters still answer `CannotFollowAFacesTrimming` at every point asked, a named
+refusal from a cause other than §166's; `a_quarter_of_a_ball_built_face_by_face.rs`
+builds them. §124's, §136.4's and §125.6's are deferred, not open.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
