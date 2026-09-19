@@ -998,8 +998,7 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
     let here = one.axis().origin();
     let along = one.axis().direction();
     let squared_direction = squared_length_enclosing(exactly(along.components()));
-    let between = other.axis().origin() - here;
-    let towards = between - along * (between.dot(along) / along.length_squared());
+    let towards = the_step_across_to_the_other_axis(one, other);
 
     let picker = HalfSpace::through_a_point_square_to(here, along, along.cross(towards))?;
     let sideways = exactly(towards.components());
@@ -1043,6 +1042,76 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
         },
         Surface::Cylinder(*other),
     )
+}
+
+/// The step from one pipe's axis across to the other's, square to the shared
+/// direction.
+///
+/// Written the way it reads — `(c − o) − w·((c − o)·w / w·w)` — this is a
+/// subtraction of two numbers that agree to everything the answer is made of,
+/// and for two axes far enough apart along `w` it **rounds away to nothing**.
+/// Then `apart` is the zero-width box at zero, the sideways direction and the
+/// distance across both divide by it, and a pair of pipes whose axes really are
+/// a rounding apart comes back unnameable both ways round while one `f64` step
+/// either side of it is named in two straight runs (`docs/decisions.md` §145).
+///
+/// `(w × (c − o)) × w` is that same step multiplied by `w·w`. It is a polynomial
+/// in the stored numbers, so [`Exact`] holds it with nothing cancelling. It is
+/// written here as `((o − c) × w) × w`, which is the same vector: the only cross
+/// product [`Exact`] offers puts the already-exact side first, so crossing with
+/// `w` twice turns the step round, and starting from the gap the other way round
+/// turns it back.
+///
+/// **The scale comes back off before the step is handed on.** Every other reader
+/// below would have been happy without it: the picker only ranks three normals
+/// by which leans nearest `w × step`, `sideways` and `up` are each divided by
+/// the step's own length, and `leaning · how_far` is the step multiplied by
+/// `across` and divided by that length again — so a positive multiple cancels
+/// out of all of them. `across = (δ² + r₁² − r₂²) / 2δ` is the one that
+/// cares — it puts the
+/// step's length up against two radii, which are not scaled — so what comes back
+/// here is a step whose length is the distance between the axes and not `w·w`
+/// times it. That division is the whole of the rounding left, one per component,
+/// and a division is not a cancellation: what comes out is the true step to
+/// within an ulp or two of itself however far along `w` the two axes sit.
+///
+/// **Which way round it points is not read at all.**
+/// The picking half-space leans along `w × step` and `up` is `w × step` again,
+/// so turning the step round turns both together: the two runs come back in the
+/// other order and nothing else moves. Measured rather than argued — taking the
+/// gap the other way round leaves all four tests in
+/// `the_step_between_two_pipe_axes_taken_scaled.rs` green. It is written the way
+/// its name says all the same, because a reader is owed that.
+fn the_step_across_to_the_other_axis(one: &Cylinder, other: &Cylinder) -> Vector {
+    let here = one.axis().origin();
+    let there = other.axis().origin();
+    let along = one.axis().direction();
+    let scale = along.length_squared();
+
+    let stepped = Exact::cross_of(
+        &Exact::gap_between(there.coordinates(), here.coordinates()),
+        along.components(),
+    )
+    .and_then(|turned| Exact::cross_of(&turned, along.components()))
+    .map(|scaled| {
+        Vector::new(
+            scaled[0].nearest_f64() / scale,
+            scaled[1].nearest_f64() / scale,
+            scaled[2].nearest_f64() / scale,
+        )
+    });
+
+    match stepped {
+        Some(step) if step.is_finite() => step,
+        // Two coordinates whose difference times `w·w` leaves `f64` altogether,
+        // or a product on the way there that would have landed among the
+        // subnormals. The plain subtraction is what this row has always done and
+        // it is what is left when the exact level cannot run.
+        _ => {
+            let between = there - here;
+            between - along * (between.dot(along) / scale)
+        }
+    }
 }
 
 /// Two pipes leaning against each other: nothing, one touching point, one closed
