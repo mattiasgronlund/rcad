@@ -80,9 +80,12 @@ fn the_pair_is_named_in_two_runs_one_way_round_and_refused_the_other() {
 /// a different bug from the one here.
 ///
 /// The neighbours a single `f64` step along `z` either side are not near
-/// neighbours: a step at `7.68e15` is `2`, which is more than a pipe is wide, so
-/// one step back still crosses in two runs and one step on misses entirely.
-/// Both of them answer the same both ways round.
+/// neighbours. One step at `7.68e15` is `1`, and the shared direction leans out
+/// of `z`, so a step moves the axes `√(1 − d_z²) ≈ 0.64` apart — near a third of
+/// the touching distance of `2`. Measured exactly, the axes are `0.6135` apart
+/// one step back, `1.7576` here, and `2.3821` one step on: so one step back
+/// still crosses in two runs and one step on misses entirely, and both of them
+/// answer the same both ways round.
 #[test]
 fn the_two_axes_are_well_inside_touching_distance_and_neither_neighbour_is_order_dependent() {
     let apart = to_the_other_axis().length();
