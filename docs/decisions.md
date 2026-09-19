@@ -15,30 +15,30 @@ Each decision cites the roadmap section it comes from or contradicts.
 
 ## 0. Where the work is
 
-reviewed: 2026-09-18
+reviewed: 2026-09-19
 
-**unit:** *a crossing too nearly parallel to follow* — the corpus files that
-hang on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off
-§107's table. §16.10 governs it: "too nearly parallel to follow" is a claim
-that something cannot be done, so it owes a demonstration either way — a gap if
-a scaling or a reformulation reaches the sign, a limit if none does.
+**unit:** *a crossing too nearly parallel to follow* — the corpus files that hang
+on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107's
+table. §16.10 governs it: a claim that something cannot be done owes a
+demonstration either way — a gap if a scaling reaches the sign, a limit if not.
 
-**Five waves have run and the demonstration is in.** §110–§113 named the pair
-and the site and falsified §109.6 — the wall is `settled`, not `one_step`.
-§115–§117 walked closed edges by this kernel's rule and not the file's flag
-(KiCad import 97/323 → 110/323), leaving 26: **20 a limit, none transverse, 6
-equal pipes whose axes cross**, answered in closed form by §118 and §119.
-§122–§128 took the last three, the third a finding — the certified rule asks
-both faces of one closed edge to be forward and only one can be. §126 cleared
-itself of the commutativity failure blamed on it, and **that failure was real
-and is now unreproduced**: §126.6.
+**Five waves have run and the demonstration is in.** §110–§113 named the pair and
+falsified §109.6 — the wall is `settled`, not `one_step`. §115–§117 walked closed
+edges by this kernel's rule, not the file's flag (KiCad 97/323 → 110/323), leaving
+26: **20 a limit, none transverse, 6 equal pipes whose axes cross**, answered in
+closed form by §118 and §119. §122–§128 took the last three; §126 cleared itself
+of a commutativity failure that **was real and is now unreproduced**: §126.6.
 
-**§121 has landed** on 2026-09-18, with everything doing it needed: §129 its own
-run and the ulp that cost a corner, §130 the meet's exact tier, §132 the plane
-offset rounding once, §136 the corner allowance. The stack landed as `912cd168`.
+**§121 has landed** on 2026-09-18 as `912cd168`, on §129's own run, §130's exact
+meet, §132's plane offset rounding once and §136's corner allowance.
 
-**What is left:** §126.6's counterexample; §124's, §136.4's and §125.6's gaps
-are deferred, not open work.
+**What is left, and §140 is the live one.** A crossing that answers one way round
+and refuses the other — **the only known correctness defect on `main`**. §140.7
+gives it a lane, not the deferred list: §13 governs features, never correctness
+gaps. §140.5 is the lane's first question and open on purpose — a commutativity
+failure does not say *which* order is wrong, so the refusal may be the gap or the
+answering order unsound. Then §126.6's counterexample; §124's, §136.4's and
+§125.6's gaps are deferred, not open work.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
