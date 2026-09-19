@@ -150,6 +150,17 @@ def load(root, repo, since, until, only=None):
                 for block in ((record or {}).get("message") or {}).get("content") or []:
                     if isinstance(block, dict) and block.get("type") == "tool_result":
                         results[block.get("tool_use_id")] = _text_of(block.get("content"))
+            elif "<task-notification>" in line:
+                # A dispatched agent answers long after the call that started it:
+                # the tool result is a launch receipt, and what the agent found
+                # arrives later as a notification carrying the same tool_use id.
+                # Both are text the asking session carries, so both belong here.
+                record = _parse(line)
+                prompt = ((record or {}).get("attachment") or {}).get("prompt", "")
+                call = re.search(r"<tool-use-id>(\w+)</tool-use-id>", prompt)
+                answer = re.search(r"<result>(.*)</result>", prompt, re.S)
+                if call and answer:
+                    results[call.group(1)] = results.get(call.group(1), "") + answer.group(1)
 
         for key in order:
             group = grouped[key]
@@ -385,6 +396,21 @@ def ritual_of(tools):
     return None
 
 
+def is_lookup(response):
+    """A response that only looked something up, and is not one of the rituals.
+
+    The rituals are a session asking about its own state — `just lanes`, the
+    question file, a renumber — and there is nobody to send for that answer.
+    §144.5 owns them. What is left is the population a lookup lane is aimed at,
+    and it is a fifth of what the word "finding" covers in `summary`.
+    """
+    if not response["tools"]:
+        return False
+    if not all(c == "finding" for c in categories(response)):
+        return False
+    return ritual_of(response["tools"]) is None
+
+
 # ------------------------------------------------------------------- reports
 
 def banner(responses, window):
@@ -446,7 +472,204 @@ def report_summary(responses, total):
                 n += 1
             previous = now
     print(f"  of those, {n:,} directly followed another: ${tax:,.2f} = {100 * tax / total:.1f}%")
+    print("  `finding` takes this apart: most of it is nobody's to delegate")
     print()
+
+
+def report_finding(responses, results, total):
+    """Looking things up: what could be handed to a lane, and when that pays.
+
+    `summary` prints one number for finding, and the number is misread: it
+    counts every probe, wherever it was made and whatever it was about. This
+    report separates the part a lookup lane could take from the part it could
+    not, then prices the lane against the hunts it would replace. §158.
+    """
+    print("=== looking things up: the part a lookup lane could take ===")
+    main = [r for r in responses if not r["lane"]]
+    inside = [r for r in responses if r["lane"]]
+
+    def probe_price(chunk):
+        probes = [r["cost"] for r in chunk if r["tools"]
+                  and all(c == "finding" for c in categories(r))]
+        return sum(probes), (sorted(probes)[len(probes) // 2] if probes else 0.0)
+
+    outer, outer_each = probe_price(main)
+    inner, inner_each = probe_price(inside)
+    print(f"  in main sessions      ${outer:9,.2f} {100 * outer / total:5.1f}%"
+          f"   ${outer_each:.3f} a response")
+    print(f"  inside lanes          ${inner:9,.2f} {100 * inner / total:5.1f}%"
+          f"   ${inner_each:.3f} a response — already the cheap kind, and a lane"
+          f" has nowhere to send it")
+    ritual = sum(r["cost"] for r in main if r["tools"]
+                 and all(c == "finding" for c in categories(r))
+                 and ritual_of(r["tools"]))
+    real = sum(r["cost"] for r in main if is_lookup(r))
+    print(f"  of the main-session part, ritual ${ritual:,.2f} "
+          f"({100 * ritual / total:.1f}%) — §144.5's, and no lane can be sent for it")
+    print(f"  LEFT TO DELEGATE      ${real:9,.2f} {100 * real / total:5.1f}%")
+    print()
+
+    runs = finding_runs(responses)
+    if not runs:
+        print("  no lookups in this window")
+        return
+    print("=== how a hunt runs: back-to-back lookups in one main session ===")
+    spread, priced = collections.Counter(), collections.Counter()
+    for run in runs:
+        length = min(len(run), 10)
+        spread[length] += 1
+        priced[length] += sum(r["cost"] for r in run)
+    for length in sorted(spread):
+        label = f"{length}" if length < 10 else "10+"
+        print(f"  run of {label:>3}: {spread[length]:5,d} runs ${priced[length]:8,.2f} "
+              f"{100 * priced[length] / total:5.1f}%")
+    long_ctx = sorted(run[0]["context"] for run in runs if len(run) >= 3)
+    short_ctx = sorted(run[0]["context"] for run in runs if len(run) < 3)
+    if long_ctx and short_ctx:
+        print(f"  a run of 3+ starts at context {long_ctx[len(long_ctx) // 2]:,} at the median")
+        print(f"  a run of 1-2 starts at        {short_ctx[len(short_ctx) // 2]:,}")
+        print("  — the longer hunt starts LOWER, so a context threshold selects"
+              " the wrong probes")
+    print()
+
+    price = lookup_lane_price(responses, results)
+    print("=== what a lookup lane costs, matched to its dispatch by agent id ===")
+    if not price["lanes"]:
+        print("  none dispatched in this window")
+        return
+    print(f"  {price['lanes']} dispatched, {price['matched']} of them with a transcript"
+          f" in this window")
+    print(f"  the dispatching response  ${price['dispatch']:.3f}"
+          f"   billed at the asking session's context, like any probe")
+    print(f"  the lane itself           ${price['lane']:.3f}"
+          f"   over {price['responses']} responses")
+    print(f"  carrying what came back   ${price['carry']:.3f}")
+    print(f"  ALL IN                    ${price['all_in']:.3f}")
+    hunt = sorted(sum(r["cost"] for r in run) for run in runs if len(run) >= 3)
+    if hunt:
+        print(f"  a hunt of 3+ costs        ${hunt[len(hunt) // 2]:.3f} at the median")
+    print()
+
+    print("=== when handing the rest of a hunt to a lane pays ===")
+    print(f"  {'trigger':>8} {'runs':>6} {'what follows':>13} {'lanes':>9} {'net':>9} {'% week':>8}")
+    for after in range(1, 7):
+        hit, net = delegation_net(runs, after, price["all_in"])
+        follows = sum(r["cost"] for run in runs if len(run) > after for r in run[after:])
+        print(f"  past {after:2d} {hit:8,d} ${follows:12,.2f} ${hit * price['all_in']:8,.2f} "
+              f"${net:8,.2f} {100 * net / total:7.2f}%")
+    print("  and the same hunts delegated at their FIRST probe, which needs foresight:")
+    for least in (2, 3, 4, 5):
+        hit = [run for run in runs if len(run) >= least]
+        net = sum(r["cost"] for run in hit for r in run) - len(hit) * price["all_in"]
+        print(f"    hunts of {least}+: {len(hit):5,d} runs, net ${net:8,.2f} "
+              f"{100 * net / total:6.2f}% of the week")
+    print("  the lane's own price is the dial, so the same hunts of 3+ at a cheaper lane:")
+    hit = [run for run in runs if len(run) >= 3]
+    spent = sum(r["cost"] for run in hit for r in run)
+    for part, label in ((1.0, "as measured"), (0.5, "half"), (0.25, "a quarter")):
+        each = price["dispatch"] + part * (price["lane"] + price["carry"])
+        net = spent - len(hit) * each
+        print(f"    lane at {label:12} (${each:.3f} all in): net ${net:8,.2f} "
+              f"{100 * net / total:6.2f}% of the week")
+    print()
+
+
+def finding_runs(responses):
+    """Maximal stretches of back-to-back lookups inside one main session.
+
+    A hunt is what a lane replaces, so a hunt is what has to be counted — not
+    single responses, which is all `summary` can see. Anything that is not a
+    lookup ends the run, a ritual call included: asking `just lanes` in the
+    middle of a hunt is a different question, not a continuation of this one.
+    """
+    by_session = collections.defaultdict(list)
+    for r in responses:
+        if not r["lane"]:
+            by_session[r["session"]].append(r)
+    runs = []
+    for chunk in by_session.values():
+        current = []
+        for r in chunk:
+            if is_lookup(r):
+                current.append(r)
+            elif current:
+                runs.append(current)
+                current = []
+        if current:
+            runs.append(current)
+    return runs
+
+
+def delegation_net(runs, after, lane_price):
+    """What handing the rest of a hunt to a lane saves, once the lane is paid for.
+
+    Delegating after N probes means those N happen anyway and everything from
+    the N+1th onward is replaced by one dispatch and a lane. So what is saved is
+    the tail of the run, and what is added is the whole `all_in` price — the
+    dispatch is a response in the asking session like the probe it replaces, and
+    is priced as one. Only a run longer than N has a tail to hand over.
+    """
+    hit = [run for run in runs if len(run) > after]
+    saved = sum(r["cost"] for run in hit for r in run[after:])
+    return len(hit), saved - len(hit) * lane_price
+
+
+def lookup_lane_price(responses, results):
+    """The three prices that make up one dispatched lookup lane, measured.
+
+    The launch receipt names the lane's agent id and the lane's transcript is
+    the file named for that id, so the pairing is exact rather than a guess
+    from the brief's first line. The three parts are the dispatching response,
+    the lane's own responses, and carrying the receipt and the answer for the
+    rest of the session that asked. Medians, because two of the three are
+    long-tailed and the mean is one runaway lane away from being wrong.
+    """
+    by_session = collections.defaultdict(list)
+    for r in responses:
+        if not r["lane"]:
+            by_session[r["session"]].append(r)
+
+    dispatch, carry, agents = [], [], {}
+    for r in responses:
+        for call in r["tools"]:
+            if call.get("name") not in ("Agent", "Task"):
+                continue
+            if (call.get("input") or {}).get("subagent_type") != "lookup":
+                continue
+            back = results.get(call.get("id"), "")
+            named = re.search(r"agentId: (\w+)", back)
+            if not named:
+                continue
+            agents[named.group(1)] = r
+            dispatch.append(r["cost"])
+            after = [x for x in by_session[r["session"]] if x["when"] > r["when"]]
+            carry.append(len(back) / CHARS_PER_TOKEN
+                         * sum(x["read_rate"] for x in after) / 1e6)
+
+    lane_cost, lane_n = collections.Counter(), collections.Counter()
+    for r in responses:
+        if not r["lane"]:
+            continue
+        base = os.path.basename(r["path"])
+        for agent in agents:
+            if agent in base:
+                lane_cost[agent] += r["cost"]
+                lane_n[agent] += 1
+
+    def middle(values, fallback=0.0):
+        values = sorted(values)
+        return values[len(values) // 2] if values else fallback
+
+    price = {
+        "lanes": len(agents),
+        "matched": sum(1 for agent in agents if lane_cost[agent]),
+        "dispatch": middle(dispatch),
+        "lane": middle(lane_cost.values()),
+        "responses": middle(lane_n.values()),
+        "carry": middle(carry),
+    }
+    price["all_in"] = price["dispatch"] + price["lane"] + price["carry"]
+    return price
 
 
 def report_classes(responses, total):
@@ -678,6 +901,7 @@ def report_warnings(responses, warnings, total):
 
 REPORTS = {
     "summary": lambda rs, res, ws, t: report_summary(rs, t),
+    "finding": lambda rs, res, ws, t: report_finding(rs, res, t),
     "classes": lambda rs, res, ws, t: report_classes(rs, t),
     "ritual": lambda rs, res, ws, t: report_ritual(rs, t),
     "sessions": lambda rs, res, ws, t: report_sessions(rs, t),

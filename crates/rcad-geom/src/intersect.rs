@@ -1271,6 +1271,21 @@ fn where_two_leaning_pipes_cross(
 /// is at most `δ + r₁` and the reading is at least `α·√(r₂² − (δ+r₁)²) − |β|·(δ + r₁)`.
 /// Still a **gap** where that does not clear the offset's own rounding: the two
 /// loops are there and they are tellable apart.
+///
+/// **That gap is now the only one here, and it is a different one from §142.8's.**
+/// `r₂² − (δ + r₁)²` was worked out as it is written and nothing else, and for a
+/// fat pipe barely wide enough to swallow the thin one the two squares cancel to
+/// nothing — so `clear` reached zero and `margin` could not be above it whatever
+/// the half-space did. Where that happens the same `clear` is read a second way,
+/// as `m·(r₂ + δ + r₁)` with `m` from
+/// [`how_far_the_fat_pipe_out_reaches_the_thin_one`], and across the whole of
+/// `how_often_naming_a_crossing_refuses` the 17 crossings of 374 whose `clear`
+/// reached zero all come back with a positive one.
+///
+/// **None of the 17 is named even so**, and that is this paragraph's gap rather
+/// than an arithmetic one: every one of them fails on `β·(δ + r₁)` instead, by
+/// tenths and not by roundings, because two loops that nearly touch need a
+/// half-space that leans further than any of the three available ones does.
 fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<SurfaceMeet> {
     let (thin_way, fat_way) = (
         thin.axis().direction().components(),
@@ -1296,7 +1311,14 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
     let [thin_radius, fat_radius] = [thin, fat].map(|pipe| Interval::exactly(pipe.radius()));
     let apart = how_far_apart_two_axes_are_enclosing(thin, fat);
     let reach = apart + thin_radius;
-    let clear = root_enclosing(fat_radius * fat_radius - reach * reach);
+    let squared_clear = fat_radius * fat_radius - reach * reach;
+    let clear = if squared_clear.lo() > 0.0 {
+        root_enclosing(squared_clear)
+    } else {
+        root_enclosing(
+            how_far_the_fat_pipe_out_reaches_the_thin_one(thin, fat, apart) * (fat_radius + reach),
+        )
+    };
     let (leaning_into, leaning_away) =
         how_a_picking_half_space_lies_across_an_axis(&between, thin, fat);
     let margin = leaning_into * clear
@@ -1319,6 +1341,69 @@ fn two_loops_either_side_of_a_pipe(thin: &Cylinder, fat: &Cylinder) -> Result<Su
             })
             .collect(),
     ))
+}
+
+/// `r_fat − r_thin − δ`, as an enclosure, for a pair the caller has already had
+/// `ask` certify is above zero.
+///
+/// # Why the subtraction is not enough
+///
+/// The caller only asks this where `r_fat² − (δ + r_thin)²` came out reaching
+/// zero, and writing the difference out as it stands does not help there: those
+/// are the same three numbers the filter in [`where_two_leaning_pipes_cross`] put
+/// against each other, and the filter is what straddled zero to send the question
+/// to the exact level in the first place.
+///
+/// A fat pipe one ulp wider than the axes are apart, against a thin one narrower
+/// than that ulp, is the measured case — `docs/decisions.md` §142.8. The true
+/// answer there is `1.92e-16` and `δ`'s own irreducible width at magnitude one is
+/// `2.22e-16`, **larger than the answer**, so no association of this subtraction
+/// in `f64` intervals reaches a positive low end.
+///
+/// # Rationalising, which does reach it
+///
+/// Write `S = r_fat − r_thin` and `δ = |T|/√K`. Multiplying above and below by
+/// `S + δ` clears the root out of the numerator:
+///
+/// ```text
+/// S − δ  =  (S² − δ²) / (S + δ)  =  (S²K − T²) / (K·(S + δ))
+/// ```
+///
+/// `S²K − T²` is [`how_far_two_radii_out_reach_a_gap_exactly`]'s expansion, which
+/// the exact level was already building to settle this very sign, and it has no
+/// cancellation left in it. The denominator is `K > 0` times a sum of two numbers
+/// neither of which is below zero, so it cannot cancel either. Nothing new is
+/// computed: the expansion is the one the sign question builds, and `δ` is the
+/// one the caller already has.
+///
+/// **The expansion exists wherever the caller needs it**, and that is what makes
+/// the pair of routes complete rather than lucky: `ask` reaches the exact level
+/// only when the filter straddles zero, and the filter straddling zero is the
+/// same condition that sends the caller here.
+///
+/// Where `Exact` cannot form the expansion at all — a product landing among the
+/// subnormals, or an axis gap that leaves `f64`'s range — this falls back to the
+/// plain subtraction, which is no better than what the caller already had. A pair
+/// that refused then refuses still, rather than being answered out of thin air.
+fn how_far_the_fat_pipe_out_reaches_the_thin_one(
+    thin: &Cylinder,
+    fat: &Cylinder,
+    apart: Interval,
+) -> Interval {
+    let widths = Interval::exactly(fat.radius()) - Interval::exactly(thin.radius());
+    let subtracted = widths - apart;
+    let Some((volume, squared_sideways)) = exactly_how_far_apart_two_axes_are(thin, fat) else {
+        return subtracted;
+    };
+    let Some(out_reach) =
+        how_far_two_radii_out_reach_a_gap_exactly(thin, fat, -1.0, &squared_sideways, &volume)
+    else {
+        return subtracted;
+    };
+    quotient_or_everything(
+        out_reach.enclosure(),
+        squared_sideways.enclosure() * (widths + apart),
+    )
 }
 
 /// How much of a picking half-space's normal lies along the direction that tells
@@ -1423,7 +1508,7 @@ fn how_far_apart_two_axes_are_enclosing(one: &Cylinder, other: &Cylinder) -> Int
     // relative accuracy and two nearly-parallel pipes are as decidable as any
     // other pair (§29).
     let (volume, squared_sideways) = match exactly_how_far_apart_two_axes_are(one, other) {
-        Some(both) => both,
+        Some((volume, squared_sideways)) => (volume.enclosure(), squared_sideways.enclosure()),
         None => {
             let sideways = cross_enclosing(exactly(my_way), exactly(their_way));
             (
@@ -1445,12 +1530,15 @@ fn how_far_apart_two_axes_are_enclosing(one: &Cylinder, other: &Cylinder) -> Int
     quotient_or_everything(size, root_enclosing(squared_sideways))
 }
 
-/// `T = (o₂ − o₁)·(w₁ × w₂)` and `K = ‖w₁ × w₂‖²`, summed exactly and then
-/// enclosed, or `None` where a product would round.
-fn exactly_how_far_apart_two_axes_are(
-    one: &Cylinder,
-    other: &Cylinder,
-) -> Option<(Interval, Interval)> {
+/// `T = (o₂ − o₁)·(w₁ × w₂)` and `K = ‖w₁ × w₂‖²`, summed exactly, or `None`
+/// where a product would round.
+///
+/// The two together are everything the gap `δ = |T|/√K` is made of, so a caller
+/// that wants the gap takes [`Exact::enclosure`] of each and divides, and one
+/// that wants a polynomial in them — [`how_two_radii_and_a_gap_compare_exactly`]
+/// and [`how_far_the_fat_pipe_out_reaches_the_thin_one`] both do — keeps them
+/// exact and builds on them.
+fn exactly_how_far_apart_two_axes_are(one: &Cylinder, other: &Cylinder) -> Option<(Exact, Exact)> {
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
     let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
     let sideways = Exact::cross_of(&Exact::of_each(my_way), their_way)?;
@@ -1463,10 +1551,7 @@ fn exactly_how_far_apart_two_axes_are(
             ),
         )
     })?;
-    Some((
-        volume.enclosure(),
-        Exact::squared_length_of(&sideways)?.enclosure(),
-    ))
+    Some((volume, Exact::squared_length_of(&sideways)?))
 }
 
 /// A number with the same sign as `mine·r₁ + theirs·r₂ + gap·δ`, exactly.
@@ -1524,19 +1609,7 @@ fn how_two_radii_and_a_gap_compare_exactly(
         [mine, theirs, gap].iter().all(|side| side.abs() == 1.0),
         "the three are signs, and squaring them away above assumed each is one"
     );
-    let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
-    let [my_way, their_way] = [one, other].map(|pipe| pipe.axis().direction().components());
-    let sideways = Exact::cross_of(&Exact::of_each(my_way), their_way)?;
-    let squared_sideways = Exact::squared_length_of(&sideways)?;
-    let volume = (0..3).try_fold(Exact::of(0.0), |so_far, axis| {
-        Some(
-            so_far.plus(
-                &Exact::of(there[axis])
-                    .minus(&Exact::of(here[axis]))
-                    .times(&sideways[axis])?,
-            ),
-        )
-    })?;
+    let (volume, squared_sideways) = exactly_how_far_apart_two_axes_are(one, other)?;
 
     // The sign of `mine·r₁ + theirs·r₂`. Both radii are above zero, so where the
     // two pull against each other it is which of them is wider — a comparison of
@@ -1569,13 +1642,14 @@ fn how_two_radii_and_a_gap_compare_exactly(
         (Decision::Pos, Decision::Pos) => Decision::Pos,
         (Decision::Neg, Decision::Neg) => Decision::Neg,
         (radii_sign, _) => {
-            let out_reaches = whether_two_radii_out_reach_a_gap_exactly(
+            let out_reaches = how_far_two_radii_out_reach_a_gap_exactly(
                 one,
                 other,
                 mine * theirs,
                 &squared_sideways,
                 &volume,
-            )?;
+            )?
+            .sign();
             match (out_reaches, radii_sign == Decision::Pos) {
                 (Decision::Zero, _) => Decision::Zero,
                 (Decision::Pos, true) | (Decision::Neg, false) => Decision::Pos,
@@ -1592,20 +1666,26 @@ fn how_two_radii_and_a_gap_compare_exactly(
     }))
 }
 
-/// The sign of `S²K − T²`: whether the two widths together out-reach the gap
-/// between the axes.
+/// `S²K − T²`: by how much the two widths together out-reach the gap between the
+/// axes, with the one square root cleared out of it.
 ///
 /// `together` is `mine·theirs`, the one thing the caller's two signs leave in
 /// `S² = r₁² + r₂² + 2·together·r₁r₂`. Degree six on each side, and every factor
 /// is a product of stored numbers, so this decides unless one of them leaves
 /// `f64`'s range.
-fn whether_two_radii_out_reach_a_gap_exactly(
+///
+/// **The value and not only its sign**, because two callers want two different
+/// things out of it. [`how_two_radii_and_a_gap_compare_exactly`] takes the sign,
+/// which is all a `Decision` can carry; [`how_far_the_fat_pipe_out_reaches_the_thin_one`]
+/// divides it by `K·(S + δ)` and gets `S − δ` back, which is a size no sign
+/// could have handed over. `docs/decisions.md` §142.9.
+fn how_far_two_radii_out_reach_a_gap_exactly(
     one: &Cylinder,
     other: &Cylinder,
     together: f64,
     squared_sideways: &Exact,
     volume: &Exact,
-) -> Option<Decision> {
+) -> Option<Exact> {
     let widths = Exact::product_of(one.radius(), one.radius())?
         .plus(&Exact::product_of(other.radius(), other.radius())?)
         .plus(&Exact::product_of(
@@ -1615,8 +1695,7 @@ fn whether_two_radii_out_reach_a_gap_exactly(
     Some(
         widths
             .times(squared_sideways)?
-            .minus(&volume.times(volume)?)
-            .sign(),
+            .minus(&volume.times(volume)?),
     )
 }
 

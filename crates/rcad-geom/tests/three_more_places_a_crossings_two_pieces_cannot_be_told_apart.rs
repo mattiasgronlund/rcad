@@ -13,14 +13,16 @@
 //! arithmetic that could not reach an answer rather than an answer that is not
 //! there.
 //!
-//! # Sites one and three are closed, and these tests now say so
+//! # All three are closed, and these tests now say so
 //!
-//! Both threw away a number the caller had already summed exactly, and both now
-//! read it back instead of working it out again in intervals. The enclosures
-//! below are still exactly what they were — the assertions that they straddle
-//! zero are kept — and the pairs are named anyway. **That is the point:** the
-//! interval route still cannot decide either pair, and neither one goes through
-//! it any more. Site two is still open, and its test still expects a refusal.
+//! Sites one and three threw away a number the caller had already summed
+//! exactly, and both now read it back instead of working it out again in
+//! intervals. Site two threw away a *size*: the same expansion that settles the
+//! sign is the numerator of the size, once the difference is rationalised. The
+//! enclosures below are still exactly what they were — the assertions that they
+//! straddle zero are kept — and the pairs are named anyway. **That is the
+//! point:** the interval route still cannot decide any of the three, and none of
+//! them goes through it any more.
 //!
 //! # Why the printed enclosure is the one the kernel computed
 //!
@@ -51,11 +53,14 @@
 //! axis. Both were then worked out again in intervals and lost, and both now
 //! read the exact sum instead. Site two is not that shape: the sign it needs is
 //! decided exactly, but `clear` wants the *size* of `r_fat² − reach²` and not
-//! its sign, and no exact level hands a size back.
+//! its sign. What closes it is rationalising, not a new exact routine —
+//! `r_fat − r_thin − δ` is `(S²K − T²)/(K·(S + δ))` with `S = r_fat − r_thin`,
+//! and that numerator is the expansion the exact level was already building to
+//! settle the sign.
 
 #![forbid(unsafe_code)]
 
-use rcad_geom::{Axis, Cylinder, Error, Plane, Point, Sphere, Surface, Vector, intersect};
+use rcad_geom::{Axis, Cylinder, Plane, Point, Sphere, Surface, Vector, intersect};
 use rcad_predicates::{Interval, Policy, ProvenanceLog};
 
 /// How far along its own direction the pipe's axis origin sits, for site one.
@@ -160,7 +165,7 @@ const AXES_APART: f64 = 1.0;
 const THIN: f64 = 3.0e-17;
 
 /// Site two, `intersect.rs:1198`: a fat pipe only just wide enough to swallow a
-/// thin one's whole cross-section loses both of its loops.
+/// thin one's whole cross-section used to lose both of its loops.
 ///
 /// The thin pipe runs along `x` through the origin, the fat one along `y`
 /// through `(0, 0, 1)`, so the two axes are exactly one apart — the cross
@@ -168,19 +173,27 @@ const THIN: f64 = 3.0e-17;
 /// division by `√K` has nothing to spoil. Two closed loops are what a crossing
 /// is when `r_fat > δ + r_thin`, and that comparison is asked through `ask` with
 /// an exact level under it, so reaching
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] at all **proves the exact
-/// level already said two loops**. The answer exists; `clear` cannot reach it.
+/// `Error::CannotNameWhichPieceOfACrossingThisIs` at all **proved the exact
+/// level had already said two loops**. The answer exists; `clear` could not
+/// reach it.
 ///
-/// `clear = √(r_fat² − (δ + r_thin)²)` is where it is lost. With the thin pipe
+/// `clear = √(r_fat² − (δ + r_thin)²)` is where it was lost. With the thin pipe
 /// far narrower than one bit of `δ`, `δ + r_thin` is not a number and the two
 /// squares are within a rounding of each other, so the value under the root
-/// straddles zero. The test walks the first few `f64`s above `δ` and reports how
-/// many of them refuse.
+/// straddles zero. It still does — this test prints it — and `clear` no longer
+/// asks it. `r_fat² − reach²` is `m·(r_fat + reach)` with
+/// `m = r_fat − r_thin − δ`, and `m` is read off the rationalised quotient
+/// `(S²K − T²)/(K·(S + δ))`, whose numerator is the expansion the exact level
+/// builds anyway.
+///
+/// The test walks the first twelve `f64` widths above `δ` and requires all
+/// twelve to be named. Exactly one of them refused before the fix,
+/// `1.0000000000000002`, a band one ulp wide.
 #[test]
-fn a_fat_pipe_only_just_wide_enough_to_swallow_a_thin_one_loses_both_of_its_loops() {
+fn a_fat_pipe_only_just_wide_enough_to_swallow_a_thin_one_keeps_both_of_its_loops() {
     let thin = Cylinder::new(Axis::x(), THIN).expect("a pipe a rounding wide");
-    let mut refused = Vec::new();
-    let mut named = Vec::new();
+    let reach = Interval::exactly(AXES_APART) + Interval::exactly(THIN);
+    let mut straddling = Vec::new();
 
     let mut fat_radius = AXES_APART;
     for _ in 0..12 {
@@ -191,58 +204,56 @@ fn a_fat_pipe_only_just_wide_enough_to_swallow_a_thin_one_loses_both_of_its_loop
             fat_radius,
         )
         .expect("a fat pipe");
+        let skin = Interval::exactly(fat_radius);
+        let under_the_root = skin * skin - reach * reach;
+        if under_the_root.lo() <= 0.0 {
+            straddling.push((fat_radius, under_the_root));
+        }
+
         let met = intersect(
             &Surface::Cylinder(thin),
             &Surface::Cylinder(fat),
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
-        let skin = Interval::exactly(fat_radius);
-        let reach = Interval::exactly(AXES_APART) + Interval::exactly(THIN);
-        let under_the_root = skin * skin - reach * reach;
-        match met {
-            Err(Error::CannotNameWhichPieceOfACrossingThisIs) => {
-                assert!(
-                    under_the_root.lo() <= 0.0,
-                    "a refusal here has to be `clear` reaching zero, and at {fat_radius:e} \
-                     the value under its root was {under_the_root:?}"
-                );
-                refused.push(fat_radius);
-            }
-            Ok(_) => {
-                assert!(
-                    under_the_root.lo() > 0.0,
-                    "every width `clear` cannot certify has to refuse, and {fat_radius:e} \
-                     did not: {under_the_root:?}"
-                );
-                named.push(fat_radius);
-            }
-            other => panic!("neither named nor site 1198's refusal: {other:?}"),
-        }
+        assert!(
+            matches!(met, Ok(rcad_geom::SurfaceMeet::Curves(ref runs)) if runs.len() == 2),
+            "site 1198 should name the two loops at r_fat {fat_radius:e}, where the \
+             value under `clear`'s root encloses {under_the_root:?}, and said {met:?}"
+        );
     }
 
-    let reach = Interval::exactly(AXES_APART) + Interval::exactly(THIN);
-    let widest = *refused.last().expect("at least one width must refuse");
-    let skin = Interval::exactly(widest);
     println!("site 2: δ + r_thin encloses {reach:?}");
+    for (width, under_the_root) in &straddling {
+        println!("site 2: r_fat² − reach² encloses {under_the_root:?} at r_fat {width:e}");
+    }
     println!(
-        "site 2: r_fat² − reach² encloses {:?} at the widest refusing r_fat {widest:e}",
-        skin * skin - reach * reach
-    );
-    println!(
-        "site 2: {} of the first 12 f64 widths above δ refuse, the first named one is {:e}",
-        refused.len(),
-        named.first().copied().unwrap_or(f64::NAN)
+        "site 2: {} of the first 12 f64 widths above δ have an interval \
+         `r_fat² − reach²` that reaches zero, and all 12 are named",
+        straddling.len()
     );
 
     assert!(
-        !refused.is_empty(),
-        "site 1198 was expected to refuse a fat pipe a rounding wider than δ + r_thin"
+        !straddling.is_empty(),
+        "the interval route has to still fail on at least one of these widths, or \
+         this is no longer measuring site 1198's shape"
+    );
+    let just_too_narrow = Cylinder::new(
+        Axis::new(Point::new(0.0, 0.0, AXES_APART), Vector::new(0.0, 1.0, 0.0))
+            .expect("an axis along y"),
+        AXES_APART,
+    )
+    .expect("a fat pipe exactly as wide as the axes are apart");
+    let met = intersect(
+        &Surface::Cylinder(thin),
+        &Surface::Cylinder(just_too_narrow),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
     );
     assert!(
-        !named.is_empty(),
-        "a fat pipe a few roundings wider must still be named, or this is measuring \
-         something other than the width of the refusing band"
+        matches!(met, Ok(rcad_geom::SurfaceMeet::Curves(ref runs)) if runs.len() == 1),
+        "a fat pipe no wider than δ does not swallow the thin one's cross-section, so \
+         the crossing is one curve and not two: {met:?}"
     );
 }
 

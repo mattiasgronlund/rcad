@@ -6091,16 +6091,24 @@ check-hub-align-selftest:
 # argument keeps only the lanes whose path contains it.
 #
 # The reports are `summary` (token classes, batching, context, the cost of
-# finding), `classes` (which part of the tree the money went into), `ritual`
-# (the recurring work no kernel change needs), `sessions`, `carry` (what fills
-# the context every later response pays to re-read), `ceiling` (what handing
-# off at a context cap would have saved) and `warnings` (what the budget hook
-# that exists actually caught).
+# finding), `finding` (which of that a lookup lane could take, and what handing
+# it over would cost), `classes` (which part of the tree the money went into),
+# `ritual` (the recurring work no kernel change needs), `sessions`, `carry`
+# (what fills the context every later response pays to re-read), `ceiling`
+# (what handing off at a context cap would have saved) and `warnings` (what the
+# budget hook that exists actually caught).
 #
-# The last two ask different questions and answered differently on the week of
-# 2026-09-12: `ceiling` prices a cap nothing enforces, `warnings` prices the one
-# installed, and the money turned out to be in sessions warned on time that kept
-# going rather than in where the line was drawn. `docs/decisions.md` §160.
+# **`summary`'s finding line is the one that gets misread**, and `finding`
+# exists because it was: it counts every probe, wherever made and whatever
+# about, and two thirds of what it counts is nobody's to delegate — probes
+# inside lanes, which are cheap already, and §144.5's ritual, which is a session
+# asking about its own state. `docs/decisions.md` §158.
+#
+# **`ceiling` and `warnings` ask different questions** and answered differently
+# on the week of 2026-09-12: `ceiling` prices a cap nothing enforces, `warnings`
+# prices the one installed, and the money turned out to be in sessions warned on
+# time that kept going rather than in where the line was drawn.
+# `docs/decisions.md` §160.
 #
 # **This reads transcripts, never the repository.** It cannot be a `check-` and
 # is not in `gate_steps`: its answer moves with what the sessions did this week,
@@ -6124,19 +6132,27 @@ spend since="" until="" report="all" lane="":
         '-home-mattias-git-mattiasgronlund-rcad' \
         "$since" "$until" '{{report}}' '{{lane}}'
 
-# The three parts of `spend` a check can hold: which ritual a response belongs
-# to, what the context budget hook said, and which side of it a response was
-# billed on.
+# The part of `spend` a check can hold: how it classifies a response, and what
+# it read out of a hook's own message.
 #
 # Everything else there answers with this week's sessions in it and moves when
-# they do, which is why `spend` is not in `gate_steps`. These three are pure
-# functions of one response, one hook message and one comparison, and two of the
-# three have already been wrong in the direction that mattered: a handoff
-# listing the open questions counted as question-file work, so §144.5 reasoned
-# about the question file from a figure a third too large, and a warning
-# recorded only as its summary line read as no warning at all, which put three
-# of the 39 sessions warned that week into the bucket that says the hook never
-# fired. A number a document reasons from is worth a case.
+# they do, which is why `spend` is not in `gate_steps`. The classifiers are pure
+# functions of a response's tool calls, and `ritual_of` was wrong for a week in
+# the direction that mattered: a handoff listing the open questions counted as
+# question-file work, so §144.5 reasoned about the question file from a figure
+# a third too large. A number a document reasons from is worth a case.
+#
+# `warning_said` and `bucket_of` were wrong the same way a fortnight later: a
+# warning recorded only as its summary line names no budget, and a parser that
+# required one read three of the 39 sessions warned that week as sessions the
+# hook never reached — a broken hook's signature, written by a broken parser.
+# `docs/decisions.md` §160.
+#
+# `is_lookup`, `finding_runs` and `delegation_net` are held for the same reason
+# one step on. §158's argument is entirely which probes a lane could have taken
+# and what handing them over would have cost, and those three decide it — the
+# obvious wrong version of each is caught by a case, which was checked rather
+# than assumed.
 #
 # It needs no transcripts and no Claude Code, so it runs on a runner like any
 # other check. `docs/decisions.md` §152.
