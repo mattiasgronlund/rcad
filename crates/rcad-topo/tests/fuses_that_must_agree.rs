@@ -3929,8 +3929,8 @@ impl Answer {
     /// The answer written out in one fixed order, so that two answers agree
     /// exactly when the arena order is the only thing between them.
     ///
-    /// A ring of corners is turned to start at its own smallest corner rather
-    /// than sorted: which corner comes first is arbitrary, but which corner
+    /// A ring of corners is turned to its own smallest rotation rather than
+    /// sorted: which corner comes first is arbitrary, but which corner
     /// follows which is the winding, and the winding is part of the answer.
     fn canonical(&self) -> Vec<Vec<Vec<u64>>> {
         let mut solids: Vec<Vec<Vec<u64>>> = self
