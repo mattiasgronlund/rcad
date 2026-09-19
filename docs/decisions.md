@@ -34,13 +34,12 @@ took the last three; §126's failure is **§149's — the oracle, not the kernel
 (`37f24350`), and the **`across` term** by **§164** — the published `2²⁶` bound
 was about a line of code that is not there, and the real defect a leaning
 picking plane anchored on an axis. **§145** by §148 and **§155**. **§150**
-diagnosed by §156, fixed by §156.3's patch (`1cfbd60e`). **§151.5** by **§163**:
-the oracle's sorts split nothing, and its wire sort merged a washer's rim with
-its hole.
+diagnosed by §156, fixed by §156.3's patch (`1cfbd60e`). **§151.5** by **§163**,
+and **§163.4** by **§165**: the oracle writes each edge's run now.
 
-**Nothing from the §140–§164 run is open.** Next and unclaimed: **§163.4**, the
-oracle not recording which curve an edge runs along. §124's, §136.4's and
-§125.6's are deferred, not open.
+**Next and unclaimed: §165.4's quarter ball** — `validate` accepts it, yet it
+measures five times its volume; `a_wedge_of_a_ball` rebuilds it. §124's,
+§136.4's and §125.6's are deferred, not open.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
