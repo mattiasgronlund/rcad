@@ -35740,7 +35740,7 @@ one. Nothing here changes.
 when this was written and catches the crossing within 3%, so there was no
 lateness to fix and the dial did not move. 22 of the 23 points billed above the
 budget are a warning that could not repeat itself and could not fire inside a
-turn; both are fixed in `guardrails` v0.3.2, and `just spend <window> warnings`
+turn; both are fixed in `guardrails` v0.3.3, and `just spend <window> warnings`
 is the report that measures it — this section's "re-run `ceiling`" was the wrong
 instrument, because `ceiling` prices a cap nothing enforces. Something did change
 here after all: that report, and its cases.
@@ -37729,14 +37729,33 @@ The two leaks above are 22 of the 23 points, and closing them costs no handoffs
 that were not already owed. That is the whole argument for leaving the number
 alone, and it is why this section is not the lane §144.3 described.
 
-### 160.5 What changed, in `guardrails` v0.3.2
+### 160.5 What changed, in `guardrails` v0.3.2 and v0.3.3
 
-**A rung, not a sentinel.** The warning repeats every 25 000 tokens of further
-growth. On that week's tail that is one extra warning in the median session past
-the budget and four in the worst — measured against $67 still ahead of the first
-repeat, and against $30 still ahead of the second. Smaller steps nag; the reason
-the original fired once was that nagging every turn is worse than silence, and a
-rung keeps that while dropping the "once".
+**A rung, not a sentinel.** The warning repeats every 25 000 tokens of growth
+past the first warning. On that week's tail that is one extra warning in the
+median session past the budget and four in the worst — measured against $67 still
+ahead of the first repeat, and against $30 still ahead of the second. Smaller
+steps nag; the reason the original fired once was that nagging every turn is
+worse than silence, and a rung keeps that while dropping the "once".
+
+**"Past the first warning" is a correction, and v0.3.2 shipped it wrong.** The
+rung was first counted from the budget, which nagged the session that wrote it
+within two turns: warned at 272 565 tokens and again at 277 124, because the
+first warning landed 72 000 past a 200 000 budget — already rung 2 — putting
+rung 3 three thousand tokens away. That is not an edge case but **the** case, and
+the same one §160.3's nine points are about: a session that crosses deep inside a
+turn is first told a long way past the line, so counting from the budget puts the
+next rung just ahead of wherever it happened to be standing, and the deeper the
+crossing the sooner the nag. `v0.3.3` counts from where the first warning landed
+and the case that proves it is in `check-context-budget.sh`, shown failing
+against `v0.3.2` first.
+
+Two things are worth keeping from how it was found. It took **two turns**, not a
+week, because the author was the subject — the fastest measurement in this file
+so far, and available only because the thing being changed acts on the session
+changing it. And the bug was in the arithmetic §160.5 explains rather than in
+anything §160.1 measures, which is the same division §77.6 draws: the numbers
+were right and the mechanism built on them was not.
 
 **`PostToolUse` beside `Stop` and `UserPromptSubmit`.** `tail -n 400 | jq` costs
 14 ms on the largest transcript on this machine (3.4 MB), so the check can afford
@@ -37773,10 +37792,10 @@ That the repeat and the mid-turn warning will be **heeded** is unmeasured and
 unmeasurable in advance: the 13 points are what a session did after being told
 once, and nothing here proves it behaves differently on being told twice. The
 measurement that settles it is §144.3's own — cost per week at a steady amount of
-work — re-run on a week that ran entirely under v0.3.2, with `0 repeat warnings`
+work — re-run on a week that ran entirely under v0.3.3, with `0 repeat warnings`
 in the report being the first thing to check, since a week with none means the
 new path never ran.
 
-Write set: the `guardrails` plugin (marketplace, `c57c714`, tagged `v0.3.2`) and
-here `tooling/session-spend/`, its cases, the `spend` recipe's doc, and the
-plugin ref in `.claude/settings.json`.
+Write set: the `guardrails` plugin (marketplace, `c57c714` and `5cc6465`, tagged
+`v0.3.2` and `v0.3.3`) and here `tooling/session-spend/`, its cases, the `spend`
+recipe's doc, and the plugin ref in `.claude/settings.json`.
