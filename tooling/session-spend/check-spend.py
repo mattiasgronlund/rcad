@@ -32,10 +32,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from spend import (
     RITUALS,
     bucket_of,
+    decision_read,
     delegation_net,
     finding_runs,
+    found_hits,
     is_lookup,
     ritual_of,
+    targets_of,
     warning_said,
 )
 
@@ -179,6 +182,65 @@ RUNS = [
 ]
 
 
+# What one call searched and read. `pairs` is built on these, and §161 decided
+# against a tool change on its answer, so a matcher that invents a pair or drops
+# one moves that decision.
+TARGETS = [
+    ("a grep of the decisions", bash("grep -n 'refusal' docs/decisions.md"),
+     [("search", "docs/decisions.md")]),
+    ("its pattern is not a file, even when it looks like one", bash("grep -n 'spend.py' justfile"),
+     [("search", "justfile")]),
+    ("decisions-find behind mise", bash("mise exec -- just decisions-find 'refusal rate'"),
+     [("search", "docs/decisions.md")]),
+    ("a section read back", bash("just decision 144.6"), [("read", "docs/decisions.md")]),
+    ("a recipe read back", bash("just recipe spend"), [("read", "justfile")]),
+    ("sed's script is not a file", bash("sed -n '31302,31330p' docs/decisions.md"),
+     [("read", "docs/decisions.md")]),
+    ("both halves of a pipe", bash("grep -n x docs/decisions.md | head -5"),
+     [("search", "docs/decisions.md")]),
+    ("a Read from another worktree is the same file",
+     {"name": "Read", "input": {"file_path": "/w/lane/docs/decisions.md"}},
+     [("read", "docs/decisions.md")]),
+    ("a grep across a directory names no file", bash("grep -rn 'fn meet' crates/"), []),
+    ("the gate reads nothing", bash("mise exec -- just gate quiet"), []),
+]
+
+# decisions-find's rows, as the recipe prints them — and what it prints when it
+# finds nothing, which must read as no sections rather than as one.
+FOUND = """  144.5   A fifth of the bill is ritual that no kernel change needs     3 hits
+  153     `just recipe`, and what §144.6 still owes                     1 hits
+"""
+NOTHING = "no line in docs/decisions.md matches refusal rat\nerror: Recipe failed"
+
+
+def check_pairs():
+    failed = 0
+    for why, call, want in TARGETS:
+        got = targets_of(call)
+        if got != want:
+            print("targets_of wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+    for why, text, want in (("two rows", FOUND, ["144.5", "153"]), ("no match", NOTHING, [])):
+        got = found_hits(text)
+        if got != want:
+            print("found_hits wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+    for why, tools, want in (
+        ("a decision read", [bash("mise exec -- just decision 153.5")], "153.5"),
+        ("decisions-find is not a decision read", [bash("just decisions-find x")], None),
+        ("a Read of the file is not one either",
+         [{"name": "Read", "input": {"file_path": "docs/decisions.md"}}], None),
+    ):
+        got = decision_read({"tools": tools})
+        if got != want:
+            print("decision_read wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+    return failed
+
+
+PAIR_CASES = len(TARGETS) + 2 + 3
+
+
 def check_delegation():
     """The arithmetic of handing a hunt over, on numbers a reader can check.
 
@@ -241,6 +303,7 @@ def main():
             failed += 1
 
     failed += check_delegation()
+    failed += check_pairs()
 
     # Every ritual has at least one case. A bucket nobody exercises is a bucket
     # that can quietly stop matching anything, and the report would still print
@@ -251,7 +314,8 @@ def main():
             print("no case covers the %r ritual" % name)
             failed += 1
 
-    every = len(CASES) + len(LOOKUPS) + len(RUNS) + 3 + len(SAYINGS) + len(BUCKETS)
+    every = (len(CASES) + len(LOOKUPS) + len(RUNS) + 3 + len(SAYINGS) + len(BUCKETS)
+             + PAIR_CASES)
     if failed:
         print("%d of %d classifier cases came out wrong" % (failed, every))
         return 1

@@ -6204,8 +6204,14 @@ check-hub-align-selftest:
 # it over would cost), `classes` (which part of the tree the money went into),
 # `ritual` (the recurring work no kernel change needs), `sessions`, `carry`
 # (what fills the context every later response pays to re-read), `ceiling`
-# (what handing off at a context cap would have saved) and `warnings` (what the
-# budget hook that exists actually caught).
+# (what handing off at a context cap would have saved), `warnings` (what the
+# budget hook that exists actually caught) and `pairs` (a file searched in one
+# response and read in the next — §144.6's two-call shape, priced).
+#
+# **`pairs` is what refused a tool change**: making `decisions-find` print the
+# section when it matches one would have reached 4 of a week's 119 pairs on
+# `docs/decisions.md`, and the whole shape there is under 1% of the bill.
+# `docs/decisions.md` §161.
 #
 # **`summary`'s finding line is the one that gets misread**, and `finding`
 # exists because it was: it counts every probe, wherever made and whatever

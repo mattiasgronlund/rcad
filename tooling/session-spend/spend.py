@@ -40,6 +40,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import sys
 
 # $/MTok as published on 2026-09-19: (input, output, cache read, 1h write, 5m write).
@@ -899,6 +900,179 @@ def report_warnings(responses, warnings, total):
     print()
 
 
+def report_pairs(responses, results, total):
+    """Search a file, then read it: the two-call shape §144.6 objected to.
+
+    A pair is two back-to-back responses in one session where the first
+    searches a file and the second reads the same one. Only the second is the
+    shape's cost — the search was needed anyway — so that is what is priced.
+
+    `docs/decisions.md` gets a block of its own, because it has a one-call
+    reader and a search that answers in section numbers, and §153.5 asked
+    whether the second call there is a tool problem or a wording one.
+    """
+    print("=== search a file, then read it in the next response ===")
+    by_session = collections.defaultdict(list)
+    for r in responses:
+        by_session[(r["session"], r["lane"])].append(r)
+
+    pairs, spend = collections.Counter(), collections.Counter()
+    by_searcher, by_searcher_spend = collections.Counter(), collections.Counter()
+    finds = []
+    greps = {"after a find": 0, "no find before it": 0}
+    for chunk in by_session.values():
+        found_before = False
+        for i, r in enumerate(chunk):
+            touched = [t for call in r["tools"] for t in targets_of(call)]
+            following = chunk[i + 1] if i + 1 < len(chunk) else None
+            read_next = set()
+            if following:
+                read_next = {f for call in following["tools"]
+                             for verb, f in targets_of(call) if verb == "read"}
+            for f in {f for verb, f in touched if verb == "search"} & read_next:
+                pairs[f] += 1
+                spend[f] += following["cost"]
+                if f == DECISIONS:
+                    how = "find" if any(is_find(c) for c in r["tools"]) else "grep"
+                    by_searcher[how] += 1
+                    by_searcher_spend[how] += following["cost"]
+
+            for call in r["tools"]:
+                command = " ".join((call.get("input") or {}).get("command", "").split())
+                if call.get("name") == "Bash" and re.search(r"just decisions-find\b", command):
+                    finds.append((found_hits(results.get(call.get("id"), "")),
+                                  decision_read(following)))
+                    found_before = True
+                elif any(verb == "search" and f == DECISIONS and not is_find(call)
+                         for verb, f in targets_of(call)):
+                    greps["after a find" if found_before else "no find before it"] += 1
+
+    every = sum(spend.values())
+    print(f"  {sum(pairs.values()):,} pairs; the second call of each cost ${every:,.2f}"
+          f" = {100 * every / total:.1f}% of the bill")
+    print(f"  {'file':44} {'pairs':>6} {'second call':>12}")
+    for f, n in pairs.most_common(12):
+        print(f"  {f:44} {n:6,d} ${spend[f]:11,.2f}")
+    print()
+
+    print(f"  {DECISIONS}")
+    for how, label in (("find", "a decisions-find"), ("grep", "a grep")):
+        print(f"    pairs opened by {label:16} {by_searcher[how]:5,d}   "
+              f"second call ${by_searcher_spend[how]:,.2f}")
+    followed = [(hits, read) for hits, read in finds if read is not None]
+    empty = sum(1 for hits, _ in finds if not hits)
+    print(f"    {len(finds):,} decisions-find calls, {empty:,} of them matching nothing; "
+          f"{len(followed):,} followed straight by `just decision`, which read")
+    shape = collections.Counter((hits_bucket(len(hits)), read in hits) for hits, read in followed)
+    print(f"      {'the find named':22} {'a section it named':>19} {'another one':>12}")
+    for size in ("nothing", "1 section", "2-3 sections", "4 or more"):
+        print(f"      {size:22} {shape[(size, True)]:19,d} {shape[(size, False)]:12,d}")
+    print(f"    {sum(greps.values()):,} greps of it that were not decisions-find: "
+          f"{greps['no find before it']:,} in a session that had not tried "
+          f"decisions-find yet, {greps['after a find']:,} after it had")
+    print()
+
+
+DECISIONS = "docs/decisions.md"
+
+
+def hits_bucket(size):
+    if size == 0:
+        return "nothing"
+    return "1 section" if size == 1 else "2-3 sections" if size <= 3 else "4 or more"
+
+
+SEARCHERS = ("grep", "rg", "egrep")
+READERS = ("sed", "awk", "head", "tail", "cat")
+
+
+def targets_of(call):
+    """What files one tool call searched and read, as (verb, file) pairs.
+
+    Only a file named in the call counts. A grep across a directory searched
+    no particular file, so it can be the first half of no pair.
+    """
+    inp = call.get("input") or {}
+    name = call.get("name")
+    if name == "Read":
+        return [("read", file_key(inp.get("file_path")))]
+    if name == "Grep":
+        path = inp.get("path") or ""
+        return [("search", file_key(path))] if looks_like_file(path) else []
+    if name != "Bash":
+        return []
+    out = []
+    for segment in re.split(r"\|\||&&|[|;\n]", inp.get("command", "")):
+        words = shell_words(segment)
+        while words and words[0] in ("mise", "exec", "--", "timeout", "env"):
+            words = words[1:]
+        if not words:
+            continue
+        head, rest = os.path.basename(words[0]), words[1:]
+        if head == "just" and rest:
+            if rest[0] in ("decisions-find", "decisions-toc"):
+                out.append(("search", DECISIONS))
+            elif rest[0] == "decision":
+                out.append(("read", DECISIONS))
+            elif rest[0] == "recipe":
+                out.append(("read", "justfile"))
+            continue
+        if head not in SEARCHERS + READERS:
+            continue
+        verb = "search" if head in SEARCHERS else "read"
+        operands = [w for w in rest if not w.startswith("-")]
+        if head in SEARCHERS + ("sed", "awk") and "-e" not in rest:
+            operands = operands[1:]
+        out.extend((verb, file_key(w)) for w in operands if looks_like_file(w))
+    return out
+
+
+def is_find(call):
+    command = (call.get("input") or {}).get("command", "")
+    return bool(re.search(r"just decisions-(find|toc)\b", command))
+
+
+def shell_words(segment):
+    try:
+        return shlex.split(segment)
+    except ValueError:
+        return segment.split()
+
+
+def looks_like_file(word):
+    base = os.path.basename(str(word).rstrip("/"))
+    return base == "justfile" or bool(re.search(r"\.[A-Za-z]{1,5}$", base))
+
+
+def file_key(path):
+    """One name per file, whichever worktree or spelling reached it."""
+    path = str(path or "")
+    base = os.path.basename(path)
+    if base == "decisions.md":
+        return DECISIONS
+    if base in ("justfile", "CLAUDE.md"):
+        return base
+    return "/".join(path.split("/")[-2:])
+
+
+FOUND_ROW = re.compile(r"^\s+(\S+)\s.*\s(\d+) hits\s*$", re.M)
+
+
+def found_hits(text):
+    """The section ids one decisions-find printed, in order."""
+    return [m.group(1) for m in FOUND_ROW.finditer(text or "")]
+
+
+def decision_read(response):
+    """The section a response read with `just decision`, or None."""
+    for call in (response or {}).get("tools", []):
+        command = (call.get("input") or {}).get("command", "")
+        m = re.search(r"just decision\s+'?([\d.]+)", command)
+        if call.get("name") == "Bash" and m:
+            return m.group(1)
+    return None
+
+
 REPORTS = {
     "summary": lambda rs, res, ws, t: report_summary(rs, t),
     "finding": lambda rs, res, ws, t: report_finding(rs, res, t),
@@ -908,6 +1082,7 @@ REPORTS = {
     "carry": lambda rs, res, ws, t: report_carry(rs, res, t),
     "ceiling": lambda rs, res, ws, t: report_ceiling(rs, t),
     "warnings": lambda rs, res, ws, t: report_warnings(rs, ws, t),
+    "pairs": lambda rs, res, ws, t: report_pairs(rs, res, t),
 }
 
 
