@@ -105,7 +105,13 @@ fn the_two_axes_are_well_inside_touching_distance_and_a_step_either_side_is_no_n
     );
     assert!(apart < WIDE + WIDE, "so the two pipes cross, with room");
 
-    for (nudge, expected) in [(0, 0.6135), (1, 1.1503), (2, 1.7576), (3, 2.3821), (4, 3.0131)] {
+    for (nudge, expected) in [
+        (0, 0.6135),
+        (1, 1.1503),
+        (2, 1.7576),
+        (3, 2.3821),
+        (4, 3.0131),
+    ] {
         let apart = to_the_other_axis_at(nudge).length();
         assert!(
             (apart - expected).abs() < 5e-4,
