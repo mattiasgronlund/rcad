@@ -25,22 +25,22 @@ demonstration either way — a gap if a scaling reaches the sign, a limit if not
 **Five waves have run and the demonstration is in.** §110–§113 named the pair
 and falsified §109.6; §115–§117 walked closed edges by this kernel's rule, not
 the file's flag (KiCad 97/323 → 110/323), leaving 26: **20 a limit, none
-transverse, 6 equal pipes whose axes cross**, closed by §118 and §119.
-§122–§128 took the last three, and §126's commutativity failure is **§149's —
-the oracle, not the kernel**. **§121 landed** 2026-09-18 as `912cd168`, on
-§129's run, §130's exact meet, §132's offset rounding and §136's allowance.
+transverse, 6 equal pipes whose axes cross**, closed by §118 and §119. §122–§128
+took the last three; §126's failure is **§149's — the oracle, not the kernel**.
+**§121 landed** 2026-09-18 as `912cd168`, on §129, §130, §132 and §136.
 
-**What is closed.** §140 — a crossing answered one way round and refused the
-other — with both findings under it: §141.6's band by §143.9, the exact arm's
-enclosure standing in for a squared cancellation, and §142's four sibling sites
-by §142.8, all §16.10 gaps. **§145 too**, by §148: the step across is taken
-times `w·w`, where nothing cancels, and sixteen of eighty-five come back named.
+**What is closed.** §140 — answered one way round, refused the other — with
+§141.6's band by §143.9 and three of §142's four sibling sites: 1 and 3 by
+**§154**, reading back the exact sum the caller already made. **§145** by §148,
+and its last question by **§155** — the annihilation has no caller that can
+reach it. **§150 is diagnosed** by §156: a picking plane rounded from its anchor.
 
-**What is open.** §142.8's site 2, a *size* where only the sign is exact — fully
-specified by §142.9, owing a kernel measurement; then its sites 1 and 3, both
-"call the exact routine this file already calls one question earlier". Then
-**§150, new**: one pair of eighty-five answers one way round and refuses the
-other, nothing diagnosed. §124's, §136.4's and §125.6's are deferred, not open.
+**What is open, and a lane is on each.** §142.8's **site 2**, a *size* where only
+the sign is exact, fully specified by §142.9 and owing a kernel measurement; the
+**`across` term** in `two_lines_between_two_pipes`, whose doc publishes a `2²⁶`
+bound nothing tests; and **§156.3's fix**, whose reach is every `HalfSpace` built
+through a far-out point. §151.5's is next and unclaimed. §124's, §136.4's and
+§125.6's are deferred, not open.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
@@ -36581,9 +36581,11 @@ lane's measurement, not re-run here.
 ### 150.2 It is a different question from §145, and the lane's reason for that was wrong
 
 The lane put it down to the two pipes being "a hair off touching, `δ ≈ r₁+r₂ =
-2`". **Measured here, the axes are `1.6583123951777` apart**, against a touching
-distance of `2`. That is not a hair — the pair crosses properly, with room, and
-whatever refuses one way round is not a near-tangency being lost.
+2`". The verdict is right and **the number this section first carried was
+wrong**: it said `1.6583123951777`, and the axes are `1.7575736716416024`
+apart, against a touching distance of `2`. §156.2 has the correction and how it
+was caught. Either way it is not a hair — the pair crosses properly, with room,
+and whatever refuses one way round is not a near-tangency being lost.
 
 What does separate it from §145 is the plain step: at this pair the step across
 does **not** cancel to zero, so §148's arithmetic is not what it turns on. Both
@@ -37006,3 +37008,239 @@ print that section** instead of a one-row table — and it is measurable: how ma
 those had a single hit. Only if the pairs report shows sessions reaching for a
 bare `grep docs/decisions.md` *without* trying `decisions-find` first is
 `CLAUDE.md`'s wording the thing that is wrong.
+
+## 154. §142.8's sites one and three read the exact sum the caller already made, fixed 2026-09-19
+
+*The last two of §142's four sibling sites, both closed on `c899b491`. Each
+recomputed in intervals a quantity the caller had summed exactly one question
+earlier; each now reads that sum back. Gate green on the merged tree: 2069 run,
+2069 passed, 1 skipped, 25 doc tests.*
+
+### 154.1 The same bug, and not the same fix
+
+**Site three** was what §142.8 said it was. `how_far_apart_two_loops_are` asks
+`how_far_off_an_axis_enclosing` for `A`, when the caller has just asked
+`how_far_off_an_axis_exactly` for the *sign* of that same `A` to decide the
+centre is on the axis. It now calls the exact routine and reads the result back
+through `Exact::enclosure`, falling back to the enclosure where the exact arm
+declines. For a centre exactly on the axis `1e10` out, `A` is `[-0.0, 0.0]`
+instead of an enclosure straddling zero, `D₋` becomes `W(R² − r²)`, and the
+offset rounding of `1.9e-6` loses to a `reach` of `3.2e-5`.
+
+**Site one was a different shape, and the brief was wrong about it.**
+`how_far_off_an_axis_exactly` has nothing to do with site one: its quantity is
+the plane-against-pipe discriminant `n·n·r² − (n·o − d)²`, not a distance off an
+axis. That arithmetic did already exist verbatim — but as an anonymous closure
+inside `where_a_plane_and_a_pipe_cross`'s `Question`, not as anything callable.
+It is now `how_much_room_a_plane_leaves_in_a_pipe_enclosing` / `_exactly`, and
+both the `Question` and `two_lines_along_a_pipe` point at it, so there is one
+copy of the discriminant.
+
+`two_lines_along_a_pipe` then takes `out = √(room/n·n)` rather than
+`√(r² − (reading/‖n‖)²)`. Those are the same number; the second is written so
+that it *has* to cancel, and for an axis `1e10` from the origin the reading is
+`±9.54e-7` — a hundred times the pipe's own width — while the true separation is
+ordinary. **No new exact arithmetic was written at either site.** The half of
+the hypothesis that survived is that one; the half about which routine site one
+wanted did not.
+
+### 154.2 Three published rates moved, and nothing was asserting any of them
+
+| family | want of a half-space | two curves |
+|---|---|---|
+| a hair from tangency | 65 (3.2%) → **55 (2.68%)** | 304 → 314 |
+| turned, the headline | 1 (0.05%) → **0 (0.00%)** | 12 → 13 |
+| turned quartic | 42 (2.05%) → **41 (2.00%)** | 225 → 226 |
+
+Re-measured on the merged tree by this session, not taken from the lane's
+report. Twelve pairs that refused are named now and nothing moved the other way.
+
+**The figures live in prose and the constants beside them are upper bounds, so
+nothing fails when a rate moves.** `A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE`'s
+doc comment read `2.10%` while the tree measured `2.05%`, and §142.9 repeated
+the `2.10%`: it had drifted once already and no one had cause to notice. The
+doc comments now name the command that re-measures and say the figure is not
+the bound.
+
+This is §15.6's rule meeting its blind spot. A published *bound* has a test —
+`share_that_lacked_a_half_space_is_within` — and the bound did not move. A
+published *measurement* has nothing, and a measurement is what a reader takes
+away.
+
+### 154.3 Why the bound stays at half a percent
+
+The turned family measures `0.00%` now, and the constant stays `0.005`.
+`soak` seeds a deterministic `ChaCha`, so the rates reproduce to the pair — but
+a draw of 2052 is a sample of a family and not the family, and zero of *these*
+2052 is what one of these 2052 became. A rate this low is a pair or no pair.
+A bound of zero would assert a structural fact the draw does not carry, and
+would then break on the next change to a generator rather than on a regression.
+`A_TURNED_CROSSING_MAY_REFUSE` may be zero because §118.11 removed the
+arithmetic; site one's fix re-routed the arithmetic and did not remove it.
+
+### 154.4 The write set had to break, and that is §148.5 again
+
+`three_more_places_a_crossings_two_pieces_cannot_be_told_apart.rs` **is**
+§142.8's measurement: it pins the two refusals as characterisation tests, so
+`rcad-geom` could not be green while it stood. The lane broke its write set in
+one isolated commit, kept every measured enclosure and every assertion that it
+straddles zero, and flipped the two verdicts to "named" — the stronger claim,
+because the interval route still cannot decide either pair and neither goes
+through it any more.
+
+That was the right call and the brief should have foreseen it: §148.5 already
+says a lane's green gate and the merged tree's are different questions, and the
+difference is whatever the write set kept it away from. **A lane that fixes a
+site owns that site's characterisation test.** Two of the file's three sites now
+read as closed and its name says "three more places"; renaming it would collide
+with the site-two lane, so it waits for that one.
+
+## 155. §145.6's annihilation has no caller that can reach it, answered 2026-09-19
+
+*§145.6's third item: is there a pair reaching §142.7's annihilation — a
+`[0,0] * how_far` swallowing an `ENTIRE` — with no second route? The answer is
+a demonstration that no caller can, per §16.10, and the hypothesis narrowed on
+the way. `enclosure.rs:102` needed no change and got none.*
+
+### 155.1 The safe-making property is narrower than §145.6 guessed
+
+§145.6 said the second route exists whenever `leaning` is an exact zero and
+`how_far` is `ENTIRE`. What actually makes the site safe is smaller:
+
+> The swallow `[0,0] * how_far` can only be **wrong** where the true `how_far`
+> is not a finite real. `how_far` is a quotient by a stored length, so that
+> needs a divisor that is **truly zero** — not merely a box around zero — and a
+> truly-zero divisor is exactly what forces the second route.
+
+That is a statement about what the true quotient is, so it covers the public
+API and not today's callers, which is what §16.10 asks for.
+
+- `two_lines_along_a_pipe`: the divisor is a `Plane` normal's squared length,
+  and a `Plane` has no zero normal to offer. The true quotient is always finite
+  and the swallowed term is genuinely zero. §145.4's demonstration is untouched
+  by §148, which rewrote `the_step_across_to_the_other_axis` in the *other*
+  caller.
+- `two_lines_between_two_pipes`: the divisor is `‖towards‖`, truly zero exactly
+  when `towards == [0,0,0]`. Then `apart` is `[0,0]`, every `sideways` component
+  is `ENTIRE`, and `dot(normal, up)` is `ENTIRE` for every picking normal the
+  kernel can build — a normal exactly square to `along` cannot sit on the one
+  axis where `(along × sideways)` annihilates.
+
+### 155.2 Two routes to the annihilation, both shut at the door
+
+Both empty `how_far` with `up` left tight *in the arithmetic*, and both are shut
+by the crossing question, which must be **certified negative** before the caller
+is reached.
+
+1. **Overflowing squared radius.** `r ≥ √f64::MAX` makes `apart² + r₁² − r₂²`
+   come back `[-inf, inf]` with `apart`, `sideways` and `up` exact — the
+   annihilation with no second route. The same overflow empties
+   `E² − 4r₁²r₂²W₁²`. Measured through the public API at radii `1e155` to
+   `1e300`: all `Err(Undecidable)` at `level: Interval`. The gate stops naming
+   pipes between `1e77` and `1e78`, and that boundary is pinned.
+2. **Overflowing quotient.** `E²` staying inside `f64` caps `r₁²+r₂²` at
+   `√f64::MAX`, and `apart` missing zero floors the step at ~`2.2e-162`. The two
+   together reach `5.022696596185628e299` against `f64::MAX`'s `1.797e308` —
+   eight and a half decades of room.
+
+**The second half is a margin and not a proof for all time**, and the file says
+so: if a later change raises what the crossing question can certify, that half
+must be re-run. The first half need not.
+
+### 155.3 What this session checked and what it took on the lane's word
+
+The eight-and-a-half decades, the 156 pickers and the `1e77`/`1e78` boundary are
+**asserted by tests in `a_pair_that_annihilates_with_no_second_route.rs`**, and
+that file ran green in the merged tree's gate — so they are carried by a test
+and not by a report. What was not independently re-derived here is the choice of
+those two routes as the only two; that rests on §155.1's argument about the true
+quotient, which is the part to attack if this is ever reopened.
+
+## 156. §150 is a picking plane rounded from its anchor's coordinates, diagnosed 2026-09-19
+
+*§150 asked why one pair of eighty-five answers one way round and refuses the
+other. It is `HalfSpace::through_a_point_facing` at `half_space.rs:110` storing
+an offset rounded from a plain `f64` dot of the normal with a point `1.8e15`
+out. §16.10's **gap**, decisively. The fix is dispatched as a lane, not landed
+here.*
+
+### 156.1 Everything is identical both ways round except one stored `f64`
+
+Instrumented in a standalone copy of `rcad-geom`, both orders side by side:
+`towards` is an exact negation, and `apart`, `across`, `how_far`, `out`,
+`leaning` and `either_way` are **bit-identical**. `how_well_aligned` ranks by
+`.abs()`, so a negated step picks the same candidate and only
+`leaning_the_right_way` flips a sign that then cancels in both places the normal
+is read.
+
+The one number that does not follow: the picking plane's **stored offset**,
+`0.0` one way and `-0.5` the other. The true `n·from` is `0.2865091987060316`
+— exact rational and a `mul_add`-compensated dot agree to the last digit. The
+stored `0.5` is two products of `1.8e15`, whose ulp is `0.25`, cancelling to a
+quarter: the plane lands `0.2134908012939684` out of place, which is
+`0.3335636787994107` of real distance on pipes one radius wide. The two lines
+read `0.4386…` and `−0.1521…`; `0.2865…` is strictly between them and `0.5` is
+past both, so `two_lines_told_apart` correctly reports both lines on one side.
+`side[0]` and `side[1]` are strictly positive with widths `~1.1e-15` — **no sign
+is lost and nothing is undecidable.**
+
+### 156.2 Two numbers in §150 were wrong, and one was this session's own
+
+**`1.6583123951777` was wrong.** §150.2 published it as "measured here". The
+axes are `1.7575736716416024` apart. Confirmed three ways: the kernel's own
+`apart` interval, the lane's exact-rational projection, and an independent
+exact computation by this session that reproduces
+`scaled_to_length_one_from_anywhere`'s documented contract and gets
+`1.7575736716416026` — agreement to the last ulp.
+
+**How it was nearly missed is the useful part.** The first independent attempt
+here normalised the direction the obvious way, `w/√Σw²`, and got
+`1.7673482164723309` — close enough to look like a rounding difference and far
+enough to settle nothing. It was neither: the separation here is set entirely by
+the rounding residue of `round(d̂·1e16)`, so a one-ulp difference in `d̂` makes
+it a *different pair*. `scaled_to_length_one_from_anywhere` works its length out
+to about a hundred bits (§120), which the naive form does not. **A replication
+that does not reproduce the kernel's own rounding is measuring something else**,
+and at `1e16` it will not look like it.
+
+**And "a step at `7.68e15` is `2`" was wrong**, in the test file that landed with
+the diagnosis. One ulp there is `1`. Because the shared direction leans out of
+`z`, a step moves the axes `√(1 − d_z²) ≈ 0.64` apart — near a third of the
+touching distance of `2`. Computed exactly at nudges 0 through 4: `0.6135`,
+`1.1503`, `1.7576`, `2.3821`, `3.0131`. The behaviour the sentence was defending
+is right and is asserted — one step back still crosses in two runs, one step on
+misses entirely — only the arithmetic beside it was not.
+
+### 156.3 A gap, and the fix is the anchor's rounding
+
+The answer exists at this precision and one rounded dot product is the whole of
+what could not reach it. The fix is to round the offset from the exact dot:
+
+```rust
+let offset = Exact::dot_of(facing.components(), through.coordinates())
+    .as_ref()
+    .map_or_else(|| facing.dot(through - Point::origin()), Exact::nearest_f64);
+```
+
+**Right rather than merely effective here**: the picking normal is exactly
+square to `along` and the anchor is a point on the axis, so `n·from` is
+invariant under sliding the anchor along that axis. Its true value is the axis's
+perpendicular offset — an ordinary-sized number however far out the stored
+origin sits — so a correctly rounded offset always lands within a half-ulp of an
+ordinary number, where the naive dot carries the ulp of the *coordinates*.
+
+Repairing it locally by choosing a better anchor was considered and rejected:
+`off_the_picker` is already an honest reading of where the stored plane is, so
+the defect is the plane's placement, and **every other `HalfSpace` built through
+a far-out point has the same flaw**.
+
+That breadth is also why it is not landed here. `through_a_point_facing` is
+called all over the kernel and the diagnosis only ever ran `rcad-geom`, in a
+copy. What the fix does to refusal rates, to `fuses_that_must_agree.rs` and to
+the cost of building a half-space in an inner loop is unmeasured, and a lane is
+measuring it.
+
+Same shape as §141.4 and a different quantity. §141.4 rules out the anchor's
+magnitude because it enters as a zero-width `Interval::exactly` — still true
+*inside* the enclosure arithmetic. Here the anchor does its damage earlier, in
+the plain `f64` dot that becomes the offset, before any interval exists.
