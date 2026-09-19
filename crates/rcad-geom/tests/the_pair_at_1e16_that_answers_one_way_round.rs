@@ -141,8 +141,7 @@ fn the_neighbour_a_step_either_side_answers_the_same_both_ways_round() {
 }
 
 /// What the picker is: a normal that is two of the shared direction's own
-/// components with one negated, through the origin, with an offset of exactly
-/// nothing.
+/// components with one negated, anchored midway between the two lines.
 ///
 /// Which of the three normals square to the direction gets picked depends only
 /// on the direction, which both orders share, and on how a step across leans
@@ -150,15 +149,31 @@ fn the_neighbour_a_step_either_side_answers_the_same_both_ways_round() {
 /// same normal turned round, and every reading of it below is the same number.
 ///
 /// **This is the half of the pair that was always right**, and it is here to say
-/// why: the point it is built through is the origin, where a dot product of any
-/// three numbers at all is exactly zero and there is nothing left to round.
+/// why: the point it is built through is a short step off the origin — the
+/// middle of the two lines, §164 — so the dot that becomes the offset is of
+/// ordinary-sized numbers whatever the second axis is doing `1e16` away. It used
+/// to be the origin itself, where a dot of any three numbers at all is exactly
+/// zero; what it stores now is the two lines' own readings averaged.
 #[test]
-fn a_picking_plane_anchored_at_the_origin_rounds_nothing_and_never_did() {
+fn the_picking_plane_is_anchored_between_the_two_lines_and_rounds_by_nothing_that_matters() {
     let [dx, dy, _] = the_way_both_pipes_run_scaled_to_one().components();
     let picker = the_picking_plane_the_pair_is_named_with();
 
     assert_eq!(picker.normal(), Vector::new(dy, -dx, 0.0));
-    assert_eq!(picker.offset(), 0.0);
+
+    let [nearer, further] = where_the_two_lines_read_against(picker.normal());
+    let midway = 0.5 * (nearer + further);
+    assert!(
+        (picker.offset() - midway).abs() <= one_step_at(midway),
+        "the stored offset reads {} against a midpoint of {midway}, further out \
+         than the {} one rounding allows",
+        picker.offset(),
+        one_step_at(midway)
+    );
+    assert!(
+        further < picker.offset() && picker.offset() < nearer,
+        "and sits between the two lines' own readings of {further} and {nearer}"
+    );
 }
 
 /// The other half: an offset worked out through a point `1e16` out, rounded from

@@ -999,7 +999,30 @@ fn where_two_pipes_side_by_side_cross(
 /// They sit either side of the plane that holds both axes, so that plane is what
 /// tells them apart, and each line's own distance `X` from it is the only thing
 /// that has to be worked out well: `across` places both lines along the line
-/// between the axes, which the picking plane reads as nothing.
+/// between the axes, and the picking plane is anchored out there with them so
+/// that it reads that displacement as nothing.
+///
+/// # Why the plane is anchored between the lines and not on an axis
+///
+/// Because the normal is only *exactly* square to `along` when the pipes run
+/// along a coordinate direction. Everywhere else
+/// [`HalfSpace::through_a_point_square_to`] takes one of its three fallbacks,
+/// which its own doc comment bounds at 55° off the direction asked for, and a
+/// plane anchored on the first pipe's axis then reads the pair's middle as
+/// `across·sin θ` against a half-separation of `X·cos θ`. Both lines land on one
+/// side of it once `across/X` passes `cot θ`, which for pipes along
+/// `[0.3, 0.5, 0.7]` is a radius ratio of `2.03` and for one of the thirty
+/// directions swept in `where_two_side_by_side_pipes_stop_being_told_apart` is
+/// `1.32` —
+/// and the same pair written the other way round, where `across ≈ 0`, decided.
+/// That was §16.10's gap, not a limit: at the refusing ratio the two lines read
+/// `−1.75` and `−0.0033` against a plane reading zero, so every `f64` between
+/// them separated them.
+///
+/// Anchoring between the lines removes that term rather than bounding it. What
+/// is left of it is this anchor's own rounding, an ulp of `across` against an
+/// `X` of about `r₂`, so the lean stops mattering and the radius ratio has to
+/// reach about `2⁵²` to bite. `docs/decisions.md` §164.
 ///
 /// # Why `X` is not `√(r₁² − across²)`
 ///
@@ -1037,7 +1060,11 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
     let squared_direction = squared_length_enclosing(exactly(along.components()));
     let towards = the_step_across_to_the_other_axis(one, other);
 
-    let picker = HalfSpace::through_a_point_square_to(here, along, along.cross(towards))?;
+    let picker = HalfSpace::through_a_point_square_to(
+        between_the_two_lines(here, towards, one.radius(), other.radius()),
+        along,
+        along.cross(towards),
+    )?;
     let sideways = exactly(towards.components());
     let apart = root_enclosing(squared_length_enclosing(sideways));
     let sideways = sideways.map(|part| quotient_or_everything(part, apart));
@@ -1149,6 +1176,36 @@ fn the_step_across_to_the_other_axis(one: &Cylinder, other: &Cylinder) -> Vector
             between - along * (between.dot(along) / scale)
         }
     }
+}
+
+/// The point midway between the two lines two side-by-side pipes cut out of each
+/// other, for the picking plane to pass through.
+///
+/// **Where the plane sits between them is a choice and not a decision**, in the
+/// same sense as which of three fallback normals
+/// [`HalfSpace::through_a_point_square_to`] picks. Whatever comes back here,
+/// `two_lines_told_apart` reads the offset that was actually stored and either
+/// proves the two lines straddle it or refuses. A worse point costs refusals and
+/// never a wrong answer, which is why this is plain `f64` with no enclosure
+/// anywhere in it.
+///
+/// It is `across / δ` of the way along the step, with `across = (δ² + r₁² − r₂²)
+/// / 2δ`, so the `δ` cancels and no square root is taken. The numerator subtracts
+/// two nearly equal numbers when one pipe dwarfs the other — that is the
+/// subtraction the rest of this row goes out of its way to avoid — and it does
+/// not matter here for the same reason the paragraph above gives: it moves the
+/// anchor, not the answer.
+fn between_the_two_lines(here: Point, towards: Vector, mine: f64, theirs: f64) -> Point {
+    let squared_apart = towards.length_squared();
+    let anchor =
+        here + towards * ((squared_apart + mine * mine - theirs * theirs) / (2.0 * squared_apart));
+
+    // Axes that coincide, or a step that left `f64` on the way here. Both are
+    // already refusals: `apart` comes back zero or infinite, `across` divides by
+    // it, and the enclosure the caller builds is everything. Anchoring on the
+    // axis hands that refusal back unchanged instead of turning it into a
+    // `NotFinite` from a half-space built through a point that is not there.
+    if anchor.is_finite() { anchor } else { here }
 }
 
 /// Two pipes leaning against each other: nothing, one touching point, one closed
