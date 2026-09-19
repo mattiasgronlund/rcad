@@ -36,11 +36,22 @@ meet, §132's plane offset rounding once and §136's corner allowance.
 other; §141 settled §140.5 — the answer exists in exact rational arithmetic and the
 answering order earned its sign, so the refusal was §16.10's gap — and the fix
 landed as `33ea2c0a`, taking the "somewhere else" row's half-space refusals from
-3.95% to none. **It left two findings open:** §141.6's second band, 66 decades
-wide, where both orders return `Undecidable` with an infinite enclosure and the
-answer exists; and §142's four sibling sites, in the family that tests a raw
-`Interval` with no `ask` cascade behind it. Then §126.6's counterexample; §124's,
-§136.4's and §125.6's gaps are deferred, not open work.
+3.95% to none. **Both findings it left are now closed too.** §141.6's band is
+fixed — §143.9, the exact arm's enclosure standing in for a squared cancellation,
+with what still refuses named as `Exact::times`'s own floor and not as a defect.
+§142's sibling sites are all measured — §142.8, three for three refusing, three
+for three §16.10 gaps, and two of the three fixed by calling an exact routine
+this file already calls one question earlier.
+
+**What is open. §145 is the new one and it is the biggest.** Chasing §142.7's
+undemonstrated case turned up a pair of entirely ordinary pipes — both one wide,
+axes `6.7e-7` apart, `1e10` from the origin — that refuses both ways round and is
+named in two runs one `f64` step either side. The step between the two axes is
+worked out in plain `f64` with no exact arm under it. Same family as §140, one
+step earlier. Then §142.8's site 2, which wants the *size* of a difference whose
+sign is already exact and is therefore a larger question than the other two;
+then §126.6's counterexample. §124's, §136.4's and §125.6's gaps are deferred,
+not open work.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
@@ -35122,14 +35133,15 @@ zero, or the margin is a plain linear product with no squared difference in it.
 | site | the wide intermediate, and what cancels | how far it was checked |
 | --- | --- | --- |
 | `intersect.rs:1016` `across` in `two_lines_between_two_pipes` | `(apart² + r₁² − r₂²)/(2·apart)`, cancelling when the radii are at very different scales | **measured** — the §140 reference row |
-| `intersect.rs:440` `out` in `two_lines_along_a_pipe` | `root_enclosing(skin² − in_front²)`, cancelling near tangency | dataflow traced in full, not reproduced |
-| `intersect.rs:1198` `clear` in `two_loops_either_side_of_a_pipe` | `root_enclosing(fat_radius² − reach²)`, `reach = apart + thin_radius` | read, not measured |
-| `intersect.rs:677-689` `reach`/`D₋` in `how_far_apart_two_loops_are` | three terms of comparable size, with no exact pre-summation — where the sibling at `:1303-1318` explicitly has one | inferred from the formula and the sibling's fix |
+| `intersect.rs:440` `out` in `two_lines_along_a_pipe` | `root_enclosing(skin² − in_front²)`, cancelling near tangency | **measured**, §142.8 — a gap |
+| `intersect.rs:1198` `clear` in `two_loops_either_side_of_a_pipe` | `root_enclosing(fat_radius² − reach²)`, `reach = apart + thin_radius` | **measured**, §142.8 — a gap, in a band one ulp wide |
+| `intersect.rs:677-689` `reach`/`D₋` in `how_far_apart_two_loops_are` | three terms of comparable size, with no exact pre-summation — where the sibling at `:1303-1318` explicitly has one | **measured**, §142.8 — a gap |
 
-**"Verified" in that table means the dataflow was read, not that a refusal was
-measured.** Only the first row has a number behind it. The distinction is the
-sweep's own and is kept because a row that says verified and was not is worse
-than no row.
+**This table said "read, not measured" for three of its four rows until
+2026-09-19**, and the distinction was the sweep's own, kept because a row that
+says verified and was not is worse than no row. §142.8 closed all three, and
+every one of them refuses. The caution was right to be there and turned out to
+be cheap: the rows were true, they were just not yet earned.
 
 ### 142.4 What the sweep could not see
 
@@ -35273,13 +35285,89 @@ What is owed is small and is not a lane: either the doc comment at
 `enclosure.rs:102` loses its "turns into a refusal" clause, or it keeps it and
 names the one site that annihilates instead.
 
+**Settled the same day, and both halves came out the other way.** §145 has the
+pair: the case is reachable, so the clause could not simply be dropped for being
+unreachable — and the annihilation certifies nothing anyway, because the same
+vanished length refuses through `up` instead. The doc comment keeps the clause
+and now names both the exception and the second route. The amendment that stood
+here for part of a day said "no refusal follows", which was measured to be false;
+what §142.7 got right was refusing to write "no caller hits this" without a
+demonstration, and the demonstration is what overturned the guess that followed
+it.
+
+### 142.8 The three unmeasured rows, measured — all three refuse, all three are gaps
+
+§142.3's caution is discharged. Each row below is a pair built through the public
+API, the printed enclosure at the refusing step, and the reason the answer exists
+anyway. In all three the certified cascade had **already decided the very thing
+the failing step needs**, which is what makes each a §16.10 gap rather than a
+limit.
+
+**`intersect.rs:440` — `out` in `two_lines_along_a_pipe`.** The plane `x + y = 0`
+against a pipe `1e-8` wide whose axis runs through `(1e10, −1e10, 0)` along
+`(1,−1,0)` — an axis lying *in* the plane. `intersect` gives
+`Err(CannotNameWhichPieceOfACrossingThisIs)`. `n·o − d` encloses
+`[-9.5367431640625e-7, 9.5367431640625e-7]` where the true sum is zero, and
+`r² − in_front²` encloses `[-9.093947017729283e-13, 9.095947017729284e-13]`, so
+`out.lo()` clamps to zero and neither line is provably on its own side. The
+certified `ask` had already proved `n·n·r² − (n·o−d)² > 0` before this point, and
+the two lines really are at `±1e-8`. The same plane and pipe at the origin are
+named as two lines.
+
+**`intersect.rs:1198` — `clear` in `two_loops_either_side_of_a_pipe`.** A pipe
+`3e-17` wide along `x` through the origin, and a fat pipe along `y` through
+`(0,0,1)`, so the axes are exactly one apart. Walking the first twelve `f64`
+widths above that, **exactly one refuses** — `r_fat = 1.0000000000000002`, with
+the next named one at `1.0000000000000004`. A refusal band one ulp wide.
+`δ + r_thin` encloses `[1.0, 1.0000000000000002]`; at the refusing width
+`r_fat² − reach²` encloses `[-2.220446049250313e-16, 6.661338147750939e-16]`.
+Reaching this function at all requires `ask(r_fat − r_thin − δ)` to have come
+back `Pos` under `Policy::certified()`, which is the exact statement that the
+crossing is two loops.
+
+**`intersect.rs:677-689` — `reach`/`D₋` in `how_far_apart_two_loops_are`.** A
+pipe `1e-3` wide along `(1,1,0)` through the origin, and a ball `1.0005e-3` wide
+centred at `(1e10, 1e10, 0)` — exactly on that axis. `A = ‖(c−o)×w‖²` encloses
+`[-9.094947017729282e-13, 9.094947017729282e-13]` where the true value is zero;
+`2r√(AW)` encloses `[-0.0, 1.9073486328125e-9]`, nearly twice the whole of `D₋`,
+which encloses `[-9.080081275143498e-10, 1.00115949470212e-9]`. `reach.lo() == 0`
+is sufficient on its own — the caller's margin subtracts two terms that are never
+below zero. The certified policy had already decided `A = 0`, which is the only
+way this pair reaches the ball-on-the-axis row at all.
+
+**Two hypotheses died here, and the third changed shape.** That §140's fix had
+moved the first row was checked by running, not reasoned: the same test file on
+`d67f958e`, the commit before `33ea2c0a`, passes with numbers identical to the
+last digit. §140's fix changed how two lines are handed to `two_lines_told_apart`
+and this site loses them earlier, in the `out` the caller works out first. And
+the shape is not "radii at very different scales" — site 3 refuses at `1e-3`
+against `1.0005e-3`, site 2 at two lengths both about one. **The lever is
+distance from the origin, not the ratio of the radii**, and only site 1 has a
+wide ratio at all.
+
+**Where the fix comes from is not the sibling.** §142.3 guessed site 3 would be
+fixed by copying the exact pre-summation at `intersect.rs:1303-1318`; the
+polynomials differ, and it is not needed. `how_far_off_an_axis_exactly`
+(`intersect.rs:851`) already computes exactly the `A` that site 3 loses, and
+`where_a_ball_and_a_pipe_cross` **already calls it** one question earlier to
+decide the centre is on the axis. `how_far_apart_two_loops_are` then recomputes
+`A` in intervals and throws the exact answer away. Site 1 has that same shape.
+
+**Site 2 does not, and that is the useful distinction.** Its sign is decided
+exactly; what `clear` wants is the *size* of `r_fat² − reach²`, and no exact
+level in this kernel hands a size back. Sites 1 and 3 are "call the exact routine
+this file already has". Site 2 is a different and larger question, and nothing
+here answers it.
+
 ## 143. §141.6's band is a gap, and its edge is `product_is_exact`'s floor, diagnosed 2026-09-19
 
 *The second refusal band §141.6 recorded is `Error::Undecidable` with an infinite
 enclosure, 66 decades wide, where the answer exists. It is a gap. The infinity
 comes from squaring a catastrophic cancellation, the band's top edge is the exact
 arm's own representability floor — predicted, and landing on the measured edge to
-the digit — and two mechanisms already in this repo reach the sign. **Not fixed.***
+the digit — and two mechanisms already in this repo reach the sign. **Fixed on
+2026-09-19 by the second of those two; §143.9 has the fix and the three
+amendments it forced on this section.***
 
 ### 143.1 The lead that was wrong
 
@@ -35386,6 +35474,70 @@ reclaimable: `48824380` on `lane-140-undecidable` (this section's four probes),
 `lane-140-site` (the site probe that pinned §140 to `intersect.rs:1650`). Take
 what a fix needs from them and turn it into a real test; do not merge them as
 they stand.
+
+### 143.9 The fix, and the three things this section had wrong
+
+`how_deeply_two_side_by_side_pipes_overlap_enclosing` now takes `E` from the
+exact arm whenever the exact arm can form it, and falls back to the old interval
+`E` when it cannot — §143.5's family 2, in the
+`map_or_else(…, Exact::enclosure)` shape `two_lines_between_two_pipes` already
+used twenty lines below it. The test is
+`a_pipe_too_thin_to_square_still_crosses_the_one_it_lies_on.rs`, four tests, none
+ignored. Reverting the one `room` line turns all four into assertion failures,
+the first of them at `r₂ = 6.411491535302116e-74` — §143.3's *predicted* refusing
+radius, one representable step below the band's top edge.
+
+The band decides both ways round from `3.044037611241337e-139` to
+`5.4016709327697754e-8`. Below it the answer is `SurfaceMeet::Nothing`, and the
+kernel's flip to it sits within one step of a 6-bit mantissa of the exact
+cross-section criterion — `2·R₁·r₂ + r₂² − Z²` crosses from `−7.029884024601e12`
+to `+1.9461878483175e13` over that same step, against the analytic
+`Z²/(2·R₁) = 1.712674258532773e-139`. Every sweep was run in both orders and no
+radius decided one way and refused the other.
+
+**What still refuses, named rather than rounded off.** Over 2 000 log-uniform
+radii asked both ways, 146 of 8 000 still refuse — 1.83% — and all 146 are the
+same thing: `r₂²`'s roundoff half is nonzero and below `Exact::times`'s floor of
+`2.004168360008973e-292`, so the exact `E` cannot be formed at all and the old
+interval arm is what answers. Across roughly 13 000 asks the kernel was never
+*wrong*, only silent. That residue is the floor itself, not a new defect.
+
+**Amendment one — §143.5 understated family 1.** It is not the weaker of the two;
+it is **unusable at this site**. `Exact::square_minus` returns "a sign and never a
+value", and `how_deeply_two_side_by_side_pipes_overlap_exactly` has two callers:
+the `edge` question at `intersect.rs:945`, which reads a sign, and
+`intersect.rs:1017`, where its enclosure becomes `-overlap`, the numerator of
+`out` — the distance between the two named lines. Family 1 there would silently
+scale that distance by a power of two. It cannot be used without first splitting
+the function into a sign-only and a value version. §143.6's fifth unruled item,
+whether `square_minus`'s window claim holds here, is moot for the same reason.
+*This was the dispatcher's hypothesis, handed over labelled as one, and the lane
+confirmed it by reading the callers rather than by agreeing with it.*
+
+**Amendment two — §143.6's fourth item expected too much.** The fix's reach below
+the band is bounded by the same `Exact::times` floor, not universal: at
+`r₂ = 1e-140`, whose roundoff half is `9.136619874250988e-298`, the pair still
+refuses. The truth column §143 took from a sibling lane on trust is right; what
+was wrong was the unstated assumption that a fix reaching the band reaches
+everything under it.
+
+**Amendment three — §140's fix is load-bearing here, not merely compatible.**
+§143.6 asked only whether the two compose. They do, and more: with both in place
+the band rows come back `Curves` with two runs, and reversing `33ea2c0a`'s
+`intersect.rs` hunk on top of this fix turns three of the four new tests red —
+including at `r₂ = 5.4016709327697754e-8`, §140's own pair. The fourth survives,
+and the exception is instructive: its thin axis sits exactly on the fat pipe's
+skin with no step along the axis-to-axis line to cancel, which is the one
+geometry §140's fix was not needed for.
+
+**General `W₁`, and what the public API can actually reach.** `Axis::new`
+normalises, so the only non-unit `W₁` a caller can produce is one plus or minus a
+few ulps; `(1,1,0)` gives `W₁ − 1 = 2.220446049250313e-16`. On that pair the band
+is decided from `2.4352300889930697e-138` up — a higher floor than the
+axis-aligned pair's, because `W₁`'s own roundoff entry must also clear
+`Exact::times` when multiplied by `r₂²`. **A leaning direction costs a few
+decades of reach**, which is worth knowing before anyone reads §143's numbers as
+holding everywhere.
 
 ## 144. What a week of sessions is spent on, measured, surveyed 2026-09-19
 
@@ -35657,3 +35809,127 @@ Each starts by re-running the report it names. A lane that quotes this section's
 motivation without re-measuring is reporting a fortnight-old number as today's,
 which is §77.6's mistake in a new place — a check that passes for a property of
 the week it ran in rather than of the thing it is about.
+
+## 145. The step between two axes rounds to nothing, and takes the crossing with it, found 2026-09-19
+
+*Two ordinary pipes, both one wide, their axes `6.7e-7` apart and `1e10` from the
+origin, refuse both ways round. Move either origin one `f64` step and the same
+pair is named in two straight runs. The step between the axes is worked out in
+plain `f64` with no exact arm under it, and for this pair it cancels to exactly
+zero. §16.10 **gap**. It is also the pair that reaches §142.7's annihilation —
+and it shows that annihilation certifies nothing, because the same vanished
+length refuses by a second route anyway.*
+
+### 145.1 The pair
+
+Both pipes one wide, both axes along `Vector::new(0.3, 0.5, 0.7)`. The first
+origin is `[0, 0, 0]`; the second is `along * 1e10` rounded componentwise onto
+the `f64` grid:
+
+```
+[3292927799.69071, 5488212999.484517, 7683498199.278325]
+```
+
+Built through the public API alone — `Axis::new`, `Cylinder::new`, `intersect` —
+and `intersect` gives `Err(CannotNameWhichPieceOfACrossingThisIs)` in **both**
+orders. The two axes are genuinely apart: `between × along` comes out
+`[-4.76837158203125e-7, 4.76837158203125e-7, 0.0]`, a separation of
+`6.743495761743046e-7` that the exact level certifies positive. Nothing about
+this pair is degenerate, and nothing about it is small.
+
+### 145.2 Why the step vanishes
+
+`intersect.rs:1003` works out the step from one axis to the other square to the
+shared direction:
+
+```text
+towards = between − along · (between·along / along·along)
+```
+
+Every term there is plain `f64`. For this pair the projection lands exactly back
+on `between`, so `towards` is exactly `[0.0, 0.0, 0.0]` — not small, not
+straddling, *zero*. Rounding the second origin onto the grid is what arranges it:
+the rounded origin is still a point the caller is entitled to write down, and it
+is the nearest representable point to one that really does lie along `along`.
+
+The vanished length is then divided by twice over. `apart =
+root_enclosing(squared_length_enclosing([0,0,0]))` is the zero-width box at
+zero, so `quotient_or_everything` takes its `ENTIRE` branch for `across` and for
+`how_far` alike.
+
+### 145.3 Why the annihilation rides on it, and certifies nothing
+
+§142.7 asked whether any drawable pair reaches `how_far` `ENTIRE` and `leaning`
+exactly zero at the same time. This pair does, and the two conditions are not
+independent — which is the part §142.7 could not see. `lines.sideways` **is**
+`towards.components()`, so `leaning = Exact::dot_of(picker_normal, [0,0,0])` is
+an exact zero whatever the picker turned out to be. In this caller `how_far ==
+ENTIRE` *implies* `leaning == 0`. §142.7's H2 — that the exact zero would be the
+hard half, a perpendicularity coincidence the fuzzer would never hit — is
+falsified: the exact zero is the easy half, and it is common away from the case
+as well. One step either side of this pair the picker normal is
+`[5.233967780575292e-7, -3.140380668345175e-7, 0]` against a `towards` of
+`[0, 0, 9.5367431640625e-7]`, dot exactly zero, with `how_far` perfectly finite.
+
+**And the annihilation buys nothing.** `middle` really does come back signed,
+soundly. But the same vanished length is what `sideways` is normalised by, so
+`up` is `ENTIRE`, so `either_way` is `ENTIRE`, and neither side of the picker can
+be signed after all. `out` stays tight — exactly the asymmetry §142.7 predicted
+would be the opening — and it does not matter. `quotient_or_everything`'s "turns
+into a refusal" survives here by a second route, not the promised one, and
+`enclosure.rs:102` now says so.
+
+### 145.4 The other caller cannot reach it, demonstrated
+
+`two_lines_told_apart` is private with exactly two call sites,
+`intersect.rs:444` and `intersect.rs:1040`, both reached from the public
+`intersect`. That is the whole family, so §16.10's "check the public API" is
+discharged by checking two functions.
+
+The other one cannot reach the case at all. In `two_lines_along_a_pipe`,
+`how_far`'s divisor is `squared_length_enclosing(exactly(flat.normal()))`, and a
+`Plane`'s normal comes from `scaled_to_length_one_from_anywhere`
+(`plane.rs:190`), so that enclosure is a box around one and never contains zero.
+Demonstrated rather than argued: over a thousand planes built from coefficient
+triples spanning `0`, `±1`, `1e±8`, `1e±160`, `1e±300`, `f64::MIN_POSITIVE` and
+`5e-324`, the squared-length enclosure never contains zero.
+
+### 145.5 That it is a gap, and the dead end that looks like the way in
+
+Move the second origin one step along `z`, or two, either way: the same pair is
+**named in two straight runs, both orders, all four nudges**. The answer exists,
+the pair is ordinary, and the arithmetic lost it only because one `f64`
+subtraction cancelled exactly. §16.10: **gap**, and the same family as §140 one
+step earlier — §140 fixed the *reading* of two lines once they had been handed
+over as whole coordinates; this is the step between the axes being worked out in
+plain `f64` before anything exact runs at all.
+
+**The dead end, written down because it is the obvious first move.** Making the
+two axes genuinely close does not get here. `apart`'s divisor only straddles zero
+on underflow, which wants the separation below about `2.2e-162`; but then
+`how_far_off_an_axis_exactly` (`intersect.rs:851`) needs `product_is_exact` on
+expansion entries around `1e-200`, returns `None`, the enclosure arm underflows
+too, and `WHERE_TWO_PIPES_CROSS` is `Undecidable` — so the pair never reaches
+`two_lines_between_two_pipes` at all. `Exact` is a Shewchuk expansion
+(`exact.rs:99`) and `squared_length_of` has no power-of-two slide to save it.
+
+### 145.6 What a fix would be, and what is not ruled out
+
+`towards` is the one quantity on this path with no exact arm under it, where
+`out` and `squared_gap` twenty lines below both have one
+(`intersect.rs:1017-1032`). Giving it the same `map_or_else(enclosing,
+Exact::enclosure)` shape is the candidate, and it is a candidate and not a plan.
+
+Not ruled out, listed rather than glossed:
+
+- Whether an exact `towards` is even representable for this pair — the
+  projection is a quotient, and `Exact` holds no quotients. The honest form may
+  be to scale the step by `along·along` and carry the scale, which changes every
+  reader of `sideways` downstream.
+- Whether `up` and `across` both recover from one fix, or need two. `up` divides
+  by a *different* root of the same vanished length.
+- Whether any pair reaches the annihilation **without** the second route. That is
+  the case that would falsify `enclosure.rs:102` outright, and nobody has looked
+  for it.
+- What this does to the refusal rates in `how_often_naming_a_crossing_refuses.rs`.
+  Unmeasured.

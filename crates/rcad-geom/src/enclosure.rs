@@ -100,14 +100,22 @@ fn squared_is_exactly(root: f64, value: f64) -> bool {
 /// invariant, so what comes back is a box that says nothing is known, which
 /// travels through the arithmetic above it and turns into a refusal (§4.1).
 ///
-/// **It travels unless something multiplies it by an exact zero**, and one
-/// caller does: `two_lines_told_apart` forms `leaning * how_far` with a
-/// `leaning` that is analytically zero and summed exactly, and `[0,0] * ENTIRE`
-/// is `[0,0]`. There the unknown is annihilated and no refusal follows — which
-/// is the right answer, because an exact zero is a certificate and the true
-/// quotient is finite wherever the picking normal existed to be built at all.
-/// Do not read the paragraph above as a guarantee when writing a new caller;
-/// §142.7 has the measurement and what it does not claim.
+/// **One term escapes that, by being multiplied by an exact zero.**
+/// `two_lines_told_apart` forms `leaning * how_far` with a `leaning` that is
+/// analytically zero and summed exactly, and `[0,0] * ENTIRE` is `[0,0]`. The
+/// unknown really is swallowed there, and soundly: an exact zero is a
+/// certificate, and the true quotient is finite wherever the picking normal
+/// existed to be built at all.
+///
+/// **A refusal still follows at that site, by a second route.** The pair that
+/// reaches it has two axes whose step apart rounds to nothing in `f64`, and
+/// that same zero length is what `sideways` is divided by — so `up` comes back
+/// `ENTIRE` too, and neither side of the picker can be signed. The sentence
+/// above therefore still describes every caller there is, but at this one it is
+/// true for a reason it does not give. A new caller that swallows the unknown
+/// and has no second route would be the one that breaks it.
+/// §142.7 argued the soundness; §145 is the pair that reaches it, and the gap
+/// underneath it.
 pub(crate) fn quotient_or_everything(over: Interval, under: Interval) -> Interval {
     if under.contains_zero() {
         return Interval::ENTIRE;
