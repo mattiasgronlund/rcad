@@ -1282,7 +1282,8 @@ impl BuildingAMesh {
             wire.closes_on_one_edge(),
         );
 
-        for step in steps_from_somewhere_that_has_a_longitude(wire, &at_a_pole) {
+        let steps = steps_from_somewhere_that_has_a_longitude(wire, &at_a_pole);
+        for (index, &step) in steps.iter().enumerate() {
             match step {
                 WireStepView::Along(coedge) => {
                     let start = coedge.start();
@@ -1311,7 +1312,7 @@ impl BuildingAMesh {
                     let at = self.remember_the_corner(vertex);
                     let where_it_is = back.apply_to_point(vertex.point());
                     walk.arrive(at, stored.coordinates_of(where_it_is), true);
-                    walk.cross_the_pole();
+                    walk.cross_the_pole(a_seam_turns_back_at(&steps, index));
                 }
             }
         }
@@ -1692,7 +1693,12 @@ struct WalkingAWire {
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
-    pole_side: f64,
+    /// Which way the longitude runs along a pole side the walk has crossed and
+    /// whose far end is not known yet, because it is wherever the next corner
+    /// with a longitude of its own sits. Only a pole between two **different**
+    /// meridians leaves one; a seam turning back is a whole turn and settled on
+    /// the spot.
+    crossing: Option<f64>,
     /// The corner at a pole the walk has arrived at and not yet left: the entry
     /// in the point table and the latitude, waiting for the longitude the walk
     /// leaves by. A pole is a whole side of the patch, so it needs a corner at
@@ -1710,7 +1716,7 @@ impl WalkingAWire {
             longitude: 0.0,
             started: false,
             will_not_lie_flat: false,
-            pole_side: 1.0,
+            crossing: None,
             still_at_a_pole: None,
             corners: Vec::new(),
             points: Vec::new(),
@@ -1742,8 +1748,13 @@ impl WalkingAWire {
     fn arrive(&mut self, at: u32, sits_at: (f64, f64), is_a_pole: bool) {
         let (raw, up) = sits_at;
         if is_a_pole {
-            self.corners.push([self.longitude, up]);
-            self.points.push(at);
+            // Past a pole side whose far end is still open, this is that far
+            // end, and its longitude is the next corner's: `leave_the_pole_at`
+            // puts it there.
+            if self.crossing.is_none() {
+                self.corners.push([self.longitude, up]);
+                self.points.push(at);
+            }
             self.still_at_a_pole = Some((at, up));
             return;
         }
@@ -1753,14 +1764,28 @@ impl WalkingAWire {
             // own, so this corner's raw one is the first fact there is. The
             // turns `cross_the_pole` counted between those poles are still
             // real: shift them all by the same amount rather than drop them.
+            //
+            // A pole side still open here has no near end to measure from, and
+            // `steps_from_somewhere_that_has_a_longitude` never opens a walk on
+            // a pole step, so only an edge with no points strictly along it gets
+            // here: refused rather than guessed.
             Some(_) if !self.started => {
+                if self.crossing.take().is_some() {
+                    self.will_not_lie_flat = true;
+                }
                 let by = raw - self.longitude;
                 for corner in &mut self.corners {
                     corner[0] += by;
                 }
                 raw
             }
-            Some(whole) => self.longitude + the_short_way_round(raw - self.longitude, whole),
+            Some(whole) => match self.crossing.take() {
+                Some(way) => {
+                    self.longitude
+                        + way * how_far_a_pole_side_runs(way * (raw - self.longitude), whole)
+                }
+                None => self.longitude + the_short_way_round(raw - self.longitude, whole),
+            },
         };
         self.started = true;
         self.longitude = longitude;
@@ -1793,24 +1818,53 @@ impl WalkingAWire {
     /// Cross the side of the patch that runs over a pole.
     ///
     /// A pole is one point in space and a whole side of the patch in the
-    /// surface's coordinates, so the walk comes off it a full turn from where it
-    /// went on. The two pole sides of a patch are walked opposite ways — round a
-    /// rectangle, the bottom goes one way and the top the other — which is why
-    /// the sign alternates, and why the walk comes back to the longitude it
-    /// started at.
+    /// surface's coordinates, running from the meridian the walk arrived down to
+    /// the meridian it leaves by.
+    ///
+    /// **How far that side runs is how far apart the two meridians are, and a
+    /// whole turn only when they are one.** A ball's seam arrives at a pole and
+    /// turns straight back up itself, so its pole side is a whole turn, and that
+    /// is settled here. A **lune** — a sphere face between two different
+    /// half-meridians, which is the skin of a quarter of a ball — arrives down
+    /// one and leaves up the other, and its pole side is the angle between
+    /// them. Charging a whole turn there too made a quarter's skin a turn and a
+    /// quarter wide and its volume `5.209` where `π/3` is the truth (§166). The
+    /// far end is left open until the next corner with a longitude is walked.
+    ///
+    /// **Which way the side runs is read off where the walk came from.** A
+    /// pinching surface's two coordinates are right-handed about its normal and
+    /// a wire keeps its face on its left, so a patch is walked anticlockwise:
+    /// arriving at a pole from above, the pole is the bottom of the patch and
+    /// its side runs with the longitude; from below, the top, and against it.
+    /// Alternating the sign from the first pole crossed, which is what stood
+    /// here, is the same thing only for a walk whose first pole is a bottom one.
+    ///
     /// A flat surface pinches to nothing, so a pole step on one is a wire that
-    /// will not lie flat, and [`WalkingAWire::finish`] says so.
-    fn cross_the_pole(&mut self) {
+    /// will not lie flat, and [`WalkingAWire::finish`] says so — as is a pole
+    /// the walk arrived at without ever having been off it.
+    fn cross_the_pole(&mut self, a_seam_turns_back_here: bool) {
         let Some(whole) = self.wraps else {
             self.will_not_lie_flat = true;
             return;
         };
-        // The wire said where the boundary goes between arriving at the pole and
-        // leaving it, so the walk does not have to work it out: the step itself
-        // is the far end of the pole side and the corner after it lands there.
         self.still_at_a_pole = None;
-        self.longitude += self.pole_side * whole;
-        self.pole_side = -self.pole_side;
+        let Some(way) = self.which_way_the_pole_side_runs() else {
+            self.will_not_lie_flat = true;
+            return;
+        };
+        if a_seam_turns_back_here {
+            self.longitude += way * whole;
+        } else {
+            self.crossing = Some(way);
+        }
+    }
+
+    /// `1` when the pole just arrived at is below everything walked before it
+    /// reached it, and `-1` when it is above.
+    fn which_way_the_pole_side_runs(&self) -> Option<f64> {
+        let pole = self.corners.last()?[1];
+        let came_from = self.corners.iter().rev().find(|corner| corner[1] != pole)?;
+        Some(if came_from[1] > pole { 1.0 } else { -1.0 })
     }
 
     /// The loop, or `None` if it will not lie flat: the walk stood still at a
@@ -1847,6 +1901,14 @@ impl WalkingAWire {
         {
             self.leave_the_pole_at(first[0]);
             self.longitude = first[0];
+        }
+        // A pole side still open at the end closes on the corner the walk set
+        // off from, which is where the loop closes; its far end is that corner.
+        if let (Some(whole), Some(way), Some(first)) =
+            (self.wraps, self.crossing.take(), self.corners.first())
+        {
+            self.longitude +=
+                way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole);
         }
         // A wire made of one whole closed curve is *allowed* to come back a
         // whole turn on — a cap circle of a tube the fuse cut out of a bar's
@@ -1927,20 +1989,56 @@ fn the_surface_pinches_at(surface: &Surface, latitude: f64) -> bool {
 }
 
 /// The steps of `wire`, turned so the walk sets off from a corner that has a
-/// longitude, when the wire has one to set off from.
+/// longitude, when the wire has one to set off from — and otherwise along an
+/// edge rather than on a pole step.
+///
+/// A lune's wire has no corner off a pole, and opened on a pole step it would
+/// cross a pole side before it had walked anywhere to say which way the side
+/// runs or where its near end is.
 fn steps_from_somewhere_that_has_a_longitude<'m>(
     wire: WireView<'m>,
     at_a_pole: &impl Fn(&VertexView<'m>) -> bool,
 ) -> Vec<WireStepView<'m>> {
     let mut steps: Vec<WireStepView<'m>> = wire.steps().collect();
-    let away = steps.iter().position(|step| match step {
-        WireStepView::Along(coedge) => !at_a_pole(&coedge.start()),
-        WireStepView::Pole(_) => false,
-    });
+    let away = steps
+        .iter()
+        .position(|step| match step {
+            WireStepView::Along(coedge) => !at_a_pole(&coedge.start()),
+            WireStepView::Pole(_) => false,
+        })
+        .or_else(|| {
+            steps
+                .iter()
+                .position(|step| matches!(step, WireStepView::Along(_)))
+        });
     if let Some(away) = away {
         steps.rotate_left(away);
     }
     steps
+}
+
+/// Whether the pole step at `index` sits between two uses of one edge, which
+/// is a seam arriving at the pole and going straight back up itself.
+fn a_seam_turns_back_at(steps: &[WireStepView<'_>], index: usize) -> bool {
+    let edge_of = |step: &WireStepView<'_>| match step {
+        WireStepView::Along(coedge) => Some(coedge.edge().key()),
+        WireStepView::Pole(_) => None,
+    };
+    let before = edge_of(&steps[(index + steps.len() - 1) % steps.len()]);
+    let after = edge_of(&steps[(index + 1) % steps.len()]);
+    before.is_some() && before == after
+}
+
+/// How far a pole side between two different meridians runs, given how far
+/// apart they are taken the way it runs: that distance brought into
+/// `(0, whole]`.
+///
+/// No turn at all is read as a whole one, because two different edges that
+/// meet at a pole on one meridian bound either nothing or the whole surface,
+/// and a face of nothing is not a face.
+fn how_far_a_pole_side_runs(apart: f64, whole: f64) -> f64 {
+    let runs = apart.rem_euclid(whole);
+    if runs == 0.0 { whole } else { runs }
 }
 
 /// The surfaces of the two faces either side of `edge`, brought into the frame
