@@ -32,26 +32,16 @@ of a commutativity failure that **was real and is now unreproduced**: §126.6.
 **§121 has landed** on 2026-09-18 as `912cd168`, on §129's own run, §130's exact
 meet, §132's plane offset rounding once and §136's corner allowance.
 
-**What is left. §140 is closed.** A crossing answered one way round and refused the
-other; §141 settled §140.5 — the answer exists in exact rational arithmetic and the
-answering order earned its sign, so the refusal was §16.10's gap — and the fix
-landed as `33ea2c0a`, taking the "somewhere else" row's half-space refusals from
-3.95% to none. **Both findings it left are now closed too.** §141.6's band is
-fixed — §143.9, the exact arm's enclosure standing in for a squared cancellation,
-with what still refuses named as `Exact::times`'s own floor and not as a defect.
-§142's sibling sites are all measured — §142.8, three for three refusing, three
-for three §16.10 gaps, and two of the three fixed by calling an exact routine
-this file already calls one question earlier.
+**What is closed.** §140 — a crossing answered one way round and refused the
+other — and both findings under it: §141.6's band by §143.9, the exact arm's
+enclosure standing in for a squared cancellation; §142's four sibling sites by
+§142.8, three for three refusing and all of them §16.10 gaps.
 
-**What is open. §145 is the new one and it is the biggest.** Chasing §142.7's
-undemonstrated case turned up a pair of entirely ordinary pipes — both one wide,
-axes `6.7e-7` apart, `1e10` from the origin — that refuses both ways round and is
-named in two runs one `f64` step either side. The step between the two axes is
-worked out in plain `f64` with no exact arm under it. Same family as §140, one
-step earlier. Then §142.8's site 2, which wants the *size* of a difference whose
-sign is already exact and is therefore a larger question than the other two;
-then §126.6's counterexample. §124's, §136.4's and §125.6's gaps are deferred,
-not open work.
+**What is open. §145 is new and the biggest.** Two ordinary pipes, axes `6.7e-7`
+apart at `1e10` out, refuse both ways round and are named one `f64` step either
+side — the step between them has no exact arm under it, §140's family one step
+earlier. Then §142.8's site 2, a *size* where only the sign is exact; then
+§126.6's counterexample. §124's, §136.4's and §125.6's are deferred, not open.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
