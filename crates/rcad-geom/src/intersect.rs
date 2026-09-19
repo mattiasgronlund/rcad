@@ -325,13 +325,10 @@ fn where_a_plane_and_a_pipe_cross(
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
     let normal = flat.normal().components();
-    let d = flat.offset();
     let along = pipe.axis().direction().components();
-    let origin = pipe.axis().origin().coordinates();
-    let radius = pipe.radius();
     let at = [
         PredicatePoint::from(flat.origin().coordinates()),
-        PredicatePoint::from(origin),
+        PredicatePoint::from(pipe.axis().origin().coordinates()),
     ];
 
     let leans = Question {
@@ -364,17 +361,8 @@ fn where_a_plane_and_a_pipe_cross(
     // makes this degree two where it used to be degree four.
     let room = Question {
         named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
-        enclosing: || {
-            let reach = dot_enclosing(exactly(normal), exactly(origin)) - Interval::exactly(d);
-            squared_length_enclosing(exactly(normal)) * squared_enclosing(radius) - reach * reach
-        },
-        exactly: || {
-            let reach = Exact::dot_of(normal, origin)?.minus(&Exact::of(d));
-            let room = Exact::dot_of(normal, normal)?
-                .times(&Exact::product_of(radius, radius)?)?
-                .minus(&reach.times(&reach)?);
-            Some(room)
-        },
+        enclosing: || how_much_room_a_plane_leaves_in_a_pipe_enclosing(flat, pipe),
+        exactly: || how_much_room_a_plane_leaves_in_a_pipe_exactly(flat, pipe),
     };
 
     match ask(&room, Measures::Area, &at, policy, log)? {
@@ -411,6 +399,12 @@ fn where_a_plane_and_a_pipe_cross(
 /// plane strayed — a question with an answer rather than a condition to be
 /// arranged. [`two_lines_told_apart`] asks it, and §29 records what that closed
 /// and what stayed.
+///
+/// One of the two separations that comparison weighs used to be recomputed here
+/// from the plane's reading against the axis, and §142.8 found a pair where
+/// that reading is a window a hundred times wider than the pipe: an axis lying
+/// in the plane `1e10` from the origin. The separation is `√(room/n·n)` for the
+/// `room` the caller certified, so it is read off that sum instead.
 fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> {
     let normal = flat.normal();
     let along = pipe.axis().direction();
@@ -428,12 +422,21 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
         });
 
     // How far the axis sits in front of the cutting plane, and how far each of
-    // the two lines sits from the plane through the axis square to it.
+    // the two lines sits from the plane through the axis square to it. The
+    // second is `√(room/n·n)` for the very `room` the caller has just certified
+    // above zero, so it is read off that sum and not worked out again from the
+    // reading: `r² − (reading/‖n‖)²` is the same number written so that it has
+    // to cancel, and for an axis far from the origin the reading is wider than
+    // the pipe is thick (§142.8).
     let reading = dot_enclosing(exactly(normal.components()), exactly(origin.coordinates()))
         - Interval::exactly(flat.offset());
-    let in_front = quotient_or_everything(reading, root_enclosing(squared_normal));
-    let skin = Interval::exactly(pipe.radius());
-    let out = root_enclosing(skin * skin - in_front * in_front);
+    let room = how_much_room_a_plane_leaves_in_a_pipe_exactly(flat, pipe)
+        .as_ref()
+        .map_or_else(
+            || how_much_room_a_plane_leaves_in_a_pipe_enclosing(flat, pipe),
+            Exact::enclosure,
+        );
+    let out = root_enclosing(quotient_or_everything(room, squared_normal));
 
     two_lines_told_apart(
         picker,
@@ -446,6 +449,28 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
             out,
         },
         Surface::Cylinder(*pipe),
+    )
+}
+
+/// `n·n·r² − (n·o − d)²` as an enclosure: how much room a plane running along a
+/// pipe's axis leaves inside it, as an area.
+fn how_much_room_a_plane_leaves_in_a_pipe_enclosing(flat: &Plane, pipe: &Cylinder) -> Interval {
+    let normal = flat.normal().components();
+    let reading = dot_enclosing(exactly(normal), exactly(pipe.axis().origin().coordinates()))
+        - Interval::exactly(flat.offset());
+    squared_length_enclosing(exactly(normal)) * squared_enclosing(pipe.radius()) - reading * reading
+}
+
+/// `n·n·r² − (n·o − d)²`, exactly.
+fn how_much_room_a_plane_leaves_in_a_pipe_exactly(flat: &Plane, pipe: &Cylinder) -> Option<Exact> {
+    let normal = flat.normal().components();
+    let radius = pipe.radius();
+    let reading =
+        Exact::dot_of(normal, pipe.axis().origin().coordinates())?.minus(&Exact::of(flat.offset()));
+    Some(
+        Exact::dot_of(normal, normal)?
+            .times(&Exact::product_of(radius, radius)?)?
+            .minus(&reading.times(&reading)?),
     )
 }
 
@@ -670,11 +695,23 @@ fn a_ball_centred_on_a_pipes_axis(
 /// changed here: a pipe of width `r` reaches `r` out from its axis in the metric
 /// of the world, so the term that pairs its radius against a distance is scaled
 /// like a distance and not like a squared direction.
+///
+/// `A` is read off the exact sum and not the enclosure, because the caller has
+/// just asked whether the centre is on the axis — the sign of that same `A` —
+/// and reached for the exact arm to answer it. Recomputing it in intervals
+/// throws that away: for a centre exactly on the axis `1e10` from the origin
+/// the enclosure straddles zero, `2r√(AW)` comes back nearly twice the whole of
+/// `D₋`, and the root clamps to nothing (§142.8).
 fn how_far_apart_two_loops_are(ball: &Sphere, pipe: &Cylinder) -> Interval {
     let centre = ball.centre().coordinates();
     let along = pipe.axis().direction().components();
     let origin = pipe.axis().origin().coordinates();
-    let off_the_axis = how_far_off_an_axis_enclosing(centre, origin, along);
+    let off_the_axis = how_far_off_an_axis_exactly(centre, origin, along)
+        .as_ref()
+        .map_or_else(
+            || how_far_off_an_axis_enclosing(centre, origin, along),
+            Exact::enclosure,
+        );
     let squared_direction = squared_length_enclosing(exactly(along));
     let reach = squared_direction
         * (squared_enclosing(ball.radius()) - squared_enclosing(pipe.radius()))

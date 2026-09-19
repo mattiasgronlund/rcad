@@ -7,12 +7,20 @@
 //! escalate to. §140 was the first measured casualty; the sweep named four more
 //! sites and only one of those had a number behind it.
 //!
-//! Each test here builds an ordinary pair of surfaces, asserts that
-//! [`intersect`] refuses it with
-//! [`Error::CannotNameWhichPieceOfACrossingThisIs`], and prints the enclosure
-//! that did it. **All three are §16.10 gaps and not limits**: in each case the
-//! answer exists and the test says in what sense, so the refusal is arithmetic
-//! that could not reach an answer rather than an answer that is not there.
+//! Each test here builds an ordinary pair of surfaces and prints the enclosure
+//! that reaches zero. **All three are §16.10 gaps and not limits**: in each
+//! case the answer exists and the test says in what sense, so the refusal is
+//! arithmetic that could not reach an answer rather than an answer that is not
+//! there.
+//!
+//! # Sites one and three are closed, and these tests now say so
+//!
+//! Both threw away a number the caller had already summed exactly, and both now
+//! read it back instead of working it out again in intervals. The enclosures
+//! below are still exactly what they were — the assertions that they straddle
+//! zero are kept — and the pairs are named anyway. **That is the point:** the
+//! interval route still cannot decide either pair, and neither one goes through
+//! it any more. Site two is still open, and its test still expects a refusal.
 //!
 //! # Why the printed enclosure is the one the kernel computed
 //!
@@ -33,16 +41,17 @@
 //! the caller works out before it hands anything over, so the fix neither
 //! helped nor hurt here.
 //!
-//! # Two of the three refusals throw away a number the caller already had
+//! # Two of the three refusals threw away a number the caller already had
 //!
-//! Site one's `n·o − d` is worked out exactly one function up, in the `exactly`
-//! half of the question that decides the plane cuts the pipe at all. Site
-//! three's `A` has a whole exact routine of its own, `how_far_off_an_axis_exactly`,
-//! and the caller calls it one question earlier to decide the centre is on the
-//! axis. Both are then worked out again in intervals and lost. Site two is not
-//! that shape: the sign it needs is decided exactly, but `clear` wants the
-//! *size* of `r_fat² − reach²` and not its sign, and no exact level hands a
-//! size back.
+//! Site one's whole discriminant `n·n·r² − (n·o − d)²` is summed exactly one
+//! function up, in the `exactly` half of the question that decides the plane
+//! cuts the pipe at all; the separation it needs is `√(that/n·n)`. Site three's
+//! `A` has a whole exact routine of its own, `how_far_off_an_axis_exactly`, and
+//! the caller calls it one question earlier to decide the centre is on the
+//! axis. Both were then worked out again in intervals and lost, and both now
+//! read the exact sum instead. Site two is not that shape: the sign it needs is
+//! decided exactly, but `clear` wants the *size* of `r_fat² − reach²` and not
+//! its sign, and no exact level hands a size back.
 
 #![forbid(unsafe_code)]
 
@@ -55,8 +64,8 @@ use rcad_predicates::{Interval, Policy, ProvenanceLog};
 /// ten-billionth of nothing special.
 const ALONG_THE_PLANE: f64 = 1.0e10;
 
-/// Site one, `intersect.rs:440`: a pipe lying exactly in a plane loses both of
-/// its lines when the place it lies at is far enough along the plane.
+/// Site one, `intersect.rs:440`: a pipe lying exactly in a plane used to lose
+/// both of its lines when the place it lies at is far enough along the plane.
 ///
 /// The plane is `x + y = 0` and the pipe's axis is the line through
 /// `(L, −L, 0)` pointing along `(1, −1, 0)`. That axis is **exactly** in the
@@ -68,11 +77,14 @@ const ALONG_THE_PLANE: f64 = 1.0e10;
 /// What is marginal is `n·o` **as an enclosure**. Each product is enclosed to
 /// its own last bit and the two do not cancel bit for bit, so the reading comes
 /// out as `±ulp(u·L)` — here `±9.54e-7`, which is a hundred times the pipe's
-/// own width. `out = √(r² − in_front²)` then has nothing left of `r²`
-/// and reaches down to zero, and the two lines are no longer provably either
+/// own width. `out = √(r² − in_front²)` then had nothing left of `r²`
+/// and reached down to zero, and the two lines were no longer provably either
 /// side of the picking plane.
+///
+/// `out` is `√((n·n·r² − (n·o − d)²)/n·n)` read off the caller's own exact sum
+/// now, so the reading below is as wide as it ever was and nothing asks it.
 #[test]
-fn a_pipe_lying_in_a_plane_far_along_it_loses_both_of_its_lines() {
+fn a_pipe_lying_in_a_plane_far_along_it_keeps_both_of_its_lines_despite_the_reading() {
     let flat = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 1.0, 0.0))
         .expect("a plane through the origin at forty-five degrees");
     let normal = flat.normal().components();
@@ -115,8 +127,8 @@ fn a_pipe_lying_in_a_plane_far_along_it_loses_both_of_its_lines() {
         &mut ProvenanceLog::new(),
     );
     assert!(
-        matches!(met, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
-        "site 440 was expected to refuse to tell the two lines apart, and said {met:?}"
+        matches!(met, Ok(rcad_geom::SurfaceMeet::Curves(ref runs)) if runs.len() == 2),
+        "site 440 should name the two lines off the caller's exact sum, and said {met:?}"
     );
 }
 
@@ -245,7 +257,7 @@ const PIPE: f64 = 1.0e-3;
 const BALL: f64 = 1.0005e-3;
 
 /// Site three, `intersect.rs:677-689`: a ball sitting on a pipe's axis a long
-/// way along it loses both of its loops.
+/// way along it used to lose both of its loops.
 ///
 /// The pipe runs along `(1, 1, 0)` through the origin and the ball's centre is
 /// at `(M, M, 0)`, which is **exactly** on that axis — the cross product
@@ -261,14 +273,17 @@ const BALL: f64 = 1.0005e-3;
 /// `W(R² − r²)` of `1.0e-9`, so the `2r√(AW)` term alone is nearly twice the
 /// whole of `D₋` and the enclosure reaches below zero.
 ///
-/// **`reach` starting at nothing is on its own enough to refuse.** The margin
+/// **`reach` starting at nothing was on its own enough to refuse.** The margin
 /// the caller then tests is `(n·ŵ)·reach − ‖n̂ × ŵ‖·R − offset_slop`, and
 /// neither of the last two terms is ever below zero — so a `reach` whose low
 /// end is zero leaves a margin whose low end cannot be above zero either. The
 /// half-space's own offset rounding grows with the centre's distance as well,
-/// and is not zero here; it does not have to be for this refusal to happen.
+/// and is not zero here; it did not have to be for that refusal to happen, and
+/// it is not what is fixed. `A` is read off `how_far_off_an_axis_exactly` now,
+/// which is exactly zero, so `D₋` is `W(R² − r²)` and the offset rounding of
+/// `1.9e-6` loses to a `reach` of `3.2e-5`.
 #[test]
-fn a_ball_on_a_pipes_axis_far_along_it_loses_both_of_its_loops() {
+fn a_ball_on_a_pipes_axis_far_along_it_keeps_both_of_its_loops_despite_the_enclosure() {
     let axis = Axis::new(Point::origin(), Vector::new(1.0, 1.0, 0.0)).expect("an axis");
     let along = axis.direction().components();
     let centre = Point::new(ALONG_THE_AXIS, ALONG_THE_AXIS, 0.0);
@@ -305,8 +320,8 @@ fn a_ball_on_a_pipes_axis_far_along_it_loses_both_of_its_loops() {
         &mut ProvenanceLog::new(),
     );
     assert!(
-        matches!(met, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
-        "site 677 was expected to refuse to tell the two loops apart, and said {met:?}"
+        matches!(met, Ok(rcad_geom::SurfaceMeet::Curves(ref runs)) if runs.len() == 2),
+        "site 677 should name the two loops off the exact `A`, and said {met:?}"
     );
 }
 

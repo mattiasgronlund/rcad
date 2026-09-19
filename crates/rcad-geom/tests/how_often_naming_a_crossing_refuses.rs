@@ -116,19 +116,34 @@ const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;
 /// normal it is handed, and a caller can always hand over one exactly square to
 /// a direction it holds — that direction crossed with a coordinate axis. §33.
 ///
-/// Half a percent. Measured on the shipped corpus: **0.05% turned**, down from
-/// 0.44%; **none at all leaning**, down from 0.20%; and none on the lattice,
-/// where the direction across a pipe and a plane is a coordinate axis. What is
-/// left is the *bounded* half of the same question — where the two lines sit
-/// relative to the flat surface that separates them — on a plane so close to a
-/// pipe's wall that the two lines nearly meet.
+/// Half a percent, and nothing reaches it. Measured on the shipped corpus:
+/// **0.00% turned**, down from 0.44% and then from 0.05%; **none at all
+/// leaning**, down from 0.20%; and none on the lattice, where the direction
+/// across a pipe and a plane is a coordinate axis.
 ///
-/// **That remainder is unclassified, not a limit**, and this sentence says so
-/// because this is where its rate is published and a rate with no verdict beside
-/// it reads as settled. §93 fixed the same shape of arithmetic one row over and
-/// §29.8 records what is untried here; what refuses is the *rotated* pairs, where
-/// the separation is worked out from two numbers a division already rounded. On
-/// the lattice it refuses nothing, down to one half-ulp of the wall.
+/// The one turned pair that still refused was §142.8's site one, and it was a
+/// gap: `√(r² − (n·o − d)²/n·n)` was worked out again in intervals when the
+/// caller had already summed the whole of `n·n·r² − (n·o − d)²` exactly, and
+/// for an axis far from the origin the reading is wider than the pipe is thick.
+/// It is read off that sum now.
+///
+/// **The bound stays at half a percent, because a draw is a sample of a family
+/// and not the family.** The draw is fixed — `soak` seeds a deterministic
+/// `ChaCha`, so these rates reproduce to the pair — but zero of *these* 2052 is
+/// what one of these 2052 became, and one pair is what 0.05% was. A rate this
+/// low is a pair or no pair, so a bound of zero would assert a structural fact
+/// the measurement does not carry, and would break on the next change to a
+/// generator rather than on a regression. `A_TURNED_CROSSING_MAY_REFUSE` next
+/// door may be zero because §118.11 removed the arithmetic; site one's fix
+/// re-routed the arithmetic here and did not remove it.
+///
+/// **What the bounded half does is still unclassified, not a limit**, and this
+/// sentence says so because a rate with no verdict beside it reads as settled.
+/// It no longer fires in *these* two families, but the same question — where
+/// two lines sit relative to the flat surface separating them, on a plane so
+/// close to a pipe's wall that they nearly meet — is what the band still
+/// refuses at 2.68%. §93 fixed the same shape of arithmetic one row over and
+/// §29.8 records what is untried.
 const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.005;
 
 /// How much of a quartic family may refuse for want of a half-space.
@@ -151,8 +166,16 @@ const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.005;
 /// and what runs out is `f64`'s supply of vectors exactly square to a given
 /// direction. §33.
 ///
-/// Measured on the shipped corpus: 0% on the lattice, **2.10% turned**, down
-/// from 11.86%.
+/// Measured on the shipped corpus: 0% on the lattice, **2.00% turned** — 41 of
+/// 2052 — down from 11.86%.
+///
+/// **That figure is not this bound, and it drifted once already.** It read
+/// 2.10% here and in §142.9 while the tree measured 2.05%: the constant below
+/// is an upper bound, the test asserts against the bound, and nothing asserts
+/// the rate the prose publishes. §142.8's site three took it from 2.05% to
+/// 2.00%, and **site two will move it again** — re-measure rather than reason
+/// from this line. `just t -E 'test(how_often_a_certified_naming_of_a_turned_quartic_crossing_refuses)' --no-capture`
+/// prints it; the draw is seeded, so it reproduces to the pair.
 const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.04;
 
 /// How much of the quartic pairs' turned family may refuse for want of a sign.
