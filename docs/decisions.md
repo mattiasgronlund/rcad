@@ -34681,6 +34681,24 @@ could lose six hours this way, which makes it the clearest evidence §134 was
 worth having — and it arrived the morning §134 landed, by coincidence rather
 than by design.
 
+### 140.7 What this owes, decided rather than asked
+
+**It owes a lane, and it is not going on the deferred list.** §13's
+no-named-consumer rule is the usual way a finding waits, and it is not available
+here: CLAUDE.md says in terms that §13 "governs **features, never correctness
+gaps**". A crossing that answers one way round and refuses the other is not a
+feature nobody asked for; it is the kernel giving two answers to one question.
+
+That is a disposition and not a schedule. **What it does not decide is §140.5**,
+which stays open on purpose: whether the refusal is the defect or the answer is,
+is the lane's first question and not something this section guessed at to look
+finished.
+
+Recorded under §138 rather than left as a question. The session that found it
+was at the end of its context and could not run the lane, which is a reason to
+write the disposition down and hand it over — not a reason to park the finding
+until someone is asked a question they have already answered generically.
+
 Commands run to reach this: `mise exec -- just fuzz-triage`, which replayed all
 thirteen artifacts against `main`; `ls -la` of
 `~/git/mattiasgronlund/rcad-nightly-fuzz/fuzz/artifacts/where_two_surfaces_cross/`
