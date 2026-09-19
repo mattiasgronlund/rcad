@@ -440,19 +440,37 @@ const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
 /// families by some way, and it is the only one where the ratio to the lattice
 /// family is what the family was built to be about.
 ///
-/// Two thirds to three times 0.7% is 0.47% to 2.1%, and at a count of three
-/// those ends are two fuses and nine exactly. Rounding the floor to two figures
-/// rounds it up, which puts two fuses just outside, so in practice this row runs
-/// **three fuses to nine and fires if one of its three stops happening.** The
-/// end is left where the rounding put it rather than nudged down to take two
-/// fuses back in: the same rounding is applied to all twelve ends, and one end
-/// chosen a different way for comfort is the thing this re-derivation was for.
+/// **The ends are the count's own spread, and they are not two thirds to three
+/// times the rate.** That convention is what the other five rows use and what
+/// this row used until §136.5, where it gave `0.47%–2.1%` — three fuses to nine
+/// — from a single draw of three. It is the wrong tool here: the rate is a
+/// twentieth of the lattice family's, so the expected *count* at 429 fuses is
+/// about three and a half, and a band whose floor is two fuses sits inside that
+/// count's own sampling spread rather than outside it.
 ///
-/// A band this tight is not a flake waiting to happen. [`measured`] runs from a
-/// fixed seed, so a count of three is a count of three on every machine, and
-/// nothing but a change to the kernel or to the corpus can move it. It was 0.5%
-/// to 3%, the same three fuses at the bottom and three more at the top.
-const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0047..=0.021;
+/// Measured rather than argued, `RCAD_SOAK_SEED` varied the way [`SOAK_SEED`]
+/// documents. **Twelve fresh seeds at the shipped 429 fuses give 1, 5, 3, 1, 4,
+/// 4, 5, 4, 6, 1, 1, 3** — a spread of one to six, with four of the twelve
+/// landing on one. **Six seeds at ten times the corpus, 3 885 fuses, give
+/// 0.72%, 1.00%, 0.88%, 0.72%, 0.93% and 0.72%**, so the underlying rate is
+/// 0.83% and has not moved from the 0.7% this band was first built on. What
+/// moved was which draw the fixed seed takes.
+///
+/// So the ends are one fuse to twelve — `0.23%` to `2.8%` — the observed spread
+/// with the ceiling at twice its maximum. The floor is one fuse because one
+/// fuse is the question this row actually asks: whether the family still
+/// reaches the four-faces-along-one-edge configuration it was built to reach.
+/// Zero is the answer that fires.
+///
+/// **The sentence this replaces was true and still misled.** It said a band
+/// this tight is not a flake waiting to happen, because [`measured`] runs from
+/// a fixed seed and a count of three is a count of three on every machine. That
+/// is right about re-running and wrong about safety: a deterministic draw from
+/// a family whose counts run one to six moves anywhere in that range whenever
+/// the corpus is reshuffled, and §121, §130, §131 and §132 reshuffled it. The
+/// row then failed for six weeks' worth of arithmetic work having changed the
+/// draw, not the kernel's behaviour. §136.5.
+const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0023..=0.028;
 
 /// The same for its control, where both solids lean the same way.
 ///
@@ -2804,9 +2822,10 @@ fn plainly_fused(
 /// dividing `(0, 3, 0)` by `3` is exact — and the skew family is the first
 /// thing here that can tilt a wall.
 ///
-/// The constructor now divides by the largest-magnitude component first, so the
-/// answer depends on the ratios alone. This is the topology-side guard on that;
-/// `rcad-geom` has the arithmetic in
+/// The constructor now scales by an exact power of two and divides by a length
+/// carried to a hundred bits, so the answer depends on the ratios alone *and* is
+/// the nearest `f64` to the exact one. This is the topology-side guard on the
+/// first half; `rcad-geom` has the arithmetic in
 /// `a_plane_is_the_same_however_long_the_normal_naming_it_was`.
 #[test]
 fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
@@ -2822,24 +2841,21 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
         plane_of(3.0),
         "the same plane, named off a longer edge"
     );
-    // Both land on the same number, and it is one ulp under the correctly
-    // rounded 1/√2. Canonical and closest are not in tension — a correctly
-    // rounded normalize is a function of the exact ray, so two proportional
-    // spellings still store the same bits — and no ordering recovers this bit
-    // because ordering is the wrong family: carrying more of them does.
+    // Both land on the same number, and since §121 it is the nearest `f64` to
+    // 1/√2 rather than the ulp below. Canonical and closest are not in tension —
+    // a correctly rounded normalize is a function of the exact ray, so two
+    // proportional spellings still store the same bits.
     //
-    // §120 fixed that for `Axis::new` and left `Plane` alone, so this literal
-    // did not move and is not meant to: a plane still divides by its largest
-    // component and then normalizes, which rounds twice. §121 books the plane
-    // half, and when it runs this is one of the numbers that moves.
-    // What §22.6 was about is the two walls agreeing, and they do.
-    let canonical = 0.707_106_781_186_547_5_f64;
-    assert_eq!(plane_of(1.0)[0], canonical);
+    // The bit this used to lose was never lost to the ordering of the
+    // arithmetic; it was lost to rounding a square root and then rounding a
+    // division. Carrying a hundred bits of the root is what recovers it.
+    let stored = plane_of(1.0)[0];
+    assert_eq!(stored, core::f64::consts::FRAC_1_SQRT_2);
     assert_eq!(
-        canonical.to_bits() + 1,
-        core::f64::consts::FRAC_1_SQRT_2.to_bits(),
-        "one ulp under, and stated here so a change to it is a change somebody \
-         has to look at"
+        stored.to_bits() - 1,
+        0.707_106_781_186_547_5_f64.to_bits(),
+        "the ulp below is what a plane stored until §121, and naming it here \
+         makes a slide back to it something somebody has to look at"
     );
 }
 

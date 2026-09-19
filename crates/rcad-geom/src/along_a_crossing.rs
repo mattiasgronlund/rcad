@@ -713,16 +713,19 @@ mod tests {
     /// dot of the two stored triples and names one closed curve.
     /// [`the_way_this_crossing_winds`] runs `== 0.0` on the same two triples in
     /// plain `f64`, reads "two straight lines", and refuses. `(2, 0, 3)` against
-    /// a plane facing `(−12, −12, 8)` is a pair of small whole numbers where the
+    /// a plane facing `(−12, −7, 8)` is a pair of small whole numbers where the
     /// `f64` dot cancels and the exact one does not, and the two answers are as
     /// far apart as they can be.
     ///
-    /// The pair used to be `(1, 0, 3)` against `(−12, −12, 4)`. §120's correctly
-    /// rounded normalize moved the stored axis and that pair's `f64` dot came
-    /// out at `−2.8e-17` rather than zero, so it stopped witnessing anything.
-    /// **The gap did not move with it**: a sweep of small whole-number pipes
-    /// against small whole-number planes still finds dozens of pairs where the
-    /// `f64` dot cancels and the exact one does not, and this is one of them.
+    /// **This witness has dissolved twice and the gap has not moved once.** It
+    /// was `(1, 0, 3)` against `(−12, −12, 4)` until §120 rounded the stored axis
+    /// correctly and that pair's `f64` dot came out at `−2.8e-17`; it was
+    /// `(2, 0, 3)` against `(−12, −12, 8)` until §121 rounded the stored normal
+    /// correctly and the *exact* dot of that pair came out at zero, which is a
+    /// pair the two authorities agree about. A sweep of small whole-number pipes
+    /// against small whole-number planes still finds dozens where the `f64` dot
+    /// cancels and the exact one does not — for this one pipe alone, more than
+    /// twenty normals inside `±12` — and this is one of them.
     ///
     /// **A gap, and this test pins today's answer so a fix fails it loudly**
     /// (§19's shape). Closing it means the two asking the same question, which is
@@ -739,7 +742,7 @@ mod tests {
             .expect("a radius"),
         );
         let leaning = Surface::Plane(
-            Plane::from_point_and_normal(Point::origin(), Vector::new(-12.0, -12.0, 8.0))
+            Plane::from_point_and_normal(Point::origin(), Vector::new(-12.0, -7.0, 8.0))
                 .expect("a normal with length"),
         );
 

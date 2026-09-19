@@ -2852,9 +2852,11 @@ mod tests {
     ///
     /// `(0, −10, −8)` dotted with `(−9, −4, 5)` is `40 − 40` and the point is
     /// exactly on the plane through the origin with that normal. The stored
-    /// plane is not that plane: the normal is divided by its largest component
-    /// and then scaled to length one, and neither division is exact, so the
-    /// point reads a fifth of a coordinate spacing off a plane it is on.
+    /// plane is not that plane: the normal is scaled to length one and that
+    /// division is not exact, so the point reads a fifth of a coordinate
+    /// spacing off a plane it is on. (`docs/decisions.md` §121 and §132 are
+    /// what made both of those one rounding rather than two; neither makes
+    /// them none.)
     ///
     /// **Nothing anywhere can make this number zero**, which is why the
     /// allowance is not a tolerance. Every arc a real file names is one of

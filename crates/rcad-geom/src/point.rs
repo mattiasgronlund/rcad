@@ -296,6 +296,22 @@ impl Vector {
         self.0.dot(&other.0)
     }
 
+    /// The dot product with the whole sum rounded once instead of five times.
+    ///
+    /// Three products and two additions each round in [`Vector::dot`], so the
+    /// answer can sit several ulps from the nearest `f64` to the real dot
+    /// product. Here every product is kept exactly and the three of them are
+    /// added to about a hundred bits, so the only place the answer rounds is
+    /// the last add. `docs/decisions.md` §132 is why a plane's offset wants
+    /// that.
+    pub(crate) fn dot_rounded_once(&self, other: Vector) -> f64 {
+        let mut total = (0.0, 0.0);
+        for (mine, theirs) in self.components().into_iter().zip(other.components()) {
+            total = sum_of(total, product_to_a_hundred_bits(mine, theirs));
+        }
+        total.0
+    }
+
     /// The cross product: a vector at right angles to both, as long as the area
     /// of the parallelogram the two of them span.
     #[must_use]
@@ -450,7 +466,7 @@ impl Vector {
 /// to round the fifty-third bit of its answer the right way. The pair is always
 /// kept so that adding the two together gives the high one back — that is what
 /// [`two_sum`] returns and why every one of these ends with a call to it.
-type AHundredBits = (f64, f64);
+pub(crate) type AHundredBits = (f64, f64);
 
 /// `x² + y² + z²`, to a hundred bits.
 ///
@@ -461,12 +477,7 @@ type AHundredBits = (f64, f64);
 fn sum_of_the_squares_to_a_hundred_bits(components: [f64; 3]) -> AHundredBits {
     let mut total = (0.0, 0.0);
     for component in components {
-        let square = if product_is_exact(component, component) {
-            two_product(component, component)
-        } else {
-            (component * component, 0.0)
-        };
-        total = sum_of(total, square);
+        total = sum_of(total, product_to_a_hundred_bits(component, component));
     }
     total
 }
@@ -494,16 +505,45 @@ fn divided_by_a_hundred_bit_number(numerator: f64, length: AHundredBits) -> f64 
     if first == 0.0 {
         return first;
     }
-    let taken_back_out = if product_is_exact(first, length.0) {
-        two_product(first, length.0)
-    } else {
-        (first * length.0, 0.0)
-    };
+    let taken_back_out = product_to_a_hundred_bits(first, length.0);
     let left_over = difference_of(
         (numerator, 0.0),
         sum_of(taken_back_out, (first * length.1, 0.0)),
     );
     first + (left_over.0 + left_over.1) / length.0
+}
+
+/// A hundred-bit numerator over an `f64`, rounded once rather than twice.
+///
+/// The mirror of [`divided_by_a_hundred_bit_number`], for the caller that has
+/// the bits in the numerator instead: [`Plane::offset_of`](crate::Plane) forms
+/// `d · unitᵢ` exactly and then divides it by a coefficient. Same shape — the
+/// `f64` quotient, then what is left over after taking it back out of the whole
+/// hundred-bit numerator, and one add.
+///
+/// **Keeping the product exact is what keeps two proportional coefficient sets
+/// agreeing** (`docs/decisions.md` §17.1, §22.6, §132). Nothing rounds before
+/// the division, so scaling the plane scales the numerator and the denominator
+/// by exactly the same real number and the quotient is the same real number —
+/// which the old spelling bought by dividing first and paid for with a second
+/// rounding.
+pub(crate) fn a_hundred_bit_number_divided_by(numerator: AHundredBits, divisor: f64) -> f64 {
+    let first = numerator.0 / divisor;
+    if first == 0.0 {
+        return first;
+    }
+    let left_over = difference_of(numerator, product_to_a_hundred_bits(first, divisor));
+    first + (left_over.0 + left_over.1) / divisor
+}
+
+/// `left · right` exactly when that product is exact, and rounded when it is
+/// not — the pair every hundred-bit sum here starts from.
+pub(crate) fn product_to_a_hundred_bits(left: f64, right: f64) -> AHundredBits {
+    if product_is_exact(left, right) {
+        two_product(left, right)
+    } else {
+        (left * right, 0.0)
+    }
 }
 
 /// Two hundred-bit numbers added, to a hundred bits.
@@ -803,6 +843,24 @@ mod tests {
         let across = a.cross(b);
         assert!(across.dot(a).abs() < 1e-12);
         assert!(across.dot(b).abs() < 1e-12);
+    }
+
+    /// The claim [`Vector::dot_rounded_once`] makes, on three terms where the
+    /// ordinary dot product loses all of the answer.
+    ///
+    /// `2^60 + 1 − 2^60` is one. Added left to right in `f64` the one falls off
+    /// the end of `2^60 + 1` and what comes back is zero — not a rounding of
+    /// the answer, the whole of it. Every product here is exact, so the
+    /// hundred-bit sum carries the one and the single rounding at the end has
+    /// nothing left to throw away.
+    #[test]
+    fn a_dot_product_rounded_once_keeps_a_term_three_products_and_two_adds_lose() {
+        let huge = 2f64.powi(60);
+        let ones = Vector::new(1.0, 1.0, 1.0);
+        let cancelling = Vector::new(huge, 1.0, -huge);
+
+        assert_eq!(ones.dot(cancelling), 0.0, "in order, the one is lost");
+        assert_eq!(ones.dot_rounded_once(cancelling), 1.0, "and it is an f64");
     }
 
     #[test]

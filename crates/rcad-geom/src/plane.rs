@@ -8,7 +8,7 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::isometry::Isometry;
-use crate::point::{Point, Vector};
+use crate::point::{Point, Vector, a_hundred_bit_number_divided_by, product_to_a_hundred_bits};
 use crate::{Error, Result};
 
 /// The name the plane's sign predicate goes by in provenance records.
@@ -110,8 +110,11 @@ impl Plane {
     /// The plane through `point` at right angles to `normal`.
     ///
     /// Only the direction of `normal` is read. Two vectors along the same line
-    /// give the same coefficients bit for bit however long each one is — see
-    /// [`Plane::reduced_by_largest_component`].
+    /// give the same coefficients bit for bit however long each one is, and
+    /// every stored component is the nearest `f64` to the exact ratio between
+    /// that component and the exact length —
+    /// [`Vector::scaled_to_length_one_from_anywhere`] is what buys both, and
+    /// `docs/decisions.md` §121 is why a plane goes through it now.
     ///
     /// # Errors
     ///
@@ -124,9 +127,8 @@ impl Plane {
                 what: "point on a plane",
             });
         }
-        let (reduced, _) = Self::reduced_by_largest_component(normal, "plane normal")?;
-        let normal = reduced.normalized_as("plane normal")?;
-        let offset = normal.dot(point - Point::origin());
+        let normal = normal.scaled_to_length_one_from_anywhere("plane normal")?;
+        let offset = normal.dot_rounded_once(point - Point::origin());
         if !offset.is_finite() {
             return Err(Error::NotFinite {
                 what: "distance from the origin to a plane",
@@ -167,10 +169,11 @@ impl Plane {
     /// The plane `a * x + b * y + c * z + d = 0`, from `[a, b, c, d]`.
     ///
     /// The coefficients are scaled so the normal has length one, which changes
-    /// the numbers but not the plane. All four are divided by the largest of
-    /// `|a|`, `|b|`, `|c|` first, so any two proportional coefficient sets give
-    /// the same plane bit for bit — see
-    /// [`Plane::reduced_by_largest_component`].
+    /// the numbers but not the plane. Any two proportional coefficient sets
+    /// give the same plane bit for bit: the normal comes back from
+    /// [`Vector::scaled_to_length_one_from_anywhere`], which is a function of
+    /// the ratios alone, and [`Plane::offset_of`] divides `d` by a coefficient
+    /// before it touches anything else, for the same reason.
     ///
     /// # Errors
     ///
@@ -183,11 +186,9 @@ impl Plane {
                 what: "plane coefficient",
             });
         }
-        let (reduced, scale) =
-            Self::reduced_by_largest_component(Vector::new(a, b, c), "plane normal")?;
-        let length = reduced.length();
-        let normal = reduced.normalized_as("plane normal")?;
-        let offset = -(d / scale) / length;
+        let coefficients = Vector::new(a, b, c);
+        let normal = coefficients.scaled_to_length_one_from_anywhere("plane normal")?;
+        let offset = Self::offset_of(coefficients, normal, d);
         if !offset.is_finite() {
             return Err(Error::NotFinite {
                 what: "distance from the origin to a plane",
@@ -196,47 +197,33 @@ impl Plane {
         Ok(Self::holding(normal, offset))
     }
 
-    /// `direction` divided by its largest-magnitude component, and the positive
-    /// number it was divided by.
+    /// How far `a * x + b * y + c * z + d = 0` sits from the origin along its
+    /// unit normal, which is `-d` over the length of `(a, b, c)`.
     ///
-    /// Every plane in the kernel comes through here, and the reason is that a
-    /// face *is* its plane (`docs/decisions.md` §17.1): two walls that describe
-    /// the same plane have to carry the same four numbers, or the fuse keeps
-    /// whichever belonged to whichever argument came first. Normalizing alone
-    /// does not give that. `(1, 1, 0)` and `(3, 3, 0)` are the same direction
-    /// and their lengths round differently, so they used to store coefficients
-    /// an ulp apart (§22.6).
+    /// That length is never formed. `unit` is `(a, b, c)` already scaled to
+    /// length one, so `unitᵢ / coefficientᵢ` is `1 / length` for every `i`, and
+    /// the widest coefficient is the one that keeps both of those numbers
+    /// furthest from zero — a unit vector's widest component is never below
+    /// `1/√3`.
     ///
-    /// Dividing by the largest component first removes it. Division is
-    /// correctly rounded, so `a/|m|` and `sa/|sm|` are the same real number and
-    /// therefore the same `f64`, whatever `s` is. What comes out depends on the
-    /// ratios between the components and on nothing else.
-    ///
-    /// It used to widen what could be answered at all as well: every component
-    /// that comes out is in `[-1, 1]` with the largest exactly `±1`, so the
-    /// length that follows could not overflow on a vector near [`f64::MAX`] nor
-    /// underflow to zero on a subnormal one, and both of those were refused
-    /// before. `Vector::length` scales by a power of two of its own now, so
-    /// nobody is refused for that any more and what is left here is the
-    /// paragraph above: same ratios, same bits.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::NotFinite`] if any component is infinite or not a number, and
-    /// [`Error::ZeroLength`] if every component is exactly zero.
-    fn reduced_by_largest_component(
-        direction: Vector,
-        what: &'static str,
-    ) -> Result<(Vector, f64)> {
-        if !direction.is_finite() {
-            return Err(Error::NotFinite { what });
-        }
-        let [x, y, z] = direction.components();
-        let scale = x.abs().max(y.abs()).max(z.abs());
-        if scale == 0.0 {
-            return Err(Error::ZeroLength { what });
-        }
-        Ok((Vector::new(x / scale, y / scale, z / scale), scale))
+    /// **Nothing rounds before the division, which is what makes two
+    /// proportional coefficient sets agree**, which is what a face being its
+    /// plane needs (`docs/decisions.md` §17.1, §22.6). `d · unitᵢ` is formed
+    /// exactly and held as a hundred bits, so `(d·unitᵢ) / m` and
+    /// `(s·d·unitᵢ) / (s·m)` are the same real number and round to the same
+    /// `f64`. Dividing `d` by the coefficient first bought that same agreement
+    /// and paid a second rounding for it (`docs/decisions.md` §132).
+    fn offset_of(coefficients: Vector, unit: Vector, d: f64) -> f64 {
+        let [a, b, c] = coefficients.components();
+        let [along_a, along_b, along_c] = unit.components();
+        let (widest, unit_there) = if a.abs() >= b.abs() && a.abs() >= c.abs() {
+            (a, along_a)
+        } else if b.abs() >= c.abs() {
+            (b, along_b)
+        } else {
+            (c, along_c)
+        };
+        -a_hundred_bit_number_divided_by(product_to_a_hundred_bits(d, unit_there), widest)
     }
 
     /// Which way the plane faces. Scaled to length one when the plane was built.
@@ -360,11 +347,14 @@ impl Plane {
     /// by `2^k` multiplies a plane's offset and leaves its normal alone, because
     /// a normal is a direction and not a length — so there is nothing left to
     /// work out and nothing that should round. Going back through
-    /// [`Plane::from_coefficients`] instead reduces and normalizes an
-    /// already-normalized vector, and that is not the normal that went in:
-    /// **24 733 of 100 000** random directions come back with other bits when a
-    /// plane is rebuilt from its own coefficients, which
+    /// [`Plane::from_coefficients`] instead scales an already-scaled vector to
+    /// length one, and that is not the normal that went in: **1 053 of
+    /// 100 000** random directions come back with other bits when a plane is
+    /// rebuilt from its own coefficients, which
     /// `rebuilding_a_plane_from_its_own_coefficients_tilts_its_normal` counts.
+    /// It was **24 733** until §121, because rounding a square root and then
+    /// rounding a division moves an already-unit triple far more often than
+    /// rounding once does. A twentieth of the footgun is still a footgun.
     /// `rcad-topo`'s `arrange` says the same thing in prose one crate away,
     /// where a moved plane moves a corner.
     ///
@@ -505,15 +495,19 @@ impl Plane {
 
     /// Where three planes meet.
     ///
-    /// The answer is a constructed point: a box the true meeting point is
-    /// somewhere inside. Cramer's rule needs a division, and dividing two
-    /// ranges almost never lands on an `f64`, so the box has real width even
-    /// when the three planes are square to each other.
+    /// The answer is an **exact point where the meeting point is an `f64`
+    /// triple and that can be proved, and a constructed point — a box the true
+    /// meeting point is somewhere inside — otherwise.** Cramer's rule needs a
+    /// division, and dividing two ranges almost never lands on an `f64`, so
+    /// most answers are boxes; `docs/decisions.md` §131 is the level that
+    /// names the corner when the box holds one, and this doc comment said
+    /// "constructed" for every answer until it did.
     ///
-    /// That width is the point of it. A predicate over a constructed point
-    /// cannot fall through to exact arithmetic, so it can genuinely come back
-    /// [`Decision::Undecidable`] — this is the geometry-side entry to the case
-    /// `docs/decisions.md` §2.5 asks M0 to reach.
+    /// Where the width is real it is the point of it. A predicate over a
+    /// constructed point cannot fall through to exact arithmetic, so it can
+    /// genuinely come back [`Decision::Undecidable`] — this is the
+    /// geometry-side entry to the case `docs/decisions.md` §2.5 asks M0 to
+    /// reach.
     ///
     /// # Errors
     ///
@@ -832,16 +826,18 @@ mod tests {
     /// `(3, −1, 0)`, `(0, 5, −3)` and `(5, 0, −1)`, and this checks all three
     /// are exactly square to `w` before a plane sees them.
     ///
-    /// **Not one of them is afterwards.**
-    /// [`Plane::reduced_by_largest_component`] divides every component by the
-    /// largest, and that division is correctly rounded rather than exact unless
-    /// the largest is a power of two; the normalization after it divides by a
-    /// square root, which is exact almost never. Worked out in exact rational
-    /// arithmetic over the stored bits, the three miss squareness by one or two
-    /// last bits of the direction. **Two of the three read exactly `0.0` in
-    /// plain `f64` and the third reads `1.1e−16`**, so a filter that trusted the
-    /// `f64` would call two of them square and be wrong about both; the exact
-    /// level sees the sign and refuses, which is what it is for.
+    /// **Not one of them is afterwards.** A plane divides its normal by the
+    /// normal's own length, and a square root is exact almost never — so the
+    /// stored triple is a rounding of the written one however carefully the
+    /// division is done. §121 made that division correctly rounded and did not
+    /// change this: **a nearer direction is still not the caller's direction.**
+    /// Worked out in exact rational arithmetic over the stored bits, all three
+    /// miss squareness by one or two last bits of the direction. One of them
+    /// reads exactly `0.0` in plain `f64` and the other two read `4.4e−16` and
+    /// `−1.1e−16`, all inside what the `f64` dot itself rounds
+    /// ([`Plane::SIGNED_DISTANCE_ROUNDOFF`]), so a filter that trusted the `f64`
+    /// would call one of them square and be wrong about it; the exact level sees
+    /// the sign and refuses, which is what it is for.
     ///
     /// That is what leaves `Error::CannotNameWhichPieceOfACrossingThisIs`
     /// standing for a piece of a crossing that runs on for ever: such a piece
@@ -872,9 +868,13 @@ mod tests {
                 Some(Decision::Zero),
                 "and it is not square to it any more once stored as {stored:?}"
             );
+            let largest = along
+                .into_iter()
+                .fold(0.0_f64, |so_far, c| so_far.max(c.abs()));
             assert!(
-                in_f64.abs() <= f64::EPSILON,
-                "the miss is one rounding of the direction, which is why it hides: {in_f64:e}"
+                in_f64.abs() <= Plane::SIGNED_DISTANCE_ROUNDOFF * largest,
+                "the miss is inside what the f64 dot itself rounds, which is why \
+                 it hides: {in_f64:e}"
             );
         }
     }
@@ -882,11 +882,13 @@ mod tests {
     /// **Why §31.4's family of fixes is not one**, demonstrated rather than
     /// argued.
     ///
-    /// §31.4 works out that the reduction above is what loses the squareness,
-    /// and offers reducing by a **power of two** instead, which rounds nothing.
-    /// The first half here confirms that half of it: a normal written square to
-    /// a direction is still square to it after a power-of-two reduction, where
-    /// the test above says it is not after the reduction the code runs.
+    /// §31.4 works out that scaling a normal to length one is what loses the
+    /// squareness, and offers scaling by a **power of two** instead, which
+    /// rounds nothing. The first half here confirms that half of it: a normal
+    /// written square to a direction is still square to it after a power-of-two
+    /// reduction, where the test above says it is not once a plane has stored
+    /// it. §121 made the store correctly rounded, which does not help — the
+    /// nearest unit triple is still not the written one.
     ///
     /// **The second half is what §31.4 did not know.** Two multiples of one
     /// wall reduced by two different powers of two differ by a factor that is
@@ -1016,9 +1018,10 @@ mod tests {
     /// ones that get an answer.
     ///
     /// The claim it is evidence for now is the surviving one, §22.6: what
-    /// [`Plane::reduced_by_largest_component`] gives depends on the ratios
-    /// between the components and on nothing else, so a plane written at either
-    /// end of the range carries the same four numbers as one written at one.
+    /// [`Vector::scaled_to_length_one_from_anywhere`] gives depends on the
+    /// ratios between the components and on nothing else, so a plane written at
+    /// either end of the range carries the same four numbers as one written at
+    /// one.
     #[test]
     fn a_normal_at_either_end_of_the_range_names_the_plane_its_ratio_names() {
         let ordinary = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 1.0, 0.0))
@@ -1103,6 +1106,37 @@ mod tests {
         let recovered = Plane::try_from(plane.coefficients()).unwrap();
         assert!((recovered.normal() - plane.normal()).length() < 1e-15);
         assert!((recovered.offset() - plane.offset()).abs() < 1e-15);
+    }
+
+    /// [`Plane::offset_of`] rounds once, and dividing before multiplying
+    /// rounded twice (`docs/decisions.md` §132, §130.6).
+    ///
+    /// The two spellings are the same real number and different `f64`. A sweep
+    /// of 200 000 random coefficient sets in `[-10, 10]` told them apart 52 355
+    /// times — a quarter — so this is an ordinary plane and not a contrived
+    /// one.
+    #[test]
+    fn a_planes_offset_from_its_coefficients_rounds_once_and_not_twice() {
+        let coefficients = [
+            8.477_658_241_021_57,
+            -8.986_484_763_473_53,
+            -8.740_426_871_854_805,
+            -7.512_026_851_469_46,
+        ];
+        let plane = Plane::from_coefficients(coefficients).expect("a plane");
+
+        let [_, widest, _, d] = coefficients;
+        let unit_there = plane.normal().y();
+        assert_eq!(
+            -(d / widest) * unit_there,
+            0.496_384_149_050_014_7,
+            "dividing first and then multiplying rounds twice"
+        );
+        assert_eq!(
+            plane.offset(),
+            0.496_384_149_050_014_66,
+            "forming the product exactly and dividing it rounds once"
+        );
     }
 
     #[test]
@@ -1198,20 +1232,27 @@ mod tests {
     /// All three points define the plane, so the truthful answer for each is
     /// `Zero`, and `orient3d` — which never divides — says so. Normalising the
     /// normal moved the stored plane off them, and the predicate is certain
-    /// about the plane it was given. The first point even has an `f64` distance
+    /// about the plane it was given. The third point even has an `f64` distance
     /// of exactly zero while the certified sign against the stored coefficients
-    /// is negative.
+    /// is positive.
+    ///
+    /// **The sides moved when the offset stopped rounding five times**
+    /// (`docs/decisions.md` §132): it was `Neg` for all three and the exactly
+    /// zero distance was the *first* point's. Which way each one is off is a
+    /// fact about the rounding and not about the geometry, so the three are
+    /// named one at a time rather than asserted to agree.
     #[test]
     fn the_points_that_defined_a_plane_are_not_on_the_plane_that_gets_stored() {
         let corners = [[1.0, 2.0, 3.0], [4.0, 5.0, 7.0], [2.0, 9.0, 4.0]];
         let [first, second, third] = corners.map(|[x, y, z]| Point::new(x, y, z));
         let plane = Plane::through_three_points(first, second, third).unwrap();
 
-        assert_eq!(plane.signed_distance_to(first), 0.0);
-        for corner in corners {
+        assert_eq!(plane.signed_distance_to(third), 0.0);
+        let certain_and_wrong = [Decision::Pos, Decision::Neg, Decision::Pos];
+        for (corner, side) in corners.into_iter().zip(certain_and_wrong) {
             assert_eq!(
                 plane.side_of_point(PredicatePoint::from(corner)),
-                Decision::Neg,
+                side,
                 "the stored plane is certain, and wrong, about {corner:?}"
             );
             assert_eq!(
