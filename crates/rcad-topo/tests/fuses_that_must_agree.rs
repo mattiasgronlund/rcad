@@ -29,9 +29,10 @@
 //!   not enter into it. Used where the two runs genuinely may cut the answer up
 //!   differently.
 //! - **The answer's geometry, bit for bit**: every face's plane, its outward
-//!   normal, and its wires as rings of corners, each ring turned to its own
-//!   smallest rotation, the outline kept first and the holes and faces and
-//!   solids sorted (§151, §163). Used where the two runs must
+//!   normal, and its wires as rings of steps — each a corner and what the edge
+//!   from it runs along, a closed one with the way it is walked — each ring
+//!   turned to its own smallest rotation, the outline kept first and the holes
+//!   and faces and solids sorted (§151, §163, §165). Used where the two runs must
 //!   produce *the same* partition and not merely the same solid.
 //!
 //! **Both comparisons are exact. There is no tolerance anywhere in this file**,
@@ -134,9 +135,12 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Axis, Deflection, Isometry, Orientation, Plane, Point, Surface, Vector};
+use rcad_geom::{
+    Axis, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Sphere,
+    Surface, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{DraftStep, EdgeView, Error, Model, Rule, SolidBuilder, SolidKey};
 
 use pairs::{
     BallAndBlock, Configuration, CurvedPair, Elsewhere, FrustumAndBlock, Movement, Placed, Rigid,
@@ -3755,7 +3759,7 @@ struct Answer {
 }
 
 /// One face: the surface it sits on, which way round its solid uses it, and its
-/// rings of corners.
+/// rings of steps — each a corner and what the edge from it runs along.
 ///
 /// **Which way round rather than which way it faces**, because a curved face has
 /// no one normal to read. For a flat face the two say the same thing: the
@@ -3768,7 +3772,145 @@ struct Answer {
 struct Face {
     sits: WhatItSitsOn,
     reversed: bool,
-    wires: Vec<Vec<[f64; 3]>>,
+    wires: Vec<Vec<Step>>,
+}
+
+/// One step round a wire: the corner it leaves from and what it runs along to
+/// the next.
+///
+/// **The run is here because the corners are not enough** (§165). A ring of two
+/// corners reads the same walked either way, a round wire has one corner and
+/// no order at all, and a quarter of a ball and three quarters of it have the
+/// same faces with the same corners — only which half-meridian each edge
+/// follows tells them apart.
+#[derive(Clone, Debug)]
+struct Step {
+    at: [f64; 3],
+    run: Run,
+}
+
+/// What an edge runs along, as numbers.
+#[derive(Clone, Debug)]
+enum Run {
+    /// Straight to the next corner, which is all there is to say about it.
+    Straight,
+    /// Right round a closed crossing and back to the corner it left, and
+    /// whether the wire walks it the way the edge is stored running.
+    ///
+    /// **Which way a closed edge is stored running is not arbitrary**: it is
+    /// the way the curved surface's own longitude takes it, the fuse writes it
+    /// that way and `Model::validate` reads it back
+    /// (`check_closed_edges_are_walked_the_way_their_surfaces_wind`). So which
+    /// way round the wire goes is part of the answer, and a round wire has no
+    /// second corner to say it.
+    RightRound { forward: bool },
+    /// One piece of where the face crosses `and`, picked out by `picked_by`.
+    PartOf {
+        and: WhatItSitsOn,
+        picked_by: Vec<Picking>,
+    },
+}
+
+/// A picker, as numbers: `a·x + b·y + c·z ≥ d` for a flat one, the surface
+/// itself for a curved one.
+#[derive(Clone, Debug)]
+enum Picking {
+    InFrontOf([f64; 4]),
+    Outside(WhatItSitsOn),
+    InsideAPipe(WhatItSitsOn),
+}
+
+impl Run {
+    fn of(edge: EdgeView<'_>) -> Run {
+        match edge.run() {
+            EdgeRun::Straight => Run::Straight,
+            EdgeRun::RightRoundWhereItsFacesCross => Run::RightRound {
+                forward: edge.orientation() == Orientation::Forward,
+            },
+            EdgeRun::PartOfWhereItCrosses { and, picked_by } => Run::PartOf {
+                and: WhatItSitsOn::of(&and),
+                picked_by: picked_by.iter().map(Picking::of).collect(),
+            },
+            other => panic!("this file does not know how to write {other:?} down"),
+        }
+    }
+
+    fn moved_by(&self, movement: &Movement) -> Run {
+        match self {
+            Run::Straight => Run::Straight,
+            Run::RightRound { forward } => Run::RightRound { forward: *forward },
+            Run::PartOf { and, picked_by } => Run::PartOf {
+                and: and.moved_by(movement),
+                picked_by: picked_by
+                    .iter()
+                    .map(|picking| picking.moved_by(movement))
+                    .collect(),
+            },
+        }
+    }
+
+    /// The numbers, tagged. The pickers are sorted: they are a set, and the
+    /// order they were listed in is the arena's business.
+    fn written_out(&self) -> Vec<u64> {
+        match self {
+            Run::Straight => vec![0],
+            Run::RightRound { forward } => vec![1, u64::from(*forward)],
+            Run::PartOf { and, picked_by } => {
+                let mut pickers: Vec<Vec<u64>> =
+                    picked_by.iter().map(Picking::written_out).collect();
+                pickers.sort_unstable();
+                let mut written = vec![2];
+                written.extend(and.written_out());
+                written.push(pickers.len() as u64);
+                written.extend(pickers.into_iter().flatten());
+                written
+            }
+        }
+    }
+}
+
+impl Picking {
+    fn of(picker: &Picker) -> Picking {
+        match picker {
+            Picker::InFrontOf(flat) => Picking::InFrontOf(flat.coefficients()),
+            Picker::OutsideABall(ball) => {
+                Picking::Outside(WhatItSitsOn::of(&Surface::Sphere(*ball)))
+            }
+            Picker::OutsideAPipe(pipe) => {
+                Picking::Outside(WhatItSitsOn::of(&Surface::Cylinder(*pipe)))
+            }
+            Picker::InsideAPipe(pipe) => {
+                Picking::InsideAPipe(WhatItSitsOn::of(&Surface::Cylinder(*pipe)))
+            }
+            other => panic!("this file does not know how to write {other:?} down"),
+        }
+    }
+
+    /// `n · p ≥ d` moved is `n' · p ≥ d + n' · t`, and the rest move as the
+    /// surfaces they are.
+    fn moved_by(&self, movement: &Movement) -> Picking {
+        match self {
+            Picking::InFrontOf([a, b, c, d]) => {
+                let [a, b, c] = movement.direction([*a, *b, *c]);
+                let along = a * movement.shift[0] + b * movement.shift[1] + c * movement.shift[2];
+                Picking::InFrontOf([a, b, c, d + along])
+            }
+            Picking::Outside(surface) => Picking::Outside(surface.moved_by(movement)),
+            Picking::InsideAPipe(surface) => Picking::InsideAPipe(surface.moved_by(movement)),
+        }
+    }
+
+    fn written_out(&self) -> Vec<u64> {
+        match self {
+            Picking::InFrontOf(coefficients) => {
+                core::iter::once(0).chain(coefficients.map(bits)).collect()
+            }
+            Picking::Outside(surface) => core::iter::once(1).chain(surface.written_out()).collect(),
+            Picking::InsideAPipe(surface) => {
+                core::iter::once(2).chain(surface.written_out()).collect()
+            }
+        }
+    }
 }
 
 /// What a face sits on, kept as the numbers that name it.
@@ -3845,6 +3987,28 @@ impl WhatItSitsOn {
                 .collect(),
         }
     }
+
+    /// Where the surface ends up after an exactly representable movement: the
+    /// points that name it move, the directions turn, and every scalar — a
+    /// radius, a slope, a tube's thickness — is carried over, because a rigid
+    /// movement does not change a length.
+    fn moved_by(&self, movement: &Movement) -> WhatItSitsOn {
+        match *self {
+            WhatItSitsOn::Flat(coefficients) => WhatItSitsOn::Flat(movement.plane(coefficients)),
+            WhatItSitsOn::Ball(centre, radius) => {
+                WhatItSitsOn::Ball(movement.point(centre), radius)
+            }
+            WhatItSitsOn::Pipe(origin, way, radius) => {
+                WhatItSitsOn::Pipe(movement.point(origin), movement.direction(way), radius)
+            }
+            WhatItSitsOn::Cone(apex, way, slope) => {
+                WhatItSitsOn::Cone(movement.point(apex), movement.direction(way), slope)
+            }
+            WhatItSitsOn::Ring(centre, way, big, small) => {
+                WhatItSitsOn::Ring(movement.point(centre), movement.direction(way), big, small)
+            }
+        }
+    }
 }
 
 fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
@@ -3861,7 +4025,14 @@ fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
                         reversed: face.orientation() == Orientation::Reversed,
                         wires: face
                             .wires()
-                            .map(|wire| wire.points().map(|at| at.coordinates()).collect())
+                            .map(|wire| {
+                                wire.coedges()
+                                    .map(|coedge| Step {
+                                        at: coedge.start().point().coordinates(),
+                                        run: Run::of(coedge.edge()),
+                                    })
+                                    .collect()
+                            })
                             .collect(),
                     })
                     .collect()
@@ -3889,35 +4060,19 @@ impl Answer {
                     faces
                         .iter()
                         .map(|face| Face {
-                            sits: match face.sits {
-                                WhatItSitsOn::Flat(coefficients) => {
-                                    WhatItSitsOn::Flat(movement.plane(coefficients))
-                                }
-                                WhatItSitsOn::Ball(centre, radius) => {
-                                    WhatItSitsOn::Ball(movement.point(centre), radius)
-                                }
-                                WhatItSitsOn::Pipe(origin, way, radius) => WhatItSitsOn::Pipe(
-                                    movement.point(origin),
-                                    movement.direction(way),
-                                    radius,
-                                ),
-                                WhatItSitsOn::Cone(apex, way, slope) => WhatItSitsOn::Cone(
-                                    movement.point(apex),
-                                    movement.direction(way),
-                                    slope,
-                                ),
-                                WhatItSitsOn::Ring(centre, way, big, small) => WhatItSitsOn::Ring(
-                                    movement.point(centre),
-                                    movement.direction(way),
-                                    big,
-                                    small,
-                                ),
-                            },
+                            sits: face.sits.moved_by(movement),
                             reversed: face.reversed,
                             wires: face
                                 .wires
                                 .iter()
-                                .map(|wire| wire.iter().map(|&at| movement.point(at)).collect())
+                                .map(|wire| {
+                                    wire.iter()
+                                        .map(|step| Step {
+                                            at: movement.point(step.at),
+                                            run: step.run.moved_by(movement),
+                                        })
+                                        .collect()
+                                })
                                 .collect(),
                         })
                         .collect()
@@ -3929,9 +4084,9 @@ impl Answer {
     /// The answer written out in one fixed order, so that two answers agree
     /// exactly when the arena order is the only thing between them.
     ///
-    /// A ring of corners is turned to its own smallest rotation rather than
-    /// sorted: which corner comes first is arbitrary, but which corner
-    /// follows which is the winding, and the winding is part of the answer.
+    /// A ring of steps is turned to its own smallest rotation rather than
+    /// sorted: which step comes first is arbitrary, but which step follows
+    /// which is the winding, and the winding is part of the answer.
     fn canonical(&self) -> Vec<Vec<Vec<u64>>> {
         let mut solids: Vec<Vec<Vec<u64>>> = self
             .solids
@@ -3986,15 +4141,15 @@ fn written_out(face: &Face) -> Vec<u64> {
 /// the only place the difference lives — and sorting every wire threw it away.
 #[test]
 fn a_washer_whose_hole_is_handed_over_as_its_outline_is_another_answer() {
-    let washer = |wires: Vec<Vec<[f64; 3]>>| Answer {
+    let washer = |wires: Vec<Vec<Step>>| Answer {
         solids: vec![vec![Face {
             sits: WhatItSitsOn::Flat([0.0, 0.0, 1.0, 0.0]),
             reversed: false,
             wires,
         }]],
     };
-    let rim = vec![[2.0, 0.0, 0.0]];
-    let hole = vec![[1.0, 0.0, 0.0]];
+    let rim = vec![round([2.0, 0.0, 0.0], true)];
+    let hole = vec![round([1.0, 0.0, 0.0], false)];
     assert_ne!(
         washer(vec![rim.clone(), hole.clone()]).canonical(),
         washer(vec![hole, rim]).canonical(),
@@ -4002,22 +4157,276 @@ fn a_washer_whose_hole_is_handed_over_as_its_outline_is_another_answer() {
     );
 }
 
-/// What the comparison still forgets, pinned so that it is said rather than
-/// found: **a ring of two corners reads the same walked either way.**
+/// **A ring of two corners walked the other way is another ring**, now that
+/// each step carries its run.
 ///
-/// Turning a ring to its smallest rotation keeps which corner follows which,
-/// and with two corners the ring walked backwards *is* a rotation of itself.
-/// A face bounded by two arcs between the same two corners is such a ring, and
-/// so is a one-corner round wire, which has no order at all. The edges' own
-/// runs are not written down either. `docs/decisions.md` §163.4 says why this
-/// is left open rather than fixed.
+/// With corners alone it was not: turning a ring to its smallest rotation keeps
+/// which corner follows which, and with two corners the ring walked backwards
+/// *is* a rotation of itself (§163.4). Walked backwards, the arc that left the
+/// first corner leaves the second instead, and that is what is written down now
+/// (§165).
 #[test]
-fn a_ring_of_two_corners_reads_the_same_walked_either_way() {
-    let (one, other) = ([1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
-    assert_eq!(
-        turned_to_its_smallest(&[one, other]),
-        turned_to_its_smallest(&[other, one])
+fn a_ring_of_two_corners_walked_the_other_way_is_another_ring() {
+    let (one, other) = ([0.0, 0.0, 1.0], [0.0, 0.0, -1.0]);
+    let arc_facing = |x: f64, y: f64| Run::PartOf {
+        and: WhatItSitsOn::Ball([0.0, 0.0, 0.0], 1.0),
+        picked_by: vec![Picking::InFrontOf([x, y, 0.0, 0.0])],
+    };
+    let step = |at, run| Step { at, run };
+    assert_ne!(
+        turned_to_its_smallest(&[
+            step(one, arc_facing(1.0, 0.0)),
+            step(other, arc_facing(0.0, 1.0))
+        ]),
+        turned_to_its_smallest(&[
+            step(one, arc_facing(0.0, 1.0)),
+            step(other, arc_facing(1.0, 0.0))
+        ]),
+        "a ring of two arcs wrote out the same walked either way"
     );
+}
+
+/// §163.4's open question, answered: **two whole valid answers that differ can
+/// write out the same when the edges' runs are left out.**
+///
+/// A quarter of a ball and three quarters of it, both cut by the planes `x = 0`
+/// and `y = 0`. The quarter is the ball where `x ≥ 0` **and** `y ≥ 0`; the
+/// three quarters are where `x ≥ 0` **or** `y ≥ 0`. Every face of one has a twin
+/// in the other on the same surface, used the same way round:
+///
+/// - the skin, one sphere face bounded by two half-meridians between the poles;
+/// - a half-disc on `x = 0` facing `−x`, because both solids lie on the `x ≥ 0`
+///   side of it there;
+/// - a half-disc on `y = 0` facing `−y`, for the same reason.
+///
+/// And every wire is a ring of the same two corners, the poles — so the corners
+/// cannot say which way it runs either. What differs is which half-meridian
+/// each edge follows: `x = 0` on the `y ≥ 0` side for the quarter and on the
+/// `y ≤ 0` side for the three quarters, and the same on `y = 0`. The two solids
+/// have no inside in common but the quarter itself and differ by half a ball.
+///
+/// Built through [`SolidBuilder`] rather than by a fuse, because all four fuses
+/// asked to cut the kernel's ball through both its poles refused
+/// (`docs/decisions.md` §165.4).
+#[test]
+fn a_quarter_of_a_ball_and_three_quarters_of_it_are_two_answers() {
+    let policy = Policy::certified();
+    let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
+    let quarter = a_wedge_of_a_ball(&mut model, [[1.0, 0.0], [0.0, 1.0]], &policy);
+    let three_quarters = a_wedge_of_a_ball(&mut model, [[0.0, -1.0], [-1.0, 0.0]], &policy);
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("both wedges are sound solids");
+
+    let quarter = answer_of(&model, &[quarter]);
+    let three_quarters = answer_of(&model, &[three_quarters]);
+    assert_ne!(
+        quarter.canonical(),
+        three_quarters.canonical(),
+        "a quarter of a ball and three quarters of it wrote out as the same answer"
+    );
+}
+
+/// The part of a unit ball between two half-planes that hang off the `z` axis,
+/// swept anticlockwise seen from above from `between[0]` to `between[1]`.
+///
+/// Each of the two is named by the way it points away from the axis, and must
+/// be one of the four axis directions so that every number here is exact. The
+/// sphere face is bounded the way the kernel's own ball is: down one meridian,
+/// a pole, up the other, a pole.
+fn a_wedge_of_a_ball(model: &mut Model, between: [[f64; 2]; 2], policy: &Policy) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let at = |builder: &mut SolidBuilder, z: f64| {
+        builder
+            .add_vertex(Point::new(0.0, 0.0, z))
+            .expect("a pole is a point")
+    };
+    let north = at(&mut builder, 1.0);
+    let south = at(&mut builder, -1.0);
+
+    // Out of the wedge across the first half-plane is clockwise of it, and out
+    // across the second is anticlockwise of it.
+    let [first, second] = between;
+    let outward = [[first[1], -first[0]], [-second[1], second[0]]];
+    let wall = |facing: [f64; 2]| {
+        Plane::from_point_and_normal(Point::origin(), Vector::new(facing[0], facing[1], 0.0))
+            .expect("an axis direction has length")
+    };
+    let mut meridians = Vec::with_capacity(2);
+    for (way, facing) in between.into_iter().zip(outward) {
+        let run = EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(wall(facing)),
+            picked_by: smallvec::smallvec![Picker::from(
+                HalfSpace::through_a_point_facing(
+                    Point::origin(),
+                    Vector::new(way[0], way[1], 0.0)
+                )
+                .expect("an axis direction has length")
+            )],
+        };
+        meridians.push(
+            builder
+                .add_edge(north, south, run)
+                .expect("a half-meridian between the poles"),
+        );
+    }
+    let axis = builder
+        .add_edge(north, south, EdgeRun::Straight)
+        .expect("the axis between the poles");
+
+    let along = |builder: &mut SolidBuilder, edge, orientation| {
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, orientation)
+                .expect("an edge of this builder"),
+        )
+    };
+    let skin_steps = [
+        along(&mut builder, meridians[0], Orientation::Forward),
+        DraftStep::Pole(south),
+        along(&mut builder, meridians[1], Orientation::Reversed),
+        DraftStep::Pole(north),
+    ];
+    let first_wall_steps = [
+        along(&mut builder, meridians[0], Orientation::Reversed),
+        along(&mut builder, axis, Orientation::Forward),
+    ];
+    let second_wall_steps = [
+        along(&mut builder, meridians[1], Orientation::Forward),
+        along(&mut builder, axis, Orientation::Reversed),
+    ];
+    let mut faces = Vec::with_capacity(3);
+    for (surface, steps) in [
+        (
+            Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a unit ball")),
+            &skin_steps[..],
+        ),
+        (Surface::Plane(wall(outward[0])), &first_wall_steps[..]),
+        (Surface::Plane(wall(outward[1])), &second_wall_steps[..]),
+    ] {
+        let wire = builder.add_wire(steps).expect("a closed ring of steps");
+        faces.push((
+            builder
+                .add_face(surface, &[wire])
+                .expect("a face with one wire"),
+            Orientation::Forward,
+        ));
+    }
+    builder.add_shell(&faces).expect("three faces close up");
+    builder
+        .build(model, policy, &mut ProvenanceLog::new())
+        .expect("a wedge of a ball is a solid")
+}
+
+/// The other half of §165: **which way a round wire is walked is the whole of
+/// what tells two balls' overlap from the two balls together.**
+///
+/// Two balls of radius 5, one about the origin and one six up, cross in a
+/// circle of radius 4 at `z = 3`, with a corner at `(4, 0, 3)`. The lens where
+/// they overlap and the solid they make together are both two sphere faces
+/// joined along that one closed edge, each face used forwards with one wire of
+/// one corner. The only thing that differs is which way the circle is walked:
+/// a face keeps its material on its left, so the small cap of each ball is the
+/// circle walked one way and the big cap is the circle walked the other.
+///
+/// The corners cannot see that, and until the runs were written down nothing
+/// else in the comparison could either. The measured volumes say the two are
+/// the lens and the union, and not a guess about which way round is which.
+#[test]
+fn where_two_balls_overlap_and_the_two_balls_together_are_two_answers() {
+    let policy = Policy::certified();
+    let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
+    let overlap = two_balls_joined_along_one_circle(&mut model, Orientation::Forward, &policy);
+    let together = two_balls_joined_along_one_circle(&mut model, Orientation::Reversed, &policy);
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("both are sound solids");
+
+    let cap = |height: f64| core::f64::consts::PI * height * height * (15.0 - height) / 3.0;
+    for (solid, space) in [(overlap, 2.0 * cap(2.0)), (together, 2.0 * cap(8.0))] {
+        let measured = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(a_fine_deflection(), &policy, &mut ProvenanceLog::new())
+            .expect("two caps measure");
+        assert!(
+            (measured.volume() - space).abs() <= measured.volume_error(),
+            "expected {space}, measured {} give or take {}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+
+    assert_ne!(
+        answer_of(&model, &[overlap]).canonical(),
+        answer_of(&model, &[together]).canonical(),
+        "the overlap of two balls and the two balls together wrote out as the same answer"
+    );
+}
+
+/// The pickers of a run are a set: a piece is on or inside every one of them,
+/// and which was listed first says nothing about the piece.
+#[test]
+fn a_run_picked_by_the_same_two_half_spaces_in_either_order_is_one_run() {
+    let picked_by = |first: [f64; 4], second: [f64; 4]| Run::PartOf {
+        and: WhatItSitsOn::Ball([0.0, 0.0, 0.0], 1.0),
+        picked_by: vec![Picking::InFrontOf(first), Picking::InFrontOf(second)],
+    };
+    let (facing_x, facing_y) = ([1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]);
+    assert_eq!(
+        picked_by(facing_x, facing_y).written_out(),
+        picked_by(facing_y, facing_x).written_out()
+    );
+}
+
+/// Two balls of radius 5 about the origin and `(0, 0, 6)`, joined along the
+/// circle where they cross, with the first ball's face walking that circle
+/// `first` and the second's the other way.
+fn two_balls_joined_along_one_circle(
+    model: &mut Model,
+    first: Orientation,
+    policy: &Policy,
+) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let corner = builder
+        .add_vertex(Point::new(4.0, 0.0, 3.0))
+        .expect("a point on both balls");
+    let circle = builder
+        .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the circle where the two balls cross");
+    let second = match first {
+        Orientation::Forward => Orientation::Reversed,
+        Orientation::Reversed => Orientation::Forward,
+    };
+    let mut faces = Vec::with_capacity(2);
+    for (centre, turn) in [
+        (Point::origin(), first),
+        (Point::new(0.0, 0.0, 6.0), second),
+    ] {
+        let coedge = builder
+            .add_coedge(circle, turn)
+            .expect("an edge of this builder");
+        let wire = builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("one closed edge is a ring");
+        let ball = Sphere::new(centre, 5.0).expect("a positive radius");
+        faces.push((
+            builder
+                .add_face(Surface::Sphere(ball), &[wire])
+                .expect("a cap with one wire"),
+            Orientation::Forward,
+        ));
+    }
+    builder.add_shell(&faces).expect("two caps close up");
+    builder
+        .build(model, policy, &mut ProvenanceLog::new())
+        .expect("two caps joined along a circle are a solid")
+}
+
+/// Fine enough that a measured volume tells a lens from a union by a wide
+/// margin; `a_deflection` is for polyhedra, which ignore it.
+fn a_fine_deflection() -> Deflection {
+    Deflection::of(0.01).expect("a hundredth of a millimetre is a length")
 }
 
 /// §151.5's first question, over answers the kernel really gives: can the
@@ -4088,14 +4497,14 @@ fn every_order_of_one_answer_with_two_holes_in_a_face_writes_out_the_same() {
 /// into a solid, and they do not.
 fn two_solids_one_with_a_face_holding_two_holes() -> Answer {
     let square = |x: f64, y: f64, side: f64| {
-        vec![
+        straight(&[
             [x, y, 0.0],
             [x + side, y, 0.0],
             [x + side, y + side, 0.0],
             [x, y + side, 0.0],
-        ]
+        ])
     };
-    let backwards = |mut ring: Vec<[f64; 3]>| {
+    let backwards = |mut ring: Vec<Step>| {
         ring.reverse();
         ring
     };
@@ -4114,17 +4523,17 @@ fn two_solids_one_with_a_face_holding_two_holes() -> Answer {
                 Face {
                     sits: WhatItSitsOn::Flat([1.0, 0.0, 0.0, -9.0]),
                     reversed: false,
-                    wires: vec![vec![
+                    wires: vec![straight(&[
                         [9.0, 0.0, 0.0],
                         [9.0, 9.0, 0.0],
                         [9.0, 9.0, 1.0],
                         [9.0, 0.0, 1.0],
-                    ]],
+                    ])],
                 },
                 Face {
                     sits: WhatItSitsOn::Ball([4.0, 4.0, 4.0], 1.0),
                     reversed: true,
-                    wires: vec![vec![[4.0, 4.0, 5.0]]],
+                    wires: vec![vec![round([4.0, 4.0, 5.0], false)]],
                 },
             ],
             vec![
@@ -4136,10 +4545,34 @@ fn two_solids_one_with_a_face_holding_two_holes() -> Answer {
                 Face {
                     sits: WhatItSitsOn::Flat([0.0, 1.0, 0.0, 0.0]),
                     reversed: false,
-                    wires: vec![vec![[20.0, 0.0, 0.0], [21.0, 0.0, 0.0], [21.0, 0.0, 1.0]]],
+                    wires: vec![straight(&[
+                        [20.0, 0.0, 0.0],
+                        [21.0, 0.0, 0.0],
+                        [21.0, 0.0, 1.0],
+                    ])],
                 },
             ],
         ],
+    }
+}
+
+/// A ring of straight edges through `corners`, in order.
+fn straight(corners: &[[f64; 3]]) -> Vec<Step> {
+    corners
+        .iter()
+        .map(|&at| Step {
+            at,
+            run: Run::Straight,
+        })
+        .collect()
+}
+
+/// A round wire: one closed edge from `at` back to itself, walked the way it is
+/// stored running or against it.
+fn round(at: [f64; 3], forward: bool) -> Step {
+    Step {
+        at,
+        run: Run::RightRound { forward },
     }
 }
 
@@ -4155,7 +4588,7 @@ fn dealt_out_again(answer: &Answer, seed: u64) -> Answer {
             let mut faces: Vec<Face> = faces
                 .iter()
                 .map(|face| {
-                    let mut wires: Vec<Vec<[f64; 3]>> = face
+                    let mut wires: Vec<Vec<Step>> = face
                         .wires
                         .iter()
                         .map(|ring| {
@@ -4217,8 +4650,8 @@ impl Dice {
 #[test]
 fn a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side() {
     let here = [0.0, 0.0, 0.0];
-    let ring = [here, [1.0, 0.0, 0.0], here, [0.0, 1.0, 0.0]];
-    let from_the_other_side = [here, [0.0, 1.0, 0.0], here, [1.0, 0.0, 0.0]];
+    let ring = straight(&[here, [1.0, 0.0, 0.0], here, [0.0, 1.0, 0.0]]);
+    let from_the_other_side = straight(&[here, [0.0, 1.0, 0.0], here, [1.0, 0.0, 0.0]]);
     assert_eq!(
         turned_to_its_smallest(&ring),
         turned_to_its_smallest(&from_the_other_side),
@@ -4236,12 +4669,24 @@ fn a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side() {
 /// halves by the two orders, and the comparison above then reports a face that
 /// differs when the two answers are the same solid. `docs/decisions.md` §149
 /// is the counterexample that cost a session, §151 is this.
-fn turned_to_its_smallest(wire: &[[f64; 3]]) -> Vec<u64> {
-    let corners: Vec<[u64; 3]> = wire.iter().map(|&at| at.map(bits)).collect();
-    (0..corners.len())
+///
+/// Each step is its corner followed by its run (§165), and a step is turned as
+/// one piece, so a corner never lands beside another corner's run.
+fn turned_to_its_smallest(wire: &[Step]) -> Vec<u64> {
+    let steps: Vec<Vec<u64>> = wire
+        .iter()
+        .map(|step| {
+            step.at
+                .map(bits)
+                .into_iter()
+                .chain(step.run.written_out())
+                .collect()
+        })
+        .collect();
+    (0..steps.len())
         .map(|start| -> Vec<u64> {
-            (0..corners.len())
-                .flat_map(|step| corners[(start + step) % corners.len()])
+            (0..steps.len())
+                .flat_map(|step| steps[(start + step) % steps.len()].iter().copied())
                 .collect()
         })
         .min()
