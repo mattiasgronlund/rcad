@@ -35797,6 +35797,13 @@ that takes all three will overrun, which is §144.8's whole finding.
 Write set: `CLAUDE.md` for the gate paragraph; the `justfile` for a renumber or
 question-fix recipe; the `questions` plugin if the fix belongs to the parser.
 
+**The gate part is taken, and §147 corrects three things above.** It was not a
+`CLAUDE.md` paragraph and nothing more — the paragraph had nothing safe to ask
+for until `just gate quiet` existed, because a whole run is 300 KB. Gate
+babysitting is also the smallest of the six here and not the first, the six are
+not listed largest first, and sessions were not polling in a loop. The renumber
+recipe and the question-file fix are still open.
+
 ### 144.6 Locating a line and then reading it, on the two files with a one-call reader — lane
 
 The most common two-call shape in the week is: grep a file for a line number,
