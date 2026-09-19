@@ -55,7 +55,7 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -818,8 +818,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "37" ]; then \
-        echo "found $n check-* recipes, expected 37"; \
+    if [ "$n" != "38" ]; then \
+        echo "found $n check-* recipes, expected 38"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -1005,6 +1005,66 @@ decisions-find pattern:
             for (i = 1; i <= k; i++)
                 printf "  %-7s %-54s %4d hits\n", order[i], name[order[i]], count[order[i]]
         }' "{{decisions_file}}"
+
+# Where `claim-section` writes down the numbers it hands out. Empty means a file
+# in the repository's common git directory, which every worktree shares and no
+# branch carries.
+section_claims := ""
+
+# Take the next section number for docs/decisions.md now, before writing it.
+#
+#     just claim-section 'the lookup trigger, measured'
+#
+# prints the number and nothing else. **The number is yours from that moment**:
+# it is written to the claims file before it is printed, under a lock, so a
+# second session asking a second later gets the one after.
+#
+# Checking by hand — `git log --all -S'## 151. '` — was correct every time and
+# lost anyway, because it is a read against a value another session is about to
+# write, and a section takes an hour to write. §144.5, §152.7 and §157.6 each
+# lost that race while being written; §157.6 lost it three times. What was
+# missing was a claim that outlives the read (§159).
+#
+# The number is one past the highest of: every `## N.` on every local and
+# remote-tracking branch, every `## N.` in every worktree's copy of the file —
+# committed or not, because a lane writes its section long before it commits —
+# and every number claimed before. A claim that is never written leaves a gap,
+# and a gap costs nothing: `check-decisions` asks for unique, ascending numbers,
+# not consecutive ones.
+#
+# Every worktree of this clone shares the claims, and nothing else does. A
+# section written on another machine is seen once it reaches a branch here.
+[doc("Take the next docs/decisions.md section number now, before writing it: `just claim-section 'what it is about'`.")]
+claim-section what:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "$1" ]; then
+        echo "claim it for what? the claims file says who holds each number" >&2
+        exit 2
+    fi
+    claims="{{section_claims}}"
+    if [ -z "$claims" ]; then
+        claims="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-section-claims"
+    fi
+    exec 9>>"$claims.lock"
+    flock 9
+    touch "$claims"
+    file="{{decisions_file}}"
+    top=$({
+        git for-each-ref --format='%(refname)' refs/heads refs/remotes \
+            | while read -r ref; do git rev-parse -q --verify "$ref:$file" || true; done \
+            | sort -u \
+            | while read -r blob; do git cat-file blob "$blob"; done \
+            | grep -E '^## [0-9]+\. ' || true
+        git worktree list --porcelain | sed -n 's/^worktree //p' \
+            | while read -r tree; do
+                if [ -f "$tree/$file" ]; then grep -E '^## [0-9]+\. ' "$tree/$file" || true; fi
+            done
+        cut -f1 "$claims" | sed 's/^/## /'
+    } | awk '{ n = $2 + 0; if (n > top) top = n } END { print top + 0 }')
+    next=$((top + 1))
+    printf '%s\t%s\t%s\t%s\n' "$next" "$(date -u +%FT%TZ)" "{{invocation_directory()}}" "$1" >> "$claims"
+    echo "$next"
 
 # `decision` finds a section by the number its heading starts with, so a heading
 # that does not start with one is a section the lookup cannot reach — and it
@@ -1218,6 +1278,55 @@ check-decisions-selftest:
     if {{just_executable()}} --set decisions_file "$dir/wrong-parent.md" \
         check-decisions >/dev/null 2>&1; then
         echo "### 1.2 under ## 2. passed check-decisions"; exit 1
+    fi
+
+# Pins `claim-section` against a throwaway repository with a section in each
+# place the recipe must look: on the checked-out branch, on another branch only,
+# and uncommitted in another worktree.
+#
+# **The concurrent round is the one that matters**, because it is the race the
+# recipe exists for. Without the lock, eight claims started together hand out
+# the same number several times over; that was checked by deleting the `flock`
+# line and watching this fail.
+[private]
+check-claim-section-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    repo="$dir/repo"
+    g() { git -C "$repo" -c user.name=selftest -c user.email=selftest@invalid "$@"; }
+    mkdir -p "$repo/docs"
+    g init -q -b main
+    printf '%s\n' "## 1. First" "## 2. Second" > "$repo/docs/decisions.md"
+    g add docs/decisions.md
+    g commit -q -m one
+    g checkout -q -b elsewhere
+    printf '%s\n' "## 5. Only on a branch" >> "$repo/docs/decisions.md"
+    g commit -q -am five
+    g checkout -q main
+    claim() { {{just_executable()}} --justfile "{{justfile()}}" --working-directory "$repo" claim-section "$@"; }
+
+    got=$(claim 'past a branch')
+    [ "$got" = "6" ] || { echo "the first claim got '$got', want 6: one past §5 on the other branch"; exit 1; }
+
+    g worktree add -q --detach "$dir/lane" main
+    printf '%s\n' "## 9. Written, not committed" >> "$dir/lane/docs/decisions.md"
+    got=$(claim 'past a worktree')
+    [ "$got" = "10" ] || { echo "a claim got '$got', want 10: one past the uncommitted §9"; exit 1; }
+
+    got=$({{just_executable()}} --justfile "{{justfile()}}" --working-directory "$dir/lane" \
+        claim-section 'from the other worktree')
+    [ "$got" = "11" ] || { echo "a claim from the other worktree got '$got', want 11: §10 was claimed from the first"; exit 1; }
+
+    for i in 1 2 3 4 5 6 7 8; do claim "at once $i" > "$dir/at-once-$i" & done
+    wait
+    got=$(cat "$dir"/at-once-* | sort -n | tr '\n' ' ')
+    [ "$got" = "12 13 14 15 16 17 18 19 " ] || {
+        echo "eight claims at once got '$got', want 12 to 19 once each"; exit 1; }
+
+    if claim '' >/dev/null 2>&1; then
+        echo "claim-section accepted a claim for nothing"; exit 1
     fi
 
 # One item of Rust source, by its name, with its doc comment and attributes.

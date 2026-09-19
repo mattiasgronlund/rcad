@@ -175,6 +175,13 @@ answers in line numbers, which is the one address this file does not take, so
 every hit then costs a walk back up to the heading above it. `decisions-find`
 answers in section numbers, which is what `just decision` wants next.
 
+**Take a new section's number with `just claim-section 'what it is about'`
+before writing it,** not by checking `git log --all -S` for a free one. The
+check was right every time and lost anyway — another session took the number
+during the hour it took to write the section. The recipe writes the claim down
+under a lock, in a file every worktree shares, so the number is yours from the
+moment it is printed. `docs/decisions.md` §159.
+
 ## Rules that come from the design
 
 These are the ones that are expensive to notice late.
