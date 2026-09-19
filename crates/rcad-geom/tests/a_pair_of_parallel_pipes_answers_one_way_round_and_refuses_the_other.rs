@@ -19,14 +19,20 @@
 //! `1.712674258532773e-139`, which is `3.17e-132` of its own radius, so the fat
 //! pipe cuts it near enough through the middle.
 //!
-//! # Why it is ignored
+//! # Where the refusing order used to lose it
 //!
-//! Asking the fat pipe first still refuses. `two_lines_told_apart` builds each
-//! line as a whole coordinate and then asks which side of the picking plane it
-//! falls, and the two products it subtracts there are `2.1e161` apiece while
-//! the answer it wants is `2.7e146`. `docs/decisions.md` §140 has the diagnosis
-//! and the shape of the fix; this test is the reproducer, and it passes the day
-//! the fix lands.
+//! `two_lines_told_apart` was handed each line as a whole coordinate and asked
+//! which side of the picking plane it fell. Asked the fat pipe first the step
+//! along the axis-to-axis line is `5.047645337156084e153` against a step off it
+//! of `5.4016709327697754e-8` — a ratio of `9.34e160` — so the short step was
+//! gone before the dot product started, and the two products that then had to
+//! cancel were `2.0988704429280249e161` apiece against a wanted reading of
+//! `2.7265719096646913e146`. Asked the thin pipe first the same step is
+//! `1.712674258532773e-139` and there is nothing to cancel.
+//!
+//! The two lines now arrive as a point, a step along a stored direction and a
+//! step either side of it, and the two readings that used to be subtracted out
+//! of `2.1e161` are summed exactly instead. `docs/decisions.md` §140.
 
 #![forbid(unsafe_code)]
 
@@ -67,11 +73,8 @@ const SEED: [f64; 14] = [
 /// Two side-by-side pipes that cross in two straight runs, whichever is asked
 /// about first.
 ///
-/// `docs/decisions.md` §140. Ignored until the gap is closed: today the fat
-/// pipe asked first comes back
-/// `Error::CannotNameWhichPieceOfACrossingThisIs`.
+/// `docs/decisions.md` §140.
 #[test]
-#[ignore = "§140: asking the fat pipe first refuses a crossing that exists"]
 fn a_thin_pipe_on_a_fat_pipes_skin_crosses_it_twice_either_way_round() {
     let pair = two_surfaces_from(&bytes_for([2, 2], &SEED)).expect("two pipes");
     for [first, second] in [[0, 1], [1, 0]] {

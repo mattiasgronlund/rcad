@@ -422,8 +422,6 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
     // each scaled to length one.
     let squared_direction = squared_length_enclosing(exactly(along.components()));
     let squared_normal = squared_length_enclosing(exactly(normal.components()));
-    let sideways = exactly(normal.components())
-        .map(|part| quotient_or_everything(part, root_enclosing(squared_normal)));
     let up =
         cross_enclosing(exactly(along.components()), exactly(normal.components())).map(|part| {
             quotient_or_everything(part, root_enclosing(squared_direction * squared_normal))
@@ -431,24 +429,22 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
 
     // How far the axis sits in front of the cutting plane, and how far each of
     // the two lines sits from the plane through the axis square to it.
-    let in_front = quotient_or_everything(
-        dot_enclosing(exactly(normal.components()), exactly(origin.coordinates()))
-            - Interval::exactly(flat.offset()),
-        root_enclosing(squared_normal),
-    );
+    let reading = dot_enclosing(exactly(normal.components()), exactly(origin.coordinates()))
+        - Interval::exactly(flat.offset());
+    let in_front = quotient_or_everything(reading, root_enclosing(squared_normal));
     let skin = Interval::exactly(pipe.radius());
     let out = root_enclosing(skin * skin - in_front * in_front);
 
-    let on_each_line = [1.0, -1.0].map(|side| {
-        core::array::from_fn(|axis| {
-            Interval::exactly(origin.coordinates()[axis]) - sideways[axis] * in_front
-                + up[axis] * out * Interval::exactly(side)
-        })
-    });
     two_lines_told_apart(
         picker,
         along.components(),
-        on_each_line,
+        &TwoLinesEitherSideOfThePicker {
+            from: origin,
+            sideways: normal.components(),
+            how_far: quotient_or_everything(-reading, squared_normal),
+            up,
+            out,
+        },
         Surface::Cylinder(*pipe),
     )
 }
@@ -1035,17 +1031,16 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
         Interval::exactly(4.0) * squared_gap * squared_direction,
     ));
 
-    let on_each_line = [1.0, -1.0].map(|side| {
-        core::array::from_fn(|axis| {
-            Interval::exactly(here.coordinates()[axis])
-                + sideways[axis] * across
-                + up[axis] * out * Interval::exactly(side)
-        })
-    });
     two_lines_told_apart(
         picker,
         along.components(),
-        on_each_line,
+        &TwoLinesEitherSideOfThePicker {
+            from: here,
+            sideways: towards.components(),
+            how_far: quotient_or_everything(across, apart),
+            up,
+            out,
+        },
         Surface::Cylinder(*other),
     )
 }
@@ -1602,6 +1597,26 @@ fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Po
     )
 }
 
+/// Two endless straight lines, as the point a picking half-space was built
+/// through and two steps off it.
+///
+/// Never added up into two points. [`two_lines_told_apart`]'s second doc section
+/// says what adding them up costs.
+struct TwoLinesEitherSideOfThePicker {
+    /// The point the picking half-space was built through.
+    from: Point,
+    /// The direction the middle of the two lines steps along from `from`,
+    /// **exactly as it was stored** and not scaled to any length, so that its
+    /// dot with the picking normal can be summed exactly.
+    sideways: [f64; 3],
+    /// How many `sideways` that step is. Signed.
+    how_far: Interval,
+    /// The direction the two lines step either way along, scaled to length one.
+    up: [Interval; 3],
+    /// How far along `up` each of the two steps.
+    out: Interval,
+}
+
 /// Two endless straight lines running along `along`, told apart by `picker`.
 ///
 /// # Errors
@@ -1630,10 +1645,33 @@ fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Po
 /// because the caller handed it two line positions worked out by subtracting two
 /// nearly equal large numbers. The caller stopped doing that; what is left here
 /// refuses where the two lines really are within a rounding of each other.
+///
+/// # Why the lines arrive in pieces rather than as two points
+///
+/// §93 fixed how far apart the two lines are and left how they were handed over
+/// alone, and §140 is the second half of the same bug. A whole coordinate holds
+/// `from + sideways·how_far ± up·out` in three `f64`s, so the short step and the
+/// long one share a rounding: at `how_far/out = 9.34e160` — a hair-thin pipe on
+/// the skin of one 161 decades fatter — the short step is gone before the dot
+/// product starts, and the reading the two lines differ by is `±out·δ` against
+/// terms of `2.1e161` that have to cancel first.
+///
+/// Taken in pieces nothing has to cancel. `normal · from − offset` is what the
+/// picker's own offset rounded away, and `normal · sideways` is what the cross
+/// product that built the normal rounded away: both are dot products of stored
+/// `f64` triples, so [`Exact`] sums them and knows each to its own last bit
+/// rather than to a bit of `2.1e161`. What is left is `±out · (normal · up)`,
+/// and its sign is the sign of `out`, which the caller has already certified.
+///
+/// **The two readings are still whatever they are.** Where a fallback normal
+/// was picked (see [`HalfSpace::through_a_point_square_to`]) `normal · sideways`
+/// is a real number and not a rounding, the middle of the two lines genuinely
+/// sits off the picking plane, and the refusal below is the right answer. This
+/// stops throwing the reading away; it does not decide it.
 fn two_lines_told_apart(
     picker: HalfSpace,
     along: [f64; 3],
-    somewhere_on_each: [[Interval; 3]; 2],
+    lines: &TwoLinesEitherSideOfThePicker,
     and: Surface,
 ) -> Result<SurfaceMeet> {
     let normal = picker.normal().components();
@@ -1644,8 +1682,24 @@ fn two_lines_told_apart(
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
 
-    let side = somewhere_on_each
-        .map(|place| dot_enclosing(exactly(normal), place) - Interval::exactly(picker.offset()));
+    let off_the_picker = Exact::dot_of(normal, lines.from.coordinates())
+        .map(|reading| reading.minus(&Exact::of(picker.offset())))
+        .as_ref()
+        .map_or_else(
+            || {
+                dot_enclosing(exactly(normal), exactly(lines.from.coordinates()))
+                    - Interval::exactly(picker.offset())
+            },
+            Exact::enclosure,
+        );
+    let leaning = Exact::dot_of(normal, lines.sideways).as_ref().map_or_else(
+        || dot_enclosing(exactly(normal), exactly(lines.sideways)),
+        Exact::enclosure,
+    );
+    let middle = off_the_picker + leaning * lines.how_far;
+    let either_way = lines.out * dot_enclosing(exactly(normal), lines.up);
+
+    let side = [1.0, -1.0].map(|which| middle + either_way * Interval::exactly(which));
     if !(side[0].lo() > 0.0 && side[1].hi() < 0.0) {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
