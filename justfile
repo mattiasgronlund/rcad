@@ -2310,7 +2310,7 @@ fuzz-overnight window="28800":
     # the timer keeps checked out, and `copy_out` below copies all of it. The
     # count in the summary has always been carry-over for that reason. It could
     # stay a wart while the count was only ever *reported*; now that a crash file
-    # is what says a night failed (§131), a five-day-old crash would fail every
+    # is what says a night failed (§134), a five-day-old crash would fail every
     # night from here on, which is the same "night nobody believes" §91 exists to
     # prevent, running the other way.
     #
@@ -2353,7 +2353,7 @@ fuzz-overnight window="28800":
     # last child process"*. Every fate the night is built to survive leaves it
     # non-zero, so **70 is a timeout in the last job of forty thousand** and not a
     # crash; two runs of the same command on the same corpus exited 70 and 0,
-    # differing only in which job happened to land last (§130.7). And the other
+    # differing only in which job happened to land last (§133.7). And the other
     # direction is worse: a crash in job 3 of 40 000 exits **0**, so a status
     # mapping that trusted zero would call that night clean.
     #
@@ -2404,7 +2404,7 @@ fuzz-overnight window="28800":
     # The other two are a measurement and not a fault. `slow-unit-` means an input
     # was slower than its neighbours — the night of 2026-09-13 wrote three while
     # being an entirely good night. `timeout-` means it was slower than the
-    # `-timeout=10` §132 sets, which on `where_two_surfaces_cross` is a nightly
+    # `-timeout=10` §135 sets, which on `where_two_surfaces_cross` is a nightly
     # certainty rather than news: its tracked corpus holds inputs of 17 to 19
     # seconds, so the replay writes one before any fuzzing starts. A standing
     # population cannot be what fails a night — that is §91's failure reached by
@@ -2561,7 +2561,7 @@ fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a
 # `fork` is how many jobs libFuzzer runs at once, and **0 means don't fork at
 # all**, which is what a hand-run `just fuzz 60` wants: one crash, one report, and
 # the run stops so you can read it. Only the night asks for a number, because only
-# the night would rather lose the report than lose the other eight hours (§131).
+# the night would rather lose the report than lose the other eight hours (§134).
 [private]
 fuzz-target target duration corpus_root="" max_len="" fork="0":
     #!/usr/bin/env bash
@@ -2584,7 +2584,7 @@ fuzz-target target duration corpus_root="" max_len="" fork="0":
     # default that changed under us would end every target in its first minute.
     #
     # **`-timeout=10` is in here and not outside it, because it is only safe
-    # inside it** (§130.7, §132). `-ignore_timeouts` is a fork-mode flag; without
+    # inside it** (§133.7, §135). `-ignore_timeouts` is a fork-mode flag; without
     # `-fork` a timeout kills the process, and `fuzz/corpus/where_two_surfaces_cross`
     # holds inputs of 17 to 19 seconds — so a hand-run `just fuzz 60` carrying this
     # flag would die on its own corpus replay before fuzzing anything.
@@ -2687,7 +2687,7 @@ check-fuzz-overnight-selftest:
     # **`slow-unit-` by default, and `crash-` only when an arm asks.** A clean
     # night writes slow units — the night of 2026-09-13 wrote three and correctly
     # said "nothing found" — so that is what an unremarkable target leaves behind.
-    # Since §131 a crash file is what fails a night, and a stub that wrote one
+    # Since §134 a crash file is what fails a night, and a stub that wrote one
     # every time would leave no fixture able to express a good night at all.
     kind="${STUB_ARTIFACT_KIND:-slow-unit-}"
     if [ -n "${STUB_ARTIFACT_KIND_TARGET:-}" ] && [ "$target" != "$STUB_ARTIFACT_KIND_TARGET" ]; then
@@ -2716,7 +2716,7 @@ check-fuzz-overnight-selftest:
                 ;;
         esac
     done
-    # The line libFuzzer's fork parent prints last, which since §131 is what says
+    # The line libFuzzer's fork parent prints last, which since §134 is what says
     # the target got as far as fuzzing. `STUB_NO_EXITING_TARGET` withholds it from
     # one target, which is how an arm asks for a target that never got going —
     # the failure the exit status used to carry and can no longer.
@@ -2726,7 +2726,7 @@ check-fuzz-overnight-selftest:
 
     # Exits non-zero while still having fuzzed the whole window, which is fork
     # mode's ordinary ending and not a failure: the code is whichever of forty
-    # thousand jobs happened to be collected last (§130.7).
+    # thousand jobs happened to be collected last (§133.7).
     for arg in "$@"; do
         if [ "$arg" = "${STUB_CRASH:-}" ]; then exit "${STUB_CRASH_CODE:-70}"; fi
     done
@@ -2766,7 +2766,7 @@ check-fuzz-overnight-selftest:
     # it reports the failure rather than swallowing it.
     #
     # **The second target fails by printing no `INFO: exiting:`, not by exiting
-    # non-zero**, and that is §131: under `-fork` a non-zero status is the last of
+    # non-zero**, and that is §134: under `-fork` a non-zero status is the last of
     # forty thousand jobs and says nothing about the night, so the fixture that
     # used to express "this target died" by `exit 1` now expresses a target that
     # exited 70 and was fine. Arm Eleven is that case, and this one is the failure
@@ -2829,7 +2829,7 @@ check-fuzz-overnight-selftest:
 
     # Every target forks, and every one is told to survive a crash. Without
     # `-ignore_crashes=1` the first crash calls `StopJobs()` and that target's
-    # night ends there, which is the whole of what §131 bought; without `-fork`
+    # night ends there, which is the whole of what §134 bought; without `-fork`
     # the flag is not even read. The number is the machine split five ways and so
     # cannot be asserted exactly, but it can be asserted to be one number, shared,
     # and at least 1 — a recipe handing out 0 would silently stop forking.
@@ -2841,7 +2841,7 @@ check-fuzz-overnight-selftest:
     [ "$(grep -c 'ignore_crashes=1' "$dir/log")" -eq 5 ] \
         || fail "a target forks without -ignore_crashes=1, so its first crash still ends its night"
 
-    # And every target bounds one input (§132). Without it `where_two_surfaces_cross`
+    # And every target bounds one input (§135). Without it `where_two_surfaces_cross`
     # spends 19% of its night on 0.025% of its inputs, at 17 to 19 seconds apiece.
     [ "$(grep -c 'timeout=10' "$dir/log")" -eq 5 ] \
         || fail "a target runs with no per-input timeout, so one input can still take twenty seconds of its night"
@@ -3128,7 +3128,7 @@ check-fuzz-overnight-selftest:
     [ "$carried" -ge 1 ] \
         || fail "four seconds into a twelve-second window nothing had been carried out of the worktree, so a night killed before its targets finish keeps nothing"
 
-    # Eleven: exit 70 is not a crash. This is §130.7 as an arm, and it is the one
+    # Eleven: exit 70 is not a crash. This is §133.7 as an arm, and it is the one
     # the recipe this replaced would fail: every target fuzzed the whole window,
     # found nothing, and exited 70 because the last of its jobs happened to time
     # out. Two real runs of the same command on the same corpus exited 70 and 0,
@@ -3178,7 +3178,7 @@ check-fuzz-overnight-selftest:
     grep -q 'nothing found' "$dir/logs/latest" \
         || fail "a carried-over crash artifact was reported as tonight's find: $(cat "$dir/logs/latest")"
 
-    # Fourteen: a `timeout-` artifact is a measurement and not a fault (§132).
+    # Fourteen: a `timeout-` artifact is a measurement and not a fault (§135).
     # `-timeout=10` makes one of these a nightly certainty on
     # `where_two_surfaces_cross`, whose tracked corpus holds inputs of 17 to 19
     # seconds — the replay writes one before any fuzzing starts. A night that
@@ -3201,7 +3201,7 @@ check-fuzz-overnight-selftest:
     # `-ignore_timeouts` is a fork-mode flag, so without `-fork` a timeout kills
     # the process — and `fuzz/corpus/where_two_surfaces_cross` is where the 17-to-19
     # second inputs live. A `just fuzz 60` carrying `-timeout=10` would die on its
-    # own corpus replay before fuzzing a single new input (§130.7).
+    # own corpus replay before fuzzing a single new input (§133.7).
     #
     # Run against `fuzz-target` through `fuzz` rather than through `fuzz-overnight`,
     # because the hand path is the one call site the night never takes. It lives in

@@ -32842,7 +32842,7 @@ and of `tooling/systemd/`; `mise exec -- just lanes`;
 three mutants — the old sequential loop, a staggered start, and the copier taken
 out; `mise exec -- just gate`.
 
-## 130. The fork-mode timings were not a path problem, measured 2026-09-18
+## 133. The fork-mode timings were not a path problem, measured 2026-09-18
 
 *§129's item 1 is `-fork=N -ignore_crashes=1`, so that one crash stops ending a
 target's night. Its blocker was written down as "the report path has no pid in
@@ -32851,7 +32851,7 @@ processes a night, the old report kept `1 runs` out of 54 845, and a pid in the
 path would have written forty thousand directories. It is one shared
 accumulation under a lock instead.*
 
-### 130.1 What `-fork` actually does
+### 133.1 What `-fork` actually does
 
 `cargo fuzz run` with `-fork=N` does not run N long-lived children. libFuzzer's
 parent orchestrates and runs nothing itself; each job is a fresh process spawned
@@ -32866,7 +32866,7 @@ roughly **forty thousand processes for one target**, and there are five targets.
 The sampling misses anything that lived under half a second, so 35 is a floor
 and the conclusion only gets stronger.
 
-### 130.2 What the old report did under it
+### 133.2 What the old report did under it
 
 Every one of those processes started a fresh empty `Watch`, wrote
 `RCAD_FUZZ_TIMINGS/<target>/report` over the last one's, and ran
@@ -32884,7 +32884,7 @@ absence of one, and it is what the surviving child happened to hold when it
 died. §129.1's table — the thing that made the `where_two_surfaces_cross`
 finding visible at all — could not have been written from a fork night.
 
-### 130.3 Why a directory per process is not the fix
+### 133.3 Why a directory per process is not the fix
 
 The obvious repair is `RCAD_FUZZ_TIMINGS/<target>/<pid>/`. It is correct and it
 is useless: forty thousand directories per target per night, each holding a few
@@ -32899,7 +32899,7 @@ code answered what happens per process; only running it answered how many there
 are. Same shape as §77.6 — a claim that is true of what was examined and silent
 about what was not.
 
-### 130.4 One accumulation, a lock, and a thread on a second
+### 133.4 One accumulation, a lock, and a thread on a second
 
 `RCAD_FUZZ_TIMINGS/<target>/totals` holds the histogram every process has merged
 into, guarded by an advisory lock on a `lock` file beside it
@@ -32919,7 +32919,7 @@ A merge is a lock, a read, an add and two small writes against a `totals` file
 measured at 2 477 bytes, so twenty-four processes ticking once a second is a
 rounding error beside the fuzzing.
 
-### 130.5 The slowest runs need no accumulation at all
+### 133.5 The slowest runs need no accumulation at all
 
 `named_for` already writes the time and a hash of the input into the file name.
 So the directory listing sorted by time **is** the top across every process, and
@@ -32927,7 +32927,7 @@ pruning is a sort — no shared state, no lock contention beyond the one already
 held, and the same one-input-once rule `TheSlowestRuns::offer` applies within a
 process now applies across them by keeping only the slowest name per hash.
 
-### 130.6 A mutant that passed, and the test that was wrong
+### 133.6 A mutant that passed, and the test that was wrong
 
 Four mutants were run against the new tests and each fails its own:
 
@@ -32948,7 +32948,7 @@ written in the test, because the next person will write the first version.
 This is the §15.6 rule in a new place: a test that passes against the defect it
 names is prose. Run the mutant.
 
-### 130.7 Exit 70 is not a crash, and the recipe half has to know
+### 133.7 Exit 70 is not a crash, and the recipe half has to know
 
 `FuzzerFork.cpp:488` — *"Use the exit code from the last child process"* —
 `exit(ExitCode)`, where `ExitCode` is whatever the last collected job returned.
@@ -32978,16 +32978,16 @@ twice a second; `Read` of `crates/rcad-fuzz-timing/src/lib.rs`; `grep` of
 rcad-fuzz-timing` against the tree and against four mutants;
 `mise exec -- just fmt`, `lint`, `test`.
 
-## 131. Under `-fork` the exit status stops being a crash oracle, built 2026-09-18
+## 134. Under `-fork` the exit status stops being a crash oracle, built 2026-09-18
 
-*§130 left the recipe half of §129's item 1 unwritten and one question open: what
+*§133 left the recipe half of §129's item 1 unwritten and one question open: what
 exit 70 means. Read out of libFuzzer's source, the answer is that the fork
 parent's exit code is whichever of its forty thousand jobs was collected last, so
 it is not a crash **and zero is not a clean night either** — a crash in job 3 of
 40 000 exits 0. The night's oracle moves off the status and onto the name
 libFuzzer gives the file it writes.*
 
-### 131.1 The flags, and which of them do anything
+### 134.1 The flags, and which of them do anything
 
 `-fork=N -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1`, added in
 `fuzz-target` and passed only when its new `fork` argument is above zero.
@@ -33004,7 +33004,7 @@ than merely tolerate it, and a default that moved under us would end every targe
 in its first minute on §91.3's landed slow units. A default depended on is worth
 one word of pinning.
 
-### 131.2 The exit status is the last job's, in both directions
+### 134.2 The exit status is the last job's, in both directions
 
 `FuzzerFork.cpp` keeps one `ExitCode` across the whole run. Each collected job
 overwrites it (the `Job->ExitCode` assignment above line 437); nothing resets it;
@@ -33019,7 +33019,7 @@ thousand**, and every fate the night is built to survive leaves a mark on it:
 - a crash in the last job → **77** or a signal (`error_exitcode`, line 53)
 - a clean last job → **0**, *no matter what happened in the other 39 999*
 
-§130.7 measured the first of these: two runs of the same command on the same
+§133.7 measured the first of these: two runs of the same command on the same
 corpus exited 70 and 0, differing only in which job landed last. The handoff that
 carried this forward framed the job as "decide what 70 means", and that framing
 is half the problem — it treats a false alarm as the whole defect. **The blind
@@ -33027,7 +33027,7 @@ spot is the larger one.** A status mapping that trusts zero reports a night as
 clean while a crash sits in `fuzz/artifacts/`, which is exactly the failure §91
 was written to prevent, and it is silent rather than noisy.
 
-### 131.3 What fails a night instead: the name libFuzzer gave the file
+### 134.3 What fails a night instead: the name libFuzzer gave the file
 
 libFuzzer names every input it writes for what happened to it —
 `DumpCurrentUnit` and `WriteUnitToFileWithPrefix` in `FuzzerLoop.cpp` give
@@ -33056,7 +33056,7 @@ exactly when the fork loop finished of its own accord. Absent, the target never
 got as far as fuzzing — a build or launch failure — and that is a night that
 fuzzed four targets while reporting five.
 
-### 131.4 Tonight's crash and not last week's
+### 134.4 Tonight's crash and not last week's
 
 `fuzz/artifacts/` is gitignored and never cleaned, so it accumulates in the tree
 the timer keeps checked out, and `copy_out` copies all of it. The artifact
@@ -33073,7 +33073,7 @@ and out of the worktree rather than out of the night's copy — `cp -Rn` gives t
 copy a copy-time mtime while the original keeps libFuzzer's own. libFuzzer writes
 an artifact once and never rewrites it, so mtime answers this question exactly.
 
-### 131.5 A hand run does not fork
+### 134.5 A hand run does not fork
 
 `fork` defaults to `0` on all five recipes and `fuzz-target`, and only
 `fuzz-overnight` passes a number. A hand-run `just fuzz 60` wants the opposite of
@@ -33085,7 +33085,7 @@ once since §129 — 4 on this machine, 20 jobs against 24 cores. Computed and n
 written down: a literal `4` would under-use a bigger machine and thrash a smaller
 one, and this justfile is checked out on whatever the timer runs on.
 
-### 131.6 The mutants
+### 134.6 The mutants
 
 Five, each caught by one arm, each with a message naming the defect:
 
@@ -33108,7 +33108,7 @@ crashes on a night where nothing happened.
 Ten of this selftest already carries that lesson in a comment from the last time
 it was learned; it has now been learned twice more in the same file.
 
-### 131.7 The fixture had to change with the contract
+### 134.7 The fixture had to change with the contract
 
 The stub `cargo` wrote `crash-<tag>` for every target on every run. Since a crash
 file is now what fails a night, that left no fixture able to express a good night
@@ -33127,7 +33127,7 @@ check-fuzz-overnight-selftest` against the tree and against six mutations; a rea
 libFuzzer accepts the argv rather than that the recipe emits it;
 `mise exec -- just gate`.
 
-## 132. One input gets ten seconds, where it used to get twenty, measured 2026-09-18
+## 135. One input gets ten seconds, where it used to get twenty, measured 2026-09-18
 
 *§129's item 2. `where_two_surfaces_cross` fuzzed 259 136 inputs on the night of
 2026-09-18 while the writer target fuzzed 94 897 507 — 366 times as many in the
@@ -33136,7 +33136,7 @@ most 7% of its night**, and the 64 slowest kept are every one of them over
 seventeen seconds. `-timeout=10` bounds that, and only under `-fork`, where a
 timeout is survivable.*
 
-### 132.1 What one target's night was actually spent on
+### 135.1 What one target's night was actually spent on
 
 The five reports from `~/rcad-fuzz-logs/2026-09-18/timings/`, the last one-core
 night, each target having had about 5 000 seconds:
@@ -33162,10 +33162,10 @@ And at the very end, the 64 runs the report keeps are all between 17.06 s and
 19.59 s, so at least 1 091 s — **19% of the night in 0.025% of the inputs**.
 
 This is the first time that question could be asked. §129's timing crate is what
-produced these tables, and §130 is what made them survive fork mode; before them
+produced these tables, and §133 is what made them survive fork mode; before them
 there was libFuzzer's one ratcheted `Slowest unit:` line and no spread at all.
 
-### 132.2 Why ten and not one
+### 135.2 Why ten and not one
 
 Ten seconds is 1 270 times that target's p99 of 7.86 ms. A far tighter bound was
 available and would have paid better — capping at one second would leave those
@@ -33187,7 +33187,7 @@ Per-target numbers were considered and refused under §13. Every other target's
 p100 is under 160 ms, so for four of the five any value at or above one second is
 invisible; four more literals with no consumer is what §13 exists to prevent.
 
-### 132.3 The flag is only safe inside fork mode
+### 135.3 The flag is only safe inside fork mode
 
 `-timeout=10` is set in the same branch as `-fork`, and never on its own.
 
@@ -33202,9 +33202,9 @@ That is arm Fifteen, and it is the one arm here that exercises `fuzz-target`
 through `fuzz` rather than through `fuzz-overnight`, because the hand path is the
 one call site the night never takes.
 
-### 132.4 `timeout-` stops being a finding
+### 135.4 `timeout-` stops being a finding
 
-§131.3 put `timeout-` in the set of artifact names that fail a night, on the
+§134.3 put `timeout-` in the set of artifact names that fail a night, on the
 grounds that a timeout then meant an input running past libFuzzer's 1200-second
 default. `-timeout=10` changes what the name means, and Q8 was answered (a) on
 2026-09-18 to move it out of that set when this landed.
@@ -33221,9 +33221,9 @@ is ignored**: both are still copied out of the worktree by §91's `copy_out` and
 still counted in the summary line, which is how a new one gets noticed. What
 failed a night is now exactly `crash-`, `oom-` and `leak-`.
 
-### 132.5 The mutants
+### 135.5 The mutants
 
-Three, on top of §131.6's six:
+Three, on top of §134.6's six:
 
 | mutation | arm | what it said |
 | --- | --- | --- |
