@@ -22,26 +22,25 @@ on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107'
 table. §16.10 governs it: a claim that something cannot be done owes a
 demonstration either way — a gap if a scaling reaches the sign, a limit if not.
 
-**Five waves have run and the demonstration is in.** §110–§113 named the pair and
-falsified §109.6 — the wall is `settled`, not `one_step`. §115–§117 walked closed
-edges by this kernel's rule, not the file's flag (KiCad 97/323 → 110/323), leaving
-26: **20 a limit, none transverse, 6 equal pipes whose axes cross**, answered in
-closed form by §118 and §119. §122–§128 took the last three; §126 cleared itself
-of a commutativity failure that **was real and is now unreproduced**: §126.6.
-
-**§121 has landed** on 2026-09-18 as `912cd168`, on §129's own run, §130's exact
-meet, §132's plane offset rounding once and §136's corner allowance.
+**Five waves have run and the demonstration is in.** §110–§113 named the pair
+and falsified §109.6; §115–§117 walked closed edges by this kernel's rule, not
+the file's flag (KiCad 97/323 → 110/323), leaving 26: **20 a limit, none
+transverse, 6 equal pipes whose axes cross**, closed by §118 and §119.
+§122–§128 took the last three, and §126's commutativity failure is **§149's —
+the oracle, not the kernel**. **§121 landed** 2026-09-18 as `912cd168`, on
+§129's run, §130's exact meet, §132's offset rounding and §136's allowance.
 
 **What is closed.** §140 — a crossing answered one way round and refused the
-other — and both findings under it: §141.6's band by §143.9, the exact arm's
-enclosure standing in for a squared cancellation; §142's four sibling sites by
-§142.8, three for three refusing and all of them §16.10 gaps.
+other — with both findings under it: §141.6's band by §143.9, the exact arm's
+enclosure standing in for a squared cancellation, and §142's four sibling sites
+by §142.8, all §16.10 gaps. **§145 too**, by §148: the step across is taken
+times `w·w`, where nothing cancels, and sixteen of eighty-five come back named.
 
-**What is open. §145 is new and the biggest.** Two ordinary pipes, axes `6.7e-7`
-apart at `1e10` out, refuse both ways round and are named one `f64` step either
-side — the step between them has no exact arm under it, §140's family one step
-earlier. Then §142.8's site 2, a *size* where only the sign is exact; then
-§126.6's counterexample. §124's, §136.4's and §125.6's are deferred, not open.
+**What is open.** §142.8's site 2, a *size* where only the sign is exact — fully
+specified by §142.9, owing a kernel measurement; then its sites 1 and 3, both
+"call the exact routine this file already calls one question earlier". Then
+**§150, new**: one pair of eighty-five answers one way round and refuses the
+other, nothing diagnosed. §124's, §136.4's and §125.6's are deferred, not open.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
@@ -32483,6 +32482,15 @@ it absent, and a property that must hold always is not answered by a rate.
 **Whoever hunts it should raise the case count rather than repeat the default
 one**: this file already has `SOAK_FACTOR` and `SOAK_SEED` for exactly that.
 
+***Both halves of that last sentence are superseded by §149.*** The
+counterexample **is reproduced** — an ell and a comb turned half a turn about
+`(0, 3, 2)`, which fails on `ae35781c` with no seed and no search — and the two
+answers turn out to be the same solid: `turned_to_its_smallest` writes one ring
+down two ways when the ring repeats a corner. The kernel was never at fault.
+And the knobs named here **do not reach this test**: it goes through `over`,
+which builds `TestRunner::new(configured(cases))`, so only running more
+processes widens that search. §149.3.
+
 **The habit this costs:** a failing property run is evidence that expires. The
 seed is written into a **tracked** file, so the recovery that makes `main` safe
 is the same operation that destroys the reproducer. Commit the regressions file,
@@ -35935,6 +35943,12 @@ zero. §16.10 **gap**. It is also the pair that reaches §142.7's annihilation �
 and it shows that annihilation certifies nothing, because the same vanished
 length refuses by a second route anyway.*
 
+***Fixed by §148**, the same day: the step is taken multiplied by `w·w`, where
+nothing cancels, and this pair is named in two straight runs both ways round.
+Everything below describes the tree before that. §145.6's open list is answered
+there too, except its third item — a pair reaching the annihilation with **no**
+second route — which stands.*
+
 ### 145.1 The pair
 
 Both pipes one wide, both axes along `Vector::new(0.3, 0.5, 0.7)`. The first
@@ -36317,3 +36331,252 @@ is at least checkable — it names one command — but the honest test is the
 Making `loud` quiet automatically when stdout is not a terminal was considered
 and rejected: CI's stdout is not a terminal either, and a red run on the runner
 needs its whole log in the Actions view.
+
+## 148. The step across to the other axis is taken scaled, and §145's crossing comes back, fixed 2026-09-19
+
+*§145's two pipes are named in two straight runs, both ways round.
+`two_lines_between_two_pipes` worked the step from one axis to the other out as
+`(c − o) − w·((c − o)·w / w·w)`, which is a subtraction of two numbers that
+agree to everything the answer is made of, and for a pair far enough out along
+`w` it cancels exactly. The same step multiplied by `w·w` is `(w × (c − o)) × w`
+— a polynomial in the stored numbers with nothing to cancel, which [`Exact`]
+holds outright — and the scale comes straight back off, one division per
+component. Sixteen pairs of eighty-five changed and no others did. §145.6's "do
+`up` and `across` need two fixes" is **falsified**: one step serves both. So is
+the move that looks obvious, fixing the magnitude alone.*
+
+### 148.1 What was built
+
+`the_step_across_to_the_other_axis` (`intersect.rs`), a private function
+replacing the two lines that took the step in plain `f64`. It crosses twice at
+the exact level — `Exact::cross_of` the gap against `w`, then that against `w`
+again — and divides each component of the result by `along.length_squared()`
+once at the end.
+
+It is written as `((o − c) × w) × w` rather than `(w × (c − o)) × w`, which is
+the same vector: the only cross product `Exact` offers puts the already-exact
+side first, so crossing with `w` twice turns the step round, and starting from
+the gap the other way round turns it back.
+
+The plain subtraction survives as the fallback arm, for two coordinates whose
+difference times `w·w` leaves `f64` altogether, or a product on the way there
+that lands among the subnormals. That is what the row has always done and it is
+what is left when the exact level cannot run.
+
+### 148.2 The scale comes off rather than travelling, and why that is the choice
+
+§145.6 floated carrying the scale downstream instead, and said what that costs:
+"changes every reader of `sideways`". Rejected, and the reason is that almost no
+reader cares. The picker only ranks three normals by which leans nearest
+`w × step`; `sideways` and `up` are each divided by the step's own length; and
+`leaning · how_far` is the step multiplied by `across` and divided by that
+length again. A positive multiple cancels out of all of them.
+
+`across = (δ² + r₁² − r₂²) / 2δ` is the one that cares, because it puts the
+step's length up against two radii, and the radii are not scaled. So the scale
+has to come off somewhere, and taking it off at the source costs one division
+per component — a division by a number near one, which is a benign rounding and
+not a cancellation — against touching every reader downstream. What is handed on
+is the true step to within an ulp or two of itself however far along `w` the two
+axes sit.
+
+**Which way round the step points is not read at all**, and that was measured
+rather than argued. Turning it round turns `w × step` with it, the picking
+half-space leans along `w × step` and `up` *is* `w × step`, so both flip
+together: the two runs come back in the other order and nothing else moves.
+Taking the gap the other way round leaves all four tests in
+`the_step_between_two_pipe_axes_taken_scaled.rs` green.
+
+### 148.3 Measured
+
+The lane swept eighteen reaches, `1e0` to `1e17`, each with the second origin at
+`w` times the reach rounded onto the grid and then nudged along `z` by −2, −1,
+0, +1 and +2 ulps, each pair asked both ways round. **Sixteen pairs changed and
+no others did**, every one of them a pair whose plain step rounds to exactly
+`[0, 0, 0]`, and every one going from `CannotNameWhichPieceOfACrossingThisIs`
+both ways round to two straight runs both ways round.
+
+**Re-run here on the merged tree** over seventeen reaches, `1e1` to `1e17`, five
+nudges, eighty-five pairs: sixteen have a plain step that cancels to exactly
+zero, and **all sixteen are named `Curves(2)` both ways round**. The sixteen are
+the nudge-0 row of every reach except `1e11`. That the sixteen *changed* is the
+lane's measurement against its own pre-fix base and is not re-run here; that all
+sixteen are now named is this session's.
+
+§143's tests and all thirteen refusal-rate tests in
+`how_often_naming_a_crossing_refuses.rs` stay green, and every published rate
+holds — §145.6 recorded that before the merge and the gate re-ran it. `just gate
+quiet` on the merged tree: PASS, 2056 tests run, 2056 passed, 1 skipped
+(§136.4's declared one), 25 doc tests.
+
+### 148.4 What §145.6 asked, and the trap it was right to name
+
+Three of its four open items are answered.
+
+- **"Whether an exact `towards` is even representable for this pair."** Not as
+  written — the projection is a quotient and `Exact` holds no quotients. Scaling
+  by `w·w` is exactly what turns it into a polynomial, which is why the fix has
+  that shape and not the `map_or_else(enclosing, Exact::enclosure)` shape §145.6
+  offered as its candidate.
+- **"Whether `up` and `across` both recover from one fix, or need two."** One.
+  Both divide by the length of the one step, so a step that no longer vanishes
+  serves both.
+- **The converse was checked before any code was written**, and it is the part
+  worth keeping: **fixing the magnitude alone would not have worked.**
+  `sideways = [0, 0, 0] / apart` is still zero, so `up` is zero, so the
+  either-side test fails anyway. Anyone reaching for `squared_gap` at
+  `intersect.rs:1023` — which is the obvious first move, because that is where
+  the vanished length is read — would have fixed a number nothing was waiting
+  on.
+
+### 148.5 The reproducer had to be turned round, and the lane could not do it
+
+`the_step_between_two_pipe_axes_that_rounds_to_nothing.rs` — §145's own
+reproducer, landed earlier the same day — **asserted the refusal this fix
+removes**. It was not in the lane's write set, so the lane correctly left it
+alone and said so; merging the branch on its own left `just gate` red by exactly
+that one test, 2050 of 2051.
+
+Its last loop now asserts two straight runs both ways round, and its module doc
+stops saying "reported, not fixed". **It keeps its own subject rather than
+becoming a second copy of the fix's file**: the plain subtraction still cancels
+to exactly nothing, the axes still stay apart, and what makes that harmless now
+is only that nothing reads it. §142.7's annihilation has no caller known to
+reach it any more.
+
+Recorded because the general case is not rare: **a lane's green gate and the
+merged tree's are different questions**, and the difference is whatever the
+lane's write set kept it away from.
+
+### 148.6 What this does not close
+
+§145.6's third item is untouched: **is there a pair that reaches the
+annihilation with no second route?** This removes one *way of reaching* the
+annihilation, not the annihilation. That is still the item on the list that
+would cost something, and still the one that would falsify `enclosure.rs:102`
+outright, because a pair that annihilated without the second route would be
+certifying a sign off `[0, 0] * ENTIRE`.
+
+§150's pair came out of this sweep and is **not** this fix's; it reads the same
+before and after.
+
+## 149. §126's commutativity counterexample was the test oracle, not the kernel, diagnosed 2026-09-19
+
+*§126.5 saw a turned pair whose union differed by a face between the two orders,
+put the tree back to make `main` safe, and threw the persisted seed away with
+it; §126.6 worked out how the seed was lost and left the counterexample
+unreproduced. **It is reproduced.** The two answers are the same solid. What
+differs is how `fuses_that_must_agree.rs` writes a ring down, and the kernel was
+never at fault. The fix this leaves is a test-suite change.*
+
+### 149.1 The pair, and that it needs no seed
+
+An **ell** two by two with a one-by-one bite, and a **comb** of two teeth three
+high at `(-1, -4, 0)`, the pair turned together by thirty-two sixty-fourths —
+half a turn — about `(0, 3, 2)`. On `ae35781c`, the tree §126.5 saw fail, that
+pair fails the property **on its own, with no seed and no search**.
+
+**It was reproduced fresh, not replayed.** 2 085 runs clean, then a first find at
+≈2 300 runs, about 110 000 configurations, with proptest's save banner and the
+*base* build's panic line before any rebuild. §126.5's "150 runs, 0 failures" is
+consistent with a rate near 1 in 2 300 — **not enough search, not a different
+tree**, which is the one thing §126.6 could not tell.
+
+Five tests landed in
+`crates/rcad-topo/tests/the_turned_pair_whose_union_lost_a_face_one_way_round.rs`,
+none `#[ignore]`d.
+
+### 149.2 Why one ring is written down two ways
+
+`turned_to_its_smallest` (`fuses_that_must_agree.rs`) starts a ring at the
+**first** corner equal to the smallest one. That is a canonical form only while
+no ring repeats a corner.
+
+The union has a face ring that goes through **the origin twice**. The origin is
+the one point a turn holds still, and both inputs have a corner there, so the
+turned pair meets itself at exactly one point of `f64`. The two orders walk into
+it from different sides, so one ring is written down as its two halves in the
+two orders — a cyclic rotation by 8 of 12 corners.
+
+Compare the ring by its smallest **rotation** and the two orders agree bit for
+bit, on `ae35781c` and on the tree this landed on. The intersection of the same
+pair has no repeated corner, and it is the control.
+
+### 149.3 What §126.6 got right, and the piece of its advice that does not work
+
+Right, and still standing: the seed was persisted into a **tracked** file, so
+the recovery that made `main` safe is the same operation that destroyed the
+reproducer; §126 did not cause the failure; and the failure was real. All three
+hold. The habit it drew — copy the regressions file out **before** resetting
+anything — is the right habit and this section does not weaken it.
+
+Wrong: *"this file already has `SOAK_FACTOR` and `SOAK_SEED` for exactly that."*
+**They do not reach the test in question.**
+`swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit` goes through
+`over`, which is `run(TestRunner::new(configured(cases)), …)` with a literal
+case count; only `measured` builds its runner with `new_with_rng` and
+`fresh_seeded_soak`, and only `measured_cases` reads `RCAD_SOAK_FACTOR`. So
+`over` ignores both knobs outright, and the only way to widen that search is to
+run more processes. Checked here by reading the two helpers, not taken on
+report.
+
+That matters beyond the bookkeeping: **a rare property failure hunted with a
+knob that does nothing looks unreproducible when it is merely under-searched**,
+which is exactly what happened to §126.
+
+### 149.4 The change this leaves, and the test that is built to die
+
+Make `turned_to_its_smallest` take the smallest **rotation** instead of the
+first smallest corner. It is a test-suite change with no kernel in it.
+
+**Do it rather than special-case it.** The defect is family-agnostic: any answer
+carrying a ring that revisits a corner can trip `same_answer` in any family, and
+the lane's fifth test shows the same failure with no kernel involved at all — one
+four-corner ring, written down from two of its own corners, coming back as two
+different lists.
+
+The lane's fourth test, `the_suites_ring_rule_still_tells_this_one_ring_from_itself`,
+asserts **today's** behaviour on purpose, and its doc comment says the day the
+rotation change lands this test fails and what replaces it is deleting it.
+
+`fuses_that_must_agree.rs` is untouched, and the regressions file was
+deliberately left at its committed state: committing that seed would turn `just
+gate` red over a false positive in the oracle.
+
+## 150. Two pipes that cross in two runs answer one way round and refuse the other, found 2026-09-19
+
+*§148's sweep turned up one pair it neither fixed nor broke: both pipes one
+wide, the second axis `1e16` out along the shared direction and nudged two `f64`
+steps along `z`. It answers `Curves(2)` asked one way round and
+`CannotNameWhichPieceOfACrossingThisIs` the other. Identical before §148 and
+after, so it is not that fix's. Same shape as §140 — an order-dependent answer —
+and **nothing else about it has been measured.***
+
+### 150.1 The observation
+
+`WAY = [0.3, 0.5, 0.7]` normalised, both radii `1.0`, the first axis at the
+origin, the second at that direction times `1e16` rounded componentwise onto the
+grid and then nudged `+2` ulps along `z`. Asked with the first pipe written
+first it is named in two straight runs; asked the other way round it refuses.
+
+Verified on the merged tree by this session, over the full eighty-five-pair
+sweep: **it is the only one of the eighty-five that answers differently
+depending on the order.** That it reads the same on the pre-fix tree is the
+lane's measurement, not re-run here.
+
+### 150.2 It is a different question from §145, and the lane's reason for that was wrong
+
+The lane put it down to the two pipes being "a hair off touching, `δ ≈ r₁+r₂ =
+2`". **Measured here, the axes are `1.6583123951777` apart**, against a touching
+distance of `2`. That is not a hair — the pair crosses properly, with room, and
+whatever refuses one way round is not a near-tangency being lost.
+
+What does separate it from §145 is the plain step: at this pair the step across
+does **not** cancel to zero, so §148's arithmetic is not what it turns on. Both
+facts are in the sweep — the cancelling rows are the nudge-0 ones, and this is a
+nudge-`+2` row.
+
+So the honest statement is that it is order-dependent, it is not §145's family,
+and the reason for it is unknown. §140's diagnosis path — find which predicate
+sees a different sign with the arguments the other way round — is the obvious
+place to start, and nobody has walked it.
