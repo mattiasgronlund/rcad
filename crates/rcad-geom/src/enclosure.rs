@@ -99,6 +99,15 @@ fn squared_is_exactly(root: f64, value: f64) -> bool {
 /// squared length underflows to nothing. That is bad input and not a broken
 /// invariant, so what comes back is a box that says nothing is known, which
 /// travels through the arithmetic above it and turns into a refusal (§4.1).
+///
+/// **It travels unless something multiplies it by an exact zero**, and one
+/// caller does: `two_lines_told_apart` forms `leaning * how_far` with a
+/// `leaning` that is analytically zero and summed exactly, and `[0,0] * ENTIRE`
+/// is `[0,0]`. There the unknown is annihilated and no refusal follows — which
+/// is the right answer, because an exact zero is a certificate and the true
+/// quotient is finite wherever the picking normal existed to be built at all.
+/// Do not read the paragraph above as a guarantee when writing a new caller;
+/// §142.7 has the measurement and what it does not claim.
 pub(crate) fn quotient_or_everything(over: Interval, under: Interval) -> Interval {
     if under.contains_zero() {
         return Interval::ENTIRE;

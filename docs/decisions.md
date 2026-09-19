@@ -35199,6 +35199,80 @@ pre-existing, both surfaced by the fix lane and outside its write set:
 prose has drifted from what it measures. Recorded rather than fixed, because
 changing a published sentence is not a thing to do in passing.
 
+**Audited and closed, and the audit found a third.** Every published figure in
+the file was re-measured against both trees rather than the two that were
+noticed. `A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE` publishes **"2.24% turned"**
+and measures **2.10%** (43 of 2052) on the base tree and the fixed one alike —
+the same drift as the row above it, missed because the fix lane was reading the
+rows §140 moved and this is a row §140 does not touch. Both numbers are
+corrected to what the test prints.
+
+The rest of the file's figures hold exactly: the "somewhere else" row's 10.58%
+and its 217 refusals, "none at all leaning", "none on the lattice", and every
+`…_MAY_REFUSE` constant's sign column at 0%. **Which quantity a constant gates
+is what makes this checkable** — the `…_MAY_REFUSE` names gate the sign column
+and the `…_LACK_A_HALF_SPACE` names gate the half-space column, and reading a
+5% threshold against the wrong column is how a correct number gets reported as
+a wrong one.
+
+Both wrong figures were *higher* than measured, so the thresholds went on
+passing and nothing failed — which is the whole reason prose drifts here and a
+bound does not. Nothing new guards it: a gate arm over published percentages
+would be the `§NNN` grep again, candidates everywhere and almost no hits.
+
+**§0's own headline was re-measured and holds.** The "somewhere else" row's
+half-space refusals are **81 of 2052 (3.95%) on `d67f958e` and 0 on `33ea2c0a`**
+— that claim was written by the session that wrote the fix, which §140.8 names
+as the species most worth checking, and it survives.
+
+### 142.7 §140's fix falsified a promise `quotient_or_everything` makes, exactly as §141.3 said it would
+
+`quotient_or_everything` (`enclosure.rs:102`) returns `ENTIRE` where its divisor
+touches zero, and its doc comment says what happens next: what comes back "is a
+box that says nothing is known, **which travels through the arithmetic above it
+and turns into a refusal** (§4.1)".
+
+That last clause is no longer true of `two_lines_told_apart`. `middle =
+off_the_picker + leaning * lines.how_far` (`intersect.rs:1699`) feeds it a
+`how_far` that is exactly such an `ENTIRE` — both callers build it with
+`quotient_or_everything` (`:444`, `:1040`) — and multiplies it by `leaning`, an
+exactly-summed dot that is analytically zero. Measured, not reasoned:
+
+| product | result |
+| --- | --- |
+| `Interval::exactly(0.0) * Interval::ENTIRE` | `[-0, 0]` |
+| `[1,1] + exactly(0.0) * ENTIRE` | `[1, 1]` — a sign certified with a term unknown |
+| `[-1,1] * ENTIRE` | `[-inf, inf]` — a merely zero-*containing* box still refuses |
+
+So the annihilation needs `leaning` to be an **exact** zero; the enclosure
+fallback at the same site does not annihilate and does still refuse.
+
+**§141.3 wrote this down before the fix existed** — "a reformulation that
+multiplies a possibly-`ENTIRE` term by an exact zero would be relying on that" —
+and §140's fix is that reformulation. The caveat was recorded against a
+formulation nobody had written yet, and then the thing it warned about was
+built. That is the §140.8 species running forwards instead of backwards, and it
+is the reason the caveat earned its place.
+
+**The argument that it is sound, offered as an argument and not a proof.** An
+exact zero from `Exact` is a rigorous certificate, so the true term is
+`0 × how_far_true`; and wherever the picker was built at all, its normal came
+from a cross product with `towards`, so `towards ≠ 0` and the true `how_far` is
+a finite real. `0 × finite` is `0`, which is what the annihilation returns. On
+that reading IEEE 1788's rule is being used correctly rather than got away with.
+
+**What is not demonstrated, and is not written here as if it were.** Whether any
+drawable pair actually reaches the case — `how_far` `ENTIRE` and `leaning`
+exactly zero together. In both callers the quantity that sends `how_far` to
+`ENTIRE` also travels into `out` by a second route, which would refuse on its
+own; whether the exact arm can make `out` tight while the enclosure arm leaves
+the divisor straddling zero was not tried. §16.10 forbids the sentence "no
+caller hits this" without the demonstration, so it is not written.
+
+What is owed is small and is not a lane: either the doc comment at
+`enclosure.rs:102` loses its "turns into a refusal" clause, or it keeps it and
+names the one site that annihilates instead.
+
 ## 143. §141.6's band is a gap, and its edge is `product_is_exact`'s floor, diagnosed 2026-09-19
 
 *The second refusal band §141.6 recorded is `Error::Undecidable` with an infinite

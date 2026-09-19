@@ -116,7 +116,7 @@ const A_CROSSING_SOMEWHERE_ELSE_MAY_REFUSE: f64 = 0.25;
 /// normal it is handed, and a caller can always hand over one exactly square to
 /// a direction it holds — that direction crossed with a coordinate axis. §33.
 ///
-/// Half a percent. Measured on the shipped corpus: **0.10% turned**, down from
+/// Half a percent. Measured on the shipped corpus: **0.05% turned**, down from
 /// 0.44%; **none at all leaning**, down from 0.20%; and none on the lattice,
 /// where the direction across a pipe and a plane is a coordinate axis. What is
 /// left is the *bounded* half of the same question — where the two lines sit
@@ -151,7 +151,7 @@ const A_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.005;
 /// and what runs out is `f64`'s supply of vectors exactly square to a given
 /// direction. §33.
 ///
-/// Measured on the shipped corpus: 0% on the lattice, **2.24% turned**, down
+/// Measured on the shipped corpus: 0% on the lattice, **2.10% turned**, down
 /// from 11.86%.
 const A_QUARTIC_CROSSING_MAY_LACK_A_HALF_SPACE: f64 = 0.04;
 
