@@ -1062,17 +1062,20 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
 /// `w` twice turns the step round, and starting from the gap the other way round
 /// turns it back.
 ///
-/// **The scale comes back off before the step is handed on.** Two of the three
-/// readers below would not have cared: `sideways` is divided by the step's own
-/// length and `up` is divided by its own, so a positive multiple cancels out of
-/// both. `across = (δ² + r₁² − r₂²) / 2δ` is the one that cares — it puts the
+/// **The scale comes back off before the step is handed on.** Every other reader
+/// below would have been happy without it: the picker only ranks three normals
+/// by which leans nearest `w × step`, `sideways` and `up` are each divided by
+/// the step's own length, and `leaning · how_far` is the step multiplied by
+/// `across` and divided by that length again — so a positive multiple cancels
+/// out of all of them. `across = (δ² + r₁² − r₂²) / 2δ` is the one that
+/// cares — it puts the
 /// step's length up against two radii, which are not scaled — so what comes back
 /// here is a step whose length is the distance between the axes and not `w·w`
 /// times it. That division is the whole of the rounding left, one per component,
 /// and a division is not a cancellation: what comes out is the true step to
 /// within an ulp or two of itself however far along `w` the two axes sit.
 ///
-/// **Which way round it points is not one of the three things that are read.**
+/// **Which way round it points is not read at all.**
 /// The picking half-space leans along `w × step` and `up` is `w × step` again,
 /// so turning the step round turns both together: the two runs come back in the
 /// other order and nothing else moves. Measured rather than argued — taking the
