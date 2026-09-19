@@ -67,8 +67,8 @@ const ALONG_THE_PLANE: f64 = 1.0e10;
 ///
 /// What is marginal is `n·o` **as an enclosure**. Each product is enclosed to
 /// its own last bit and the two do not cancel bit for bit, so the reading comes
-/// out as `±ulp(u·L)` — here about `1.6e-6`, which is a hundred times the
-/// pipe's own width. `out = √(r² − in_front²)` then has nothing left of `r²`
+/// out as `±ulp(u·L)` — here `±9.54e-7`, which is a hundred times the pipe's
+/// own width. `out = √(r² − in_front²)` then has nothing left of `r²`
 /// and reaches down to zero, and the two lines are no longer provably either
 /// side of the picking plane.
 #[test]
