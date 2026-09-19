@@ -38356,7 +38356,7 @@ is the axis-aligned control, whose step is exact and which keeps being named to
 `2⁷⁰`.
 
 A refusal rate moved **down**, and nothing else moved: `just gate` is green on the
-merged tree at 2089 tests, and `RCAD_SOAK_FACTOR=100` over
+merged tree at 2093 tests, and `RCAD_SOAK_FACTOR=100` over
 `every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly`,
 `the_same_pair_turned_names_the_same_kind_of_crossing`,
 `every_cone_or_torus_pair_the_fuzzer_draws_is_named_honestly` and
