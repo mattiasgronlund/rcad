@@ -35360,11 +35360,92 @@ polynomials differ, and it is not needed. `how_far_off_an_axis_exactly`
 decide the centre is on the axis. `how_far_apart_two_loops_are` then recomputes
 `A` in intervals and throws the exact answer away. Site 1 has that same shape.
 
-**Site 2 does not, and that is the useful distinction.** Its sign is decided
-exactly; what `clear` wants is the *size* of `r_fat² − reach²`, and no exact
-level in this kernel hands a size back. Sites 1 and 3 are "call the exact routine
-this file already has". Site 2 is a different and larger question, and nothing
-here answers it.
+**Site 2 does not**, and what is different about it is narrower than this
+paragraph first claimed. Its sign is decided exactly; what `clear` wants is the
+*size* of `r_fat² − reach²`. Sites 1 and 3 are "call the exact routine this file
+already has"; site 2 is not, and §142.9 is the answer for it.
+
+### 142.9 A magnitude where only a sign was kept: rationalise, don't factor
+
+*Site 2's answer, and the rule behind it. The family is **four** sites, not
+three — the sweep turned up one nobody had named. Factoring the difference does
+not work and the reason is worth keeping. The fix is to rationalise it, so the
+expansion the kernel already builds becomes a numerator that cannot cancel.*
+
+**The family is four.** A paren-balanced sweep of `crates/rcad-geom/src/` for a
+`root_enclosing` or `quotient_or_everything` whose whole argument holds a binary
+minus gives 8 hits, of which four are this shape — a magnitude of a cancelling
+difference whose *sign* a predicate settles: `intersect.rs:436` (§142.8's site
+1), `:1193` (site 2), `:680-685` (site 3, which the syntactic sweep misses
+because the difference is bound to a `let` first), and **`:1012`, the `across`
+term in `two_lines_between_two_pipes`, which nothing has measured**. That last
+is the same `T² + (r₁²−r₂²)K` expansion family and is new work.
+
+**Factoring alone is refuted, and the refutation is the useful part.** The
+obvious move is `r_fat² − reach² = (r_fat − reach)(r_fat + reach)`, the first
+factor being what the caller already certified positive. It fails on the real
+code's own printed numbers: at the refusing width `reach.hi()` and `fat_radius`
+are **the same `f64`**, so `fat_radius − reach` is `[0, 2.220446049250313e-16]`
+with its low end exactly zero, and the product's is too. `reach` encloses a
+number that is not representable, and its irreducible one-ulp width at magnitude
+one, `2.22e-16`, is *larger than the true answer* `1.92e-16`. **No rearrangement
+of `f64` interval arithmetic reaches a positive lower bound from `reach`** —
+§16.10's "name the family of fixes and say why it is the only one", discharged
+against the family the obvious move belongs to.
+
+**Rationalising does work.** With `S = r_fat − r_thin`, `δ = |T|/√K`:
+
+```text
+m  =  S − |T|/√K  =  (S²K − T²) / (K·S + |T|·√K)
+```
+
+The single root is gone from the numerator, which is the expansion
+`whether_two_radii_out_reach_a_gap_exactly` (`intersect.rs:1495`) already
+builds; the denominator is two positive terms with nothing to cancel. Then
+`clear = √(m · (r_fat + reach))`, and `r_fat + reach ≈ 2` is well conditioned.
+
+**What makes it complete is a dichotomy, not the formula.** `ask` runs the
+filter first and only builds the expansion when the filter straddles zero. The
+filter's interval is the same three numbers as `m` in a different association
+order. So where the filter decided `Pos`, `m`'s interval is already positive and
+the cheap form suffices; where it did not, the exact numerator exists by
+construction. Each arm alone has a hole; together they have none, and nothing
+new is computed in the common case.
+
+**Modelled, not measured, and the distinction is kept.** Over 423 synthetic
+pairs sitting on the two-loops boundary, a rational model of the routes gives a
+positive lower bound on 185/423 today, 240/423 factored, and **423/423**
+rationalised. That is a `Fraction` model with one-ulp outward rounding, which is
+*wider* than the code's directed rounding — so a positive low end in the model
+implies one in the code, and the first two figures understate the real kernel by
+a couple of ulps. **No kernel measurement stands behind the 423/423 yet**; the
+lane that builds this owes it.
+
+**What would break it, and why none of it corrupts.** `Exact::times`'s subnormal
+floor can refuse the degree-six numerator — then fall back to today's formula,
+as `the_size_of_the_discriminant` (`three_surfaces.rs:1799`) already does, so no
+regression. Overflow in `K·S` or `|T|√K` widens the quotient to everything,
+which is today's refusal and not a wrong answer. `S > 0` is guaranteed by the
+`ask` that got the caller here; a future caller arriving without it gets a
+straddling denominator, so `quotient_or_everything` returns everything and the
+kernel refuses. Worth an assert, never a wrong answer.
+
+**The rule, one sentence.** When a predicate needs a magnitude and the exact
+level only certifies a sign, rationalise the difference so the exact expansion
+becomes the numerator of a quotient that cannot cancel, and hand it back through
+`Exact::enclosure` — **the kernel needs no new "magnitude from a sign" facility;
+it needs the routine that already built the expansion to stop wrapping it in
+`Exact::of(±1.0)`.**
+
+*The sentence that stood here said "no exact level in this kernel hands a size
+back". **That is false**, and `Exact::enclosure` exists to do exactly it — 38
+call sites in `crates/rcad-geom/src/` outside `exact.rs`, with
+`the_size_of_the_discriminant` (`three_surfaces.rs:1799`) as the finished
+precedent. What is true is much smaller: one routine,
+`how_two_radii_and_a_gap_compare_exactly` (`intersect.rs:1481-1486`), computes
+the expansion site 2 needs and then throws it away in `Exact::of(±1.0)`. A
+sentence that generalised one routine's habit into a property of the kernel is
+what closed this question prematurely, and §142.9 reopened it.*
 
 ## 143. §141.6's band was a gap, and its edge is `product_is_exact`'s floor, fixed 2026-09-19
 
