@@ -34693,9 +34693,11 @@ every_oracle_holds_of(two_surfaces_from(&bytes_for([2, 2], &[0.0, 0.0, 0.0,
 That line is the durable form and the reason it is written here rather than
 promoted: `fuzz/artifacts/` is gitignored, and the tree it lives in is the one
 the timer keeps checked out and rewrites nightly. Promoting the input into
-`fuzz/corpus/` was considered and **refused for now** — the corpus is replayed
-at the start of every run, so seeding a still-panicking input would end that
-target's night on its own corpus before fuzzing anything. It becomes a corpus
+`fuzz/corpus/` was considered and **refused for now** — the corpus is replayed at
+the start of every run, so a still-panicking seed costs a **hand-run** `just fuzz`
+its whole session before it fuzzes anything. It does not cost *the night* that,
+and §140.8 corrects the sentence that said it did: the night runs `-fork` with
+`-ignore_crashes=1`, which §133 added for exactly this reason. It becomes a corpus
 seed when it is fixed, which is what `crash-a-thin-pipe-on-a-fat-ones-skin`
 already is.
 
@@ -34773,3 +34775,38 @@ thirteen artifacts against `main`; `ls -la` of
 and of the night's copy, for the mtimes §140.1 turns on; `cat` of the five
 `report` files and of `~/rcad-fuzz-logs/latest`; `mise exec -- just decision
 126.6` to rule out §140.4.
+
+### 140.8 A4: the reason §140.2 gave for not promoting the input was already false
+
+`rcad-f1` flagged its own sentence for audit within the hour of writing it,
+suspecting the reason was narrower than the claim. It is worse than narrow: for
+the night, it is **false**, and what falsified it was that session's own work
+earlier the same morning.
+
+§140.2 refused promotion because "seeding a still-panicking input would end that
+target's night on its own corpus before fuzzing anything". That was true of the
+night as it ran until 2026-09-19. It is not true of the night as it runs now: the
+night computes `fork=$(nproc)/5`, which is never zero, so it passes
+`-ignore_crashes=1` — and the `justfile` comment above that flag says in terms
+that it "is the flag that buys the night: without it the first crash calls
+`StopJobs()` and the target is done for the evening". §133 and §134 added it
+hours before §140.2 was written. A crashing corpus seed now costs the night one
+child process, not an evening.
+
+Where the sentence still holds is a **hand-run** `just fuzz 60`, which defaults
+`fork="0"` and so passes none of the fork flags. That is the same hand-run/night
+split the `-timeout=10` comment four lines above already draws for exactly this
+reason, which is the part that stings: the distinction was on the screen.
+
+**The disposition survives and the family is still unexamined.** Not promoting is
+defensible on the hand-run alone. But the sentence ruled out one destination on
+grounds true of that destination, and the question it never asked is where else a
+reproducer can durably live — and the answer was already being built, since lane A
+is committing an `#[ignore]`d test carrying these bytes. That is the member of the
+family that is neither gitignored nor replayed at startup.
+
+**A4 is the fifth of this species in two days**, after §137.5, §137.6, and A1 and
+A3 of §139.7. Three different sessions, five sections, every one of them citing
+§16.10. The pattern is now specific enough to name: each was a claim about a
+mechanism, written by the session that had most recently changed that mechanism,
+and checkable in minutes against code that was already open.
