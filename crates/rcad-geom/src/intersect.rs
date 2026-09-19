@@ -1518,12 +1518,40 @@ fn whether_two_radii_out_reach_a_gap_exactly(
 ///
 /// Below zero the two cross in two lines, and then this same reading says how far
 /// apart those lines are — see [`two_lines_between_two_pipes`].
+///
+/// # Why `E` is taken from the exact arm when the exact arm can reach it
+///
+/// `E = A − W₁(r₁² + r₂²)` is a subtraction of two numbers that agree to as many
+/// digits as the pipes differ in width. A hair-thin pipe lying on a pipe 161
+/// decades fatter has both sides at `2.5e307` and a true `E` of about `1.7e15`,
+/// so an interval `E` comes back as `±5e291` — and **squaring that overflows to
+/// everything**, which is a refusal on a pair whose answer exists. The exact
+/// expansion loses nothing there: `A`'s `r₁²` term cancels against the one it is
+/// being subtracted from, and what is left encloses to a fraction of an ulp.
+///
+/// The exact arm alone does not cover it, which is why this reads `E` rather
+/// than deferring to it: `room.times(&room)` in
+/// [`how_deeply_two_side_by_side_pipes_overlap_exactly`] needs every pairwise
+/// product to stay above `f64::MIN_POSITIVE · 2⁵³`, and the smallest entry of
+/// that expansion is `r₂²`, so the exact arm gives up below
+/// `r₂ ≈ 1.19e-73` while the geometry stays perfectly ordinary for another 66
+/// decades. `docs/decisions.md` §143.
+///
+/// Where the exact arm cannot form `E` at all — an `A` that leaves `f64`'s range
+/// — there is nothing to take an enclosure from and this falls back to the
+/// interval `E` it used to compute, so a pair that refuses today still refuses
+/// rather than being answered out of thin air.
 fn how_deeply_two_side_by_side_pipes_overlap_enclosing(
     one: &Cylinder,
     other: &Cylinder,
 ) -> Interval {
     let [my_way, _] = [one, other].map(|pipe| pipe.axis().direction().components());
-    let room = how_much_room_two_side_by_side_pipes_leave_enclosing(one, other);
+    let room = how_much_room_two_side_by_side_pipes_leave_exactly(one, other)
+        .as_ref()
+        .map_or_else(
+            || how_much_room_two_side_by_side_pipes_leave_enclosing(one, other),
+            Exact::enclosure,
+        );
     let squared_mine = squared_length_enclosing(exactly(my_way));
     room * room
         - Interval::exactly(4.0)
