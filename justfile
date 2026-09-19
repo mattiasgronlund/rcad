@@ -4487,6 +4487,28 @@ check-fuzz-unit-selftest:
 bench:
     cargo bench --workspace
 
+# What the provenance log costs the three fuzz targets that never read one.
+#
+# The §144.9 measurement, run on its own because it is the one bench somebody
+# comes looking for by name rather than by sweeping them all. Two passes over
+# each target's checked-in corpus and a 200 000-draw soak: the draw as the fuzz
+# target runs it, then every record that draw made built and freed again. The
+# share of the two is the whole of what a stubbed `ProvenanceLog` behind a cargo
+# feature could have bought.
+#
+# **It asserts nothing**, the way §12.5 says a human-read figure should, and
+# `docs/decisions.md` §162 records what it said on the day. The two doors it
+# measures through are pinned by
+# `a_fuzz_draw_hands_its_provenance_back_through_the_door.rs` in `rcad-geom` and
+# its namesake in `rcad-topo` — without those a door that stopped collecting
+# would read as nought percent, which is §77.6's shape.
+#
+# It writes each target's worst draw to `target/provenance-cost/` and names the
+# path, because a count cannot be replayed and those bytes can.
+[doc("What the provenance log costs a fuzz night: the §144.9 measurement.")]
+provenance-cost:
+    cargo bench -p rcad-step --bench what_the_provenance_log_costs_a_fuzz_night
+
 # Which regions of `crates/*/src` the suite never runs.
 #
 # **Not in `gate`, and named `coverage` rather than `check-coverage` for that

@@ -21,3 +21,7 @@ step-io = "0.2.4"
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "what_the_provenance_log_costs_a_fuzz_night"
+harness = false

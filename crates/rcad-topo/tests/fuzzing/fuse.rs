@@ -122,7 +122,7 @@ use the_door::every_number_the_door_promised_is_real;
 /// model that does not validate and a fuse that refuses fail for entirely
 /// different reasons, and one number would let the deep stages fall to nothing
 /// behind the shallow ones.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Reached {
     /// Halves handed to the decoder.
     pub halves: usize,
@@ -190,14 +190,37 @@ impl Reached {
 /// The fuzz target and the suite's replay both call this and nothing narrower.
 #[must_use]
 pub fn two_models_split_and_fused(data: &[u8]) -> Reached {
+    two_models_split_and_fused_keeping_the_provenance(data, &mut ProvenanceLog::new())
+}
+
+/// **The same draw, handing the provenance back instead of dropping it.**
+///
+/// The fuzz target calls [`two_models_split_and_fused`] and throws all three
+/// logs away — the validate sweep's, the fuse's, and the second sweep's.
+/// `rcad-topo/benches/what_the_provenance_log_costs_a_fuzz_night.rs` goes
+/// through here to count what a draw recorded, and this is the body both share
+/// so that the draw being measured is the draw being fuzzed (§144.9).
+///
+/// **One log where the fuzz path keeps three**, which merges the counts and
+/// changes no record that is made.
+///
+/// # Panics
+///
+/// As [`two_models_split_and_fused`] does.
+#[must_use]
+pub fn two_models_split_and_fused_keeping_the_provenance(
+    data: &[u8],
+    log: &mut ProvenanceLog,
+) -> Reached {
     let Some((&header, rest)) = data.split_first() else {
         return Reached::default();
     };
     let half = rest.len() / 2;
     let (first_half, second_half) = rest.split_at(half);
 
-    how_one_model_is_fused(first_half, header)
-        .and(how_one_model_is_fused(second_half, header.rotate_left(4)))
+    how_one_model_is_fused_keeping_the_provenance(first_half, header, log).and(
+        how_one_model_is_fused_keeping_the_provenance(second_half, header.rotate_left(4), log),
+    )
 }
 
 /// Decode one `Model`, and — if it passes `validate` — fuse a `header`-chosen
@@ -210,6 +233,24 @@ pub fn two_models_split_and_fused(data: &[u8]) -> Reached {
 /// would refuse, or if `fuse` panics, which is the whole point.
 #[must_use]
 pub fn how_one_model_is_fused(bytes: &[u8], header: u8) -> Reached {
+    how_one_model_is_fused_keeping_the_provenance(bytes, header, &mut ProvenanceLog::new())
+}
+
+/// The same draw of one model, recording into the caller's log rather than its
+/// own three.
+///
+/// Why this door exists is
+/// [`two_models_split_and_fused_keeping_the_provenance`]'s doc comment.
+///
+/// # Panics
+///
+/// As [`how_one_model_is_fused`] does.
+#[must_use]
+pub fn how_one_model_is_fused_keeping_the_provenance(
+    bytes: &[u8],
+    header: u8,
+    log: &mut ProvenanceLog,
+) -> Reached {
     let mut reached = Reached {
         halves: 1,
         ..Reached::default()
@@ -219,10 +260,7 @@ pub fn how_one_model_is_fused(bytes: &[u8], header: u8) -> Reached {
     };
     reached.decoded = 1;
     every_number_the_door_promised_is_real(&model);
-    if model
-        .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .is_err()
-    {
+    if model.validate(&Policy::certified(), log).is_err() {
         return reached;
     }
     reached.validated = 1;
@@ -260,7 +298,7 @@ pub fn how_one_model_is_fused(bytes: &[u8], header: u8) -> Reached {
 
     reached.fused = 1;
     let before = postcard::to_allocvec(&model).expect("a model that decoded serializes again");
-    let answer = model.fuse(arguments, tools, rule, &policy, &mut ProvenanceLog::new());
+    let answer = model.fuse(arguments, tools, rule, &policy, log);
     let after = postcard::to_allocvec(&model).expect("a fused model serializes");
 
     match answer {
@@ -276,7 +314,7 @@ pub fn how_one_model_is_fused(bytes: &[u8], header: u8) -> Reached {
                     .expect("a solid the fuse handed back resolves in the model that made it");
             }
             model
-                .validate(&policy, &mut ProvenanceLog::new())
+                .validate(&policy, log)
                 .expect("an answer the fuse called Ok passes the sweep under its own policy");
         }
         Err(_) => {

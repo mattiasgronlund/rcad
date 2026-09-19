@@ -294,6 +294,21 @@ impl Record {
 /// Empty when everything was certified, which is both the common case and a
 /// meaningful signal on its own. `Vec::new` does not allocate, so a certified
 /// operation pays nothing for carrying one.
+///
+/// **And an operation that records pays almost nothing for it either**, which is
+/// the reason [`Record`] owning a `Vec<Point>` has been left alone. §144.9 read
+/// the sentence above as optimising the path a fuzz night never takes — every
+/// *recorded* decision allocates, and finding refusals is what a night is for —
+/// and asked for a stub behind a cargo feature. Measured instead, by
+/// `rcad-topo/benches/what_the_provenance_log_costs_a_fuzz_night.rs` and `just
+/// provenance-cost`: recording is **under a tenth of a percent** of what the
+/// three recording fuzz targets spend, and the worst single draw in any of their
+/// corpora holds 99 kB.
+///
+/// The draws that record are the ones that go deep, and they record about thirty
+/// decisions each — which is nothing beside the fuse that made them. It is the
+/// *ratio* that kills the feature, not a scarcity of records. `docs/decisions.md`
+/// §162, and it is why there is no `[features]` in this workspace yet.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProvenanceLog {
     records: Vec<Record>,

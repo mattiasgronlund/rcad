@@ -285,7 +285,7 @@ const FIVES_PER_STEP: i32 = 5;
 /// refuses is not a failure here — giving up is an answer a caller can read —
 /// so without these a harness could not tell an oracle that held from one that
 /// skipped every draw it was given.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Asked {
     /// Walked points checked against both the surfaces that named them.
     pub points: usize,
@@ -330,10 +330,34 @@ impl Asked {
 ///
 /// If any oracle below fails.
 pub fn every_oracle_holds_of(pair: [Surface; 2]) -> Asked {
+    every_oracle_holds_of_keeping_the_provenance(pair, &mut ProvenanceLog::new())
+}
+
+/// **The same oracles, handing the provenance back instead of dropping it.**
+///
+/// The fuzz target calls [`every_oracle_holds_of`] and throws the log away —
+/// nothing in the fuzz path has ever read one. This is the door
+/// `benches/what_the_provenance_log_costs_a_fuzz_night.rs` goes through to count
+/// what a draw recorded, and it is the body both share so that the draw being
+/// measured is the draw being fuzzed (§144.9).
+///
+/// **One log where the fuzz path keeps five.** Each oracle below made its own as
+/// it went — one for the walks, two for the orders, up to three for the
+/// scalings. Threading one instead merges them, which changes nothing any test
+/// can see, because every record made is the same record; what it changes is
+/// that the count comes back whole.
+///
+/// # Panics
+///
+/// If any oracle below fails.
+pub fn every_oracle_holds_of_keeping_the_provenance(
+    pair: [Surface; 2],
+    log: &mut ProvenanceLog,
+) -> Asked {
     Asked {
-        points: every_point_of_every_crossing_is_on_both_surfaces(pair),
-        orders: naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(&pair),
-        scalings: writing_a_pair_at_another_power_of_two_does_not_change_it(&pair),
+        points: every_point_of_every_crossing_is_on_both_surfaces(pair, log),
+        orders: naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(&pair, log),
+        scalings: writing_a_pair_at_another_power_of_two_does_not_change_it(&pair, log),
     }
 }
 
@@ -353,8 +377,11 @@ pub fn every_oracle_holds_of(pair: [Surface; 2]) -> Asked {
 ///
 /// If any point of any walked run is certified on the wrong side of either
 /// surface that named it.
-pub fn every_point_of_every_crossing_is_on_both_surfaces(pair: [Surface; 2]) -> usize {
-    how_every_crossing_was_walked(pair)
+pub fn every_point_of_every_crossing_is_on_both_surfaces(
+    pair: [Surface; 2],
+    log: &mut ProvenanceLog,
+) -> usize {
+    how_every_crossing_was_walked_keeping_the_provenance(pair, log)
         .iter()
         .map(WhereARunWent::points_checked)
         .sum()
@@ -373,9 +400,23 @@ pub fn every_point_of_every_crossing_is_on_both_surfaces(pair: [Surface; 2]) -> 
 /// If any point of any walked run is certified on the wrong side of either
 /// surface that named it.
 pub fn how_every_crossing_was_walked(pair: [Surface; 2]) -> Vec<WhereARunWent> {
-    let mut log = ProvenanceLog::new();
-    let Ok(SurfaceMeet::Curves(runs)) =
-        intersect(&pair[0], &pair[1], &Policy::certified(), &mut log)
+    how_every_crossing_was_walked_keeping_the_provenance(pair, &mut ProvenanceLog::new())
+}
+
+/// The same walk, recording into the caller's log rather than its own.
+///
+/// Why this door exists is [`every_oracle_holds_of_keeping_the_provenance`]'s
+/// doc comment.
+///
+/// # Panics
+///
+/// If any point of any walked run is certified on the wrong side of either
+/// surface that named it.
+pub fn how_every_crossing_was_walked_keeping_the_provenance(
+    pair: [Surface; 2],
+    log: &mut ProvenanceLog,
+) -> Vec<WhereARunWent> {
+    let Ok(SurfaceMeet::Curves(runs)) = intersect(&pair[0], &pair[1], &Policy::certified(), log)
     else {
         return Vec::new();
     };
@@ -391,7 +432,7 @@ pub fn how_every_crossing_was_walked(pair: [Surface; 2]) -> Vec<WhereARunWent> {
             [&pair[0], &pair[1]],
             roughly,
             &Policy::certified(),
-            &mut log,
+            log,
         ) {
             Ok(sized) => sized,
             Err(why) => {
@@ -410,7 +451,7 @@ pub fn how_every_crossing_was_walked(pair: [Surface; 2]) -> Vec<WhereARunWent> {
             [&pair[0], &pair[1]],
             deflection,
             &Policy::certified(),
-            &mut log,
+            log,
         ) {
             Ok(along_it) => along_it,
             Err(why) => {
@@ -521,19 +562,12 @@ fn side_of(surface: &Surface, point: PredicatePoint) -> Decision {
 /// # Panics
 ///
 /// If the two orders disagree about what the pair crosses in.
-fn naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(pair: &[Surface; 2]) -> usize {
-    let one_way = intersect(
-        &pair[0],
-        &pair[1],
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    let other_way = intersect(
-        &pair[1],
-        &pair[0],
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+fn naming_a_pair_does_not_depend_on_which_way_round_it_is_asked(
+    pair: &[Surface; 2],
+    log: &mut ProvenanceLog,
+) -> usize {
+    let one_way = intersect(&pair[0], &pair[1], &Policy::certified(), log);
+    let other_way = intersect(&pair[1], &pair[0], &Policy::certified(), log);
     assert_eq!(
         answer_of(&one_way),
         answer_of(&other_way),
@@ -593,13 +627,11 @@ fn kind_of(met: &SurfaceMeet) -> (&'static str, usize) {
 /// # Panics
 ///
 /// If the two scales disagree about what the pair crosses in.
-fn writing_a_pair_at_another_power_of_two_does_not_change_it(pair: &[Surface; 2]) -> usize {
-    let Ok(here) = intersect(
-        &pair[0],
-        &pair[1],
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    ) else {
+fn writing_a_pair_at_another_power_of_two_does_not_change_it(
+    pair: &[Surface; 2],
+    log: &mut ProvenanceLog,
+) -> usize {
+    let Ok(here) = intersect(&pair[0], &pair[1], &Policy::certified(), log) else {
         return 0;
     };
 
@@ -608,12 +640,7 @@ fn writing_a_pair_at_another_power_of_two_does_not_change_it(pair: &[Surface; 2]
         let (Some(first), Some(second)) = (scaled(&pair[0], by), scaled(&pair[1], by)) else {
             continue;
         };
-        let Ok(there) = intersect(
-            &first,
-            &second,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) else {
+        let Ok(there) = intersect(&first, &second, &Policy::certified(), log) else {
             continue;
         };
         compared += 1;
@@ -742,12 +769,16 @@ fn exactly_scaled(value: f64, factor: f64) -> Option<f64> {
 /// twice.
 #[cfg(test)]
 mod scaling_by_one {
-    use super::{Axis, Cone, Cylinder, Plane, Point, Sphere, Surface, Torus, Vector, scaled};
+    use super::{Axis, Cone, Cylinder, Plane, Point, Sphere, Surface, Torus, Vector};
 
+    // `super::scaled` and not an import, because a bench that reaches this file
+    // gets `cfg(test)` without the test harness — so the body below is stripped
+    // while the helpers under it stay, and an import used only here would read
+    // as unused there.
     #[test]
     fn scaling_any_surface_by_one_hands_back_the_bits_it_was_given() {
         for surface in one_of_every_kind() {
-            let same = scaled(&surface, 0).expect("a factor of one scales anything");
+            let same = super::scaled(&surface, 0).expect("a factor of one scales anything");
             for (which, (before, after)) in every_number_of(&surface)
                 .into_iter()
                 .zip(every_number_of(&same))
