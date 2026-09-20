@@ -5557,21 +5557,7 @@ status dir=".":
 
     echo
     echo "=== main against the last green ==="
-    if ! command -v gh >/dev/null 2>&1; then
-        echo "unknown: gh is not on PATH, so no run's conclusion can be read"
-    else
-        green=$(gh run list --workflow ci.yml --branch main --status success \
-            --limit 1 --json headSha --jq '.[0].headSha' 2>/dev/null)
-        if [ -z "$green" ]; then
-            echo "unknown: gh lists no green run on main"
-        elif ! git -C '{{dir}}' cat-file -e "${green}^{commit}" 2>/dev/null; then
-            echo "last green $(cut -c1-7 <<<"$green") is not in this checkout; fetch to weigh main against it"
-        else
-            ahead=$(git -C '{{dir}}' rev-list --count "$green"..main 2>/dev/null)
-            printf 'main tip %s, last green %s, %s commit(s) on main not yet green\n' \
-                "$(git -C '{{dir}}' rev-parse --short main)" "$(cut -c1-7 <<<"$green")" "${ahead:-?}"
-        fi
-    fi
+    {{ just_executable() }} _status-green '{{dir}}' main
 
     echo
     echo "=== docs/decisions.md ==="
@@ -5885,6 +5871,92 @@ _status-branches dir base:
     fi
     echo "$quiet branch(es) carry nothing {{base}} does not already have"
 
+# The green half of `status`, kept apart for the same reason as the branch half:
+# the live repository's answer is whatever happened to it this week, so the ways
+# this row goes wrong can only be pinned against a fixture.
+#
+# **Two sources, because since §172 one of them can no longer answer.** The
+# Actions allowance is spent, so no push to `main` can go green on the runner,
+# and a row that asks only GitHub reports a tip drifting further from a green
+# that cannot move — 22 commits within a day, while a full `just gate` had in
+# fact read the tip end to end. That is the same staleness §173.9 fixed for
+# `fuzz-watermark`, and this was the other place it showed: the row a session
+# reads first. `_record-green` writes each local gate down; this reads that file
+# beside `gh`, and §173.9's rule about what may be written there — every metered
+# step ran, on a clean tree — is what makes the two comparable at all.
+#
+# **It says which source answered, and that is the point rather than a detail.**
+# A CI green is a different machine; a local green is *this* machine, the one
+# §173 spent a day finding four environment-dependent faults in, so the two are
+# not the same evidence and a row that blurred them would be the more expensive
+# error now that almost every green is local. §173.9 left that caveat owed; this
+# is where it gets paid, next to the number it qualifies.
+[private]
+_status-green dir base:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    file=""
+    common=$(git -C '{{dir}}' rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
+        && file="$common/rcad-greens"
+
+    # Both sources normalised to full shas in *this* checkout, so that the
+    # source test below is a string compare it cannot get subtly wrong, and so
+    # a sha naming no commit here drops out before it can be chosen.
+    keep() {
+        for sha in $1; do
+            git -C '{{dir}}' rev-parse --verify --quiet "${sha}^{commit}" 2>/dev/null
+        done
+    }
+    raw_ci=""
+    if command -v gh >/dev/null 2>&1; then
+        raw_ci=$(gh run list --workflow ci.yml --branch '{{base}}' --status success \
+            --limit 20 --json headSha --jq '.[].headSha' 2>/dev/null) || raw_ci=""
+    fi
+    raw_local=$(cut -d' ' -f1 "$file" 2>/dev/null) || raw_local=""
+    ci=$(keep "$raw_ci")
+    local_greens=$(keep "$raw_local")
+
+    if [ -z "$raw_ci$raw_local" ]; then
+        if command -v gh >/dev/null 2>&1; then
+            echo "unknown: neither gh nor the local gate record names a green commit on {{base}}"
+        else
+            echo "unknown: gh is not on PATH and no local gate has been recorded"
+        fi
+        exit 0
+    fi
+
+    # The furthest forward of the candidates, not the first that qualifies: two
+    # sources merged arrive in no useful order, so the walk establishes it here.
+    best=""
+    for sha in $ci $local_greens; do
+        git -C '{{dir}}' merge-base --is-ancestor "$sha" '{{base}}' 2>/dev/null || continue
+        if [ -z "$best" ] || git -C '{{dir}}' merge-base --is-ancestor "$best" "$sha" 2>/dev/null; then
+            best=$sha
+        fi
+    done
+    if [ -z "$best" ]; then
+        echo "no green commit is on {{base}} in this checkout; fetch, or gate it here"
+        exit 0
+    fi
+
+    case " $ci " in *" $best "*) from_ci=yes ;; *) from_ci=no ;; esac
+    case " $local_greens " in *" $best "*) from_local=yes ;; *) from_local=no ;; esac
+    if [ "$from_ci" = yes ] && [ "$from_local" = yes ]; then
+        how="CI and a local gate"
+    elif [ "$from_ci" = yes ]; then
+        how="CI"
+    else
+        how="a local gate$(awk -v s="$best" '$1 == s { printf " on %s, %s", $3, $2 }' "$file" 2>/dev/null)"
+    fi
+
+    ahead=$(git -C '{{dir}}' rev-list --count "$best"..'{{base}}' 2>/dev/null)
+    printf '%s tip %s, last green %s (%s), %s commit(s) on %s not yet green\n' \
+        '{{base}}' "$(git -C '{{dir}}' rev-parse --short '{{base}}')" \
+        "$(git -C '{{dir}}' rev-parse --short "$best")" "$how" "${ahead:-?}" '{{base}}'
+    [ "$from_ci" = yes ] \
+        || echo "  nothing independent has read it: a local gate is this machine, §173 and §173.9"
+
 # §0 is the one row of `status` that a recipe cannot compute, so this is what
 # stands behind it. It cannot check the judgement — whether the unit named there
 # is still the unit — and it does not pretend to. It checks the three ways the
@@ -6026,6 +6098,74 @@ check-status-selftest:
         && fail "weighing against a branch that does not exist did not fail"
     grep -qF "no branch named no-such-branch" <<<"$got" \
         || fail "a missing base branch did not say so"
+
+    # The green row, against a stub `gh` so no arm needs the network or an
+    # account — `check-fuzz-watermark-selftest`'s fixture, for the same reason.
+    # What is pinned here is that the local record can answer *alone*: with the
+    # Actions allowance spent that is the only source there is, and the version
+    # of this row that asked GitHub and stopped reported a tip 22 commits from a
+    # green while a full gate had read that very tip. §173.9.
+    mkdir -p "$dir/bin"
+    cat >"$dir/bin/gh" <<'STUB'
+    #!/usr/bin/env bash
+    cat "$GH_GREEN"
+    STUB
+    sed -i 's/^    //' "$dir/bin/gh"
+    chmod +x "$dir/bin/gh"
+    : >"$dir/ci"
+    greens="$dir/repo/.git/rcad-greens"
+    : >"$greens"
+
+    git -C "$dir/repo" checkout -q main
+    two=$(git -C "$dir/repo" rev-parse main~1)
+    three=$(git -C "$dir/repo" rev-parse main)
+    aside=$(git -C "$dir/repo" rev-parse unlanded)
+
+    green_row() {
+        GH_GREEN="$dir/ci" PATH="$dir/bin:$PATH" \
+            just _status-green "$dir/repo" main 2>&1
+    }
+
+    printf '%s 2026-09-20T00:00:00Z somehost\n' "$two" >"$greens"
+    got=$(green_row)
+    grep -q "last green $(cut -c1-7 <<<"$two") (a local gate on somehost" <<<"$got" \
+        || fail "with gh silent the local gate record did not answer, which is the only source left"
+    grep -q "1 commit(s) on main not yet green" <<<"$got" \
+        || fail "the local green was named but main was not weighed against it"
+    grep -qF "nothing independent has read it" <<<"$got" \
+        || fail "a green only this machine has seen was not said to be this machine's"
+
+    # Furthest forward, not first seen: the two sources merged arrive in no
+    # order, so a loop taking the first match would pass only by luck.
+    printf '%s\n' "$two" >"$dir/ci"
+    printf '%s 2026-09-20T00:00:00Z somehost\n' "$three" >"$greens"
+    got=$(green_row)
+    grep -q "last green $(cut -c1-7 <<<"$three")" <<<"$got" \
+        || fail "it chose a green behind the furthest one that qualifies"
+
+    # A CI green is a different machine, so it carries no caveat — and the row
+    # must still be able to say so, or the caveat means nothing when it appears.
+    printf '%s\n' "$three" >"$dir/ci"
+    printf '%s 2026-09-20T00:00:00Z somehost\n' "$two" >"$greens"
+    got=$(green_row)
+    grep -qF "(CI)" <<<"$got" \
+        || fail "a green CI run on the tip was not credited to CI"
+    grep -qF "nothing independent has read it" <<<"$got" \
+        && fail "an independent green was still called this machine's"
+
+    printf '%s\n' "$three" >"$dir/ci"
+    printf '%s 2026-09-20T00:00:00Z somehost\n' "$three" >"$greens"
+    got=$(green_row)
+    grep -qF "(CI and a local gate)" <<<"$got" \
+        || fail "a commit both sources name was credited to only one of them"
+
+    # Green somewhere that is not `main` moves nothing, and a sha naming no
+    # commit here is dropped rather than crashing the row.
+    printf '%s\n0000000000000000000000000000000000000000\n' "$aside" >"$dir/ci"
+    : >"$greens"
+    got=$(green_row)
+    grep -qF "no green commit is on main in this checkout" <<<"$got" \
+        || fail "a green belonging to another branch was counted as main's"
 
     good='## 0. Where the work is
 
