@@ -464,7 +464,8 @@ fn a_fused_eighth_of_a_ball_says_which_points_are_inside_it() {
                 &mut log,
             );
             assert_eq!(
-                answer, expected,
+                answer,
+                expected,
                 "a fused eighth placed by {placement:?}, asked about {:?}",
                 [x, y, z]
             );
@@ -513,7 +514,10 @@ fn an_eighth_of_a_ball_the_fuse_made(placement: &Isometry) -> (Model, SolidKey) 
         )
         .expect("a block and a ball sharing a corner intersect");
     let [eighth] = *fused.solids() else {
-        panic!("a block and a ball meet in one piece, got {:?}", fused.solids());
+        panic!(
+            "a block and a ball meet in one piece, got {:?}",
+            fused.solids()
+        );
     };
     (model, eighth)
 }
