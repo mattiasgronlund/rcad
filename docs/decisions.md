@@ -39917,6 +39917,48 @@ independent reading, and the honest upgrade is to let it record too — deferred
 under §13 until the night's greens are actually seen to be wrong, and written
 down here so that whoever wants it knows the hook already exists.
 
+### 173.10 The same staleness was in `status`, where more people read it
+
+§173.9 fixed the night and left the morning alone. `fuzz-watermark` was not the
+only reader asking GitHub whether a commit had been read end to end: `just
+status`'s fifth row asks the same question, of the same spent allowance, and
+`status` is the recipe CLAUDE.md sends a session to *first*.
+
+The number it gave was true of CI and useless about the repo. On 2026-09-20 it
+read **"main tip 2229c205, last green 146d0d6, 22 commit(s) on main not yet
+green"** while a full `just gate` had passed on `2229c205` itself. A reader who
+believed it would think twenty-two commits were unread; a reader who knew about
+§172 would know the row could not move and stop reading it. Neither of those is
+a row worth printing, and the second is the worse outcome — a survey people have
+learnt to skip is how the other four rows stop being read too.
+
+So the green row now reads both sources, exactly as `fuzz-watermark` does: `gh`
+for CI, `rcad-greens` for local gates, normalised to full shas in this checkout,
+furthest-forward-that-is-an-ancestor wins. It is `_status-green`, beside
+`_status-branches` and for the same reason — the live repository's answer is
+whatever happened to it this week, so the ways the row goes wrong can only be
+pinned against a fixture with a stub `gh`.
+
+**The row names which source answered, and that is the substance rather than a
+nicety.** §173.9 ends by refusing to call a local green as good as an
+independent one, and that refusal has to survive contact with the place the
+number is actually read. A CI green is a different machine. A local green is
+*this* machine — the one §173 spent a day finding four environment-dependent
+faults in, three of which were green here and red in a container on the same
+tree. Now that almost every green is local, a row that blurred the two would be
+the more expensive error, so a green nothing independent has seen says so on a
+second line and a CI green carries no such line. That is §173.9's owed caveat
+paid where it is load-bearing, next to the number it qualifies.
+
+**What is still not taught about `rcad-greens`: nothing, and that is checked
+rather than assumed.** §173.9 left this reader behind precisely by assuming, so
+the claim owes a demonstration (§16.10). `gh run ... --status success` is how a
+recipe here asks whether a commit is green, and the tree holds exactly two such
+query sites — `fuzz-watermark` at `justfile:3356` and `_status-green` at
+`justfile:5913`. The three remaining `gh run` hits are prose in `ci.yml`'s
+comments. Both query sites now read both sources, so the set of readers asking
+only GitHub is empty.
+
 ## 174. Three corpus lanes, 119 files priced, none freed — the top rows are one queue
 
 *§171 priced the corpus and §171.7 said to cut lanes from the top of its table.
