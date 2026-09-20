@@ -39917,6 +39917,102 @@ independent reading, and the honest upgrade is to let it record too — deferred
 under §13 until the night's greens are actually seen to be wrong, and written
 down here so that whoever wants it knows the hook already exists.
 
+### 173.10 The same staleness was in `status`, where more people read it
+
+§173.9 fixed the night and left the morning alone. `fuzz-watermark` was not the
+only reader asking GitHub whether a commit had been read end to end: `just
+status`'s fifth row asks the same question, of the same spent allowance, and
+`status` is the recipe CLAUDE.md sends a session to *first*.
+
+The number it gave was true of CI and useless about the repo. On 2026-09-20 it
+read **"main tip 2229c205, last green 146d0d6, 22 commit(s) on main not yet
+green"** while a full `just gate` had passed on `2229c205` itself. A reader who
+believed it would think twenty-two commits were unread; a reader who knew about
+§172 would know the row could not move and stop reading it. Neither of those is
+a row worth printing, and the second is the worse outcome — a survey people have
+learnt to skip is how the other four rows stop being read too.
+
+So the green row now reads both sources, exactly as `fuzz-watermark` does: `gh`
+for CI, `rcad-greens` for local gates, normalised to full shas in this checkout,
+furthest-forward-that-is-an-ancestor wins. It is `_status-green`, beside
+`_status-branches` and for the same reason — the live repository's answer is
+whatever happened to it this week, so the ways the row goes wrong can only be
+pinned against a fixture with a stub `gh`.
+
+**The row names which source answered, and that is the substance rather than a
+nicety.** §173.9 ends by refusing to call a local green as good as an
+independent one, and that refusal has to survive contact with the place the
+number is actually read. A CI green is a different machine. A local green is
+*this* machine — the one §173 spent a day finding four environment-dependent
+faults in, three of which were green here and red in a container on the same
+tree. Now that almost every green is local, a row that blurred the two would be
+the more expensive error, so a green nothing independent has seen says so on a
+second line and a CI green carries no such line. That is §173.9's owed caveat
+paid where it is load-bearing, next to the number it qualifies.
+
+**What is still not taught about `rcad-greens`: nothing, and that is checked
+rather than assumed.** §173.9 left this reader behind precisely by assuming, so
+the claim owes a demonstration (§16.10). `gh run ... --status success` is how a
+recipe here asks whether a commit is green, and the tree holds exactly two such
+query sites — `fuzz-watermark` at `justfile:3356` and `_status-green` at
+`justfile:5913`. The three remaining `gh run` hits are prose in `ci.yml`'s
+comments. Both query sites now read both sources, so the set of readers asking
+only GitHub is empty.
+
+**The row still counts shas, and will often say one or two are not green.**
+Landing §173.10 itself left it reading "main tip f2494a21, last green d32cca01,
+2 commit(s) on main not yet green" — where `26727b9d` is the merge, whose tree is
+`d8eb9b50`, *byte for byte the tree that was gated*, and `f2494a21` is docs-only
+and was read by `gate-docs`. Both had been read; neither had been read under its
+own sha.
+
+Counting trees instead would remove that, and it is deliberately not done. A sha
+is the whole record (§173.9), and the number this row exists to give is a
+conservative one — it should err towards saying work is unread. **What makes it
+tolerable is that it heals and the CI version could not.** The old row asked an
+allowance that can never answer again, so its number only ever grew; this one
+goes to zero the next time anybody runs a full gate on the tip. A row that is
+briefly pessimistic after a merge is a different thing from a row that is
+permanently wrong, and only the second is worth code.
+
+### 173.11 The fifth run found nothing, which is the first evidence the class is exhausted
+
+`gate-fresh` had gone four for four: every run since it was written found a real
+fault, each one a check answering a property of its environment rather than of
+the tree — mawk's word boundary (§173), the missing `jq` (§173.7), mise's changed
+output format (§173.8). Each fix bought one or two more steps, and the furthest
+it had ever reached was **step 10 of 43**. The expectation handed to this session
+was a fifth.
+
+On 2026-09-20 it ran the whole gate: **43 steps, PASS, 2101 tests** on `5ca78b31`,
+against the same tree's 2101 here. Thirty-three steps ran in a container for the
+first time and none of them disagreed with this machine.
+
+**That is evidence about the instrument, not a clean bill of health.** Four
+findings in four runs meant the next red was the expected outcome and the tree
+was never the suspect; one clean run inverts that. A red from `gate-fresh` is now
+*news* — the prior that it is the check rather than the code has just lost the
+only support it had, which was an unbroken streak. Whoever gets the next one
+should weigh both, where §173 could say "assume the check" and be right four
+times running.
+
+Two things the run showed that no local gate can:
+
+- **`check-fuzz-watermark-selftest` passes in a container**, so §173.9's two-source
+  picking loop is exercised somewhere without a `gh`, an account or this machine's
+  `rcad-greens`. That arm was written the same day it was first run anywhere.
+- **The container's green evaporates, exactly as §173.9 left it.** The run ends
+  `green recorded for 5ca78b31 in /rcad/.git/rcad-greens` — inside the throwaway
+  clone, which the recipe deletes on exit. The independent reading that §173.9
+  says would be the honest upgrade therefore still reaches nothing, and the hook
+  being *present and inert* is why that stays a deferral rather than a bug.
+
+`nextest` reported **5 leaky** in the container and none here. Leaky is a passing
+test that outlived its own process handles, not a failure, and the difference is
+process reaping under PID 1 in a container rather than anything about the code.
+Recorded because it is exactly the kind of difference that looks like a finding
+next time somebody reads this output cold.
+
 ## 174. Three corpus lanes, 119 files priced, none freed — the top rows are one queue
 
 *§171 priced the corpus and §171.7 said to cut lanes from the top of its table.
