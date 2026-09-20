@@ -403,11 +403,15 @@ fn a_corner_that_is_not_on_its_curved_face_is_refused_with_how_far_off_it_is() {
 /// `9.4e-13`, which is `5.8e-13` of radius, and that is the number the refusal
 /// hands back.
 ///
-/// **An `f64` would have been two thousand times closer**, which is the whole
-/// claim. `NEAREST_F64_POINT_ROUNDOFF` times the coordinate is `2.6e-16`, and
+/// **An `f64` would have been eight hundred times closer**, which is the whole
+/// claim. `NEAREST_F64_POINT_ROUNDOFF` is *per unit of the point's largest
+/// coordinate*, and this corner's largest is the `3.` it sits at — not the `y`
+/// worked out above — so the furthest a corner of this cylinder written as three
+/// `f64` can land off it is `6.7e-16`. This one is `5.8e-13` off, 866 times
+/// that, and its `y` alone is 1411 times that out of place.
 /// `crates/rcad-geom/tests/how_far_off_a_curved_surface_the_nearest_f64_can_sit.rs`
 /// is the search that says no point of a curved surface written as three `f64`
-/// lands further off than that. So this corner is not the rounding of any point
+/// lands further off. So this corner is not the rounding of any point
 /// of this cylinder: the exporter chose twelve digits, the answer the file needs
 /// is not among its own numbers, and no filter, no exact level and no rescale
 /// reaches a corner that was never written down. A sweep that accepted it would
@@ -450,11 +454,22 @@ fn the_corpus_corner_this_refusal_names_was_written_short_and_not_rounded() {
          {off_by}, so this test is no longer reading the corner the refusal names"
     );
 
-    let a_rounding_of_that_coordinate = asked_for * rcad_geom::NEAREST_F64_POINT_ROUNDOFF;
+    // Per unit of the point's *largest* coordinate, which is the 3. the corner
+    // sits at and not the y this test works out. Taking the y instead understates
+    // the budget by 2.6x and flatters every ratio below it.
+    let largest_coordinate = 3.0_f64;
+    let a_written_down_corner_can_miss_by =
+        largest_coordinate * rcad_geom::NEAREST_F64_POINT_ROUNDOFF;
     assert!(
-        short_by > 2000.0 * a_rounding_of_that_coordinate,
-        "writing that coordinate down costs {a_rounding_of_that_coordinate} and the file is \
-         {short_by} out, so this is no longer a number the exporter shortened"
+        off_by > 800.0 * a_written_down_corner_can_miss_by,
+        "the furthest a corner of this cylinder written as three f64 lands off it is \
+         {a_written_down_corner_can_miss_by} and this one is {off_by} off, so it is no \
+         longer a corner outside every rounding of itself"
+    );
+    assert!(
+        short_by > 1000.0 * a_written_down_corner_can_miss_by,
+        "writing that coordinate down costs {a_written_down_corner_can_miss_by} and the file \
+         is {short_by} out, so this is no longer a number the exporter shortened"
     );
     assert!(
         off_by > 800.0 * coordinate_spacing,

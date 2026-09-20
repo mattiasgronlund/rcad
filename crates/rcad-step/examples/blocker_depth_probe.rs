@@ -354,7 +354,9 @@ fn report_family_union(findings: &[FileFinding]) {
 
     let blocked_but_reasonless: usize = findings
         .iter()
-        .filter(|finding| !finding.imports && finding.reasons.is_empty() && finding.fatal.is_empty())
+        .filter(|finding| {
+            !finding.imports && finding.reasons.is_empty() && finding.fatal.is_empty()
+        })
         .count();
     if blocked_but_reasonless > 0 {
         println!(
@@ -383,7 +385,10 @@ fn report_family_union(findings: &[FileFinding]) {
         }
         let kicad = by_family.get("kicad").copied().unwrap_or(0);
         let nist = by_family.get("nist").copied().unwrap_or(0);
-        println!("    {label}: kicad={kicad:>4}  nist={nist:>3}  combined={:>4}", kicad + nist);
+        println!(
+            "    {label}: kicad={kicad:>4}  nist={nist:>3}  combined={:>4}",
+            kicad + nist
+        );
     }
 
     println!(
