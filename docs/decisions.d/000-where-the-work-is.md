@@ -10,16 +10,16 @@ demonstration either way — a gap if a scaling reaches the sign, a limit if not
 side; a row's count is a ceiling, only the import count settles it (§174.8). Unit
 unchanged.
 
-**Five waves have run and the demonstration is in.** §110–§113 named the pair and
-falsified §109.6; §115–§117 walked closed edges (KiCad 97/323 → 110/323), leaving
-26 closed by §118–§119; §122–§128 took the last three, §126's failure being
-**§149's oracle, not the kernel**; **§121 landed** as `912cd168`.
+**Five waves have run, §110–§128**: §109.6 falsified, closed edges 97/323 →
+110/323, §126's failure **§149's oracle, not the kernel**, §121 as `912cd168`.
 
 **What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
 sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150 by §156;
 §151.5 by §163; §163.4 by §165; §165.4 by §166; §166.4 by §167; §167.4 by §168;
-**§168.4's pie slice** by **§169**; and **§169.4's fused arcs** by **§176**, one
-acceptance test, nothing downstream of a picker having read the offset.
+**§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**, one
+acceptance test, nothing downstream of a picker having read the offset; and
+**§181.6's question** by **§182** — the answering order was wrong and not merely
+coarse, so the pair refuses both ways round now and the gap it names stays open.
 
 **Next and unclaimed: the 18 LED files.** §176.2 falsifies §174.5's "coarse edge
 walk" — the walk never runs, because the circle is imprinted on a flat face and

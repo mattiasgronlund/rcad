@@ -438,13 +438,27 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
         );
     let out = root_enclosing(quotient_or_everything(room, squared_normal));
 
+    // The step to the middle of the two lines runs along the cutting plane's
+    // own stored normal, so the picking normal's dot with it is an exact sum of
+    // stored numbers and the step it describes is the real one.
+    let leaning = Exact::dot_of(picker.normal().components(), normal.components())
+        .as_ref()
+        .map_or_else(
+            || {
+                dot_enclosing(
+                    exactly(picker.normal().components()),
+                    exactly(normal.components()),
+                )
+            },
+            Exact::enclosure,
+        );
+
     two_lines_told_apart(
         picker,
         along.components(),
         &TwoLinesEitherSideOfThePicker {
             from: origin,
-            sideways: normal.components(),
-            how_far: quotient_or_everything(-reading, squared_normal),
+            to_the_middle: leaning * quotient_or_everything(-reading, squared_normal),
             up,
             out,
         },
@@ -1094,13 +1108,26 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
         Interval::exactly(4.0) * squared_gap * squared_direction,
     ));
 
+    // The middle of the two lines sits `across / apart` of the way from this
+    // pipe's axis to the other's, so the reading there is that same share of the
+    // way between the readings at the two axes. Both are stored points, so both
+    // readings are exact — and `along`'s own component of the step contributes
+    // nothing to either, the picking normal being exactly square to it.
+    //
+    // **Not `normal · towards`, which is exactly zero here and says nothing.**
+    // `towards` was rounded on its way out of `the_step_across_to_the_other_axis`
+    // and the picking normal was then built exactly square to *it*; for a pair
+    // far enough from the origin the true step leans out of that plane by far
+    // more than the two lines are apart. §182.
+    let from_here_to_there =
+        how_far_in_front(picker, there) - how_far_in_front(picker, here.coordinates());
+
     two_lines_told_apart(
         picker,
         along.components(),
         &TwoLinesEitherSideOfThePicker {
             from: here,
-            sideways: towards.components(),
-            how_far: quotient_or_everything(across, apart),
+            to_the_middle: quotient_or_everything(across, apart) * from_here_to_there,
             up,
             out,
         },
@@ -1185,9 +1212,18 @@ fn the_step_across_to_the_other_axis(one: &Cylinder, other: &Cylinder) -> Vector
 /// same sense as which of three fallback normals
 /// [`HalfSpace::through_a_point_square_to`] picks. Whatever comes back here,
 /// `two_lines_told_apart` reads the offset that was actually stored and either
-/// proves the two lines straddle it or refuses. A worse point costs refusals and
-/// never a wrong answer, which is why this is plain `f64` with no enclosure
-/// anywhere in it.
+/// proves the two lines straddle it or refuses, which is why this is plain `f64`
+/// with no enclosure anywhere in it.
+///
+/// **That is only true while the caller can see which way a worse point moved.**
+/// This said "a worse point costs refusals and never a wrong answer" until §182,
+/// and it was false in the one case that matters most here: the
+/// picking normal is built exactly square to `towards`, so the reading cannot
+/// move along `towards` at all, and a pair far enough from the origin has the
+/// *true* step leaning out of that plane by more than the two lines are apart.
+/// The caller now reads the picker at both stored axis origins rather than
+/// against the rounded direction, and the sentence holds again because the
+/// check is no longer blind to the step.
 ///
 /// It is `across / δ` of the way along the step, with `across = (δ² + r₁² − r₂²)
 /// / 2δ`, so the `δ` cancels and no square root is taken. The numerator subtracts
@@ -1873,14 +1909,23 @@ fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Po
 /// Never added up into two points. [`two_lines_told_apart`]'s second doc section
 /// says what adding them up costs.
 struct TwoLinesEitherSideOfThePicker {
-    /// The point the picking half-space was built through.
+    /// A point the reading `normal · p − offset` can be taken at.
     from: Point,
-    /// The direction the middle of the two lines steps along from `from`,
-    /// **exactly as it was stored** and not scaled to any length, so that its
-    /// dot with the picking normal can be summed exactly.
-    sideways: [f64; 3],
-    /// How many `sideways` that step is. Signed.
-    how_far: Interval,
+    /// How much that reading changes between `from` and the point midway
+    /// between the two lines.
+    ///
+    /// **Each caller works this out its own way, because what is exact differs
+    /// between them, and reading it off a direction is what §182 got wrong.**
+    /// A plane cutting a pipe steps along the plane's own *stored* normal, so
+    /// the picking normal's dot with it is an exact sum and the step is real.
+    /// Two side-by-side pipes step along a direction that was *computed* —
+    /// `the_step_across_to_the_other_axis` divides by `w·w` at the end — and the
+    /// picking normal is built exactly square to that rounded direction. Its dot
+    /// with it is then exactly zero **by construction**, which says nothing at
+    /// all about where the true axis-to-axis step points, and for a pair far
+    /// from the origin the two disagree by far more than the lines are apart.
+    /// That caller reads the picker at both stored axis origins instead.
+    to_the_middle: Interval,
     /// The direction the two lines step either way along, scaled to length one.
     up: [Interval; 3],
     /// How far along `up` each of the two steps.
@@ -1952,21 +1997,7 @@ fn two_lines_told_apart(
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
 
-    let off_the_picker = Exact::dot_of(normal, lines.from.coordinates())
-        .map(|reading| reading.minus(&Exact::of(picker.offset())))
-        .as_ref()
-        .map_or_else(
-            || {
-                dot_enclosing(exactly(normal), exactly(lines.from.coordinates()))
-                    - Interval::exactly(picker.offset())
-            },
-            Exact::enclosure,
-        );
-    let leaning = Exact::dot_of(normal, lines.sideways).as_ref().map_or_else(
-        || dot_enclosing(exactly(normal), exactly(lines.sideways)),
-        Exact::enclosure,
-    );
-    let middle = off_the_picker + leaning * lines.how_far;
+    let middle = how_far_in_front(picker, lines.from.coordinates()) + lines.to_the_middle;
     let either_way = lines.out * dot_enclosing(exactly(normal), lines.up);
 
     let side = [1.0, -1.0].map(|which| middle + either_way * Interval::exactly(which));
@@ -1986,6 +2017,23 @@ fn two_lines_told_apart(
             })
             .collect(),
     ))
+}
+
+/// How far in front of `picker` a stored point sits: `normal · p − offset`.
+///
+/// Both halves are stored `f64`s, so [`Exact`] sums the dot product and takes
+/// the offset off it with nothing cancelling — which matters because the two
+/// terms of that sum routinely stand a hundred decades apart and the answer is
+/// the small change left over.
+fn how_far_in_front(picker: HalfSpace, point: [f64; 3]) -> Interval {
+    let normal = picker.normal().components();
+    Exact::dot_of(normal, point)
+        .map(|reading| reading.minus(&Exact::of(picker.offset())))
+        .as_ref()
+        .map_or_else(
+            || dot_enclosing(exactly(normal), exactly(point)) - Interval::exactly(picker.offset()),
+            Exact::enclosure,
+        )
 }
 
 /// A plane and a cone: seven shapes, and **every one of them is named**.
