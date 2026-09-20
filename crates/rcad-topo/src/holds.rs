@@ -49,7 +49,9 @@
 //! shown of the face in hand, and the side is read off the way the wire runs
 //! rather than off a corner, because every corner sits on every cut.
 
-use rcad_geom::{EdgeRun, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, intersect};
+use rcad_geom::{
+    EdgeRun, HalfSpace, Picker, Plane, Point, Sphere, Surface, SurfaceMeet, intersect,
+};
 use rcad_predicates::{
     Decision, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog,
     Record,
@@ -538,9 +540,12 @@ struct Corner {
 /// What a [`Side`] runs along between its ends.
 enum SideRun {
     Straight,
-    /// The part of a circle in front of `picker`, whose plane holds both ends.
+    /// Part of a circle, carrying the one thing about it the steps below read:
+    /// a direction square to the chord, in the circle's own plane, pointing from
+    /// the chord into this arc rather than into its sibling
+    /// ([`the_way_into_an_arc`]).
     Arc {
-        picker: HalfSpace,
+        into_the_arc: [Interval; 3],
     },
 }
 
@@ -581,24 +586,19 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
             key: corner.key(),
             at: where_it_is_stored(solid, corner.key()),
         });
+        let across_surface = across.stored_surface();
         let run = match edge.stored_run() {
             EdgeRun::Straight => SideRun::Straight,
             EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key != end.key => {
-                let ends = [start, end].map(|corner| PredicatePoint::from(corner.at.coordinates()));
-                let picker = picked_by
-                    .iter()
-                    .find_map(|picker| match picker {
-                        Picker::InFrontOf(half) => ends
-                            .iter()
-                            .all(|&at| half.side_of_point(at) == Decision::Zero)
-                            .then_some(*half),
-                        Picker::OutsideABall(_)
-                        | Picker::OutsideAPipe(_)
-                        | Picker::InsideAPipe(_)
-                        | _ => None,
-                    })
-                    .ok_or_else(cannot)?;
-                SideRun::Arc { picker }
+                SideRun::Arc {
+                    into_the_arc: the_way_into_an_arc(
+                        &face.stored_surface(),
+                        &across_surface,
+                        [start.at, end.at],
+                        picked_by,
+                    )
+                    .ok_or_else(cannot)?,
+                }
             }
             // A whole closed crossing among parts of others, or a kind of run
             // this has not been taught.
@@ -607,7 +607,7 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
             }
         };
         sides.push(Side {
-            across: across.stored_surface(),
+            across: across_surface,
             across_placed: across.surface(),
             start,
             end,
@@ -624,6 +624,136 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
 fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
     let model = solid.model();
     model.data().vertices[corner.slot_in(model.id())].point
+}
+
+/// A direction square to the chord between `ends`, lying in the plane the arc's
+/// circle lies in, pointing from the chord into **this** arc and not into the
+/// other one with the same two ends; `None` when nothing in `picked_by` says
+/// which of the two this is.
+///
+/// This is the one thing the three steps below read out of an arc, and it is
+/// read out of the picker's **normal** alone. Where the picker's plane sits is
+/// never asked, which is what lets a fused arc in: the fuse lowers that plane
+/// until the predicate says both ends are on or in front of it
+/// (`the_half_space_both_ends_are_on`), so a fused arc's ends are off its
+/// picker's plane where they are stored, and §167 asked them to be on it.
+///
+/// # What the picker has to say, and why the reading is then sound
+///
+/// The arc's own circle is where the flat one of the two surfaces cuts the round
+/// one. Its chord line splits that circle in two, and the whole of this arc is
+/// strictly on one side of the line, because a line meets a circle at two points
+/// and those two are the arc's own ends. So "which of the two arcs" *is* "which
+/// side of the chord", and `square_to_the_chord` below names the two sides — the
+/// chord read off the corners as they are stored, which for a fused solid is a
+/// rounded world frame and is the same frame every other step here reads
+/// (§17.3, §168). The picker has to settle which side, and it does so in one of
+/// two ways:
+///
+/// - **Its plane holds both ends**, which is §167's test and what a face built
+///   by hand gives. That plane then meets the circle's plane in the chord line
+///   itself, and the arc is in front, so the arc is on the side the normal
+///   points to.
+/// - **Both ends are on or in front of it and the circle's centre is on or
+///   behind it** ([`where_the_circles_centre_sits`]), which is what a fused arc
+///   gives. The whole arc is on or in front of the picker, and the picker is at
+///   or above the centre, so the whole arc is in the closed half of the circle
+///   the normal points to from the centre. The arc's own midpoint is in there
+///   with it, and a midpoint sits a radius from the centre square to the chord,
+///   on the arc's side of it — so the normal reads positive against that side.
+///
+/// Either way the arc is on the side of the chord the picker's normal points to,
+/// so `square_to_the_chord` turned round to read positive against that normal
+/// points from the chord into the arc. That sign is the only reading taken of
+/// the picker; how nearly square to the chord its normal is never comes into it,
+/// and neither does how far the fuse lowered its plane.
+///
+/// **The tangent goes the same way.** Every point of the arc is off the chord on
+/// the arc's own side — `(p − end) · into_the_arc > 0` for each of them — so the
+/// direction the arc leaves either end in, being a limit of those, reads
+/// non-negative against `into_the_arc` too. It reads zero only where the tangent
+/// lies along the chord, which on a circle means the two ends are one point.
+/// That is why steps 1 and 3 can read a *direction* off this same vector.
+fn the_way_into_an_arc(
+    surface: &Surface,
+    across: &Surface,
+    ends: [Point; 2],
+    picked_by: &[Picker],
+) -> Option<[Interval; 3]> {
+    let flat = surface.as_plane().or_else(|| across.as_plane())?;
+    let round = a_ball_or_nothing(surface).or_else(|| a_ball_or_nothing(across))?;
+    let [from, to] = ends.map(|at| at.coordinates());
+    let chord =
+        core::array::from_fn(|axis| Interval::exactly(to[axis]) - Interval::exactly(from[axis]));
+    let square_to_the_chord = cross(exactly(flat.normal().components()), chord);
+    let asked = ends.map(|at| PredicatePoint::from(at.coordinates()));
+
+    picked_by.iter().find_map(|picker| {
+        let half = match picker {
+            Picker::InFrontOf(half) => half,
+            Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => {
+                return None;
+            }
+        };
+        if !a_picker_that_tells_the_two_arcs_apart(half, flat, round, asked) {
+            return None;
+        }
+        match dot(exactly(half.normal().components()), square_to_the_chord).sign() {
+            Decision::Pos => Some(square_to_the_chord),
+            Decision::Neg => Some(square_to_the_chord.map(core::ops::Neg::neg)),
+            Decision::Zero | Decision::Undecidable { .. } | _ => None,
+        }
+    })
+}
+
+/// Whether `half` says which of the two arcs between `ends` an edge is, by one
+/// of the two ways [`the_way_into_an_arc`] sets out.
+fn a_picker_that_tells_the_two_arcs_apart(
+    half: &HalfSpace,
+    flat: &Plane,
+    round: &Sphere,
+    ends: [PredicatePoint; 2],
+) -> bool {
+    let sides = ends.map(|at| half.side_of_point(at));
+    if sides.iter().all(|side| *side == Decision::Zero) {
+        return true;
+    }
+    if !sides
+        .iter()
+        .all(|side| matches!(side, Decision::Zero | Decision::Pos))
+    {
+        return false;
+    }
+    matches!(
+        where_the_circles_centre_sits(half, flat, round),
+        Decision::Zero | Decision::Neg
+    )
+}
+
+/// Which side of `half` the centre of the circle where `flat` cuts `round` sits
+/// on.
+///
+/// That centre is `c + ((e − n·c)/(n·n)) n`, with `n` and `e` the plane's normal
+/// and offset and `c` the ball's centre, and the division is left out rather
+/// than taken: `n·n` is positive, so the sign wanted is the sign of
+/// `(h·c − d)(n·n) + (e − n·c)(h·n)`, a polynomial in numbers that are stored
+/// exactly. The ball's radius never comes into it.
+fn where_the_circles_centre_sits(half: &HalfSpace, flat: &Plane, round: &Sphere) -> Decision {
+    let normal = exactly(flat.normal().components());
+    let facing = exactly(half.normal().components());
+    let centre = exactly(round.centre().coordinates());
+    let above = Interval::exactly(flat.offset()) - dot(normal, centre);
+    ((dot(facing, centre) - Interval::exactly(half.offset())) * dot(normal, normal)
+        + above * dot(facing, normal))
+    .sign()
+}
+
+/// The ball `surface` sits on, or `None` for any other kind.
+fn a_ball_or_nothing(surface: &Surface) -> Option<&Sphere> {
+    match surface {
+        Surface::Sphere(ball) => Some(ball),
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => None,
+    }
 }
 
 /// Whether the part of `surface` in front of every cut is connected and has
@@ -660,9 +790,9 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
 /// `T`'s negative side (§36.6, `a_closed_crossing_is_walked_the_way_it_is_stored`).
 /// So the face keeps `T`'s negative side exactly when the side runs along
 /// `∇S × ∇T` at its start, with `∇S` the face's own outward gradient. A straight
-/// side runs from its start to its end. An arc leaves its start into the front
-/// of its picker, whose plane holds that start, so the sign of the picker's
-/// normal against `∇S × ∇T` is the sign of the way it runs.
+/// side runs from its start to its end. An arc leaves either of its ends into
+/// itself, and into itself reads positive against [`the_way_into_an_arc`], so
+/// the sign of that against `∇S × ∇T` is the sign of the way it runs.
 ///
 /// # Errors
 ///
@@ -691,8 +821,8 @@ fn which_side_of_its_neighbour_a_side_keeps(
             });
             dot(step, along_the_crossing)
         }
-        SideRun::Arc { picker } if flat == [true, false] || flat == [false, true] => {
-            dot(exactly(picker.normal().components()), along_the_crossing)
+        SideRun::Arc { into_the_arc } if flat == [true, false] || flat == [false, true] => {
+            dot(*into_the_arc, along_the_crossing)
         }
         SideRun::Straight | SideRun::Arc { .. } => return Err(cannot()),
     };
@@ -724,11 +854,12 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 /// - A straight side against a plane lies where its ends do.
 /// - A straight side against a ball it has both ends in or on is inside it,
 ///   because a ball holds every segment between two of its points.
-/// - An arc against a plane that holds both its ends: the arc's own plane meets
-///   that plane, and its picker's, in one line — the one through the two ends —
-///   so across the arc's plane the two read the same sign or opposite signs
-///   everywhere. Which is the sign of `(n × p) · (h × p)`, the two lines'
-///   directions compared, and the arc is in front of its picker.
+/// - An arc against a plane that holds both its ends: that plane meets the arc's
+///   own plane in the line through the two ends, which is the chord, and the arc
+///   is the whole of the side of the chord [`the_way_into_an_arc`] points to. So
+///   the arc is in front of the cut exactly when the cut's normal points that
+///   way too, which is the sign of `(n × p) · (h × p)` — the cut's and the arc's
+///   in-plane directions compared.
 /// - An arc against a plane that holds **one** of its ends, which is the pie
 ///   slice: [`where_an_arc_with_one_end_on_a_cut_lies`].
 ///
@@ -772,12 +903,19 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             | Surface::Torus(_)
             | _ => Lies::Across,
         },
-        SideRun::Arc { picker } => {
+        SideRun::Arc { into_the_arc } => {
             let Surface::Plane(flat) = cut.surface else {
                 return Lies::Across;
             };
             let on_the_cut = |end: Corner, far| {
-                where_an_arc_with_one_end_on_a_cut_lies(surface, side, picker, &flat, end.at, far)
+                where_an_arc_with_one_end_on_a_cut_lies(
+                    surface,
+                    side,
+                    *into_the_arc,
+                    &flat,
+                    end.at,
+                    far,
+                )
             };
             match ends {
                 [Decision::Zero, Decision::Zero] => {
@@ -786,8 +924,8 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                     };
                     let normal = exactly(own_plane.normal().components());
                     let cut_line = cross(exactly(flat.normal().components()), normal);
-                    let picker_line = cross(exactly(picker.normal().components()), normal);
-                    match dot(cut_line, picker_line).sign() {
+                    let arc_line = cross(*into_the_arc, normal);
+                    match dot(cut_line, arc_line).sign() {
                         found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
                         Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
                     }
@@ -817,22 +955,23 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
 /// open.
 ///
 /// **Which way it leaves** is `∇S × ∇T`, the way the crossing runs, turned round
-/// to point into the arc: the arc lies in front of its picker and this end is on
-/// the picker's plane, so into the arc is whichever way reads positive against
-/// the picker's normal. The side of the cut it leaves on is then the sign of
-/// `(∇S × ∇T · picker)(∇S × ∇T · cut)`, and turning `∇S × ∇T` round turns both
-/// factors round, so which of the arc's two ends this is does not matter.
+/// to point into the arc: the arc leaves either of its ends into itself, so into
+/// the arc is whichever way reads positive against [`the_way_into_an_arc`]. The
+/// side of the cut it leaves on is then the sign of
+/// `(∇S × ∇T · into_the_arc)(∇S × ∇T · cut)`, and turning `∇S × ∇T` round turns
+/// both factors round, so which of the arc's two ends this is does not matter.
 ///
 /// [`Lies::Across`] when the two disagree, which is an arc that really does
 /// cross the cut, and when either sign is [`Decision::Zero`] or could not be
 /// settled. The two `Zero` readings are grazes — the cut touching the circle at
-/// this end rather than crossing it, or the picker's plane doing so — and a
-/// graze is a side that stays where it starts, so those are answers this refuses
-/// rather than answers it gets wrong. A gap, left for the face that needs it.
+/// this end rather than crossing it, or the tangent there lying along the chord
+/// — and a graze is a side that stays where it starts, so those are answers this
+/// refuses rather than answers it gets wrong. A gap, left for the face that
+/// needs it.
 fn where_an_arc_with_one_end_on_a_cut_lies(
     surface: &Surface,
     side: &Side,
-    picker: &HalfSpace,
+    into_the_arc: [Interval; 3],
     cut: &Plane,
     at: Point,
     far: Decision,
@@ -840,8 +979,7 @@ fn where_an_arc_with_one_end_on_a_cut_lies(
     let Some(along) = the_way_the_crossing_runs(surface, &side.across, at) else {
         return Lies::Across;
     };
-    let leaving = dot(along, exactly(picker.normal().components()))
-        * dot(along, exactly(cut.normal().components()));
+    let leaving = dot(along, into_the_arc) * dot(along, exactly(cut.normal().components()));
     if leaving.sign() == far {
         Lies::Beside(far)
     } else {
