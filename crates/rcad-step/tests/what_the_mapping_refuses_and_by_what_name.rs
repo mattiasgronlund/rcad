@@ -392,6 +392,91 @@ fn a_corner_that_is_not_on_its_curved_face_is_refused_with_how_far_off_it_is() {
     );
 }
 
+/// The corner of a real file, worked out from the file's own decimal text, so
+/// that "this refusal is a limit and not a gap" is drawn rather than argued.
+///
+/// `kicad/LED_D3.0mm.step` puts the corner `#118` at
+/// `(-0.23, -1.16619037897, 3.)` on `#140`, a cylinder of radius `1.9` about
+/// `(1.27, 0., 3.)`. The corner is exactly `1.5` from the axis along `x`, so the
+/// `y` the cylinder asks for is `√(1.9² − 1.5²) = 1.16619037896906…` and the
+/// file wrote **twelve significant digits of it**. Those digits are short by
+/// `9.4e-13`, which is `5.8e-13` of radius, and that is the number the refusal
+/// hands back.
+///
+/// **An `f64` would have been eight hundred times closer**, which is the whole
+/// claim. `NEAREST_F64_POINT_ROUNDOFF` is *per unit of the point's largest
+/// coordinate*, and this corner's largest is the `3.` it sits at — not the `y`
+/// worked out above — so the furthest a corner of this cylinder written as three
+/// `f64` can land off it is `6.7e-16`. This one is `5.8e-13` off, 866 times
+/// that, and its `y` alone is 1411 times that out of place.
+/// `crates/rcad-geom/tests/how_far_off_a_curved_surface_the_nearest_f64_can_sit.rs`
+/// is the search that says no point of a curved surface written as three `f64`
+/// lands further off. So this corner is not the rounding of any point
+/// of this cylinder: the exporter chose twelve digits, the answer the file needs
+/// is not among its own numbers, and no filter, no exact level and no rescale
+/// reaches a corner that was never written down. A sweep that accepted it would
+/// be accepting a corner nobody placed.
+///
+/// Measured on 2026-09-20, this is the shape of **75 of the 76** corpus files
+/// whose first refusal is this one: the smallest miss among the other 74 is 56
+/// coordinate spacings and the largest 20 777, where one spacing is all a
+/// rounding can cost. The remaining file is `SW_Slide_SPDT_Angled_…`, whose
+/// named corner is inside its own spacing and is not what the sweep stopped at —
+/// the looseness the variant's own doc comment declares.
+#[test]
+fn the_corpus_corner_this_refusal_names_was_written_short_and_not_rounded() {
+    let text = fs::read(corpus().join("kicad").join("LED_D3.0mm.step"))
+        .expect("LED_D3.0mm.step is in the pinned corpus");
+    let file = StepFile::read(&text).expect("every file in the corpus parses");
+    let mut log = ProvenanceLog::new();
+    let Err(why) = Import::read(&file, &Policy::certified(), &mut log) else {
+        panic!("LED_D3.0mm.step does not import, and this test is about why not");
+    };
+    let Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn {
+        face,
+        corner,
+        off_by,
+        coordinate_spacing,
+        ..
+    } = why
+    else {
+        panic!("LED_D3.0mm.step is refused for a corner off a curved face, and got: {why}");
+    };
+    assert_eq!((face, corner), (EntityId(113), EntityId(118)));
+
+    let written = -1.166_190_378_97_f64;
+    let asked_for = (1.9_f64 * 1.9 - 1.5 * 1.5).sqrt();
+    let short_by = (written.abs() - asked_for).abs();
+    let missed_by = ((1.5_f64 * 1.5 + written * written).sqrt() - 1.9).abs();
+    assert!(
+        (missed_by - off_by).abs() < off_by * 1e-3,
+        "the file's own decimal text misses the cylinder by {missed_by} and the refusal says \
+         {off_by}, so this test is no longer reading the corner the refusal names"
+    );
+
+    // Per unit of the point's *largest* coordinate, which is the 3. the corner
+    // sits at and not the y this test works out. Taking the y instead understates
+    // the budget by 2.6x and flatters every ratio below it.
+    let largest_coordinate = 3.0_f64;
+    let a_written_down_corner_can_miss_by =
+        largest_coordinate * rcad_geom::NEAREST_F64_POINT_ROUNDOFF;
+    assert!(
+        off_by > 800.0 * a_written_down_corner_can_miss_by,
+        "the furthest a corner of this cylinder written as three f64 lands off it is \
+         {a_written_down_corner_can_miss_by} and this one is {off_by} off, so it is no \
+         longer a corner outside every rounding of itself"
+    );
+    assert!(
+        short_by > 1000.0 * a_written_down_corner_can_miss_by,
+        "writing that coordinate down costs {a_written_down_corner_can_miss_by} and the file \
+         is {short_by} out, so this is no longer a number the exporter shortened"
+    );
+    assert!(
+        off_by > 800.0 * coordinate_spacing,
+        "{off_by} against a coordinate spacing of {coordinate_spacing}"
+    );
+}
+
 #[test]
 fn a_corner_that_is_not_on_the_plane_of_its_own_arc_is_refused_with_how_far_off_it_is() {
     // The bottom arc's circle lifted a nanometre off the corners it ends at.
