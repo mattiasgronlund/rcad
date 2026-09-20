@@ -176,13 +176,33 @@ already on `main` byte for byte, because the re-park runs `clean -fd`. It aligns
 to local `main` and never fetches — a network round trip on every `just t` is
 §144's cost in another currency. `docs/decisions.md` §146.
 
-`docs/decisions.md` is 27 000 lines: `just decisions-toc` for the map, then
-`just decision 49` or `just decision 49.6`. Never guess a line range.
+**The decisions are one file per section**, `docs/decisions.d/NNN-<slug>.md`,
+zero-padded to three digits, with the preamble in `00-preamble.md` ahead of them
+all. `docs/decisions.md` is now a short pointer and nothing else. Read a section
+the way you always did — `just decisions-toc` for the map, then `just decision
+49` or `just decision 49.6`. Every recipe survived the split unchanged; **what
+changed is where a new section goes.** §179.
 
-**Search it with `just decisions-find 'refusal rate'`, not with `grep`.** Grep
-answers in line numbers, which is the one address this file does not take, so
+**A new section is a new file. Never append to `docs/decisions.md`.** Four
+sessions' habit is to add to the end of that file, and text there would now be
+live and addressed by nothing — so `check-decisions` fails the gate on any `##`
+heading in the pointer. `just claim-section` gives you the number, and the file
+it names is where the prose goes.
+
+**Never sort those filenames under your own locale.** glibc ignores the `-`, so
+`00-preamble` collates as `00preamble` and lands between §9 and §10 — the
+preamble's fifteen lines 785 lines into the file, silently, with every recipe
+still printing something plausible. The recipes say `LC_ALL=C` for this reason
+and it is not decoration. It is §173's shape again: a check answering a property
+of the environment rather than of the tree, and the byte-identity diff is what
+caught it.
+
+**Search with `just decisions-find 'refusal rate'`, not with `grep`.** Grep
+answers in line numbers, which is the one address these sections do not take, so
 every hit then costs a walk back up to the heading above it. `decisions-find`
-answers in section numbers, which is what `just decision` wants next.
+answers in section numbers, which is what `just decision` wants next. The split
+strengthens this rather than softening it: a grep now also has to tell you which
+of 179 files it landed in.
 
 **Take a new section's number with `just claim-section 'what it is about'`
 before writing it,** not by checking `git log --all -S` for a free one. The

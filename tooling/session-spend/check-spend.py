@@ -203,6 +203,21 @@ TARGETS = [
      [("read", "docs/decisions.md")]),
     ("a grep across a directory names no file", bash("grep -rn 'fn meet' crates/"), []),
     ("the gate reads nothing", bash("mise exec -- just gate quiet"), []),
+
+    # §177 split the file into one per section. The sections kept their numbers,
+    # so these are the same subject as the four cases above and must key the same
+    # way — otherwise every rate this file publishes breaks at the date of the
+    # split, silently, reading as a habit that changed rather than a path that did.
+    ("a section file is the same subject",
+     {"name": "Read", "input": {"file_path": "docs/decisions.d/049-the-hollow.md"}},
+     [("read", "docs/decisions.md")]),
+    ("a section file read from another worktree",
+     {"name": "Read", "input": {"file_path": "/w/lane/docs/decisions.d/177-the-split.md"}},
+     [("read", "docs/decisions.md")]),
+    ("a grep of one section file", bash("grep -n 'refusal' docs/decisions.d/016-the-limit.md"),
+     [("search", "docs/decisions.md")]),
+    ("the pointer file left behind is still the corpus",
+     bash("grep -n 'refusal' docs/decisions.md"), [("search", "docs/decisions.md")]),
 ]
 
 # decisions-find's rows, as the recipe prints them — and what it prints when it
