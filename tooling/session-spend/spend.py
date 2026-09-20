@@ -316,7 +316,7 @@ def subject_of(path):
     """Which part of the tree a file belongs to."""
     path = str(path or "")
     base = os.path.basename(path)
-    if "decisions.md" in path:
+    if is_decisions(path):
         return "docs/decisions.md"
     if base == "justfile" or "/hooks/" in path or base.endswith(".sh"):
         return "justfile + hooks"
@@ -335,6 +335,17 @@ def subject_of(path):
     if path.endswith(".toml"):
         return "cargo manifests"
     return "unidentified"
+
+
+def is_decisions(path):
+    """The decisions corpus, whether it is one file or one file per section.
+
+    §177 split it into `docs/decisions.d/NNN-slug.md`. The sections kept their
+    numbers, so a reader still addresses §49 either way and the two shapes are
+    one subject here; counting them apart would split every rate this file
+    publishes across the date of the split.
+    """
+    return os.path.basename(path) == "decisions.md" or "decisions.d/" in path
 
 
 # The rituals that recur, and the shape each leaves in a tool call. First match
@@ -1045,10 +1056,15 @@ def looks_like_file(word):
 
 
 def file_key(path):
-    """One name per file, whichever worktree or spelling reached it."""
+    """One name per file, whichever worktree or spelling reached it.
+
+    A section file counts as the whole corpus, so a `decisions-find` and the
+    `just decision` that follows it still pair: the recipe reads one file per
+    section now, and the find that opened it names no file at all.
+    """
     path = str(path or "")
     base = os.path.basename(path)
-    if base == "decisions.md":
+    if is_decisions(path):
         return DECISIONS
     if base in ("justfile", "CLAUDE.md"):
         return base
