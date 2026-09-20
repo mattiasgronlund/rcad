@@ -13,7 +13,7 @@ use rcad_geom::{
     meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Model, OnAFace, SolidKey};
+use rcad_topo::{Containment, Model, OnAFace, Rule, SolidKey};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
@@ -402,6 +402,137 @@ fn how_far_from_a_side(at: Point, from: Point, to: Point) -> f64 {
     }
     let part = ((at - from).dot(side) / squared).clamp(0.0, 1.0);
     (at - (from + side * part)).length()
+}
+
+/// An eighth of a ball the **fuse** made, rather than one built face by face,
+/// and every point asked of it is answered (`docs/decisions.md` §169.4).
+///
+/// The shape is the same pie-slice-walled wedge
+/// `a_quarter_of_a_ball_built_face_by_face.rs` builds by hand, and until this
+/// lane the two were not answered alike. A fused arc is not stored with a picker
+/// whose plane holds its ends: the fuse lowers that plane until the predicate
+/// says both ends are on or in front of it (`the_half_space_both_ends_are_on`),
+/// so both ends read `Pos` where a hand-built one reads `Zero`, and §167's step
+/// asked for `Zero`. Every flat face here came back
+/// `CannotFollowAFacesTrimming` for it.
+///
+/// **The turn is what makes them round.** Fused on the lattice the two corners
+/// of each arc land on whole numbers and the picker's plane holds them after
+/// all, which is the control below: it was answered before this lane and is
+/// answered now. Turned about an axis along none of the coordinate directions,
+/// nothing lands on a representable number and the picker is the lowered one.
+///
+/// The oracle is the octant: inside the ball and clear of all three walls, read
+/// in the frame the shape was turned *from*, and every point is held well clear
+/// of all four faces.
+#[test]
+fn a_fused_eighth_of_a_ball_says_which_points_are_inside_it() {
+    let turn = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("an axis with a length"),
+        0.7,
+    )
+    .expect("a finite angle");
+    let asked = [
+        [1.0, 1.0, 1.0],
+        [2.0, 0.5, 0.5],
+        [0.4, 1.8, 0.7],
+        [0.5, 0.5, 2.2],
+        [-1.0, 1.0, 1.0],
+        [1.0, -1.0, 1.0],
+        [1.0, 1.0, -1.0],
+        [2.0, 2.0, 2.0],
+        [0.5, 0.5, 4.0],
+        [-2.0, -2.0, -2.0],
+    ];
+    let policy = Policy::certified();
+    let mut inside = 0;
+    let mut outside = 0;
+    for placement in [Isometry::identity(), turn] {
+        let (model, eighth) = an_eighth_of_a_ball_the_fuse_made(&placement);
+        let solid = model.solid(eighth).expect("this model made the key");
+        assert_eq!(
+            solid.faces().count(),
+            4,
+            "an eighth of a ball is a sphere patch and three pie slices"
+        );
+        for [x, y, z] in asked {
+            let expected = where_it_is_in_a_fused_eighth([x, y, z]);
+            let mut log = ProvenanceLog::new();
+            let answer = solid.classify_point(
+                placement.apply_to_point(Point::new(x, y, z)),
+                &policy,
+                &mut log,
+            );
+            assert_eq!(
+                answer, expected,
+                "a fused eighth placed by {placement:?}, asked about {:?}",
+                [x, y, z]
+            );
+            assert!(
+                log.is_empty(),
+                "a certified answer about an exact point records nothing"
+            );
+            match expected {
+                Containment::Inside => inside += 1,
+                Containment::Outside => outside += 1,
+                Containment::OnBoundary
+                | Containment::Undecidable { .. }
+                | Containment::CannotFollowAFacesTrimming { .. }
+                | Containment::CannotFireARayAtAFacesSurface { .. }
+                | _ => unreachable!("the oracle only says inside or outside, not {expected:?}"),
+            }
+        }
+    }
+    eprintln!("{inside} points inside a fused eighth of a ball and {outside} outside");
+    assert!(
+        inside >= 4 && outside >= 4,
+        "the points should land on both sides often: {inside} inside, {outside} outside"
+    );
+}
+
+/// The part of a ball of radius [`RADIUS`] about the origin that a block with a
+/// corner there keeps: the eighth where every coordinate is positive, placed by
+/// `placement`.
+fn an_eighth_of_a_ball_the_fuse_made(placement: &Isometry) -> (Model, SolidKey) {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let block = model
+        .add_cube(7.0, &policy, &mut ProvenanceLog::new())
+        .expect("a whole-number cube");
+    model
+        .place_solid(block, placement)
+        .expect("this model made the key");
+    let ball = model.add_ball(RADIUS, placement).expect("a ball");
+    let fused = model
+        .fuse(
+            &[block],
+            &[ball],
+            Rule::Intersection,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a block and a ball sharing a corner intersect");
+    let [eighth] = *fused.solids() else {
+        panic!("a block and a ball meet in one piece, got {:?}", fused.solids());
+    };
+    (model, eighth)
+}
+
+/// Inside or outside the eighth of the ball of radius [`RADIUS`] where every
+/// coordinate is positive, for a point well clear of all four of its faces.
+fn where_it_is_in_a_fused_eighth([x, y, z]: [f64; 3]) -> Containment {
+    let clear = 0.2;
+    let reach = (x * x + y * y + z * z).sqrt();
+    assert!(
+        (reach - RADIUS).abs() > clear && [x, y, z].iter().all(|along| along.abs() > clear),
+        "{:?} is too near a face of the eighth",
+        [x, y, z]
+    );
+    if reach < RADIUS && x > 0.0 && y > 0.0 && z > 0.0 {
+        Containment::Inside
+    } else {
+        Containment::Outside
+    }
 }
 
 /// §31.10's first route needs a meet of three surfaces, and the ones it needs
