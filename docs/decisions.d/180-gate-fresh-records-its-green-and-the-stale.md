@@ -112,6 +112,27 @@ describes is the one `git clone` read. `_record-green` re-checks cleanliness
 itself, which is what catches a tree written to during the ten minutes the
 container was running.
 
+**The leak was not a leak, and the first real run is what said so.** With the
+trap firing for the first time, `gate-fresh` gated `df3e11bc` green — 2105
+tests, and `green already recorded for df3e11bc` written by the host — and then
+**exited 1**, on thirty-two thousand lines of
+
+    rm: cannot remove '.../target/debug/.../query-cache.bin': Permission denied
+
+The container is root and everything it writes is root-owned, so the host user
+cannot delete the tree it has just gated. Under `exec` nobody found this out,
+because the trap never ran. What `exec` was hiding was therefore not an untidy
+`$TMPDIR` but **a passing gate that reports failure** — which would have made
+this recipe useless as the second opinion §172 keeps it for, on the first day
+anyone leaned on it.
+
+So the container hands the tree back before it exits: `chown -R` to the invoking
+uid and gid, with the gate's status carried by hand so the handover happens on a
+red run too. The host's trap is tolerant rather than fatal — a clean-up it
+cannot finish names the directory and the command that removes it, on stderr,
+and leaves the exit status alone. **A tidy-up has no business deciding whether a
+gate passed.**
+
 ### 180.5 The indicator, named and not built
 
 The stranding was silent for a day, and the cheap thing that would have spoken
@@ -155,10 +176,21 @@ Two arms:
 - **a container that failed records nothing**, and its status is what comes out.
   Bookkeeping that ran anyway would write a green for a gate that went red, and
   that is the one entry no reader of `rcad-greens` could catch.
+- **the clone is gone afterwards**, read out of the arguments the stub was
+  handed, because the path is a `mktemp -d` the arm never sees otherwise. The
+  arm refuses to pass on an empty parse rather than comparing nothing, which is
+  `check-gate-runs-every-check`'s rule applied to a fixture.
 
-Run side by side rather than argued: against a copy of the `justfile` with
-`exec` put back, arm one fails with *"it passed and wrote no green for
-27bc974"*; against the tree as it stands, both pass.
+Run side by side rather than argued, each against a copy of the `justfile` with
+one thing put back. With `exec` restored, arm one fails: *"it passed and wrote
+no green for 27bc974"*. With the clean-up trap removed, arm three fails: *"the
+clone was left behind at /tmp/tmp.osK62WRswF/rcad"*. Against the tree as it
+stands, all three pass.
+
+The `chown` is the one part no arm reaches: making a fixture that reproduces it
+means making root-owned files, and a selftest that needs root is a selftest
+nobody runs. It is demonstrated instead by the real run in §180.4, which is what
+found it.
 
 `check-gate-runs-every-check`'s declared count moves 41 → 42 in the same commit,
 which is that recipe's own instruction and the only way a new `check-*` lands.

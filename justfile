@@ -271,7 +271,22 @@ gate-fresh image="rust:1-bookworm":
     # object transfer: a local clone hardlinks into the hub's object store, and
     # a container writing through a hardlink would be writing into it.
     work=$(mktemp -d)
-    trap 'chmod -R u+w "$work" 2>/dev/null || true; rm -rf "$work"' EXIT
+    # **A clean-up that cannot finish must not fail the gate.** The container is
+    # root and writes `target/` as root, so the host cannot delete the tree it
+    # has just gated — which turned a green run into an exit 1 the moment the
+    # trap started firing at all. The `chown` at the end of the container script
+    # is the fix; this is what is left when the container dies before reaching
+    # it, and it names the tree rather than leaking in silence.
+    cleanup() {
+        rc=$?
+        chmod -R u+w "$work" 2>/dev/null || true
+        rm -rf "$work" 2>/dev/null || {
+            echo "gate-fresh: $work is left behind, owned by the container's root" >&2
+            echo "  docker run --rm -v $work:/w {{ image }} rm -rf /w/rcad  removes it" >&2
+        }
+        exit "$rc"
+    }
+    trap cleanup EXIT
     git clone --no-local --quiet --single-branch "$(git rev-parse --show-toplevel)" "$work/rcad"
     echo "gate-fresh: cloned $(git -C "$work/rcad" rev-parse --short HEAD) into a single-worktree tree"
     # `HOME` inside is a scratch directory, so nothing of this machine's
@@ -293,6 +308,8 @@ gate-fresh image="rust:1-bookworm":
         -e RCAD_STEP_CORPUS=/corpus \
         -e CARGO_TERM_COLOR=always \
         -e RUST_BACKTRACE=1 \
+        -e HOST_UID="$(id -u)" \
+        -e HOST_GID="$(id -g)" \
         '{{ image }}' \
         bash -eu -c '
             mkdir -p /tmp/home
@@ -326,7 +343,16 @@ gate-fresh image="rust:1-bookworm":
             # best evidence the recipe does what it claims.
             rustup show
             mise install
-            mise exec -- just gate quiet
+            # The gate runs as root and everything it writes is root-owned, so
+            # the tree goes back to the invoking user before this container
+            # exits. The status is carried by hand rather than left to `set -e`
+            # so that the handover happens whether the gate passed or failed: a
+            # red run whose tree cannot be deleted is the same mess as a green
+            # one, and the host has no way to undo it afterwards.
+            gate_status=0
+            mise exec -- just gate quiet || gate_status=$?
+            chown -R "$HOST_UID:$HOST_GID" /rcad
+            exit $gate_status
         ' || status=$?
     [ "$status" -eq 0 ] || exit "$status"
 
@@ -4839,6 +4865,7 @@ check-gate-fresh-selftest:
 
     cat >"$dir/bin/docker" <<'STUB'
     #!/usr/bin/env bash
+    printf '%s\n' "$@" >>"$DOCKER_ARGV"
     exit "${DOCKER_STATUS:-0}"
     STUB
     chmod +x "$dir/bin/docker"
@@ -4853,7 +4880,8 @@ check-gate-fresh-selftest:
     # because the recipe only checks that one is there and a selftest that reads
     # the real one is answering a question about the machine (§77.6).
     fresh() {
-        DOCKER_STATUS="$1" PATH="$dir/bin:$PATH" RCAD_STEP_CORPUS="$dir/corpus" \
+        DOCKER_STATUS="$1" DOCKER_ARGV="$dir/argv" \
+            PATH="$dir/bin:$PATH" RCAD_STEP_CORPUS="$dir/corpus" \
             {{ just_executable() }} --justfile "{{ justfile() }}" \
             --working-directory "$repo" gate-fresh >"$dir/said" 2>&1
     }
@@ -4874,6 +4902,17 @@ check-gate-fresh-selftest:
         || fail "a container exiting 3 came out as $status"
     [ ! -s "$greens" ] \
         || fail "a green was recorded for a container that failed"
+
+    # Three: the clone is gone afterwards. `exec` discarded the EXIT trap with
+    # the shell, so every run left its tree behind and nothing noticed for as
+    # long as nothing else needed the trap. Read out of the arguments the stub
+    # was handed, because the path is a `mktemp -d` this arm never sees
+    # otherwise.
+    clone=$(grep -o '^/.*/rcad:/rcad$' "$dir/argv" | head -1 | cut -d: -f1)
+    [ -n "$clone" ] \
+        || fail "the stub was handed no clone to mount, so this arm compared nothing"
+    [ ! -e "$clone" ] \
+        || fail "the clone was left behind at $clone"
 
 # The morning after a night's fuzzing, in one call.
 #
