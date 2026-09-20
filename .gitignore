@@ -2,3 +2,4 @@
 /corpora
 *.profraw
 /.claude/worktrees/
+__pycache__/
