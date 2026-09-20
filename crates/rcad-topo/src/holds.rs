@@ -644,8 +644,11 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// one. Its chord line splits that circle in two, and the whole of this arc is
 /// strictly on one side of the line, because a line meets a circle at two points
 /// and those two are the arc's own ends. So "which of the two arcs" *is* "which
-/// side of the chord", and `square_to_the_chord` below names the two sides. The
-/// picker has to settle which, and it does so in one of two ways:
+/// side of the chord", and `square_to_the_chord` below names the two sides — the
+/// chord read off the corners as they are stored, which for a fused solid is a
+/// rounded world frame and is the same frame every other step here reads
+/// (§17.3, §168). The picker has to settle which side, and it does so in one of
+/// two ways:
 ///
 /// - **Its plane holds both ends**, which is §167's test and what a face built
 ///   by hand gives. That plane then meets the circle's plane in the chord line
@@ -653,10 +656,11 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 ///   points to.
 /// - **Both ends are on or in front of it and the circle's centre is on or
 ///   behind it** ([`where_the_circles_centre_sits`]), which is what a fused arc
-///   gives. Everything on or in front of the picker is then in the closed half
-///   of the circle on the normal's side of the centre, so this arc is, so it is
-///   the shorter of the two and its midpoint is on the normal's side of the
-///   centre — which is the side of the chord the normal points to.
+///   gives. The whole arc is on or in front of the picker, and the picker is at
+///   or above the centre, so the whole arc is in the closed half of the circle
+///   the normal points to from the centre. The arc's own midpoint is in there
+///   with it, and a midpoint sits a radius from the centre square to the chord,
+///   on the arc's side of it — so the normal reads positive against that side.
 ///
 /// Either way the arc is on the side of the chord the picker's normal points to,
 /// so `square_to_the_chord` turned round to read positive against that normal
