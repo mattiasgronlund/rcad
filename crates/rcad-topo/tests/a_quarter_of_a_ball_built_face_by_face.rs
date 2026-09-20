@@ -14,6 +14,12 @@
 //! and the mesh must land within its own published error of both. The three
 //! quarters, built the same way, measured right before the fix and are the
 //! control that the builder itself is not what is wrong.
+//!
+//! An **eighth** of the ball is built the same way at the end of this file, and
+//! it is here for its flat faces rather than for its measure: each is a pie
+//! slice, a sector of a quarter turn, where a wedge's flat faces are half-discs.
+//! A half-disc's arc has both ends on every wall; a pie slice's arc has one end
+//! on each, which is the case §169 taught the route to read.
 
 use core::f64::consts::PI;
 
@@ -151,6 +157,102 @@ fn wedges_say_which_points_are_inside_them(movement: &Isometry) {
         inside >= 10 && outside >= 10,
         "the points should land on both sides often: {inside} inside, {outside} outside"
     );
+}
+
+/// A pie slice is a sector of a disc under a half turn, and until §169 an
+/// eighth of a ball answered `CannotFollowAFacesTrimming` about every point.
+/// Each of its three flat faces is one, and so is every arc of its skin: the
+/// arc has one end on each of the two walls that meet at the slice's point, and
+/// §167's step 2 could only read an arc with *both* ends on the cut it was being
+/// asked about.
+///
+/// The oracle is the octant: inside the unit ball with all three coordinates
+/// positive. Every point is held well clear of all four faces, so nothing here
+/// turns on a sign near a boundary.
+#[test]
+fn a_pie_slice_of_a_ball_says_which_points_are_inside_it_wherever_it_sits() {
+    let moved = Isometry::translation(Vector::new(0.1, -1.0 / 3.0, 2.7)).expect("a finite shift");
+    let turned = Isometry::rotation(
+        &Axis::new(Point::new(0.3, -0.2, 0.5), Vector::new(1.0, 2.0, 3.0))
+            .expect("an axis with a length"),
+        0.7,
+    )
+    .expect("a finite angle");
+    let asked = [
+        [0.3, 0.3, 0.3],
+        [0.5, 0.2, 0.1],
+        [0.15, 0.6, 0.25],
+        [0.2, 0.2, 0.7],
+        [-0.3, 0.3, 0.3],
+        [0.3, -0.3, 0.3],
+        [0.3, 0.3, -0.3],
+        [0.7, 0.7, 0.7],
+        [0.2, 0.2, 1.3],
+        [-0.5, -0.5, -0.5],
+    ];
+    let policy = Policy::certified();
+    let mut inside = 0;
+    let mut outside = 0;
+    for movement in [Isometry::identity(), moved, turned, moved.compose(&turned)] {
+        let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
+        let eighth = an_eighth_of_a_ball(&mut model, &policy);
+        model
+            .place_solid(eighth, &movement)
+            .expect("this model made the key");
+        let solid = model.solid(eighth).expect("this model made the key");
+        for [x, y, z] in asked {
+            let expected = where_it_is_in_an_eighth([x, y, z]);
+            let mut log = ProvenanceLog::new();
+            let answer = solid.classify_point(
+                movement.apply_to_point(Point::new(x, y, z)),
+                &policy,
+                &mut log,
+            );
+            assert_eq!(
+                answer,
+                expected,
+                "an eighth of a ball, placed by {movement:?}, asked about {:?}",
+                [x, y, z]
+            );
+            assert!(
+                log.is_empty(),
+                "a certified answer about an exact point records nothing"
+            );
+            match expected {
+                Containment::Inside => inside += 1,
+                Containment::Outside => outside += 1,
+                Containment::OnBoundary
+                | Containment::Undecidable { .. }
+                | Containment::CannotFollowAFacesTrimming { .. }
+                | Containment::CannotFireARayAtAFacesSurface { .. }
+                | _ => unreachable!("the oracle only says inside or outside, not {expected:?}"),
+            }
+        }
+    }
+    eprintln!(
+        "{inside} points inside an eighth of a ball and {outside} outside, every one answered"
+    );
+    assert!(
+        inside >= 4 && outside >= 4,
+        "the points should land on both sides often: {inside} inside, {outside} outside"
+    );
+}
+
+/// Inside or outside the eighth of the unit ball where every coordinate is
+/// positive, for a point well clear of all four of its faces.
+fn where_it_is_in_an_eighth([x, y, z]: [f64; 3]) -> Containment {
+    let clear = 0.05;
+    let reach = (x * x + y * y + z * z).sqrt();
+    assert!(
+        (reach - 1.0).abs() > clear && [x, y, z].iter().all(|along| along.abs() > clear),
+        "{:?} is too near a face of the eighth",
+        [x, y, z]
+    );
+    if reach < 1.0 && x > 0.0 && y > 0.0 && z > 0.0 {
+        Containment::Inside
+    } else {
+        Containment::Outside
+    }
 }
 
 /// Inside or outside a wedge of the unit ball swept anticlockwise from `first`
@@ -314,4 +416,119 @@ fn a_wedge_of_a_ball(
     builder
         .build(model, policy, &mut ProvenanceLog::new())
         .expect("a wedge of a ball is a solid")
+}
+
+/// The eighth of the unit ball where every coordinate is positive.
+///
+/// Four faces: a triangle of the sphere, and a quarter-disc on each of the three
+/// coordinate planes. Each quarter-disc is a **pie slice** — two radii out from
+/// the centre and an arc between their far ends — where a wedge's flat faces are
+/// half-discs, whose one straight side runs right through the centre.
+///
+/// Each wall's normal points away from the material, so the wire on it walks the
+/// slice with the material on its left: out along one radius, back along the
+/// other, and round the arc.
+fn an_eighth_of_a_ball(model: &mut Model, policy: &Policy) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let corner = |builder: &mut SolidBuilder, at: [f64; 3]| {
+        builder
+            .add_vertex(Point::new(at[0], at[1], at[2]))
+            .expect("a corner is a point")
+    };
+    let centre = corner(&mut builder, [0.0, 0.0, 0.0]);
+    let along_x = corner(&mut builder, [1.0, 0.0, 0.0]);
+    let along_y = corner(&mut builder, [0.0, 1.0, 0.0]);
+    let along_z = corner(&mut builder, [0.0, 0.0, 1.0]);
+
+    let wall = |facing: [f64; 3]| {
+        Plane::from_point_and_normal(
+            Point::origin(),
+            Vector::new(facing[0], facing[1], facing[2]),
+        )
+        .expect("a coordinate direction has length")
+    };
+    let [off_x, off_y, off_z] = [
+        wall([-1.0, 0.0, 0.0]),
+        wall([0.0, -1.0, 0.0]),
+        wall([0.0, 0.0, -1.0]),
+    ];
+
+    let radius = |builder: &mut SolidBuilder, to| {
+        builder
+            .add_edge(centre, to, EdgeRun::Straight)
+            .expect("a radius out of the centre")
+    };
+    let out_along_x = radius(&mut builder, along_x);
+    let out_along_y = radius(&mut builder, along_y);
+    let out_along_z = radius(&mut builder, along_z);
+
+    // A quarter of a circle is the part of it in front of the plane through its
+    // two ends, and those ends are two of `(1, 0, 0)`, `(0, 1, 0)` and
+    // `(0, 0, 1)`: a normal of ones and zeroes and an offset of one read exactly
+    // `Zero` at both, which is what the route asks of a picker.
+    let quarter = |builder: &mut SolidBuilder, from, to, on: Plane, picking: [f64; 3]| {
+        let run = EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(on),
+            picked_by: smallvec::smallvec![Picker::from(
+                HalfSpace::new(Vector::new(picking[0], picking[1], picking[2]), 1.0)
+                    .expect("a direction with a length")
+            )],
+        };
+        builder
+            .add_edge(from, to, run)
+            .expect("a quarter of a great circle")
+    };
+    let x_to_y = quarter(&mut builder, along_x, along_y, off_z, [1.0, 1.0, 0.0]);
+    let y_to_z = quarter(&mut builder, along_y, along_z, off_x, [0.0, 1.0, 1.0]);
+    let z_to_x = quarter(&mut builder, along_z, along_x, off_y, [1.0, 0.0, 1.0]);
+
+    let along = |builder: &mut SolidBuilder, edge, orientation| {
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, orientation)
+                .expect("an edge of this builder"),
+        )
+    };
+    let skin_steps = [
+        along(&mut builder, x_to_y, Orientation::Forward),
+        along(&mut builder, y_to_z, Orientation::Forward),
+        along(&mut builder, z_to_x, Orientation::Forward),
+    ];
+    let off_z_steps = [
+        along(&mut builder, out_along_x, Orientation::Reversed),
+        along(&mut builder, out_along_y, Orientation::Forward),
+        along(&mut builder, x_to_y, Orientation::Reversed),
+    ];
+    let off_y_steps = [
+        along(&mut builder, out_along_x, Orientation::Forward),
+        along(&mut builder, z_to_x, Orientation::Reversed),
+        along(&mut builder, out_along_z, Orientation::Reversed),
+    ];
+    let off_x_steps = [
+        along(&mut builder, out_along_y, Orientation::Reversed),
+        along(&mut builder, out_along_z, Orientation::Forward),
+        along(&mut builder, y_to_z, Orientation::Reversed),
+    ];
+    let mut faces = Vec::with_capacity(4);
+    for (surface, steps) in [
+        (
+            Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a unit ball")),
+            skin_steps,
+        ),
+        (Surface::Plane(off_z), off_z_steps),
+        (Surface::Plane(off_y), off_y_steps),
+        (Surface::Plane(off_x), off_x_steps),
+    ] {
+        let wire = builder.add_wire(&steps).expect("a closed ring of steps");
+        faces.push((
+            builder
+                .add_face(surface, &[wire])
+                .expect("a face with one wire"),
+            Orientation::Forward,
+        ));
+    }
+    builder.add_shell(&faces).expect("four faces close up");
+    builder
+        .build(model, policy, &mut ProvenanceLog::new())
+        .expect("an eighth of a ball is a solid")
 }
