@@ -128,18 +128,42 @@ fn twice_the_area_of_the_triangles(patch: &Patch) -> f64 {
 }
 
 /// Every side of every loop, as an unordered pair of corner indices.
+///
+/// Indices are put through [`the_first_corner_in_each_place`] first, because
+/// two loops are allowed to meet at a point and a point the mesh holds once
+/// cannot be two indices to a triangle. That is the identity map for every
+/// shape here but the pinched ones.
 fn every_side(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> HashSet<(u32, u32)> {
+    let corners: Vec<[f64; 2]> = outer.iter().chain(holes.iter().flatten()).copied().collect();
+    let stands_for = the_first_corner_in_each_place(&corners);
     let mut sides = HashSet::new();
     let mut first = 0u32;
     for ring in core::iter::once(outer).chain(holes.iter().map(Vec::as_slice)) {
         let count = u32::try_from(ring.len()).expect("a small ring");
         for step in 0..count {
-            let (from, to) = (first + step, first + (step + 1) % count);
+            let from = stands_for[(first + step) as usize];
+            let to = stands_for[(first + (step + 1) % count) as usize];
             sides.insert((from.min(to), from.max(to)));
         }
         first += count;
     }
     sides
+}
+
+/// For each corner, the first corner standing in the same place — itself,
+/// unless an earlier loop already named that place.
+fn the_first_corner_in_each_place(corners: &[[f64; 2]]) -> Vec<u32> {
+    corners
+        .iter()
+        .enumerate()
+        .map(|(index, corner)| {
+            let first = corners
+                .iter()
+                .position(|earlier| earlier == corner)
+                .unwrap_or(index);
+            u32::try_from(first).expect("a small domain")
+        })
+        .collect()
 }
 
 fn sides_of_the_triangles(patch: &Patch) -> HashSet<(u32, u32)> {
@@ -385,21 +409,31 @@ fn a_hole_reaching_out_to_the_outline_says_where_it_touches() {
     );
 }
 
-/// The rest of the touching family, refused by the same one check.
+/// The rest of the landing-inside family, refused by the same one check.
 ///
-/// Sharing a corner outright, and resting a corner at a single point of
-/// someone else's side, are the same problem to the walk. The second of those
-/// would in fact be safe — nothing is doubled at a single point — and is
-/// refused anyway; the refusal is asserted here so that the strictness is a
-/// thing somebody chose rather than a thing that happens.
+/// A corner resting at a single point in the middle of somebody else's side
+/// doubles nothing, and the patch it gives is right — `[2, 2], [8, 4], [2, 6]`
+/// came back covering 104 of the outline's 128, which is the answer. It is
+/// refused anyway, and not out of timidity: the triangulation splits the outer
+/// side at that corner, so a side the caller handed over whole comes back as
+/// two edges. This crate sees one face at a time and the face on the other side
+/// of that side gets no such split, so what looks like a harmless extra vertex
+/// is a crack between two faces (`docs/decisions.md` §25.1).
+///
+/// The second shape is the one that gets past every corner test and still has
+/// to go: both its ends are corners the outline already names, and the stretch
+/// between them is the whole of the outline's own side.
 #[test]
-fn the_other_ways_two_loops_can_touch_are_refused_too() {
+fn the_other_ways_a_loop_can_land_on_another_loops_side_are_refused_too() {
     let outer = vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]];
     let touching = [
-        ("sharing a corner", vec![[4.0, 4.0], [4.0, 8.0], [8.0, 8.0]]),
         (
-            "one corner resting on a side, and no more",
+            "one corner resting in the middle of a side, and no more",
             vec![[2.0, 2.0], [8.0, 4.0], [2.0, 6.0]],
+        ),
+        (
+            "a hole naming one of the outline's own sides, end for end",
+            vec![[8.0, 8.0], [0.0, 8.0], [4.0, 4.0]],
         ),
     ];
 
@@ -410,6 +444,39 @@ fn the_other_ways_two_loops_can_touch_are_refused_too() {
             "{what}: got {refusal:?}"
         );
     }
+}
+
+/// A hole meeting the outline at a corner they both name is meshed, hole and
+/// all.
+///
+/// **This is the shape the `LED_*_Horizontal_*` files of the STEP corpus stop
+/// at.** The round pin is drawn tangent to a flat of the body it stands in, the
+/// file writes a vertex at the tangency point, and both the flat's outline and
+/// the pin's circle run through it — so the two loops hold one point in common
+/// and no stretch at all. Reduced to whole numbers here, because the claim is
+/// about the shape and the corpus file is the corroboration.
+///
+/// It used to refuse, and the refusal was deliberate: `refuse_loops_that_touch`
+/// said in as many words that a single-point touch is harmless and was turning
+/// it away because nothing needed it. What makes letting it through safe is
+/// that both loops already name the point, so nothing is split and no
+/// constrained edge ends up belonging to two loops — the crossing count in
+/// `walk_in_from_the_outside` stays right.
+///
+/// That is a claim about the answer and not about the refusal, so it is checked
+/// as one: `check_everything`'s coverage claim is **exact** here, every corner
+/// being a whole number, and a patch that filled the hole in would report 128
+/// where the answer is 112.
+#[test]
+fn a_hole_meeting_the_outline_at_a_corner_they_both_name_is_meshed() {
+    check_everything(
+        "a hole sharing one corner with the outline and nothing else",
+        &domain_of(
+            flat(),
+            vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]],
+            vec![vec![[8.0, 8.0], [4.0, 4.0], [6.0, 2.0]]],
+        ),
+    );
 }
 
 /// A plane is flat, a triangle is flat, and standing one in for the other loses

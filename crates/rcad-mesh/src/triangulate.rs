@@ -118,8 +118,9 @@ impl Patch {
 /// # Errors
 ///
 /// About the loops: [`CannotTriangulate::BoundaryCrossesItself`] when two
-/// boundary edges cross, [`CannotTriangulate::CornersCoincide`] when two
-/// corners are the same point, and
+/// boundary edges cross, [`CannotTriangulate::CornersCoincide`] when one loop
+/// names the same point twice — two *different* loops naming it is a pinch and
+/// is allowed, see [`refuse_loops_that_touch`] — and
 /// [`CannotTriangulate::CoordinateOutOfRange`] for a scaled coordinate the
 /// triangulation will not take — see that variant, the range is narrower than
 /// `f64`'s.
@@ -133,7 +134,8 @@ impl Patch {
 /// number it asked them to be good to.
 pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     let mut corners = every_corner(domain);
-    refuse_loops_that_touch(&corners, domain)?;
+    let loop_of = loop_of_each_corner(domain);
+    refuse_loops_that_touch(&corners, &loop_of, domain)?;
     let surface = domain.surface();
     let (across, along) = how_this_domain_is_scaled(surface, &corners);
 
@@ -144,10 +146,17 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         let handle = mesh
             .insert(Point2::new(corner[0] * across, corner[1] * along))
             .map_err(|why| CannotTriangulate::CoordinateOutOfRange { position, why })?;
-        if handles.contains(&handle) {
-            return Err(CannotTriangulate::CornersCoincide { position });
+        // Two loops are allowed to meet at a point, so a repeat is only a
+        // refusal when it is a loop repeating itself. A repeat across loops is
+        // one vertex of the mesh wearing two of the domain's corner numbers,
+        // and the first of the two is the one the triangles get told about.
+        match handles.iter().position(|earlier| *earlier == handle) {
+            Some(earlier) if loop_of[earlier] == loop_of[position] => {
+                return Err(CannotTriangulate::CornersCoincide { position });
+            }
+            Some(_) => {}
+            None => remember_which_corner(&mut corner_of, handle.index(), position),
         }
-        remember_which_corner(&mut corner_of, handle.index(), position);
         handles.push(handle);
     }
 
@@ -218,7 +227,7 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     })
 }
 
-/// Refuse a domain where a corner of one loop sits on a side of another.
+/// Refuse a domain where one loop lands on the *inside* of another loop's side.
 ///
 /// **This is a precondition and not a nicety, and it was found by a test rather
 /// than by thinking.** Where a hole reaches out and touches the outline, the
@@ -229,18 +238,32 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 /// material, and hands back a patch covering it. That is a wrong answer, which
 /// is worse than either a refusal or a crash (`docs/decisions.md` §4.1).
 ///
-/// **Stricter than it strictly has to be**, and the limit is worth stating
-/// exactly. A corner touching another loop at a *single point* is harmless —
-/// nothing is doubled there and the count stays right — and this refuses it
-/// anyway, because telling the two apart means measuring how far the sharing
-/// goes, and the fix for the case that matters is to count multiplicity rather
-/// than to classify the touch. Nothing in this milestone needs a hole that
-/// touches, so the honest move is to refuse the family and say so. The kernel's
-/// own profile builder already refuses the same shape.
+/// **Two loops meeting at a shared corner are let through, and nothing else
+/// is.** That is narrower than it first looks, and the line is drawn where it
+/// is for a reason that is not about this crate's own arithmetic:
 ///
-/// Exact throughout: [`orient2d`] settles whether a corner is on a side, and a
-/// coordinate comparison settles whether it is between the ends. No tolerance
-/// and nothing to tune.
+/// - A corner sitting *between* a side's two ends is refused even though the
+///   patch would come out right. The triangulation splits that side at it, so a
+///   boundary side the caller handed over whole comes back as two edges — and
+///   refining a boundary is the caller's job precisely because this crate is
+///   shown one face at a time and cannot see the face on the other side of it
+///   (`docs/decisions.md` §25.1). A silent split here is a crack there.
+/// - A corner sitting *at* a side's end splits nothing. Both loops already name
+///   that point, every constrained edge still belongs to exactly one loop, and
+///   the crossing count stays right, so the patch comes back with its hole in
+///   it. [`triangulate`] lets the repeated point through for the same reason.
+/// - Two sides of different loops with the *same two ends* are refused by
+///   [`refuse_loops_that_share_a_whole_side`], which is the one way a stretch
+///   can be doubled without any corner landing inside anything.
+///
+/// The shared corner used to be refused with the rest, on the stated grounds
+/// that nothing needed it. Something does: a round pin drawn tangent to a flat
+/// of the body it stands in meets that flat at a vertex both loops name, and
+/// that is how a whole family of the STEP corpus is drawn.
+///
+/// Exact throughout: [`orient2d`] settles whether a corner is on a side, and
+/// coordinate comparisons settle whether it is between the ends and whether it
+/// is one of them. No tolerance and nothing to tune.
 ///
 /// # Errors
 ///
@@ -250,14 +273,17 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 /// product overflowed or fell subnormal.
 fn refuse_loops_that_touch(
     corners: &[[f64; 2]],
+    loop_of: &[usize],
     domain: &TrimmedDomain,
 ) -> Result<(), CannotTriangulate> {
     let sides = every_side(domain);
-    let loop_of = loop_of_each_corner(domain);
 
     for &(from, to) in &sides {
         for (corner, at) in corners.iter().enumerate() {
-            if loop_of[corner] == loop_of[from] {
+            if loop_of[corner] == loop_of[from]
+                || *at == corners[from]
+                || *at == corners[to]
+            {
                 continue;
             }
             match orient2d(corners[from], corners[to], *at) {
@@ -280,6 +306,46 @@ fn refuse_loops_that_touch(
                 }
                 other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
             }
+        }
+    }
+    refuse_loops_that_share_a_whole_side(corners, loop_of, &sides, domain)
+}
+
+/// Refuse two loops that name the same side, end for end.
+///
+/// The one doubled stretch [`refuse_loops_that_touch`] cannot see, and the
+/// reason it cannot is that neither loop puts a corner anywhere but at the
+/// other's corners: an overlap longer than a point has an end, that end is a
+/// corner of one of the two sides, and a corner inside the other side is
+/// already refused — so what is left over is two sides with the same two ends.
+///
+/// Comparisons of the corners' own coordinates, so exact.
+///
+/// # Errors
+///
+/// [`CannotTriangulate::LoopsTouch`].
+fn refuse_loops_that_share_a_whole_side(
+    corners: &[[f64; 2]],
+    loop_of: &[usize],
+    sides: &[(usize, usize)],
+    domain: &TrimmedDomain,
+) -> Result<(), CannotTriangulate> {
+    for (which, &(from, to)) in sides.iter().enumerate() {
+        for &(other_from, other_to) in &sides[which + 1..] {
+            if loop_of[from] == loop_of[other_from] {
+                continue;
+            }
+            let ends = [corners[from], corners[to]];
+            let other_ends = [corners[other_from], corners[other_to]];
+            if ends != other_ends && ends != [other_ends[1], other_ends[0]] {
+                continue;
+            }
+            let at = corners[other_from];
+            return Err(CannotTriangulate::LoopsTouch {
+                corner: other_from,
+                side: from,
+                at: domain.surface().point_at(at[0], at[1]),
+            });
         }
     }
     Ok(())
@@ -1170,17 +1236,21 @@ pub enum CannotTriangulate {
         at: usize,
     },
 
-    /// Two corners are the same point.
-    #[error("the corner at {position} is in the same place as an earlier one")]
+    /// One loop names the same point twice.
+    ///
+    /// Two different loops naming the same point is a pinch, not a broken loop,
+    /// and it is allowed — see [`refuse_loops_that_touch`].
+    #[error("the corner at {position} is in the same place as an earlier one of its own loop")]
     CornersCoincide {
         /// Which corner repeats an earlier one.
         position: usize,
     },
 
-    /// A corner of one loop sits on a side of another.
+    /// A corner of one loop lands on a side of another without being one of
+    /// that side's own ends.
     ///
-    /// See [`refuse_loops_that_touch`] for why this is refused, and for the
-    /// part of the family that is refused although it would in fact be fine.
+    /// See [`refuse_loops_that_touch`] for why this is refused while two loops
+    /// meeting at a corner they both name is not.
     ///
     /// **`at` is the field a caller further up can do anything with**, and it
     /// is here because the two indices are not. They count corners of the
