@@ -39830,6 +39830,93 @@ discarded every time, so a reader got three symptoms and no cause. Stderr is
 kept now and printed when a check fails. **A selftest that hides why it failed is
 worse than no selftest, because it is believed.**
 
+### 173.8 The kache check read a text format, and mise changed it
+
+With jq pinned, `gate-fresh` got one step further and failed in
+`check-kache-off-on-ci`:
+
+```
+off CI, RUSTC_WRAPPER is '' and should be kache
+```
+
+which reads as the `mise.toml` template having broken, and is nothing of the
+sort. The check sed'd `^export RUSTC_WRAPPER=` out of `mise env`. This machine
+has mise **2026.7.5**, which prints that line. A container curls the latest,
+**2026.9.11**, which does not print it in that shape at all:
+
+```
+=== mise env | grep RUSTC_WRAPPER ===   (no line matched)
+=== what mise exec actually applies ===
+on:  []        off: [kache]
+```
+
+So both halves extracted the empty string. The local half failed, naming the
+wrong cause — and **the CI half passed vacuously**, which is the half whose
+failure took CI red for ten pushes. A check with two assertions, one of which
+had quietly stopped asserting anything.
+
+It asks `mise exec -- sh -c 'echo "${RUSTC_WRAPPER-}"'` now: the value mise
+actually applies to a process, which is the thing the gate relies on, rather than
+a line in a format mise is free to change. Both mise versions agree on it.
+
+The class is §173.6's again with a new supplier: not the machine's `awk` or its
+`jq`, but a *version* of a tool whose human-readable output was being parsed as
+an interface. **Anything parsed out of a tool's stdout is a version dependency**,
+and the gate has more of them.
+
+### 173.9 The night fuzzes what CI blessed, and CI can no longer bless anything
+
+`fuzz-watermark` picks the commit the overnight fuzz stands on: the newest on
+`main` that a CI run went green for. §172 spent the Actions allowance, so no push
+can be green in that sense any more.
+
+**And it fails by staying put**, deliberately — "a night that cannot work out
+where to stand is a night that runs where it already is". That was right when the
+only way to lose the answer was a network blip. Against a billing failure it
+means the night keeps fuzzing the last green commit for as long as the account is
+in arrears, saying nothing: `just status` had it **18 commits behind `main`** the
+morning this was found, and the gap only grows. A fuzzer working on a tree a
+fortnight old is not obviously broken from any log — it still finds things, and
+they are things that may already be fixed.
+
+**What was wrong is the supplier, not the condition.** §81.4 asked that nothing
+fuzz a tree nobody has read end to end. A green CI run was evidence of that
+reading; `just gate` on a clean tree *is* that reading, and it already runs on
+every commit that lands. So `_record-green` writes the sha of a passing full gate
+into `rcad-greens` in the common git dir — one list for every worktree, untracked,
+because a commit's greenness is a fact about this machine and not about the tree
+it describes. `fuzz-watermark` merges that list with `gh`'s and keeps its other
+two conditions unchanged: on `main`, and forward only.
+
+Three things that would each have made the record a lie, and are refused:
+
+- **A trimmed gate does not count.** `gate-docs` re-enters `gate` with
+  `gate_metered_steps` removed and arrives at the recorder as a pass having
+  compiled nothing. `_record-green` requires every metered step in the list it
+  was handed. This is the one that would have left no trace: the file would name
+  a commit and say nothing about how little ran for it.
+- **A dirty tree does not count**, because the sha is the entire record.
+- **The recorder never fails the gate.** Every giving-up path says why on stdout
+  and exits 0. Bookkeeping that can turn a green run red is worse than none.
+
+Merging two lists cost the old picking loop its ordering: `gh` returns
+newest-first and a de-duplicated union returns in sha order, so "the newest" now
+has to be worked out with `--is-ancestor` between candidates rather than taken as
+the first that qualifies. Arm nine pins it in both directions, because a loop that
+took either source's side would pass a one-directional test.
+
+**Arm five earned its place twice.** `grep -v '^$'` exits 1 when it filters every
+line away, so under `pipefail` two silent sources arrived as a *failed recipe* —
+the single thing this recipe must never do. The arm that says "a gh that cannot
+answer made the whole night fail" caught it on the first run of the new code.
+
+What this does not do is make a local green as good as an independent one. It is
+the same machine, the same toolchain, the same environment whose properties §173
+spent the day finding checks that depended on. `just gate-fresh` is the
+independent reading, and the honest upgrade is to let it record too — deferred
+under §13 until the night's greens are actually seen to be wrong, and written
+down here so that whoever wants it knows the hook already exists.
+
 ## 174. Three corpus lanes, 119 files priced, none freed — the top rows are one queue
 
 *§171 priced the corpus and §171.7 said to cut lanes from the top of its table.

@@ -341,6 +341,13 @@ gate mode="loud":
         tail -c "+$((started_at + 1))" "$log" | tail -60
     fi
     {{ just_executable() }} _gate-summary "$log" "$status" "$failed" | tee -a "$log"
+    # After the block, so that a reader's `tail -6` still lands on the summary,
+    # and only on a pass: what it records is that this commit was read end to
+    # end. §173.9 — it is what moves the overnight fuzz now that no push can be
+    # CI-green.
+    if [ "$status" -eq 0 ]; then
+        {{ just_executable() }} _record-green "{{ gate_steps }}"
+    fi
     exit $status
 
 # The block itself, kept apart from the run so `check-gate-summary-selftest` can
@@ -390,6 +397,64 @@ _gate-summary log status failed="":
     fi
     echo "doc tests: ${doctests:-not reached}"
     echo "full log: {{ log }}"
+
+# Writes down that this commit has been read end to end, so that something other
+# than GitHub can say so.
+#
+# `fuzz-watermark` moves the overnight run onto a commit CI went green on, and
+# §172's spent Actions allowance means no commit can be green in that sense any
+# more. Left alone the night keeps fuzzing the last one that was — silently,
+# because staying put is how that recipe is built to fail, and it was 18 commits
+# behind within a day. **The condition §81.4 asked for is that nothing fuzzes a
+# tree nobody has read end to end, and a passing `just gate` is exactly such a
+# reading.** CI supplied that fact; it was never the only thing that could.
+#
+# Three conditions, and each is a way the record could otherwise lie:
+#
+#   - **the metered steps all ran.** `gate-docs` re-enters `gate` with a trimmed
+#     list, so it lands here as a pass having compiled nothing at all. A green
+#     that skipped `test` is not a reading of the code, and this is the one
+#     mistake that would be invisible afterwards — the file would just name a
+#     commit, with no trace of how little was run for it.
+#   - **the tree is clean**, because the sha is the whole record. A green
+#     recorded against a dirty tree names something nobody can get back.
+#   - **it never fails the gate.** Bookkeeping that can turn a green run red is
+#     worse than no bookkeeping; every giving-up path here says why and exits 0.
+#
+# The file sits in the common git dir, so every worktree writes to one list and
+# the hub does not need to be checked out to have one. Untracked by construction:
+# it is a fact about this machine, and a commit's greenness is not the sort of
+# thing to carry in the tree it describes. `docs/decisions.md` §173.9.
+[private]
+_record-green steps:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    for heavy in {{ gate_metered_steps }}; do
+        case " {{ steps }} " in
+            *" $heavy "*) ;;
+            *) echo "green not recorded: this run skipped $heavy, so it read no code"; exit 0 ;;
+        esac
+    done
+    git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null || {
+        echo "green not recorded: the tree has uncommitted changes, so a sha would not name it"
+        exit 0
+    }
+    sha=$(git rev-parse HEAD 2>/dev/null) || { echo "green not recorded: no HEAD here"; exit 0; }
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
+        || { echo "green not recorded: no git dir here"; exit 0; }
+    file="$common/rcad-greens"
+    if grep -q "^$sha " "$file" 2>/dev/null; then
+        echo "green already recorded for $(git rev-parse --short HEAD)"
+        exit 0
+    fi
+    printf '%s %s %s\n' "$sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname)" >>"$file"
+    # Bounded, because nothing ever deletes from it and the readers are loops.
+    # The tail is what a watermark could still move onto; the head is history no
+    # night will ever walk back to.
+    if [ "$(wc -l <"$file")" -gt 500 ]; then
+        tail -200 "$file" >"$file.new" && mv "$file.new" "$file"
+    fi
+    echo "green recorded for $(git rev-parse --short HEAD) in $file"
 
 # Holds the block and the loop that drives it against fixtures whose right
 # answer is known, rather than against whatever the gate happens to do today.
@@ -1068,13 +1133,22 @@ check-hooks:
 # which would turn the cache off for every human as well. Checking only the
 # local half passes on the state that kept CI red for ten pushes.
 #
-# It reads `mise env` rather than the file, because the file is a template and
+# It asks mise rather than reading the file, because the file is a template and
 # what breaks CI is the value mise computes, not the text. That also means this
 # fails if the template stops parsing, which the eye does not catch.
+#
+# **It asks by running a process under mise, not by parsing `mise env`.** Until
+# 2026-09-20 it sed'd `^export RUSTC_WRAPPER=` out of `mise env`; mise 2026.9.11
+# no longer prints that line in that shape, and this machine's 2026.7.5 does. So
+# in a fresh container both halves extracted the empty string: the CI half passed
+# vacuously — the one direction that took CI red for ten pushes — and the local
+# half failed saying `RUSTC_WRAPPER is ''`, which reads as a broken template and
+# was nothing of the sort. `mise exec` is the thing the gate actually relies on,
+# and its answer is a value rather than a format. `docs/decisions.md` §173.8.
 [doc("kache wraps rustc here, and wraps nothing on a runner.")]
 check-kache-off-on-ci:
-    @on=$(CI=true mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
-    off=$(env -u CI mise env | sed -n 's/^export RUSTC_WRAPPER=//p' | tr -d "\"'"); \
+    @on=$(CI=true mise exec -- sh -c 'echo "${RUSTC_WRAPPER-}"'); \
+    off=$(env -u CI mise exec -- sh -c 'echo "${RUSTC_WRAPPER-}"'); \
     if [ -n "$on" ]; then \
         echo "with CI set, RUSTC_WRAPPER is '$on' and should be empty"; \
         echo "mise applies [env] while installing [tools], so cargo would be asked"; \
@@ -3244,7 +3318,10 @@ fuzz-overnight window="28800":
 #
 #   - **green**, so it never fuzzes a tree nothing has read end to end. This is
 #     §81.4's objection kept rather than overturned — what changed is that a
-#     green gate answers it, where in §81.4 nothing did.
+#     green gate answers it, where in §81.4 nothing did. **Green now means a
+#     green CI run or a recorded local `just gate`**, because since §172 the
+#     first of those can no longer happen and asking only GitHub froze the night
+#     on a commit that kept getting older. §173.9.
 #   - **on `main`**, so a green run for some other branch cannot move it.
 #   - **forward only**, so a tree somebody advanced by hand is never dragged
 #     back, and neither is one already past the last green.
@@ -3252,7 +3329,7 @@ fuzz-overnight window="28800":
 # Separate from `fuzz-overnight` because that recipe's selftest runs it for real
 # in whatever worktree the gate was run from, and a checkout in there would move
 # somebody's tree out from under them.
-[doc("Which commit the overnight run should fuzz: the newest CI-green commit on main.")]
+[doc("Which commit the overnight run should fuzz: the newest green commit on main, CI's or a local gate's.")]
 fuzz-watermark:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -3261,13 +3338,31 @@ fuzz-watermark:
 
     git diff --quiet && git diff --cached --quiet \
         || staying "the tree has uncommitted changes"
+    # No longer fatal: a missing `gh` costs the CI half of the list, and since
+    # §173.9 that is not the only half there is.
     command -v gh >/dev/null 2>&1 \
-        || staying "gh is not on PATH, so no run's conclusion can be read"
+        || echo "gh is not on PATH, so only the local gate record can answer" >&2
 
+    # Two sources, because since §172 one of them can no longer answer: the
+    # Actions allowance is spent, so no push to `main` can go green and asking
+    # only GitHub freezes the night on whatever was last green before the
+    # billing ran out — 18 commits back inside a day, and silently, since
+    # staying put is how this recipe is built to fail. A local `just gate` reads
+    # the tree end to end, which is the thing §81.4 wanted; `_record-green`
+    # writes each one down. §173.9.
+    #
+    # A `gh` that cannot answer is not a failure here and never was — it leaves
+    # the list shorter, and the local half can still carry the night.
     green=$(gh run list --workflow ci.yml --branch main --status success \
-        --limit 20 --json headSha --jq '.[].headSha' 2>/dev/null) \
-        || staying "gh could not list the runs on main"
-    [ -n "$green" ] || staying "gh lists no green run on main"
+        --limit 20 --json headSha --jq '.[].headSha' 2>/dev/null) || green=""
+    recorded=$(cut -d' ' -f1 \
+        "$(git rev-parse --path-format=absolute --git-common-dir)/rcad-greens" 2>/dev/null) || recorded=""
+    # `|| green=""` and not a bare pipeline: `grep -v` exits 1 when it filters
+    # every line away, which under `pipefail` is both sources being silent
+    # reported as a failed recipe — the one thing this must never do, because a
+    # night that cannot decide still has to run. Arm five caught it.
+    green=$(printf '%s\n%s\n' "$green" "$recorded" | grep -v '^$' | sort -u) || green=""
+    [ -n "$green" ] || staying "neither gh nor the local gate record names a green commit"
 
     # Fetched only once there is something to weigh against it, so that a gate
     # running this recipe does not need the network to pass — §77.6's shape, a
@@ -3275,16 +3370,30 @@ fuzz-watermark:
     git fetch --quiet origin 2>/dev/null \
         || staying "origin could not be reached"
 
+    # The furthest forward of the candidates, not the first one seen. Two
+    # sources merged and de-duplicated arrive in no useful order, where `gh`
+    # alone arrived newest-first, so the walk has to establish that itself —
+    # `--is-ancestor` between two candidates is which of them is further along.
+    best=""
+    on_head=""
     for sha in $green; do
         git cat-file -e "${sha}^{commit}" 2>/dev/null || continue
         git merge-base --is-ancestor "$sha" origin/main || continue
         git merge-base --is-ancestor HEAD "$sha" || continue
-        [ "$(git rev-parse "$sha")" != "$(git rev-parse HEAD)" ] \
-            || staying "already on the last green"
-        echo "$sha"
-        exit 0
+        if [ "$(git rev-parse "$sha")" = "$(git rev-parse HEAD)" ]; then
+            on_head=yes
+            continue
+        fi
+        if [ -z "$best" ] || git merge-base --is-ancestor "$best" "$sha"; then
+            best=$sha
+        fi
     done
-    staying "no green run on main is ahead of it"
+    if [ -n "$best" ]; then
+        echo "$best"
+        exit 0
+    fi
+    [ -z "$on_head" ] || staying "already on the last green"
+    staying "no green commit on main is ahead of it"
 
 # The property fuzzer, over a pair of surfaces (docs/decisions.md §24.14).
 #
@@ -4191,6 +4300,78 @@ check-fuzz-watermark-selftest:
     [ -z "$got" ] || fail "it offered to check out $got over uncommitted work"
     grep -q 'uncommitted changes' "$dir/why" \
         || fail "uncommitted work was passed over without saying why"
+    git -C "$repo" checkout -q -- README
+
+    # The arms below are §173.9's: a green recorded by a local `just gate`
+    # counts, because since §172 no push can be CI-green and a night that waits
+    # for one fuzzes a tree that only gets older.
+    greens="$repo/.git/rcad-greens"
+
+    # Seven: gh names nothing at all and the local record carries the night.
+    # This is the arm that fails without §173.9 — before it, an empty `gh`
+    # answer was the end of the question.
+    git -C "$repo" checkout -q --detach "$first"
+    : >"$dir/green"
+    printf '%s 2026-09-20T00:00:00Z here\n' "$third" >"$greens"
+    got=$(picked) || fail "deciding exited non-zero with a local green to go on"
+    [ "$got" = "$third" ] \
+        || fail "with gh silent and $third recorded green locally it chose ${got:-nothing}"
+
+    # Eight: the local record is not a way around the other two conditions. A
+    # gate that went green on a branch is still not a green commit on `main`.
+    printf '%s 2026-09-20T00:00:00Z here\n' "$aside" >"$greens"
+    got=$(picked) || fail "deciding exited non-zero"
+    [ -z "$got" ] \
+        || fail "a locally recorded green off main moved the night to $got"
+
+    # Nine: the furthest forward of the two sources wins, whichever source it
+    # came from and whichever order they merge in. Merging two lists and
+    # de-duplicating them destroys gh's newest-first order, so the walk has to
+    # work this out rather than take the first thing that qualifies.
+    printf '%s\n' "$second" >"$dir/green"
+    printf '%s 2026-09-20T00:00:00Z here\n' "$third" >"$greens"
+    got=$(picked) || fail "deciding exited non-zero"
+    [ "$got" = "$third" ] \
+        || fail "gh said $second and the record said $third; it chose ${got:-nothing}"
+    printf '%s\n' "$third" >"$dir/green"
+    printf '%s 2026-09-20T00:00:00Z here\n' "$second" >"$greens"
+    got=$(picked) || fail "deciding exited non-zero"
+    [ "$got" = "$third" ] \
+        || fail "with the sources swapped it chose ${got:-nothing}, so it took a side not a commit"
+
+    rm -f "$greens"
+
+    # Ten: what may be written down in the first place. `gate-docs` re-enters
+    # `gate` with a trimmed step list and reaches the recorder as a pass, having
+    # compiled nothing — and a green that skipped `test` is not a reading of the
+    # code. This is the mistake that would leave no trace afterwards: the file
+    # would name a commit and say nothing about how little ran for it.
+    record() {
+        {{just_executable()}} --justfile "{{justfile()}}" \
+            --working-directory "$repo" _record-green "$1"
+    }
+    record "check-decisions check-hub" >"$dir/said" 2>&1
+    [ ! -s "$greens" ] \
+        || fail "a step list that compiles nothing recorded a green anyway"
+    grep -q 'read no code' "$dir/said" \
+        || fail "it declined to record without saying why: $(cat "$dir/said")"
+
+    record "{{ gate_steps }}" >"$dir/said" 2>&1
+    grep -q "^$(git -C "$repo" rev-parse HEAD) " "$greens" \
+        || fail "a full gate's green was not written down: $(cat "$dir/said")"
+
+    record "{{ gate_steps }}" >"$dir/said" 2>&1
+    [ "$(wc -l <"$greens")" = "1" ] \
+        || fail "the same commit was recorded twice"
+
+    echo "something uncommitted" >>"$repo/README"
+    rm -f "$greens"
+    record "{{ gate_steps }}" >"$dir/said" 2>&1
+    [ ! -s "$greens" ] \
+        || fail "a green was recorded against a tree the sha does not name"
+    grep -q 'uncommitted changes' "$dir/said" \
+        || fail "it declined a dirty tree without saying why: $(cat "$dir/said")"
+    git -C "$repo" checkout -q -- README
 
 # The morning after a night's fuzzing, in one call.
 #

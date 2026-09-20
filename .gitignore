@@ -2,4 +2,6 @@
 /corpora
 *.profraw
 /.claude/worktrees/
+# Written by `tooling/session-spend/`'s scripts wherever they are run from, and
+# named by `gate-fresh` on every run until it was ignored.
 __pycache__/
