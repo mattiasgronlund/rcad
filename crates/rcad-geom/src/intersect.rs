@@ -1972,17 +1972,24 @@ struct TwoLinesEitherSideOfThePicker {
 /// terms of `2.1e161` that have to cancel first.
 ///
 /// Taken in pieces nothing has to cancel. `normal · from − offset` is what the
-/// picker's own offset rounded away, and `normal · sideways` is what the cross
-/// product that built the normal rounded away: both are dot products of stored
-/// `f64` triples, so [`Exact`] sums them and knows each to its own last bit
-/// rather than to a bit of `2.1e161`. What is left is `±out · (normal · up)`,
-/// and its sign is the sign of `out`, which the caller has already certified.
+/// picker's own offset rounded away, and `to_the_middle` is the rest of the way
+/// to the middle of the two lines: both are built out of dot products of stored
+/// `f64` triples, so [`Exact`] knows each to its own last bit rather than to a
+/// bit of `2.1e161`. What is left is `±out · (normal · up)`, and its sign is the
+/// sign of `out`, which the caller has already certified.
 ///
-/// **The two readings are still whatever they are.** Where a fallback normal
-/// was picked (see [`HalfSpace::through_a_point_square_to`]) `normal · sideways`
-/// is a real number and not a rounding, the middle of the two lines genuinely
-/// sits off the picking plane, and the refusal below is the right answer. This
-/// stops throwing the reading away; it does not decide it.
+/// **§182 is why `to_the_middle` is a reading and not a direction and a length.**
+/// It used to be `normal · sideways` multiplied by how far along `sideways` the
+/// middle sat, which is sound only while `sideways` is a direction the geometry
+/// really steps along. For two side-by-side pipes it is not: the picking normal
+/// is built exactly square to a **rounded** step, so that product is zero by
+/// construction and says nothing about where the true step points — and a pair
+/// far enough from the origin was answered with a plane holding both lines and a
+/// reverse holding neither. Each caller now works the reading out its own way.
+///
+/// **The two readings are still whatever they are.** The middle of the two lines
+/// may genuinely sit off the picking plane, and the refusal below is then the
+/// right answer. This stops throwing the reading away; it does not decide it.
 fn two_lines_told_apart(
     picker: HalfSpace,
     along: [f64; 3],
