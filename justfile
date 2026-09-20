@@ -47,8 +47,20 @@ list:
     @{{ just_executable() }} --list --unsorted
 
 # Every step of the gate, in the order CI runs them, and the one place that
-# order is written down. `check-gate-runs-every-check` reads this line to prove
+# order is written down. `check-gate-runs-every-check` reads this block to prove
 # no `check-*` recipe was written and then never run.
+#
+# **One step per line, joined by `\` into a single-line value.** The value is
+# what it always was — every consumer below word-splits it and none can tell —
+# but the *source* is now one line per step, and that is the whole point: git
+# merges by line. As one line this was the single worst merge shape in the repo,
+# a 43-name line that two lanes adding a check each rewrite in full, and it
+# conflicted on 2026-09-16 (`2da15de4`) for exactly that reason. One name per
+# line, two lanes appending two different checks, and git takes both.
+#
+# Continuation rather than a `"""` indented string, which was tried first: that
+# form puts real newlines in the value, and `for step in {{ gate_steps }}` is
+# then a bash syntax error at the second name. `docs/decisions.md` §177.
 #
 # **A list rather than `gate`'s dependencies, which is what it used to be.** A
 # dependency that fails takes `just` down with it, so a gate that failed printed
@@ -63,7 +75,51 @@ list:
 # "a new one, or a new variant reaching an old one" — a sentence about the tree,
 # when what moved was the scan. That is the wrong place to start reading, and it
 # is where a container's mawk put one session. Prove the instrument, then read it.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards-selftest check-wildcards check-ignored check-hooks check-skills-selftest check-skills check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-gate-docs-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins \
+    check \
+    check-fuzz-builds \
+    check-enums \
+    check-wildcards-selftest \
+    check-wildcards \
+    check-ignored \
+    check-hooks \
+    check-skills-selftest \
+    check-skills \
+    check-kache-off-on-ci \
+    check-gate-runs-every-check \
+    check-gate-summary-selftest \
+    check-gate-docs-selftest \
+    check-lanes-selftest \
+    check-release-lanes-selftest \
+    check-status-selftest \
+    check-plan \
+    check-plan-selftest \
+    check-hub \
+    check-hub-selftest \
+    check-hub-align-selftest \
+    check-clean-targets-selftest \
+    check-prune-worktrees-selftest \
+    check-decisions \
+    check-decisions-selftest \
+    check-claim-section-selftest \
+    check-where-the-work-is \
+    check-src-selftest \
+    check-recipe-selftest \
+    check-questions-selftest \
+    check-corpus \
+    check-corpus-selftest \
+    check-coverage-selftest \
+    check-fuzz-overnight-selftest \
+    check-fuzz-watermark-selftest \
+    check-fuzz-triage-selftest \
+    check-fuzz-unit \
+    check-fuzz-unit-selftest \
+    check-spend-selftest \
+    lint \
+    test \
+    check-release-build \
+    check-t-selftest \
+    deny"
 
 # The steps that cost a runner money, and that a change touching only `docs/`
 # and `*.md` cannot move either way. `gate-docs` runs `gate_steps` **minus**
@@ -600,15 +656,18 @@ check-gate-docs-selftest:
         exit 1
     }
 
-    all=$(grep -m1 '^gate_steps := ' justfile | sed 's/^gate_steps := "//; s/"$//' | tr ' ' '\n')
-    heavy=$(grep -m1 '^gate_metered_steps := ' justfile \
-        | sed 's/^gate_metered_steps := "//; s/"$//' | tr ' ' '\n')
-    # Both sides are parsed out of this one file, so an extraction that stops
-    # matching empties them and every comparison below passes against nothing.
+    # Interpolated rather than grepped out of the justfile. `gate_steps` is one
+    # step per source line now (§177), and a regex anchored at `^` reads the
+    # first name and stops — which is exactly what it did, loudly, the moment
+    # the list was split. What `just` hands over cannot disagree with what
+    # `gate-docs` reads, because it is the same substitution.
+    all=$(printf '%s\n' {{ gate_steps }})
+    heavy=$(printf '%s\n' {{ gate_metered_steps }})
+    # An empty list would make every comparison below pass against nothing.
     # `check-gate-runs-every-check` says the same thing about itself.
-    [ "$(grep -c . <<<"$all")" -ge 30 ] || fail "gate_steps parsed to nothing; the extraction broke"
+    [ "$(grep -c . <<<"$all")" -ge 30 ] || fail "gate_steps came back empty"
     [ "$(grep -c . <<<"$heavy")" -ge 5 ] \
-        || fail "gate_metered_steps parsed to nothing; the extraction broke"
+        || fail "gate_metered_steps came back empty"
 
     # A name in the exclusion list that is not a step excludes nothing, and says
     # so nowhere. That is how this list goes stale when a step is renamed.
@@ -1338,10 +1397,10 @@ check-kache-off-on-ci:
 # who also noticed that nothing held the ordering it depends on.
 [doc("Every check-* recipe is in `gate`, and check-plugins is first.")]
 check-gate-runs-every-check:
-    @steps=$(grep -m1 '^gate_steps := ' justfile | sed 's/^gate_steps := "//; s/"$//'); \
+    @steps=$(printf '%s\n' {{ gate_steps }}); \
     defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
-    listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
-    others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
+    listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
+    others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
     if [ "$n" != "41" ]; then \
         echo "found $n check-* recipes, expected 41"; \
@@ -1363,7 +1422,17 @@ check-gate-runs-every-check:
         echo "change that sentence in the same commit, or this is now false"; \
         exit 1; \
     fi; \
-    first=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -m1 .); \
+    decl=$(awk '/^gate_steps := /{f=1} f{print} f && !/\\$/{exit}' justfile); \
+    lines=$(printf '%s\n' "$decl" | grep -c .); \
+    steps_n=$(printf '%s\n' "$steps" | grep -c .); \
+    if [ "$lines" != "$steps_n" ]; then \
+        echo "gate_steps is $steps_n steps written on $lines source lines"; \
+        echo "one step per line is what stops two lanes adding two checks from"; \
+        echo "conflicting: git merges by line, and as one line this was the worst"; \
+        echo "merge shape in the repo (docs/decisions.md §177)"; \
+        exit 1; \
+    fi; \
+    first=$(printf '%s\n' "$steps" | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
         echo "gate runs '$first' first, expected 'check-plugins'"; \
         echo "CLAUDE.md says check-plugins runs first thing in just gate, and"; \
