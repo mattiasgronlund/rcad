@@ -22,24 +22,25 @@ on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107'
 table. §16.10 governs it: a claim that something cannot be done owes a
 demonstration either way — a gap if a scaling reaches the sign, a limit if not.
 
-**Five waves have run and the demonstration is in.** §110–§113 named the pair
-and falsified §109.6; §115–§117 walked closed edges by this kernel's rule, not
-the file's flag (KiCad 97/323 → 110/323), leaving 26: **20 a limit, none
-transverse, 6 equal pipes whose axes cross**, closed by §118 and §119. §122–§128
-took the last three; §126's failure is **§149's — the oracle, not the kernel**.
-**§121 landed** 2026-09-18 as `912cd168`, on §129, §130, §132 and §136.
+**Five waves have run and the demonstration is in.** §110–§113 named the pair and
+falsified §109.6; §115–§117 walked closed edges by this kernel's rule (KiCad
+97/323 → 110/323), leaving 26: **20 a limit, none transverse, 6 equal pipes whose
+axes cross**, closed by §118–§119. §122–§128 took the last three; §126's failure
+is **§149's — the oracle, not the kernel**. **§121 landed** as `912cd168`.
 
 **What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
-sites, 1 and 3 by §154, 2 by §142.9 (`37f24350`), `across` by **§164**. §145 by
-§148 and §155; §150 by §156; §151.5 by §163; §163.4 by §165; §165.4 by §166;
-§166.4 by §167; **§167.4's placed wedge** by **§168**: proved where the face is
-stored, asked where the point sits.
+sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150 by §156;
+§151.5 by §163; §163.4 by §165; §165.4 by §166; §166.4 by §167; §167.4 by §168,
+proved where the face is stored and asked where the point sits; **§168.4's pie
+slice** by **§169**: an arc with one end on a cut lies where it leaves that end.
 
-**Next and unclaimed: §168.4's pie slice** — its arc has one end on each
-radius's plane, so step 2 cannot tell which way it bulges; §168.4 sketches the
-lane. §124, §136.4, §125.6: deferred — though the 2026-09-19 triage timed five of
-§125's slow units at 90 s–5.5 min on `3b3949b2`, against §125.6's ~7 s, one run
-each and unexplained. None of that night's five crashes still fails.
+**Next and unclaimed: §169.4's fused arcs** — the fuse bakes placement in at
+entry (§17.3) and lowers a picker until both ends read strictly in front, so
+§167's steps 1 and 2 need rebuilding around ends *in front of* a picker. §124,
+§136.4, §125.6: deferred, and 2026-09-20 keeps §125.6 there — the 90 s–5.5 min is
+`rcad-fuzz-explain` at `opt-level = 0`, a seeded replay at 2 (2.2 s for
+`5dddf2a9`). §125.6's own ~7 s does not reproduce (112–456 s on the same code):
+open, about that number, not the gate.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
