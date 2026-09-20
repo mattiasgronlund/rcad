@@ -603,10 +603,24 @@ impl Walk {
     /// later, so a hint that came out wrong is a refusal by name and never a
     /// solid with a seam running backwards.
     ///
-    /// A travel that dots to exactly zero against the winding is the one place
-    /// the hint is a guess: `which_way_a_closed_crossing_turns` reads the
-    /// surface's latitude there, and this has no gradient to build one from.
-    /// [`Orientation::Forward`] is the guess and that named refusal is the cost.
+    /// **A travel that dots to exactly zero against the winding is no answer,
+    /// and it says so.** `which_way_a_closed_crossing_turns` reads the surface's
+    /// latitude there, and this has no gradient to build one from — so the hint
+    /// goes back to the file's own flag rather than picking a side. Picking one
+    /// is worse than useless: the two uses of a closed edge travel exact
+    /// opposite ways, so a tie-break that answers the same for both is
+    /// *provably* wrong for one of them, and `SolidBuilder` refuses the whole
+    /// solid by `ADraftEdgeIsWalkedTheSameWayTwice`. That is where 26
+    /// of the corpus's files went, every one of them stopped by this and
+    /// nothing else: a bend of pipe capped by a plane, whose cap circle runs
+    /// round the *ring* while [`Surface::the_way_its_first_coordinate_runs_at`]
+    /// on a bend runs round the **tube**, square to it at every corner.
+    ///
+    /// `ORIENTED_EDGE.orientation` answers a different question (§115), so
+    /// falling back to it is luck — but it is luck that at least tells the two
+    /// uses apart, and `Model::validate` asks the certified question moments
+    /// later and refuses by `AClosedEdgeIsWalkedAgainstItsSurface` when the luck
+    /// runs out.
     fn which_way_round_a_closed_edge_is_stored(
         &self,
         reading: &Reading<'_>,
@@ -631,7 +645,14 @@ impl Walk {
         else {
             return Ok(None);
         };
-        Ok(Some(travel.dot(winding) >= 0.0))
+        let leaning = travel.dot(winding);
+        Ok(if leaning > 0.0 {
+            Some(true)
+        } else if leaning < 0.0 {
+            Some(false)
+        } else {
+            None
+        })
     }
 
     /// Which way this use of a closed edge travels in space, at its one corner.
