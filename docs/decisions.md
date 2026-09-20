@@ -39959,6 +39959,44 @@ query sites — `fuzz-watermark` at `justfile:3356` and `_status-green` at
 comments. Both query sites now read both sources, so the set of readers asking
 only GitHub is empty.
 
+### 173.11 The fifth run found nothing, which is the first evidence the class is exhausted
+
+`gate-fresh` had gone four for four: every run since it was written found a real
+fault, each one a check answering a property of its environment rather than of
+the tree — mawk's word boundary (§173), the missing `jq` (§173.7), mise's changed
+output format (§173.8). Each fix bought one or two more steps, and the furthest
+it had ever reached was **step 10 of 43**. The expectation handed to this session
+was a fifth.
+
+On 2026-09-20 it ran the whole gate: **43 steps, PASS, 2101 tests** on `5ca78b31`,
+against the same tree's 2101 here. Thirty-three steps ran in a container for the
+first time and none of them disagreed with this machine.
+
+**That is evidence about the instrument, not a clean bill of health.** Four
+findings in four runs meant the next red was the expected outcome and the tree
+was never the suspect; one clean run inverts that. A red from `gate-fresh` is now
+*news* — the prior that it is the check rather than the code has just lost the
+only support it had, which was an unbroken streak. Whoever gets the next one
+should weigh both, where §173 could say "assume the check" and be right four
+times running.
+
+Two things the run showed that no local gate can:
+
+- **`check-fuzz-watermark-selftest` passes in a container**, so §173.9's two-source
+  picking loop is exercised somewhere without a `gh`, an account or this machine's
+  `rcad-greens`. That arm was written the same day it was first run anywhere.
+- **The container's green evaporates, exactly as §173.9 left it.** The run ends
+  `green recorded for 5ca78b31 in /rcad/.git/rcad-greens` — inside the throwaway
+  clone, which the recipe deletes on exit. The independent reading that §173.9
+  says would be the honest upgrade therefore still reaches nothing, and the hook
+  being *present and inert* is why that stays a deferral rather than a bug.
+
+`nextest` reported **5 leaky** in the container and none here. Leaky is a passing
+test that outlived its own process handles, not a failure, and the difference is
+process reaping under PID 1 in a container rather than anything about the code.
+Recorded because it is exactly the kind of difference that looks like a finding
+next time somebody reads this output cold.
+
 ## 174. Three corpus lanes, 119 files priced, none freed — the top rows are one queue
 
 *§171 priced the corpus and §171.7 said to cut lanes from the top of its table.
