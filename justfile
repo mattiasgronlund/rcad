@@ -229,6 +229,14 @@ gate-fresh image="rust:1-bookworm":
             apt-get install -y -qq locales >/dev/null
             sed -i "s/^# en_US.UTF-8/en_US.UTF-8/" /etc/locale.gen
             locale-gen >/dev/null
+            # The clone is bind-mounted from the host and owned by the host
+            # user, while this container is root, so git calls it "dubious
+            # ownership" and refuses. That is not cosmetic here: the `justfile`
+            # derives `RCAD_STEP_CORPUS` from a backtick `git rev-parse` at parse
+            # time, and just evaluates it whether or not the variable is already
+            # set — so with git refusing, *every* `just` command in this
+            # container fails before any recipe runs.
+            git config --global --add safe.directory /rcad
             curl -fsSL https://mise.run | sh
             export PATH="/tmp/home/.local/bin:$PATH"
             eval "$(mise activate bash --shims)"
