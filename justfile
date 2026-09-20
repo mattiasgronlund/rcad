@@ -111,6 +111,7 @@ gate_steps := "check-plugins \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
     check-fuzz-watermark-selftest \
+    check-gate-fresh-selftest \
     check-fuzz-triage-selftest \
     check-fuzz-unit \
     check-fuzz-unit-selftest \
@@ -226,6 +227,12 @@ gate-docs mode="loud":
 # `run_in_background` and be woken — and read the output file rather than piping
 # it, because a pipe hands back the pipe's exit code and a failed run then reads
 # as a pass. That happened on this recipe's own first run.
+#
+# **A pass here is written to the green record**, the same one a plain `just
+# gate` writes and the one `fuzz-watermark` reads to choose what the overnight
+# run fuzzes (§173.9). This is the strongest green this machine can produce —
+# the whole gate, on a tree nothing of this environment has touched — so it is
+# the last one that should have gone unrecorded, and it did.
 [doc("The gate in a container on a fresh clone, with this machine's environment taken away.")]
 gate-fresh image="rust:1-bookworm":
     #!/usr/bin/env bash
@@ -271,7 +278,12 @@ gate-fresh image="rust:1-bookworm":
     # `~/.claude`, `~/.cargo` or `~/.rustup` is visible. `CI=true` is what
     # `mise.toml` reads to empty `RUSTC_WRAPPER`, so the build cache — which
     # lives in the `HOME` we just took away — is not asked for.
-    exec docker run --rm -t \
+    #
+    # **Run, not `exec`ed, because the green is written down after it.** `exec`
+    # replaces this shell, so nothing could follow the container — and the
+    # `trap` above could never fire either, leaving every run's clone behind.
+    status=0
+    docker run --rm -t \
         -v "$work/rcad:/rcad" \
         -v "$corpus:/corpus:ro" \
         -v rcad-gate-fresh-tools:/tmp/home/.local/share/mise \
@@ -315,7 +327,29 @@ gate-fresh image="rust:1-bookworm":
             rustup show
             mise install
             mise exec -- just gate quiet
-        '
+        ' || status=$?
+    [ "$status" -eq 0 ] || exit "$status"
+
+    # **The green goes in the host's record, because the container's dies with
+    # it.** `gate` in there reaches `_record-green` too, and writes into
+    # `/rcad/.git` — the clone the `trap` deletes. Without this line the
+    # strongest gate this machine can run would be the only one leaving no
+    # trace, while a plain `just gate` in a warm tree counts.
+    # `fuzz-watermark` reads that record to choose what the night fuzzes, and
+    # since §172 spent the Actions allowance it is the only source that can
+    # still answer. §173.9.
+    #
+    # The sha is taken here and not carried out of the clone, and it is the same
+    # sha: this recipe refuses a dirty tree and the clone is of HEAD.
+    # `_record-green` re-reads that for itself, which is what catches a tree
+    # written to during the ten minutes the container was running.
+    #
+    # Both directories named rather than left to `just`'s defaults, so the tree
+    # the record describes is the one `git clone` above read, whichever
+    # directory of it this recipe was invoked from.
+    {{ just_executable() }} --justfile "{{ justfile() }}" \
+        --working-directory "$(git rev-parse --show-toplevel)" \
+        _record-green "{{ gate_steps }}"
 
 # The whole gate, and the same command CI runs. Named `gate` rather than
 # `test-all` because it is two dozen checks, a lint and a `cargo-deny` around
@@ -1403,8 +1437,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "41" ]; then \
-        echo "found $n check-* recipes, expected 41"; \
+    if [ "$n" != "42" ]; then \
+        echo "found $n check-* recipes, expected 42"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -4777,6 +4811,69 @@ check-fuzz-watermark-selftest:
     grep -q 'uncommitted changes' "$dir/said" \
         || fail "it declined a dirty tree without saying why: $(cat "$dir/said")"
     git -C "$repo" checkout -q -- README
+
+# `gate-fresh` writes its green down, which is what `exec docker` made
+# impossible: `exec` replaces the shell, so there was no process left to record
+# anything and the recipe still exited 0. The strongest green this machine can
+# produce was the only one leaving no trace, and nothing said so.
+#
+# The container is stubbed rather than run. Ten minutes and a docker daemon are
+# not what this is asking about — it asks whether a pass reaches `_record-green`
+# on the host and a failure does not, and that is answered by a stub that exits
+# with whichever status the arm wants.
+[doc("`gate-fresh` records a green when the container passes, and not when it fails.")]
+check-gate-fresh-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    mkdir -p "$dir/bin" "$dir/corpus"
+
+    repo="$dir/repo"
+    git init -q -b main "$repo"
+    echo "a tree to clone" >"$repo/README"
+    git -C "$repo" add README
+    git -C "$repo" -c user.email=t@t -c user.name=t commit -q -m one
+    head=$(git -C "$repo" rev-parse HEAD)
+    greens="$repo/.git/rcad-greens"
+
+    cat >"$dir/bin/docker" <<'STUB'
+    #!/usr/bin/env bash
+    exit "${DOCKER_STATUS:-0}"
+    STUB
+    chmod +x "$dir/bin/docker"
+
+    fail() {
+        echo "gate-fresh drifted from its own fixtures: $1"
+        [ -f "$dir/said" ] && sed 's/^/    /' "$dir/said"
+        exit 1
+    }
+
+    # The corpus is pointed at an empty directory rather than this machine's,
+    # because the recipe only checks that one is there and a selftest that reads
+    # the real one is answering a question about the machine (§77.6).
+    fresh() {
+        DOCKER_STATUS="$1" PATH="$dir/bin:$PATH" RCAD_STEP_CORPUS="$dir/corpus" \
+            {{ just_executable() }} --justfile "{{ justfile() }}" \
+            --working-directory "$repo" gate-fresh >"$dir/said" 2>&1
+    }
+
+    # One: a container that passed is a green on the host, under the sha that was
+    # cloned. This is the arm `exec docker` fails while exiting 0.
+    fresh 0 || fail "it failed over a container that passed"
+    grep -q "^$head " "$greens" 2>/dev/null \
+        || fail "it passed and wrote no green for $(git -C "$repo" rev-parse --short HEAD)"
+
+    # Two: a container that failed records nothing, and its status is what comes
+    # out. Bookkeeping that ran anyway would write down a green for a gate that
+    # went red, which is the one entry no reader could catch.
+    rm -f "$greens"
+    status=0
+    fresh 3 || status=$?
+    [ "$status" -eq 3 ] \
+        || fail "a container exiting 3 came out as $status"
+    [ ! -s "$greens" ] \
+        || fail "a green was recorded for a container that failed"
 
 # The morning after a night's fuzzing, in one call.
 #
