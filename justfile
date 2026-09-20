@@ -1171,7 +1171,7 @@ test-ignored:
 # is named here rather than hidden. The shared 24 have a runner of their own in
 # the marketplace repo now.
 #
-# The two hooks below it are rcad's own, need no plugin, and run either way —
+# The three hooks below it are rcad's own, need no plugin, and run either way —
 # which is why the skip wraps one line and not the recipe.
 [doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
@@ -1184,6 +1184,7 @@ check-hooks:
     fi
     .claude/hooks/check-worktree-create.sh
     .claude/hooks/check-session-start-hub.sh
+    .claude/hooks/check-decisions-zero.sh
 
 # Every `just` recipe and every repo path a project skill names still exists.
 #
@@ -6457,6 +6458,13 @@ _where-the-work-is-check file name="":
         echo "^ a renumbering moved them; §0 reads as current whether or not it is (docs/decisions.md §71)"
         exit 1
     fi
+
+    # Headroom, not a verdict (§178.4): a session that knows it has three lines
+    # left writes the trim into the edit it is already making, where "clean"
+    # alone sends it to find out at the gate instead. Printed on every clean run
+    # of this check, including from `just gate` — `decisions-zero.sh` is what
+    # this line was written for, but there is no reason `gate` should see less.
+    echo "§0 is $lines of 50 non-blank lines, reviewed $reviewed, every section it cites exists."
 
 # Pins both halves of `status` against fixtures, because the live repository
 # cannot exercise either of them. Its §0 is right today by construction, and its
