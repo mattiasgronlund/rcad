@@ -133,6 +133,22 @@ cannot finish names the directory and the command that removes it, on stderr,
 and leaves the exit status alone. **A tidy-up has no business deciding whether a
 gate passed.**
 
+**Confirmed on the tree carrying the fix**, same recipe and same image, 7m12s
+end to end:
+
+    === gate summary ===
+    gate: PASS
+    tests: Summary [  30.232s] 2105 tests run: 2105 passed, 1 skipped
+    doc tests: 25 passed, 0 failed, across 9 crate(s)
+    green recorded for f280e574 in /rcad/.git/rcad-greens
+    green already recorded for f280e574
+
+Not one `rm: cannot remove`, against thirty-two thousand the run before, and
+exit 0. **Two record lines is the shape to expect**, and they are not a
+duplicate: the first is the container writing into the clone, which the trap
+then deletes, and the second is the host. A run that prints only the first is
+the bug this section is about.
+
 ### 180.5 The indicator, named and not built
 
 The stranding was silent for a day, and the cheap thing that would have spoken
@@ -191,6 +207,15 @@ The `chown` is the one part no arm reaches: making a fixture that reproduces it
 means making root-owned files, and a selftest that needs root is a selftest
 nobody runs. It is demonstrated instead by the real run in §180.4, which is what
 found it.
+
+**Both real runs printed `green already recorded`, and that is worth being
+precise about.** A host `just gate` had been run on each of those commits first,
+so the sha was in the file before `gate-fresh` reached it — what the real runs
+prove is that the host-side call is made and lands in the real file, not that it
+writes a sha nothing else had. The fresh write is arm one's, against a fixture
+where nothing else has recorded anything. The two together cover it; neither
+does alone, and a reader who takes `already recorded` for the whole
+demonstration is reading half of it.
 
 `check-gate-runs-every-check`'s declared count moves 41 → 42 in the same commit,
 which is that recipe's own instruction and the only way a new `check-*` lands.
