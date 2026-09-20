@@ -8,6 +8,13 @@ lockfile = true
 "cargo:cargo-llvm-cov" = "0.6"
 "cargo:cargo-mutants" = "25"
 "cargo:just" = "1.42"
+# Three hooks and three recipes parse JSON with it, and until 2026-09-20 nothing
+# installed it — it passed on a runner and on this machine because both images
+# happen to ship one. A container that does not is where that ran out:
+# `check-hooks` reported three symptoms and no cause. A single static binary, so
+# pinning it costs a download and not a build — which is the whole reason python
+# is not pinned beside it. `docs/decisions.md` §173.7.
+"aqua:jqlang/jq" = "1.7"
 "cargo:kache" = "0.16"
 "cargo:taplo-cli" = "0.10"
 

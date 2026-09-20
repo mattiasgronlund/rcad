@@ -39597,3 +39597,58 @@ Worth carrying forward: every one of the three was found by taking away what thi
 machine supplies and running the check again. None was found by reading it. The
 recipe that does the taking-away is `just gate-fresh`, it costs no Actions
 minutes, and it earned its keep on the first run that got as far as the tree.
+
+### 173.7 jq is pinned, python is not, and the awk is not rewritten
+
+Mattias asked, on reading the above, whether it was time to pin a python in mise
+and replace the awk with it. Three answers, and the first one is not about
+either.
+
+**`jq` is pinned, because it was the next thing to fall over.** With §173 fixed,
+`gate-fresh` got four steps further and failed in `check-hooks`: no path on
+stdout, no worktree, no lock — three of five checks wrong. `worktree-create.sh`
+parses its payload with `jq`, `rust:1-bookworm` has none, and nothing in this
+repo ever installed one. It passed here and on the runner because both images
+happen to ship it. **Fourth instance of the same class in one session**, and the
+cheapest possible fix: `aqua:jqlang/jq` is one static binary, so the pin costs a
+download. Six places use it — three hooks, three recipes.
+
+**Python is not pinned, and the asymmetry with jq is the argument.** It is
+already load-bearing and already unpinned: `check-spend-selftest` runs
+`check-spend.py`, `just question` runs the parser, and a recipe carries an inline
+`#!/usr/bin/env python3`. This machine has 3.12 and the container has 3.11.2 —
+two versions, in the two environments the gate runs in, nobody the wiser, because
+the container has never reached step 38. By §173.6's own logic that is the next
+one to bite.
+
+It was still not pinned, for a reason and not an oversight. `check-spend.py` was
+run under the container's 3.11 before this was decided: **60 classifier cases,
+all as expected.** So the divergence is hypothetical where awk's was measured,
+and the fix is not a download but an interpreter build on every cold runner —
+against §172, where runner minutes are the binding constraint and the month's
+arithmetic already sits at ~1270 of 2000. §13 says not to build the part before
+the consumer names itself, and no consumer has. **What pins it is the first
+python failure that differs across the two, or a month where minutes stop being
+the constraint** — and the evidence of the 3.11 run is written here so that
+whoever pins it is not re-deriving this.
+
+**The awk is not rewritten in python.** There is one awk *script*, 196 lines, and
+it is the one this section already fixed and now proves under four
+implementations. The other 65 uses in the justfile are one-liners of the shape
+`{print $1}` and `/^worktree /{print $2}` — POSIX, and the same under every awk
+there is. A rewrite would spend the proof to buy a property one line already
+bought. The script's own header names the thing that actually retires it:
+rustc's `non_exhaustive_omitted_patterns`, unstable on the pinned 1.96. Port it
+if it needs substantial work before that lint stabilises; not before.
+
+**A fifth, found while writing this.** `check-worktree-create.sh` tested its lock
+reason for non-ASCII with `grep -qP`. `-P` is GNU grep's, and a grep without it
+exits non-zero on the *option* — which that `if` reads as "found nothing" and
+passes. Silently, in the safe-looking direction, exactly like `COUNT=0`. It is a
+`tr -d '\000-\177'` now, verified to catch what the old one caught.
+
+And a defect in the same file that cost a round trip: it ran the hook with
+`2>/dev/null`. The missing `jq` announced itself on stderr every time and was
+discarded every time, so a reader got three symptoms and no cause. Stderr is
+kept now and printed when a check fails. **A selftest that hides why it failed is
+worse than no selftest, because it is believed.**

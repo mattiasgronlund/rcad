@@ -18,6 +18,18 @@ repo="$work/rcad"
 git init -q -b main "$repo"
 git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
 
+# The hook parses its payload with `jq`, so without one it produces no path, no
+# worktree and no lock — three of the five checks below failing at once, each
+# describing a symptom and none of them the cause. That is what a fresh
+# container said, for as long as it took to go and look. `mise.toml` pins jq for
+# exactly this; say so here rather than let it be diagnosed again.
+# `docs/decisions.md` §173.7.
+if ! command -v jq >/dev/null; then
+	echo "worktree-create.sh needs jq and there is none on PATH:" >&2
+	echo "  mise.toml pins it, so this is a shell that did not go through mise" >&2
+	exit 1
+fi
+
 failed=0
 total=0
 
@@ -34,7 +46,9 @@ reason_for() {
 }
 
 total=$((total + 1))
-out=$(cd "$repo" && printf '{"name":"agent-abc"}' | "$hook" 2>/dev/null)
+# Kept off stdout, which is the answer being checked, but kept: discarding it
+# is why a missing `jq` reached a reader as three symptoms and no cause.
+out=$(cd "$repo" && printf '{"name":"agent-abc"}' | "$hook" 2>"$work/hook.err")
 want="$work/rcad-worktrees/agent-abc"
 if [ "$out" != "$want" ]; then
 	wrong "the path on stdout should be exactly '$want', got '$out'"
@@ -60,8 +74,13 @@ fi
 # A reason holding a non-ASCII byte reaches every porcelain reader C-quoted, as
 # `\302\267` for a `·`. `just lanes` reads the lock file and so is unaffected,
 # but `prune-worktrees` matches on the listing.
+#
+# `tr` and not `grep -qP`: `-P` is GNU grep's, and a grep without it exits
+# non-zero on the option rather than on the search — which reads here as "no
+# non-ASCII found" and passes the check by accident. The same shape as §173's
+# `\<match\>`, in the same file as its fix, found while writing it.
 total=$((total + 1))
-if LC_ALL=C grep -qP '[^\x00-\x7F]' <<<"$held"; then
+if [ -n "$(printf '%s' "$held" | LC_ALL=C tr -d '\000-\177')" ]; then
 	wrong "the lock reason is not ASCII, so porcelain readers see it escaped: '$held'"
 fi
 
@@ -77,6 +96,10 @@ fi
 
 if [ "$failed" -gt 0 ]; then
 	echo "$failed of $total checks came out wrong"
+	if [ -s "$work/hook.err" ]; then
+		echo "--- what the hook said on stderr ---"
+		cat "$work/hook.err"
+	fi
 	exit 1
 fi
 
