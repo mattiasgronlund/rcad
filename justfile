@@ -6110,7 +6110,10 @@ _status-green dir base:
 # **A block that has grown into an essay.** The cap is the whole reason this
 # stays true: `decisions.md` is 27 000 lines because nothing ever capped it, and
 # that is correct for a record and fatal for a summary. Fifty lines is about a
-# screen, which is the length something gets re-read at.
+# screen, which is the length something gets re-read at. The refusal names how
+# many lines to cut, because the 21 trims of 2026-09-17..20 took 34 rounds
+# between them — 67 to 56 to 54 to 51 is one of them — and a trim by eye aims
+# short.
 [doc("docs/decisions.md §0 exists, parses, and points only at sections that do.")]
 check-where-the-work-is:
     #!/usr/bin/env bash
@@ -6139,6 +6142,7 @@ _where-the-work-is-check file:
     lines=$(grep -c . <<<"$block")
     if [ "$lines" -gt 50 ]; then
         echo "§0 is $lines non-blank lines; the cap is 50, because a summary nobody re-reads is not one"
+        echo "^ cut $((lines - 50)) non-blank lines, in one pass: trimming by eye takes two to four (§102.3)"
         exit 1
     fi
 
@@ -6345,6 +6349,13 @@ check-status-selftest:
         && fail "a §0 grown past the cap was accepted"
     grep -qF "the cap is 50" <<<"$got" \
         || fail "an over-long §0 did not say what the cap is"
+
+    fifty=$(for _ in $(seq 50); do printf 'filler\n'; done)
+    awk -v f="$fifty" '/^## 1\./{print f} {print}' "$dir/good.md" > "$dir/three-over.md"
+    got=$(just _where-the-work-is-check "$dir/three-over.md" 2>&1) \
+        && fail "a §0 three lines over the cap was accepted"
+    grep -qF "cut 3 non-blank lines" <<<"$got" \
+        || fail "an over-long §0 did not say how many lines to cut"
 
     printf '## 1. No zero here\n' > "$dir/none.md"
     got=$(just _where-the-work-is-check "$dir/none.md" 2>&1) \
