@@ -55,7 +55,15 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-gate-docs-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
+#
+# **`check-wildcards-selftest` runs before `check-wildcards`, and the order is
+# the finding of §173.** The ledger check judges the tree with an instrument it
+# does not itself prove; the selftest proves the instrument against fixtures
+# whose answer is known. With the ledger first, a broken scan is reported as
+# "a new one, or a new variant reaching an old one" — a sentence about the tree,
+# when what moved was the scan. That is the wrong place to start reading, and it
+# is where a container's mawk put one session. Prove the instrument, then read it.
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards-selftest check-wildcards check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-gate-docs-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
 
 # The steps that cost a runner money, and that a change touching only `docs/`
 # and `*.md` cannot move either way. `gate-docs` runs `gate_steps` **minus**
@@ -921,20 +929,33 @@ check-wildcards-selftest:
         B,
     }
     RS
-    got=$(awk -v enums="Toy" -f crates/rcad-step/tools/composite_wildcards.awk \
-        "$dir/bad_array.rs" "$dir/bad_tuple_ref.rs" "$dir/good_named.rs" \
-        "$dir/good_single_enum_wildcard.rs" "$dir/commented.rs" "$dir/toy_enum.rs" | sort)
     want=$(printf '%s\n' \
         "$dir/bad_array.rs:2" \
         "$dir/bad_tuple_ref.rs:2" \
         "$dir/commented.rs:3" \
         "COUNT=3" | sort)
-    if [ "$got" != "$want" ]; then
-        echo "composite_wildcards.awk drifted from its own fixtures:"
-        echo "--- got ---"; echo "$got"
-        echo "--- want ---"; echo "$want"
-        exit 1
-    fi
+    # Under **every** awk on this machine and not just the default one. The
+    # script is not the gate's answer; what the gate counts is whatever the awk
+    # in front of it says, and two of them disagreed by four arms —
+    # `docs/decisions.md` §173. A bare container has mawk alone and this arm is
+    # then one implementation wide, which is why it says which ones it ran.
+    ran=
+    for a in awk gawk mawk nawk "busybox awk"; do
+        command -v ${a%% *} >/dev/null || continue
+        got=$($a -v enums="Toy" -f crates/rcad-step/tools/composite_wildcards.awk \
+            "$dir/bad_array.rs" "$dir/bad_tuple_ref.rs" "$dir/good_named.rs" \
+            "$dir/good_single_enum_wildcard.rs" "$dir/commented.rs" "$dir/toy_enum.rs" | sort)
+        if [ "$got" != "$want" ]; then
+            echo "composite_wildcards.awk drifted from its own fixtures under $a:"
+            echo "--- got ---"; echo "$got"
+            echo "--- want ---"; echo "$want"
+            echo "an answer that depends on which awk ran is not an answer —"
+            echo "gawk's own regex extensions are the way this happened before"
+            exit 1
+        fi
+        ran="$ran $a"
+    done
+    echo "composite scan agrees under:$ran"
 
     # The direct half, against the same line with and without cargo's colours.
     # The escapes below are the bytes `cargo clippy` actually emitted under
