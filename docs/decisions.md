@@ -39665,3 +39665,167 @@ billed for it.
   change. The honest check is the same query a month from now: `gh run list
   --repo mattiasgronlund/rcad --limit 300 --json createdAt,updatedAt` and sum
   the durations by day.
+
+## 173. The wildcard ledger counted four fewer in a container, because `awk` there is not gawk
+
+`just gate-fresh` (§172.4) found this on its first working run, which is the
+whole reason it exists. Same commit, same recipe: green here, red in the
+container, on a number that is supposed to be a property of the tree.
+
+```
+wildcard arms over our own enums: 83 (83 direct, 0 composite), expected 87
+```
+
+### 173.1 The direct half agreed; it was the composite half that vanished
+
+87 here is 83 direct + 4 composite. The container's 83 is 83 direct + **0**
+composite — so clippy, the compiler, `--all-targets`, the build cache and
+`RUSTC_WRAPPER` are all in the clear. They were the first suspects and every one
+of them is wrong. What disagreed is `composite_wildcards.awk`, a line-based text
+scan that compiles nothing and reads only the files in front of it.
+
+Run over this tree, with the same arguments `check-wildcards` passes:
+
+```
+gawk    crates/rcad-geom/src/intersect.rs:1696
+        crates/rcad-geom/tests/the_same_pair_turned_names_…_crossing.rs:379
+        COUNT=4
+mawk    COUNT=0
+```
+
+### 173.2 `\<` is gawk's, and mawk reads it as a literal `<`
+
+The scan opened a match on `if ($0 !~ /\<match\>/) next`. GNU awk's `\<` and
+`\>` are word boundaries and are its own extension; mawk has no such thing and
+takes the backslash off, so the pattern means `<match>` — which no line of Rust
+contains. **The scan therefore never left its idle state, read nothing, and
+printed `COUNT=0`.** Not an error, not a warning: a clean zero.
+
+```
+$ docker run --rm rust:1-bookworm readlink -f $(command -v awk)
+/usr/bin/mawk
+```
+
+mawk is Debian's default `awk`, so this is every Debian and Ubuntu container,
+including `rust:1-bookworm`, which is what `gate-fresh` and any runner image
+would use. The fix is to spell the boundary out —
+`/(^|[^A-Za-z0-9_])match([^A-Za-z0-9_]|$)/`, `_` excluded from the class because
+gawk counts it a word character too. It is the only GNU-only construct in the
+192 lines; with it gone, **gawk, mawk, nawk and busybox awk all print the same
+two sites and `COUNT=4`.**
+
+### 173.3 87 is right, and the ledger does not move
+
+This matters more than the fix. The tempting repair when a gate says 83 and the
+pin says 87 is to move the pin, and it would have been wrong: the four arms are
+really there, `intersect.rs:1696` and the turned-pair test at 379, and four
+different awks agree once the scan is portable. **Nothing about the tree
+changed and `wildcard_arms` stays at 87.** §40's bookkeeping was never off. What
+was off was the instrument, in one direction only — silently downwards, which is
+the direction a ledger cannot notice, because a check that finds fewer wildcards
+than the pin reads as good news about the code.
+
+Nor is the defect this branch's: `git diff --name-only 7e9a7f55..HEAD -- '*.rs'`
+is empty, and the `\<match\>` line predates §172 entirely. §172's green on
+`11142675` stands.
+
+### 173.4 The test is to run the fixtures under every awk on the machine
+
+`check-wildcards-selftest` already pins the scan against fixtures whose answer is
+known. It ran them under `awk`, whichever that is — and on this machine that is
+gawk, which is exactly the one implementation that could not see the bug.
+
+It now runs them under `awk`, `gawk`, `mawk`, `nawk` and `busybox awk`, every one
+of them that is on `PATH`, and fails if any disagrees. All four others are
+installed here, so **the test fails on this machine without the fix** — it does
+not need a container to bite, which is the only reason it is a test and not a
+ritual. It prints which implementations it ran under, because a bare container
+has mawk alone and an arm one implementation wide should say so rather than look
+like four.
+
+A blacklist of gawk-isms was the other candidate and is weaker: it catches the
+constructs somebody already knows about, which is the class of guard that was
+just shown not to hold. Running the thing under the other interpreter catches the
+next one too.
+
+### 173.5 The instrument goes before the ledger
+
+`gate_steps` ran `check-wildcards` and then `check-wildcards-selftest`, so the
+first thing the container printed was *"a new one, or a new variant reaching an
+old one — see docs/decisions.md §40"*: a sentence about the tree, when what had
+moved was the scan. The selftest, one step later, would have said so plainly and
+never got to run.
+
+The two are swapped now. **Prove the instrument, then read it** — the selftest
+takes no compilation and costs nothing, and it is the step that can tell a broken
+scan from a changed tree.
+
+### 173.6 What the class is
+
+This is §77.6's third instance and the first one `gate-fresh` caught rather than
+a red runner: a check passing for a property of the environment it ran in rather
+than of the tree. The first two were `check-plugins` reading a directory CI does
+not have, and `check-wildcards`'s own direct half counting colour escapes under
+`CARGO_TERM_COLOR: always`. **That is twice now for this one recipe**, both times
+in the half that is a text scan over somebody else's output format, and both
+times the answer was silently *low* rather than an error.
+
+Worth carrying forward: every one of the three was found by taking away what this
+machine supplies and running the check again. None was found by reading it. The
+recipe that does the taking-away is `just gate-fresh`, it costs no Actions
+minutes, and it earned its keep on the first run that got as far as the tree.
+
+### 173.7 jq is pinned, python is not, and the awk is not rewritten
+
+Mattias asked, on reading the above, whether it was time to pin a python in mise
+and replace the awk with it. Three answers, and the first one is not about
+either.
+
+**`jq` is pinned, because it was the next thing to fall over.** With §173 fixed,
+`gate-fresh` got four steps further and failed in `check-hooks`: no path on
+stdout, no worktree, no lock — three of five checks wrong. `worktree-create.sh`
+parses its payload with `jq`, `rust:1-bookworm` has none, and nothing in this
+repo ever installed one. It passed here and on the runner because both images
+happen to ship it. **Fourth instance of the same class in one session**, and the
+cheapest possible fix: `aqua:jqlang/jq` is one static binary, so the pin costs a
+download. Six places use it — three hooks, three recipes.
+
+**Python is not pinned, and the asymmetry with jq is the argument.** It is
+already load-bearing and already unpinned: `check-spend-selftest` runs
+`check-spend.py`, `just question` runs the parser, and a recipe carries an inline
+`#!/usr/bin/env python3`. This machine has 3.12 and the container has 3.11.2 —
+two versions, in the two environments the gate runs in, nobody the wiser, because
+the container has never reached step 38. By §173.6's own logic that is the next
+one to bite.
+
+It was still not pinned, for a reason and not an oversight. `check-spend.py` was
+run under the container's 3.11 before this was decided: **60 classifier cases,
+all as expected.** So the divergence is hypothetical where awk's was measured,
+and the fix is not a download but an interpreter build on every cold runner —
+against §172, where runner minutes are the binding constraint and the month's
+arithmetic already sits at ~1270 of 2000. §13 says not to build the part before
+the consumer names itself, and no consumer has. **What pins it is the first
+python failure that differs across the two, or a month where minutes stop being
+the constraint** — and the evidence of the 3.11 run is written here so that
+whoever pins it is not re-deriving this.
+
+**The awk is not rewritten in python.** There is one awk *script*, 196 lines, and
+it is the one this section already fixed and now proves under four
+implementations. The other 65 uses in the justfile are one-liners of the shape
+`{print $1}` and `/^worktree /{print $2}` — POSIX, and the same under every awk
+there is. A rewrite would spend the proof to buy a property one line already
+bought. The script's own header names the thing that actually retires it:
+rustc's `non_exhaustive_omitted_patterns`, unstable on the pinned 1.96. Port it
+if it needs substantial work before that lint stabilises; not before.
+
+**A fifth, found while writing this.** `check-worktree-create.sh` tested its lock
+reason for non-ASCII with `grep -qP`. `-P` is GNU grep's, and a grep without it
+exits non-zero on the *option* — which that `if` reads as "found nothing" and
+passes. Silently, in the safe-looking direction, exactly like `COUNT=0`. It is a
+`tr -d '\000-\177'` now, verified to catch what the old one caught.
+
+And a defect in the same file that cost a round trip: it ran the hook with
+`2>/dev/null`. The missing `jq` announced itself on stderr every time and was
+discarded every time, so a reader got three symptoms and no cause. Stderr is
+kept now and printed when a check fails. **A selftest that hides why it failed is
+worse than no selftest, because it is believed.**

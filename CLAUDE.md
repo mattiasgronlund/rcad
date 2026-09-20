@@ -316,6 +316,13 @@ so it is the second opinion that survives a spent allowance; run it before
 handing work over while the runner is down. It is cold by construction, so pass
 `run_in_background: true`.
 
+**On its first working run it found a fourth.** The container's `awk` is mawk,
+not gawk, and the composite half of `check-wildcards` was opening its matches on
+a GNU-only word boundary — so it read every file and counted 0 of 4, silently,
+here green and there red on the same commit. `docs/decisions.md` §173. A check
+that answers a property of the environment rather than of the tree is the class,
+and taking the environment away is still the only way anyone has found one.
+
 **Run it as `just gate quiet`, in one plain Bash call, with `timeout` set to
 600000 and no redirect.** `quiet` prints one line per step, the failing step's
 own last sixty lines, and the summary block — about fifty lines in all — and
