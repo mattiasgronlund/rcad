@@ -138,13 +138,52 @@
 # `check-*` recipe joins `gate` and is enforced here without anyone editing
 # this workflow, which is the failure that recipe exists for. Splitting the four
 # back out would buy prettier step names and give that up.
+#
+# **This job is metered, and on 2026-09-20 it stopped.** Six pushes to `main`
+# produced jobs with zero steps, failing in two seconds, annotated *"The job was
+# not started because recent account payments have failed or your spending limit
+# needs to be increased."* Nothing in the tree was wrong; the runner never
+# started. `rcad` is private and the account is on GitHub Free — 2000 minutes a
+# month — and 171 runs between 2026-09-04 and 09-20 had spent **2271**.
+#
+# So this file now carries two cuts, and `ci-docs.yml` is the third. Neither cut
+# changes what a run checks; both change which runs happen. `docs/decisions.md`
+# §172 has the arithmetic and the two things that were given up.
+#
+# **`concurrency` below cancels a run its own branch has already superseded.**
+# 68 of those 171 runs — 40% — were obsolete before they finished, a later push
+# having landed inside their 13 minutes. What it costs is that a superseded
+# commit never gets a green of its own, so "CI is green on `<sha>`" can now only
+# be said of a tip. That is the weaker half of a rule this repo already keeps
+# ("gate the tree you merged, not the one you tested"), and the tip is the tree
+# that is on `main`.
+#
+# **`paths-ignore` sends prose to `ci-docs.yml` instead.** 43 of `main`'s last
+# 150 commits touched only `docs/` and `*.md`, 42 of them `docs/decisions.md`,
+# and each bought a full compile of source that had not moved. That is sound
+# only because no `.md` reaches rustc here: there is no `#![doc =
+# include_str!("../README.md")]` in this workspace, so no prose file is an input
+# to a build. Check that before widening either list — `grep -rn 'include_str!'
+# --include=*.rs crates/` — because the idiom is common and would make a
+# README a compile input overnight.
+#
+# A push touching prose *and* source matches neither filter's exclusion and runs
+# **both** arms. That is a deliberate ~1 minute of overlap rather than a third
+# filter: `paths` and `paths-ignore` cannot both be given for one event, and the
+# arm that would have to guess is the expensive one.
 
 name: CI
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '**.md']
   pull_request:
+    paths-ignore: ['docs/**', '**.md']
 
 env:
   CARGO_TERM_COLOR: always
