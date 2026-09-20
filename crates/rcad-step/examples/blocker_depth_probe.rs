@@ -140,6 +140,7 @@ fn report(findings: &[FileFinding]) {
     report_pricing_table(findings);
     report_co_occurrence(findings);
     report_fatal_bucket(findings);
+    report_family_union(findings);
 }
 
 /// Deliverable 1: per file, the set of distinct refusal reasons it produces.
@@ -286,5 +287,125 @@ fn report_fatal_bucket(findings: &[FileFinding]) {
     sorted.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     for (reason, count) in sorted {
         println!("    {count:>4}  {reason}");
+    }
+}
+
+/// Whether a reason means "this kernel does not hold this curve, surface or
+/// loop type" — the three [`rcad_step::Refusal`] variants named
+/// `ASurfaceThisKernelDoesNotHold`, `ACurveThisKernelDoesNotHold` and
+/// `ALoopThisReaderDoesNotWalk`, told apart from every other reason by the
+/// exact phrase `kind_of` builds for each. `APlacementThisReaderCannotApply`
+/// says "cannot apply", not "does not hold", and names a transform rather
+/// than a curve/surface/loop type, so it is not in this family.
+fn is_unheld_geometry_reason(reason: &str) -> bool {
+    reason.starts_with("a surface this kernel does not hold: ")
+        || reason.starts_with("a curve this kernel does not hold: ")
+        || reason.starts_with("a loop this reader does not walk: ")
+}
+
+/// Deliverable 6: §171.3 says the whole B-spline family's worth "cannot be
+/// computed from this run" because co-occurrence (deliverable 4) is pairwise,
+/// not a union. This answers that question directly: for a nested set of
+/// unheld-geometry reasons, how many files have **every** reason they hold —
+/// `reasons` and `fatal` both — inside that set. Such a file is fully freed by
+/// implementing exactly that set; a file with even one reason outside the set
+/// is not freed by it, no matter how many reasons inside the set it also has.
+///
+/// A file that already imports contributes nothing here — there is nothing
+/// left to free — and is filtered out before any set is compared against
+/// (`Import::read` agreeing on this, per `probe_one_file`'s assertion).
+fn report_family_union(findings: &[FileFinding]) {
+    println!("\n=== 6) unheld-geometry family: nested union pricing (§171.3) ===");
+
+    let mut all_family_reasons: BTreeSet<&str> = BTreeSet::new();
+    for finding in findings {
+        for reason in finding.reasons.iter().chain(finding.fatal.iter()) {
+            if is_unheld_geometry_reason(reason) {
+                all_family_reasons.insert(reason.as_str());
+            }
+        }
+    }
+
+    let s1: BTreeSet<&str> =
+        BTreeSet::from(["a curve this kernel does not hold: B_SPLINE_CURVE_WITH_KNOTS"]);
+    let mut s2 = s1.clone();
+    s2.insert("a surface this kernel does not hold: B_SPLINE_SURFACE_WITH_KNOTS");
+    let mut s3 = s2.clone();
+    s3.insert("a surface this kernel does not hold: SURFACE_OF_REVOLUTION");
+    let mut s4 = s3.clone();
+    s4.insert("a surface this kernel does not hold: BOUNDED_SURFACE");
+    let mut s5 = s4.clone();
+    s5.insert("a loop this reader does not walk: VERTEX_LOOP");
+    let s6 = all_family_reasons;
+
+    println!("  S6 — every unheld-geometry reason this run emitted:");
+    for reason in &s6 {
+        println!("    {reason}");
+    }
+
+    let sets: [(&str, &BTreeSet<&str>); 6] = [
+        ("S1 = {B_SPLINE_CURVE_WITH_KNOTS}", &s1),
+        ("S2 = S1 + B_SPLINE_SURFACE_WITH_KNOTS", &s2),
+        ("S3 = S2 + SURFACE_OF_REVOLUTION", &s3),
+        ("S4 = S3 + BOUNDED_SURFACE", &s4),
+        ("S5 = S4 + VERTEX_LOOP", &s5),
+        ("S6 = every unheld-geometry reason (see list above)", &s6),
+    ];
+
+    let blocked_but_reasonless: usize = findings
+        .iter()
+        .filter(|finding| !finding.imports && finding.reasons.is_empty() && finding.fatal.is_empty())
+        .count();
+    if blocked_but_reasonless > 0 {
+        println!(
+            "  ({blocked_but_reasonless} file(s) do not import and yet the probe found no reason \
+             and no fatal for them — excluded from every set below; report this, it means probe \
+             and Import::read disagree on a file the assertion in probe_one_file did not catch)"
+        );
+    }
+
+    println!("  files fully freed by holding every reason in the set:");
+    for (label, set) in &sets {
+        let mut by_family: BTreeMap<&str, usize> = BTreeMap::new();
+        for finding in findings {
+            if finding.imports || (finding.reasons.is_empty() && finding.fatal.is_empty()) {
+                continue;
+            }
+            let all: Vec<&str> = finding
+                .reasons
+                .iter()
+                .map(String::as_str)
+                .chain(finding.fatal.iter().map(String::as_str))
+                .collect();
+            if all.iter().all(|reason| set.contains(reason)) {
+                *by_family.entry(finding.family).or_default() += 1;
+            }
+        }
+        let kicad = by_family.get("kicad").copied().unwrap_or(0);
+        let nist = by_family.get("nist").copied().unwrap_or(0);
+        println!("    {label}: kicad={kicad:>4}  nist={nist:>3}  combined={:>4}", kicad + nist);
+    }
+
+    println!(
+        "\n  after S6 alone is implemented, the non-family reasons still held by files S6 does \
+         not fully free:"
+    );
+    let mut leftover_histogram: BTreeMap<usize, usize> = BTreeMap::new();
+    for finding in findings {
+        if finding.imports {
+            continue;
+        }
+        let non_family_count = finding
+            .reasons
+            .iter()
+            .chain(finding.fatal.iter())
+            .filter(|reason| !s6.contains(reason.as_str()))
+            .count();
+        if non_family_count > 0 {
+            *leftover_histogram.entry(non_family_count).or_default() += 1;
+        }
+    }
+    for (count, files) in &leftover_histogram {
+        println!("    {count:>3} other reason(s) remaining: {files:>4} files");
     }
 }
