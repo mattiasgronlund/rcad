@@ -2095,6 +2095,29 @@ check-claim-section-selftest:
     [ "$got" = "12 13 14 15 16 17 18 19 " ] || {
         echo "eight claims at once got '$got', want 12 to 19 once each"; exit 1; }
 
+    # Both shapes, which is the whole of §179.2's second point. Everything above
+    # is the old single file, because that is what a lane branch cut before the
+    # split still carries; these two are the new directory, committed on a
+    # branch and uncommitted in a worktree. A recipe that had learnt the new
+    # shape and forgotten the old would pass every case above and hand out a
+    # number a branch already holds — so the old cases are the test for the new
+    # code just as much as these are.
+    g checkout -q elsewhere
+    mkdir -p "$repo/docs/decisions.d"
+    printf '%s\n' "## 40. Split, on a branch" > "$repo/docs/decisions.d/040-split.md"
+    g add docs/decisions.d/040-split.md
+    g commit -q -m forty
+    g checkout -q main
+    got=$(claim 'past a split branch')
+    [ "$got" = "41" ] || {
+        echo "a claim got '$got', want 41: one past §40 in the branch's decisions.d"; exit 1; }
+
+    mkdir -p "$dir/lane/docs/decisions.d"
+    printf '%s\n' "## 60. Split, not committed" > "$dir/lane/docs/decisions.d/060-split.md"
+    got=$(claim 'past a split worktree')
+    [ "$got" = "61" ] || {
+        echo "a claim got '$got', want 61: one past the uncommitted §60 in decisions.d"; exit 1; }
+
     if claim '' >/dev/null 2>&1; then
         echo "claim-section accepted a claim for nothing"; exit 1
     fi
