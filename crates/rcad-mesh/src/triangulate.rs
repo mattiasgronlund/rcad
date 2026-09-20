@@ -280,10 +280,7 @@ fn refuse_loops_that_touch(
 
     for &(from, to) in &sides {
         for (corner, at) in corners.iter().enumerate() {
-            if loop_of[corner] == loop_of[from]
-                || *at == corners[from]
-                || *at == corners[to]
-            {
+            if loop_of[corner] == loop_of[from] || *at == corners[from] || *at == corners[to] {
                 continue;
             }
             match orient2d(corners[from], corners[to], *at) {

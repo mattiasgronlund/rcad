@@ -134,7 +134,11 @@ fn twice_the_area_of_the_triangles(patch: &Patch) -> f64 {
 /// cannot be two indices to a triangle. That is the identity map for every
 /// shape here but the pinched ones.
 fn every_side(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> HashSet<(u32, u32)> {
-    let corners: Vec<[f64; 2]> = outer.iter().chain(holes.iter().flatten()).copied().collect();
+    let corners: Vec<[f64; 2]> = outer
+        .iter()
+        .chain(holes.iter().flatten())
+        .copied()
+        .collect();
     let stands_for = the_first_corner_in_each_place(&corners);
     let mut sides = HashSet::new();
     let mut first = 0u32;
