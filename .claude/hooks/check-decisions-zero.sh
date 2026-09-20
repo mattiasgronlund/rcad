@@ -65,15 +65,26 @@ reviewed: 2026-09-20
 ## 1. Something else
 MD
 
+# The whole field, not a substring of it. `additionalContext` is the one thing
+# this hook puts in front of a model, so "contains the headroom line" is the
+# wrong question — it passes just as happily when the line arrives with three
+# lines of junk stapled to it, which is exactly what this fixture used to do
+# and nothing noticed. The fixture repo has no `tooling/hub-align/align.sh`,
+# so `hub_aligned` writes `No such file or directory` to stderr three times on
+# every run through here; keeping that fixture unfixed is the point, because
+# it makes this an assertion that the hook drops stderr rather than a wish.
+want_clean='`just check-where-the-work-is` ran on 000-where-the-work-is.md as part of this write: §0 is 3 of 50 non-blank lines, reviewed 2026-09-20, every section it cites exists.'
+
 total=$((total + 1))
 out=$(payload "$zero" | "$hook" 2>"$work/err")
 status=$?
+got=$(jq -r '.hookSpecificOutput.additionalContext // empty' <<<"$out" 2>/dev/null)
 if [ "$status" -ne 0 ]; then
 	wrong "a clean §0 exited $status, wanted 0 — stderr: $(cat "$work/err")"
-elif ! grep -qF '"additionalContext"' <<<"$out"; then
+elif [ -z "$got" ]; then
 	wrong "a clean §0 did not carry additionalContext: $out"
-elif ! grep -qF '§0 is 3 of 50 non-blank lines, reviewed 2026-09-20, every section it cites exists.' <<<"$out"; then
-	wrong "a clean §0's headroom line was not the exact §178.4 shape: $out"
+elif [ "$got" != "$want_clean" ]; then
+	wrong "$(printf 'a clean §0 did not carry exactly the §178.4 line:\n--- got ---\n%s\n--- want ---\n%s' "$got" "$want_clean")"
 fi
 
 # Three lines over the cap: the heading, `reviewed:`, and 51 filler lines is

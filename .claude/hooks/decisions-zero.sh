@@ -43,11 +43,23 @@ if ! command -v just >/dev/null 2>&1; then
 	exit 2
 fi
 
-out=$(cd "$repo" && just check-where-the-work-is 2>&1)
+# stdout and stderr are kept apart, and that is the whole of what the clean
+# line is worth. The recipe says everything it has to say about §0 on stdout;
+# stderr is whatever `just` said on the way to running it, and a bare `just`
+# here evaluates every top-level assignment first (§146) — `hub_aligned`
+# shells out to a script, and a tree that does not have it gets three lines of
+# `No such file or directory` for free. Folded into one stream, those land
+# inside `additionalContext`, which is the single field this hook exists to
+# keep to a single line. A failure is the other way round: there stderr is the
+# diagnosis, so the block carries both.
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+out=$(cd "$repo" && just check-where-the-work-is 2>"$err")
 status=$?
 
 if [ "$status" -ne 0 ]; then
-	jq -n --arg reason "$(printf '`just check-where-the-work-is` found a problem after this write to %s:\n\n%s' "$file" "$out")" \
+	detail=$(cat "$err"; printf '%s\n' "$out")
+	jq -n --arg reason "$(printf '`just check-where-the-work-is` found a problem after this write to %s:\n\n%s' "$file" "$detail")" \
 		'{decision: "block", reason: $reason}'
 	exit 0
 fi

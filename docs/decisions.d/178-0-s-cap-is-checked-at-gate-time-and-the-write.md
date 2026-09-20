@@ -155,19 +155,39 @@ section a session writes or closes, which §179's own split did 179 times over.
 `check-decisions-zero.sh` pins the narrow match: a write to
 `docs/decisions.d/050-something.md` is silent, exit 0.
 
-**Measured cost.** Five runs of the hook against the real §0 file, timed with
-`date +%s.%N` around each call: 0.394s, 0.429s, 0.410s, 0.408s, 0.406s — 0.39
-to 0.43s, under the "about half a second" `check-hooks` asked to be told
-about. Almost all of it is `just` evaluating its top-level assignments before
-any recipe runs — `hub_aligned`'s git calls, the plugin-root lookups — the
-same cost §146 already named; `check-where-the-work-is` alone was clocked at
-0.21s in `gate`'s own comment. Left as a shell-out rather than inlined, per
-§178.3 and §178.6's own instruction not to chase this number by duplicating
-the awk.
+**Measured cost: 0.42 s, and it is not where §178.6 expected.** Three runs of
+the hook end to end against the real §0 file: 0.417 s, 0.414 s, 0.427 s. Under
+the "about half a second" §178.6 asked to be told about, so it stays a
+shell-out and the awk stays in one place (§178.3).
 
-**The literal clean line**, from a real `Edit` of the real §0 file in this
-session — it happens to be exactly saturated today, so this is the file's true
-state and not a fixture:
+**The lane's first attribution of that number was wrong, and the merge caught
+it.** It read the 0.42 s as `just` evaluating its top-level assignments before
+any recipe runs — `hub_aligned`'s git calls, which §146 does make every `just`
+in this repo pay — and cited `gate`'s own comment for a `check-where-the-work-is`
+of 0.21 s. Split apart at the merge, on the same tree, three runs each:
+
+    just --evaluate (every top-level assignment)   0.028 s  0.027 s  0.027 s
+    just decisions-all                             0.190 s  0.176 s  0.178 s
+    _where-the-work-is-check over that output      0.191 s  0.192 s  0.194 s
+    the hook, end to end                           0.417 s  0.414 s  0.427 s
+
+So the assignments are 0.027 s of it — about 6% per `just`, and the hook spends
+three of them, so under a fifth all told. **The rest is the check**, and the
+check is what §179 made expensive: `decisions-all` concatenates 41 020 lines out
+of 179 files, and the citation arm then greps that concatenation once for each
+of the **72 distinct sections §0 cites**. Neither half existed in this shape
+when the 0.21 s was measured — that figure is at `justfile:164`, it predates the
+split, and the same recipe clocks 0.41 s here now. The claim it stands in is
+still true (every step `gate-docs` keeps is under a second), so the row is named
+here rather than quietly edited from one measurement of one of its six entries.
+
+A number restated from a comment is not a number anyone ran. This one was two
+weeks stale and pointed the explanation at the wrong half of the work.
+
+**The literal clean line**, from the payload a `PostToolUse` call would send,
+fed to the hook against the real §0 file — not a fixture, and not Claude Code
+invoking the hook either; see the registration paragraph below. §0 happens to
+be exactly saturated today, which is why the headroom reads 50 of 50:
 
     §0 is 50 of 50 non-blank lines, reviewed 2026-09-20, every section it cites exists.
 
@@ -176,6 +196,31 @@ reverted before committing (`git checkout -- docs/decisions.d/000-where-the-work
 
     §0 is 53 non-blank lines; the cap is 50, because a summary nobody re-reads is not one
     ^ cut 3 non-blank lines, in one pass: trimming by eye takes two to four (§102.3)
+
+**The selftest was passing over a dirty field, and that is the second thing
+the merge found.** Its clean case asked whether `additionalContext` *contained*
+the headroom line. It did — with three lines of
+
+    bash: /tmp/tmp.4LQPW0TnZ0/rcad/tooling/hub-align/align.sh: No such file or directory
+
+stapled in front of it, on every run, unnoticed. The fixture repo is built from
+a copy of the `justfile` alone, so `hub_aligned` cannot find the script it
+shells out to (§146), and the hook was folding stderr into stdout with `2>&1`.
+Nothing was broken in the real repo, where that script exists — which is
+exactly why a substring assertion could not see it.
+
+Two changes, and the second is the one that matters. The hook now keeps the
+streams apart: stdout carries the headroom line, stderr is dropped on the clean
+path and carried on the failing one, where it is the diagnosis. And the
+selftest asserts the **whole** of `additionalContext`, byte for byte. The
+fixture is deliberately left without `tooling/hub-align/`, so it goes on
+producing that stderr — which turns "the hook drops it" from a wish into a
+test. Reverting the hook to `2>&1` fails that case, printed got-against-want;
+restoring it passes 4 of 4.
+
+`additionalContext` is the single field this hook exists to fill, and it is
+read by a model rather than by a person. "Contains the line" is the wrong
+question to ask about it.
 
 **Mid-session registration did not take effect.** After the `PostToolUse`
 entry was added to `.claude/settings.json`, a real `Edit` of §0 later in this
