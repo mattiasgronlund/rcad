@@ -63,7 +63,7 @@ list:
 # "a new one, or a new variant reaching an old one" — a sentence about the tree,
 # when what moved was the scan. That is the wrong place to start reading, and it
 # is where a container's mawk put one session. Prove the instrument, then read it.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards-selftest check-wildcards check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-gate-docs-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards-selftest check-wildcards check-ignored check-hooks check-skills-selftest check-skills check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-gate-docs-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
 
 # The steps that cost a runner money, and that a change touching only `docs/`
 # and `*.md` cannot move either way. `gate-docs` runs `gate_steps` **minus**
@@ -1126,6 +1126,142 @@ check-hooks:
     .claude/hooks/check-worktree-create.sh
     .claude/hooks/check-session-start-hub.sh
 
+# Every `just` recipe and every repo path a project skill names still exists.
+#
+# A skill is prose that tells a session which commands to run, so it rots the
+# way every document naming a recipe rots — and this repo has already paid for
+# that once: `default` became `gate` on 2026-09-08 and every sentence naming it
+# went quietly wrong, including ones in the shared skills. `check-decisions`
+# holds that file to its own numbering for the same reason; this is that rule
+# pointed at `.claude/skills/`, which is where a skill too repo-specific to give
+# away has to live (§64.4).
+#
+# **Only code spans are read.** "just" is an ordinary English word, and a prose
+# sentence containing it would otherwise invent a recipe name and fail here for
+# nothing. A command a skill means literally is one it wrote in backticks or in
+# a fenced block — the same rule the reader follows, so the check and the reader
+# cannot disagree about what was a claim.
+#
+# A path is checked only when it carries a slash and an extension and no `<`, so
+# `crates/<c>/src` is left alone: a placeholder is not a claim about the disk.
+#
+# Only public recipes are known, because `--summary` is what lists them. A skill
+# naming a `[private]` recipe fails here, which is the right answer — those are
+# the selftests, and a skill has no business sending a session into one.
+[doc("Every recipe and path a .claude/skills SKILL.md names still exists.")]
+check-skills:
+    @{{ just_executable() }} _skills-check '.claude/skills'
+
+# Held apart from the recipe above so the selftest can run it over fixtures
+# whose answer is known, rather than over whatever the skills happen to say.
+[private]
+_skills-check dir:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir='{{dir}}'
+    if [ ! -d "$dir" ]; then
+        echo "no $dir, so there are no project skills to check"
+        exit 0
+    fi
+    files=$(find "$dir" -name SKILL.md | sort)
+    if [ -z "$files" ]; then
+        echo "no SKILL.md under $dir, so there are no project skills to check"
+        exit 0
+    fi
+    recipes=$({{ just_executable() }} --justfile {{ justfile() }} --summary 2>/dev/null \
+        | tr ' ' '\n' | grep . | sort -u)
+    if [ -z "$recipes" ]; then
+        echo "just --summary listed no recipes, so every name a skill gave would pass"
+        exit 1
+    fi
+    spans=0
+    bad=0
+    for f in $files; do
+        claims=$(awk '
+            /^[ \t]*```/ { fence = !fence; next }
+            fence { print; next }
+            {
+                line = $0
+                while (match(line, /`[^`]+`/)) {
+                    print substr(line, RSTART + 1, RLENGTH - 2)
+                    line = substr(line, RSTART + RLENGTH)
+                }
+            }
+        ' "$f")
+        spans=$((spans + $(printf '%s\n' "$claims" | grep -c .)))
+        named=$(printf '%s\n' "$claims" \
+            | awk '{ for (i = 1; i < NF; i++) \
+                if ($i == "just" && $(i + 1) ~ /^[a-z][a-z0-9-]*$/) print $(i + 1) }' \
+            | sort -u)
+        for r in $named; do
+            printf '%s\n' "$recipes" | grep -qx "$r" && continue
+            echo "$f says \`just $r\`, which this justfile does not define"
+            bad=1
+        done
+        paths=$(printf '%s\n' "$claims" \
+            | awk '{ for (i = 1; i <= NF; i++) { t = $i; sub(/[,;:)]+$/, "", t); \
+                if (t ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]*\.[a-z]+$/ && t !~ /</) print t } }' \
+            | sort -u)
+        for p in $paths; do
+            [ -e "$p" ] && continue
+            echo "$f names $p, which is not in the tree"
+            bad=1
+        done
+    done
+    if [ "$spans" -eq 0 ]; then
+        echo "no code spans in any SKILL.md under $dir, so this scan compared nothing"
+        echo "a skill with no backticks and no fenced block is not how any of them are written"
+        exit 1
+    fi
+    [ "$bad" -eq 0 ] || exit 1
+
+# Pins the scan against fixtures rather than against the skills in this tree, so
+# it stays proven on a day they are rewritten.
+#
+# The passing fixture carries the two cases that would make this check worse than
+# nothing if the code-span rule broke: an ordinary English "just" before a word
+# that is not a recipe, and a `<`-placeholder path. Both are in the file that has
+# to pass, so either one failing fails here rather than in a lane's brief.
+[private]
+check-skills-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    j="{{ just_executable() }} --justfile {{ justfile() }}"
+
+    mkdir -p "$dir/good"
+    cat > "$dir/good/SKILL.md" <<'MD'
+    Run `mise exec -- just gate quiet`, then read .claude/workflows/lanes.js.
+    You can just read it first. The sources are crates/<c>/src/thing.rs.
+    MD
+    $j _skills-check "$dir" || { echo "a skill naming only real things failed"; exit 1; }
+
+    mkdir -p "$dir/bad-recipe"
+    printf 'Run `just no-such-recipe`.\n' > "$dir/bad-recipe/SKILL.md"
+    if $j _skills-check "$dir" >/dev/null 2>&1; then
+        echo "a skill naming a recipe this justfile does not define passed"; exit 1
+    fi
+    rm -rf "$dir/bad-recipe"
+
+    mkdir -p "$dir/bad-path"
+    printf 'Read `docs/no-such-file.md` first.\n' > "$dir/bad-path/SKILL.md"
+    if $j _skills-check "$dir" >/dev/null 2>&1; then
+        echo "a skill naming a path that is not in the tree passed"; exit 1
+    fi
+    rm -rf "$dir/bad-path"
+
+    rm -rf "$dir/good"
+    mkdir -p "$dir/silent"
+    printf 'No code spans at all in this one.\n' > "$dir/silent/SKILL.md"
+    if $j _skills-check "$dir" >/dev/null 2>&1; then
+        echo "a scan that found no code spans passed, having compared nothing"; exit 1
+    fi
+
+    if ! $j _skills-check "$dir/no-such-dir" | grep -q 'no project skills'; then
+        echo "a missing skills directory is not the same as a broken scan"; exit 1
+    fi
+
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
 # Both halves are asserted, because each one alone passes for the wrong reason.
@@ -1207,8 +1343,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "39" ]; then \
-        echo "found $n check-* recipes, expected 39"; \
+    if [ "$n" != "41" ]; then \
+        echo "found $n check-* recipes, expected 41"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
