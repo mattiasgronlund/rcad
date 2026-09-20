@@ -55,13 +55,195 @@ list:
 # whatever the failing step said and stopped — and the summary block below, the
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
-gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
+gate_steps := "check-plugins check check-fuzz-builds check-enums check-wildcards check-wildcards-selftest check-ignored check-hooks check-kache-off-on-ci check-gate-runs-every-check check-gate-summary-selftest check-gate-docs-selftest check-lanes-selftest check-release-lanes-selftest check-status-selftest check-plan check-plan-selftest check-hub check-hub-selftest check-hub-align-selftest check-clean-targets-selftest check-prune-worktrees-selftest check-decisions check-decisions-selftest check-claim-section-selftest check-where-the-work-is check-src-selftest check-recipe-selftest check-questions-selftest check-corpus check-corpus-selftest check-coverage-selftest check-fuzz-overnight-selftest check-fuzz-watermark-selftest check-fuzz-triage-selftest check-fuzz-unit check-fuzz-unit-selftest check-spend-selftest lint test check-release-build check-t-selftest deny"
+
+# The steps that cost a runner money, and that a change touching only `docs/`
+# and `*.md` cannot move either way. `gate-docs` runs `gate_steps` **minus**
+# this list, so a new `check-*` recipe joins the docs arm by default and only an
+# explicitly named step is left out — the same direction
+# `check-gate-runs-every-check` guards, for the same reason. A list of what to
+# keep would have quietly dropped each new check from the docs arm instead.
+#
+# Two reasons land a step here, and "metered" rather than "compiling" is the
+# name because of the second:
+#
+#   It needs a build. `check`, `lint`, `test`, `check-release-build`,
+#   `check-fuzz-builds` and `check-fuzz-unit` obviously; `check-wildcards`
+#   because it reads clippy's output; `deny` because it resolves the dependency
+#   graph, and a prose commit cannot change `Cargo.lock`.
+#
+#   It needs the STEP corpus. `check-corpus` is 0.16 s and compiles nothing, and
+#   it is here anyway: it **fails** when `RCAD_STEP_CORPUS` is not a directory,
+#   by design (§44.10), and putting a corpus there is a 119 MiB fetch. A prose
+#   commit cannot change the corpus or `corpus/manifest.sha256`, so the arm that
+#   pays for one is the arm that might have broken it.
+#   `check-corpus-selftest` stays in the docs arm, because it builds its own
+#   fixture and never reads the real corpus.
+#
+# On a metered runner this is 1m07s against 9m46s. `docs/decisions.md` §172.
+gate_metered_steps := "check check-fuzz-builds check-wildcards lint test check-release-build check-fuzz-unit deny check-corpus"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
 # point a nested run somewhere else: the selftest runs inside the gate, and a
 # fixed path would have it truncate the log its own parent was still writing.
 gate_log := "target/last-gate.log"
+
+# The gate a prose commit needs: `gate_steps` minus `gate_metered_steps`,
+# driven through `gate` itself so the summary block and `quiet` come for free.
+#
+# **This exists because the runner is metered and half of `main` is prose.** Of
+# `main`'s last 150 commits, 43 touched only `docs/` and `*.md` — 42 of them
+# `docs/decisions.md` — and each one bought a 13-minute compile of a tree whose
+# source had not moved. Every step it keeps finishes in under a second:
+# `check-decisions` 0.08 s, `check-plan` 0.14 s, `check-where-the-work-is`
+# 0.21 s, `check-enums` 0.08 s, `check-ignored` 0.54 s, `check-corpus` 0.16 s.
+#
+# It is the arm `ci.yml` picks by path, and the choice is made there rather than
+# here: a recipe cannot see what a push touched, and one that guessed from
+# `git diff HEAD~1` would be wrong on the first merge commit it met.
+#
+# Running the docs arm by hand on a change that touches `.rs` is not guarded
+# against, and deliberately: the steps it drops are the ones that cost money, so
+# the way to be sure is `just gate`, and this recipe says which steps it dropped
+# so that a reader of the output can see what was not asked.
+[doc("The gate a docs-only change needs: everything that does not compile. `quiet` works here too.")]
+gate-docs mode="loud":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    steps=""
+    dropped=""
+    for step in {{ gate_steps }}; do
+        skip=""
+        for heavy in {{ gate_metered_steps }}; do
+            if [ "$step" = "$heavy" ]; then skip=yes; break; fi
+        done
+        if [ -n "$skip" ]; then dropped="$dropped $step"; else steps="$steps $step"; fi
+    done
+    # An empty list would run nothing and exit 0, which is the one answer this
+    # must never give: a gate that checked nothing reads exactly like a pass.
+    if [ -z "$steps" ]; then
+        echo "gate-docs would run no steps at all, which would pass by checking nothing" >&2
+        exit 2
+    fi
+    echo "gate-docs: dropped${dropped:- nothing}"
+    exec {{ just_executable() }} --set gate_steps "${steps# }" gate '{{ mode }}'
+
+# The gate with what this machine supplies taken away, which is the one thing a
+# local run cannot otherwise be: a fresh clone, in a container, with no `HOME`
+# from here, no `CLAUDE_PLUGINS_ROOT`, no sibling hub and no warm `target/`.
+#
+# **This is `docs/decisions.md` §77.6's manoeuvre as a recipe.** Three red runs
+# in 2026-09 were checks passing for a property of the environment they ran in
+# rather than of the tree, and the way all three were found was to take away what
+# the environment supplied and run it again. That was done by hand each time.
+#
+# It is not a replacement for the runner and does not pretend to be: it runs on
+# the same kernel, the same docker daemon and the same disk, so it cannot catch
+# what only a different machine would. What it does catch is the whole class the
+# runner was bought for, and it costs no minutes — which is why it is the arm
+# that survives a spent Actions allowance. §172.
+#
+# `check-plugins`, the plugin arm of `check-hooks` and `check-questions-selftest`
+# all skip in here, because there is no Claude Code config directory. That is
+# them working, not them broken: the predicate is that directory and never `CI`,
+# `docs/decisions.md` §77.
+#
+# **The tools live in a named docker volume, the tree does not.** `mise install`
+# builds eight `cargo:` tools from source, which is two minutes for
+# `cargo-nextest` alone and dwarfs the gate it is setting up for. The volume
+# keeps them across runs; the clone is thrown away every time. Taking `HOME`
+# away is about this machine's `~/.claude` and its build cache, not about
+# rebuilding `cargo-deny` on every run, and nothing of this repo's own
+# compilation is in there. `docker volume rm rcad-gate-fresh-tools` resets it.
+#
+# Cold by construction, so expect the nine minutes the `gate` doc names rather
+# than the median 98 seconds, and more than that on the first run of all. Pass
+# `run_in_background` and be woken — and read the output file rather than piping
+# it, because a pipe hands back the pipe's exit code and a failed run then reads
+# as a pass. That happened on this recipe's own first run.
+[doc("The gate in a container on a fresh clone, with this machine's environment taken away.")]
+gate-fresh image="rust:1-bookworm":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v docker >/dev/null || {
+        echo "gate-fresh needs docker, which is not on PATH" >&2; exit 2; }
+    corpus="$RCAD_STEP_CORPUS"
+    [ -d "$corpus" ] || {
+        echo "gate-fresh needs the STEP corpus at $corpus; just fetch-corpus builds one" >&2
+        exit 2; }
+    # **A clone carries commits, so uncommitted work is invisible to it.** Left
+    # unguarded this is the worst answer a gate can give: a green for a tree
+    # nobody asked about, indistinguishable from a green for the tree in front of
+    # you. Refusing is the only honest option, because the alternative — copying
+    # the dirty tree in — would stop this being a *fresh* clone, which is the one
+    # thing the recipe is for.
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+        echo "gate-fresh clones, so it would gate HEAD and not your changes:" >&2
+        git status --short --untracked-files=no >&2
+        echo "commit first — a WIP commit is enough, and the branch is still on disk" >&2
+        exit 2
+    fi
+    # An untracked file is invisible to a clone for the same reason, but it is
+    # also not part of the commit anyone is about to hand over, so gating without
+    # it is right rather than wrong. What it must not do is pass *silently*: a
+    # new `.rs` file nobody has `git add`ed is exactly the work a reader of this
+    # green would assume was covered. So it is named, and the run carries on.
+    untracked=$(git ls-files --others --exclude-standard)
+    if [ -n "$untracked" ]; then
+        echo "gate-fresh: not in the clone, because they are not committed —" >&2
+        printf '  %s\n' $untracked >&2
+        echo "  this gate is of HEAD; git add them if they were meant to be in it" >&2
+    fi
+    # The clone is made here rather than in the container so that the container
+    # needs no credentials and no network for it. `--no-local` forces a real
+    # object transfer: a local clone hardlinks into the hub's object store, and
+    # a container writing through a hardlink would be writing into it.
+    work=$(mktemp -d)
+    trap 'chmod -R u+w "$work" 2>/dev/null || true; rm -rf "$work"' EXIT
+    git clone --no-local --quiet --single-branch "$(git rev-parse --show-toplevel)" "$work/rcad"
+    echo "gate-fresh: cloned $(git -C "$work/rcad" rev-parse --short HEAD) into a single-worktree tree"
+    # `HOME` inside is a scratch directory, so nothing of this machine's
+    # `~/.claude`, `~/.cargo` or `~/.rustup` is visible. `CI=true` is what
+    # `mise.toml` reads to empty `RUSTC_WRAPPER`, so the build cache — which
+    # lives in the `HOME` we just took away — is not asked for.
+    exec docker run --rm -t \
+        -v "$work/rcad:/rcad" \
+        -v "$corpus:/corpus:ro" \
+        -v rcad-gate-fresh-tools:/tmp/home/.local/share/mise \
+        -w /rcad \
+        -e HOME=/tmp/home \
+        -e CI=true \
+        -e RCAD_STEP_CORPUS=/corpus \
+        -e CARGO_TERM_COLOR=always \
+        -e RUST_BACKTRACE=1 \
+        '{{ image }}' \
+        bash -eu -c '
+            mkdir -p /tmp/home
+            # `check-corpus-selftest` refuses without a locale that collates by
+            # dictionary order, because the collation bug it exists to catch is
+            # invisible under a codepoint collation and three of its four cases
+            # stay green with the bug in place. A bare image has only `C.UTF-8`,
+            # which is exactly the wrong one. `ci.yml` installs this too; §79.
+            apt-get update -qq
+            apt-get install -y -qq locales >/dev/null
+            sed -i "s/^# en_US.UTF-8/en_US.UTF-8/" /etc/locale.gen
+            locale-gen >/dev/null
+            curl -fsSL https://mise.run | sh
+            export PATH="/tmp/home/.local/bin:$PATH"
+            eval "$(mise activate bash --shims)"
+            # Materialise the pinned toolchain before mise installs anything.
+            # This is fault 1 from the top of `ci.yml`, and the first run of this
+            # recipe reproduced it exactly: mise installs the eight `cargo:`
+            # tools in parallel, each triggers rustup to fetch the version
+            # `rust-toolchain.toml` pins, they race over one `.partial`, and
+            # seven of the eight died — `cargo-nextest` won. That the fresh
+            # environment found a fault this repo had already documented is the
+            # best evidence the recipe does what it claims.
+            rustup show
+            mise install
+            mise exec -- just gate quiet
+        '
 
 # The whole gate, and the same command CI runs. Named `gate` rather than
 # `test-all` because it is two dozen checks, a lint and a `cargo-deny` around
@@ -303,6 +485,110 @@ check-gate-summary-selftest:
     got=$($j _gate-summary "$dir/counts.log" 1 test)
     grep -q '^first failing test: FAIL \[   0.011s\] rcad-geom a_plane_and_a_sphere$' <<<"$got" \
         || fail "a failing suite did not name the first test that failed"
+
+# Holds `gate-docs` to the two things it claims: that it drops the compiles, and
+# that it still runs everything a prose commit can break.
+#
+# **The second is the arm that matters, and it is the one nothing else guards.**
+# Dropping a step too few costs money. Dropping a step too many means a
+# `docs/decisions.md` commit lands on `main` having been checked by nothing that
+# reads `docs/decisions.md` — and it would pass, loudly, printing a summary
+# block. So `check-decisions`, `check-plan` and `check-where-the-work-is` are
+# named here: move one of them into `gate_metered_steps` and this fails.
+#
+# The filter is driven through `--set` against fixture lists rather than against
+# the real ones, for the same reason `check-gate-summary-selftest` is: this
+# recipe is itself a step of the docs arm, so a nested real run would not
+# terminate.
+#
+# Both directions are exercised. A filter that dropped nothing and a filter that
+# dropped everything are both "the list came out wrong", and only one of them is
+# visible from a run that passes.
+[private]
+check-gate-docs-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    j='{{ just_executable() }}'
+    got=""
+
+    fail() {
+        echo "gate-docs drifted from what it promises: $1"
+        [ -n "$got" ] && { echo "--- got ---"; echo "$got"; }
+        exit 1
+    }
+
+    all=$(grep -m1 '^gate_steps := ' justfile | sed 's/^gate_steps := "//; s/"$//' | tr ' ' '\n')
+    heavy=$(grep -m1 '^gate_metered_steps := ' justfile \
+        | sed 's/^gate_metered_steps := "//; s/"$//' | tr ' ' '\n')
+    # Both sides are parsed out of this one file, so an extraction that stops
+    # matching empties them and every comparison below passes against nothing.
+    # `check-gate-runs-every-check` says the same thing about itself.
+    [ "$(grep -c . <<<"$all")" -ge 30 ] || fail "gate_steps parsed to nothing; the extraction broke"
+    [ "$(grep -c . <<<"$heavy")" -ge 5 ] \
+        || fail "gate_metered_steps parsed to nothing; the extraction broke"
+
+    # A name in the exclusion list that is not a step excludes nothing, and says
+    # so nowhere. That is how this list goes stale when a step is renamed.
+    while read -r step; do
+        grep -qx "$step" <<<"$all" \
+            || fail "gate_metered_steps names '$step', which is not a step of the gate"
+    done <<<"$heavy"
+
+    docs_arm=$(grep -vxF -f <(printf '%s\n' "$heavy") <<<"$all")
+
+    # What a prose commit can actually break. Named one by one rather than
+    # counted, because the count would survive the swap that matters.
+    for needed in check-decisions check-decisions-selftest check-claim-section-selftest \
+                  check-plan check-plan-selftest check-where-the-work-is; do
+        grep -qx "$needed" <<<"$docs_arm" \
+            || fail "$needed is not in the docs arm, so a docs commit would be checked by nothing that reads docs"
+    done
+
+    # And the other half of the bargain: if these survived, the arm buys nothing.
+    #
+    # `check-corpus` is in this list for a different reason from the rest, and it
+    # is the one that would not have been noticed by reading. It compiles nothing
+    # and takes 0.16 s, and it **fails** when `RCAD_STEP_CORPUS` is not a
+    # directory (§44.10) — so a docs arm that ran it would have gone red on the
+    # runner, every time, until somebody added a 119 MiB fetch to the cheap job.
+    for costly in check lint test check-release-build check-corpus; do
+        grep -qx "$costly" <<<"$docs_arm" \
+            && fail "$costly is still in the docs arm, which is the whole cost it exists to drop"
+    done
+    # The selftest beside it must stay, though: it builds its own fixture, so it
+    # is the arm that would catch the collation bug in a prose-only commit.
+    grep -qx check-corpus-selftest <<<"$docs_arm" \
+        || fail "check-corpus-selftest left the docs arm, and it needs no corpus to run"
+
+    # The filter itself. `list` is a real recipe that costs nothing; the word
+    # beside it is not a recipe at all, which is the cheapest failing step there
+    # is and needs no fixture of its own.
+    got=$($j --set gate_steps 'list no-such-step' --set gate_metered_steps 'no-such-step' \
+            --set gate_log "$dir/drop.log" gate-docs 2>&1) \
+        || fail "the docs arm did not drop the step it was told to drop"
+    grep -q '^gate-docs: dropped no-such-step$' <<<"$got" \
+        || fail "the docs arm dropped a step without saying which"
+
+    # The same fixture with the lists swapped. A non-zero exit alone would prove
+    # nothing here — dropping every step also exits non-zero — so this checks
+    # which step was dropped and which one the summary blames.
+    got=$($j --set gate_steps 'list no-such-step' --set gate_metered_steps 'list' \
+            --set gate_log "$dir/keep.log" gate-docs 2>&1) \
+        && fail "the docs arm kept a failing step and exited 0, so it is filtering nothing"
+    grep -q '^gate-docs: dropped list$' <<<"$got" \
+        || fail "the docs arm dropped something other than the one step it was told to"
+    grep -q '^gate: FAIL  first failure: no-such-step' <<<"$got" \
+        || fail "the step the docs arm was told to keep never ran"
+
+    # Every step excluded. Running no steps exits 0 through the loop in `gate`,
+    # prints a passing summary block, and has checked nothing whatsoever.
+    got=$($j --set gate_steps 'list' --set gate_metered_steps 'list' \
+            --set gate_log "$dir/empty.log" gate-docs 2>&1) \
+        && fail "an empty docs arm passed by checking nothing"
+    grep -q 'no steps at all' <<<"$got" \
+        || fail "an empty docs arm failed without saying that it had nothing to run"
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -818,8 +1104,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | tr ' ' '\n' | grep -v '^check-' | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "38" ]; then \
-        echo "found $n check-* recipes, expected 38"; \
+    if [ "$n" != "39" ]; then \
+        echo "found $n check-* recipes, expected 39"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \

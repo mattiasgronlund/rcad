@@ -676,12 +676,11 @@ fn which_side_of_its_neighbour_a_side_keeps(
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let at = side.start.at;
-    let mut outward = gradient_at(surface, at).ok_or_else(cannot)?;
+    let mut along_the_crossing =
+        the_way_the_crossing_runs(surface, &side.across, at).ok_or_else(cannot)?;
     if face.orientation().is_reversed() {
-        outward = outward.map(core::ops::Neg::neg);
+        along_the_crossing = along_the_crossing.map(core::ops::Neg::neg);
     }
-    let across = gradient_at(&side.across, at).ok_or_else(cannot)?;
-    let along_the_crossing = cross(outward, across);
     let flat = [surface, &side.across].map(|one| one.as_plane().is_some());
     let runs = match &side.run {
         SideRun::Straight if flat == [true, true] => {
@@ -730,9 +729,11 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   so across the arc's plane the two read the same sign or opposite signs
 ///   everywhere. Which is the sign of `(n × p) · (h × p)`, the two lines'
 ///   directions compared, and the arc is in front of its picker.
+/// - An arc against a plane that holds **one** of its ends, which is the pie
+///   slice: [`where_an_arc_with_one_end_on_a_cut_lies`].
 ///
-/// Everything else is [`Lies::Across`]: an arc whose ends are not both on the
-/// plane may bulge across it, and nothing here builds the point where it would.
+/// Everything else is [`Lies::Across`]: an arc with neither end on the plane may
+/// bulge across it, and nothing here builds the point where it would.
 fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
     let side_of_an_end = |end: Corner| {
         if cut.corners_on_it.contains(&end.key) {
@@ -775,19 +776,87 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             let Surface::Plane(flat) = cut.surface else {
                 return Lies::Across;
             };
-            let own_plane = surface.as_plane().or(side.across.as_plane());
-            let (Some(own_plane), [Decision::Zero, Decision::Zero]) = (own_plane, ends) else {
-                return Lies::Across;
+            let on_the_cut = |end: Corner, far| {
+                where_an_arc_with_one_end_on_a_cut_lies(surface, side, picker, &flat, end.at, far)
             };
-            let normal = exactly(own_plane.normal().components());
-            let cut_line = cross(exactly(flat.normal().components()), normal);
-            let picker_line = cross(exactly(picker.normal().components()), normal);
-            match dot(cut_line, picker_line).sign() {
-                found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
-                Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
+            match ends {
+                [Decision::Zero, Decision::Zero] => {
+                    let Some(own_plane) = surface.as_plane().or(side.across.as_plane()) else {
+                        return Lies::Across;
+                    };
+                    let normal = exactly(own_plane.normal().components());
+                    let cut_line = cross(exactly(flat.normal().components()), normal);
+                    let picker_line = cross(exactly(picker.normal().components()), normal);
+                    match dot(cut_line, picker_line).sign() {
+                        found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
+                        Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
+                    }
+                }
+                [Decision::Zero, far @ (Decision::Pos | Decision::Neg)] => {
+                    on_the_cut(side.start, far)
+                }
+                [far @ (Decision::Pos | Decision::Neg), Decision::Zero] => {
+                    on_the_cut(side.end, far)
+                }
+                [..] => Lies::Across,
             }
         }
     }
+}
+
+/// Where an arc lies against a plane cutting the face, when one end of the arc
+/// is on that plane and the other is not — which is what a **pie slice** asks
+/// and a half-disc does not (`docs/decisions.md` §169).
+///
+/// The arc runs on a circle, and the cutting plane meets that circle in the end
+/// it holds and in **one** other point. So the side of the plane the arc is on
+/// changes nowhere but there: it leaves the end it holds on one side, and it is
+/// still on that side at its far end unless it ran past the other point on the
+/// way. The far end's own side says whether it did, so how far the arc runs is
+/// answered without building a single point on it — which is what §168.4 left
+/// open.
+///
+/// **Which way it leaves** is `∇S × ∇T`, the way the crossing runs, turned round
+/// to point into the arc: the arc lies in front of its picker and this end is on
+/// the picker's plane, so into the arc is whichever way reads positive against
+/// the picker's normal. The side of the cut it leaves on is then the sign of
+/// `(∇S × ∇T · picker)(∇S × ∇T · cut)`, and turning `∇S × ∇T` round turns both
+/// factors round, so which of the arc's two ends this is does not matter.
+///
+/// [`Lies::Across`] when the two disagree, which is an arc that really does
+/// cross the cut, and when either sign is [`Decision::Zero`] or could not be
+/// settled. The two `Zero` readings are grazes — the cut touching the circle at
+/// this end rather than crossing it, or the picker's plane doing so — and a
+/// graze is a side that stays where it starts, so those are answers this refuses
+/// rather than answers it gets wrong. A gap, left for the face that needs it.
+fn where_an_arc_with_one_end_on_a_cut_lies(
+    surface: &Surface,
+    side: &Side,
+    picker: &HalfSpace,
+    cut: &Plane,
+    at: Point,
+    far: Decision,
+) -> Lies {
+    let Some(along) = the_way_the_crossing_runs(surface, &side.across, at) else {
+        return Lies::Across;
+    };
+    let leaving = dot(along, exactly(picker.normal().components()))
+        * dot(along, exactly(cut.normal().components()));
+    if leaving.sign() == far {
+        Lies::Beside(far)
+    } else {
+        Lies::Across
+    }
+}
+
+/// Which way the curve two surfaces cross in runs where it passes `at`, as
+/// `∇S × ∇T`; `None` for a surface [`gradient_at`] does not read.
+fn the_way_the_crossing_runs(
+    surface: &Surface,
+    across: &Surface,
+    at: Point,
+) -> Option<[Interval; 3]> {
+    Some(cross(gradient_at(surface, at)?, gradient_at(across, at)?))
 }
 
 /// The face is the part of its surface in front of every cut.

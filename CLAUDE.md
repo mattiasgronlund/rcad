@@ -117,6 +117,15 @@ decision 0` — and **that section is edited by hand when the work moves**;
 `check-where-the-work-is` holds it to its shape but cannot tell you it is
 stale, so `status` prints its age instead. `docs/decisions.md` §102.
 
+**The §0 update goes in the same commit as the section that closes it.** "§168.4's
+pie slice closed by §169" is only true because §169 exists, so landing it a commit
+later guarantees `main` carries a wrong first row for the length of a gate — the
+staleness `status` prints an age for, manufactured on purpose. It was also half
+the runner bill: 5 of 6 §0 commits sat directly beside the section they announced,
+and 27 of 44 sections cost two commits or more. The code commit landing separately
+is fine — that comes from a lane — but the section and the pointer are one act by
+one session. `docs/decisions.md` §172.5.
+
 Do not read the branch row off `just lanes`: `lanes` lists worktrees, and a
 worktree is not a branch. Do not derive it from ahead-of-main either — of the
 five branches that count called unmerged on 2026-09-14, three carried nothing,
@@ -280,6 +289,33 @@ entry months after the fix landed.
 2026-09-07, so every `check-*` recipe is enforced on the runner too. Before that
 it ran four recipes and the `check-*` ones gated nothing but your own machine.
 
+**Since 2026-09-20 there are two arms, and which one runs is decided by path.**
+A push touching only `docs/` and `*.md` goes to `.github/workflows/ci-docs.yml`
+and runs `just gate-docs` — `gate_steps` minus `gate_metered_steps`, 1m07s
+against 9m46s. Anything touching source runs the whole gate as before; a push
+touching both runs both. Both arms cancel a run their own branch has already
+superseded, so **a green can now only be claimed for a tip**, never for a commit
+in the middle of a push run.
+
+This is because the runner is metered and **it ran out**: `rcad` is private on
+GitHub Free's 2000 minutes a month, and 171 runs spent 2271 of them in
+seventeen days. When a push to `main` shows a red X on a job with **zero steps**
+that failed in two seconds, that is the allowance and not a regression — check
+the annotation (`gh api /repos/mattiasgronlund/rcad/check-runs/<job>/annotations`)
+before looking for one. `docs/decisions.md` §172.
+
+**`just gate` is still what you run locally, and `gate-docs` is not a shortcut
+for it.** The steps it drops are the ones that cost money, not the ones that are
+unlikely to fail.
+
+**`just gate-fresh` is the gate with this machine's environment taken away** — a
+container, a fresh clone, no `HOME` from here, no plugins, no warm `target/`.
+That is §77.6's manoeuvre, which found all three of the red runs of 2026-09, as
+a recipe rather than something retyped each time. It costs no Actions minutes,
+so it is the second opinion that survives a spent allowance; run it before
+handing work over while the runner is down. It is cold by construction, so pass
+`run_in_background: true`.
+
 **Run it as `just gate quiet`, in one plain Bash call, with `timeout` set to
 600000 and no redirect.** `quiet` prints one line per step, the failing step's
 own last sixty lines, and the summary block — about fifty lines in all — and
@@ -310,7 +346,8 @@ two calls instead of one, which is still fewer than polling. `docs/decisions.md`
 each ask about something a runner does not have — Claude Code's own config, a
 **PreToolUse** hook, and the marketplace repo's tree — so they print that they
 skipped and carry on. Every other `check-*` runs on the runner exactly as it runs
-here. The skip is in `check-declared.sh` rather than in the `justfile`, so
+here, on whichever arm ran: the docs arm leaves steps out, but it never runs one
+differently. The skip is in `check-declared.sh` rather than in the `justfile`, so
 `rscene` gets the same one; `docs/decisions.md` §77, and the argument in full at
 the top of `.github/workflows/ci.yml`'s gate step.
 

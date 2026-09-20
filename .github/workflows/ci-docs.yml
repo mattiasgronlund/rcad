@@ -1,0 +1,76 @@
+# The gate for a commit that is only prose. `ci.yml` carries the argument for
+# why this file exists; the short version is that the runner is metered, it ran
+# out on 2026-09-20, and 43 of `main`'s last 150 commits bought a 13-minute
+# compile for a tree whose source had not moved.
+#
+# **What this runs is not a shorter list, it is a derived one.** `just gate-docs`
+# is `gate_steps` minus `gate_metered_steps` — an *exclusion*, so a new
+# `check-*` recipe joins this arm by default and nobody has to remember to add
+# it. That is the same direction `check-gate-runs-every-check` guards for the
+# full gate, and it is why this file, like `ci.yml`, names one recipe and no
+# steps. `check-gate-docs-selftest` holds the split from the other side: it
+# fails if `check-decisions`, `check-plan` or `check-where-the-work-is` ever
+# leaves this arm, which is the failure that would matter — a
+# `docs/decisions.md` commit checked by nothing that reads `docs/decisions.md`,
+# passing loudly with a summary block.
+#
+# **What this arm costs is 1m07s, measured, against 9m46s for `just gate` on the
+# same tree** (step 11 of run `35459633208`: 586 s). The saving is not in the
+# setup steps and it is worth knowing which they are, because the first draft of
+# this file claimed it was: on that run `rustup show` was 13 s,
+# `jdx/mise-action@v2` 3 s, `Swatinem/rust-cache@v2` 16 s and the corpus cache
+# 2 s. All of it together is under a minute. **The compile is the bill**, and
+# dropping the steps that need one is the whole mechanism.
+#
+# `mise-action` stays, because `just` is one of the tools `mise.toml` pins and
+# this repo installs nothing ad hoc. It is 3 s rather than a source build of
+# eight `cargo:` tools because the action caches on a key derived from
+# `mise.toml`, and `ci.yml` on `main` populates the cache this job reads.
+#
+# **`check-corpus` is deliberately not in this arm**, and it is the trap here.
+# It compiles nothing and runs in 0.16 s, so it reads like a step this job should
+# have — but it *fails* when `RCAD_STEP_CORPUS` is not a directory, by design
+# (§44.10), and a corpus is a 119 MiB fetch. Running it here would have gone red
+# on every prose commit until somebody "fixed" it by adding that fetch to the
+# cheap job. It is named in `gate_metered_steps` and
+# `check-gate-docs-selftest` holds it there. `check-corpus-selftest` does run
+# here: it builds its own fixture and never opens the real corpus.
+#
+# If a step ever needs cargo or the corpus, it belongs in `gate_metered_steps`
+# and therefore in `ci.yml`. Adding a toolchain or a fetch here would be the
+# mistake: it would make this arm cost what it exists not to cost, and every
+# check in the repo would go on passing while it happened.
+#
+# `paths` here is the complement of `ci.yml`'s `paths-ignore`, and a push
+# touching prose and source runs both arms on purpose. See `ci.yml`.
+
+name: CI (docs)
+
+concurrency:
+  group: ci-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', '**.md']
+  pull_request:
+    paths: ['docs/**', '**.md']
+
+env:
+  RUST_BACKTRACE: 1
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history, because `check-where-the-work-is` and `just status`
+      # read how far §0 has got against the log, and a shallow clone would have
+      # them measuring against a tree with no past.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+      - run: mise exec -- just gate-docs

@@ -22,24 +22,25 @@ on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107'
 table. §16.10 governs it: a claim that something cannot be done owes a
 demonstration either way — a gap if a scaling reaches the sign, a limit if not.
 
-**Five waves have run and the demonstration is in.** §110–§113 named the pair
-and falsified §109.6; §115–§117 walked closed edges by this kernel's rule, not
-the file's flag (KiCad 97/323 → 110/323), leaving 26: **20 a limit, none
-transverse, 6 equal pipes whose axes cross**, closed by §118 and §119. §122–§128
-took the last three; §126's failure is **§149's — the oracle, not the kernel**.
-**§121 landed** 2026-09-18 as `912cd168`, on §129, §130, §132 and §136.
+**Five waves have run and the demonstration is in.** §110–§113 named the pair and
+falsified §109.6; §115–§117 walked closed edges by this kernel's rule (KiCad
+97/323 → 110/323), leaving 26: **20 a limit, none transverse, 6 equal pipes whose
+axes cross**, closed by §118–§119. §122–§128 took the last three; §126's failure
+is **§149's — the oracle, not the kernel**. **§121 landed** as `912cd168`.
 
 **What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
-sites, 1 and 3 by §154, 2 by §142.9 (`37f24350`), `across` by **§164**. §145 by
-§148 and §155; §150 by §156; §151.5 by §163; §163.4 by §165; §165.4 by §166;
-§166.4 by §167; **§167.4's placed wedge** by **§168**: proved where the face is
-stored, asked where the point sits.
+sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150 by §156;
+§151.5 by §163; §163.4 by §165; §165.4 by §166; §166.4 by §167; §167.4 by §168,
+proved where the face is stored and asked where the point sits; **§168.4's pie
+slice** by **§169**: an arc with one end on a cut lies where it leaves that end.
 
-**Next and unclaimed: §168.4's pie slice** — its arc has one end on each
-radius's plane, so step 2 cannot tell which way it bulges; §168.4 sketches the
-lane. §124, §136.4, §125.6: deferred — though the 2026-09-19 triage timed five of
-§125's slow units at 90 s–5.5 min on `3b3949b2`, against §125.6's ~7 s, one run
-each and unexplained. None of that night's five crashes still fails.
+**Next and unclaimed: §169.4's fused arcs** — the fuse bakes placement in at
+entry (§17.3) and lowers a picker until both ends read strictly in front, so
+§167's steps 1 and 2 need rebuilding around ends *in front of* a picker. §124,
+§136.4, §125.6: deferred, and 2026-09-20 keeps §125.6 there — the 90 s–5.5 min is
+`rcad-fuzz-explain` at `opt-level = 0`, a seeded replay at 2 (2.2 s for
+`5dddf2a9`). §125.6's own ~7 s does not reproduce (112–456 s on the same code):
+open, about that number, not the gate.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
@@ -38970,6 +38971,313 @@ run: 756 passed, 1 skipped`.
 Write set: `crates/rcad-topo/src/holds.rs`, the test file, this section, and the
 pointer at the end of §167.4.
 
+**§169 answers the second item**, and the sketch above was half right: the
+direction the arc leaves in is the `∇S × ∇T` sign, as it says, but how far the
+arc runs did not need the picker to say — the far end's own side of the cut says
+it, because the side can change only where the cut meets the arc's circle again.
+
+## 169. A pie slice is where its arc leaves the corner it shares with a radius — §168.4's second item fixed, 2026-09-20
+
+*An eighth of a ball answered `CannotFollowAFacesTrimming` about every point,
+placed or not. Its three flat faces are pie slices — two radii and an arc — and
+§167's step 2 could read an arc only against a cut holding **both** of its ends,
+which is the half-disc a wedge has and not this. The cut meets the arc's own
+circle in the end it holds and in one other point, so the arc's side of the cut
+changes nowhere else: it leaves on one side and is still on it at its far end
+unless it ran past that other point, and the far end's own side says whether it
+did. Which way it leaves is `∇S × ∇T` turned to point into the arc, which is the
+front of the arc's picker. So a sign already in hand answers how far the arc
+runs, and no point on it is built. A gap closed, not a limit. The eighth answers
+forty points, four placements, with an empty log.*
+
+### 169.1 The cause, printed
+
+The test below, run on `f34f8321` before the fix:
+
+```text
+assertion `left == right` failed: an eighth of a ball, placed by Isometry(Isometry { rotation: [0.0, 0.0, 0.0, 1.0], translation: [0.0, 0.0, 0.0] }), asked about [0.3, 0.3, 0.3]
+  left: CannotFollowAFacesTrimming { face: FaceKey { slot: FaceSlot(1v1), model: ModelId(1) } }
+ right: Inside
+```
+
+No movement is involved — this is the identity placement, and slot 1 is the
+first pie slice, the quarter-disc on `z = 0`. §168's cause needed a shift or a
+turn; this one is there where the solid is stored.
+
+`where_a_side_lies` is the step. It asks, for each surface cutting the face,
+where every *other* side of the face lies against it, and its arc arm read one
+shape only:
+
+```rust
+let (Some(own_plane), [Decision::Zero, Decision::Zero]) = (own_plane, ends) else {
+    return Lies::Across;
+};
+```
+
+`Lies::Across` is a refusal at the call site. A wedge's flat face is a half-disc:
+its one straight side is a diameter, both ends of its arc are on both walls, and
+`[Zero, Zero]` is every pair it ever reads. A pie slice's arc has one end on each
+radius's plane and the other end off it, so every pair it reads is `[Zero, Pos]`
+or `[Pos, Zero]` — and so does every arc of the sphere face above it, because
+each of those also runs from a cut to a cut.
+
+### 169.2 The fix, and why the far end is enough
+
+The arc runs on a circle, one of the two surfaces either side of it being a
+plane and the other a sphere — `which_side_of_its_neighbour_a_side_keeps`
+already refuses anything else before this step is reached. The cut is a plane
+that holds one end of the arc, and it holds it by **topology**: that end is a
+corner of an edge running along the cut, which §35.2's rule reads as on it
+rather than asking a predicate.
+
+A plane holding a point of a circle meets that circle in that point and in at
+most one other. So along the circle the cut's sign changes only at those two
+places, and the arc — a connected piece of the circle with that end as one of
+its ends — has one sign from its end until it reaches the other place, and the
+opposite sign after. Its far end is neither of those two places, since the far
+end reads a settled `Pos` or `Neg`. So:
+
+> the arc lies beside the cut exactly when the side it leaves its end on is the
+> side its far end is on.
+
+That is the whole of it. §168.4 guessed that how far the arc runs was "what the
+arc's own picker would have to say"; it is not, and nothing needs to know where
+the arc stops. The far end's sign is read already.
+
+**Which way it leaves.** The way the crossing runs at that end is `∇S × ∇T`,
+which is the same quantity `which_side_of_its_neighbour_a_side_keeps` reads, now
+named once in `the_way_the_crossing_runs` and used by both. It points one way
+along the circle or the other, and which of the two is the arc is settled by the
+picker: the arc lies in front of its picker and this end is on the picker's
+plane, so into the arc is whichever way reads positive against the picker's
+normal. The side of the cut it leaves on is then
+
+```text
+sign( (∇S × ∇T · picker) · (∇S × ∇T · cut) )
+```
+
+— one interval product, and turning `∇S × ∇T` round turns both factors, so which
+of the arc's two ends is the one on the cut never has to be worked out.
+
+**Nothing an existing face answered moves.** The new arm fires only on end pairs
+the old code returned `Lies::Across` for, and `Lies::Across` is a refusal. Where
+the two signs disagree it still refuses — and there it is right to: the arc
+really does cross the cut.
+
+**Two grazes are refused rather than answered.** A `Zero` from either factor is
+the cut touching the circle at that end rather than crossing it, or the picker's
+plane doing so; both are sides that stay where they start, and both come back
+`Lies::Across`. A gap, left for the face that needs it.
+
+### 169.3 The test, and what it printed before the fix
+
+`a_pie_slice_of_a_ball_says_which_points_are_inside_it_wherever_it_sits`, in
+`crates/rcad-topo/tests/a_quarter_of_a_ball_built_face_by_face.rs`.
+`an_eighth_of_a_ball` builds the eighth of the unit ball where every coordinate
+is positive: four faces, six edges, four corners. Three of the faces are pie
+slices of a quarter turn, on the three coordinate planes; the fourth is a
+triangle of the sphere. Each arc is a quarter of a great circle, picked by a
+half-space whose normal is ones and zeroes and whose offset is one, which reads
+exactly `Zero` at both of its ends — `HalfSpace` keeps a caller's normal bit for
+bit, so nothing there rounds.
+
+Ten points, each at least `0.05` clear of all four faces, four each inside and
+outside by the octant's own oracle, asked at four placements: unplaced, §168's
+shift by `(0.1, −1/3, 2.7)`, §168's turn, and both. Before the fix the unplaced
+eighth failed on its first point, printed in §169.1. After, the test prints
+`16 points inside an eighth of a ball and 24 outside, every one answered`, with
+the log empty at every one.
+
+`mise exec -- just t -p rcad-topo` on the code commit `2ebe8554`: `757 tests
+run: 757 passed, 1 skipped`. One test more than §168's 756, the new one.
+
+`mise exec -- just gate quiet` on that tree with this section in it, read back:
+`gate: PASS`, `2101 tests run: 2101 passed, 1 skipped`, `3 tests run: 3 passed,
+0 skipped`, `doc tests: 25 passed, 0 failed, across 9 crate(s)`. One test more
+than §168's 2100. No declared count moved.
+
+### 169.4 What is left of §168.4
+
+- **A pie slice** — done, above.
+- **Fused arcs are still outside the family**, unchanged by this. The fuse bakes
+  placement into world coordinates at entry (§17.3) and
+  `the_half_space_both_ends_are_on` lowers the picker's offset until both ends
+  read strictly in front, so an arc's ends are off its picker's plane where it is
+  stored. This step needs that plane to hold the end it is asked about — it reads
+  the direction into the arc as "the way that reads positive against the picker's
+  normal", which is only the way along the circle when the end is on the plane.
+  Admitting fused arcs still needs steps 1 and 2 rebuilt around ends *in front
+  of* a picker rather than on it, which is the same work §168.4 named.
+- **Cylinders and cones** are refused by name as before. Nothing here touched
+  them, and they are a different shape of problem: their crossings with a plane
+  are not circles, so "the cut meets the arc's circle twice" — the whole of
+  §169.2 — says nothing about them. An ellipse would carry the argument over
+  unchanged; a parabola or a hyperbola, which a cone also gives, would not,
+  because the sign along an unbounded crossing can change once rather than twice.
+- **Planes that miss a ball's centre** are refused by name as before.
+- **An arc with neither end on the cut** is still refused, and is not this
+  section's case: with nothing holding an end, there is no place along the circle
+  where the argument can start.
+
+Write set: `crates/rcad-topo/src/holds.rs`, the test file, this section, and the
+pointer at the end of §168.4.
+
+## 170. Dispatch tooling: one lanes workflow instead of two retyped scripts, and a lane told when to stop — 2026-09-20
+
+*Two Workflow runs on 2026-09-19 and 2026-09-20 used scripts ~90% identical,
+retyped the second time. They are now `.claude/workflows/lanes.js`, taking the
+base and a list of lanes. The second half is the context budget hook, which
+exited on any `agent_id` because "a lane is short by construction and has
+nowhere to hand off to". The second clause was wrong — a lane's handoff is its
+report — and the first was never measured and is false: 134 lanes over nine
+days reached a median peak of 134k tokens and a worst of 335k. A lane is short
+in minutes, which the 45-minute rule caps; minutes are not tokens. It now hears
+its own dial at 150k and is told to commit, report and stop.*
+
+### 170.1 What the two scripts had in common, and what the file keeps
+
+The generalisation keeps the parts that were doing work in both, and they are
+the parts that turn a CLAUDE.md sentence into something the script holds:
+
+- **A `schema` on every `agent()` call.** A lane cannot return prose. The report
+  carries `start_sha`, `base_sha`, `landed_sha`, `branch`, `outcome`,
+  `files_changed`, `tests_that_fail_without_the_change`,
+  `numbers: [{what, value, command}]`, `out_of_write_set_needs` and `remaining`.
+  The shape of `numbers` is the enforcement: "never restate a number you did not
+  run yourself" is a required `command` field rather than a sentence in a brief.
+- **The base-sha check in script code.** A worktree-isolated lane branches from
+  the session's HEAD, not from `origin/main`, so a brief that does not pin the
+  base gets a lane measuring a different tree. If `base_sha` is not the pinned
+  base the lane is not verified at all and the script says so: verifying those
+  claims against this base would only report that they disagree, which is known.
+  It never fired in either run, and it is four lines.
+- **A Sonnet verifier per *writing* lane**, handed the lane's JSON and told not
+  to trust it: the branch touches only the declared files, the claimed tests
+  pass, the non-test source reverted to base makes them **fail**, `just gate
+  quiet` on the branch tip, every number re-run, and every "cannot" or "limit"
+  claim held against §16.10. It caught two real things across the two runs — a
+  gate not run on a docs commit, and an unbacked §16.10-shaped claim in §169.4.
+- **Read-only lanes get no verifier** and are told to write no tracked file.
+- Verification is skipped, out loud, when the lane was blocked or named no
+  failing test.
+
+One thing is new. A `merge` verdict is now cross-examined by the script: if the
+verifier came back `merge` while `tests_fail_without_fix` is not true, or the
+lane declared no source directory to revert, or the branch touched files outside
+the write set, the run says so beside the verdict. A `merge` that never watched
+the tests fail is a merge on the verifier's word, which is the one thing the
+verifier exists to replace.
+
+### 170.2 A named workflow is its `meta.name`, not its filename
+
+Worth writing down because guessing it wrong costs a dispatch. Claude Code
+2.1.276 loads `.claude/workflows/*.js` from the project, parses the `meta`
+block, and registers the workflow under `meta.name` — the loader's own line is
+`return {source: s, name: c.meta.name, ...}`, and the plugin variant prefixes it
+as `${plugin}:${meta.name}`. The filename is never the handle; it only has to
+end in `.js`, and the file has to be under 512 KB.
+
+The registry is **memoised for the life of the session** (`s.workflows ??=`), so
+a workflow written mid-session does not resolve by name in that session — the
+attempt here answered *`Workflow "lanes" not found. Available: deep-research`*
+with the file already on disk and correct. It resolves from the next session on.
+`{scriptPath: ...}` bypasses the registry and was how this one was smoke-tested:
+two runs with deliberately bad `args`, zero agents, 10 ms and 6 ms, each
+stopping at the guard it was aimed at. That is the whole test the file has —
+there is no JS runtime in `mise.toml`, so the interesting half, the pure
+functions that decide which lane gets a verifier, is checked by reading and by
+the next real dispatch. §170.5 says what that would cost to fix.
+
+### 170.3 A lane is not short in tokens
+
+Measured over 2026-09-12 to 2026-09-21, lane transcripts only:
+
+```
+just spend 2026-09-12 2026-09-21 ceiling subagents
+```
+
+134 lanes, 6,698 API responses, **$433.55**. The `subagents` argument is
+`spend.py`'s path filter, and a lane transcript is the only kind with
+`subagents` in its path, so the existing report already answers this question
+without a new one.
+
+Peak context reached per lane — the figure the hook compares against a budget:
+
+| p50 | p75 | p90 | p95 | p99 | worst |
+|---|---|---|---|---|---|
+| 134,189 | 170,271 | 220,617 | 237,450 | 299,691 | 334,658 |
+
+So the median lane goes two thirds of the way to the session budget and one lane
+in ten passes it. "Short by construction" was true of the clock and assumed of
+the context: lanes do obey the 45-minute cap — median 14 minutes over this
+window — and a lane can re-read a great deal in 14 minutes.
+
+The tail is what makes a warning worth sending. A lane that crosses 140k bills a
+median of 22 further responses and a p90 of 75, so the warning does not arrive
+as the lane is already finishing. That is the opposite of the failure the
+session dial has, where the warning was on time and ignored.
+
+### 170.4 Why 150k, and why not the session's 200k
+
+The session dial was set on this test: the line where about a third of the spend
+is billed above it — 200k took 35% of that week, and 250k was rejected at 16%.
+The same statistic for lanes, spend billed in responses whose own context was at
+or above the line:
+
+| 100k | 120k | 140k | **150k** | 160k | 175k | 200k |
+|---|---|---|---|---|---|---|
+| 72.1% | 58.7% | 43.7% | **37.7%** | 31.0% | 22.4% | 12.9% |
+
+150k lands on the precedent almost exactly. It warns 53 of the 134 lanes (40%),
+a median of two rungs each and eight in the worst, at the session's 25k step.
+
+**The session's 200k would not have been worth a separate dial**, which is the
+point of not simply deleting the exemption: it reaches 12.9% by this measure and
+1.3% by `ceiling`'s, against 5.9% at 150k. The two measures disagree because
+they price different things — `ceiling` bills cache reads at `min(context, cap)`
+and lets the work carry on, while the table above counts everything billed past
+the line as if it stopped. Neither is the real saving, which sits between them:
+a lane that stops hands its remainder to a fresh lane that re-reads some of it.
+What both agree on is the ordering, and that 200k is near enough to nothing.
+
+Three things the lane branch does that the session branch does not:
+
+- **Its own state file.** Several lanes share one `session_id`, so a ladder
+  keyed on that alone would let the first lane's rung silence every other lane
+  of the same dispatch. The key is `$session-$agent_id`.
+- **A different instruction.** It is told to commit, report the remainder and
+  stop — never to call the handoff skill, because there is no next session to
+  pick it up — and it is not offered the budget-raising advice, because a lane
+  cannot set its own environment. The dispatcher can, with `CLAUDE_LANE_BUDGET`.
+- **A different headline.** "Lane budget passed at N tokens" rather than
+  "Context budget", so the two stay countable apart in a transcript and
+  `spend.py`'s `SAID` regex keeps matching only session warnings.
+
+Six cases in `check-context-budget.sh` cover these; all six fail against the
+hook as it was at `3e476a4` and pass after, checked by restoring that version
+into a copy of the plugin and running the new cases against it.
+
+### 170.5 What is left
+
+- **`lanes.js` has no selftest**, only the two zero-agent smoke runs. A real one
+  needs a JS runtime in `mise.toml`, which puts a node install on every runner
+  and in every fresh worktree for one script. Deferred rather than refused: the
+  cost is a toolchain, the benefit is catching a `meta` that stopped being a
+  pure literal or a `Date.now()` that crept in, both of which currently cost a
+  dispatch to find. Worth revisiting if a second workflow script appears.
+- **The lane dial is dated.** §170.3's command re-measures the money; the peak
+  and rung distributions came from a one-off script and would need rebuilding —
+  read every `agent-*.jsonl` under `<project>/<session>/subagents/`, take each
+  response's `input + cache_creation + cache_read`, dedupe on
+  `(requestId, message.id)`, and take the max per file. A `lanes` report in
+  `spend.py` would make that a command, which is this repo's own rule; it was
+  not built here because §13 wants a named consumer and the only one so far is
+  this section.
+- **Nothing measures whether lanes obey it.** The session rung's own finding was
+  that being warned on time is not the same as heeding it. The equivalent
+  question for lanes — what is billed after a lane warning — needs the warning
+  to have been firing for a while first.
+
 ## 171. The corpus refuses 22 things, not 209 files — what lanes are cut from, 2026-09-20
 
 *Asked how several people could work here at once, the answer turned out not to
@@ -38998,7 +39306,7 @@ not the reader's, which stops at the first one.
 The pin `KICAD_FILES_THAT_IMPORT` lists **114** of the 323, counted two ways on
 the same commit, so 209 KiCad files do not import. The doc comment above that
 array still says the equal-pipes lane "moved it from 110 to 112"; it is two
-behind, and the count in prose is the one to distrust.
+behind, and the count written in prose is the one to distrust.
 
 ### 171.2 The pricing table: 22 items, five of which carry four fifths
 
@@ -39016,7 +39324,7 @@ Files where a reason is the **only** one the probe found, both corpora:
    3  a solid with a void in it                                    [fatal]
    3  no half-space square to both surfaces separates the two pieces
    3  a vertex of a face is <N> away from the face's plane
-   2  a placement this reader cannot apply: NEXT_ASSEMBLY_USAGE_… [fatal]
+   2  a placement this reader cannot apply: NEXT_ASSEMBLY_USAGE_…  [fatal]
    2  crossing too nearly parallel, bounding how far off a point sits
    2  triangulating: the corner at <N> is where an earlier one is
    2  the file declares two different length units                 [fatal]
@@ -39037,16 +39345,16 @@ shown to be sufficient, and the way to show it is to re-run
 
 ### 171.3 Three ways to misread this output
 
-**The histogram's `0` bucket is not "imports".** `report_depth_histogram`
-counts `finding.reasons.len()` and never `fatal`; its doc comment says so. So
-the eight files the walk could not get past at all sit in the `0` bucket. The
-table above counts them — it takes both `(1 reason, 0 fatal)` and `(0 reasons, 1
-fatal)` — which is the whole of the arithmetic 190 + 8 = 198 that otherwise
-looks like a mistake. Read in source on `f34f8321`, not inferred from the totals.
+**The histogram's `0` bucket is not "imports".** `report_depth_histogram` counts
+`finding.reasons.len()` and never `fatal`; its doc comment says so. So the eight
+files the walk could not get past at all sit in the `0` bucket. The table above
+counts them — it takes both `(1 reason, 0 fatal)` and `(0 reasons, 1 fatal)` —
+which is the whole of the arithmetic 190 + 8 = 198 that otherwise looks like a
+mistake. Read in source on `f34f8321`, not inferred from the totals.
 
 **The co-occurrence ranking is not the pricing ranking.** Deliverable 4 ranks by
-how many files hold a reason at all; deliverable 3 ranks by how many hold it
-alone. They disagree, and the disagreement is the interesting part:
+how many files hold a reason at all; deliverable 3 by how many hold it alone.
+They disagree, and the disagreement is the interesting part:
 `B_SPLINE_CURVE_WITH_KNOTS` is in 68 files and alone in 17, while both coedges
 running the same way round is in 26 and alone in all 26.
 
@@ -39061,11 +39369,11 @@ ask the probe for the union.
 ### 171.4 Which items may run at once
 
 Two corpus items are concurrent when no file holds both. That is the measurement
-the delegating skill's write-set table wants and normally has to guess, for this
-source at least — but it is a statement about *files*, not about *source
-files*. It says fixing them separately frees files. It does not say the two
-fixes touch different modules, and the write-set table still has to be built by
-hand before anything is dispatched.
+the delegating skill's write-set table normally has to guess, for this source at
+least — but it is a statement about *files*, not about *source files*. It says
+fixing them separately frees files. It does not say the two fixes touch
+different modules, and the write-set table still has to be built by hand before
+anything is dispatched.
 
 By that rule, on this run:
 
@@ -39113,14 +39421,20 @@ What is worth building instead is small: a claim that outlives a read, and one
 renderer for A.
 
 - **A claim.** §159's `claim-section` is the same primitive and exists for the
-  same race. Writing this section took the number 171 while the tree's highest
-  heading was 168 — 169 and 170 had been claimed and not yet written by other
-  sessions, which is the race happening while the argument about it was typed.
+  same race. Writing this section took 171 while the tree's highest heading was
+  168; §169 and §170 landed before the merge, and §172 landed *during* it. Three
+  numbers moved under one session in one afternoon, which is the argument.
 - **A renderer for A**, cached against the commit, with claimed items hidden.
   Not named `blockers`: the probe's word means a thing that stops a *file*, and
   nothing in this list stops any *work*. That absence of real blocking is
   exactly why the list parallelises, and a name suggesting otherwise would cost
   a re-reading every time.
+
+**§170 is the other half, written the same day.** It generalises the dispatch
+into `.claude/workflows/lanes.js`, which takes a base and a list of lanes, with
+a report schema, a pinned base sha and a verifier per writing lane. That is how
+a lane is *run*; this section is what the list is *cut from*. The seam between
+them is the write-set table of §171.7, which neither of them computes.
 
 ### 171.7 What is left
 
@@ -39130,13 +39444,224 @@ renderer for A.
   lanes.** Every lane that fixes anything wants to append to it, and an array
   whose entries change without changing any string count is invisible to `git
   log -S`. The lane proves its fix; whoever merges regenerates the pin.
-- **C has no record.** `docs/plan.md` carries roadmap 11.3, "finding hard
+- **C has no record.** `docs/plan.md` carried roadmap 11.3, "finding hard
   cases", as `done`, evidenced by five fuzz targets and the nightly apparatus.
   That is true of a thing that was built and cannot hold work that continues.
-  Mattias said plainly on 2026-09-20 that it is not done. Reopening it is in the
-  write set below; what shape its record takes is not settled here, except that
-  a find-rate is confounded by the moving watermark of §90 and too slow to read,
+  Mattias said plainly on 2026-09-20 that it is not done, and this section moves
+  it to `partly`. What shape its record takes is not settled here, except that a
+  find-rate is confounded by the moving watermark of §90 and too slow to read,
   so whatever is written down should carry its own evidence per line the way
   `docs/plan.md` does rather than ask to be read as a trend.
 
 Write set: this section, and `docs/plan.md`'s state for 11.3.
+
+## 172. The gate on a metered runner: a docs arm, cancelled supersedes, and a fresh-environment gate at home
+
+CI stopped on 2026-09-20. Six pushes to `main` produced jobs with **zero steps**
+that failed in two seconds, and the annotation on run `35501873094`, job
+`106054944816`, says why:
+
+> The job was not started because recent account payments have failed or your
+> spending limit needs to be increased.
+
+Nothing in the tree was wrong and no check failed. The runner never started. The
+first thing this cost was half an hour of looking for a regression, because a
+red X on a push to `main` has meant a regression every previous time.
+
+`rcad` is private, so GitHub-hosted minutes are metered. The account is on
+**GitHub Free** — 2000 minutes a month — which is not read off a billing page
+but derived: `gh api /repos/mattiasgronlund/rcad/branches/main/protection`
+answers *"Upgrade to GitHub Pro or make this repository public to enable this
+feature"*, and branch protection on a private repo is a Pro feature. Between
+2026-09-04 and 09-20, 171 runs spent **2271 wall-clock minutes**, 490 of them on
+09-19 alone across 42 runs. The allowance was gone before anyone looked.
+
+### 172.1 What was actually being bought
+
+The bill is one number: **`just gate` is 9m46s** and everything else in the job
+is under a minute. Step 11 of run `35459633208` took 586 s; `rustup show` 13 s,
+`jdx/mise-action@v2` 3 s, `Swatinem/rust-cache@v2` 16 s, the corpus cache 2 s,
+`apt-get install locales` 5 s, the two checkouts and the summary 5 s between
+them. Anyone optimising the setup steps would have been optimising 40 seconds.
+
+Against that, what the runs contained:
+
+| of `main`'s last 150 commits | count |
+| --- | --- |
+| touching only `docs/` and `*.md` | 43 |
+| merge commits | 32 |
+| touching source | 75 |
+
+42 of the 43 prose commits touched `docs/decisions.md`. Each one bought a full
+compile, a 2093-test suite and a release build, of a tree whose source had not
+moved — 13 minutes to find out that prose is still prose.
+
+And separately, **40% of the runs were obsolete before they finished**: 68 of
+171 had a later push land on the same branch inside their own 13 minutes.
+
+### 172.2 Three cuts, none of which changes what a run checks
+
+**`concurrency` with `cancel-in-progress`**, in both workflows. This is the 40%,
+and it is free.
+
+What it costs is a sentence this repo says often. A superseded commit now never
+gets a green of its own, so "CI is green on `<sha>`" can only be said of a tip.
+That is a real loss of record and it is accepted, because it is the weaker half
+of a rule already kept here — "gate the tree you merged, not the one you tested"
+— and the tip is the tree that is on `main`. A commit whose green was cancelled
+was, by construction, not the tree anyone was going to keep.
+
+**A docs arm**, `.github/workflows/ci-docs.yml`, selected by `paths`. `ci.yml`
+gains the complementary `paths-ignore: ['docs/**', '**.md']`. The arm runs
+`just gate-docs`, measured at **1m07s** against 9m46s.
+
+This is sound only because no prose file is a compile input here. There is no
+`#![doc = include_str!("../README.md")]` anywhere in the workspace —
+`grep -rn 'include_str!' --include=*.rs crates/` finds nothing pointing at
+`docs/` or an `.md` file, only prose *references* to section numbers inside
+doc comments. That idiom is common enough that it could arrive in a single
+commit and silently make a README a build input, so the check belongs in the
+header of `ci.yml` where someone widening the filter will read it, and it is
+there.
+
+**`just gate-fresh`**, which needs no runner at all. See §172.4.
+
+### 172.3 The docs arm is an exclusion, and that is the whole design
+
+`gate-docs` runs `gate_steps` **minus** `gate_metered_steps`. It was tempting to
+write the list the other way round — name the cheap steps the arm should run —
+and that would have been the bug. A new `check-*` recipe would then join `gate`,
+be enforced by `check-gate-runs-every-check` on the full arm, and quietly never
+run on a prose commit. Excluding instead means a new check joins the docs arm by
+default, which is the same direction §77's `check-gate-runs-every-check` already
+guards, for the same reason.
+
+**The failure that matters is not an expensive arm, it is a cheap one that
+checks nothing about docs.** If `check-decisions` ever landed in the metered
+list, a `docs/decisions.md` commit would be gated by nothing that reads
+`docs/decisions.md` — and it would pass, loudly, printing the same summary
+block a real gate prints. So `check-gate-docs-selftest` names
+`check-decisions`, `check-decisions-selftest`, `check-claim-section-selftest`,
+`check-plan`, `check-plan-selftest` and `check-where-the-work-is` one at a time
+and fails if any of them leaves the docs arm. Named rather than counted: a count
+survives the swap that matters.
+
+It holds four more things, each mutation-tested rather than confirmed by a green
+run — the lesson of §77.6, applied to the recipe written to serve it:
+
+- every name in `gate_metered_steps` is really a step of the gate, because a
+  renamed step leaves a name behind that excludes nothing and says so nowhere;
+- both lists parsed to something, because both are grepped out of one file and
+  an extraction that stops matching compares two empty sets and passes;
+- the expensive steps really are gone, or the arm buys nothing;
+- an arm that excluded *everything* refuses, because running no steps exits 0
+  through `gate`'s loop and prints a passing summary having checked nothing.
+
+**`check-corpus` is in the metered list, and it is the trap.** It compiles
+nothing and runs in 0.16 s, so it reads exactly like a step the cheap arm should
+keep. It *fails* when `RCAD_STEP_CORPUS` is not a directory — by design, §44.10
+— and putting a corpus there is a 119 MiB fetch. A docs arm that ran it would
+have gone red on every prose commit until somebody repaired it by adding that
+fetch to the cheap job, at which point the cheap job would not have been cheap.
+This was found by running `RCAD_STEP_CORPUS=/nonexistent/corpus just gate-docs`,
+not by reading the list. `check-corpus-selftest` stays in the docs arm, because
+it builds its own fixture and never opens the real corpus, and the selftest pins
+it there too.
+
+A push touching prose *and* source matches neither exclusion and runs **both**
+arms, about a minute of overlap. `paths` and `paths-ignore` cannot both be given
+for one event, so the alternative was a third filter guessing from a diff — and
+the arm that would have to guess is the expensive one. The overlap is cheaper
+than the guess.
+
+### 172.4 `gate-fresh`: the manoeuvre from §77.6, as a recipe
+
+The cuts above make the next month fit. They do nothing for the days until the
+allowance resets, and a repo with no second opinion is where this was in August.
+
+`just gate-fresh` runs the whole gate in a container on a fresh `--no-local`
+clone, with `HOME` pointed at a scratch directory, no `CLAUDE_PLUGINS_ROOT`, no
+sibling hub and no warm `target/`. That is precisely the manoeuvre §77.6 records
+as the only way the three red runs of 2026-09 were found — take away what the
+environment supplies and run it again — which until now was done by hand each
+time it was needed.
+
+**It is not the runner and does not claim to be.** Same kernel, same docker
+daemon, same disk, so it cannot catch what only another machine would. What it
+catches is the class the runner was bought for, at no minutes.
+
+Two things it needs that a bare image lacks, both learnt from `ci.yml` rather
+than from a failure: `locale-gen en_US.UTF-8`, because `check-corpus-selftest`
+**refuses** without a dictionary-collating locale and a container has only
+`C.UTF-8`, which is the wrong one (§79); and the corpus, mounted read-only.
+`check-plugins`, the plugin arm of `check-hooks` and `check-questions-selftest`
+all skip inside it for want of a config directory, which is §77 working rather
+than breaking.
+
+**It refuses a dirty tree, and that guard is the interesting part of the
+recipe.** A clone carries commits, so the first version of this gated `HEAD`
+while the changes it was written to check sat uncommitted three directories
+away — and it would have reported a green, in the same words, for a tree nobody
+had asked about. That is the §77.6 shape again, one level up: a check passing for
+a property of something other than its subject. Copying the working tree in was
+the wrong fix, because then it is not a fresh clone and the recipe has no
+purpose; so it names the dirty files and exits 2. A WIP commit is enough, and
+the branch is still on disk.
+
+### 172.5 The cheapest cut is not in this section's tooling
+
+Half the prose commits did not need to exist. The pattern on `main` is three
+pushes for one unit of work:
+
+```
+2ebe8554  fix(topo): §169 — a pie slice of a ball says which points are inside it
+55e628a8  docs: §169 — a pie slice is where its arc leaves the corner it shares…
+08119094  docs: §0 — §168.4's pie slice closed by §169, fused arcs next
+```
+
+**5 of the 6 `§0` pointer commits sit directly beside the section commit they
+announce**, and across `main` 27 of 44 referenced sections cost two or more
+commits — 117 commits carrying 27 units of work.
+
+The `§0` line says "§168.4's pie slice closed by §169", a sentence that is only
+true *because* §169 exists. Same fact, same author, same minute, two pushes.
+
+The cost argument is the smaller one. **Splitting them manufactures exactly the
+staleness §102 built `status` to warn about**: §0 is edited by hand,
+`check-where-the-work-is` holds its shape but cannot tell anyone it is stale, and
+landing the pointer one commit after the section guarantees `main` carries a
+wrong first row for the length of a gate, every time, by construction.
+
+So: **the `§0` update goes in the same commit as the section that closes it.**
+The code commit landing separately is honest — it comes from a lane, and the
+section and pointer are written later by whoever merged — but those two are the
+same post-merge act by the same session.
+
+No check is proposed for this, and §158's arithmetic is why: the candidates are
+every docs commit on `main`, the real hits are the ones where a `§0` edit and a
+section edit were split, and a gate arm that guessed would fire on every
+legitimate `§0`-only correction. It is a habit, written down where habits are
+written down, and CLAUDE.md points at it.
+
+Where it drifted from is worth naming, because it was a rule working as
+designed: §8.3's branch-per-change requirement is about test claims, so a
+docs-only change may go straight to `main`. "May land on its own" became "does
+land on its own", nothing enforced otherwise, and until 2026-09-20 nothing
+billed for it.
+
+### 172.6 What is still owed
+
+- **The arithmetic fits the average, not the peak.** ~10 runs a day → ~6 after
+  cancelling → three code arms at 13 minutes and three docs arms at one is about
+  42 minutes a day, ~1270 a month, inside 2000. A day like 09-19 — 42 runs — is
+  ~169 minutes even after both cuts, and sustained at that rate nothing here is
+  enough. The next lever then is not a fourth cut but batching `main`: PRs and a
+  schedule rather than a run per push.
+- **`check-release-build` was not moved to a scheduled arm**, though it is the
+  obvious next cut and was in the plan this section was written from. It wants
+  its own decision about how often a release build has to be green, and §13
+  says not to build the part before the consumer.
+- **Nothing measures the saving yet.** Every number above is from before the
+  change. The honest check is the same query a month from now: `gh run list
+  --repo mattiasgronlund/rcad --limit 300 --json createdAt,updatedAt` and sum
+  the durations by day.
