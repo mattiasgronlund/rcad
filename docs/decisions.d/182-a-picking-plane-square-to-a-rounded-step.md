@@ -128,6 +128,16 @@ separation it had not got.
 `just gate` passes on the merged tree, 2116 tests, and no published refusal rate
 needed changing.
 
+**It refuses the pairs it cannot read and not the family**, which is the
+difference between this and widening a bound until the fuzzer goes quiet. All
+seven `crash-*` artifacts under `where_two_surfaces_cross` now come back without
+a deadly signal, and they do not come back the same way: §181's
+`crash-0f06237e`, `crash-477e4468` and `crash-b76d3903` refuse both ways round,
+while its fourth — `crash-87e70e7f`, the one whose *thin* axis carries the large
+displacement rather than the fat one — **answers** both ways round in two curves,
+and the three older artifacts answer exactly as they did. A check that had gone
+blanket-conservative would have taken all seven.
+
 ### 182.6 What this does not close
 
 **§140's pair still answers, and this does not make the far-from-the-origin one
