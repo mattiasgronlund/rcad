@@ -133,3 +133,64 @@ Two things for the lane to measure rather than assume:
   §0.** Always running is the simpler rule and keeps one code path; the risk is
   a line of noise on every section a session writes. Whichever way it goes, the
   selftest pins it.
+
+### 178.7 The hook landed, matched narrowly, and did not fire this session
+
+`.claude/hooks/decisions-zero.sh` matches only
+`docs/decisions.d/000-where-the-work-is.md` — §0's own file, after §179 moved
+it out of `docs/decisions.md`, which is now a 17-line pointer carrying no
+sections at all. It runs `just check-where-the-work-is` rather than a second
+copy of `_where-the-work-is-check`'s awk: that recipe already builds the whole
+`decisions-all` concatenation, which the citation arm needs, and copying it
+into the hook is the drift §178.3 exists to stop.
+
+**Narrow, not wide.** §178.6 asked whether the hook should also speak on a
+write to any other file under `docs/decisions.d/`, since a heading rename
+anywhere can dangle a citation §0 makes. Kept to §0's own file: the round trip
+this hook removes is the one §178.1 measured, 21 trim episodes on edits to §0
+itself, 11 found only at `just gate`. A rename elsewhere breaking one of §0's
+citations is a different and rarer failure — `just gate` already catches it on
+the commit that made the rename — and a wide matcher would speak on every
+section a session writes or closes, which §179's own split did 179 times over.
+`check-decisions-zero.sh` pins the narrow match: a write to
+`docs/decisions.d/050-something.md` is silent, exit 0.
+
+**Measured cost.** Five runs of the hook against the real §0 file, timed with
+`date +%s.%N` around each call: 0.394s, 0.429s, 0.410s, 0.408s, 0.406s — 0.39
+to 0.43s, under the "about half a second" `check-hooks` asked to be told
+about. Almost all of it is `just` evaluating its top-level assignments before
+any recipe runs — `hub_aligned`'s git calls, the plugin-root lookups — the
+same cost §146 already named; `check-where-the-work-is` alone was clocked at
+0.21s in `gate`'s own comment. Left as a shell-out rather than inlined, per
+§178.3 and §178.6's own instruction not to chase this number by duplicating
+the awk.
+
+**The literal clean line**, from a real `Edit` of the real §0 file in this
+session — it happens to be exactly saturated today, so this is the file's true
+state and not a fixture:
+
+    §0 is 50 of 50 non-blank lines, reviewed 2026-09-20, every section it cites exists.
+
+**The literal block**, from the same file with three lines added by hand and
+reverted before committing (`git checkout -- docs/decisions.d/000-where-the-work-is.md`):
+
+    §0 is 53 non-blank lines; the cap is 50, because a summary nobody re-reads is not one
+    ^ cut 3 non-blank lines, in one pass: trimming by eye takes two to four (§102.3)
+
+**Mid-session registration did not take effect.** After the `PostToolUse`
+entry was added to `.claude/settings.json`, a real `Edit` of §0 later in this
+same session produced no `additionalContext` and no block — the tool result
+was the plain "file has been updated successfully," nothing from the hook.
+Both lines above came from piping the payload a `PostToolUse` call would send
+straight into `decisions-zero.sh`, not from Claude Code invoking it.
+`check-decisions-zero.sh` is what proves the hook's behaviour unconditionally
+and on CI, rather than resting on a session restart nobody can force to order.
+
+`just gate` now prints the headroom line too, on every clean run:
+`_where-the-work-is-check` emits it once, and both the hook and `gate` read it
+from the same place rather than the hook computing it a second time. This
+lane's own green run carries `§0 is 50 of 50 non-blank lines, reviewed
+2026-09-20, every section it cites exists.` at line 9 of
+`target/last-gate.log`. That is deliberate, not a leak: the whole point of
+turning "clean" into a count was that `gate` should not know less than the
+write does.
