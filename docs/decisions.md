@@ -39959,6 +39959,22 @@ query sites — `fuzz-watermark` at `justfile:3356` and `_status-green` at
 comments. Both query sites now read both sources, so the set of readers asking
 only GitHub is empty.
 
+**The row still counts shas, and will often say one or two are not green.**
+Landing §173.10 itself left it reading "main tip f2494a21, last green d32cca01,
+2 commit(s) on main not yet green" — where `26727b9d` is the merge, whose tree is
+`d8eb9b50`, *byte for byte the tree that was gated*, and `f2494a21` is docs-only
+and was read by `gate-docs`. Both had been read; neither had been read under its
+own sha.
+
+Counting trees instead would remove that, and it is deliberately not done. A sha
+is the whole record (§173.9), and the number this row exists to give is a
+conservative one — it should err towards saying work is unread. **What makes it
+tolerable is that it heals and the CI version could not.** The old row asked an
+allowance that can never answer again, so its number only ever grew; this one
+goes to zero the next time anybody runs a full gate on the tip. A row that is
+briefly pessimistic after a merge is a different thing from a row that is
+permanently wrong, and only the second is worth code.
+
 ### 173.11 The fifth run found nothing, which is the first evidence the class is exhausted
 
 `gate-fresh` had gone four for four: every run since it was written found a real
