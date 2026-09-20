@@ -128,7 +128,11 @@ FNR == 1 { state = "idle"; in_attr = 0 }
     }
 }
 state == "idle" {
-    if ($0 !~ /\<match\>/) next
+    # Spelled out rather than as `\<match\>`, which is gawk's alone: mawk is
+    # Debian's default `awk` and every container this gate runs in has it, and
+    # there `\<` is just a literal `<`, so no line ever opens a match and the
+    # whole scan answers 0 without failing. `docs/decisions.md` §173.
+    if ($0 !~ /(^|[^A-Za-z0-9_])match([^A-Za-z0-9_]|$)/) next
     state = "header"
     match_line = FNR
 }
