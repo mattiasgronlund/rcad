@@ -1452,9 +1452,30 @@ check-enums:
             $(find crates -path '*/src/*' -name '*.rs') | grep . \
         || (echo "^ a public enum that neither grows nor says why not (docs/decisions.md §40)"; exit 1)
 
-# Where `decisions-toc` and `decision` read from. A variable so the selftest
-# below can point them at fixtures rather than at whatever the real file happens
-# to say today.
+# Where `decisions-toc`, `decision` and the rest read from: one file per `## N.`
+# section, named `NNN-<slug>.md` for the number it is cited as, plus
+# `00-preamble.md` for the fifteen lines that stood above `## 0.`. A variable so
+# the selftest below can point them at fixtures rather than at whatever the real
+# sections happen to say today.
+#
+# **The preamble is two digits and a section is three, and that is the whole
+# scheme.** Both wanted to be `000-`: the preamble comes first and §0 is a real
+# section whose number is 0. Two digits sorts before three under byte order
+# (`-` is 0x2D, below `0`), which is what `LC_ALL=C sort` gives, and it is the
+# one distinction a filename can carry that `just decision 0` does not have to
+# know about — the lookup matches three digits, so the preamble is invisible to
+# it rather than special-cased in it.
+#
+# **Every listing here sorts under `LC_ALL=C`**, and that is not decoration: a
+# plain `ls` collates under the user's locale, which ignores `-` entirely, and
+# then `00-preamble.md` lands between `009-` and `010-` — which is exactly where
+# the first attempt at this put it, silently, and the concatenation came back
+# 15 lines out of order.
+decisions_dir := "docs/decisions.d"
+
+# The pointer file. Every citation in the tree spells `docs/decisions.md §N` and
+# still does after the split (§179), so the path keeps its name and holds four
+# lines of prose. `check-decisions` is what keeps it a pointer.
 decisions_file := "docs/decisions.md"
 
 # The map of docs/decisions.md: every top-level section, and what it costs to
@@ -1474,21 +1495,50 @@ decisions_file := "docs/decisions.md"
 # same section that goes stale the moment anybody inserts a paragraph.
 [doc("The map of docs/decisions.md: every section, and what it costs to read.")]
 decisions-toc:
-    @awk '/^## [0-9]/ { \
-             if (num != "") printf "  %-5s %-56s %4d lines\n", num, title, n; \
-             rest = substr($0, 4); p = index(rest, " "); \
-             num = substr(rest, 1, p - 1); sub(/\.$/, "", num); \
-             title = substr(rest, p + 1); n = 0; next \
-         } \
-         num != "" { n++ } \
-         END { if (num != "") printf "  %-5s %-56s %4d lines\n", num, title, n }' \
-        {{decisions_file}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir='{{decisions_dir}}'
+    for f in $(ls "$dir" | LC_ALL=C sort); do
+        head=$(head -n 1 "$dir/$f")
+        case "$head" in '## '*) ;; *) continue ;; esac
+        rest=${head#'## '}
+        title=${rest#* }
+        num=${rest%% *}; num=${num%.}
+        printf "  %-5s %-56s %4d lines\n" \
+            "$num" "$title" "$(( $(wc -l < "$dir/$f") - 1 ))"
+    done
+
+# Every section, concatenated, in the order the numbers run.
+#
+# This is the file the sections used to be, and it is how the split was checked
+# to have lost nothing: at §179's own commit this recipe's output was
+# byte-identical to the `docs/decisions.md` it replaced, diffed and empty.
+#
+# It is not what anybody should read — 40 000 lines — but a whole-file search
+# needs it to exist, and `decisions-find` and `check-where-the-work-is` are both
+# written against it rather than against a directory walk, because a hit or a
+# citation has to be attributed across sections to mean anything.
+[doc("Every section concatenated, in number order: the file the sections used to be.")]
+decisions-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir='{{decisions_dir}}'
+    for f in $(ls "$dir" | LC_ALL=C sort); do
+        cat "$dir/$f"
+    done
 
 # One section of docs/decisions.md, by its number.
 #
 # `just decision 49` gives §49's own prose and then the list of its subsections,
 # which is the cheap way in; `just decision 49.6` gives §49.6 in full. A leading
 # section sign is accepted so a citation can be pasted as it is written.
+#
+# **The subsection address is what the split had to preserve** (§179). rscene's
+# `###` headings are free text, so its port of this recipe prints whole sections
+# and stops; here every subsection is numbered and `just decision 173.10` is how
+# one is read. The filename picks the file — `173.10` and `173` both resolve to
+# `173-*.md` — and then the awk below is the one that ran against the single
+# file, unchanged, reading a file that now holds one section instead of 177.
 #
 # **A number that does not exist fails rather than printing nothing.** Silence
 # reads as "the decisions say nothing about this", which is the opposite of what
@@ -1503,6 +1553,22 @@ decision want:
         echo "which section? try 'just decisions-toc' for the map" >&2
         exit 2
     fi
+    dir='{{decisions_dir}}'
+    top=${want%%.*}
+    file=""
+    if [[ $top =~ ^[0-9]+$ ]]; then
+        for f in $(ls "$dir" | LC_ALL=C sort); do
+            n=${f%%-*}
+            [[ $n =~ ^[0-9][0-9][0-9]$ ]] || continue
+            [ "$((10#$n))" = "$((10#$top))" ] || continue
+            file="$dir/$f"
+            break
+        done
+    fi
+    if [ -z "$file" ]; then
+        echo "docs/decisions.md has no section $want" >&2
+        exit 3
+    fi
     case "$want" in
     *.*)
         awk -v want="$want" '
@@ -1513,7 +1579,7 @@ decision want:
                 if (id == want) { on = 1; found = 1 }
             }
             on { print }
-            END { exit(found ? 0 : 3) }' "{{decisions_file}}" || {
+            END { exit(found ? 0 : 3) }' "$file" || {
             echo "docs/decisions.md has no section $want" >&2
             exit 3
         }
@@ -1528,7 +1594,7 @@ decision want:
             }
             /^### / { if (on) exit }
             on { print }
-            END { exit(found ? 0 : 3) }' "{{decisions_file}}" || {
+            END { exit(found ? 0 : 3) }' "$file" || {
             echo "docs/decisions.md has no section $want" >&2
             exit 3
         }
@@ -1546,7 +1612,7 @@ decision want:
             }
             /^## / { flush(); next }
             num != "" { n++ }
-            END { flush() }' "{{decisions_file}}"
+            END { flush() }' "$file"
         ;;
     esac
 
@@ -1567,6 +1633,13 @@ decision want:
 # **No match fails rather than printing nothing**, for the same reason `decision`
 # fails on a number that does not exist: an empty answer here reads as "the
 # decisions say nothing about this", and that is a claim a typo can forge.
+#
+# **This searches the concatenation and not the directory**, which is what keeps
+# a hit attributed to the `### N.M` it fell in rather than only to the `## N.`
+# file that holds it. rscene's port counts hits per file with `grep -c`, because
+# a file is the finest unit it has; here the subsection is finer than the file,
+# so the search needs a stream with every heading in it. `decisions-all` is that
+# stream, and the awk below is unchanged from the one that read the single file.
 [doc("Which sections mention this? Answers in section numbers, not line numbers.")]
 decisions-find pattern:
     #!/usr/bin/env bash
@@ -1575,10 +1648,13 @@ decisions-find pattern:
         echo "find what? an empty pattern matches every line" >&2
         exit 2
     fi
+    all=$(mktemp)
     hits=$(mktemp)
-    trap 'rm -f "$hits"' EXIT
-    if ! grep -inE -- "$1" "{{decisions_file}}" | cut -d: -f1 > "$hits"; then
-        echo "no line in {{decisions_file}} matches $1" >&2
+    trap 'rm -f "$all" "$hits"' EXIT
+    dir='{{decisions_dir}}'
+    for f in $(ls "$dir" | LC_ALL=C sort); do cat "$dir/$f"; done > "$all"
+    if ! grep -inE -- "$1" "$all" | cut -d: -f1 > "$hits"; then
+        echo "no line in {{decisions_dir}} matches $1" >&2
         exit 1
     fi
     awk -v hits="$hits" '
@@ -1598,7 +1674,7 @@ decisions-find pattern:
         END {
             for (i = 1; i <= k; i++)
                 printf "  %-7s %-54s %4d hits\n", order[i], name[order[i]], count[order[i]]
-        }' "{{decisions_file}}"
+        }' "$all"
 
 # Where `claim-section` writes down the numbers it hands out. Empty means a file
 # in the repository's common git directory, which every worktree shares and no
@@ -1624,7 +1700,17 @@ section_claims := ""
 # committed or not, because a lane writes its section long before it commits —
 # and every number claimed before. A claim that is never written leaves a gap,
 # and a gap costs nothing: `check-decisions` asks for unique, ascending numbers,
-# not consecutive ones.
+# not consecutive ones. §54 and §65 are two such gaps today.
+#
+# **It reads both shapes, and that is not tidiness** (§179). The split put the
+# sections in `docs/decisions.d/NNN-*.md`, and every lane branch cut before it
+# still carries the single `docs/decisions.md` with its sections in it — for
+# weeks, since a lane lives as long as its unit. A recipe that read only the new
+# shape would see §178 as the top while a branch held §180, and hand §179 out
+# twice; reading only the old shape would stop counting the moment the split
+# landed. So both are read, on refs and in worktrees alike, and the highest of
+# everything wins. This is the failure this repository has already paid for once
+# by hand, which is what §159 was written about.
 #
 # Every worktree of this clone shares the claims, and nothing else does. A
 # section written on another machine is seen once it reaches a branch here.
@@ -1644,15 +1730,22 @@ claim-section what:
     flock 9
     touch "$claims"
     file="{{decisions_file}}"
+    dir="{{decisions_dir}}"
     top=$({
         git for-each-ref --format='%(refname)' refs/heads refs/remotes \
             | while read -r ref; do git rev-parse -q --verify "$ref:$file" || true; done \
             | sort -u \
             | while read -r blob; do git cat-file blob "$blob"; done \
             | grep -E '^## [0-9]+\. ' || true
+        git for-each-ref --format='%(refname)' refs/heads refs/remotes \
+            | while read -r ref; do git ls-tree --name-only "$ref:$dir" 2>/dev/null || true; done \
+            | sed -nE 's/^([0-9][0-9][0-9])-.*\.md$/## \1./p'
         git worktree list --porcelain | sed -n 's/^worktree //p' \
             | while read -r tree; do
                 if [ -f "$tree/$file" ]; then grep -E '^## [0-9]+\. ' "$tree/$file" || true; fi
+                if [ -d "$tree/$dir" ]; then
+                    ls "$tree/$dir" | sed -nE 's/^([0-9][0-9][0-9])-.*\.md$/## \1./p'
+                fi
             done
         cut -f1 "$claims" | sed 's/^/## /'
     } | awk '{ n = $2 + 0; if (n > top) top = n } END { print top + 0 }')
@@ -1660,9 +1753,10 @@ claim-section what:
     printf '%s\t%s\t%s\t%s\n' "$next" "$(date -u +%FT%TZ)" "{{invocation_directory()}}" "$1" >> "$claims"
     echo "$next"
 
-# `decision` finds a section by the number its heading starts with, so a heading
-# that does not start with one is a section the lookup cannot reach — and it
-# fails as silence, which reads as "nothing was decided about this".
+# `decision` finds a section by the number its filename starts with and a
+# subsection by the number its heading starts with, so either one written
+# without a number is a section the lookup cannot reach — and it fails as
+# silence, which reads as "nothing was decided about this".
 #
 # All 487 headings are numbered today, `## N.` and `### N.M`. `####` headings are
 # free text on purpose: they sit inside a subsection and are never addressed.
@@ -1670,85 +1764,151 @@ claim-section what:
 # A heading hiding inside a code fence would fool the same match. None exists and
 # none ever has, so per §13 that check is not built until something needs it.
 #
-# **Two sections sharing a number is the second way to be unreachable**, and it
-# is the one that happens by itself. `decision` stops at the first heading whose
-# number matches, so the second §56 is addressed by nothing at all — and it is
-# not a typo that puts it there. Sections are appended at the tail by whoever
-# finishes first, ten to thirty times a day from as many as four concurrent
-# sessions, and two of them reaching for the same next number is the ordinary
-# case rather than the unlucky one. It happened while §57 was being written
-# (§57.4), and nothing in this file noticed; the collision was found by hand,
-# at merge time, which is the expensive place to find it.
+# **The filename and the heading are two places to write the number**, so they
+# are compared. A section file copied to start the next one keeps its old
+# heading under a new name, and then two numbers address one text and one
+# addresses none.
 #
-# **A `## N.` lower than the one before it, and a `### N.M` sitting under the
-# wrong `## N.`, are two more ways to go silently unreachable.** A renumbering
-# that moves later sections down leaves the file out of order if a stray
-# earlier one is missed, and a subsection typed by hand during that renumbering
-# can end up under the wrong parent — `### 64.3` left under `## 69.` after 64
-# was renumbered to 67 is the shape it takes, and it happened four times in one
-# session and was only caught by grepping for it. Neither is a duplicate, so
-# the check above passes both. `docs/decisions.md` §71.
+# **Two files sharing a number is the second way to be unreachable**, and it is
+# the one that happens by itself. `decision` takes the first file whose number
+# matches, so the second §56 is addressed by nothing at all — and it is not a
+# typo that puts it there. Whoever finishes a section next takes the next
+# number, ten to thirty times a day from as many as four concurrent sessions,
+# and two of them reaching for the same one is the ordinary case rather than the
+# unlucky one. It happened while §57 was being written (§57.4). The split (§179)
+# is what stopped that being a merge conflict every time; the collision it
+# cannot prevent is the one worth catching here.
+#
+# **A `### N.M` sitting in the wrong file, or after a higher one, is the
+# third.** A subsection typed by hand during a renumbering can end up under the
+# wrong parent — `### 64.3` left under `## 69.` after 64 was renumbered to 67 is
+# the shape it takes, and it happened four times in one session and was only
+# caught by grepping for it. `docs/decisions.md` §71.
+#
+# **And the pointer file must stay a pointer.** Every citation in the tree says
+# `docs/decisions.md §N`, the habit of four sessions is to append a section to
+# that path, and an append there is invisible to every recipe above — the text
+# would be live, addressed by nothing, and colliding again. This is the failure
+# the split invites and the one nothing else would catch. The pointer's path is
+# derived from the directory's own name (`docs/decisions.d` → `docs/decisions.md`)
+# so that the selftest below gets it too, against a fixture pointer of its own.
+#
+# **Contiguity is deliberately not demanded, unlike rscene's port of this.**
+# `claim-section` hands a number out under a lock before the section is written,
+# so a claim that is never used leaves a permanent hole: §54 and §65 are two
+# such holes today and neither is a fault. A check that asked for 0..N would
+# have been red on the tree it was written against.
 [doc("Every heading in docs/decisions.md can be reached by its number.")]
 check-decisions:
     #!/usr/bin/env bash
     set -euo pipefail
-    bad=$(grep -nE '^(## |### )' "{{decisions_file}}" \
-        | grep -vE '^[0-9]+:## [0-9]+\. ' \
-        | grep -vE '^[0-9]+:### [0-9]+\.[0-9]+ ' || true)
-    if [ -n "$bad" ]; then
-        echo "$bad"
-        echo "^ a decisions.md heading that 'just decision' cannot address"
-        exit 1
-    fi
+    dir="{{decisions_dir}}"
+    [ -d "$dir" ] || { echo "$dir is not a directory"; exit 1; }
 
-    dupes=$(grep -oE '^(## [0-9]+|### [0-9]+\.[0-9]+)' "{{decisions_file}}" \
-        | awk '{ print $2 }' | sort | uniq -d)
+    ok=1
+    nums=$(mktemp)
+    trap 'rm -f "$nums"' EXIT
+    for f in $(ls "$dir" | LC_ALL=C sort); do
+        path="$dir/$f"
+        if [ "$f" = "00-preamble.md" ]; then
+            if grep -q '^## ' "$path"; then
+                grep -n '^## ' "$path"
+                echo "^ $path is the preamble and carries a '## ' heading"
+                ok=0
+            fi
+            continue
+        fi
+        if [[ ! $f =~ ^([0-9][0-9][0-9])-[a-z0-9-]+\.md$ ]]; then
+            echo "$path is not named NNN-<slug>.md, so 'just decision' cannot reach it"
+            ok=0
+            continue
+        fi
+        n=$((10#${BASH_REMATCH[1]}))
+        echo "$n" >> "$nums"
+
+        headings=$(grep -c '^## ' "$path" || true)
+        if [ "$headings" -ne 1 ]; then
+            echo "$path has $headings '## ' headings; a file is one section"
+            ok=0
+            continue
+        fi
+        if ! head -n 1 "$path" | grep -q "^## $n\. "; then
+            head -n 1 "$path"
+            echo "^ $path does not open with '## $n. ', so its name and its heading disagree"
+            ok=0
+            continue
+        fi
+
+        bad=$(grep -nE '^(## |### )' "$path" \
+            | grep -vE '^[0-9]+:## [0-9]+\. ' \
+            | grep -vE '^[0-9]+:### [0-9]+\.[0-9]+ ' || true)
+        if [ -n "$bad" ]; then
+            echo "$path"
+            echo "$bad"
+            echo "^ a decisions heading that 'just decision' cannot address"
+            ok=0
+            continue
+        fi
+
+        subs=$(awk -v n="$n" -v path="$path" '
+            /^### [0-9]/ {
+                rest = $0; sub(/^#+ /, "", rest)
+                p = index(rest, " "); id = substr(rest, 1, p - 1)
+                split(id, parts, ".")
+                if (parts[1] + 0 != n)
+                    print path ":" FNR ": ### " id " is not under its own ## " n
+                else if (parts[2] + 0 <= lastsub)
+                    print path ":" FNR ": ### " id " comes after ### " n "." lastsub
+                lastsub = parts[2] + 0
+            }' "$path")
+        if [ -n "$subs" ]; then
+            echo "$subs"
+            echo "^ decisions subsection numbers are out of order (docs/decisions.md §71)"
+            ok=0
+        fi
+    done
+    [ "$ok" -eq 1 ] || exit 1
+
+    [ -s "$nums" ] || { echo "$dir holds no sections at all"; exit 1; }
+    dupes=$(sort -n "$nums" | uniq -d)
     if [ -n "$dupes" ]; then
-        for id in $dupes; do
-            grep -nE "^(## ${id//./\\.}\. |### ${id//./\\.} )" "{{decisions_file}}"
-        done
-        echo "^ these sections share a number, and 'just decision' reaches only the first"
+        for id in $dupes; do ls "$dir" | { grep -E "^0*${id}-" || true; }; done
+        echo "^ these files share a section number, and 'just decision' reaches only the first"
         exit 1
     fi
 
-    order=$(awk '
-        /^## [0-9]/ {
-            rest = $0; sub(/^#+ /, "", rest)
-            p = index(rest, " "); n = substr(rest, 1, p - 1) + 0
-            if (n < top) print FNR ": ## " n " comes after ## " top
-            top = n; lastsub = 0
-            next
-        }
-        /^### [0-9]/ {
-            rest = $0; sub(/^#+ /, "", rest)
-            p = index(rest, " "); id = substr(rest, 1, p - 1)
-            split(id, parts, ".")
-            subtop = parts[1] + 0; subnum = parts[2] + 0
-            if (subtop != top)
-                print FNR ": ### " id " is not under its own ## " top
-            else if (subnum < lastsub)
-                print FNR ": ### " id " comes after ### " top "." lastsub
-            lastsub = subnum
-        }' "{{decisions_file}}")
-    if [ -n "$order" ]; then
-        echo "$order"
-        echo "^ decisions.md section numbers are out of order (docs/decisions.md §71)"
+    pointer="${dir%.d}.md"
+    if [ -e "$pointer" ] && grep -q '^## ' "$pointer"; then
+        grep -n '^## ' "$pointer"
+        echo "^ $pointer is the pointer, not a section; that heading is addressed by nothing"
         exit 1
     fi
 
-# Pins the lookup against fixtures rather than against the real file, so it stays
-# proven on a tree where the real §1.1 has been rewritten.
+# Pins the lookup against fixtures rather than against the real sections, so it
+# stays proven on a tree where the real §1.1 has been rewritten.
 #
 # `#### ` inside the fixture is the case worth having: it is a heading, and a
 # lookup that stops at any heading would cut §1.1 in half without saying so.
+#
+# **The fixture is a directory now** (§179), and every case below that used to
+# be a second `.md` file is a second fixture directory. The cases the split
+# added are the ones that were impossible before: a filename and a heading that
+# disagree, two files claiming one number, a section appended to the pointer,
+# and a `00-preamble.md` that has grown a section heading. The cases it made
+# impossible went the other way — two `## 1.` in one file is now "a file is one
+# section", and a descending `## 1.` after `## 2.` cannot be expressed at all,
+# because the order is the filenames' and the filenames are sorted.
 [private]
 check-decisions-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
-    cat > "$dir/fixture.md" <<'MD'
+    mkdir -p "$dir/fixture.d"
+    cat > "$dir/fixture.d/00-preamble.md" <<'MD'
     # Design decisions
+    MD
+    cat > "$dir/fixture.d/001-first.md" <<'MD'
     ## 1. First
     intro to one
     ### 1.1 Alpha
@@ -1757,10 +1917,20 @@ check-decisions-selftest:
     still alpha
     ### 1.2 Beta
     beta body
+    MD
+    cat > "$dir/fixture.d/002-second.md" <<'MD'
     ## 2. Second
     intro to two
     MD
-    j="{{just_executable()}} --set decisions_file $dir/fixture.md"
+    j="{{just_executable()}} --set decisions_dir $dir/fixture.d"
+
+    got=$($j decisions-all)
+    want=$(printf '%s\n' "# Design decisions" "## 1. First" "intro to one" \
+        "### 1.1 Alpha" "alpha body" \
+        "#### A fourth-level heading that must not end the section" "still alpha" \
+        "### 1.2 Beta" "beta body" "## 2. Second" "intro to two")
+    [ "$got" = "$want" ] || { echo "decisions-all drifted:"; \
+        echo "--- got ---"; echo "$got"; echo "--- want ---"; echo "$want"; exit 1; }
 
     got=$($j decision 1.1)
     want=$(printf '%s\n' "### 1.1 Alpha" "alpha body" \
@@ -1815,64 +1985,70 @@ check-decisions-selftest:
         echo "decisions-find accepted the empty pattern"; exit 1
     fi
 
-    # The duplicate-number check, against fixtures for the same reason: the real
-    # file has no duplicate today, so pinning it there would prove nothing.
+    # Each way the sections can go unreachable, against fixtures for the same
+    # reason as above: the real directory is clean today, so pinning the check
+    # there would prove nothing.
     $j check-decisions >/dev/null \
         || { echo "the clean fixture failed check-decisions"; exit 1; }
 
-    cat > "$dir/twice.md" <<'MD'
-    ## 1. First
-    ## 1. First again
-    MD
-    if {{just_executable()}} --set decisions_file "$dir/twice.md" \
-        check-decisions >/dev/null 2>&1; then
-        echo "two sections numbered 1 passed check-decisions"; exit 1
-    fi
+    # `bad <name> <why>` builds a fixture directory from the clean one, lets the
+    # caller break it, and fails if `check-decisions` is happy with the wreck.
+    bad() {
+        cp -r "$dir/fixture.d" "$dir/$1.d"
+        "break_$1"
+        if {{just_executable()}} --set decisions_dir "$dir/$1.d" \
+            check-decisions >/dev/null 2>&1; then
+            echo "$2 passed check-decisions"; exit 1
+        fi
+    }
 
-    cat > "$dir/twice-sub.md" <<'MD'
-    ## 1. First
-    ### 1.1 Alpha
-    ### 1.1 Alpha again
-    MD
-    if {{just_executable()}} --set decisions_file "$dir/twice-sub.md" \
-        check-decisions >/dev/null 2>&1; then
-        echo "two subsections numbered 1.1 passed check-decisions"; exit 1
-    fi
+    break_twice() { cp "$dir/twice.d/001-first.md" "$dir/twice.d/001-first-again.md"; }
+    bad twice "two files numbered 001"
 
-    # Descending: §1 lands after §2, which a renumbering that skips one section
-    # leaves behind.
-    cat > "$dir/descending.md" <<'MD'
-    ## 2. Second
-    ## 1. First
-    MD
-    if {{just_executable()}} --set decisions_file "$dir/descending.md" \
-        check-decisions >/dev/null 2>&1; then
-        echo "## 1. after ## 2. passed check-decisions"; exit 1
-    fi
+    break_twice_sub() {
+        printf '%s\n' "### 1.1 Alpha again" >> "$dir/twice_sub.d/001-first.md"
+    }
+    bad twice_sub "two subsections numbered 1.1"
 
     # Descending within a section: §1.1 lands after §1.2.
-    cat > "$dir/descending-sub.md" <<'MD'
-    ## 1. First
-    ### 1.2 Beta
-    ### 1.1 Alpha
-    MD
-    if {{just_executable()}} --set decisions_file "$dir/descending-sub.md" \
-        check-decisions >/dev/null 2>&1; then
-        echo "### 1.1 after ### 1.2 passed check-decisions"; exit 1
-    fi
+    break_descending_sub() {
+        printf '%s\n' "### 1.1 Alpha" >> "$dir/descending_sub.d/001-first.md"
+    }
+    bad descending_sub "### 1.1 after ### 1.2"
 
-    # Wrong parent: §1.2 is left under §2 by a renumbering, exactly the way
-    # `### 64.3` ended up under `## 69.` in the real file.
-    cat > "$dir/wrong-parent.md" <<'MD'
-    ## 1. First
-    ### 1.1 Alpha
-    ## 2. Second
-    ### 1.2 Beta
-    MD
-    if {{just_executable()}} --set decisions_file "$dir/wrong-parent.md" \
-        check-decisions >/dev/null 2>&1; then
-        echo "### 1.2 under ## 2. passed check-decisions"; exit 1
-    fi
+    # Wrong parent: §1.2 is left in §2's file by a renumbering, exactly the way
+    # `### 64.3` ended up under `## 69.` in the single file.
+    break_wrong_parent() {
+        printf '%s\n' "### 1.2 Beta" >> "$dir/wrong_parent.d/002-second.md"
+    }
+    bad wrong_parent "### 1.2 in ## 2.'s file"
+
+    # The name and the heading disagree: a file copied to start the next section
+    # and renamed but not retitled.
+    break_renamed() { mv "$dir/renamed.d/002-second.md" "$dir/renamed.d/003-second.md"; }
+    bad renamed "a file named 003 whose heading says 2"
+
+    # A file is one section: the old habit of appending, applied to a section
+    # file instead of the whole document.
+    break_two_in_one() {
+        printf '%s\n' "## 3. Third" >> "$dir/two_in_one.d/002-second.md"
+    }
+    bad two_in_one "two sections in one file"
+
+    # An unnumbered filename, which `just decision` can reach by nothing.
+    break_unnumbered() { mv "$dir/unnumbered.d/002-second.md" "$dir/unnumbered.d/second.md"; }
+    bad unnumbered "a file named without a number"
+
+    # The preamble grows a section heading, which addresses it to nobody.
+    break_preamble_section() {
+        printf '%s\n' "## 3. Third" >> "$dir/preamble_section.d/00-preamble.md"
+    }
+    bad preamble_section "a section heading in the preamble"
+
+    # The pointer grows a section, which is the habit of four sessions and the
+    # one failure the split invites (§179).
+    break_pointer() { printf '%s\n' "## 3. Third" > "$dir/pointer.md"; }
+    bad pointer "a section appended to the pointer file"
 
 # Pins `claim-section` against a throwaway repository with a section in each
 # place the recipe must look: on the checked-out branch, on another branch only,
@@ -1918,6 +2094,29 @@ check-claim-section-selftest:
     got=$(cat "$dir"/at-once-* | sort -n | tr '\n' ' ')
     [ "$got" = "12 13 14 15 16 17 18 19 " ] || {
         echo "eight claims at once got '$got', want 12 to 19 once each"; exit 1; }
+
+    # Both shapes, which is the whole of §179.2's second point. Everything above
+    # is the old single file, because that is what a lane branch cut before the
+    # split still carries; these two are the new directory, committed on a
+    # branch and uncommitted in a worktree. A recipe that had learnt the new
+    # shape and forgotten the old would pass every case above and hand out a
+    # number a branch already holds — so the old cases are the test for the new
+    # code just as much as these are.
+    g checkout -q elsewhere
+    mkdir -p "$repo/docs/decisions.d"
+    printf '%s\n' "## 40. Split, on a branch" > "$repo/docs/decisions.d/040-split.md"
+    g add docs/decisions.d/040-split.md
+    g commit -q -m forty
+    g checkout -q main
+    got=$(claim 'past a split branch')
+    [ "$got" = "41" ] || {
+        echo "a claim got '$got', want 41: one past §40 in the branch's decisions.d"; exit 1; }
+
+    mkdir -p "$dir/lane/docs/decisions.d"
+    printf '%s\n' "## 60. Split, not committed" > "$dir/lane/docs/decisions.d/060-split.md"
+    got=$(claim 'past a split worktree')
+    [ "$got" = "61" ] || {
+        echo "a claim got '$got', want 61: one past the uncommitted §60 in decisions.d"; exit 1; }
 
     if claim '' >/dev/null 2>&1; then
         echo "claim-section accepted a claim for nothing"; exit 1
@@ -6183,23 +6382,43 @@ _status-green dir base:
 # many lines to cut, because the 21 trims of 2026-09-17..20 took 34 rounds
 # between them — 67 to 56 to 54 to 51 is one of them — and a trim by eye aims
 # short.
+#
+# **It reads the concatenation, not §0's own file** (§179). Only half of what it
+# checks lives in §0: the `reviewed:` date and the 50-line cap do, but the last
+# arm walks every `§N` and `§N.M` the block cites and asks whether that heading
+# exists — and after the split those headings are in 177 other files. Pointing
+# this at `docs/decisions.d/000-*.md` alone would have turned every correct
+# citation in §0 into "cites sections that do not exist", which is louder than
+# the failure it was written for and wrong every time. `decisions-all` is the
+# same bytes the single file held, so the check below is the one that ran
+# against it, unchanged, and its fixtures are unchanged with it.
 [doc("docs/decisions.md §0 exists, parses, and points only at sections that do.")]
 check-where-the-work-is:
     #!/usr/bin/env bash
     set -uo pipefail
-    {{ just_executable() }} _where-the-work-is-check '{{ decisions_file }}'
+    all=$(mktemp)
+    trap 'rm -f "$all"' EXIT
+    {{ just_executable() }} decisions-all > "$all" || exit 1
+    {{ just_executable() }} _where-the-work-is-check "$all" '{{ decisions_file }}'
 
 # Held apart from the recipe above so the selftest can run it over fixtures
 # whose answer is known, rather than over whatever §0 happens to say today.
+#
+# `name` is what a failure calls the file, so the recipe above can hand over a
+# temporary concatenation and still have the message name `docs/decisions.md`,
+# which is the path a reader has to go and edit. It defaults to `file`, which is
+# what the fixtures pass.
 [private]
-_where-the-work-is-check file:
+_where-the-work-is-check file name="":
     #!/usr/bin/env bash
     set -uo pipefail
     file='{{file}}'
+    name='{{name}}'
+    [ -n "$name" ] || name="$file"
 
     block=$(awk '/^## 0\. /{on=1} on && /^## [1-9]/{exit} on{print}' "$file")
     if [ -z "$block" ]; then
-        echo "$file has no '## 0.' section, so nothing says where the work is"
+        echo "$name has no '## 0.' section, so nothing says where the work is"
         exit 1
     fi
     if ! head -1 <<<"$block" | grep -qx '## 0\. Where the work is'; then
