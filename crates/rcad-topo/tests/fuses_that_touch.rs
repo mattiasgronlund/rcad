@@ -612,16 +612,14 @@ fn named(why: &Error) -> String {
     let name: String = written.chars().take_while(|c| *c != '{').collect();
     let open = name.matches('(').count() - name.matches(')').count();
     let name = format!("{}{}", name.trim_end(), ")".repeat(open));
-    match why {
-        Error::Undecidable { records } => {
-            let gave_up: BTreeSet<_> = records.records().iter().map(|r| r.predicate()).collect();
-            format!(
-                "{name} ({})",
-                gave_up.into_iter().collect::<Vec<_>>().join(", ")
-            )
-        }
-        _ => name,
-    }
+    let Error::Undecidable { records } = why else {
+        return name;
+    };
+    let gave_up: BTreeSet<_> = records.records().iter().map(|r| r.predicate()).collect();
+    format!(
+        "{name} ({})",
+        gave_up.into_iter().collect::<Vec<_>>().join(", ")
+    )
 }
 
 fn how_much_it_holds(model: &Model, solids: &[SolidKey]) -> Held {

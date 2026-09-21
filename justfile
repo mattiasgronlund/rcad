@@ -1003,7 +1003,16 @@ check-fuzz-builds:
 # untouched by a turn, so the resting survives it — and an arm that skips a pair
 # the property can now compare is a hole in the property. Two more quartic pairs
 # get compared for the point.
-wildcard_arms := "87"
+#
+#     §191's three test lanes  after the merge  84 direct + 4 composite = 88
+#
+# One new direct arm, in test code. `fuses_that_touch.rs`'s `named` grew one
+# that only singled out `Undecidable`, and it is a `let … else` now; what is
+# left is a match that names the three variants it is asked about and hands
+# everything else on — `Rule`'s three fuses in `name_of`, or
+# `a_turned_curved_refusal` handing every other `Error` to `a_curved_refusal`,
+# where the upright families' names live.
+wildcard_arms := "88"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
