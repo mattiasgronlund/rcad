@@ -10,6 +10,7 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::exact::{difference, square_of_expansion};
+use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::isometry::Isometry;
 use crate::point::{Axis, Point, Vector};
 use crate::{Error, Result};
@@ -308,18 +309,22 @@ impl Predicate for HowFarFromTheSkin {
         let origin = self.cylinder.axis.origin().coordinates();
         let direction = self.cylinder.axis.direction().components();
 
-        let from_origin = [0, 1, 2].map(|axis| point[axis] - Interval::exactly(origin[axis]));
+        let largest = largest_magnitude(&point, &[origin, [self.cylinder.radius, 0.0, 0.0]]);
         let along = direction.map(Interval::exactly);
-        let halves = cross_product_halves(from_origin, along);
+        let direction_squared = squared(along[0]) + squared(along[1]) + squared(along[2]);
 
-        let squared = |axis: usize| {
-            let (left, right) = halves[axis];
-            let component = left - right;
-            component * component
-        };
-        let radius = Interval::exactly(self.cylinder.radius);
-        let direction_squared = along[0] * along[0] + along[1] * along[1] + along[2] * along[2];
-        squared(0) + squared(1) + squared(2) - radius * radius * direction_squared
+        without_overflow(largest, |scale| {
+            let from_origin = [0, 1, 2]
+                .map(|axis| point[axis] * scale - Interval::exactly(origin[axis]) * scale);
+            let halves = cross_product_halves(from_origin, along);
+            let squared_component = |axis: usize| {
+                let (left, right) = halves[axis];
+                squared(left - right)
+            };
+            let radius = Interval::exactly(self.cylinder.radius) * scale;
+            squared_component(0) + squared_component(1) + squared_component(2)
+                - squared(radius) * direction_squared
+        })
     }
 
     fn exactly(&self) -> Option<Decision> {

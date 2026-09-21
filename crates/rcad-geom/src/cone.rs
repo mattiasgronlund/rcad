@@ -10,6 +10,7 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::exact::{difference, square_of_expansion};
+use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::isometry::Isometry;
 use crate::point::{Axis, Point, Vector};
 use crate::{Error, Result};
@@ -329,20 +330,24 @@ impl Predicate for HowFarFromTheSkin {
         let apex = self.cone.axis.origin().coordinates();
         let direction = self.cone.axis.direction().components();
 
-        let from_apex = [0, 1, 2].map(|axis| point[axis] - Interval::exactly(apex[axis]));
+        let largest = largest_magnitude(&point, &[apex]);
         let along = direction.map(Interval::exactly);
-        let halves = cross_product_halves(from_apex, along);
+        let slope_squared = squared(Interval::exactly(self.cone.slope));
 
-        let squared = |axis: usize| {
-            let (left, right) = halves[axis];
-            let component = left - right;
-            component * component
-        };
-        let up = (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
-            so_far + from_apex[axis] * along[axis]
-        });
-        let slope = Interval::exactly(self.cone.slope);
-        squared(0) + squared(1) + squared(2) - slope * slope * up * up
+        without_overflow(largest, |scale| {
+            let from_apex =
+                [0, 1, 2].map(|axis| point[axis] * scale - Interval::exactly(apex[axis]) * scale);
+            let halves = cross_product_halves(from_apex, along);
+            let squared_component = |axis: usize| {
+                let (left, right) = halves[axis];
+                squared(left - right)
+            };
+            let up = (0..3).fold(Interval::exactly(0.0), |so_far, axis| {
+                so_far + from_apex[axis] * along[axis]
+            });
+            squared_component(0) + squared_component(1) + squared_component(2)
+                - slope_squared * squared(up)
+        })
     }
 
     fn exactly(&self) -> Option<Decision> {
