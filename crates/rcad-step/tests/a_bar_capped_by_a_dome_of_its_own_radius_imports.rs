@@ -57,11 +57,12 @@ fn why_it_does_not_import(name: &str) -> rcad_topo::Error {
     let file = StepFile::read(&bytes).expect("it parses");
     let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
         .expect_err("the LED does not import yet");
-    match refused {
-        Refusal::ThisEntityOfTheSolidWasRefused { why, .. }
-        | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } => *why,
-        other => panic!("{name} is refused before it reaches the model: {other:?}"),
-    }
+    let (Refusal::ThisEntityOfTheSolidWasRefused { why, .. }
+    | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }) = refused
+    else {
+        panic!("{name} is refused before it reaches the model: {refused:?}");
+    };
+    *why
 }
 
 fn corpus() -> PathBuf {
