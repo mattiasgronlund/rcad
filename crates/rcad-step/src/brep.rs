@@ -584,7 +584,10 @@ impl Walk {
             let uses = if along_the_loop {
                 [(there, Orientation::Forward), (back, Orientation::Forward)]
             } else {
-                [(back, Orientation::Reversed), (there, Orientation::Reversed)]
+                [
+                    (back, Orientation::Reversed),
+                    (there, Orientation::Reversed),
+                ]
             };
             let mut coedges = Vec::with_capacity(uses.len());
             for (half, way) in uses {
@@ -679,12 +682,14 @@ impl Walk {
             return Ok(None);
         };
         let far = place.origin + axis.cross(near - place.origin);
-        let and = Surface::Plane(Plane::from_point_and_normal(place.origin, place.axis).map_err(
-            |why| Refusal::TheGeometryIsNotAWorkingShape {
-                id: edge_curve,
-                why,
-            },
-        )?);
+        let and = Surface::Plane(
+            Plane::from_point_and_normal(place.origin, place.axis).map_err(|why| {
+                Refusal::TheGeometryIsNotAWorkingShape {
+                    id: edge_curve,
+                    why,
+                }
+            })?,
+        );
         let there = self.the_arc_between(edge_curve, &place, and, [near, far], along_the_curve)?;
         let back = self.the_arc_between(edge_curve, &place, and, [far, near], along_the_curve)?;
 
