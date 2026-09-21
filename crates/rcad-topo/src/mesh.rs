@@ -828,6 +828,11 @@ impl BuildingAMesh {
             return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
         }
         let widest = whole_turn / 4.0;
+        if walked.len() == 1
+            && let Some((one, other)) = self.open_a_slit(face, stored, &walked[0], room)?
+        {
+            return self.cut_each_narrow_enough(face, stored, vec![one, other], widest, room);
+        }
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
         }
@@ -863,8 +868,20 @@ impl BuildingAMesh {
             };
             return Ok(patches);
         }
+        let only = walked.into_iter().next().expect("just checked");
+        self.cut_each_narrow_enough(face, stored, vec![only], widest, room)
+    }
 
-        let mut pieces = vec![walked.into_iter().next().expect("just checked")];
+    /// Cut each piece in two until none of them goes further round than
+    /// `widest`, or until no cut makes one any narrower.
+    fn cut_each_narrow_enough(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        mut pieces: Vec<WalkedLoop>,
+        widest: f64,
+        room: f64,
+    ) -> Result<Vec<Vec<WalkedLoop>>> {
         let mut done: Vec<Vec<WalkedLoop>> = Vec::new();
         while let Some(piece) = pieces.pop() {
             if pieces.len() + done.len() >= MOST_PIECES_A_FACE_IS_CUT_INTO {
@@ -879,6 +896,52 @@ impl BuildingAMesh {
             }
         }
         Ok(done)
+    }
+
+    /// Cut a face in two along the line that carries on from a **slit** in its
+    /// wire, or `None` when the wire has no slit.
+    ///
+    /// A slit is one edge the wire runs out along and straight back, ending at
+    /// a corner inside the face: in the surface's two coordinates the loop
+    /// passes the same points twice, and the triangulator refuses a loop with
+    /// two corners in one place. A seam is written that way whenever the file's
+    /// own chart of a closed surface is not this kernel's, and the one that
+    /// found it is `kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`'s dome.
+    /// The file's ball has its axis along `−y`, so its seam runs from its pole
+    /// — the top of the dome — to the rim, and in its chart the two uses are a
+    /// whole turn apart. A [`Sphere`](rcad_geom::Sphere) here always has its
+    /// axis along `z`, where the top of the dome is an ordinary point of the
+    /// equator; there the seam is a line from `(−π/2, 0)` to the pole at
+    /// `(−π/2, π/2)`, used twice on the same points, and **no longitude it
+    /// could be moved to by whole turns stops that**, because walking round an
+    /// ordinary point gains no longitude.
+    ///
+    /// So the face is cut instead, on from the slit's inner end in the direction
+    /// away from the slit, to the first side of the loop that line reaches.
+    /// Each half then has one side of the slit and no point twice. The cut ends
+    /// on points both halves already have, by the rule [`where_to_cut`] keeps.
+    fn open_a_slit(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        around: &WalkedLoop,
+        room: f64,
+    ) -> Result<Option<(WalkedLoop, WalkedLoop)>> {
+        let Some(tip) = the_inner_end_of_a_slit(around) else {
+            return Ok(None);
+        };
+        let Some((opened, [tip, far])) = where_a_slit_carries_on_to(around, tip) else {
+            return Ok(None);
+        };
+        self.on_a_cut.insert(opened.points[tip]);
+        self.on_a_cut.insert(opened.points[far]);
+        let cut =
+            self.points_along_a_cut(face, stored, opened.corners[far], opened.corners[tip], room)?;
+        let mut one = opened.between(tip, far);
+        one.take_in(&cut);
+        let mut other = opened.between(far, tip);
+        other.take_in(&cut.the_other_way());
+        Ok(Some((one, other)))
     }
 
     /// Cut a **cap** — one loop right round a surface that pinches to a point,
@@ -1807,6 +1870,102 @@ fn passes(middle: f64, from: f64, to: f64) -> bool {
 fn the_nearer_of(middle: f64, here: f64, next: f64) -> bool {
     let (mine, theirs) = ((here - middle).abs(), (next - middle).abs());
     mine < theirs || (mine == theirs && here < next)
+}
+
+/// The corner a slit ends at inside the face: the one whose two neighbours are
+/// the same point and which is not that point itself.
+///
+/// A pole side is two corners at one point, but its neighbours are two
+/// different points, so it is never taken for one.
+fn the_inner_end_of_a_slit(around: &WalkedLoop) -> Option<usize> {
+    let count = around.points.len();
+    if count < 3 {
+        return None;
+    }
+    (0..count).find(|&at| {
+        let before = around.points[(at + count - 1) % count];
+        let after = around.points[(at + 1) % count];
+        before == after && around.points[at] != after
+    })
+}
+
+/// Where the line carrying on from a slit's inner end at `tip` meets the loop:
+/// the loop with that end put into it where it lands on a pole side, and the
+/// positions of the tip and of that end.
+///
+/// The line runs along the tip's own longitude, away from the latitude the
+/// slit leaves by, to the nearest side it reaches. It ends where [`where_to_cut`]
+/// would end it: in the middle of a pole side, or else at the nearer corner of
+/// the side it crosses.
+///
+/// `None` when the slit leaves along the tip's own latitude, when the line
+/// reaches nothing, or when it reaches the slit again.
+fn where_a_slit_carries_on_to(around: &WalkedLoop, tip: usize) -> Option<(WalkedLoop, [usize; 2])> {
+    let count = around.corners.len();
+    let [longitude, latitude] = around.corners[tip];
+    let slit_leaves_by = around.corners[(tip + 1) % count][1] - latitude;
+    if slit_leaves_by == 0.0 {
+        return None;
+    }
+    let mut on_the_slit = HashSet::from([around.points[tip]]);
+    let mut out = 1;
+    while 2 * out < count
+        && around.points[(tip + out) % count] == around.points[(tip + count - out) % count]
+    {
+        on_the_slit.insert(around.points[(tip + out) % count]);
+        out += 1;
+    }
+
+    let mut nearest: Option<(f64, usize, f64)> = None;
+    for at in 0..count {
+        let onwards = (at + 1) % count;
+        if at == tip || onwards == tip {
+            continue;
+        }
+        let (here, next) = (around.corners[at], around.corners[onwards]);
+        if !passes(longitude, here[0], next[0]) {
+            continue;
+        }
+        let crossing = if here[0] == next[0] {
+            if (here[1] - latitude).abs() <= (next[1] - latitude).abs() {
+                here[1]
+            } else {
+                next[1]
+            }
+        } else {
+            here[1] + (longitude - here[0]) / (next[0] - here[0]) * (next[1] - here[1])
+        };
+        let away = (latitude - crossing) * slit_leaves_by.signum();
+        if away > 0.0 && nearest.is_none_or(|(least, _, _)| away < least) {
+            nearest = Some((away, at, crossing));
+        }
+    }
+    let (_, at, crossing) = nearest?;
+    let onwards = (at + 1) % count;
+    let (here, next) = (around.corners[at], around.corners[onwards]);
+
+    let mut opened = around.clone();
+    let mut tip = tip;
+    let far = if here == [longitude, crossing] {
+        at
+    } else if next == [longitude, crossing] {
+        onwards
+    } else if around.points[at] == around.points[onwards] {
+        opened.corners.insert(at + 1, [longitude, crossing]);
+        opened.points.insert(at + 1, around.points[at]);
+        if tip > at {
+            tip += 1;
+        }
+        at + 1
+    } else if the_nearer_of(longitude, here[0], next[0]) {
+        at
+    } else {
+        onwards
+    };
+    if on_the_slit.contains(&opened.points[far]) {
+        return None;
+    }
+    Some((opened, [tip, far]))
 }
 
 /// The running state of a walk round one wire.
