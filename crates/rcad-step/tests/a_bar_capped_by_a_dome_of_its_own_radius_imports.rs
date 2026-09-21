@@ -13,10 +13,10 @@
 //! circle lies on both the body and the dome, and then names the run by the
 //! circle's plane, which the walk crosses with the dome to draw it.
 //!
-//! **None of the nine LEDs imports yet.** The two `_O1.27mm` ones get past the
-//! body and the dome and stop on their flat face with the pin holes. The seven
-//! siblings §188.3 counted as "50 shortenings" get past the body too, and stop
-//! on the dome's own wire, which the mesher will not lay flat.
+//! **None of the nine LEDs imports yet.** All get past the body and, since
+//! §192.1, the dome's wire. They are reported on their flat face with the pin
+//! holes, but §192.2 found that report hides the dome's own triangulation
+//! refusing a few deflections finer.
 
 use std::{env, fs, path::PathBuf};
 
@@ -50,14 +50,21 @@ fn the_leds_body_and_dome_no_longer_stop_them() {
 }
 
 /// One of the seven §188.3 files whose body used to stop the marcher after 50
-/// shortenings on entity `#317`. The body is walked now, and what stops it is
-/// the dome's wire.
+/// shortenings on entity `#317`. The body is walked now, and so is the dome's
+/// wire (§192.1), so it stops where its `_O1.27mm` siblings do: on `#223`.
 #[test]
-fn a_sibling_led_gets_past_its_body_and_stops_on_its_dome() {
-    let (_, why) = why_it_does_not_import("LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step");
+fn a_sibling_led_gets_past_its_body_and_its_dome_wire() {
+    let name = "LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step";
+    let (entity, why) = why_it_does_not_import(name);
     assert!(
-        matches!(why, rcad_topo::Error::AWireWillNotLieFlatOnItsFace { .. }),
-        "the sibling LED stops somewhere other than its dome's wire: {why:?}"
+        entity == Some(223)
+            && matches!(
+                &why,
+                rcad_topo::Error::ADraftFaceCouldNotBeMeshed { why, .. }
+                    if format!("{why:?}").starts_with("BoundaryCrossesItself")
+            ),
+        "{name} stops somewhere other than a boundary crossing itself on #223: \
+         {entity:?} {why:?}"
     );
 }
 
