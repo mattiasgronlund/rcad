@@ -19,13 +19,13 @@ sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150 by §1
 **§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**, one
 acceptance test, nothing downstream of a picker having read the offset; and
 **§181.6's question** by **§182**; **§183's picking normal** by **§184**, 793
-refusals to 0; §184.7 left pipes off the axes, far out, unswept.
+refusals to 0; §184.6's far pipes by **§187.3**, 0 wrong in 8000; §176.5's
+silent chord and the LED arc by **§187.1–2** — 20 files, not 18, and 0 import.
 
-**Next and unclaimed: the 18 LED files.** §176.2 falsifies §174.5's "coarse edge
-walk" — the walk never runs, because the circle is imprinted on a flat face and
-the reader names its arc with that same plane, so centre and radius never reach
-the model; `rcad-step`'s `brep.rs` and `rcad-geom`'s `walk.rs`, and a mesh wrong
-by a whole radius rather than refused rides on it (§176.5). §124, §136.4, §125.6:
+**Next and unclaimed: the wrong leaning-bar mesh**, §187.4 item 1 — `mesh()`
+returns `Ok` with χ 3 on a bar whose cap leans 5 across for 1 up, so it comes
+before any refusal. Then the LED files' coarse sweep in `validate.rs` (§187.2),
+which frees none of the 20 alone. §187.5 lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
