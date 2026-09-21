@@ -1079,6 +1079,31 @@ pub enum Invalid {
     #[error("a corner of a curved face is not on the surface that face sits on")]
     VertexOffItsFaceSurface,
 
+    /// A wire stands still at a corner — a pole step — and that corner is not
+    /// where the face's surface pinches to a point.
+    ///
+    /// A ball pinches at its two poles, straight above and below its centre,
+    /// and a cone at its apex. A plane, a pipe and a ring pinch nowhere, so a
+    /// pole step on one of them is always this. The mesher trusts a pole step
+    /// and squashes a whole side of the face into that one corner, so a pole
+    /// that is somewhere else draws a mesh folded over itself
+    /// (`docs/decisions.md` §188.2).
+    ///
+    /// Refused only when the corner is *provably* away from every pinch, after
+    /// the same room [`Invalid::VertexOffItsFaceSurface`] gives a corner: the
+    /// slop recorded on it, or what writing a point down in `f64` costs,
+    /// whichever is wider.
+    #[error(
+        "a wire stands still at a pole at {at:?}, but its face's surface pinches to a point at {pinch:?}"
+    )]
+    APoleStandsWhereTheSurfaceDoesNotPinch {
+        /// Where the pole step's corner stands, in the face's stored frame.
+        at: rcad_geom::Point,
+        /// The pinch point nearest it, or `None` when the face's surface
+        /// pinches nowhere.
+        pinch: Option<rcad_geom::Point>,
+    },
+
     /// An edge named as part of a crossing sits outside a half-space that was
     /// meant to pick which part.
     ///

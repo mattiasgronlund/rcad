@@ -22,7 +22,7 @@ use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_t
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
-use crate::model::WireData;
+use crate::model::{WireData, WireStep};
 use crate::view::{CoedgeView, FaceView, SolidView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
@@ -502,10 +502,60 @@ impl Model {
 
         let view = FaceView::new(self, slot, Isometry::identity(), Orientation::Forward);
         if let Surface::Plane(plane) = &face.surface {
-            check_flat_face(self, view, plane, allowed_wobble, policy, log)
+            check_flat_face(self, view, plane, allowed_wobble, policy, log)?;
         } else {
-            check_curved_face(view, &face.surface, writing_a_point_down)
+            check_curved_face(view, &face.surface, writing_a_point_down)?;
         }
+        self.check_every_pole_stands_where_the_surface_pinches(slot, writing_a_point_down)
+    }
+
+    /// Every pole step of this face stands where its surface pinches to a
+    /// point, as far as anyone can prove otherwise.
+    ///
+    /// **Asked after the corners are asked onto the surface**, so that a pole
+    /// slid off a ball is still refused as a corner off its face — the plainer
+    /// of the two things wrong with it. What is left for this check is a pole
+    /// on the surface, or within room of it, that is not at a pinch. What goes
+    /// wrong then is §188.2: the mesher squashes a whole side of the face into
+    /// that corner and draws a mesh folded over itself.
+    ///
+    /// The room is [`not_provably_off`]'s, spent the other way round: the
+    /// corner is widened into a box of the slop recorded on it or of
+    /// `writing_it_down`, whichever is wider, and refused only when that box
+    /// misses every pinch point. **A pole is not asked exactly**, because the
+    /// kernel's own balls read back from the corpus put their poles a few ulps
+    /// off the pinch.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::APoleStandsWhereTheSurfaceDoesNotPinch`].
+    fn check_every_pole_stands_where_the_surface_pinches(
+        &self,
+        slot: FaceSlot,
+        writing_it_down: f64,
+    ) -> Result<()> {
+        let face = &self.data().faces[slot];
+        for &wire in &face.wires {
+            for &step in &self.data().wires[wire].steps {
+                let WireStep::Pole(vertex) = step else {
+                    continue;
+                };
+                let corner = &self.data().vertices[vertex];
+                let pinches = where_it_pinches(&face.surface);
+                let reach = corner
+                    .approximation
+                    .map_or(0.0, Approximation::magnitude)
+                    .max(writing_it_down);
+                if provably_away_from_every_pinch(corner.point, reach, &pinches) {
+                    return Err(Invalid::APoleStandsWhereTheSurfaceDoesNotPinch {
+                        at: corner.point,
+                        pinch: nearest(corner.point, &pinches),
+                    }
+                    .into());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Every curved face on one side of everything that trims it.
@@ -1978,6 +2028,80 @@ fn not_provably_off(
         side_of_surface(surface, within),
         Decision::Zero | Decision::Undecidable { .. }
     )
+}
+
+/// Every point where `surface` pinches, each as the box its coordinates round
+/// into.
+///
+/// A ball pinches at its poles, `radius` straight above and below its centre
+/// along `z` — the frame is the world's, because a ball has no axis of its own
+/// ([`rcad_geom::Sphere::point_at`]), and it is where `Model::add_ball` and the
+/// fuse both put them. Adding the radius to the centre rounds, so each pole is
+/// the box that sum lands in rather than one `f64`. A cone pinches at its apex,
+/// which it stores exactly. A plane, a pipe and a ring pinch nowhere: a ring's
+/// tube is always narrower than the ring ([`rcad_geom::Torus::new`] refuses
+/// the rest), so it never closes up on its axis.
+fn where_it_pinches(surface: &Surface) -> Vec<[Interval; 3]> {
+    match surface {
+        Surface::Sphere(ball) => {
+            let [x, y, z] = ball.centre().coordinates();
+            let radius = Interval::exactly(ball.radius());
+            vec![
+                [
+                    Interval::exactly(x),
+                    Interval::exactly(y),
+                    Interval::exactly(z) + radius,
+                ],
+                [
+                    Interval::exactly(x),
+                    Interval::exactly(y),
+                    Interval::exactly(z) - radius,
+                ],
+            ]
+        }
+        Surface::Cone(cone) => vec![cone.apex().coordinates().map(Interval::exactly)],
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) => Vec::new(),
+        other => panic!("a surface nothing here knows the pinches of: {other:?}"),
+    }
+}
+
+/// Whether a corner widened by `reach` in every direction misses every one of
+/// `pinches`.
+///
+/// Two boxes miss when they miss along one axis, and comparing the ends of two
+/// intervals is exact, so this is decided outright and has no undecidable
+/// answer to hand back. A reach that is not a finite length proves nothing
+/// away, so the corner is kept — the approximation check refuses that length
+/// on its own account.
+fn provably_away_from_every_pinch(point: Point, reach: f64, pinches: &[[Interval; 3]]) -> bool {
+    if !reach.is_finite() {
+        return false;
+    }
+    let corner = point.coordinates().map(|coordinate| {
+        Interval::around(coordinate, reach)
+            .expect("a finite reach makes a box round a finite corner")
+    });
+    pinches.iter().all(|pinch| {
+        corner
+            .iter()
+            .zip(pinch)
+            .any(|(near, far)| near.hi() < far.lo() || far.hi() < near.lo())
+    })
+}
+
+/// The pinch point nearest `point`, for the refusal to name.
+fn nearest(point: Point, pinches: &[[Interval; 3]]) -> Option<Point> {
+    pinches
+        .iter()
+        .map(|pinch| {
+            let [x, y, z] = pinch.map(|along| (along.lo() + along.hi()) / 2.0);
+            Point::new(x, y, z)
+        })
+        .min_by(|one, other| {
+            (*one - point)
+                .length()
+                .total_cmp(&(*other - point).length())
+        })
 }
 
 /// Whether the surface an edge is *named* by is a plane, and the corner is off
