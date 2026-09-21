@@ -40,8 +40,8 @@ use std::collections::BTreeMap;
 use proptest::prelude::RngCore;
 use proptest::test_runner::TestRng;
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, Error, HalfSpace, Picker, Point, Surface, SurfaceMeet, Vector,
-    intersect,
+    Axis, Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Point, Surface, SurfaceMeet,
+    Vector, intersect,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -78,10 +78,12 @@ fn every_answer_for_two_leaning_pipes_far_out_names_the_true_two_lines() {
         tally.answered,
         tally.asked
     );
-    assert_eq!(
-        tally.not_two_lines, 0,
-        "the family is drawn to cross in two lines, and rounding the second \
-         origin should not move a pair out of it"
+    assert!(
+        tally.not_two_lines < tally.asked / 5,
+        "the family is drawn to cross in two lines, and only the draws on a \
+         knife edge should round out of it: {} of {}",
+        tally.not_two_lines,
+        tally.asked
     );
 }
 
@@ -115,6 +117,82 @@ fn the_checker_reads_two_pipes_along_z_the_way_a_hand_does() {
     assert!(truth.which_lines_it_holds(leaning).is_none());
 }
 
+/// The check refuses the three ways a far-out answer could go wrong while still
+/// looking like two runs: a half-space holding both lines, the same line picked
+/// twice, and a run cut out of the wrong pipe.
+///
+/// §182's defect was the first of these — a plane holding both lines and a
+/// reverse holding neither — and the sweep found none of it on the tree before
+/// §182's fix either, so this is what shows the sweep would have said so.
+#[test]
+fn the_checker_refuses_an_answer_that_holds_both_lines_or_one_twice() {
+    let mut rng = soak::seeded();
+    let [one, other] = a_leaning_pair_far_out(&mut rng);
+    let truth = TrueLines::of(&one, &other);
+    let Ok(meet @ SurfaceMeet::Curves(_)) = intersect(
+        &Surface::Cylinder(one),
+        &Surface::Cylinder(other),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        panic!("the first pair the sweep draws is named");
+    };
+    assert_eq!(truth.agrees_with(&meet, &other), Ok(()));
+
+    let SurfaceMeet::Curves(runs) = &meet else {
+        unreachable!("matched above")
+    };
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = runs[0].run() else {
+        panic!("a picked piece of a crossing");
+    };
+    let [Picker::InFrontOf(picker)] = picked_by[..] else {
+        panic!("one flat picker");
+    };
+    let everything_in_front = HalfSpace::new(
+        picker.normal(),
+        picker.offset() - 1e12 * picker.normal().length(),
+    )
+    .expect("a half-space");
+    let answer = |pickers: [HalfSpace; 2], and: Cylinder| {
+        SurfaceMeet::Curves(
+            pickers
+                .into_iter()
+                .map(|half_space| {
+                    NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                        and: Surface::Cylinder(and),
+                        picked_by: [Picker::InFrontOf(half_space)].into_iter().collect(),
+                    })
+                    .expect("a picked run")
+                })
+                .collect(),
+        )
+    };
+
+    assert_eq!(
+        truth.agrees_with(&answer([picker, picker.reversed()], other), &other),
+        Ok(()),
+        "rebuilt as the kernel builds it"
+    );
+    assert!(
+        truth
+            .agrees_with(
+                &answer([everything_in_front, picker.reversed()], other),
+                &other
+            )
+            .is_err()
+    );
+    assert!(
+        truth
+            .agrees_with(&answer([picker, picker], other), &other)
+            .is_err()
+    );
+    assert!(
+        truth
+            .agrees_with(&answer([picker, picker.reversed()], one), &other)
+            .is_err()
+    );
+}
+
 /// A pair of pipes: the first written first.
 type Pair = [Cylinder; 2];
 
@@ -129,10 +207,15 @@ fn a_leaning_pair_far_out(rng: &mut TestRng) -> Pair {
     let far = 10f64.powf(3.0 + 5.0 * unit(rng));
     let here = [0, 1, 2].map(|_| far * signed(rng) * (0.1 + 0.9 * unit(rng)));
 
-    let fat = 10f64.powf(-2.0 + 5.0 * unit(rng));
-    let thin = fat * 10f64.powf(-1.5 + 3.0 * unit(rng));
+    let fat = 10f64.powf(-7.0 + 11.0 * unit(rng));
+    let thin = fat * 10f64.powf(-4.0 + 8.0 * unit(rng));
     let [least, most] = [(fat - thin).abs(), fat + thin];
-    let apart = least + (most - least) * (0.02 + 0.96 * unit(rng));
+    let share = match rng.next_u32() % 4 {
+        0 => 10f64.powf(-12.0 * unit(rng)),
+        1 => 1.0 - 10f64.powf(-12.0 * unit(rng)),
+        _ => unit(rng),
+    };
+    let apart = least + (most - least) * share;
 
     let one = a_pipe(here, raw, fat);
     let along = one.axis().direction();
@@ -144,7 +227,7 @@ fn a_leaning_pair_far_out(rng: &mut TestRng) -> Pair {
         ))
         .normalized()
         .expect("a random vector off the pipes");
-    let slide = if rng.next_u32() % 4 == 0 {
+    let slide = if rng.next_u32().is_multiple_of(4) {
         0.0
     } else {
         far * signed(rng) * unit(rng)
@@ -170,7 +253,7 @@ fn a_pipe(origin: [f64; 3], along: Vector, radius: f64) -> Cylinder {
 /// A component well away from zero: a small whole number, or a mantissa drawn
 /// off the lattice.
 fn a_component(rng: &mut TestRng) -> f64 {
-    let size = if rng.next_u32() % 2 == 0 {
+    let size = if rng.next_u32().is_multiple_of(2) {
         f64::from(1 + rng.next_u32() % 20)
     } else {
         0.05 + unit(rng)
@@ -185,14 +268,20 @@ fn unit(rng: &mut TestRng) -> f64 {
 }
 
 fn signed(rng: &mut TestRng) -> f64 {
-    if rng.next_u32() % 2 == 0 { 1.0 } else { -1.0 }
+    if rng.next_u32().is_multiple_of(2) {
+        1.0
+    } else {
+        -1.0
+    }
 }
 
 #[derive(Default)]
 struct Tally {
     asked: usize,
     answered: usize,
+    named_in_runs: usize,
     refused: BTreeMap<String, usize>,
+    refused_two_lines: usize,
     wrong: Vec<String>,
     not_two_lines: usize,
     some_stored_plane_separates: usize,
@@ -220,12 +309,18 @@ impl Tally {
         match answer {
             Ok(meet) => {
                 self.answered += 1;
+                if matches!(meet, SurfaceMeet::Curves(_)) {
+                    self.named_in_runs += 1;
+                }
                 if let Err(why) = truth.agrees_with(&meet, other) {
                     self.wrong.push(format!("{why}: {one:?} then {other:?}"));
                 }
             }
             Err(refusal) => {
                 *self.refused.entry(what_refused(&refusal)).or_default() += 1;
+                if truth.d.sign() == Ordering::Greater {
+                    self.refused_two_lines += 1;
+                }
                 if separable {
                     self.refused_though_a_stored_plane_separates += 1;
                 }
@@ -236,13 +331,15 @@ impl Tally {
     fn report(&self) {
         let refused: usize = self.refused.values().sum();
         println!(
-            "asked {}, answered {}, refused {} {:?}, wrong {}; not two lines {}; \
-             some exactly-square normal through a stored origin separates in {} \
-             askings, {} of them refused",
+            "asked {}, answered {} ({} in runs), refused {} {:?} ({} of them two \
+             true lines), wrong {}; not two lines {}; some exactly-square normal \
+             through a stored origin separates in {} askings, {} of them refused",
             self.asked,
             self.answered,
+            self.named_in_runs,
             refused,
             self.refused,
+            self.refused_two_lines,
             self.wrong.len(),
             self.not_two_lines,
             self.some_stored_plane_separates,
@@ -330,7 +427,12 @@ impl TrueLines {
         if sa == Ordering::Equal {
             return sb;
         }
-        match a.times(a).times(&self.big_w).minus(&b.times(b).times(&self.d)).sign() {
+        match a
+            .times(a)
+            .times(&self.big_w)
+            .minus(&b.times(b).times(&self.d))
+            .sign()
+        {
             Ordering::Greater => sa,
             Ordering::Less => sb,
             Ordering::Equal => Ordering::Equal,
@@ -378,11 +480,16 @@ impl TrueLines {
         let SurfaceMeet::Curves(runs) = meet else {
             return match (meet, crosses) {
                 (SurfaceMeet::Nothing, Ordering::Less) => Ok(()),
-                _ => Err(format!("answered {meet:?} where D is {crosses:?} than zero")),
+                _ => Err(format!(
+                    "answered {meet:?} where D is {crosses:?} than zero"
+                )),
             };
         };
         if crosses != Ordering::Greater {
-            return Err(format!("answered {} runs where D is {crosses:?}", runs.len()));
+            return Err(format!(
+                "answered {} runs where D is {crosses:?}",
+                runs.len()
+            ));
         }
         let [first, second] = &runs[..] else {
             return Err(format!("answered {} runs for two lines", runs.len()));
@@ -428,8 +535,7 @@ fn dot(one: &[Dyadic; 3], other: &[Dyadic; 3]) -> Dyadic {
 }
 
 fn cross(one: &[Dyadic; 3], other: &[Dyadic; 3]) -> [Dyadic; 3] {
-    [(1, 2), (2, 0), (0, 1)]
-        .map(|(i, j)| one[i].times(&other[j]).minus(&one[j].times(&other[i])))
+    [(1, 2), (2, 0), (0, 1)].map(|(i, j)| one[i].times(&other[j]).minus(&one[j].times(&other[i])))
 }
 
 /// A whole number times a power of two, held with nothing rounded: every `f64`
@@ -522,8 +628,7 @@ impl Dyadic {
         for (i, mine) in self.magnitude.iter().enumerate() {
             let mut carry = 0u64;
             for (j, theirs) in other.magnitude.iter().enumerate() {
-                let sum =
-                    u64::from(product[i + j]) + u64::from(*mine) * u64::from(*theirs) + carry;
+                let sum = u64::from(product[i + j]) + u64::from(*mine) * u64::from(*theirs) + carry;
                 #[allow(clippy::cast_possible_truncation)]
                 {
                     product[i + j] = sum as u32;
@@ -561,7 +666,12 @@ fn shifted_up(magnitude: &[u32], bits: i64) -> Vec<u32> {
 }
 
 fn compared(one: &[u32], other: &[u32]) -> Ordering {
-    let top = |limbs: &[u32]| limbs.iter().rposition(|limb| *limb != 0).map_or(0, |i| i + 1);
+    let top = |limbs: &[u32]| {
+        limbs
+            .iter()
+            .rposition(|limb| *limb != 0)
+            .map_or(0, |i| i + 1)
+    };
     let [one, other] = [&one[..top(one)], &other[..top(other)]];
     one.len()
         .cmp(&other.len())
@@ -572,9 +682,8 @@ fn added(one: &[u32], other: &[u32]) -> Vec<u32> {
     let mut sum = Vec::with_capacity(one.len().max(other.len()) + 1);
     let mut carry = 0u64;
     for i in 0..one.len().max(other.len()) {
-        let total = u64::from(*one.get(i).unwrap_or(&0))
-            + u64::from(*other.get(i).unwrap_or(&0))
-            + carry;
+        let total =
+            u64::from(*one.get(i).unwrap_or(&0)) + u64::from(*other.get(i).unwrap_or(&0)) + carry;
         #[allow(clippy::cast_possible_truncation)]
         sum.push(total as u32);
         carry = total >> 32;
