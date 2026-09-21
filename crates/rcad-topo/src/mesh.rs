@@ -355,16 +355,19 @@ impl SolidView<'_> {
     /// such a solid under `Policy::certified()` with an empty provenance log, and
     /// [`Model::validate`](crate::Model::validate) passes it certified;
     /// `what_a_tolerant_policy_costs_a_mesh.rs` measures both answers over
-    /// twelve lean-and-deflection cells. A wall face storing a
-    /// [`Plane`](rcad_geom::Plane) where its own
-    /// [`Cylinder`](rcad_geom::Cylinder) belongs fans a four-step wire into
-    /// one corner in the plane's own two coordinates. All four are refusals
+    /// twelve lean-and-deflection cells. All four are refusals
     /// rather than asserts precisely because
     /// [`Model::validate`](crate::Model::validate) is a separate call this
     /// does not require first, `Model` derives `Deserialize`, and a caller's
     /// bytes may not panic (CLAUDE.md, §4.1). Whatever [`rcad_geom::walk`]
     /// makes of an edge it cannot follow, which includes a seam whose
     /// half-spaces pick both halves of its meridian or neither.
+    /// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] for an edge that is not
+    /// straight, has only flat faces along it, and whose run names no curved
+    /// surface to place it by — a circle a file imprinted on a flat face and
+    /// named by its own plane, or a wall face storing a
+    /// [`Plane`](rcad_geom::Plane) where its own
+    /// [`Cylinder`](rcad_geom::Cylinder) belongs.
     pub fn mesh(
         self,
         deflection: Deflection,
@@ -3377,6 +3380,13 @@ mod tests {
     /// here stores a flat surface under a curved wire, but nothing stops
     /// `Model`'s `Deserialize` from holding it, and [`SolidView::mesh`] is
     /// public in its own right.
+    ///
+    /// **It is refused one step earlier now, and more truly.** With the wall a
+    /// plane, both cap circles have only flat faces along them and nothing
+    /// naming the curve, so no face can place them — which is
+    /// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`], raised before any wire
+    /// is fanned out. This test used to reach `AWireDoesNotFanIntoALoopToMesh`
+    /// with the two circles already read as having no points at all (§176.2).
     #[test]
     fn a_wall_stored_with_the_wrong_surface_is_refused_rather_than_asserted_against() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
@@ -3407,7 +3417,7 @@ mod tests {
             )
             .expect_err("a wire fanned onto the wrong surface cannot be cut up");
         assert!(
-            matches!(refusal, Error::AWireDoesNotFanIntoALoopToMesh { .. }),
+            matches!(refusal, Error::AnEdgeBendsButEveryFaceAlongItIsFlat { .. }),
             "got {refusal:?}"
         );
     }
