@@ -1012,7 +1012,18 @@ check-fuzz-builds:
 # everything else on — `Rule`'s three fuses in `name_of`, or
 # `a_turned_curved_refusal` handing every other `Error` to `a_curved_refusal`,
 # where the upright families' names live.
-wildcard_arms := "88"
+#
+#     §194's ball-and-block lane  after the merge  85 direct + 7 composite = 92
+#
+# Four more, all in the cut of a ball-and-plane circle that starts at a pole.
+# The direct one is `which_half_of_a_circle_cut_at_a_pole`'s material side,
+# which panics on `Zero` or `Undecidable` as `which_arc_this_is` beside it does.
+# The composite three are one site, `across_a_circle_that_starts_at_a_pole`'s
+# pair of surfaces, which names the ball and the plane and leaves `Surface`'s
+# other three kinds to `_`. A pair that is not a ball and a plane is not cut,
+# and `None` there leaves the fuse where it was before — refusing by
+# `AClosedEdgeOfTheAnswerWouldStartAtAPole` when the start is a pole.
+wildcard_arms := "92"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
