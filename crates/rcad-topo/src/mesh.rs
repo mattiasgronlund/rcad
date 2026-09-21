@@ -727,8 +727,7 @@ impl BuildingAMesh {
         // ball come out walked backwards — a mesh that is wrong rather than one
         // that was refused.
         if edge.is_closed()? {
-            let corner = back.apply_to_point(from.point());
-            if let Some(first) = points.first()
+            let corner = back.apply_to_point(from.point());            if let Some(first) = points.first()
                 && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)
                     .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner))
                 && (*first - corner).dot(stored_way) < 0.0
@@ -799,8 +798,7 @@ impl BuildingAMesh {
     ) -> Result<Vec<Vec<WalkedLoop>>> {
         let Some(whole_turn) = how_far_the_longitude_wraps(stored) else {
             return Ok(vec![walked]);
-        };
-        // **A loop drawn on a ball bounds two pieces and only one of them is a
+        };        // **A loop drawn on a ball bounds two pieces and only one of them is a
         // patch this can fill.** The triangulator fills the inside of what it
         // is handed, and the inside of a loop in the surface's own two
         // coordinates is the piece holding no pole. When the material is on the
@@ -1399,6 +1397,14 @@ impl BuildingAMesh {
     /// when the wire has anywhere else to start. A ball's own wire has not:
     /// every one of its steps stands at a pole, and [`WalkingAWire::arrive`]'s
     /// first-longitude rule is what carries that one.
+    ///
+    /// **A point walked along an edge that stands at a pole is a pole too**,
+    /// and its side is opened the way a corner's is. A plane through a ball's
+    /// axis cuts it in a circle through both poles, and an edge with its one
+    /// corner off them passes both in its middle; taking each the short way
+    /// round is a coin toss at exactly half a turn (§192.1). This only answers
+    /// for a walked point that lands on the pole: one that the walk steps past
+    /// between two points is not seen here (§193.3).
     fn walk_a_wire_round(
         &mut self,
         wire: WireView<'_>,
@@ -1459,7 +1465,12 @@ impl BuildingAMesh {
                             walked[step]
                         };
                         let where_it_is = back.apply_to_point(self.points[at as usize]);
-                        walk.arrive(at, stored.coordinates_of(where_it_is), false);
+                        let sits_at = stored.coordinates_of(where_it_is);
+                        let passes_a_pole = the_surface_pinches_at(stored, sits_at.1);
+                        walk.arrive(at, sits_at, passes_a_pole);
+                        if passes_a_pole {
+                            walk.turn_at_a_corner_on_a_pole();
+                        }
                     }
                 }
                 WireStepView::Pole(vertex) => {
