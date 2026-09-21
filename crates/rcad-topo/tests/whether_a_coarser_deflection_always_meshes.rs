@@ -349,6 +349,9 @@ fn what_it_refused(why: &Error) -> String {
         Error::AWireDoesNotFanIntoALoopToMesh { .. } => {
             "a wire does not fan into a loop".to_owned()
         }
+        Error::TwoPatchesOfTheMeshDrewTheSameSide { .. } => {
+            "two patches drew the same side".to_owned()
+        }
         Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => {
             "a curved face goes right round with no seam".to_owned()
         }
@@ -389,6 +392,9 @@ fn what_the_triangulator_said(why: &rcad_mesh::CannotTriangulate) -> &'static st
         No::MoreTrianglesThanAPatchWillHold { .. } => "more triangles than a patch holds",
         No::RanOutOfRoomBeforeMeetingTheDeflection { .. } => {
             "the refinement ran out of room before meeting the deflection"
+        }
+        No::ASideCutsOffOneCornerOfACurvedPatch { .. } => {
+            "a side cuts straight across a corner of a curved patch"
         }
         _ => "an unexpected refusal from the triangulator",
     }

@@ -335,6 +335,8 @@ impl SolidView<'_> {
     /// than one mesh holds. [`Error::CannotMeshAFace`] when the triangulator
     /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
+    /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] when two patches folded
+    /// onto each other and a side would be used more than twice.
     /// [`Error::AWireWillNotLieFlatOnItsFace`],
     /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`],
     /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
@@ -383,7 +385,7 @@ impl SolidView<'_> {
         for face in self.faces() {
             building.cut_up(face, log)?;
         }
-        Ok(building.finish())
+        building.finish()
     }
 
     /// The surfaces of the faces either side of each edge, as the arena holds
@@ -1417,9 +1419,16 @@ impl BuildingAMesh {
     /// faces along it — but a side drawn inside a patch belongs to that patch
     /// alone, so any third use is two patches having drawn the same side, the
     /// pocket of §187.4, and the mesh would come back with a side used four
-    /// times. That is this crate's arithmetic being wrong and never the
-    /// caller's input, so it panics.
-    fn finish(self) -> Mesh {
+    /// times.
+    ///
+    /// **Refused rather than asserted**, although the leaning cap that found it
+    /// was this crate's own arithmetic: a caller's bytes reach it too. A ball
+    /// whose pole step stands on its centre rather than a pole folds two patches
+    /// onto each other the same way, and
+    /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] says what it is for both.
+    /// The side reported is the lowest-numbered one, so the same model is
+    /// refused the same way every time.
+    fn finish(self) -> Result<Mesh> {
         let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
         for triangle in &self.triangles {
             let [first, second, third] = triangle.corners;
@@ -1427,21 +1436,22 @@ impl BuildingAMesh {
                 *times_used.entry(a_side(from, to)).or_default() += 1;
             }
         }
-        for (side, drawn) in &self.drawn_inside_a_patch {
-            assert!(
-                *drawn == 2 && times_used[side] == 2,
-                "the side between mesh points {side:?} was drawn inside a patch {drawn} times \
-                 and is used {} times in all, where both should be two",
-                times_used[side]
-            );
+        let folded = self
+            .drawn_inside_a_patch
+            .iter()
+            .map(|(&side, &drawn)| (side, drawn, times_used[&side]))
+            .filter(|&(_, drawn, used)| drawn != 2 || used != 2)
+            .min_by_key(|&(side, _, _)| side);
+        if let Some((_, drawn, used)) = folded {
+            return Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn, used });
         }
-        Mesh {
+        Ok(Mesh {
             points: self.points,
             triangles: self.triangles,
             at_vertex: self.at_vertex,
             along_edge: self.along_edge,
             deviation: Approximation::new(self.worst, Cause::FlatStandIn),
-        }
+        })
     }
 }
 
