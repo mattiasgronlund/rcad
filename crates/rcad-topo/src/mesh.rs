@@ -631,6 +631,10 @@ impl BuildingAMesh {
     /// rather than a second opinion about position: a reversed list is the same
     /// points.
     ///
+    /// **A closed crossing that runs through a ball's pole has the pole among
+    /// its points**, whether or not the walk would have landed there — see
+    /// [`put_in_the_poles_a_closed_crossing_passes`].
+    ///
     /// # What a refusal from here is in, and why it is not what was walked
     ///
     /// The points ride back out of [`the_frame_this_face_is_meshed_in`] and so
@@ -1411,9 +1415,9 @@ impl BuildingAMesh {
     /// and its side is opened the way a corner's is. A plane through a ball's
     /// axis cuts it in a circle through both poles, and an edge with its one
     /// corner off them passes both in its middle; taking each the short way
-    /// round is a coin toss at exactly half a turn (§192.1). This only answers
-    /// for a walked point that lands on the pole: one that the walk steps past
-    /// between two points is not seen here (§193.3).
+    /// round is a coin toss at exactly half a turn (§192.1). A walk that would
+    /// have stepped past the pole between two points has had the pole put
+    /// among them by [`put_in_the_poles_a_closed_crossing_passes`] (§193.3).
     fn walk_a_wire_round(
         &mut self,
         wire: WireView<'_>,
