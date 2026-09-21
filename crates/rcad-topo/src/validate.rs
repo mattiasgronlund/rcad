@@ -1249,15 +1249,15 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// # Errors
 ///
-/// Whatever meshing the solid at its coarsest makes of it, and
-/// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one side do
-/// not.
+/// Whatever [`the_coarsest_mesh_whose_sides_do_not_cross`] makes of the solid,
+/// and [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
+/// side do not.
 pub(crate) fn how_much_space_a_curved_solid_encloses(
     view: SolidView<'_>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<f64> {
-    let coarsest = view.mesh(as_coarse_as_a_mesh_gets(), policy, log)?;
+    let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(view, policy, log)?;
     every_side_of_the_skin_is_used_both_ways(&coarsest)?;
     let enclosed = signed_volume_over(&coarsest);
     if enclosed != 0.0 {
@@ -1280,6 +1280,106 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         room /= 2.0;
     }
     Ok(0.0)
+}
+
+/// The solid meshed as coarsely as a mesh gets, or — when that mesh's own sides
+/// cross — as coarsely as it can be meshed without them crossing.
+///
+/// **A chord the sweep chose is not a side of the solid.** At
+/// [`as_coarse_as_a_mesh_gets`] an arc is stepped a quarter turn at a time, and
+/// the chord of a quarter turn runs up to `0.29` of a radius inside it. A hole
+/// sitting in that room is cut in two by it, and the flat face's boundary
+/// crosses itself on the way to the triangulator. That is the sweep refusing a
+/// sound solid for a sampling choice of its own: twenty KiCad LED files, a disc
+/// with its pin holes near the rim, stopped here (`docs/decisions.md` §187.2).
+///
+/// So a crossing is asked again with less room, halving from the width of the
+/// box round the solid — the largest a sag can usefully be — down. A chord at
+/// deflection `d` strays at most `d` from its curve, so two pieces of boundary
+/// the solid keeps apart by more than twice that cannot be made to cross by the
+/// mesh; halving reaches such a `d` for any gap the solid really has.
+///
+/// # Why this is not a fixed finer deflection
+///
+/// Any constant has a solid its chords still cut across — a hole half as far
+/// from the rim — and a fixed fine one taxes every solid at every test boundary
+/// for the handful that need it. This costs a solid that meshes at the coarsest
+/// nothing at all, which is every solid the gate built before this was written.
+///
+/// # What stops it, and why stopping is safe
+///
+/// **Only a mesh the triangulator took is ever used**, so where the halving
+/// stops decides what it costs and never what it lets through: a solid that
+/// stops early is refused, never passed. It stops at the model's own
+/// [`Scale::default_linear_tolerance`]. Two pieces of boundary closer than that
+/// are one place to this model, so a crossing that survives a mesh that fine is
+/// the solid's own and not the chords'. Before then `Deflection::of` refusing a
+/// length that is not positive, [`Error::DeflectionBelowWhatAMeshCanReach`] and
+/// [`Error::MoreMeshPointsThanASolidWillHold`] each end it too, for the reason
+/// the zero-volume halving above gives.
+///
+/// Whichever ends it, **the coarse mesh's refusal is what is handed back**: the
+/// finer ones said the same thing about the same solid in more points.
+///
+/// # Not a self-crossing check, before or after
+///
+/// A mesh whose sides do not cross says the chords do not cross; it does not
+/// say the solid's own boundary does not. That was as true of the coarse mesh
+/// before this retried, and nothing here claims more.
+///
+/// # Errors
+///
+/// The coarsest mesh's refusal when no finer mesh clears it, and a finer
+/// mesh's refusal when it is about something other than its sides crossing —
+/// which is the solid's next blocker and the one worth naming.
+fn the_coarsest_mesh_whose_sides_do_not_cross(
+    view: SolidView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Mesh> {
+    let crossed = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
+        Err(why) if its_sides_cross(&why) => why,
+        answer => return answer,
+    };
+    let Some((low, high)) = view.box_around_it() else {
+        return Err(crossed);
+    };
+    let finest = view.model().scale().default_linear_tolerance();
+    let (low, high) = (low.coordinates(), high.coordinates());
+    let mut room = (0..3).fold(0.0, |widest: f64, axis| {
+        widest.max(high[axis] - low[axis])
+    }) / 2.0;
+    while room >= finest {
+        let Ok(less) = Deflection::of(room) else {
+            break;
+        };
+        match view.mesh(less, policy, log) {
+            Ok(mesh) => return Ok(mesh),
+            Err(why) if its_sides_cross(&why) => {}
+            Err(
+                Error::DeflectionBelowWhatAMeshCanReach { .. }
+                | Error::MoreMeshPointsThanASolidWillHold { .. },
+            ) => break,
+            Err(why) => return Err(why),
+        }
+        room /= 2.0;
+    }
+    Err(crossed)
+}
+
+/// Whether the triangulator refused a face because two pieces of its boundary
+/// met where they should not — the refusals a chord cutting across a hole, or
+/// across another chord, comes back as.
+fn its_sides_cross(why: &Error) -> bool {
+    matches!(
+        why,
+        Error::CannotMeshAFace {
+            why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. }
+                | rcad_mesh::CannotTriangulate::CornersCoincide { .. }
+                | rcad_mesh::CannotTriangulate::LoopsTouch { .. },
+            ..
+        }
+    )
 }
 
 /// The longest side of the box a mesh's points sit in.
