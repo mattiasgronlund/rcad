@@ -29,7 +29,7 @@
 use std::collections::HashMap;
 
 use rcad_geom::{Point, Scale, Surface, Unit, Vector};
-use rcad_topo::{EdgeKey, Model, VertexKey, WireStepView};
+use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
 
 /// Write every solid in `model` as an ISO 10303-21 file called `called`.
 ///
@@ -52,7 +52,7 @@ pub fn write(model: &Model, called: &str) -> Result<String, CannotWrite> {
         if extra > 0 {
             return Err(CannotWrite::ASolidWithMoreThanOneShell { shells: extra + 1 });
         }
-        writing.solid_from_shell(model, shell.key())?;
+        writing.solid_from_shell(model, shell)?;
     }
     Ok(writing.finished())
 }
@@ -265,14 +265,11 @@ impl Writing {
     /// curve comes from the two faces either side of the edge, and neither face
     /// knows about the other. So the first pass collects each edge's two
     /// surfaces off the shell, and the second writes.
-    fn solid_from_shell(
-        &mut self,
-        model: &Model,
-        shell: rcad_topo::ShellKey,
-    ) -> Result<(), CannotWrite> {
-        let shell = model
-            .shell(shell)
-            .expect("every key here came off the model being written");
+    ///
+    /// The shell is taken as its solid handed it out and never looked up again
+    /// by key: `Model::shell` sees it un-located, so a placed solid would be
+    /// written where it was built rather than where it was put (§191).
+    fn solid_from_shell(&mut self, model: &Model, shell: ShellView<'_>) -> Result<(), CannotWrite> {
         let mut either_side: HashMap<EdgeKey, Vec<Surface>> = HashMap::new();
         for face in shell.faces() {
             let surface = face.surface();

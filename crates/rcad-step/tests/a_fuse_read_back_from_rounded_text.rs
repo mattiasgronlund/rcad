@@ -60,8 +60,8 @@
 //!   digit counts, because every number is a whole one, so those rows are
 //!   controls and not measurements.
 //! - A ball and a frustum: the writer refuses every one, so nothing is read.
-//! - The writer drops a solid's placement:
-//!   [`a_cube_moved_along_x_is_written_where_it_was_moved_to`], left failing.
+//! - The writer dropped a solid's placement:
+//!   [`a_cube_moved_along_x_is_written_where_it_was_moved_to`], fixed in §191.
 //!
 //! # What it cannot catch
 //!
@@ -180,19 +180,16 @@ fn a_ball_and_a_block_never_reaches_the_reader_because_the_writer_refuses_a_ball
     );
 }
 
-/// **A wrong answer, left failing** (§191). A cube moved five along `x` is
-/// written where it stood before it was moved.
+/// A cube moved five along `x` is written where it was moved to (§191).
 ///
-/// `rcad_step::write` walks each solid's shell by key — `model.shell(key)` in
-/// `solid_from_shell` — and a shell looked up by key does not carry the
-/// solid's placement, so every face and corner goes out unplaced. The same
-/// shell reached through `model.solid(key).shells()` has it. Every family in
-/// this file is built with at least one placement (`place_solid` for a turn,
-/// the lift `add_extrusion` takes, the shift `add_round_bar` takes), so every
-/// family's file was a different configuration from the one built — a turned
-/// pair came back as its lattice pair with no real to round. The families
-/// above get past it by baking the placements in first; this is the defect
-/// itself, and it corrupts silently rather than refusing.
+/// `rcad_step::write` used to walk each solid's shell by key —
+/// `model.shell(key)` in `solid_from_shell` — and a shell looked up by key does
+/// not carry the solid's placement, so every face and corner went out unplaced.
+/// Every family in this file is built with at least one placement
+/// (`place_solid` for a turn, the lift `add_extrusion` takes, the shift
+/// `add_round_bar` takes), so every family's file was a different
+/// configuration from the one built — a turned pair came back as its lattice
+/// pair with no real to round. It corrupted silently rather than refusing.
 #[test]
 fn a_cube_moved_along_x_is_written_where_it_was_moved_to() {
     let policy = Policy::certified();
@@ -350,8 +347,9 @@ fn a_family_read_back_from_rounded_text<T: Debug + Clone>(
 ///
 /// The pair is baked first — each solid united with nothing, which gives a new
 /// solid whose faces carry the placement in their own numbers — because the
-/// writer drops a solid's placement
-/// ([`a_cube_moved_along_x_is_written_where_it_was_moved_to`]). The file then
+/// writer used to drop a solid's placement
+/// ([`a_cube_moved_along_x_is_written_where_it_was_moved_to`]); the bake is now
+/// redundant and costs nothing but two more solids in the file. The file then
 /// holds the two built solids unplaced and the two baked ones, and only the
 /// baked ones are read.
 ///
