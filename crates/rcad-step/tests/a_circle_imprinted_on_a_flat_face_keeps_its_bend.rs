@@ -18,7 +18,7 @@ use std::{env, fs, path::PathBuf};
 
 use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_step::{Import, Refusal, StepFile};
+use rcad_step::{Import, StepFile};
 use written_by_hand::{a_header, real};
 
 const CENTRE: [f64; 2] = [5.0, 5.0];
@@ -74,35 +74,23 @@ fn a_circle_drawn_on_a_slabs_top_is_meshed_round_and_not_as_a_square() {
     }
 }
 
-/// The LED is no longer stopped for want of a curve to place its circle by.
+/// The LED the finding came from imports, circle and all (§192.2).
 ///
-/// **It does not import yet**, and what stops it is measured rather than
-/// guessed: `Model::validate` meshes the solid as coarsely as a mesh goes to
-/// read the sign of its volume, which walks each arc of the circle in one step
-/// of a quarter turn, and the disc's two pin holes sit closer to the circle
-/// than that step's chord. The boundary crosses a hole there. Asked at a
-/// hundredth instead, the disc meshes and the file stops on a later face.
+/// The coarsest mesh still walks each arc of the circle in one quarter-turn
+/// step whose chord crosses a pin hole, but a finer one meshes the disc, and
+/// since the dome's seam is cut open nothing later stops it.
 #[test]
-fn the_led_the_finding_came_from_gets_past_the_circle_on_its_face() {
+fn the_led_the_finding_came_from_imports() {
     let bytes = fs::read(corpus().join("kicad").join(THE_LED)).expect("the LED is in the corpus");
     let file = StepFile::read(&bytes).expect("it parses");
-    let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect_err("the LED does not import yet");
-    let nothing_names_the_curve = if let Refusal::ThisEntityOfTheSolidWasRefused { why, .. }
-    | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } =
-        &refused
-    {
-        matches!(
-            **why,
-            rcad_topo::Error::AnEdgeBendsButEveryFaceAlongItIsFlat { .. }
-        )
-    } else {
-        false
-    };
-    assert!(
-        !nothing_names_the_curve,
-        "the circle reached the model with nothing naming its curve: {refused:?}"
-    );
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|refused| panic!("{THE_LED} does not import: {refused:?}"));
+    import
+        .model()
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("{THE_LED} imports but the full sweep refuses it: {why:?}"));
 }
 
 const THE_LED: &str = "LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step";

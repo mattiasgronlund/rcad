@@ -700,6 +700,13 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// edge stopped each of the 26 before is not measured here;
 /// `Relay_SPST_SANYOU_SRD_Series_Form_A` is the one the equal-pipes paragraph
 /// above named as stopped by a pipe tangent to a ball at a pin's rounded end.
+///
+/// **The dome-slit lane then moved it from 140 to 160**, with nothing dropping
+/// out: 20 `LED_D3.0mm_Horizontal` and `LED_D5.0mm_Horizontal` files. Each
+/// dome's seam, read in this kernel's chart of the ball, is a slit the wire
+/// runs out along and back, and the mesher now cuts the dome in two on from
+/// the slit's inner end instead of handing the triangulator the same points
+/// twice.
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -718,6 +725,26 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z8.2mm.step",
     "LED_D2.0mm_W4.0mm_H2.8mm_FlatTop.step",
     "LED_D2.0mm_W4.8mm_H2.5mm_FlatTop.step",
+    "LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step",
+    "LED_D3.0mm_Horizontal_O1.27mm_Z6.0mm.step",
+    "LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step",
+    "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
+    "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_Clear.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_IRBlack.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_IRGrey.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z9.0mm.step",
+    "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
+    "LED_D5.0mm_Horizontal_O3.81mm_Z3.0mm.step",
+    "LED_D5.0mm_Horizontal_O3.81mm_Z9.0mm.step",
+    "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
+    "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
+    "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
     "LED_Rectangular_W3.0mm_H2.0mm.step",
     "LED_Rectangular_W3.9mm_H1.8mm.step",
     "LED_Rectangular_W3.9mm_H1.9mm.step",

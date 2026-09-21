@@ -627,19 +627,23 @@ impl Walk {
     /// `rcad-topo` reads that kind and no other as closed. So the run is named
     /// the way an arc already is — by the circle's plane and a half-space
     /// standing on its chord — and a circle with one corner has no chord. The
-    /// second corner is put a quarter turn on from the first, `c + w × (A − c)`,
-    /// which lies on the circle's plane and on every face the circle was
-    /// checked against to within the rounding of one cross product. The two
-    /// pieces run the way the edge does, `A` to the second corner and back.
+    /// second corner is the opposite point, `c − (A − c)`, which lies on the
+    /// circle's plane and on every face the circle was checked against to
+    /// within the rounding of one subtraction. The two pieces run the way the
+    /// edge does, `A` to the second corner and back.
     ///
-    /// **Why a quarter turn and not the opposite point is measured, not
-    /// argued.** On `kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` the
-    /// opposite point lands on the dome's longitude `π`, and the mesher refuses
-    /// the dome by `AWireWillNotLieFlatOnItsFace`; a quarter turn gets the dome
-    /// through. A quarter turn the other way is refused again, and the seven
-    /// sibling files are refused on the dome whichever quarter is taken, so
-    /// the mesher's wire walk depends on where this corner lands — that is
-    /// `rcad-topo`'s to fix (§189.3).
+    /// **Why the opposite point is measured, not argued.** Every KiCad LED
+    /// dome puts its file corner on the ball's pole, and its equator is a
+    /// circle through both poles. The opposite point is then the other pole,
+    /// so the mesher meets both as corners. A quarter turn left the second
+    /// pole in the middle of a piece, where it is a walked point or not
+    /// depending on how finely the piece is walked, and a pole passed between
+    /// two walked points has no corner to open a pole side at: 18
+    /// `LED_D*_Horizontal` files were refused on the dome by
+    /// `AWireWillNotLieFlatOnItsFace` that way. The quarter turn was chosen
+    /// when the mesher took a pole side at a corner the short way round, which
+    /// at exactly half a turn went the wrong way; `rcad-topo`'s
+    /// `turn_at_a_corner_on_a_pole` is that fix.
     ///
     /// This is the one place the reader describes an edge the file wrote as
     /// one as two. It is limited to the circle [`Walk::a_circle_every_face_holds`]
@@ -678,10 +682,10 @@ impl Walk {
         let corner = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
         let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
         let near = self.point_of_vertex(reading, corner)?;
-        let Ok(axis) = place.axis.normalized() else {
+        if place.axis.normalized().is_err() {
             return Ok(None);
-        };
-        let far = place.origin + axis.cross(near - place.origin);
+        }
+        let far = place.origin - (near - place.origin);
         let and = Surface::Plane(
             Plane::from_point_and_normal(place.origin, place.axis).map_err(|why| {
                 Refusal::TheGeometryIsNotAWorkingShape {

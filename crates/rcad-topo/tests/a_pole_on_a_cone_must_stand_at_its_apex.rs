@@ -101,13 +101,8 @@ fn a_pole_halfway_up_the_cone_is_refused() {
     );
 }
 
-/// A few ulps out from the apex, inside the room: kept.
-///
-/// **Beside the apex and not up the ruling**, because a corner up the ruling
-/// is measured by the dynamic range check as a circle of the cone's radius
-/// there: `2^-50` up comes back `DynamicRangeTooWide` with a ratio of
-/// `1.8e16`. A corner level with the apex has radius zero there and is passed
-/// over. It is off the cone by `x²`, which the room keeps too.
+/// A few ulps out from the apex, level with it, inside the room: kept. It is
+/// off the cone by `x²`, which the room keeps too.
 #[test]
 fn a_pole_inside_the_room_of_the_apex_builds() {
     let beside_the_apex = Point::new(2f64.powi(-50), 0.0, 0.0);
@@ -117,6 +112,27 @@ fn a_pole_inside_the_room_of_the_apex_builds() {
         2f64.powi(-50)
     );
     a_cone_whose_side_stands_still_at(beside_the_apex).expect("a pole within the room of the apex");
+}
+
+/// The same room, up the ruling instead of beside the apex: kept, and it
+/// validates again.
+///
+/// The pole check takes this corner for the apex, so the dynamic range check
+/// must too. It used to measure the cone's radius there, `2^-51`, as the
+/// smallest feature of the solid, and refused the cone as `DynamicRangeTooWide`
+/// with a ratio of `1.8e16` (`docs/decisions.md` §190.5).
+#[test]
+fn a_pole_inside_the_room_of_the_apex_up_the_ruling_builds() {
+    assert!(
+        2f64.powi(-50) < ROOM,
+        "{} against a room of {ROOM}",
+        2f64.powi(-50)
+    );
+    let model = a_cone_whose_side_stands_still_at(on_the_ruling(2f64.powi(-50)))
+        .expect("a pole up the ruling within the room of the apex");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the built cone validates again");
 }
 
 /// The other side of the same room: `2^-40` up is about thirty-two rooms from
