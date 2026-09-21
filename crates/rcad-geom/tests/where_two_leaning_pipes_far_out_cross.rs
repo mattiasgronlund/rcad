@@ -179,14 +179,11 @@ fn three_far_pairs_the_sweep_refuses_have_a_plane_between_their_lines() {
 
 /// The kernel names the three pairs the witness above separates.
 ///
-/// Refused today because `picking_normals_to_try` offers only the three
-/// normals, and for one of the pairs because no anchor it rounds lands on the
-/// one offset that works. Adding the combined normals to that list names two
-/// of the three pairs in a scratch copy; reading the offset off the exact
-/// middle reading as well names all three, and the whole sweep, 8000 of 8000
-/// with 0 wrong.
+/// Refused before §188.4's fix, because the kernel offered only the three
+/// normals. Trying the combined normals through its three anchors names two of
+/// the three pairs; reading the offset off the exact middle as well names all
+/// three, each both ways round.
 #[test]
-#[ignore = "a gap: the kernel does not try the combined normals the witness uses"]
 fn the_kernel_names_the_three_far_pairs_it_refuses() {
     for (pair, _, _) in the_three_far_pairs_refused() {
         for first in [0, 1] {
