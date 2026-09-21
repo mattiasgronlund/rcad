@@ -1310,13 +1310,23 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 ///
 /// **Only a mesh the triangulator took is ever used**, so where the halving
 /// stops decides what it costs and never what it lets through: a solid that
-/// stops early is refused, never passed. It stops at the model's own
-/// [`Scale::default_linear_tolerance`]. Two pieces of boundary closer than that
-/// are one place to this model, so a crossing that survives a mesh that fine is
-/// the solid's own and not the chords'. Before then `Deflection::of` refusing a
-/// length that is not positive, [`Error::DeflectionBelowWhatAMeshCanReach`] and
-/// [`Error::MoreMeshPointsThanASolidWillHold`] each end it too, for the reason
-/// the zero-volume halving above gives.
+/// stops early is refused, never passed.
+///
+/// It stops below half the distance between the two closest corners of the
+/// solid that are not in the same place — the finest feature the sweep can read
+/// without meshing. That is **a cost bound and not a proof that finer would not
+/// help**: a wall thinner than half its nearest corner pair, between two arcs
+/// whose corners sit far apart, would still be refused, by the coarse mesh's
+/// name. The model's own linear tolerance was the first floor tried, and it is
+/// the one with an argument behind it — two pieces of boundary closer than it
+/// are one place — but a solid whose boundary really does cross, which is what
+/// the sweep is for, then walks some thirty halvings down to meshes of millions
+/// of triangles: `builder.rs`'s tube with a hole as wide as its wall took
+/// 16.6 seconds to be refused, and by the triangle cap rather than by its own
+/// crossing. At the corner floor the same test takes 0.010 seconds. `Deflection::of` refusing a length that is not positive,
+/// [`Error::DeflectionBelowWhatAMeshCanReach`],
+/// [`Error::MoreMeshPointsThanASolidWillHold`] and a patch with more triangles
+/// than the triangulator will hold each end it too.
 ///
 /// Whichever ends it, **the coarse mesh's refusal is what is handed back**: the
 /// finer ones said the same thing about the same solid in more points.
@@ -1344,7 +1354,10 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     let Some((low, high)) = view.box_around_it() else {
         return Err(crossed);
     };
-    let finest = view.model().scale().default_linear_tolerance();
+    let Some(closest) = how_close_two_corners_come(view) else {
+        return Err(crossed);
+    };
+    let finest = closest / 2.0;
     let (low, high) = (low.coordinates(), high.coordinates());
     let mut room = (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0;
     while room >= finest {
@@ -1356,13 +1369,53 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
             Err(why) if its_sides_cross(&why) => {}
             Err(
                 Error::DeflectionBelowWhatAMeshCanReach { .. }
-                | Error::MoreMeshPointsThanASolidWillHold { .. },
+                | Error::MoreMeshPointsThanASolidWillHold { .. }
+                | Error::CannotMeshAFace {
+                    why: rcad_mesh::CannotTriangulate::MoreTrianglesThanAPatchWillHold { .. },
+                    ..
+                },
             ) => break,
             Err(why) => return Err(why),
         }
         room /= 2.0;
     }
     Err(crossed)
+}
+
+/// The distance between the two closest corners of the solid that are not in
+/// the same place, or `None` when it has fewer than two such corners.
+///
+/// Corners in the same place are counted once, whichever vertex holds them:
+/// two vertices on one point are one place, and a distance of zero would stop
+/// the halving before it started for a reason that is not a feature.
+fn how_close_two_corners_come(view: SolidView<'_>) -> Option<f64> {
+    let mut corners: Vec<[f64; 3]> = view
+        .faces()
+        .flat_map(|face| {
+            face.wires()
+                .flat_map(WireView::points)
+                .map(|point| point.coordinates())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    corners.sort_by(|one, other| {
+        (0..3)
+            .map(|axis| one[axis].total_cmp(&other[axis]))
+            .find(|order| order.is_ne())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    corners.dedup();
+    let mut closest: Option<f64> = None;
+    for (position, one) in corners.iter().enumerate() {
+        for other in &corners[position + 1..] {
+            let apart = (0..3)
+                .map(|axis| (one[axis] - other[axis]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            closest = Some(closest.map_or(apart, |so_far| so_far.min(apart)));
+        }
+    }
+    closest
 }
 
 /// Whether the triangulator refused a face because two pieces of its boundary
