@@ -576,7 +576,9 @@ impl BuildingAMesh {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        let flat = the_surface_this_face_is_meshed_on(face).as_plane().is_some();
+        let flat = the_surface_this_face_is_meshed_on(face)
+            .as_plane()
+            .is_some();
         let room =
             self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
         for wire in face.wires() {

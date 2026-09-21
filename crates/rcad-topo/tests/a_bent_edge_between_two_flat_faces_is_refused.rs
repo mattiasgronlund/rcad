@@ -28,14 +28,15 @@ fn a_circle_named_only_by_the_plane_it_is_drawn_on_is_refused_rather_than_meshed
     let top = the_top();
     let slab = a_slab_with_a_circle_on_top(&mut model, Surface::Plane(top))?;
 
-    let meshed = model.solid(slab)?.mesh(
-        Deflection::for_scale(model.scale()),
-        &policy,
-        &mut log,
-    );
+    let meshed = model
+        .solid(slab)?
+        .mesh(Deflection::for_scale(model.scale()), &policy, &mut log);
 
     assert!(
-        matches!(meshed, Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { .. })),
+        matches!(
+            meshed,
+            Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { .. })
+        ),
         "expected the circle to be refused by name, got {:?}",
         meshed.map(|mesh| mesh.points().len())
     );
@@ -62,7 +63,10 @@ fn the_same_circle_named_by_its_cylinder_is_walked_round() -> Result<()> {
     assert_eq!(arcs.len(), 4, "the circle is four arcs");
     for arc in arcs {
         let along = mesh.points_along_edge(arc);
-        assert!(!along.is_empty(), "an arc of the circle got no points: {arc:?}");
+        assert!(
+            !along.is_empty(),
+            "an arc of the circle got no points: {arc:?}"
+        );
         for &at in along {
             let point = mesh.points()[at as usize];
             let [x, y, z] = point.coordinates();
@@ -127,13 +131,8 @@ fn a_slab_with_a_circle_on_top(model: &mut Model, and: Surface) -> Result<SolidK
         upright.push(builder.add_edge(low[side], high[side], EdgeRun::Straight)?);
     }
 
-    let on_the_circle = [
-        [RADIUS, 0.0],
-        [0.0, RADIUS],
-        [-RADIUS, 0.0],
-        [0.0, -RADIUS],
-    ]
-    .map(|[x, y]| Point::new(x, y, TOP));
+    let on_the_circle = [[RADIUS, 0.0], [0.0, RADIUS], [-RADIUS, 0.0], [0.0, -RADIUS]]
+        .map(|[x, y]| Point::new(x, y, TOP));
     let mut round = Vec::new();
     for corner in on_the_circle {
         round.push(builder.add_vertex(corner)?);
@@ -160,7 +159,9 @@ fn a_slab_with_a_circle_on_top(model: &mut Model, and: Surface) -> Result<SolidK
 
     let mut steps = Vec::new();
     for side in (0..4).rev() {
-        steps.push(DraftStep::Along(builder.add_coedge(bottom_edges[side], reversed)?));
+        steps.push(DraftStep::Along(
+            builder.add_coedge(bottom_edges[side], reversed)?,
+        ));
     }
     let wire = builder.add_wire(&steps)?;
     let floor = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))?;
@@ -192,17 +193,25 @@ fn a_slab_with_a_circle_on_top(model: &mut Model, and: Surface) -> Result<SolidK
     let square = builder.add_wire(&square)?;
     let mut hole = Vec::new();
     for quarter in (0..4).rev() {
-        hole.push(DraftStep::Along(builder.add_coedge(arcs[quarter], reversed)?));
+        hole.push(DraftStep::Along(
+            builder.add_coedge(arcs[quarter], reversed)?,
+        ));
     }
     let hole = builder.add_wire(&hole)?;
-    faces.push((builder.add_face(Surface::Plane(the_top()), &[square, hole])?, forward));
+    faces.push((
+        builder.add_face(Surface::Plane(the_top()), &[square, hole])?,
+        forward,
+    ));
 
     let mut disc = Vec::new();
     for &quarter in &arcs {
         disc.push(DraftStep::Along(builder.add_coedge(quarter, forward)?));
     }
     let disc = builder.add_wire(&disc)?;
-    faces.push((builder.add_face(Surface::Plane(the_top()), &[disc])?, forward));
+    faces.push((
+        builder.add_face(Surface::Plane(the_top()), &[disc])?,
+        forward,
+    ));
 
     builder.add_shell(&faces)?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())

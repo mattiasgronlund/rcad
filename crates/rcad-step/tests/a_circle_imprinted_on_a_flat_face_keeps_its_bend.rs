@@ -89,7 +89,8 @@ fn the_led_the_finding_came_from_gets_past_the_circle_on_its_face() {
     let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
         .expect_err("the LED does not import yet");
     let nothing_names_the_curve = if let Refusal::ThisEntityOfTheSolidWasRefused { why, .. }
-    | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } = &refused
+    | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } =
+        &refused
     {
         matches!(
             **why,
@@ -161,11 +162,19 @@ fn a_slab_with_a_circle_drawn_on_top() -> String {
 
     let mut text = a_header(".MILLI.");
     for (which, corner) in corners.iter().enumerate() {
-        text += &format!("#{}=CARTESIAN_POINT('',{});\n", 100 + which, triple(*corner));
+        text += &format!(
+            "#{}=CARTESIAN_POINT('',{});\n",
+            100 + which,
+            triple(*corner)
+        );
         text += &format!("#{}=VERTEX_POINT('',#{});\n", 110 + which, 100 + which);
     }
     for (which, corner) in on_the_circle.iter().enumerate() {
-        text += &format!("#{}=CARTESIAN_POINT('',{});\n", 120 + which, triple(*corner));
+        text += &format!(
+            "#{}=CARTESIAN_POINT('',{});\n",
+            120 + which,
+            triple(*corner)
+        );
         text += &format!("#{}=VERTEX_POINT('',#{});\n", 125 + which, 120 + which);
     }
     for (which, [from, to]) in edges.iter().enumerate() {
@@ -179,8 +188,18 @@ fn a_slab_with_a_circle_drawn_on_top() -> String {
             340 + which,
             triple([way[0], way[1], way[2]])
         );
-        text += &format!("#{}=VECTOR('',#{},{});\n", 320 + which, 340 + which, real(1.0));
-        text += &format!("#{}=LINE('',#{},#{});\n", 300 + which, 100 + from, 320 + which);
+        text += &format!(
+            "#{}=VECTOR('',#{},{});\n",
+            320 + which,
+            340 + which,
+            real(1.0)
+        );
+        text += &format!(
+            "#{}=LINE('',#{},#{});\n",
+            300 + which,
+            100 + from,
+            320 + which
+        );
         text += &format!(
             "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
             380 + which,
@@ -218,7 +237,11 @@ fn a_slab_with_a_circle_drawn_on_top() -> String {
             .map(|step| format!("#{}", 400 + which * 4 + step))
             .collect();
         text += &format!("#{}=EDGE_LOOP('',({}));\n", 430 + which, steps.join(","));
-        text += &format!("#{}=FACE_OUTER_BOUND('',#{},.T.);\n", 440 + which, 430 + which);
+        text += &format!(
+            "#{}=FACE_OUTER_BOUND('',#{},.T.);\n",
+            440 + which,
+            430 + which
+        );
         text += &format!(
             "#{}=CARTESIAN_POINT('',{});\n",
             470 + which,
@@ -245,8 +268,16 @@ fn a_slab_with_a_circle_drawn_on_top() -> String {
     }
 
     for (step, quarter) in (0..4).rev().enumerate() {
-        text += &format!("#{}=ORIENTED_EDGE('',*,*,#{},.F.);\n", 700 + step, 610 + quarter);
-        text += &format!("#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n", 720 + quarter, 610 + quarter);
+        text += &format!(
+            "#{}=ORIENTED_EDGE('',*,*,#{},.F.);\n",
+            700 + step,
+            610 + quarter
+        );
+        text += &format!(
+            "#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            720 + quarter,
+            610 + quarter
+        );
     }
     text += "#710=EDGE_LOOP('',(#700,#701,#702,#703));\n";
     text += "#711=FACE_BOUND('',#710,.T.);\n";

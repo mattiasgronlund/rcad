@@ -798,7 +798,8 @@ impl Walk {
             self.point_of_vertex(reading, ends[0])?,
             self.point_of_vertex(reading, ends[1])?,
         ];
-        let and = self.the_surface_that_names_the_curve(reading, edge_curve, curve, keyword, &place)?;
+        let and =
+            self.the_surface_that_names_the_curve(reading, edge_curve, curve, keyword, &place)?;
         self.the_arc_between(edge_curve, &place, and, corners, along_the_curve)
     }
 
@@ -846,8 +847,8 @@ impl Walk {
                 .map_err(not_a_working_shape)?;
             return Ok(Surface::Cylinder(round));
         }
-        let flat = Plane::from_point_and_normal(place.origin, place.axis)
-            .map_err(not_a_working_shape)?;
+        let flat =
+            Plane::from_point_and_normal(place.origin, place.axis).map_err(not_a_working_shape)?;
         Ok(Surface::Plane(flat))
     }
 
