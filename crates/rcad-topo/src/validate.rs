@@ -1346,9 +1346,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     };
     let finest = view.model().scale().default_linear_tolerance();
     let (low, high) = (low.coordinates(), high.coordinates());
-    let mut room = (0..3).fold(0.0, |widest: f64, axis| {
-        widest.max(high[axis] - low[axis])
-    }) / 2.0;
+    let mut room = (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0;
     while room >= finest {
         let Ok(less) = Deflection::of(room) else {
             break;

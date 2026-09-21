@@ -26,9 +26,7 @@ use rcad_geom::{
 };
 use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{
-    DraftEdge, DraftVertex, DraftWire, Error, Model, Result, SolidBuilder, SolidKey,
-};
+use rcad_topo::{DraftEdge, DraftVertex, DraftWire, Error, Model, Result, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 1.0;
@@ -46,14 +44,11 @@ fn at_the_coarsest_deflection_the_rims_chord_cuts_across_the_hole() {
     let plate = a_half_disc_with_a_square_hole(&mut model, &policy, &mut log, Hole::InsideTheRim)
         .expect("a sound plate");
 
-    let refused = model
-        .solid(plate)
-        .expect("this model made the key")
-        .mesh(
-            Deflection::of(f64::MAX).expect("a positive length"),
-            &policy,
-            &mut log,
-        );
+    let refused = model.solid(plate).expect("this model made the key").mesh(
+        Deflection::of(f64::MAX).expect("a positive length"),
+        &policy,
+        &mut log,
+    );
 
     assert!(
         matches!(
@@ -104,12 +99,8 @@ fn a_hole_poking_out_through_the_rim_is_still_refused() {
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(a_working_size());
 
-    let refused = a_half_disc_with_a_square_hole(
-        &mut model,
-        &policy,
-        &mut log,
-        Hole::ThroughTheRim,
-    );
+    let refused =
+        a_half_disc_with_a_square_hole(&mut model, &policy, &mut log, Hole::ThroughTheRim);
 
     assert!(
         matches!(
@@ -274,8 +265,8 @@ fn a_half_disc_with_a_square_hole(
         // Rotating the side's direction a quarter turn anticlockwise points it
         // into the square, which is where the material is not.
         let inward = Vector::new(-(next_y - y), next_x - x, 0.0);
-        let plane = Plane::from_point_and_normal(Point::new(x, y, 0.0), inward)
-            .expect("a side has length");
+        let plane =
+            Plane::from_point_and_normal(Point::new(x, y, 0.0), inward).expect("a side has length");
         faces.push(builder.add_face(Surface::Plane(plane), &[side])?);
     }
 
