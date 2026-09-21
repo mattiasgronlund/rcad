@@ -1,6 +1,6 @@
 ## 0. Where the work is
 
-reviewed: 2026-09-21
+reviewed: 2026-09-22
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files that hang
 on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107's
@@ -19,11 +19,12 @@ refusals to 0; §184.6 by **§187.3**; §176.5's chord and LED arc by **§187.1�
 far pipes by **§189.2**, 8000 of 8000; §189.3's body meeting its dome by
 **§190.1–2**; §187.1's sweep half by **§190.3**; §189.1's overflow by
 **§190.4**; the dome wire by **§192.1**, 18 LEDs to 0; §190.5 by **§192.3**;
-§192.2's slit and wrong face by **§193.1–2**, 20 LEDs import.
+§192.2's slit and wrong face by **§193.1–2**, 20 LEDs import; §193.3's disc dome
+by **§194.2–3**, Z2 LEDs as a limit by **§194.1**, a pole fuse by **§194.4**.
 
-**Next and unclaimed: a dome whose rim crosses a plane**, §193.3 — a half ball
-on a flat disc, built through the public API, is refused "will not lie flat".
-Beside it, the four `O1.27mm_Z2.0mm` LEDs. §193.3 lists the rest. §124, §136.4, §125.6:
+**Next and unclaimed: a wire whose two corners are both poles**, §194.5 — the
+mesher will not walk the lune, so the fuse will not cut a plane down a ball's
+polar axis. §194.5 lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
