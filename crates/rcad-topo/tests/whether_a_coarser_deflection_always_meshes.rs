@@ -862,7 +862,11 @@ fn a_coarser_deflection_meshes_whenever_a_finer_one_did_on_solids_drawn_at_rando
     let asked = Cell::new(0_u32);
     let finer_meshed = Cell::new(0_u32);
     run(
-        (a_random_solid(), log_uniform(1e-4, 1.0), log_uniform(1.0, 1e3)),
+        (
+            a_random_solid(),
+            log_uniform(1e-4, 1.0),
+            log_uniform(1.0, 1e3),
+        ),
         |(drawn, finer_share, coarser_by)| {
             let shape = drawn.built();
             asked.set(asked.get() + 1);
@@ -929,9 +933,10 @@ impl ARandomSolid {
                 format!("bar {radius} across and {height} tall"),
                 (2.0 * radius).max(height),
             ),
-            CurvedKind::Frustum { slope, near, far } => {
-                (format!("frustum of slope {slope} from {near} to {far}"), far)
-            }
+            CurvedKind::Frustum { slope, near, far } => (
+                format!("frustum of slope {slope} from {near} to {far}"),
+                far,
+            ),
             CurvedKind::PointedCone { slope, far } => {
                 (format!("pointed cone of slope {slope} up to {far}"), far)
             }
@@ -1020,18 +1025,16 @@ fn a_random_solid() -> impl Strategy<Value = ARandomSolid> {
             }
         }),
     ];
-    (kind, a_shift(), proptest::option::of(a_turn())).prop_map(|(kind, shift, turn)| {
-        ARandomSolid { kind, shift, turn }
+    (kind, a_shift(), proptest::option::of(a_turn())).prop_map(|(kind, shift, turn)| ARandomSolid {
+        kind,
+        shift,
+        turn,
     })
 }
 
 /// A move of nothing, of a few units, or of up to a million.
 fn a_shift() -> impl Strategy<Value = [f64; 3]> {
-    let how_far = prop_oneof![
-        Just(0.0),
-        log_uniform(1.0, 100.0),
-        log_uniform(1e3, 1e6)
-    ];
+    let how_far = prop_oneof![Just(0.0), log_uniform(1.0, 100.0), log_uniform(1e3, 1e6)];
     (how_far, a_direction()).prop_map(|(how_far, direction)| {
         let length = Vector::from(direction).length();
         direction.map(|component| component / length * how_far)

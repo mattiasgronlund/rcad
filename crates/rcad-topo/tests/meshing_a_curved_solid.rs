@@ -1711,6 +1711,53 @@ fn every_triangle_of_a_random_bar_or_ball_stays_within_the_deviation_its_mesh_re
     );
 }
 
+/// **A defect the soak above found, kept by its own numbers.** A bar of radius
+/// one and ten tall, its top cap leaning five across for every one up, meshed
+/// at a tenth, does not close up into one surface.
+///
+/// The leaning cap cuts the bar in a long ellipse, from five up to fifteen. Near
+/// its top end, where it turns sharpest, three points in a row along it — call
+/// them the first, the middle and the last — are cut off as an ear by **both**
+/// faces that meet there: the cap has the triangle middle–last–first and the
+/// wall has middle–first–last. Those are the same three points facing opposite
+/// ways, and the middle point is in no other triangle. So the pair is a flat
+/// pocket with nothing inside it, pinched off from the rest of the mesh along
+/// the first–last side, which the mesh then uses four times — twice each way,
+/// the one pattern [`the_mesh_closes_up`]'s balance check says it lets through
+/// and its χ check catches. χ comes out 3 rather than a bar's 2.
+///
+/// Measured (probe, not kept): the same fault at radius 1 and fifty tall with
+/// the cap leaning 5, 10, 25 and 45, at several deflections from a tenth to one;
+/// never with a lean of 2 or less. Where the bar sits changes which deflections
+/// show it and not whether it happens: the soak's own find was a bar a tenth
+/// across, turned and moved two thousand units out.
+///
+/// Ignored because it fails; the justfile's `ignored_tests` has to move from 1
+/// to 2 alongside it.
+#[test]
+#[ignore = "open: a steep leaning cap and the wall both cut the same ear off the ellipse"]
+fn a_bar_whose_top_leans_five_across_for_one_up_meshes_into_one_closed_surface() {
+    let mut model = a_model();
+    let bar = model
+        .add_bar_cut_off_by(
+            1.0,
+            [
+                a_cap_square_to_the_axis(0.0, -1.0),
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, 10.0), Vector::new(5.0, 0.0, 1.0))
+                    .expect("a direction with length"),
+            ],
+            &Isometry::identity(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a cap leaning five in one, through the axis ten up, cuts right round a bar of radius one");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a bar cut off at a steep angle is a sound bar");
+    assert_eq!(euler_characteristic_of(&model, bar), 2);
+    meshed(&model, bar, 0.1);
+}
+
 /// A ball, a bar, or a bar cut off at an angle, with where it is put.
 #[derive(Clone, Debug)]
 struct ARandomBarOrBall {
@@ -1723,10 +1770,15 @@ struct ARandomBarOrBall {
 #[derive(Clone, Copy, Debug)]
 enum RoundKind {
     Ball,
-    Bar { height: f64 },
+    Bar {
+        height: f64,
+    },
     /// The top cap leans `lean` in `x` for every one in `z`, and never so far
     /// that the two caps meet inside the bar.
-    BarCutOffAtAnAngle { height: f64, lean: f64 },
+    BarCutOffAtAnAngle {
+        height: f64,
+        lean: f64,
+    },
 }
 
 impl ARandomBarOrBall {
@@ -1875,14 +1927,18 @@ impl TheTrueSurfaces {
                 .iter()
                 .map(|corner| (*corner - self.centre).length())
                 .fold(0.0_f64, f64::max);
-            let nearest = (closest_point_on_a_triangle(self.centre, a, b, c) - self.centre).length();
+            let nearest =
+                (closest_point_on_a_triangle(self.centre, a, b, c) - self.centre).length();
             return (furthest - self.radius).max(self.radius - nearest);
         }
         const STEPS: u32 = 12;
         let mut worst = 0.0_f64;
         for i in 0..=STEPS {
             for j in 0..=STEPS - i {
-                let (s, t) = (f64::from(i) / f64::from(STEPS), f64::from(j) / f64::from(STEPS));
+                let (s, t) = (
+                    f64::from(i) / f64::from(STEPS),
+                    f64::from(j) / f64::from(STEPS),
+                );
                 let point = a + (b - a) * s + (c - a) * t;
                 let from_the_foot = point - self.centre;
                 let across = (from_the_foot - self.axis * from_the_foot.dot(self.axis)).length();
@@ -1944,11 +2000,7 @@ fn closest_point_on_a_triangle(p: Point, a: Point, b: Point, c: Point) -> Point 
 
 /// A move of nothing, of a few units, or of up to a million.
 fn a_shift() -> impl Strategy<Value = [f64; 3]> {
-    let how_far = prop_oneof![
-        Just(0.0),
-        log_uniform(1.0, 100.0),
-        log_uniform(1e3, 1e6)
-    ];
+    let how_far = prop_oneof![Just(0.0), log_uniform(1.0, 100.0), log_uniform(1e3, 1e6)];
     (how_far, a_direction()).prop_map(|(how_far, direction)| {
         let length = Vector::from(direction).length();
         direction.map(|component| component / length * how_far)
