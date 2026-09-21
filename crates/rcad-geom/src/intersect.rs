@@ -1395,10 +1395,16 @@ fn the_middle_exactly(
             .nearest_f64()
             .abs()
             .max(at_there.nearest_f64().abs()),
-        [x.nearest_f64(), y.nearest_f64(), z.nearest_f64(), mine, theirs]
-            .into_iter()
-            .map(f64::abs)
-            .fold(0.0, f64::max),
+        [
+            x.nearest_f64(),
+            y.nearest_f64(),
+            z.nearest_f64(),
+            mine,
+            theirs,
+        ]
+        .into_iter()
+        .map(f64::abs)
+        .fold(0.0, f64::max),
         along.into_iter().map(f64::abs).fold(0.0, f64::max),
     );
     let slid = |length: f64| {
@@ -1439,11 +1445,9 @@ fn how_far_to_slide_the_lengths_down(
             binary_exponent(value).max(0)
         }
     };
-    let too_high = binade(largest_reading)
-        + 2 * binade(longest_length)
-        + 2 * binade(largest_direction)
-        + 11
-        - 1020;
+    let too_high =
+        binade(largest_reading) + 2 * binade(longest_length) + 2 * binade(largest_direction) + 11
+            - 1020;
     (too_high.max(0) + 1) / 2
 }
 
@@ -4525,9 +4529,12 @@ mod tests {
         let normals = picking_normals_to_try(anchors[0], along, along.cross(towards))
             .expect("a direction with a length");
 
-        let squared_gap =
-            how_far_off_an_axis_exactly(there.coordinates(), here.coordinates(), along.components())
-                .expect("small enough to hold exactly");
+        let squared_gap = how_far_off_an_axis_exactly(
+            there.coordinates(),
+            here.coordinates(),
+            along.components(),
+        )
+        .expect("small enough to hold exactly");
         let widths = Exact::dot_of(along.components(), along.components())
             .and_then(|squared_direction| {
                 let [mine, theirs] = [one.radius(), other.radius()]
@@ -4554,8 +4561,12 @@ mod tests {
                     .map(|(from_here, from_there)| from_here.plus(&from_there))
                     .expect("small enough to hold exactly");
                 let [above_low, below_high] = [
-                    Exact::of(window.lo()).times(&bottom).map(|low| top.minus(&low)),
-                    Exact::of(window.hi()).times(&bottom).map(|high| high.minus(&top)),
+                    Exact::of(window.lo())
+                        .times(&bottom)
+                        .map(|low| top.minus(&low)),
+                    Exact::of(window.hi())
+                        .times(&bottom)
+                        .map(|high| high.minus(&top)),
                 ]
                 .map(|gap| gap.expect("small enough to hold exactly").sign());
 
