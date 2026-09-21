@@ -1107,22 +1107,19 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
             || how_deeply_two_side_by_side_pipes_overlap_enclosing(one, other),
             Exact::enclosure,
         );
-    let squared_gap = how_far_off_an_axis_exactly(
-        there.coordinates(),
-        here.coordinates(),
-        along.components(),
-    )
-    .as_ref()
-    .map_or_else(
-        || {
-            how_far_off_an_axis_enclosing(
-                there.coordinates(),
-                here.coordinates(),
-                along.components(),
-            )
-        },
-        Exact::enclosure,
-    );
+    let squared_gap =
+        how_far_off_an_axis_exactly(there.coordinates(), here.coordinates(), along.components())
+            .as_ref()
+            .map_or_else(
+                || {
+                    how_far_off_an_axis_enclosing(
+                        there.coordinates(),
+                        here.coordinates(),
+                        along.components(),
+                    )
+                },
+                Exact::enclosure,
+            );
     let out = root_enclosing(quotient_or_everything(
         -overlap,
         Interval::exactly(4.0) * squared_gap * squared_direction,
@@ -1356,22 +1353,20 @@ fn how_far_in_front_of_the_middle(
 ) -> Interval {
     let here = one.axis().origin().coordinates();
     let there = other.axis().origin().coordinates();
-    the_middle_exactly(picker, here, there, towards, one.radius(), other.radius())
-        .map_or_else(
-            || {
-                let [at_here, at_there] =
-                    [here, there].map(|point| how_far_in_front(picker, point));
-                let squared_apart = squared_length_enclosing(exactly(towards.components()));
-                let [mine, theirs] = [one.radius(), other.radius()].map(squared_enclosing);
-                let twice_squared_apart = Interval::exactly(2.0) * squared_apart;
-                quotient_or_everything(
-                    at_here * (squared_apart - mine + theirs)
-                        + at_there * (squared_apart + mine - theirs),
-                    twice_squared_apart,
-                )
-            },
-            |(top, bottom)| quotient_or_everything(top.enclosure(), bottom.enclosure()),
-        )
+    the_middle_exactly(picker, here, there, towards, one.radius(), other.radius()).map_or_else(
+        || {
+            let [at_here, at_there] = [here, there].map(|point| how_far_in_front(picker, point));
+            let squared_apart = squared_length_enclosing(exactly(towards.components()));
+            let [mine, theirs] = [one.radius(), other.radius()].map(squared_enclosing);
+            let twice_squared_apart = Interval::exactly(2.0) * squared_apart;
+            quotient_or_everything(
+                at_here * (squared_apart - mine + theirs)
+                    + at_there * (squared_apart + mine - theirs),
+                twice_squared_apart,
+            )
+        },
+        |(top, bottom)| quotient_or_everything(top.enclosure(), bottom.enclosure()),
+    )
 }
 
 /// The top and bottom of [`how_far_in_front_of_the_middle`]'s quotient, each
@@ -1392,7 +1387,10 @@ fn the_middle_exactly(
 
     let [x, y, z] = towards.components();
     let down = how_far_to_slide_the_lengths_down(
-        at_here.nearest_f64().abs().max(at_there.nearest_f64().abs()),
+        at_here
+            .nearest_f64()
+            .abs()
+            .max(at_there.nearest_f64().abs()),
         [x.abs(), y.abs(), z.abs(), mine, theirs]
             .into_iter()
             .fold(0.0, f64::max),

@@ -51,7 +51,7 @@ mod fuzzing;
 
 use fuzzing::{bytes_for, two_surfaces_from};
 use rcad_geom::{EdgeRun, Picker, SurfaceMeet, intersect};
-use rcad_predicates::{Decision, Policy, Point as PredicatePoint, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 
 /// The fat pipe's radius, and the thin pipe's offset off the fat axis.
 const R1: f64 = 5.047645337156084e153;
