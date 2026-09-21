@@ -151,6 +151,15 @@ anchor-the-half-space-at-a-point fix, still not excluded, still not built, and
 What changed is that the kernel now **refuses** that pair instead of answering
 it wrongly, which is where §16.10 says an unreached answer belongs.
 
+> **§183 corrects the paragraph above.** The offset's ulp is not the constraint:
+> all four anchors a caller can name round into the same plane, so an anchored
+> half-space would carry it unchanged. A plane that separates the two lines does
+> exist here — one of the constructor's own fallback normals, whose offset is the
+> stored number `41581179` with no rounding in it — and it is reached by keeping
+> the step exact and proving the normal rather than assuming it. The
+> anchor-the-half-space-at-a-point fix is **excluded**, and `HalfSpace` does not
+> change. The row stays a gap.
+
 Commands this section was written from: `just decision 181`, `181.2`–`181.7`,
 `140.7`, `29.8`; `just src two_lines_told_apart`, `HalfSpace`, `Picker`,
 `through_a_point_square_to`, `SurfaceMeet`, `which_side_of_a_flat_surface`; a

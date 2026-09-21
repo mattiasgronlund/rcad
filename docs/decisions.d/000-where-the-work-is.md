@@ -1,6 +1,6 @@
 ## 0. Where the work is
 
-reviewed: 2026-09-20
+reviewed: 2026-09-21
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files that hang
 on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107's
@@ -18,8 +18,8 @@ sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150 by §1
 §151.5 by §163; §163.4 by §165; §165.4 by §166; §166.4 by §167; §167.4 by §168;
 **§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**, one
 acceptance test, nothing downstream of a picker having read the offset; and
-**§181.6's question** by **§182** — the answering order was wrong and not merely
-coarse, so the pair refuses both ways round now and the gap it names stays open.
+**§181.6's question** by **§182**. **§183 renames the gap §182.6 left**: the
+picking normal, not the offset — `HalfSpace` untouched, and a lane owes the fix.
 
 **Next and unclaimed: the 18 LED files.** §176.2 falsifies §174.5's "coarse edge
 walk" — the walk never runs, because the circle is imprinted on a flat face and
