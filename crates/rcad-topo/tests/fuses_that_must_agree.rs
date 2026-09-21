@@ -140,15 +140,15 @@ use rcad_geom::{
     Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, EdgeView, Error, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, EdgeView, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
 
 use pairs::{
-    BallAndBlock, Configuration, CurvedPair, Elsewhere, FrustumAndBlock, Movement, Placed, Rigid,
-    Shape, Skew, Turn, a_ball_a_bar_and_a_block, a_ball_and_a_block, a_chain_of_fuses,
-    a_curved_pair, a_flush_pair, a_frustum_and_a_block, a_lattice_pair, a_lattice_trio,
-    a_pair_leaning_the_same_way, a_pair_somewhere_else, a_rigid_movement, a_skew_pair,
-    a_solid_and_its_copy, a_turned_pair, a_turned_solid_and_its_copy,
-    a_turned_solid_and_several_copies,
+    BallAndBlock, Configuration, CurvedPair, Elsewhere, Fixture, FrustumAndBlock, LeaningBar,
+    Movement, Placed, Rigid, Shape, Skew, Turn, Turned, a_ball_a_bar_and_a_block,
+    a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair, a_frustum_and_a_block,
+    a_lattice_pair, a_lattice_trio, a_leaning_bar, a_pair_leaning_the_same_way,
+    a_pair_somewhere_else, a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
+    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies, room_for_a_leaning_bar, turned,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -345,6 +345,42 @@ const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 /// A drop here is a fuse that stopped answering, which is a regression and not a
 /// draw. Re-derive it when it moves; do not relax it to a floor (§19.1).
 const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 106;
+
+/// How many of the comparisons a law over a bar leaning through a block has to
+/// have made (§191).
+///
+/// **This family refuses most of what it draws, and says so here rather than
+/// shipping as coverage** (§14.7). Its rate row refuses 298 of 429 fuses,
+/// 69.5%, against its upright control's none. Both laws over it run from the
+/// fixed seed ([`over_a_fixed_corpus`]), so the share compared is one number:
+/// commutativity reaches **28 of 126**, 22%, and inclusion and exclusion
+/// **11 of 63**, 17%, because it needs two fuses to answer and not one. A tenth
+/// is a little over half the smaller: it fires if either law loses half of what
+/// it compares, and a law that compares eleven cases is thin, which is what
+/// this paragraph is for.
+const A_LEANING_BAR_STILL_COMPARES_THIS_MUCH: f64 = 0.1;
+
+/// How much of a curved fixture turned together a certified fuse may refuse
+/// (§191).
+///
+/// Measured over the shipped corpus: a bar through a block **6 of 429**, a ball
+/// in a block **3 of 429**, every one naming *telling the cells of a face
+/// apart*, against none for either upright. Three per cent is thirteen fuses —
+/// room for twice the larger count and a little over, and still fires on
+/// anything that makes the turned row a real fraction of its fuses. Every one
+/// of those refusals is a gap: see
+/// [`every_fuse_a_turned_curved_fixture_refuses_has_an_answer_turned_from_the_upright_one`].
+const TURNED_ROUND_REFUSALS_MUST_STAY_BELOW: f64 = 0.03;
+
+/// How much of a bar leaning through a block a certified fuse may refuse
+/// (§191).
+///
+/// Measured at **298 of 429, 69.5%**, over the shipped corpus. Seventy-five per
+/// cent is twenty-three fuses above it. It is a ceiling on a family that already
+/// refuses most of itself, so its job is only to say out loud when that gets
+/// worse; [`A_LEANING_BAR_STILL_COMPARES_THIS_MUCH`] is the guard that the laws
+/// over it still compare anything.
+const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 
 /// How much of the lattice control comes back as something a `Model` cannot
 /// hold.
@@ -2788,6 +2824,644 @@ fn every_certified_fuse_of_a_curved_pair_is_decided_and_records_nothing() {
     );
 }
 
+/// §191: how often a certified fuse gives up once a bar and its block are turned
+/// together, beside [`every_certified_fuse_of_a_curved_pair_is_decided_and_records_nothing`]
+/// as the unturned control.
+#[test]
+fn how_often_a_certified_fuse_of_a_turned_bar_and_block_refuses() {
+    let tally = measured(turned(a_curved_pair()), |fixture, tally| {
+        every_rule_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report("§191: a bar through a block, turned together, every rule");
+    tally.refuses_no_more_than(TURNED_ROUND_REFUSALS_MUST_STAY_BELOW);
+    if tally.refused.get() > 0 {
+        tally.the_cause_named_most_often_is(CANNOT_TELL_THE_CELLS_OF_A_FACE_APART);
+    }
+}
+
+/// The same for a ball half sunk into a block, with
+/// [`every_certified_fuse_of_a_ball_and_a_block_is_decided_and_records_nothing`]
+/// as the control.
+#[test]
+fn how_often_a_certified_fuse_of_a_turned_ball_and_block_refuses() {
+    let tally = measured(turned(a_ball_and_a_block()), |fixture, tally| {
+        every_rule_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report("§191: a ball in a block, turned together, every rule");
+    tally.refuses_no_more_than(TURNED_ROUND_REFUSALS_MUST_STAY_BELOW);
+    if tally.refused.get() > 0 {
+        tally.the_cause_named_most_often_is(CANNOT_TELL_THE_CELLS_OF_A_FACE_APART);
+    }
+}
+
+/// The same for a frustum up through a block. Its control is
+/// [`swapping_the_two_sides_of_a_block_and_a_frustum_changes_not_one_bit`],
+/// the only row that fuses the unturned family, and it refuses on its own.
+#[test]
+fn how_often_a_certified_fuse_of_a_turned_frustum_and_block_refuses() {
+    let control = measured(a_frustum_and_a_block(), |fixture, tally| {
+        every_rule_of(tally, Coordinates::LieOnAConesWall, &|| fixture.build())
+    });
+    control.report("§191 control: a frustum up through a block, every rule");
+    let tally = measured(turned(a_frustum_and_a_block()), |fixture, tally| {
+        every_rule_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report("§191: a frustum up through a block, turned together, every rule");
+}
+
+/// §191's second row: a bar leaning through a block, which no other family
+/// draws, beside [`every_certified_fuse_of_a_curved_pair_is_decided_and_records_nothing`]
+/// as the control.
+#[test]
+fn how_often_a_certified_fuse_of_a_bar_leaning_through_a_block_refuses() {
+    let tally = measured(a_leaning_bar(), |fixture, tally| {
+        every_rule_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report("§191: a bar leaning through a block, every rule");
+    tally.refuses_no_more_than(LEANING_BAR_REFUSALS_MUST_STAY_BELOW);
+}
+
+/// Swapping the two sides of a turned bar and block, bit for bit.
+#[test]
+fn swapping_the_two_sides_of_a_turned_bar_and_block_changes_not_one_bit() {
+    let tally = over(CASES, turned(a_curved_pair()), |fixture, tally| {
+        both_ways_round_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report_what_it_compared("commutativity, a bar through a block, turned together");
+}
+
+/// Swapping the two sides of a turned ball and block, bit for bit.
+#[test]
+fn swapping_the_two_sides_of_a_turned_ball_and_block_changes_not_one_bit() {
+    let tally = over(CASES, turned(a_ball_and_a_block()), |fixture, tally| {
+        both_ways_round_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report_what_it_compared("commutativity, a ball in a block, turned together");
+}
+
+/// Swapping the two sides of a turned frustum and block, bit for bit.
+#[test]
+fn swapping_the_two_sides_of_a_turned_frustum_and_block_changes_not_one_bit() {
+    let tally = over(CASES, turned(a_frustum_and_a_block()), |fixture, tally| {
+        both_ways_round_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report_what_it_compared_at_least(
+        "commutativity, a frustum up through a block, turned together",
+        A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH,
+    );
+}
+
+/// Swapping the two sides of a bar leaning through a block, bit for bit.
+#[test]
+fn swapping_the_two_sides_of_a_bar_leaning_through_a_block_changes_not_one_bit() {
+    let tally = over_a_fixed_corpus(CASES, a_leaning_bar(), |fixture, tally| {
+        both_ways_round_of(tally, Coordinates::LieOnATurnedRoundWall, &|| {
+            fixture.build()
+        })
+    });
+    tally.report_what_it_compared_at_least(
+        "commutativity, a bar leaning through a block",
+        A_LEANING_BAR_STILL_COMPARES_THIS_MUCH,
+    );
+}
+
+/// A turned bar and block take up what the unturned ones do, rule by rule,
+/// inside the share of the declared mesh error the curved law already uses.
+///
+/// §191. The tolerance is [`A_CURVED_LAW_MAY_USE_THIS_MUCH_OF_WHAT_THE_FOUR_DECLARE`]
+/// and not a new one (§14.1 question 1): the two answers are one solid put in
+/// two places, so how far apart their measured volumes are is bounded by what
+/// the two measurements declare, exactly as the four sides of inclusion and
+/// exclusion are.
+#[test]
+fn turning_a_bar_and_block_together_changes_no_answer_s_volume() {
+    let tally = over(CASES, turned(a_curved_pair()), |fixture, tally| {
+        turning_it_moves_no_volume(tally, &fixture)
+    });
+    tally.report_what_it_compared("volume under a turn, a bar through a block");
+}
+
+/// The same for a ball half sunk into a block.
+#[test]
+fn turning_a_ball_and_block_together_changes_no_answer_s_volume() {
+    let tally = over(CASES, turned(a_ball_and_a_block()), |fixture, tally| {
+        turning_it_moves_no_volume(tally, &fixture)
+    });
+    tally.report_what_it_compared("volume under a turn, a ball in a block");
+}
+
+/// The same for a frustum up through a block.
+#[test]
+fn turning_a_frustum_and_block_together_changes_no_answer_s_volume() {
+    let tally = over(CASES, turned(a_frustum_and_a_block()), |fixture, tally| {
+        turning_it_moves_no_volume(tally, &fixture)
+    });
+    tally.report_what_it_compared_at_least(
+        "volume under a turn, a frustum up through a block",
+        A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH,
+    );
+}
+
+/// Inclusion and exclusion over a bar leaning through a block, to the same
+/// share of the declared mesh error as
+/// [`what_a_block_and_a_ball_take_up_adds_up_inside_a_stated_share_of_what_they_declare`].
+#[test]
+fn what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_they_declare() {
+    let tally = over_a_fixed_corpus(CASES, a_leaning_bar(), |fixture, tally| {
+        let (model, keys) = fixture.build();
+        let (block, bar) = (keys[0], keys[1]);
+        tally.meaning_to_compare();
+        let coordinates = Coordinates::LieOnATurnedRoundWall;
+        let Some(united) =
+            fused(tally, coordinates, &model, &[block], &[bar], Rule::Union)?.answer()
+        else {
+            return Ok(());
+        };
+        let Some(shared) = fused(
+            tally,
+            coordinates,
+            &model,
+            &[block],
+            &[bar],
+            Rule::Intersection,
+        )?
+        .answer() else {
+            return Ok(());
+        };
+        tally.comparing();
+        for how_fine in HOW_FINE_THE_LAW_IS_ASKED_AT {
+            let deflection = Deflection::of(how_fine).expect("a length");
+            within_the_share_they_declare(
+                &[
+                    (how_much_it_holds(&united.0, &united.1, deflection), 1.0),
+                    (how_much_it_holds(&shared.0, &shared.1, deflection), 1.0),
+                    (how_much_it_holds(&model, &[block], deflection), -1.0),
+                    (how_much_it_holds(&model, &[bar], deflection), -1.0),
+                ],
+                &format!("inclusion and exclusion over {fixture:?} at a deflection of {how_fine}"),
+            )?;
+        }
+        Ok(())
+    });
+    tally.report_what_it_compared_at_least(
+        "inclusion and exclusion, a bar leaning through a block",
+        A_LEANING_BAR_STILL_COMPARES_THIS_MUCH,
+    );
+}
+
+/// A ball half sunk into a block and united with it meshes at a deflection of
+/// `0.3` upright, and **turned, it does not** — pinned, because it is a gap and
+/// not a limit (§16.10), and the fix is not a test lane's.
+///
+/// §191's volume row found it and shrank it to this. The fuse answers turned
+/// as it does upright, and the answer validates; what refuses is measuring it,
+/// with `MeshError::BoundaryCrossesItself` on the dome. **The demonstration
+/// that it is a gap** is the first half of this test: the same solid put
+/// somewhere else by a rigid movement meshes at the same deflection, and a
+/// rigid movement does not change whether a mesh within a deflection exists.
+/// The dome is the §124 shape in small — a round face whose rim was meant to
+/// be a line of latitude and came in a few ulps off one.
+///
+/// The day this test fails, the mesh refusal is closed and the `0.3` column of
+/// [`turning_a_ball_and_block_together_changes_no_answer_s_volume`] stops
+/// skipping it.
+#[test]
+fn a_turned_ball_united_with_a_block_will_not_mesh_where_the_upright_one_does() {
+    let fixture = Turned {
+        fixture: BallAndBlock {
+            side: 5,
+            radius: 1,
+            at: [3, 2],
+        },
+        turn: Turn {
+            direction: [2, -2, 3],
+            steps: 38,
+        },
+    };
+    let coarse = Deflection::of(0.3).expect("a length");
+    let meshed = |(model, keys): (Model, Vec<SolidKey>)| {
+        let (model, solids) = plainly_fused(&model, &keys[..1], &keys[1..], Rule::Union);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the union is a sound model");
+        let [solid] = solids[..] else {
+            panic!(
+                "a ball and a block unite into one solid, not {}",
+                solids.len()
+            )
+        };
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(coarse, &Policy::certified(), &mut ProvenanceLog::new())
+            .map(|measured| measured.volume())
+    };
+
+    meshed(fixture.fixture.built()).expect("upright, the union meshes at 0.3");
+    match meshed(fixture.build()) {
+        Err(Error::CannotMeshAFace {
+            why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
+            ..
+        }) => {}
+        Ok(volume) => {
+            panic!("the turned union meshes now, holding {volume} — assert the volume instead")
+        }
+        Err(why) => panic!("the turned union refused to mesh some other way: {why}"),
+    }
+}
+
+/// Every fuse a turned curved fixture refuses has an answer the kernel can
+/// hold — so every such refusal is a **gap and not a limit** (§16.10), and this
+/// is the demonstration rather than a paragraph.
+///
+/// A turned fixture's solids are the upright fixture's solids with one more
+/// placement composed on, the same `Isometry` for each. So the upright answer,
+/// placed by that same `Isometry`, *is* the turned answer, written in the
+/// numbers the kernel itself would have to write it in: nothing is rounded
+/// that the turned inputs did not already round. This takes every turned fuse
+/// that did not answer, fuses the upright fixture instead, turns what comes
+/// back and asks `Model::validate` of it. Where the upright fixture refuses as
+/// well — the frustum does, on its own — there is nothing to demonstrate and
+/// the case is counted apart.
+#[test]
+fn every_fuse_a_turned_curved_fixture_refuses_has_an_answer_turned_from_the_upright_one() {
+    let bar = the_refusals_the_upright_answer_turned_would_have_answered(turned(a_curved_pair()));
+    let ball =
+        the_refusals_the_upright_answer_turned_would_have_answered(turned(a_ball_and_a_block()));
+    let frustum =
+        the_refusals_the_upright_answer_turned_would_have_answered(turned(a_frustum_and_a_block()));
+    for (what, (demonstrated, both_refused)) in [
+        ("a bar through a block", bar),
+        ("a ball in a block", ball),
+        ("a frustum up through a block", frustum),
+    ] {
+        println!(
+            "{what}, turned: {demonstrated} refusals shown to have an answer, {both_refused} \
+             refused upright as well"
+        );
+    }
+    assert!(
+        bar.0 > 0 && ball.0 > 0 && frustum.0 > 0,
+        "each turned family refuses something its upright control answers, which is what \
+         makes this a demonstration rather than an empty loop"
+    );
+}
+
+/// Over the shipped corpus: how many turned refusals the upright answer, turned,
+/// showed to have an answer, and how many refused upright too.
+///
+/// # Panics
+///
+/// If the upright answer, turned, is not a sound model — which would make the
+/// refusal a limit after all, or the fixture wrong.
+fn the_refusals_the_upright_answer_turned_would_have_answered<P: Fixture + core::fmt::Debug>(
+    fixtures: impl Strategy<Value = Turned<P>>,
+) -> (usize, usize) {
+    let demonstrated = Cell::new(0usize);
+    let both_refused = Cell::new(0usize);
+    let unsound_when_turned = Cell::new(0usize);
+    // The shipped corpus and not [`CASES`]: at forty-eight the bar and the ball
+    // draw no refusal at all, and there is nothing to demonstrate.
+    measured(fixtures, |fixture, tally| {
+        let (turned, turned_keys) = fixture.build();
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let coordinates = Coordinates::LieOnATurnedRoundWall;
+            let answered = fused(
+                tally,
+                coordinates,
+                &turned,
+                &[turned_keys[0]],
+                &[turned_keys[1]],
+                rule,
+            )?
+            .answer();
+            if answered.is_some() {
+                continue;
+            }
+            let (upright, upright_keys) = fixture.fixture.built();
+            let Some((mut model, solids)) = fused(
+                tally,
+                coordinates,
+                &upright,
+                &[upright_keys[0]],
+                &[upright_keys[1]],
+                rule,
+            )?
+            .answer() else {
+                both_refused.set(both_refused.get() + 1);
+                continue;
+            };
+            let turn = fixture.turn.isometry();
+            for &solid in &solids {
+                model
+                    .place_solid(solid, &turn)
+                    .expect("this model made the key");
+            }
+            match model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+                Ok(()) => demonstrated.set(demonstrated.get() + 1),
+                // `a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`
+                // carries this defect by name; here it only means no demonstration.
+                Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface)) => {
+                    unsound_when_turned.set(unsound_when_turned.get() + 1);
+                }
+                Err(why) => {
+                    return Err(TestCaseError::fail(format!(
+                        "the upright {rule:?} of {fixture:?}, turned, is not a sound model: {why}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    });
+    if unsound_when_turned.get() > 0 {
+        println!(
+            "    {} upright answers were not sound once turned, so no demonstration for them",
+            unsound_when_turned.get()
+        );
+    }
+    (demonstrated.get(), both_refused.get())
+}
+
+/// A sound union of a ball and a block, moved by a half turn, is still sound —
+/// and **today `Model::validate` says it is broken**. Left failing on purpose.
+///
+/// §191's volume row found the case on a fresh seed and shrank it to this: a
+/// half turn about `(1, 0, 1)` carries the ball's own axis from `z` to `x`,
+/// give or take the rounding of `cos π`. The turned fixture's union is refused
+/// with `ACurvedFaceGoesRightRoundWithNoSeam`, and the way to classify that
+/// refusal (§16.10) is to turn the upright union by the same `Isometry` and ask
+/// whether the kernel holds it. It does not: the upright union validates,
+/// `place_solid` accepts the turn, and the moved model fails with
+/// `AClosedEdgeIsWalkedAgainstItsSurface`. A rigid movement cannot turn a sound
+/// solid into a broken one, so one of `place_solid` or `validate`'s winding
+/// check is wrong about a moved closed edge. The two inputs turned the same way
+/// validate, and so does a lone unit ball turned the same way — it is the dome
+/// the union leaves, not the ball.
+///
+/// Until this is fixed the refusal cannot be classified: the demonstration that
+/// would call it a gap is exactly what fails.
+///
+/// **A second turn does the same**: three quarters of a turn about `-y`, which
+/// the volume row shrank to on another fresh seed. There the turned fuse
+/// *answers*, and measuring its answer is what refuses (a loop with a corner in
+/// the same place twice). Both turns carry the ball's axis onto the world's `x`,
+/// give or take the rounding of the angle — the §124 shape exactly.
+///
+/// The two seeds are not kept in `fuses_that_must_agree.proptest-regressions`:
+/// every property here replays that file first, so a seed added there reshuffles
+/// the fixed-seed rows of every other family — it moved the skew row out of its
+/// band on the first try (§136.5's hazard). They are these two fixtures instead.
+#[test]
+fn a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model() {
+    for turn in [
+        Turn {
+            direction: [-2, 0, -2],
+            steps: 32,
+        },
+        Turn {
+            direction: [0, -1, 0],
+            steps: 48,
+        },
+    ] {
+        let fixture = Turned {
+            fixture: BallAndBlock {
+                side: 4,
+                radius: 1,
+                at: [2, 2],
+            },
+            turn,
+        };
+        let (inputs, _) = fixture.build();
+        inputs
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the two inputs turned are sound");
+
+        let (upright, keys) = fixture.fixture.built();
+        let (mut model, solids) = plainly_fused(&upright, &keys[..1], &keys[1..], Rule::Union);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the upright union is sound");
+        let turn = fixture.turn.isometry();
+        for &solid in &solids {
+            model
+                .place_solid(solid, &turn)
+                .expect("this model made the key");
+        }
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| {
+                panic!(
+                    "a sound union moved by {:?} is still sound: {why}",
+                    fixture.turn
+                )
+            });
+    }
+}
+
+/// A bar leaning through a block, clear of every side wall by more than a unit,
+/// united with the block is a solid — and **today the fuse says it is not**.
+///
+/// §191 found it. **Left failing on purpose**: this is a wrong statement about
+/// geometry, not a refusal. Every crossing here is transversal — the floor and
+/// the roof cut the bar in ellipses whose nearest point to a side wall is more
+/// than a unit off it, and the caps stand more than a unit clear of the block —
+/// so no edge of the true union has more than two faces along it. The fuse
+/// answers `ResultIsNotManifold`, *"an edge would have 8 faces along it"*,
+/// which claims the union cannot be held as a solid. It can.
+///
+/// Found by walking every whole-number place the [`a_leaning_bar`] family's
+/// room allows for radius one and two, leans `(1, 0)` and `(1, 1)`, one to
+/// four up and blocks six to sixteen across: two of those fuses came back this
+/// way, and this is the first of them.
+#[test]
+fn a_bar_leaning_through_a_block_unites_with_it_into_a_solid() {
+    let fixture = LeaningBar {
+        side: 15,
+        radius: 1,
+        at: [6, 6],
+        lean: [1, 1],
+        up: 2,
+    };
+    let room = room_for_a_leaning_bar(fixture.side, fixture.radius, fixture.lean, fixture.up);
+    assert!(
+        room.iter().all(|room| room.contains(&6)),
+        "the fixture is one the family draws, a unit clear of every side wall"
+    );
+    let (mut model, keys) = fixture.build();
+    match model.fuse(
+        &keys[..1],
+        &keys[1..],
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) {
+        Err(why @ Error::ResultIsNotManifold { .. }) => {
+            panic!("a union that is a solid was called not one: {why}")
+        }
+        Err(why) => println!("refused, which is allowed: {why}"),
+        Ok(fused) => {
+            assert_eq!(
+                fused.solids().len(),
+                1,
+                "a bar through a block is one solid"
+            );
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("the union is a sound model");
+        }
+    }
+}
+
+/// Ask all three rules of whatever `build` builds, the first solid against the
+/// second, and keep nothing but the tally.
+fn every_rule_of(
+    tally: &Tally,
+    coordinates: Coordinates,
+    build: &dyn Fn() -> (Model, Vec<SolidKey>),
+) -> Result<(), TestCaseError> {
+    let (model, keys) = build();
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        fused(tally, coordinates, &model, &[keys[0]], &[keys[1]], rule)?;
+    }
+    Ok(())
+}
+
+/// Every rule over a fixture and over the same fixture turned: the same number
+/// of solids, and volumes apart by no more than the share of what the two
+/// measurements declare.
+fn turning_it_moves_no_volume<P: Fixture + core::fmt::Debug>(
+    tally: &Tally,
+    fixture: &Turned<P>,
+) -> Result<(), TestCaseError> {
+    let coordinates = Coordinates::LieOnATurnedRoundWall;
+    let (still, still_keys) = fixture.fixture.built();
+    let (turned, turned_keys) = fixture.build();
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        tally.meaning_to_compare();
+        let Some(still) = fused(
+            tally,
+            coordinates,
+            &still,
+            &[still_keys[0]],
+            &[still_keys[1]],
+            rule,
+        )?
+        .answer() else {
+            continue;
+        };
+        let Some(turned) = fused(
+            tally,
+            coordinates,
+            &turned,
+            &[turned_keys[0]],
+            &[turned_keys[1]],
+            rule,
+        )?
+        .answer() else {
+            continue;
+        };
+        tally.comparing();
+        prop_assert_eq!(
+            still.1.len(),
+            turned.1.len(),
+            "a {:?} of {:?} came back in a different number of solids turned",
+            rule,
+            fixture
+        );
+        for how_fine in HOW_FINE_THE_LAW_IS_ASKED_AT {
+            let deflection = Deflection::of(how_fine).expect("a length");
+            let still = how_much_it_holds(&still.0, &still.1, deflection);
+            let Some(turned) = how_much_it_holds_if_it_meshes(&turned.0, &turned.1, deflection)?
+            else {
+                *tally
+                    .gave_up
+                    .borrow_mut()
+                    .entry(A_MESH_OF_THE_TURNED_ANSWER_REFUSED)
+                    .or_default() += 1;
+                continue;
+            };
+            within_the_share_they_declare(
+                &[(still, 1.0), (turned, -1.0)],
+                &format!("a {rule:?} of {fixture:?} turned, at a deflection of {how_fine}"),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// [`how_much_it_holds`], or nothing when the mesher refuses a face of it.
+///
+/// Only ever asked of a **turned** answer whose upright twin has just measured
+/// at the same deflection — [`how_much_it_holds`] panics otherwise — so every
+/// refusal let past here is a gap by
+/// [`a_turned_ball_united_with_a_block_will_not_mesh_where_the_upright_one_does`]'s
+/// argument: a rigid movement does not change whether a mesh exists. Two kinds
+/// have turned up, `BoundaryCrossesItself` and a loop with a corner twice.
+fn how_much_it_holds_if_it_meshes(
+    model: &Model,
+    solids: &[SolidKey],
+    how_fine: Deflection,
+) -> Result<Option<(f64, f64)>, TestCaseError> {
+    let mut held = (0.0, 0.0);
+    for &solid in solids {
+        match model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
+        {
+            Ok(measured) => {
+                held.0 += measured.volume();
+                held.1 += measured.volume_error();
+            }
+            Err(
+                Error::CannotMeshAFace { .. } | Error::TwoPatchesOfTheMeshDrewTheSameSide { .. },
+            ) => return Ok(None),
+            Err(why) => {
+                return Err(TestCaseError::fail(format!(
+                    "an answer would not measure: {why}"
+                )));
+            }
+        }
+    }
+    Ok(Some(held))
+}
+
+/// Volumes added up with their signs miss zero by no more than
+/// [`A_CURVED_LAW_MAY_USE_THIS_MUCH_OF_WHAT_THE_FOUR_DECLARE`] of the mesh
+/// error they declare between them.
+fn within_the_share_they_declare(
+    sides: &[((f64, f64), f64)],
+    what: &str,
+) -> Result<(), TestCaseError> {
+    let out_by: f64 = sides.iter().map(|((volume, _), sign)| sign * volume).sum();
+    let declared: f64 = sides.iter().map(|((_, error), _)| error).sum();
+    // §47.4 item 1: a tolerance nothing can exceed has measured nothing.
+    prop_assert!(
+        declared.is_finite() && declared > 0.0,
+        "{what}: the measurements declared {declared}, and nothing is worth asserting against that"
+    );
+    let share = out_by.abs() / declared;
+    prop_assert!(
+        share < A_CURVED_LAW_MAY_USE_THIS_MUCH_OF_WHAT_THE_FOUR_DECLARE,
+        "{what}: {out_by} out, which is {share} of the {declared} the measurements declared"
+    );
+    Ok(())
+}
+
 /// Fuse without a tally, for the tests that name one pair rather than a family.
 ///
 /// # Panics
@@ -2930,6 +3604,35 @@ const ORDERING_ALONG_AN_ENDLESS_BEND: &str = "nothing can put points in order al
 /// only conic order `arrange` has.
 const A_CROSSING_THAT_DOES_NOT_CLOSE: &str = "a crossing that does not close";
 
+/// What a fuse over a bar leaning through a block refuses on that no upright
+/// curved family does: `Error::AWireWillNotLieFlatOnItsFace`, a face of the
+/// answer whose wire does not close in the face's own two coordinates (§191).
+const A_WIRE_THAT_WILL_NOT_LIE_FLAT: &str = "a wire that will not lie flat on its face";
+
+/// Another refusal only the leaning bar reaches,
+/// `Error::CurvedFaceWithAHoleGoesTooFarRound` (§191). The upright bar never
+/// does: its rims are circles square to its own axis.
+const A_HOLED_FACE_TOO_FAR_ROUND: &str = "a curved face with a hole too far round to mesh";
+
+/// What a ball turned half over refuses on: `Error::ACurvedFaceGoesRightRoundWithNoSeam`
+/// (§191). Not yet classified: see
+/// [`a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`].
+const A_ROUND_FACE_WITH_NO_SEAM: &str = "a curved face right round with no seam to open at";
+
+/// A fuse over a ball turned so its own axis lies along a world axis, give or
+/// take an ulp, stopping because a face it built would not mesh (§191). Not yet
+/// classified, for the reason
+/// [`a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`]
+/// gives.
+const A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH: &str = "a face of the answer the fuse could not mesh";
+
+/// Not a fuse refusing but the mesher, over an answer the fuse gave: a face of
+/// a turned answer it could not cut into triangles where the upright answer
+/// meshed (§191). Counted beside the fuses' refusals so that a skipped
+/// comparison says why.
+const A_MESH_OF_THE_TURNED_ANSWER_REFUSED: &str =
+    "measuring the answer: the mesher refused a face of it";
+
 /// Whether this run is the shipped measurement rather than a soak.
 ///
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] is a statement about one deterministic
@@ -2951,9 +3654,18 @@ fn both_ways_round(
     coordinates: Coordinates,
     configuration: Configuration,
 ) -> Result<(), TestCaseError> {
+    both_ways_round_of(tally, coordinates, &|| configuration.build())
+}
+
+/// The same, over whatever `build` builds, the first two solids of it swapped.
+fn both_ways_round_of(
+    tally: &Tally,
+    coordinates: Coordinates,
+    build: &dyn Fn() -> (Model, Vec<SolidKey>),
+) -> Result<(), TestCaseError> {
     for rule in [Rule::Union, Rule::Intersection] {
         tally.meaning_to_compare();
-        let (model, keys) = configuration.build();
+        let (model, keys) = build();
         let (one, other) = (keys[0], keys[1]);
 
         let forwards = fused(tally, coordinates, &model, &[one], &[other], rule)?;
@@ -3065,7 +3777,8 @@ fn fused(
                 Coordinates::AreUnderAGeneralRotation
                 | Coordinates::SitOnTiltedWalls
                 | Coordinates::LieOnARoundWallAndMayCoincide
-                | Coordinates::LieOnAConesWall => Ok(Fused::Refused),
+                | Coordinates::LieOnAConesWall
+                | Coordinates::LieOnATurnedRoundWall => Ok(Fused::Refused),
                 Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => {
                     Err(TestCaseError::fail(format!(
                         "a {rule:?} over a family that has never refused refused, with {} records",
@@ -3081,24 +3794,32 @@ fn fused(
                 | Coordinates::SitOnTiltedWalls
                 | Coordinates::AreExactlyRepresentable
                 | Coordinates::LieOnARoundWallAndMayCoincide
-                | Coordinates::LieOnAConesWall => Ok(Fused::NotASolid),
+                | Coordinates::LieOnAConesWall
+                | Coordinates::LieOnATurnedRoundWall => Ok(Fused::NotASolid),
                 Coordinates::LieOnARoundWall => Err(TestCaseError::fail(format!(
                     "a {rule:?} over a family that has never handed back four faces along \
                      one edge did, and that is not something this kernel can hold"
                 ))),
             }
         }
-        Err(why) => match (coordinates, a_curved_refusal(&why)) {
-            (
-                Coordinates::LieOnARoundWallAndMayCoincide | Coordinates::LieOnAConesWall,
-                Some(named),
-            ) => {
-                tally.refused.set(tally.refused.get() + 1);
-                *tally.gave_up.borrow_mut().entry(named).or_default() += 1;
-                Ok(Fused::Refused)
-            }
-            _ => Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}"))),
-        },
+        Err(why) => {
+            let allowed = match coordinates {
+                Coordinates::LieOnATurnedRoundWall => a_turned_curved_refusal(&why),
+                Coordinates::LieOnARoundWallAndMayCoincide | Coordinates::LieOnAConesWall => {
+                    a_curved_refusal(&why)
+                }
+                Coordinates::AreExactlyRepresentable
+                | Coordinates::AreUnderAGeneralRotation
+                | Coordinates::SitOnTiltedWalls
+                | Coordinates::LieOnARoundWall => None,
+            };
+            let Some(named) = allowed else {
+                return Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}")));
+            };
+            tally.refused.set(tally.refused.get() + 1);
+            *tally.gave_up.borrow_mut().entry(named).or_default() += 1;
+            Ok(Fused::Refused)
+        }
     }
 }
 
@@ -3133,6 +3854,25 @@ fn a_curved_refusal(why: &Error) -> Option<&'static str> {
             unreachable!("those two are matched above")
         }
         _ => None,
+    }
+}
+
+/// The refusals a curved fuse whose round wall is not square to the world is
+/// allowed to hit: [`a_curved_refusal`]'s, and the ones §191 found that no
+/// upright family reaches.
+///
+/// Kept apart from [`a_curved_refusal`] so that a refusal found here does not
+/// quietly become allowed on the upright families, where it has never been
+/// seen and would be new.
+fn a_turned_curved_refusal(why: &Error) -> Option<&'static str> {
+    match why {
+        Error::AWireWillNotLieFlatOnItsFace { .. } => Some(A_WIRE_THAT_WILL_NOT_LIE_FLAT),
+        Error::CurvedFaceWithAHoleGoesTooFarRound { .. } => Some(A_HOLED_FACE_TOO_FAR_ROUND),
+        Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => Some(A_ROUND_FACE_WITH_NO_SEAM),
+        Error::CannotMeshAFace { .. } | Error::TwoPatchesOfTheMeshDrewTheSameSide { .. } => {
+            Some(A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH)
+        }
+        _ => a_curved_refusal(why),
     }
 }
 
@@ -3221,7 +3961,8 @@ fn both_agree_about_whether_there_is_an_answer(
         | Coordinates::SitOnTiltedWalls => Ok(()),
         Coordinates::LieOnARoundWall
         | Coordinates::LieOnARoundWallAndMayCoincide
-        | Coordinates::LieOnAConesWall => Err(TestCaseError::fail(format!(
+        | Coordinates::LieOnAConesWall
+        | Coordinates::LieOnATurnedRoundWall => Err(TestCaseError::fail(format!(
             "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
              answer no `Model` can hold, which cannot depend on the path taken"
         ))),
@@ -3339,6 +4080,16 @@ enum Coordinates {
     /// reason: nothing has ever seen one from this family, so there is no
     /// measurement saying it would be new.
     LieOnAConesWall,
+    /// A round wall whose axis is not an axis of the world: a curved fixture
+    /// under one general rotation, or a bar leaning through a block (§191).
+    ///
+    /// **A refusal is an outcome to count**, by `Undecidable` or by one of the
+    /// curved refusals' own names, because nothing had ever drawn one of these
+    /// and so nothing says a refusal would be new. An answer no `Model` can
+    /// hold is counted too. **Two runs disagreeing about whether the answer is
+    /// a solid is a failure**, as on every curved family: that is a fact about
+    /// the answer and not about the arithmetic.
+    LieOnATurnedRoundWall,
 }
 
 /// What every fuse a property ran came back with.
@@ -3454,6 +4205,21 @@ impl Tally {
         );
     }
 
+    /// Insist the share refused is under `ceiling`, on the shipped corpus only
+    /// ([`this_is_the_shipped_corpus`] says why).
+    fn refuses_no_more_than(&self, ceiling: f64) {
+        let refused = self.refused.get() as f64 / self.fuses.get() as f64;
+        if this_is_the_shipped_corpus() {
+            assert!(
+                refused < ceiling,
+                "{:.1}% of {} fuses refused, over the {:.0}% this row was measured under",
+                refused * 100.0,
+                self.fuses.get(),
+                ceiling * 100.0
+            );
+        }
+    }
+
     /// Insist `predicate` is the one the most refusals named.
     ///
     /// A rate says how often the kernel gives up and the breakdown says on
@@ -3553,6 +4319,25 @@ fn over<T: core::fmt::Debug>(
     property: impl Fn(T, &Tally) -> Result<(), TestCaseError>,
 ) -> Tally {
     run(TestRunner::new(configured(cases)), strategy, property)
+}
+
+/// `cases` configurations from the fixed seed, whatever [`SOAK_SEED`] says.
+///
+/// For a law over a family that refuses most of what it draws, where a fresh
+/// seed would move the share compared by more than any floor could allow.
+fn over_a_fixed_corpus<T: core::fmt::Debug>(
+    cases: u32,
+    strategy: impl Strategy<Value = T>,
+    property: impl Fn(T, &Tally) -> Result<(), TestCaseError>,
+) -> Tally {
+    run(
+        TestRunner::new_with_rng(
+            configured(cases),
+            TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        ),
+        strategy,
+        property,
+    )
 }
 
 /// The same from a fixed seed, so the number that comes out is the same every

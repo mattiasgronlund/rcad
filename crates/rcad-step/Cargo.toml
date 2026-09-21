@@ -17,6 +17,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 postcard.workspace = true
+proptest.workspace = true
 step-io = "0.2.4"
 
 [lints]
