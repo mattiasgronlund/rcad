@@ -11,6 +11,10 @@ stored number `41581179` with no rounding in it at all. Nothing about
 `HalfSpace` has to change. §39.4's row stays a **gap**; what changes is which
 arithmetic has to reach.*
 
+*Read §183.4 before §183.3's table. That table's third row places the middle
+along the step, which is what the kernel did before §182, and it makes the
+step's own rounding look load-bearing when §183.4 shows it is not.*
+
 ### 183.1 Why §181.6 named the wrong fix, and it is §16.10's own lesson again
 
 §181.6 ruled out rescaling the normal, and it is right: offset and ulp scale
@@ -72,44 +76,60 @@ nothing. The constructor skips it only because the asked-for direction happens
 to be exactly square as well, and "nothing beats the direction that was asked
 for" then takes it unread.
 
-### 183.4 Two roundings, and each one alone is fatal
+### 183.4 Three things have to be right, and the step is not one of them
 
-The third row above needs both halves, and rows one and two are the controls
-that say so. Each fails by the same factor, `8.19e4`, for a different reason:
+The good normal is necessary and it is not sufficient. Taking the probe's rows
+for `along × ŷ` apart gives three separate requirements, each demonstrated by a
+row that fails on that one alone:
 
-- **The normal.** `along × towards` is `[0, 3.705489715806365e21,
-  5.047645337156084e153]`, two components **132 decades apart**. One `f64`
-  offset holding their sum absorbs the smaller one whole, and the smaller one is
-  where the answer is. Row one gives it a perfect anchor and the exact step and
-  it still cannot be written down.
-- **The step.** `the_step_across_to_the_other_axis` computes the step exactly and
-  then divides by `w·w`, one rounding per component, and hands back a `Vector`.
-  At `3.7e21` that rounding is `162427`, against two lines `3.97` apart. Row two
-  is the good normal fed the stored step, and `middle` comes back as exactly
-  that number, `-1.624270e5`.
+- **The normal must not absorb the answer.** `along × towards` is
+  `[0, 3.705489715806365e21, 5.047645337156084e153]`, two components **132
+  decades apart**. One `f64` offset holding their sum swallows the smaller
+  whole, and the smaller is where the answer is. Row one of §183.3 gives that
+  normal a perfect anchor and it is still short by `8.19e4`.
+- **The anchor must be a stored point.** `between_the_two_lines` computes
+  `here + towards·share`, whose `z` comes out `41418752` against the thin axis'
+  `41581179` — displaced by `162427`, the rounding
+  `the_step_across_to_the_other_axis` leaves when it divides by `w·w` at
+  `3.7e21`. With the big normal that displacement was absorbed by the offset and
+  invisible; with a normal whose offset is exact it becomes the whole error.
+  `midpoint/along × ŷ` stores `offset = 41418752` and misses by exactly that.
+- **The middle must not be read as a difference.** `at_here + q·(at_there −
+  at_here)` is right in exact arithmetic and useless in intervals when `q` is
+  within `2.7e-265` of one and `at_here` is `3.7e21`: `q`'s own relative width
+  of `2⁻⁵³` lands as `3.7e5` absolute. `there/along × ŷ` has the exact offset and
+  the stored anchor and still refuses, on an enclosure `2.6e6` wide around a true
+  middle of `9.98e-244`.
 
-Its own doc comment publishes the bound and is right: "the true step to within
-an ulp or two of itself however far along `w` the two axes sit". An ulp at
-`3.7e21` is `524288`. The bound is correct and the quantity it bounds is four
-decades too big to place this plane.
+**The step's own rounding is not on this list, and §183.3's third row is why it
+looked as though it were.** That row placed the middle *along the step*, which
+is what the kernel did before §182. §182.4 already reads the picker at both
+stored axes, so the step reaches the middle only through `apart²` — a relative
+change of `1e-281` here. Written as one exact polynomial the middle comes to
+`9.984566e-244` from the stored step and `9.984566e-244` from the exact one:
+the same sixteen digits. `scratchpad/middle_from_axes.py`.
 
 ### 183.5 The fix, named
 
-Two changes, both inside `intersect.rs`, neither touching a type:
+Three changes, all inside `intersect.rs`, none touching a type:
 
-1. **Keep the step exactly.** `the_step_across_to_the_other_axis` already has it
-   — `Exact::cross_of` twice — and throws it away at `nearest_f64() / scale`.
-   Where the placement of the plane and the position of the middle depend on the
-   step, use the exact one.
-2. **Prove the normal rather than assume it.** `two_lines_told_apart` already
+1. **Prove the normal rather than assume it.** `two_lines_told_apart` already
    proves or refuses. So try the exactly-square candidates in turn and take the
    first that *proves* the separation, instead of building one and refusing when
    it does not. This is the same shape as `orient2d`'s power-of-two retry: each
    candidate is proved or not, and nothing is nudged.
+2. **Anchor on a stored axis**, not on a computed midpoint. §164 anchored between
+   the lines to kill the `across·sin θ` term a leaning fallback leaves, and that
+   reasoning is untouched for pairs near the origin — so this is a third
+   candidate to try, not a replacement.
+3. **Read the middle as one exact polynomial over one division.**
+   `(at_here·2·apart² + (at_there − at_here)·(apart² + r₁² − r₂²)) / (2·apart²)`
+   is a polynomial in stored numbers over one divide, which is §93's technique
+   and the one §29.8 says is still untried on the other half of this row.
 
 `HalfSpace` keeps its four numbers, its serde `[f64; 4]`, and every predicate
 certified about it. §182.6's "still not excluded, still not built" is withdrawn:
-it is now excluded, and a smaller thing is built instead.
+it is now excluded, and three smaller things are built instead.
 
 ### 183.6 What this owes, and what it does not claim
 
