@@ -186,8 +186,8 @@ fn a_slab_with_a_circle_on_top(model: &mut Model, and: Surface) -> Result<SolidK
     }
 
     let mut square = Vec::new();
-    for side in 0..4 {
-        square.push(DraftStep::Along(builder.add_coedge(top_edges[side], forward)?));
+    for &side in &top_edges {
+        square.push(DraftStep::Along(builder.add_coedge(side, forward)?));
     }
     let square = builder.add_wire(&square)?;
     let mut hole = Vec::new();
@@ -198,8 +198,8 @@ fn a_slab_with_a_circle_on_top(model: &mut Model, and: Surface) -> Result<SolidK
     faces.push((builder.add_face(Surface::Plane(the_top()), &[square, hole])?, forward));
 
     let mut disc = Vec::new();
-    for quarter in 0..4 {
-        disc.push(DraftStep::Along(builder.add_coedge(arcs[quarter], forward)?));
+    for &quarter in &arcs {
+        disc.push(DraftStep::Along(builder.add_coedge(quarter, forward)?));
     }
     let disc = builder.add_wire(&disc)?;
     faces.push((builder.add_face(Surface::Plane(the_top()), &[disc])?, forward));
