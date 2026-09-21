@@ -13,74 +13,49 @@
 //! circle lies on both the body and the dome, and then names the run by the
 //! circle's plane, which the walk crosses with the dome to draw it.
 //!
-//! **None of the nine LEDs imports yet.** All get past the body and, since
-//! §192.1, the dome's wire. They are reported on their flat face with the pin
-//! holes, but §192.2 found that report hides the dome's own triangulation
-//! refusing a few deflections finer.
+//! **These LEDs import now.** They got past the body with §189.3 and past the
+//! dome's wire with §192.1. What stopped them after that was the dome's seam,
+//! which in this kernel's chart of the ball is a slit, and the mesher now cuts
+//! the dome open along it (§192.2). They were reported on their flat face with
+//! the pin holes, `#223`, because that is the coarsest refusal; the finer
+//! deflections were all refused on the dome.
 
 use std::{env, fs, path::PathBuf};
 
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_step::{Import, Refusal, StepFile};
+use rcad_step::{Import, StepFile};
 
-/// Both `_O1.27mm` LEDs now stop on entity `#223`, the flat face with the pin
-/// holes, whose boundary crosses itself. The taller one used to stop on the
-/// marcher following the body's circle.
-///
-/// `CannotTriangulate` is `rcad-mesh`'s, which this crate does not depend on,
-/// so its variant is read off its name.
+/// Both `_O1.27mm` LEDs, which used to stop on `#223`. The taller one used to
+/// stop on the marcher following the body's circle before that.
 #[test]
 fn the_leds_body_and_dome_no_longer_stop_them() {
     for name in [
         "LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step",
         "LED_D3.0mm_Horizontal_O1.27mm_Z6.0mm.step",
     ] {
-        let (entity, why) = why_it_does_not_import(name);
-        assert!(
-            entity == Some(223)
-                && matches!(
-                    &why,
-                    rcad_topo::Error::ADraftFaceCouldNotBeMeshed { why, .. }
-                        if format!("{why:?}").starts_with("BoundaryCrossesItself")
-                ),
-            "{name} stops somewhere other than a boundary crossing itself on #223: \
-             {entity:?} {why:?}"
-        );
+        imports_and_sweeps_clean(name);
     }
 }
 
 /// One of the seven §188.3 files whose body used to stop the marcher after 50
-/// shortenings on entity `#317`. The body is walked now, and so is the dome's
-/// wire (§192.1), so it stops where its `_O1.27mm` siblings do: on `#223`.
+/// shortenings on entity `#317`. The body is walked now, and so are the dome's
+/// wire (§192.1) and its seam (§192.2).
 #[test]
-fn a_sibling_led_gets_past_its_body_and_its_dome_wire() {
-    let name = "LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step";
-    let (entity, why) = why_it_does_not_import(name);
-    assert!(
-        entity == Some(223)
-            && matches!(
-                &why,
-                rcad_topo::Error::ADraftFaceCouldNotBeMeshed { why, .. }
-                    if format!("{why:?}").starts_with("BoundaryCrossesItself")
-            ),
-        "{name} stops somewhere other than a boundary crossing itself on #223: \
-         {entity:?} {why:?}"
-    );
+fn a_sibling_led_gets_past_its_body_and_its_dome() {
+    imports_and_sweeps_clean("LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step");
 }
 
-/// The file entity a refusal names, if it names one, and why.
-fn why_it_does_not_import(name: &str) -> (Option<u64>, rcad_topo::Error) {
+fn imports_and_sweeps_clean(name: &str) {
     let bytes = fs::read(corpus().join("kicad").join(name)).expect("the LED is in the corpus");
     let file = StepFile::read(&bytes).expect("it parses");
-    let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect_err("the LED does not import yet");
-    if let Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } = refused {
-        return (None, *why);
-    }
-    let Refusal::ThisEntityOfTheSolidWasRefused { entity, why, .. } = refused else {
-        panic!("{name} is refused before it reaches the model: {refused:?}");
-    };
-    (Some(entity.0), *why)
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|refused| panic!("{name} does not import: {refused:?}"));
+    import
+        .model()
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("{name} imports but the full sweep refuses it: {why:?}"));
 }
 
 fn corpus() -> PathBuf {

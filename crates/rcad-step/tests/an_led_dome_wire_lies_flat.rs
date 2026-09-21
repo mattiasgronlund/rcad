@@ -11,35 +11,24 @@
 use std::{env, fs, path::PathBuf};
 
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_step::{Import, Refusal, StepFile};
+use rcad_step::{Import, StepFile};
 
-/// The smallest of the 18 files. Its dome is walked now, and what stops it is
-/// `#223`, the flat face with the pin holes, whose boundary crosses itself —
-/// the same place the two `_O1.27mm` `D3.0` files stop (§190.2).
-///
-/// `CannotTriangulate` is `rcad-mesh`'s, which this crate does not depend on,
-/// so its variant is read off its name.
+/// The smallest of the 18 files. Its dome is walked (§192.1), and since the
+/// mesher cuts the dome open along its seam rather than handing the
+/// triangulator a slit (§192.2), the whole LED imports.
 #[test]
-fn the_dome_of_an_led_is_walked_and_the_led_stops_on_its_pin_face() {
+fn the_dome_of_an_led_is_walked_and_the_led_imports() {
     let name = "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step";
     let bytes = fs::read(corpus().join("kicad").join(name)).expect("the LED is in the corpus");
     let file = StepFile::read(&bytes).expect("it parses");
-    let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect_err("the LED does not import yet");
-    let Refusal::ThisEntityOfTheSolidWasRefused { entity, why, .. } = refused else {
-        panic!("{name} is refused somewhere other than one of its faces: {refused:?}");
-    };
-    assert!(
-        entity.0 == 223
-            && matches!(
-                &*why,
-                rcad_topo::Error::ADraftFaceCouldNotBeMeshed { why, .. }
-                    if format!("{why:?}").starts_with("BoundaryCrossesItself")
-            ),
-        "{name} stops somewhere other than a boundary crossing itself on #223: \
-         #{} {why:?}",
-        entity.0
-    );
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|refused| panic!("{name} does not import: {refused:?}"));
+    import
+        .model()
+        .validate(&policy, &mut log)
+        .expect("and the full sweep is happy with what it brought");
 }
 
 fn corpus() -> PathBuf {

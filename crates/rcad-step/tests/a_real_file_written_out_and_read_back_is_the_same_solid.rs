@@ -110,7 +110,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     }
 
     assert_eq!(
-        denominator, 140,
+        denominator, 160,
         "the count of KiCad files that import must not shift without somebody saying so"
     );
     assert_eq!(
@@ -122,7 +122,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 }
 
 /// The 45 imported KiCad files this kernel can write back out and read back as
-/// the same solid, out of the 140 that import.
+/// the same solid, out of the 160 that import.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
 /// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
