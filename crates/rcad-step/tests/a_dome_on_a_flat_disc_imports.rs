@@ -6,53 +6,37 @@
 //! chart its rim is two meridians half a turn apart and passes through both
 //! poles. When the rim is also the edge of a bar, the reader gives it a second
 //! corner at the opposite point and the mesher meets each pole as a corner.
-//! Closed by a flat disc, the rim keeps the one corner the file gave it.
+//! Closed by a flat disc, the rim gets the same cut, because its one corner is
+//! a pole and no rule reads which way a closed edge runs there.
 //!
-//! Three files, because the flat disc stops on two different things:
+//! Three files:
 //!
-//! - the LED's own rim, one corner on the north pole: no rule reads which way
-//!   a closed edge runs at a pole, so the rim is walked in whatever order the
-//!   walker produced it, and here that is backwards;
-//! - the same rim cut in two at the south pole, which is what the reader does
-//!   against a bar: imports and measures half a ball;
+//! - the LED's own rim, one corner on the north pole: the reader cuts it at
+//!   the south pole, and it imports and measures half a ball;
+//! - the same rim written already cut in two at the south pole: imports and
+//!   measures half a ball;
 //! - a rim with its one corner on the chart's equator, which says which way it
 //!   runs and passes both poles in the middle of the edge.
 
 mod written_by_hand;
 
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_step::{Import, Refusal, StepFile};
+use rcad_step::{Import, StepFile};
 use written_by_hand::a_header;
 
 const RADIUS: f64 = 1.5;
 
-/// The half ball the LED dome would be on a flat disc is still refused. What
-/// is missing is a direction, not a pole: [`a_rim_cut_in_two_at_the_far_pole_imports_and_measures_half_a_ball`]
-/// is the same shape with the rim written as two halves, and it imports.
-///
-/// The rim's one corner is the ball's pole, where `∇S × ∇T` is square to
-/// both the longitude and the latitude, and the reader's hint reads nothing
-/// there either and falls back to the file's flag. A closed edge between a
-/// plane and a ball carries no surface that names its direction, so the model
-/// holds none for this rim, and the mesher walks it the wrong way round. The
-/// fix is the reader cutting the rim at the opposite point, as it already does
-/// for a rim it checks against a bar (§193.3).
+/// The half ball the LED dome would be on a flat disc. The rim's one corner is
+/// the ball's pole, where the longitude has no direction, so a closed edge
+/// there says nothing about which way it runs and the mesher walked it
+/// backwards (`AWireWillNotLieFlatOnItsFace`). The reader now cuts such a rim
+/// in two at the opposite point, the way
+/// [`a_rim_cut_in_two_at_the_far_pole_imports_and_measures_half_a_ball`]
+/// writes it by hand (§193.3).
 #[test]
-fn a_rim_with_its_one_corner_on_a_pole_is_refused_for_want_of_a_direction() {
-    let text = a_half_ball_on_a_flat_disc(RADIUS);
-    let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
-
-    let Err(Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }) =
-        Import::read(&file, &policy, &mut log)
-    else {
-        panic!("the rim with one corner on the pole has no direction the mesher can read");
-    };
-    assert!(
-        matches!(*why, rcad_topo::Error::AWireWillNotLieFlatOnItsFace { .. }),
-        "the dome's wire walked the wrong way round does not close, and not {why:?}"
-    );
+fn a_rim_with_its_one_corner_on_a_pole_imports_and_measures_half_a_ball() {
+    let import = imports(&a_half_ball_on_a_flat_disc(RADIUS));
+    measures_half_a_ball(&import);
 }
 
 /// The rim cut in two at the south pole: the direction comes from the two

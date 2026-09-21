@@ -619,8 +619,33 @@ impl Walk {
         Ok(vec![coedge])
     }
 
-    /// The two halves a closed circle between a ball and another curved face
-    /// is described as, or `None` for every other edge.
+    /// The two halves a closed circle is described as, or `None` for an edge
+    /// that is read as it was written.
+    ///
+    /// Two kinds of closed circle are cut: one between a ball and another
+    /// curved face, and one whose corner is a point where the curved face
+    /// beside it has no way round — a ball's pole, where
+    /// [`Surface::the_way_its_first_coordinate_runs_at`] answers `None`.
+    ///
+    /// **A closed edge at a pole has no readable direction, and two corners
+    /// give it one.** A closed edge is stored running the way its curved face
+    /// winds at the corner ([`Walk::which_way_round_a_closed_edge_is_stored`]),
+    /// and `rcad-topo`'s mesher reads the same rule back. At a pole every
+    /// longitude runs through the one point, so neither side has an answer and
+    /// the mesher walks the rim in whatever order it came: backwards, for the
+    /// KiCad LED dome closed by a flat disc, refused by
+    /// `AWireWillNotLieFlatOnItsFace` (§193.3). Cut in two, each half runs from
+    /// one corner to the other and the file's own flag says which way, as for
+    /// any edge with two — and the same file written with the cut already in it
+    /// imports and measures half a ball.
+    ///
+    /// **Only where the direction is missing, not on every ball-and-plane
+    /// rim.** A rim whose corner is off the poles already has a direction, and
+    /// cutting it would move a corner the file did not write onto a face that
+    /// imports today. The halves here are what the reader makes of the same
+    /// circle written as two arcs, which is read with no check that the circle
+    /// lies on its faces, so this cut asks for none either; the check below is
+    /// the ball-and-curved-face cut's own (§189.3).
     ///
     /// **A closed edge has no room in the model for the surface that names its
     /// circle.** [`EdgeRun::RightRoundWhereItsFacesCross`] carries nothing, and
@@ -646,9 +671,9 @@ impl Walk {
     /// `turn_at_a_corner_on_a_pole` is that fix.
     ///
     /// This is the one place the reader describes an edge the file wrote as
-    /// one as two. It is limited to the circle [`Walk::a_circle_every_face_holds`]
-    /// passes, where a ball and a curved face only touch and nothing but the
-    /// file's circle draws where (`docs/decisions.md` §189.3).
+    /// one as two. Between a ball and a curved face it is limited to the circle
+    /// [`Walk::a_circle_every_face_holds`] passes, where the two only touch and
+    /// nothing but the file's circle draws where (`docs/decisions.md` §189.3).
     fn describe_the_halves_of_a_circle(
         &mut self,
         reading: &Reading<'_>,
@@ -660,11 +685,18 @@ impl Walk {
         if !an_edge_with_one_corner(reading, edge_curve) {
             return Ok(None);
         }
+        let corner = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
+        let near = self.point_of_vertex(reading, corner)?;
         let a_ball_and_a_curved_face = self
             .surfaces_along_each_edge
             .get(&edge_curve)
             .is_some_and(|faces| a_ball_where_curved_faces_meet(faces).is_some());
-        if !a_ball_and_a_curved_face {
+        let no_way_round_at_its_corner = self
+            .closed_edges
+            .get(&edge_curve)
+            .and_then(|carried_by| the_curved_one_of(carried_by))
+            .is_some_and(|curved| curved.the_way_its_first_coordinate_runs_at(near).is_none());
+        if !a_ball_and_a_curved_face && !no_way_round_at_its_corner {
             return Ok(None);
         }
         let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
@@ -676,12 +708,12 @@ impl Walk {
         }
         let position = reading.reference_at(curve, "CIRCLE", 1)?;
         let place = reading.placement_at(curve, position)?;
-        if !self.a_circle_every_face_holds(reading, edge_curve, curve, "CIRCLE", &place)? {
+        if a_ball_and_a_curved_face
+            && !self.a_circle_every_face_holds(reading, edge_curve, curve, "CIRCLE", &place)?
+        {
             return Ok(None);
         }
-        let corner = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
         let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
-        let near = self.point_of_vertex(reading, corner)?;
         if place.axis.normalized().is_err() {
             return Ok(None);
         }
