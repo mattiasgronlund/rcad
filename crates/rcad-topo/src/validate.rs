@@ -284,6 +284,7 @@ impl Model {
         }
 
         self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
+        self.check_something_curved_says_where_this_edge_bends(slot)?;
 
         // The other half of Q16's invariant, and the half that keeps an
         // edge's *name* honest. An edge named by a crossing has to be on
@@ -344,6 +345,43 @@ impl Model {
             }
         }
         Ok(())
+    }
+
+    /// An edge that bends has a curved face along it, or a run naming a curved
+    /// surface, to say where it goes.
+    ///
+    /// [`nothing_curved_says_where_it_bends`] is the rule, and it is the one
+    /// [`SolidView::mesh`] refuses by: a solid this passes, the mesher can
+    /// place every edge of.
+    ///
+    /// An edge with no face found along it is left alone: that is a coedge no
+    /// wire holds, which `check_coedges` refuses under its own name.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] for a closed edge, which has
+    /// that name already, and [`Invalid::AnEdgeBendsButNothingAlongItIsCurved`]
+    /// for any other.
+    pub(crate) fn check_something_curved_says_where_this_edge_bends(
+        &self,
+        slot: EdgeSlot,
+    ) -> Result<()> {
+        let run = &self.data().edges[slot].run;
+        let mut faces = self.faces_along_edge(slot).peekable();
+        if faces.peek().is_none() {
+            return Ok(());
+        }
+        let surfaces = faces.map(|face| self.data().faces[face].surface);
+        if !nothing_curved_says_where_it_bends(run, surfaces) {
+            return Ok(());
+        }
+        Err(match run {
+            EdgeRun::RightRoundWhereItsFacesCross => Invalid::ClosedEdgeBetweenTwoFlatFaces,
+            EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } | _ => {
+                Invalid::AnEdgeBendsButNothingAlongItIsCurved
+            }
+        }
+        .into())
     }
 
     /// Whether every face of this solid sits on a plane.
@@ -1218,6 +1256,33 @@ impl Model {
 /// The four arenas that sit under something else — coedges under wires, wires
 /// under faces, faces under shells, shells under solids — are all asked this,
 /// with a different pair of lists each time rather than with different code.
+/// Whether an edge bends, every face along it sits on a plane, and its run names
+/// no curved surface — so nothing in the model says where it goes.
+///
+/// A plane cannot say where a curve drawn on it bends. A run naming a plane
+/// names where two planes cross, which is a straight line and not this edge; a
+/// whole closed curve names no surface at all; and a kind of run this crate
+/// does not know names nothing it can read.
+///
+/// **`SolidView::mesh` refuses by this same rule**, as
+/// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`], and keeps its own copy of it
+/// in `only_a_flat_face_can_place` and `the_curve_a_flat_edge_is_named_by` —
+/// the two should become one call to this (`docs/decisions.md` §187.1).
+pub(crate) fn nothing_curved_says_where_it_bends(
+    run: &EdgeRun,
+    faces_along_it: impl IntoIterator<Item = Surface>,
+) -> bool {
+    let a_curve_is_named = match run {
+        EdgeRun::Straight => return false,
+        EdgeRun::PartOfWhereItCrosses { and, .. } => and.as_plane().is_none(),
+        EdgeRun::RightRoundWhereItsFacesCross | _ => false,
+    };
+    !a_curve_is_named
+        && faces_along_it
+            .into_iter()
+            .all(|surface| surface.as_plane().is_some())
+}
+
 fn used_exactly_once<K: slotmap::Key>(
     entity: &'static str,
     held: impl Iterator<Item = K>,
@@ -3990,16 +4055,26 @@ mod tests {
     /// The sweep goes on to refuse this scrap for what it really is — a face in
     /// no shell — and the point is that the *length* rule is no longer what
     /// stops it. `a_face_bounded_by_two_steps.rs` builds the whole solid.
+    ///
+    /// The arc is named by the cylinder it runs round. Named by the ground it is
+    /// drawn on, nothing would say where it bends, and the sweep refuses that
+    /// first as [`Invalid::AnEdgeBendsButNothingAlongItIsCurved`].
     #[test]
     fn a_wire_of_an_arc_and_its_chord_is_long_enough_for_the_sweep() {
         let mut model = an_empty_model();
         let start = model.add_vertex(Point::new(1.0, 0.0, 0.0));
         let end = model.add_vertex(Point::new(-1.0, 0.0, 0.0));
+        let round = rcad_geom::Cylinder::new(
+            rcad_geom::Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis has length"),
+            1.0,
+        )
+        .expect("a radius of one");
         let arc = model.add_edge_running(
             start,
             end,
             EdgeRun::PartOfWhereItCrosses {
-                and: Surface::Plane(the_ground()),
+                and: Surface::Cylinder(round),
                 picked_by: SmallVec::from_buf([rcad_geom::Picker::from(
                     rcad_geom::HalfSpace::through_a_point_facing(
                         Point::origin(),

@@ -1185,6 +1185,25 @@ pub enum Invalid {
     )]
     ClosedEdgeBetweenTwoFlatFaces,
 
+    /// An edge bends, every face along it is flat, and its run names no curved
+    /// surface that would say where it bends.
+    ///
+    /// The sweep's name for what [`SolidView::mesh`](crate::SolidView::mesh)
+    /// refuses as [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`], and by the
+    /// same rule: a plane cannot say where a curve drawn on it goes, and a run
+    /// naming a plane names where two planes cross, which is a straight line.
+    /// Such an edge is a curve whose centre and size are not in the model, and
+    /// the mesher used to draw it as a chord (`docs/decisions.md` §176.5,
+    /// §187.1).
+    ///
+    /// A closed edge between two flat faces is the same shape, and keeps its
+    /// own older name, [`Invalid::ClosedEdgeBetweenTwoFlatFaces`].
+    #[error(
+        "an edge bends but every face along it is flat and its run names no curved surface \
+         to say where"
+    )]
+    AnEdgeBendsButNothingAlongItIsCurved,
+
     /// A curved face stands on both sides of a surface that trims it.
     ///
     /// This is the curved twin of [`Invalid::OuterWireWindsAgainstTheNormal`],
