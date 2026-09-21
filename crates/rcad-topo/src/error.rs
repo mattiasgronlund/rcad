@@ -339,6 +339,34 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// Two patches of the mesh drew the same side through their insides, so the
+    /// mesh would come back with that side used more than twice.
+    ///
+    /// A side the triangulator draws inside a patch belongs to that patch alone,
+    /// and a third use of one is two patches folded onto each other — a flat
+    /// pocket with nothing inside it (`docs/decisions.md` §187.4). A leaning
+    /// cap and its wall did it before the triangulator learned not to cut a
+    /// corner inside one edge.
+    ///
+    /// **A refusal and not an assert, because a caller's bytes reach it.** A
+    /// ball whose wire takes a pole step at a corner standing on the ball's
+    /// centre, where the surface pinches nowhere, collapses a whole quarter of
+    /// the equator to that one corner, and both faces of the slit it is cut
+    /// along then draw the same two triangles. Nothing in
+    /// [`Model::validate`](crate::Model::validate) asks where a pole step's
+    /// corner stands, and a panic is the wrong answer to a caller's bytes
+    /// (§4.1).
+    #[error(
+        "two patches of the mesh drew the same side through their insides: {drawn} times, \
+         and {used} uses in all where there should be two"
+    )]
+    TwoPatchesOfTheMeshDrewTheSameSide {
+        /// How many triangles drawn inside a patch use the side.
+        drawn: u32,
+        /// How many triangles of the whole mesh use it.
+        used: u32,
+    },
+
     /// A closed edge of the answer would start at a **pole** of the surface it is
     /// drawn on, where nothing says which way it runs.
     ///

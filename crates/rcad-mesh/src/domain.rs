@@ -54,6 +54,7 @@ pub struct TrimmedDomain {
     outer: Loop,
     holes: Vec<Loop>,
     deflection: Deflection,
+    between_two_edges: Vec<bool>,
 }
 
 impl TrimmedDomain {
@@ -66,7 +67,50 @@ impl TrimmedDomain {
             outer,
             holes,
             deflection,
+            between_two_edges: Vec::new(),
         }
+    }
+
+    /// Say which corners are where the boundary passes from one edge of the
+    /// solid to a different one: one entry per corner, the outer loop's first
+    /// and then each hole's, in order.
+    ///
+    /// Without this every corner is taken to lie inside one edge, which is the
+    /// safe reading. On a curved surface the triangulator never lets a side cut
+    /// straight across such a corner, because the face on the other side of
+    /// that edge sees the same three corners in a row and may draw the same
+    /// side (`docs/decisions.md` §187.4). Where the boundary turns from one edge
+    /// to another there is, in general, no single face across both, and cutting
+    /// the corner off is left to the triangulation — which matters, because
+    /// every corner of a rectangle is one of those and would otherwise cost a
+    /// point each.
+    ///
+    /// # Panics
+    ///
+    /// When `between` does not have one entry per corner. That is the calling
+    /// code miscounting its own list, not data it was handed.
+    #[must_use]
+    pub fn with_corners_between_two_edges(mut self, between: Vec<bool>) -> Self {
+        let corners = self.outer.corners().len()
+            + self
+                .holes
+                .iter()
+                .map(|hole| hole.corners().len())
+                .sum::<usize>();
+        assert_eq!(between.len(), corners, "one entry per corner of the domain");
+        self.between_two_edges = between;
+        self
+    }
+
+    /// Whether the corner at `position`, counted as
+    /// [`TrimmedDomain::with_corners_between_two_edges`] counts them, is where
+    /// the boundary passes from one edge to another.
+    #[must_use]
+    pub fn is_between_two_edges(&self, position: usize) -> bool {
+        self.between_two_edges
+            .get(position)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// The surface the patch lies on.

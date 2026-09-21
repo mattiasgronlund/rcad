@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use spade::handles::FixedVertexHandle;
 use spade::{ConstrainedDelaunayTriangulation, InsertionError, Point2, Triangulation};
 
 use rcad_geom::{Cone, Point, Surface, Torus};
@@ -197,6 +198,11 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         }
     }
 
+    let corners_inside_one_edge = if matches!(surface, Surface::Plane(_)) {
+        Vec::new()
+    } else {
+        corners_inside_one_edge(domain, &handles)
+    };
     let deviation = refine_the_inside(
         &mut mesh,
         &mut corners,
@@ -208,6 +214,7 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
             deflection,
             slop,
             step,
+            corners_inside_one_edge: &corners_inside_one_edge,
         },
     )?;
 
@@ -963,6 +970,10 @@ struct HowFineToGo<'a> {
     deflection: f64,
     slop: f64,
     step: f64,
+    /// Each corner of the domain that lies inside one edge, with the corners
+    /// before and after it along its own loop. Empty on a plane: see
+    /// [`corners_cut_off_by_one_side`].
+    corners_inside_one_edge: &'a [(usize, [FixedVertexHandle; 2])],
 }
 
 /// Put points strictly inside the patch until no triangle strays too far, and
@@ -1060,14 +1071,31 @@ fn refine_the_inside(
             wanted.push([(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0]);
         }
 
-        if !anything_missed {
+        // **A side cutting off a corner is cut whether or not a point is close
+        // by**, because a point close by does not remove the side and this one
+        // does. That leaves the packing argument below intact: the side's
+        // midpoint is the same place every round, so each corner can add at
+        // most one point this way, and a second attempt finds the first one
+        // there and places nothing.
+        let corners_cut_off = corners_cut_off_by_one_side(mesh, &inside, aim);
+        let breaking = corners_cut_off.iter().map(|(_, either_side)| {
+            let [from, to] = either_side.map(|handle| corners[corner_of[handle.index()] as usize]);
+            ([(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0], true)
+        });
+        let wanted: Vec<([f64; 2], bool)> = wanted
+            .into_iter()
+            .map(|corner| (corner, false))
+            .chain(breaking)
+            .collect();
+
+        if !anything_missed && corners_cut_off.is_empty() {
             return Ok(furthest);
         }
 
         let mut anything_placed = false;
-        for corner in wanted {
+        for (corner, breaks_a_side) in wanted {
             let at = Point2::new(corner[0] * aim.across, corner[1] * aim.along);
-            if !placed.has_room_for(at) {
+            if !breaks_a_side && !placed.has_room_for(at) {
                 continue;
             }
             let before = mesh.num_vertices();
@@ -1088,12 +1116,90 @@ fn refine_the_inside(
         }
 
         if !anything_placed {
+            if let (false, Some(&(corner, _))) = (anything_missed, corners_cut_off.first()) {
+                return Err(CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch { corner });
+            }
             return Err(CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection {
                 strays: furthest,
                 deflection: aim.deflection,
             });
         }
     }
+}
+
+/// The corners of a curved patch that one side of the triangulation cuts
+/// straight across, from the corner before to the corner after along the loop.
+///
+/// **Such a side can be a side of the next face too, and then the mesh is
+/// wrong.** Where two faces meet at a sharp edge — a cap leaning steeply across
+/// a bar meets the wall at eleven degrees near the top of its ellipse — the
+/// three corners around the edge's sharpest bend are a natural ear for both
+/// faces. Each cuts it off with the same side, both keep the same triangle facing
+/// opposite ways, and the side between the corner before and the corner after is
+/// then used four times: a flat pocket with nothing inside it, pinched off the
+/// rest of the mesh (`docs/decisions.md` §187.4). This crate is shown one face at
+/// a time and cannot see the other one, so it cannot agree a side with it; what
+/// it can do is never draw one that the other face could also draw.
+///
+/// **Only a curved patch is held to this**, and one is enough. The three
+/// corners of such a triangle all lie on the boundary and so on the edge's own
+/// curve; on a plane that triangle is exactly the surface, and on a curved face
+/// it is the edge's curve standing in for a strip of surface. Keeping the flat
+/// face's triangle and cutting the curved face's side in two gives the curved
+/// face a point off the plane of that curve, so the two no longer coincide. Two
+/// flat faces never meet along a curve, since two planes meet in a line.
+///
+/// **Only a corner inside one edge is held to it**, when the caller has said
+/// which those are ([`TrimmedDomain::with_corners_between_two_edges`]). Where
+/// the boundary passes from one edge to another there is in general no one face
+/// across both, and every corner of a rectangle is such a place.
+///
+/// A plane's list is empty, so this finds nothing there.
+fn corners_cut_off_by_one_side(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    inside: &[bool],
+    aim: &HowFineToGo<'_>,
+) -> Vec<(usize, [FixedVertexHandle; 2])> {
+    let mut cut_off = Vec::new();
+    for &(position, [before, after]) in aim.corners_inside_one_edge {
+        let Some(side) = mesh.get_edge_from_neighbors(before, after) else {
+            continue;
+        };
+        if side.is_constraint_edge() {
+            continue;
+        }
+        if side
+            .face()
+            .as_inner()
+            .is_some_and(|face| inside[face.index()])
+        {
+            cut_off.push((position, [before, after]));
+        }
+    }
+    cut_off
+}
+
+/// Each corner that lies inside one edge, with the triangulation's handles for
+/// the corners either side of it along its own loop.
+fn corners_inside_one_edge(
+    domain: &TrimmedDomain,
+    handles: &[FixedVertexHandle],
+) -> Vec<(usize, [FixedVertexHandle; 2])> {
+    let mut before = vec![0; handles.len()];
+    let mut after = vec![0; handles.len()];
+    for (from, to) in every_side(domain) {
+        after[from] = to;
+        before[to] = from;
+    }
+    (0..handles.len())
+        .filter(|&position| !domain.is_between_two_edges(position))
+        .map(|position| {
+            (
+                position,
+                [handles[before[position]], handles[after[position]]],
+            )
+        })
+        .collect()
 }
 
 /// The points the refinement has put down, bucketed by how far apart they have
@@ -1414,6 +1520,25 @@ pub enum CannotTriangulate {
         strays: f64,
         /// What was asked for, in the same unit.
         deflection: f64,
+    },
+
+    /// On a curved surface, a side from the corner before `corner` to the corner
+    /// after it would not go away, and the face on the other side of the
+    /// boundary may draw the same side.
+    ///
+    /// The refinement cuts such a side in half at its middle, and this is what
+    /// is left when that point cannot be placed: the triangulation would not
+    /// take it, or it went in on an earlier round and the side survived it.
+    /// Neither has been seen in this workspace. Returning the patch instead
+    /// could hand back a mesh with one side used four times
+    /// (`docs/decisions.md` §187.4), which is worse than no mesh.
+    #[error(
+        "on a curved surface, a side cuts straight across corner {corner} of the boundary \
+         and there is nowhere to put the point that would break it"
+    )]
+    ASideCutsOffOneCornerOfACurvedPatch {
+        /// Which corner is cut off.
+        corner: usize,
     },
 }
 

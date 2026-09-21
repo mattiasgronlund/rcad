@@ -335,6 +335,8 @@ impl SolidView<'_> {
     /// than one mesh holds. [`Error::CannotMeshAFace`] when the triangulator
     /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
+    /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] when two patches folded
+    /// onto each other and a side would be used more than twice.
     /// [`Error::AWireWillNotLieFlatOnItsFace`],
     /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`],
     /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
@@ -383,7 +385,7 @@ impl SolidView<'_> {
         for face in self.faces() {
             building.cut_up(face, log)?;
         }
-        Ok(building.finish())
+        building.finish()
     }
 
     /// The surfaces of the faces either side of each edge, as the arena holds
@@ -534,6 +536,11 @@ struct BuildingAMesh {
     at_vertex: HashMap<VertexKey, u32>,
     along_edge: HashMap<EdgeKey, Vec<u32>>,
     triangles: Vec<MeshTriangle>,
+    /// How many triangles use each side that is not along the boundary of the
+    /// patch it was drawn in — see [`BuildingAMesh::finish`].
+    drawn_inside_a_patch: HashMap<(u32, u32), u32>,
+    /// The points where a face was cut into pieces, ends included.
+    on_a_cut: HashSet<u32>,
     worst: f64,
     along_each_edge: HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
 }
@@ -549,6 +556,8 @@ impl BuildingAMesh {
             at_vertex: HashMap::new(),
             along_edge: HashMap::new(),
             triangles: Vec::new(),
+            drawn_inside_a_patch: HashMap::new(),
+            on_a_cut: HashSet::new(),
             worst: 0.0,
             along_each_edge,
         }
@@ -921,9 +930,11 @@ impl BuildingAMesh {
             return Ok(None);
         }
         let at_the_pole = self.remember(there.apply_to_point(at_the_pole));
+        self.on_a_cut.insert(at_the_pole);
 
         let mut cuts = Vec::with_capacity(4);
         for &corner in &along {
+            self.on_a_cut.insert(cap.points[corner]);
             let leaving = cap.corners[corner];
             let arriving = [leaving[0], towards];
             cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
@@ -1071,6 +1082,8 @@ impl BuildingAMesh {
         for step in 0..4 {
             let leaving = up.corners[along_the_top[step]];
             let arriving = down.corners[along_the_bottom[step]];
+            self.on_a_cut.insert(up.points[along_the_top[step]]);
+            self.on_a_cut.insert(down.points[along_the_bottom[step]]);
             cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
         }
 
@@ -1128,9 +1141,9 @@ impl BuildingAMesh {
                 [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
             let on_it = stored.point_at(sits_at[0], sits_at[1]);
             along.corners.push(sits_at);
-            along
-                .points
-                .push(self.remember(there.apply_to_point(on_it)));
+            let at = self.remember(there.apply_to_point(on_it));
+            self.on_a_cut.insert(at);
+            along.points.push(at);
         }
         Ok(along)
     }
@@ -1185,15 +1198,17 @@ impl BuildingAMesh {
             closes_on_one_curve: false,
             goes_right_round: false,
         };
+        self.on_a_cut.insert(opened.points[at[0]]);
+        self.on_a_cut.insert(opened.points[at[1]]);
         for step in 1..steps {
             let part = step as f64 / steps as f64;
             let sits_at =
                 [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
             let on_it = stored.point_at(sits_at[0], sits_at[1]);
             along_the_cut.corners.push(sits_at);
-            along_the_cut
-                .points
-                .push(self.remember(there.apply_to_point(on_it)));
+            let at = self.remember(there.apply_to_point(on_it));
+            self.on_a_cut.insert(at);
+            along_the_cut.points.push(at);
         }
 
         one.take_in(&along_the_cut);
@@ -1213,7 +1228,23 @@ impl BuildingAMesh {
     ) -> Result<()> {
         let mut corner_is = Vec::new();
         let mut loops = Vec::with_capacity(patch.len());
+        let mut along_a_loop = HashSet::new();
+        let mut between_two_edges = Vec::new();
+        let model_corners: HashSet<u32> = self.at_vertex.values().copied().collect();
         for one in patch {
+            for (at, &from) in one.points.iter().enumerate() {
+                along_a_loop.insert(a_side(from, one.points[(at + 1) % one.points.len()]));
+                // A loop that is one closed edge passes its own corner and stays
+                // on that edge. Anywhere else a corner of the model, or a point
+                // where this face was cut into pieces, is taken to be where the
+                // boundary passes from one neighbour to another; where that is
+                // not so — two edges between the same two faces — `finish` is
+                // what stands between a shared side and an `Ok`.
+                between_two_edges.push(
+                    !one.closes_on_one_curve
+                        && (model_corners.contains(&from) || self.on_a_cut.contains(&from)),
+                );
+            }
             corner_is.extend(one.points);
             loops.push(Loop::through(one.corners).map_err(|why: NotALoop| {
                 Error::AWireDoesNotFanIntoALoopToMesh {
@@ -1229,7 +1260,8 @@ impl BuildingAMesh {
             outer.clone(),
             holes.to_vec(),
             Deflection::of(room)?,
-        );
+        )
+        .with_corners_between_two_edges(between_two_edges);
         let cut = match triangulate(&domain) {
             Ok(cut) => cut,
             Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
@@ -1260,6 +1292,12 @@ impl BuildingAMesh {
             } else {
                 [first, second, third]
             };
+            for (from, to) in [(first, second), (second, third), (third, first)] {
+                let side = a_side(from, to);
+                if !along_a_loop.contains(&side) {
+                    *self.drawn_inside_a_patch.entry(side).or_default() += 1;
+                }
+            }
             self.triangles.push(MeshTriangle {
                 corners,
                 face: face.key(),
@@ -1377,15 +1415,51 @@ impl BuildingAMesh {
         at
     }
 
-    fn finish(self) -> Mesh {
-        Mesh {
+    /// **Every side the triangulator drew inside a patch is used by exactly the
+    /// two triangles either side of it, both from that patch.** A side along a
+    /// loop is the model's to count — a file may hand over an edge with three
+    /// faces along it — but a side drawn inside a patch belongs to that patch
+    /// alone, so any third use is two patches having drawn the same side, the
+    /// pocket of §187.4, and the mesh would come back with a side used four
+    /// times.
+    ///
+    /// **Refused rather than asserted**, although the leaning cap that found it
+    /// was this crate's own arithmetic: a caller's bytes reach it too. A ball
+    /// whose pole step stands on its centre rather than a pole folds two patches
+    /// onto each other the same way, and
+    /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] says what it is for both.
+    /// The side reported is the lowest-numbered one, so the same model is
+    /// refused the same way every time.
+    fn finish(self) -> Result<Mesh> {
+        let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
+        for triangle in &self.triangles {
+            let [first, second, third] = triangle.corners;
+            for (from, to) in [(first, second), (second, third), (third, first)] {
+                *times_used.entry(a_side(from, to)).or_default() += 1;
+            }
+        }
+        let folded = self
+            .drawn_inside_a_patch
+            .iter()
+            .map(|(&side, &drawn)| (side, drawn, times_used[&side]))
+            .filter(|&(_, drawn, used)| drawn != 2 || used != 2)
+            .min_by_key(|&(side, _, _)| side);
+        if let Some((_, drawn, used)) = folded {
+            return Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn, used });
+        }
+        Ok(Mesh {
             points: self.points,
             triangles: self.triangles,
             at_vertex: self.at_vertex,
             along_edge: self.along_edge,
             deviation: Approximation::new(self.worst, Cause::FlatStandIn),
-        }
+        })
     }
+}
+
+/// A side between two mesh points, whichever way round it is walked.
+fn a_side(from: u32, to: u32) -> (u32, u32) {
+    (from.min(to), from.max(to))
 }
 
 /// One closed loop of a patch boundary: where each corner sits in the face's own
@@ -4816,7 +4890,9 @@ mod tests {
             Loop::through(cell).expect("four corners of a rectangle"),
             Vec::new(),
             Deflection::of(1e9).expect("a length"),
-        );
+        )
+        // Each corner of the cell is where two steps meet, as it is in the walk.
+        .with_corners_between_two_edges(vec![true; 4]);
         triangulate(&domain)
             .expect("a rectangle of one cell")
             .deviation()
