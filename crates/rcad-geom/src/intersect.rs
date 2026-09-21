@@ -1130,7 +1130,7 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
             picker,
             along.components(),
             &TwoLinesEitherSideOfThePicker {
-                middle: how_far_in_front_of_the_middle(picker, one, other, towards),
+                middle: how_far_in_front_of_the_middle(picker, one, other),
                 up,
                 out,
             },
@@ -1316,19 +1316,27 @@ fn between_the_two_lines(here: Point, towards: Vector, mine: f64, theirs: f64) -
 /// How far in front of `picker` the point midway between the two lines two
 /// side-by-side pipes cut out of each other sits.
 ///
-/// Write `δ` for the step between the axes and `rᵢ` for the two widths. The
+/// Write `δ` for the distance between the axes and `rᵢ` for the two widths. The
 /// middle sits `(δ² + r₁² − r₂²) / 2δ²` of the way from one axis to the other,
-/// so each axis' reading counts for how far the middle is from the *other* one:
+/// so each axis' reading counts for how far the middle is from the *other* one.
+/// With `δ² = A/W`, where `A = ‖(c − o) × w‖²` and `W = w·w`, that is
 ///
 /// ```text
-/// (at_here·(δ² − r₁² + r₂²)  +  at_there·(δ² + r₁² − r₂²))  /  2δ²
+/// (at_here·(A − W·(r₁² − r₂²))  +  at_there·(A + W·(r₁² − r₂²)))  /  2A
 /// ```
 ///
-/// Both axis origins are stored points, `δ²` is the stored step's own squared
-/// length and the widths are stored, so top and bottom are polynomials in stored
-/// numbers and [`Exact`] holds each with nothing rounded. The one division is
-/// where the enclosure is formed. This is §93's technique, and §29.8 named it as
-/// untried on this half of the row.
+/// Both axis origins, `w` and the widths are stored, so top and bottom are
+/// polynomials in stored numbers and [`Exact`] holds each with nothing rounded.
+/// The one division is where the enclosure is formed. This is §93's technique,
+/// and §29.8 named it as untried on this half of the row.
+///
+/// **Not the step `the_step_across_to_the_other_axis` hands back.** Its squared
+/// length is `δ²` to within a rounding of each component, and that rounding is
+/// in no enclosure. It did not show while the middle was read through a share
+/// whose own width was about as wide. Read as one exact quotient, the window is
+/// an ulp of the answer and the step's rounding lands outside it: of 279 636
+/// candidate half-spaces over 23 303 pairs off the coordinate directions, 119 763
+/// had a window that missed the true middle. §184.7.
 ///
 /// **Not `at_here + share·(at_there − at_here)`.** That is the same number, and
 /// with `share` an enclosure its relative width of `2⁻⁵³` lands against the
@@ -1337,32 +1345,28 @@ fn between_the_two_lines(here: Point, towards: Vector, mine: f64, theirs: f64) -
 /// and the middle is `9.98e-244` — so the window was `3.7e5` around a number
 /// that needed one of `1.3`.
 ///
-/// **The widths and the step are slid down by a power of two first** when the
-/// top would overflow. Every term is degree two in them, top and bottom alike,
-/// so the slide cancels out of the quotient and rounds nothing while the slid
-/// numbers stay normal. At §181.2's pair `2δ²` alone is `5.1e307` and a reading
-/// is `3.7e21`, so without it the exact level cannot run at all. The slide is
-/// the smallest that fits, and zero wherever the top already fits. It is not
-/// only pairs far from the origin that need it: fat enough pipes do on their
-/// own, and §140's pair, at the origin with the same widths, slides too. §184.
-fn how_far_in_front_of_the_middle(
-    picker: HalfSpace,
-    one: &Cylinder,
-    other: &Cylinder,
-    towards: Vector,
-) -> Interval {
+/// **The widths and the gap between the origins are slid down by a power of
+/// two first** when the top would overflow. `A` and `W·(r₁² − r₂²)` are both
+/// degree two in them, top and bottom alike, so the slide cancels out of the
+/// quotient and rounds nothing while the slid numbers stay normal. At §181.2's
+/// pair `2A` alone is `5.1e307` and a reading is `3.7e21`, so without it the
+/// exact level cannot run at all. The slide is the smallest that fits, and zero
+/// wherever the top already fits. It is not only pairs far from the origin that
+/// need it: fat enough pipes do on their own, and §140's pair, at the origin
+/// with the same widths, slides too. §184.
+fn how_far_in_front_of_the_middle(picker: HalfSpace, one: &Cylinder, other: &Cylinder) -> Interval {
     let here = one.axis().origin().coordinates();
     let there = other.axis().origin().coordinates();
-    the_middle_exactly(picker, here, there, towards, one.radius(), other.radius()).map_or_else(
+    let along = one.axis().direction().components();
+    the_middle_exactly(picker, here, there, along, one.radius(), other.radius()).map_or_else(
         || {
             let [at_here, at_there] = [here, there].map(|point| how_far_in_front(picker, point));
-            let squared_apart = squared_length_enclosing(exactly(towards.components()));
-            let [mine, theirs] = [one.radius(), other.radius()].map(squared_enclosing);
-            let twice_squared_apart = Interval::exactly(2.0) * squared_apart;
+            let squared_gap = how_far_off_an_axis_enclosing(there, here, along);
+            let widths = squared_length_enclosing(exactly(along))
+                * (squared_enclosing(one.radius()) - squared_enclosing(other.radius()));
             quotient_or_everything(
-                at_here * (squared_apart - mine + theirs)
-                    + at_there * (squared_apart + mine - theirs),
-                twice_squared_apart,
+                at_here * (squared_gap - widths) + at_there * (squared_gap + widths),
+                Interval::exactly(2.0) * squared_gap,
             )
         },
         |(top, bottom)| quotient_or_everything(top.enclosure(), bottom.enclosure()),
@@ -1376,7 +1380,7 @@ fn the_middle_exactly(
     picker: HalfSpace,
     here: [f64; 3],
     there: [f64; 3],
-    towards: Vector,
+    along: [f64; 3],
     mine: f64,
     theirs: f64,
 ) -> Option<(Exact, Exact)> {
@@ -1385,38 +1389,49 @@ fn the_middle_exactly(
     let at_here = Exact::dot_of(normal, here)?.minus(&offset);
     let at_there = Exact::dot_of(normal, there)?.minus(&offset);
 
-    let [x, y, z] = towards.components();
+    let [x, y, z] = Exact::gap_between(here, there);
     let down = how_far_to_slide_the_lengths_down(
         at_here
             .nearest_f64()
             .abs()
             .max(at_there.nearest_f64().abs()),
-        [x.abs(), y.abs(), z.abs(), mine, theirs]
+        [x.nearest_f64(), y.nearest_f64(), z.nearest_f64(), mine, theirs]
             .into_iter()
+            .map(f64::abs)
             .fold(0.0, f64::max),
+        along.into_iter().map(f64::abs).fold(0.0, f64::max),
     );
     let slid = |length: f64| {
         let moved = multiplied_by_a_power_of_two(length, -down);
         (length == 0.0 || moved.is_normal()).then_some(moved)
     };
-    let step = [slid(x)?, slid(y)?, slid(z)?];
+    let gap = [x.slid_by(-down)?, y.slid_by(-down)?, z.slid_by(-down)?];
     let [mine, theirs] = [slid(mine)?, slid(theirs)?];
 
-    let squared_apart = Exact::dot_of(step, step)?;
-    let widths = Exact::product_of(mine, mine)?.minus(&Exact::product_of(theirs, theirs)?);
+    let squared_gap = Exact::squared_length_of(&Exact::cross_of(&gap, along)?)?;
+    let widths = Exact::dot_of(along, along)?
+        .times(&Exact::product_of(mine, mine)?.minus(&Exact::product_of(theirs, theirs)?))?;
     let top = at_here
-        .times(&squared_apart.minus(&widths))?
-        .plus(&at_there.times(&squared_apart.plus(&widths))?);
-    Some((top, squared_apart.plus(&squared_apart)))
+        .times(&squared_gap.minus(&widths))?
+        .plus(&at_there.times(&squared_gap.plus(&widths))?);
+    Some((top, squared_gap.plus(&squared_gap)))
 }
 
-/// The smallest power of two to slide the step and the widths down by so that a
-/// reading as large as `largest_reading` times their squares stays inside `f64`.
+/// The smallest power of two to slide the gap and the widths down by so that a
+/// reading as large as `largest_reading` times `A + W·(r₁² − r₂²)` stays inside
+/// `f64`.
 ///
-/// The top of the middle's quotient is at most two readings times three squared
-/// lengths, which is under `2⁶` times the largest of each, and `f64` holds
-/// anything under `2¹⁰²⁴`.
-fn how_far_to_slide_the_lengths_down(largest_reading: f64, longest_length: f64) -> i32 {
+/// Each component of `(c − o) × w` is at most `2·g·v`, writing `g` for the
+/// longest length and `v` for the largest component of `w`, so `A` is under
+/// `12·g²·v²` and `W·(r₁² − r₂²)` under `3·g²·v²`. Two readings times their sum
+/// is then under `2¹¹` times the product of the largest of each, and `f64`
+/// holds anything under `2¹⁰²⁴`. Only the lengths slide, so the slide is half
+/// of what is left over.
+fn how_far_to_slide_the_lengths_down(
+    largest_reading: f64,
+    longest_length: f64,
+    largest_direction: f64,
+) -> i32 {
     let binade = |value: f64| {
         if value == 0.0 {
             0
@@ -1424,7 +1439,11 @@ fn how_far_to_slide_the_lengths_down(largest_reading: f64, longest_length: f64) 
             binary_exponent(value).max(0)
         }
     };
-    let too_high = binade(largest_reading) + 2 * binade(longest_length) + 6 - 1020;
+    let too_high = binade(largest_reading)
+        + 2 * binade(longest_length)
+        + 2 * binade(largest_direction)
+        + 11
+        - 1020;
     (too_high.max(0) + 1) / 2
 }
 
@@ -4451,5 +4470,101 @@ mod tests {
         // the whole of this test. It also fails on a refusal, and one order used
         // to refuse.
         assert!(matches!(crossing(&one, &other), SurfaceMeet::Curves(_)));
+    }
+
+    /// §184.7's pair, found by a search over pipes off the coordinate
+    /// directions and checked in exact rationals from the stored numbers. The
+    /// window read the middle through the squared length of the *rounded* step,
+    /// `3.2e-17` of itself off the true `A/W`, and came back
+    /// `[-1.0538915031078247e-16, -1.0538915031078239e-16]` around a true middle
+    /// of `-1.209827636296209e-16`.
+    ///
+    /// Every half-space the row may try is asked, because any of them can be
+    /// the one it proves with. The true middle is decided here the long way, as
+    /// `(at_here·(A − W·d) + at_there·(A + W·d)) / 2A` with nothing but stored
+    /// numbers in it, and the window has to hold it.
+    #[test]
+    fn the_window_around_the_middle_of_two_leaning_pipes_holds_the_true_middle() {
+        let along = Vector::new(3.0, 5.0, 7.0);
+        let one = Cylinder::new(
+            Axis::new(
+                Point::from([
+                    1.889_498_858_277_455_2,
+                    1.754_621_790_330_662_7,
+                    5.900_896_671_941_921,
+                ]),
+                along,
+            )
+            .expect("a direction"),
+            8.668_044_147_417_756,
+        )
+        .expect("a radius");
+        let other = Cylinder::new(
+            Axis::new(
+                Point::from([
+                    20.032_907_041_561_735,
+                    41.902_862_084_155_37,
+                    41.157_496_726_973_64,
+                ]),
+                along,
+            )
+            .expect("a direction"),
+            3.509_441_474_803_657_5,
+        )
+        .expect("a radius");
+
+        let here = one.axis().origin();
+        let there = other.axis().origin();
+        let along = one.axis().direction();
+        let towards = the_step_across_to_the_other_axis(&one, &other);
+        let anchors = [
+            between_the_two_lines(here, towards, one.radius(), other.radius()),
+            here,
+            there,
+        ];
+        let normals = picking_normals_to_try(anchors[0], along, along.cross(towards))
+            .expect("a direction with a length");
+
+        let squared_gap =
+            how_far_off_an_axis_exactly(there.coordinates(), here.coordinates(), along.components())
+                .expect("small enough to hold exactly");
+        let widths = Exact::dot_of(along.components(), along.components())
+            .and_then(|squared_direction| {
+                let [mine, theirs] = [one.radius(), other.radius()]
+                    .map(|radius| Exact::product_of(radius, radius).expect("a normal square"));
+                squared_direction.times(&mine.minus(&theirs))
+            })
+            .expect("small enough to hold exactly");
+        let bottom = squared_gap.plus(&squared_gap);
+
+        for anchor in anchors {
+            for normal in &normals {
+                let picker =
+                    HalfSpace::through_a_point_facing(anchor, *normal).expect("a finite offset");
+                let window = how_far_in_front_of_the_middle(picker, &one, &other);
+
+                let reading = |point: Point| {
+                    Exact::dot_of(picker.normal().components(), point.coordinates())
+                        .expect("small enough to hold exactly")
+                        .minus(&Exact::of(picker.offset()))
+                };
+                let top = reading(here)
+                    .times(&squared_gap.minus(&widths))
+                    .zip(reading(there).times(&squared_gap.plus(&widths)))
+                    .map(|(from_here, from_there)| from_here.plus(&from_there))
+                    .expect("small enough to hold exactly");
+                let [above_low, below_high] = [
+                    Exact::of(window.lo()).times(&bottom).map(|low| top.minus(&low)),
+                    Exact::of(window.hi()).times(&bottom).map(|high| high.minus(&top)),
+                ]
+                .map(|gap| gap.expect("small enough to hold exactly").sign());
+
+                assert!(
+                    matches!(above_low, Decision::Pos | Decision::Zero)
+                        && matches!(below_high, Decision::Pos | Decision::Zero),
+                    "the window {window:?} for {picker:?} does not hold the true middle"
+                );
+            }
+        }
     }
 }

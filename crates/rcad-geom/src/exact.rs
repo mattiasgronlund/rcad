@@ -254,7 +254,7 @@ impl Exact {
     /// while the result is a normal number. Past the top it is infinity and
     /// below the bottom it is rounded onto the subnormal grid, and either way the
     /// slid copy stands for a different number than the one that was slid.
-    fn slid_by(&self, exponent: i32) -> Option<Exact> {
+    pub(crate) fn slid_by(&self, exponent: i32) -> Option<Exact> {
         if exponent == 0 {
             return Some(self.clone());
         }
