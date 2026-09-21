@@ -1363,7 +1363,13 @@ impl BuildingAMesh {
                     let start = coedge.start();
                     let at = self.remember_the_corner(start);
                     let where_it_is = back.apply_to_point(start.point());
-                    walk.arrive(at, stored.coordinates_of(where_it_is), at_a_pole(&start));
+                    let start_is_a_pole = at_a_pole(&start);
+                    walk.arrive(at, stored.coordinates_of(where_it_is), start_is_a_pole);
+                    let a_pole_step_came_first =
+                        index > 0 && matches!(steps[index - 1], WireStepView::Pole(_));
+                    if start_is_a_pole && !a_pole_step_came_first {
+                        walk.turn_at_a_corner_on_a_pole();
+                    }
 
                     let edge = coedge.edge();
                     let walked = match self.along_edge.get(&edge.key()) {
@@ -1980,6 +1986,35 @@ impl WalkingAWire {
         }
     }
 
+    /// Open the pole side at an ordinary corner of the wire that sits on a
+    /// pole, so it runs the way the face lies and not the short way round.
+    ///
+    /// **The short way round is a guess, and at half a turn it is a coin that
+    /// lands wrong.** A ball's equator circle read in a chart whose axis lies
+    /// in the circle's plane is two meridians half a turn apart, and a face
+    /// bounded by it has a corner at each pole. `the_short_way_round` answers
+    /// a jump of exactly `π` with `−π` — `round` goes away from zero — so the
+    /// south pole side of `kicad/LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step`'s
+    /// dome ran from `−π` to `−2π` instead of to `0`, and the walk came back a
+    /// whole turn from where it set off. The rule `cross_the_pole` uses does
+    /// not guess: a wire keeps its face on its left, so a pole below the walk
+    /// is crossed with the longitude and one above it against. A pole side
+    /// wider than half a turn, which the short way can never give, comes out
+    /// right the same way.
+    ///
+    /// Nothing to do before the walk has a longitude of its own: the far end
+    /// is then where the walk set off, and [`WalkingAWire::finish`] closes it.
+    fn turn_at_a_corner_on_a_pole(&mut self) {
+        if !self.started || self.wraps.is_none() {
+            return;
+        }
+        let Some(way) = self.which_way_the_pole_side_runs() else {
+            self.will_not_lie_flat = true;
+            return;
+        };
+        self.crossing = Some(way);
+    }
+
     /// `1` when the pole just arrived at is below everything walked before it
     /// reached it, and `-1` when it is above.
     fn which_way_the_pole_side_runs(&self) -> Option<f64> {
@@ -2021,7 +2056,9 @@ impl WalkingAWire {
             && self.still_at_a_pole.is_some()
         {
             self.leave_the_pole_at(first[0]);
-            self.longitude = first[0];
+            if self.crossing.is_none() {
+                self.longitude = first[0];
+            }
         }
         // A pole side still open at the end closes on the corner the walk set
         // off from, which is where the loop closes; its far end is that corner.
