@@ -905,6 +905,63 @@ fn a_coarser_deflection_meshes_whenever_a_finer_one_did_on_solids_drawn_at_rando
     );
 }
 
+/// **A defect the soak above found, kept by its own numbers.** A turned quarter
+/// bend meshes at a deflection of `1.46`, is refused at every deflection from
+/// `1.47` to `1.57`, and meshes again at `1.58`.
+///
+/// The bend is ring `4.8200302726828` and tube `0.9357021242936023`, turned by
+/// `4.467589615527247` radians — about 256 degrees — about an axis through the
+/// origin along `(0.32268650637944635, -0.6828390663284947,
+/// 0.038820372944909774)`, and moved nowhere. The refusal is the triangulator's
+/// "the boundary crosses itself" on one face. Measured (probe, not kept), in
+/// steps of a hundredth from `1.00` to `1.59`: every step from `1.47` to `1.57`
+/// refused and every other step meshed. The same bend unturned meshes at every
+/// one of those steps, and so does a bend of ring 5 and tube 1 under the same
+/// turn, so the turn and the exact size are both part of it.
+///
+/// That is the non-monotone ladder this file exists to catch, on a kind the
+/// fixed family holds but at a placement it never tries. Ignored because it
+/// fails; the justfile's `ignored_tests` has to move alongside it.
+#[test]
+#[ignore = "open: a turned quarter bend refuses 1.47 to 1.57 between meshes at 1.46 and 1.58"]
+fn a_turned_quarter_bend_meshes_at_every_deflection_coarser_than_one_it_meshed_at() {
+    let mut model = a_model(4.8200302726828 + 0.9357021242936023);
+    let bend = rings::a_quarter_bend(&mut model, 4.8200302726828, 0.9357021242936023);
+    let turn = Isometry::rotation(
+        &Axis::new(
+            Point::origin(),
+            Vector::new(
+                0.32268650637944635,
+                -0.6828390663284947,
+                0.038820372944909774,
+            ),
+        )
+        .expect("a direction with length"),
+        4.467589615527247,
+    )
+    .expect("a finite turn");
+    model
+        .place_solid(bend, &turn)
+        .expect("this model made the key");
+    let shape = Shape {
+        what: "a turned quarter bend".to_owned(),
+        model,
+        solid: bend,
+        size: 4.8200302726828 + 0.9357021242936023,
+    };
+
+    assert!(
+        how_a_mesh_answered(&shape, 1.46).meshed(),
+        "the finer deflection meshes, which is what makes the coarser one a question"
+    );
+    let coarser = how_a_mesh_answered(&shape, 1.5);
+    assert!(
+        coarser.meshed(),
+        "meshed at 1.46 and then answered {} at 1.5",
+        coarser.how_it_reads()
+    );
+}
+
 /// One curved solid of the kinds [`the_family`] holds, with where it is put.
 #[derive(Clone, Debug)]
 struct ARandomSolid {
