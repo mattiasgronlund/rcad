@@ -44,10 +44,8 @@ left. 2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a — 11.3 moved by §171.7. §
 
 **deferred, with the section that defers it:**
 
-- §43.8 item 8 — `composite_wildcards.awk` counts sites, not uncovered
-  variants. The section says so itself: the hole all seven drifts fell through.
-- §43.8 item 12 — healing option C, imported-corner slop, not built. Nothing
-  closes it.
+- §43.8 items 8 and 12 — `composite_wildcards.awk` counts sites, not uncovered
+  variants; healing option C, imported-corner slop, is not built.
 - §89.7 — the cheap detector for a walk that does not close, deferred under
   §13's no-named-consumer rule. Fine deflection still costs ~2.9s.
 - §52.13 — unscored. The gate that was to score it, §53.7 charge 3, never ran;
@@ -56,6 +54,8 @@ left. 2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a — 11.3 moved by §171.7. §
   construction, no transversal control to fix against. Wants a witness, not an argument.
 - §136.4 — the fuse corner re-check is tighter than `Model::validate`, §75.6's
   forbidden direction. Mattias parked it under §13; its repro fires at 100 m parts.
+- §191.6 — four wrong answers behind `#[ignore]`, each a `src/` lane; §191.3 meets
+  §136.4's direction at ordinary sizes, and §191.4 turns up §124's refusal.
 
 This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
 status` prints it, `check-where-the-work-is` holds its shape, §102 says why here.
