@@ -1824,7 +1824,7 @@ pub fn a_leaning_bar() -> impl Strategy<Value = LeaningBar> {
 /// the middle, and the ellipse the bar cuts reaches at most `radius · sec θ`
 /// from its axis, `θ` being the lean off upright. Both ends are rounded inward,
 /// so the unit of room is at least a unit.
-fn room_for_a_leaning_bar(
+pub fn room_for_a_leaning_bar(
     side: u32,
     radius: u32,
     lean: [i32; 2],
