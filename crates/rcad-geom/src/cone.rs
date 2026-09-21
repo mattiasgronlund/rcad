@@ -10,9 +10,9 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::exact::{difference, square_of_expansion};
-use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::isometry::Isometry;
 use crate::point::{Axis, Point, Vector};
+use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::{Error, Result};
 
 /// The name the cone's sign predicate goes by in provenance records.

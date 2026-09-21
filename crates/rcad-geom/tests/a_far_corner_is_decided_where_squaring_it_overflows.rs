@@ -41,13 +41,17 @@ fn a_corner_on_a_ball_of_radius_1e200_is_undecided_by_a_finite_width() {
     let ball = Sphere::new(Point::origin(), 1e200).unwrap();
     let on_it = [1e200, 0.0, 0.0];
     let room = 16.0 * f64::EPSILON * 1e200;
-    let widened =
-        PredicatePoint::Constructed(on_it.map(|coordinate| Interval::around(coordinate, room).unwrap()));
+    let widened = PredicatePoint::Constructed(
+        on_it.map(|coordinate| Interval::around(coordinate, room).unwrap()),
+    );
     for point in [PredicatePoint::from(on_it), widened] {
         let Decision::Undecidable { enclosure } = ball.side_of(point) else {
             panic!("a corner on the ball is on the skin, so neither side can be certified");
         };
-        assert!(enclosure.is_finite(), "{point:?} came back with {enclosure}");
+        assert!(
+            enclosure.is_finite(),
+            "{point:?} came back with {enclosure}"
+        );
     }
 }
 

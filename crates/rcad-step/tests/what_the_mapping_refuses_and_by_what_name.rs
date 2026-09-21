@@ -539,16 +539,16 @@ fn a_file_whose_every_coordinate_is_zero_is_refused_by_name() {
 /// `docs/decisions.md` §123.5's half of §123: the mapping's own
 /// `ADraftEdgeHasACrossingThatCannotBeFollowed` already turned a crossing
 /// refusal's key into the position an edge was described at
-/// (`a_crossing_the_marcher_gave_up_on_names_its_edge.rs`), and
+/// (`a_crossing_the_marcher_gave_up_on_names_its_edge.rs`, retired by §190 when
+/// no corpus file reached the tangency wall any more), and
 /// `ADraftFaceCouldNotBeMeshed` is the same move for a face the sweep's own
 /// mesher gives up on — `builder::tests::a_face_the_sweep_cannot_mesh_names_its_own_position`
 /// in `rcad-topo` shows the same refusal from a hand-built solid; this shows
 /// it reachable from bytes.
 ///
-/// Same shape as `a_crossing_the_marcher_gave_up_on_names_its_edge.rs`: a
-/// property over whichever corpus files bottom out here, and not a named
-/// file, because a rescue can empty the set the way §112 emptied the
-/// tangency wall's (that file's own note on why it names none).
+/// A property over whichever corpus files bottom out here, and not a named
+/// file, because a rescue can empty the set the way §112 and then §190
+/// emptied the tangency wall's.
 #[test]
 fn a_face_the_mesher_cannot_cut_up_names_its_own_advanced_face() {
     let root = corpus();

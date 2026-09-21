@@ -7,9 +7,9 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::exact::Exact;
-use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::isometry::Isometry;
 use crate::point::{Axis, Point, Vector};
+use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::{Error, Result};
 
 /// The name the torus's sign predicate goes by in provenance records.
@@ -410,8 +410,8 @@ impl Predicate for HowFarFromTheRing {
         let axis_squared = squared_length(along);
 
         without_overflow(largest, |scale| {
-            let from_centre = [0, 1, 2]
-                .map(|axis| point[axis] * scale - Interval::exactly(centre[axis]) * scale);
+            let from_centre =
+                [0, 1, 2].map(|axis| point[axis] * scale - Interval::exactly(centre[axis]) * scale);
             let sideways =
                 cross_product_halves(from_centre, along).map(|(left, right)| left - right);
             let ring_squared = squared(Interval::exactly(ring) * scale);
