@@ -1489,8 +1489,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// solid that are not in the same place — the finest feature the sweep can read
 /// without meshing. That is **a cost bound and not a proof that finer would not
 /// help**: a wall thinner than half its nearest corner pair, between two arcs
-/// whose corners sit far apart, would still be refused, by the coarse mesh's
-/// name. The model's own linear tolerance was the first floor tried, and it is
+/// whose corners sit far apart, would still be refused, as a crossing. The model's own linear tolerance was the first floor tried, and it is
 /// the one with an argument behind it — two pieces of boundary closer than it
 /// are one place — but a solid whose boundary really does cross, which is what
 /// the sweep is for, then walks some thirty halvings down to meshes of millions
@@ -1501,8 +1500,11 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// [`Error::MoreMeshPointsThanASolidWillHold`] and a patch with more triangles
 /// than the triangulator will hold each end it too.
 ///
-/// Whichever ends it, **the coarse mesh's refusal is what is handed back**: the
-/// finer ones said the same thing about the same solid in more points.
+/// Whichever ends it, **the finest mesh's crossing is what is handed back**. A
+/// face that meshed at a finer deflection was not what stopped the solid, so a
+/// coarse refusal can name a face whose only fault was the sweep's own chords.
+/// That happened: on `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` the coarse
+/// mesh named the disc `#223`, which meshes from 0.869 down (§192.2).
 ///
 /// # Not a self-crossing check, before or after
 ///
@@ -1512,7 +1514,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 ///
 /// # Errors
 ///
-/// The coarsest mesh's refusal when no finer mesh clears it, and a finer
+/// The finest mesh's crossing when no finer mesh clears it, and a finer
 /// mesh's refusal when it is about something other than its sides crossing —
 /// which is the solid's next blocker and the one worth naming.
 fn the_coarsest_mesh_whose_sides_do_not_cross(
@@ -1520,15 +1522,15 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Mesh> {
-    let crossed = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
+    let mut finest_crossing = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
         Err(why) if its_sides_cross(&why) => why,
         answer => return answer,
     };
     let Some((low, high)) = view.box_around_it() else {
-        return Err(crossed);
+        return Err(finest_crossing);
     };
     let Some(closest) = how_close_two_corners_come(view) else {
-        return Err(crossed);
+        return Err(finest_crossing);
     };
     let finest = closest / 2.0;
     let (low, high) = (low.coordinates(), high.coordinates());
@@ -1539,7 +1541,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         };
         match view.mesh(less, policy, log) {
             Ok(mesh) => return Ok(mesh),
-            Err(why) if its_sides_cross(&why) => {}
+            Err(why) if its_sides_cross(&why) => finest_crossing = why,
             Err(
                 Error::DeflectionBelowWhatAMeshCanReach { .. }
                 | Error::MoreMeshPointsThanASolidWillHold { .. }
@@ -1552,7 +1554,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         }
         room /= 2.0;
     }
-    Err(crossed)
+    Err(finest_crossing)
 }
 
 /// The distance between the two closest corners of the solid that are not in
@@ -1594,12 +1596,24 @@ fn how_close_two_corners_come(view: SolidView<'_>) -> Option<f64> {
 /// Whether the triangulator refused a face because two pieces of its boundary
 /// met where they should not — the refusals a chord cutting across a hole, or
 /// across another chord, comes back as.
+///
+/// **`CornersCoincide` is not one of them**, because a finer deflection cannot
+/// cure it. Every corner of a loop sits on that loop's own edges, so two of them
+/// on one point of the chart means the wire meets itself there, or the chart
+/// sends two places to one — a seam used twice, two poles rounding onto the
+/// centre. Both are fixed by the solid, not by where the chords fall. The third
+/// way, two chord points of different edges landing on the same double by
+/// accident, needs those edges within a rounding of each other, far below the
+/// halving's floor of half the closest corner pair, so the halving could only
+/// cure it by luck. Measured: of the 1364 finer meshes the whole test suite asked
+/// for, the 886 that refused `CornersCoincide` never gave way to a mesh; and all
+/// 24 sweeps in `rcad-step`'s import tests that reached the floor refuse it
+/// again at 0.005, some forty times finer, only at a later corner (§192.2).
 fn its_sides_cross(why: &Error) -> bool {
     matches!(
         why,
         Error::CannotMeshAFace {
             why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. }
-                | rcad_mesh::CannotTriangulate::CornersCoincide { .. }
                 | rcad_mesh::CannotTriangulate::LoopsTouch { .. },
             ..
         }
