@@ -264,12 +264,14 @@ impl Predicate for HowFarFromTheSkin {
     fn on_intervals(&self) -> Interval {
         let point = self.point.enclosure();
         let centre = self.sphere.centre.coordinates();
-        let squared_gap = |axis: usize| {
-            let gap = point[axis] - Interval::exactly(centre[axis]);
-            gap * gap
-        };
-        let radius = Interval::exactly(self.sphere.radius);
-        squared_gap(0) + squared_gap(1) + squared_gap(2) - radius * radius
+        let largest = largest_magnitude(&point, &[centre, [self.sphere.radius, 0.0, 0.0]]);
+        without_overflow(largest, |scale| {
+            let squared_gap = |axis: usize| {
+                squared(point[axis] * scale - Interval::exactly(centre[axis]) * scale)
+            };
+            let radius = Interval::exactly(self.sphere.radius) * scale;
+            squared_gap(0) + squared_gap(1) + squared_gap(2) - squared(radius)
+        })
     }
 
     fn exactly(&self) -> Option<Decision> {
@@ -309,6 +311,84 @@ impl Predicate for HowFarFromTheSkin {
             other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
         }
     }
+}
+
+/// The largest magnitude among a point's box and some exact lengths: what
+/// [`without_overflow`] sizes its scale from.
+pub(crate) fn largest_magnitude(point: &[Interval; 3], lengths: &[[f64; 3]]) -> f64 {
+    let in_the_box = point
+        .iter()
+        .flat_map(|side| [side.lo().abs(), side.hi().abs()]);
+    let written_down = lengths.iter().flatten().map(|length| length.abs());
+    in_the_box.chain(written_down).fold(0.0, f64::max)
+}
+
+/// A level-2 evaluation of a quadric's side-of-surface expression, run a second
+/// time with every length scaled down when the first run overflowed.
+///
+/// `skin_gap` gets the scale to multiply every *length* by — point, centre or
+/// origin, radii — and nothing else: not a direction, not a slope. Each
+/// quadric's expression is a sum of terms of one and the same degree in the
+/// lengths, so scaling them all by `2⁻ᵏ` scales the result by a positive power
+/// of two and keeps its sign.
+///
+/// The scale is an exact power of two, so multiplying by it is exact until a
+/// length falls below the normal range, and there `inari` rounds outward: the
+/// scaled box still holds the scaled value, so underflow can widen the answer
+/// but never flip its sign. The scale brings the largest magnitude into
+/// `[1, 4)`, so only a length under about `2⁻¹⁰²²` of the largest can
+/// underflow. Where the sign hangs on such a length — the corner
+/// `(2⁶⁰⁰, 2⁻⁵⁰⁰, 0)` on a ball of radius `2⁶⁰⁰` about the origin — the answer
+/// stays undecided, which is what it was before the scaling too.
+///
+/// The second run happens only when the first one straddles zero with an
+/// infinite width. An answer that is decided, or finite, is kept as it was, so
+/// this changes no answer that did not overflow. A ball of radius `1e200` is
+/// what it is for: a corner on it squares to infinity plain, and to a finite
+/// straddle scaled (`docs/decisions.md` §189.1).
+pub(crate) fn without_overflow(largest: f64, skin_gap: impl Fn(Interval) -> Interval) -> Interval {
+    let plain = skin_gap(Interval::exactly(1.0));
+    if plain.width().is_finite() || !plain.contains_zero() {
+        return plain;
+    }
+    match power_of_two_bringing_down(largest) {
+        Some(scale) => skin_gap(Interval::exactly(scale)),
+        None => plain,
+    }
+}
+
+/// `2⁻ᵉ` for the exponent `e` of `largest`, held to `e <= 1022` so the power
+/// stays a normal number: `largest` times it lands in `[1, 4)`. `None` when
+/// `largest` is not a normal number, which cannot have overflowed anything.
+fn power_of_two_bringing_down(largest: f64) -> Option<f64> {
+    if !largest.is_normal() {
+        return None;
+    }
+    let biased_exponent = (largest.to_bits() >> 52) & 0x7ff;
+    let exponent = (biased_exponent as i64 - 1023).min(1022);
+    let power = f64::from_bits(((1023 - exponent) as u64) << 52);
+    assert!(
+        power.is_normal() && (1.0..4.0).contains(&(largest * power)),
+        "2^-{exponent} does not bring {largest} into [1, 4)"
+    );
+    Some(power)
+}
+
+/// `value²`, which unlike `value * value` knows both factors are one number.
+///
+/// Interval multiplication takes its two factors as independent, so a range
+/// that straddles zero squares to `[lo·hi, max(lo², hi²)]` — reaching below
+/// zero, where no square is. For a huge range that lower end is `-inf`, and one
+/// such term turns a whole sum of squares into an enclosure of everything:
+/// fuse seed `3482a32e` half 0, a corner at `x = 4.7e226` outside a ball of
+/// radius 5, came back undecided for exactly that (`docs/decisions.md` §189.1).
+pub(crate) fn squared(value: Interval) -> Interval {
+    if !value.contains_zero() {
+        return value * value;
+    }
+    let reach = Interval::exactly(value.lo().abs().max(value.hi()));
+    Interval::new(0.0, (reach * reach).hi())
+        .expect("a square's upper end is a number at or above zero")
 }
 
 /// Level 1's forward error bound, as a multiple of the permanent.

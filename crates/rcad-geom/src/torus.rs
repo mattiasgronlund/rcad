@@ -7,6 +7,7 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::exact::Exact;
+use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::isometry::Isometry;
 use crate::point::{Axis, Point, Vector};
 use crate::{Error, Result};
@@ -400,16 +401,25 @@ impl Predicate for HowFarFromTheRing {
         let centre = self.torus.axis.origin().coordinates();
         let direction = self.torus.axis.direction().components();
 
-        let from_centre = [0, 1, 2].map(|axis| point[axis] - Interval::exactly(centre[axis]));
+        let ring = self.torus.ring_radius;
+        let tube = self.torus.tube_radius;
+        let largest = largest_magnitude(&point, &[centre, [ring, tube, 0.0]]);
         let along = direction.map(Interval::exactly);
-        let sideways = cross_product_halves(from_centre, along).map(|(left, right)| left - right);
+        let squared_length =
+            |value: [Interval; 3]| squared(value[0]) + squared(value[1]) + squared(value[2]);
+        let axis_squared = squared_length(along);
 
-        let squared =
-            |value: [Interval; 3]| value[0] * value[0] + value[1] * value[1] + value[2] * value[2];
-        let ring = Interval::exactly(self.torus.ring_radius);
-        let tube = Interval::exactly(self.torus.tube_radius);
-        let bulge = squared(from_centre) + ring * ring - tube * tube;
-        squared(along) * bulge * bulge - Interval::exactly(4.0) * ring * ring * squared(sideways)
+        without_overflow(largest, |scale| {
+            let from_centre = [0, 1, 2]
+                .map(|axis| point[axis] * scale - Interval::exactly(centre[axis]) * scale);
+            let sideways =
+                cross_product_halves(from_centre, along).map(|(left, right)| left - right);
+            let ring_squared = squared(Interval::exactly(ring) * scale);
+            let tube_squared = squared(Interval::exactly(tube) * scale);
+            let bulge = squared_length(from_centre) + ring_squared - tube_squared;
+            axis_squared * squared(bulge)
+                - Interval::exactly(4.0) * ring_squared * squared_length(sideways)
+        })
     }
 
     fn exactly(&self) -> Option<Decision> {

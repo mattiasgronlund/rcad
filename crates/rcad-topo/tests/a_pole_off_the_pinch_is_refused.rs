@@ -17,8 +17,9 @@
 //!
 //! §188.2 names fuse seed `3482a32e…`, whose first half the mesher used to
 //! refuse after the fact. The sweep refuses it now, though for its *other*
-//! corner: [`the_seed_that_prompted_this_is_refused_by_the_sweep`] says which,
-//! and why the corner at the ball's centre is still inside the room.
+//! corner, and as a corner off its ball rather than a pole off its pinch:
+//! [`the_seed_that_prompted_this_is_refused_by_the_sweep`] says which, and why
+//! the corner at the ball's centre is still inside the room.
 
 #![forbid(unsafe_code)]
 
@@ -139,23 +140,24 @@ fn the_two_models_in(bytes: &[u8]) -> [Option<Model>; 2] {
     [first, second].map(|half| postcard::from_bytes::<Model>(half).ok())
 }
 
-/// §188.2's seed: refused by the sweep now, before the mesher folds it.
+/// §188.2's seed: refused by the sweep now, before the mesher folds it — and
+/// refused as a corner off its ball, before the pole check is asked.
 ///
 /// Its first half is one ball of radius 5 whose wire takes a pole step at each
-/// of its two corners. **Neither is at a pole**, and the one this check names
-/// is not the one §188.2 described. One corner stands by the ball's centre,
-/// but the other stands at `x = 4.7e226`, and the room a corner gets is
-/// measured against the largest coordinate in the model — about `1.7e212`
-/// here. So the corner by the centre is inside the room of a pole, and of the
-/// ball, and is kept; the corner at `4.7e226` is that far from any pinch, and
-/// comparing the ends of two boxes needs no arithmetic that can overflow, so
-/// it is refused.
+/// of its two corners. **Neither is at a pole.** One corner stands by the
+/// ball's centre, but the other stands at `x = 4.7e226`, and the room a corner
+/// gets is measured against the largest coordinate in the model — about
+/// `1.7e212` here. So the corner by the centre is inside the room of a pole,
+/// and of the ball, and is kept.
 ///
-/// The older "a corner is on its face" check kept that corner, and the last
-/// assertion below is why. Exactly, the corner is outside the ball; widened
-/// into its room it comes back undecided, with an enclosure of `inf` because
-/// squaring the box overflows — and an undecided box is a corner nobody has
-/// shown to be off (`not_provably_off` in `validate.rs`).
+/// The corner at `4.7e226` used to get through "a corner is on its face",
+/// because squaring its widened box went through `gap * gap`: the `y` and `z`
+/// sides straddle zero with a reach of `1.7e212`, so interval multiplication
+/// gave each square a lower end of `-inf`, and the sum came back undecided
+/// with an enclosure of `inf`. A square is never below zero, and squared as a
+/// square the sum starts at `f64::MAX` and is decided outside the ball
+/// (`docs/decisions.md` §189.1). The pole check, which caught it before, is
+/// now never reached for it.
 #[test]
 fn the_seed_that_prompted_this_is_refused_by_the_sweep() {
     let bytes = std::fs::read(the_fuse_corpus().join("3482a32e1c9186370acb804a509b12d5cbaf20a7"))
@@ -166,11 +168,22 @@ fn the_seed_that_prompted_this_is_refused_by_the_sweep() {
     let refusal = first
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect_err("a ball whose poles are not at its pinches");
-    let Error::Invalid(Invalid::APoleStandsWhereTheSurfaceDoesNotPinch { at, pinch }) = refusal
-    else {
-        panic!("the seed's first half came back {refusal:?}");
-    };
-    assert_eq!(at.coordinates()[0], 4.737909217226285e226, "{at:?}");
+    assert!(
+        matches!(refusal, Error::Invalid(Invalid::VertexOffItsFaceSurface)),
+        "the seed's first half came back {refusal:?}"
+    );
+    let at = first
+        .vertices()
+        .map(|corner| corner.point())
+        .max_by(|one, other| {
+            one.largest_coordinate_magnitude()
+                .total_cmp(&other.largest_coordinate_magnitude())
+        })
+        .expect("the seed's ball has corners");
+    assert_eq!(
+        at.coordinates(),
+        [4.737909217226285e226, 1.727233711018889e-77, 5.0]
+    );
     let ball =
         Sphere::new(Point::new(1.113623391098575e-308, 0.0, 0.0), RADIUS).expect("the seed's ball");
     let room = 16.0 * f64::EPSILON * at.coordinates()[0];
@@ -183,27 +196,26 @@ fn the_seed_that_prompted_this_is_refused_by_the_sweep() {
     );
     let in_its_room = rcad_predicates::SideOfSurface::side_of(&ball, widened);
     assert_eq!(exactly, rcad_predicates::Decision::Pos);
-    assert!(
-        matches!(in_its_room, rcad_predicates::Decision::Undecidable { .. }),
-        "the corner widened into its room came back {in_its_room:?}"
-    );
     assert_eq!(
-        pinch.map(|pinch| pinch.coordinates()[2]),
-        Some(5.0),
-        "the north pole is the nearer: {pinch:?}"
+        in_its_room,
+        rcad_predicates::Decision::Pos,
+        "the corner widened into its room"
     );
 }
 
 /// Which models in the fuse fuzzer's corpus this check refuses, and the one of
 /// them nothing refused before.
 ///
-/// **132 halves are refused for a pole off its pinch, and 131 of them were
-/// refused before this check existed** — measured by sweeping the same 132 on
-/// the commit before it (`f792e20c`), where exactly one validated. The replay in
-/// `every_model_the_fuse_fuzzer_kept_is_fused_again.rs` agrees: `validated`
-/// went 682 → 681. The 131 are fuzz models with corners out past `1e10`, which
-/// something later in the sweep turned away; this check is simply asked first
-/// now.
+/// **One half of 926 is refused for a pole off its pinch.** It was 132 when
+/// the check landed, and 131 of those were refused before it existed —
+/// fuzz models with corners out past `1e10`, which something later in the
+/// sweep turned away. Since the quadric predicates square an interval as a
+/// square and scale down an evaluation that overflowed (`docs/decisions.md`
+/// §189.1), those 131 are refused one check earlier, as
+/// `VertexOffItsFaceSurface`: their far corners are now decided off the ball
+/// rather than undecided. Every one of the 926 verdicts was compared before
+/// and after that change, and those 131 are the only ones that moved;
+/// `validated` stays at 681.
 ///
 /// **The one is `e8fe8935…` half 0, and it is a true refusal.** One ball of
 /// radius 5 whose largest coordinate is 5, with a pole step at
@@ -246,7 +258,7 @@ fn the_fuse_corpus_holds_one_pole_off_its_pinch_that_nothing_refused_before() {
         decoded >= 680,
         "only {decoded} halves decoded, so the corpus moved"
     );
-    assert_eq!(refused, 132, "halves refused for a pole off its pinch");
+    assert_eq!(refused, 1, "halves refused for a pole off its pinch");
     assert_eq!(
         at_an_ordinary_size,
         ["e8fe8935c39e5c8e588016b74b233db6a93282b7 half 0"],
