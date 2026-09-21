@@ -16,7 +16,8 @@
 //! - the same rim written already cut in two at the south pole: imports and
 //!   measures half a ball;
 //! - a rim with its one corner on the chart's equator, which says which way it
-//!   runs and passes both poles in the middle of the edge.
+//!   runs and passes both poles in the middle of the edge: imports and
+//!   measures half a ball.
 
 mod written_by_hand;
 
@@ -48,17 +49,16 @@ fn a_rim_cut_in_two_at_the_far_pole_imports_and_measures_half_a_ball() {
 }
 
 /// A rim whose one corner is off the poles passes both in the middle of its
-/// one edge. When a point walked along the edge lands on a pole, the walk
-/// opens that pole's side the way it opens a corner's, so the dome's wire lies
-/// flat and the import's own mesh closes. Before, the walk took each pole the
-/// short way round, and at exactly half a turn that came back a whole turn
-/// off: refused by `ACurvedFaceGoesRightRoundWithNoSeam`.
-///
-/// Only the import is asserted. The finer walk `measure` asks for steps past
-/// both poles without landing on either, which this does not reach (§193.3).
+/// one edge. The edge's walk now holds each pole as one of its points, and
+/// the wire walk opens that pole's side the way it opens a corner's. Before,
+/// the walk took each pole the short way round, and at exactly half a turn
+/// that came back a whole turn off: refused by
+/// `ACurvedFaceGoesRightRoundWithNoSeam`. `a_rim_through_both_poles_measures.rs`
+/// measures the same half ball at four deflections (§194).
 #[test]
-fn a_rim_that_passes_both_poles_in_the_middle_of_its_edge_imports() {
-    imports(&a_half_ball_with_its_corner_off_the_poles(RADIUS));
+fn a_rim_that_passes_both_poles_in_the_middle_of_its_edge_imports_and_measures_half_a_ball() {
+    let import = imports(&a_half_ball_with_its_corner_off_the_poles(RADIUS));
+    measures_half_a_ball(&import);
 }
 
 fn imports(text: &str) -> Import {
