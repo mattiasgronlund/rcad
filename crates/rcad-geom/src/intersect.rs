@@ -41,6 +41,7 @@
 
 use core::cmp::Ordering;
 
+use rcad_predicates::expansion::two_sum;
 use rcad_predicates::{
     Decision, Filtered, Interval, Measures, Point as PredicatePoint, Policy, Predicate,
     ProvenanceLog, Record, decide, resolve_under_policy,
@@ -1058,6 +1059,22 @@ fn where_two_pipes_side_by_side_cross(
 /// proves is refused exactly as before. Today's half-space is the first tried,
 /// so a pair named before §184 is named by the same plane.
 ///
+/// # Why there is a second round, and why it only runs after a refusal
+///
+/// Far out and off the axes, three normals and three anchors are not enough.
+/// §188.4 found pairs where **no** `f64` offset along any of the three normals
+/// separates the two lines: the one below them and the one above them are
+/// neighbours. A plane between them still exists, facing one of the three plus
+/// another times a power of two, where that sum rounds nothing and so stays
+/// exactly square. Its one working offset is the one nearest where the true
+/// middle reads, and no anchor need round to it, so the offsets are read off
+/// the exact middle instead ([`offsets_around_the_middle`]).
+///
+/// That costs a few dozen more tries, so it waits until everything above has
+/// refused. `where_two_leaning_pipes_far_out_cross.rs` is the measurement: the
+/// six askings §188.4 names are answered, and the sweep's 8000 answer with
+/// none wrong.
+///
 /// # Why `X` is not `√(r₁² − across²)`
 ///
 /// It is, as arithmetic, and that subtraction is where the row used to give up on
@@ -1160,6 +1177,17 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
             }
         }
     }
+    let combined = normals_made_of_two_square_ones(along, asked_for);
+    for normal in normals.iter().chain(&combined) {
+        for offset in offsets_around_the_middle(*normal, one, other) {
+            let Ok(picker) = HalfSpace::new(*normal, offset) else {
+                continue;
+            };
+            if let Ok(two_runs) = tell_apart(picker) {
+                return Ok(two_runs);
+            }
+        }
+    }
     first_try
 }
 
@@ -1202,6 +1230,106 @@ fn picking_normals_to_try(
     );
     Ok(normals)
 }
+
+/// Normals exactly square to `along` that are not among the three
+/// [`normals_exactly_square_to`] builds: one of the three plus another times
+/// `±2ᵖ` for `p` in `−80..=80`, the family §188.4 searched, each turned to lean
+/// the way `asked_for` does.
+///
+/// **Only a sum that rounded nothing is kept.** Two exactly square vectors add
+/// up to one, so where no component rounded the result is square by algebra;
+/// where one did it is square only by accident. That is checked first because
+/// it is a few flops a component, and of the 966 candidates the three pairs
+/// §188.4 names keep between 11 and 26. [`Exact::dot_of`] then confirms each
+/// survivor, and [`two_lines_told_apart`] checks it again before it is used.
+///
+/// **Why the turn matters.** `two_lines_told_apart` asks for the first line in
+/// front of the plane and the second behind it, and which line is first follows
+/// `asked_for`. Unturned, one of §188.4's pairs was separated by the right
+/// plane facing the wrong way and refused.
+fn normals_made_of_two_square_ones(along: Vector, asked_for: Vector) -> Vec<Vector> {
+    let three = normals_exactly_square_to(along);
+    let mut found = Vec::new();
+    for (first, second) in [(0, 1), (0, 2), (1, 2)] {
+        let [first, second] = [three[first], three[second]];
+        for power in -80..=80 {
+            for sign in [1.0, -1.0] {
+                let scaled = second * (sign * multiplied_by_a_power_of_two(1.0, power));
+                let normal = first + scaled;
+                let rounded_nothing = (0..3).all(|axis| {
+                    two_sum(first.components()[axis], scaled.components()[axis]).1 == 0.0
+                });
+                if !rounded_nothing || normal == Vector::zero() {
+                    continue;
+                }
+                let square = Exact::dot_of(normal.components(), along.components())
+                    .is_some_and(|reading| reading.sign() == Decision::Zero);
+                if square {
+                    found.push(if normal.dot(asked_for) < 0.0 {
+                        -normal
+                    } else {
+                        normal
+                    });
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The `f64` offsets that could put a plane facing `normal` between the two
+/// lines: every one inside the enclosure of where the true middle reads,
+/// nearest the centre first.
+///
+/// **Why nothing outside the enclosure.** The offsets that separate the two
+/// lines are the ones strictly between the two readings, and the true middle
+/// reading is halfway between those. If any `f64` is between them, the `f64`
+/// nearest the middle is, and that one lies inside any enclosure of the middle
+/// whose ends are `f64`s. §188.4's scratch copy also tried two either side;
+/// without them the far-pipe sweep still answers all 8000.
+///
+/// Empty where the middle cannot be read exactly, or where its enclosure holds
+/// more than [`WIDEST_WINDOW_AROUND_THE_MIDDLE`] offsets. Either leaves the pair
+/// refused as it was, never answered wrongly: every offset handed back is still
+/// proved by [`two_lines_told_apart`].
+fn offsets_around_the_middle(
+    normal: Vector,
+    one: &Cylinder,
+    other: &Cylinder,
+) -> SmallVec<[f64; WIDEST_WINDOW_AROUND_THE_MIDDLE]> {
+    let Ok(through_the_origin) = HalfSpace::new(normal, 0.0) else {
+        return SmallVec::new();
+    };
+    let Some((top, bottom)) = the_middle_exactly(
+        through_the_origin,
+        one.axis().origin().coordinates(),
+        other.axis().origin().coordinates(),
+        one.axis().direction().components(),
+        one.radius(),
+        other.radius(),
+    ) else {
+        return SmallVec::new();
+    };
+    let middle = quotient_or_everything(top.enclosure(), bottom.enclosure());
+    let mut offsets: SmallVec<[f64; WIDEST_WINDOW_AROUND_THE_MIDDLE]> = SmallVec::new();
+    let mut offset = middle.lo();
+    while offset <= middle.hi() {
+        if offsets.len() == WIDEST_WINDOW_AROUND_THE_MIDDLE {
+            return SmallVec::new();
+        }
+        offsets.push(offset);
+        offset = offset.next_up();
+    }
+    let centre = middle.lo() / 2.0 + middle.hi() / 2.0;
+    offsets.sort_by(|a, b| (a - centre).abs().total_cmp(&(b - centre).abs()));
+    offsets
+}
+
+/// How many `f64` offsets [`offsets_around_the_middle`] walks before giving the
+/// normal up. The enclosure is one quotient of two exact sums, and over the
+/// far-pipe sweep it held 4 to 6; a window this much wider only comes from a
+/// bottom reaching zero, where the quotient is everything.
+const WIDEST_WINDOW_AROUND_THE_MIDDLE: usize = 16;
 
 /// The step from one pipe's axis across to the other's, square to the shared
 /// direction.
