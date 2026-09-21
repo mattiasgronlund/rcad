@@ -690,12 +690,23 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// necks that narrow to about that. Making both sides of the comparison degree
 /// two in the direction makes a pipe `r` wide however its direction rounded, and
 /// the pair is the family again (`docs/decisions.md` §118.10).
+///
+/// **The touching-circle lane then moved it from 114 to 140**, with nothing
+/// dropping out: 25 relays and `Fuseholder_Cylinder-5x20mm_Stelvio-Kontek_PTF78_Horizontal_Open`.
+/// Where a ball meets another curved face along a circle the file names, the
+/// reader now checks that circle lies on both faces and names the run by the
+/// circle's plane, and the walk crosses the plane with the ball instead of
+/// following two surfaces that only touch (`docs/decisions.md` §189.3). Which
+/// edge stopped each of the 26 before is not measured here;
+/// `Relay_SPST_SANYOU_SRD_Series_Form_A` is the one the equal-pipes paragraph
+/// above named as stopped by a pipe tangent to a ball at a pin's rounded end.
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
     "Fuse_0805_2012Metric.step",
     "Fuse_1206_3216Metric.step",
     "Fuse_1210_3225Metric.step",
+    "Fuseholder_Cylinder-5x20mm_Stelvio-Kontek_PTF78_Horizontal_Open.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z1.6mm.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z4.9mm.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z8.2mm.step",
@@ -761,21 +772,46 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "PinHeader_2x34_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x36_P2.54mm_Vertical.step",
     "PinHeader_2x39_P2.54mm_Horizontal.step",
+    "Relay_3PST_COTO_3650.step",
+    "Relay_3PST_COTO_3660.step",
+    "Relay_DPDT_FCL_FTR-B4C.step",
     "Relay_DPDT_Finder_30.22.step",
     "Relay_DPDT_Finder_40.52.step",
+    "Relay_DPDT_Hongfa_HF115F-2Z-x4.step",
+    "Relay_DPDT_Kemet_EC2_NJ.step",
+    "Relay_DPDT_Kemet_EC2_NJ_DoubleCoil.step",
+    "Relay_DPDT_Kemet_EC2_NU.step",
+    "Relay_DPDT_Kemet_EC2_NU_DoubleCoil.step",
+    "Relay_DPDT_Kemet_UA2-NE_NU_NJ.step",
+    "Relay_DPDT_Omron_G2RL.step",
     "Relay_DPDT_Omron_G5V-2.step",
+    "Relay_DPDT_Omron_G6A.step",
+    "Relay_DPDT_Omron_G6AK.step",
     "Relay_DPDT_Omron_G6H-2.step",
     "Relay_DPDT_Omron_G6K-2P-Y.step",
     "Relay_DPDT_Omron_G6K-2P.step",
     "Relay_DPDT_Panasonic_JW2.step",
+    "Relay_DPDT_Schrack-RT2-FormC-Dual-Coil_RM5mm.step",
+    "Relay_DPDT_Schrack-RT2-FormC_RM5mm.step",
+    "Relay_DPST_Schrack-RT2-FormA_RM5mm.step",
+    "Relay_SPDT_CUI_SR5.step",
     "Relay_SPDT_Finder_32.21-x000.step",
+    "Relay_SPDT_Finder_36.11.step",
     "Relay_SPDT_Finder_40.31.step",
     "Relay_SPDT_Finder_40.51.step",
     "Relay_SPDT_HJR-4102.step",
+    "Relay_SPDT_Omron-G5LE-1.step",
     "Relay_SPDT_Omron_G6E.step",
     "Relay_SPDT_Omron_G6EK.step",
+    "Relay_SPDT_SANYOU_SRD_Series_Form_C.step",
+    "Relay_SPDT_Schrack-RT1-FormC_RM5mm.step",
     "Relay_SPDT_StandexMeder_SIL_Form1C.step",
     "Relay_SPST_Finder_32.21-x300.step",
+    "Relay_SPST_Omron_G5NB.step",
+    "Relay_SPST_SANYOU_SRD_Series_Form_A.step",
+    "Relay_SPST_SANYOU_SRD_Series_Form_B.step",
+    "Relay_SPST_Schrack-RT1-16A-FormA_RM5mm.step",
+    "Relay_SPST_Schrack-RT1-FormA_RM5mm.step",
     "Relay_SPST_StandexMeder_SIL_Form1A.step",
     "Relay_SPST_StandexMeder_SIL_Form1B.step",
     "Relay_StandexMeder_DIP_HighProfile.step",

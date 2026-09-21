@@ -10,7 +10,8 @@
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, Vector,
+    Axis, Cylinder, EdgeRun, HalfSpace, NEAREST_F64_POINT_ROUNDOFF, Orientation, Picker, Plane,
+    Point, Sphere, Surface, Vector,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{
@@ -124,6 +125,9 @@ struct Walk {
     builder: SolidBuilder,
     vertices: BTreeMap<EntityId, DraftVertex>,
     edges: BTreeMap<EntityId, DraftEdge>,
+    /// The closed circles described as two halves — see
+    /// [`Walk::describe_the_halves_of_a_circle`].
+    halves: BTreeMap<EntityId, [DraftEdge; 2]>,
     vertex_names: Vec<EntityId>,
     edge_names: Vec<EntityId>,
     coedge_names: Vec<EntityId>,
@@ -146,6 +150,7 @@ impl Walk {
             builder: SolidBuilder::new(),
             vertices: BTreeMap::new(),
             edges: BTreeMap::new(),
+            halves: BTreeMap::new(),
             vertex_names: Vec::new(),
             edge_names: Vec::new(),
             coedge_names: Vec::new(),
@@ -540,11 +545,8 @@ impl Walk {
         }
         let mut steps = Vec::with_capacity(oriented.len());
         for use_of_an_edge in oriented {
-            steps.push(DraftStep::Along(self.describe_the_coedge(
-                reading,
-                use_of_an_edge,
-                walk_it_backwards,
-            )?));
+            let coedges = self.describe_the_coedge(reading, use_of_an_edge, walk_it_backwards)?;
+            steps.extend(coedges.into_iter().map(DraftStep::Along));
         }
         let wire = self
             .builder
@@ -564,14 +566,37 @@ impl Walk {
     /// — the way the curved surface either side of the edge winds — which the
     /// file never wrote down. [`Walk::which_way_round_a_closed_edge_is_stored`]
     /// works it out; `docs/decisions.md` §115.
+    ///
+    /// **A closed circle between a ball and another curved face is two uses of
+    /// two halves**, in the order the loop meets them — see
+    /// [`Walk::describe_the_halves_of_a_circle`]. Each half has two corners, so
+    /// the file's own flag says which way it is walked, as it does for any edge
+    /// with two.
     fn describe_the_coedge(
         &mut self,
         reading: &Reading<'_>,
         oriented: EntityId,
         walk_it_backwards: bool,
-    ) -> Result<DraftCoedge, Refusal> {
+    ) -> Result<Vec<DraftCoedge>, Refusal> {
         let edge_curve = reading.reference_at(oriented, "ORIENTED_EDGE", 3)?;
         let along_the_loop = reading.flag_at(oriented, "ORIENTED_EDGE", 4)? != walk_it_backwards;
+        if let Some([there, back]) = self.describe_the_halves_of_a_circle(reading, edge_curve)? {
+            let uses = if along_the_loop {
+                [(there, Orientation::Forward), (back, Orientation::Forward)]
+            } else {
+                [(back, Orientation::Reversed), (there, Orientation::Reversed)]
+            };
+            let mut coedges = Vec::with_capacity(uses.len());
+            for (half, way) in uses {
+                let coedge = self
+                    .builder
+                    .add_coedge(half, way)
+                    .map_err(|why| self.refused(oriented, why))?;
+                self.coedge_names.push(oriented);
+                coedges.push(coedge);
+            }
+            return Ok(coedges);
+        }
         let edge = self.describe_the_edge(reading, edge_curve)?;
         let forwards = self
             .which_way_round_a_closed_edge_is_stored(reading, edge_curve, along_the_loop)?
@@ -588,7 +613,99 @@ impl Walk {
             )
             .map_err(|why| self.refused(oriented, why))?;
         self.coedge_names.push(oriented);
-        Ok(coedge)
+        Ok(vec![coedge])
+    }
+
+    /// The two halves a closed circle between a ball and another curved face
+    /// is described as, or `None` for every other edge.
+    ///
+    /// **A closed edge has no room in the model for the surface that names its
+    /// circle.** [`EdgeRun::RightRoundWhereItsFacesCross`] carries nothing, and
+    /// `rcad-topo` reads that kind and no other as closed. So the run is named
+    /// the way an arc already is — by the circle's plane and a half-space
+    /// standing on its chord — and a circle with one corner has no chord. The
+    /// second corner is put a quarter turn on from the first, `c + w × (A − c)`,
+    /// which lies on the circle's plane and on every face the circle was
+    /// checked against to within the rounding of one cross product. The two
+    /// pieces run the way the edge does, `A` to the second corner and back.
+    ///
+    /// **Why a quarter turn and not the opposite point is measured, not
+    /// argued.** On `kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` the
+    /// opposite point lands on the dome's longitude `π`, and the mesher refuses
+    /// the dome by `AWireWillNotLieFlatOnItsFace`; a quarter turn gets the dome
+    /// through. A quarter turn the other way is refused again, and the seven
+    /// sibling files are refused on the dome whichever quarter is taken, so
+    /// the mesher's wire walk depends on where this corner lands — that is
+    /// `rcad-topo`'s to fix (§189.3).
+    ///
+    /// This is the one place the reader describes an edge the file wrote as
+    /// one as two. It is limited to the circle [`Walk::a_circle_every_face_holds`]
+    /// passes, where a ball and a curved face only touch and nothing but the
+    /// file's circle draws where (`docs/decisions.md` §189.3).
+    fn describe_the_halves_of_a_circle(
+        &mut self,
+        reading: &Reading<'_>,
+        edge_curve: EntityId,
+    ) -> Result<Option<[DraftEdge; 2]>, Refusal> {
+        if let Some(&halves) = self.halves.get(&edge_curve) {
+            return Ok(Some(halves));
+        }
+        if !an_edge_with_one_corner(reading, edge_curve) {
+            return Ok(None);
+        }
+        let a_ball_and_a_curved_face = self
+            .surfaces_along_each_edge
+            .get(&edge_curve)
+            .is_some_and(|faces| a_ball_where_curved_faces_meet(faces).is_some());
+        if !a_ball_and_a_curved_face {
+            return Ok(None);
+        }
+        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
+        let Some(held) = reading.file().instance(curve) else {
+            return Ok(None);
+        };
+        if held.parts()[0].keyword() != "CIRCLE" {
+            return Ok(None);
+        }
+        let position = reading.reference_at(curve, "CIRCLE", 1)?;
+        let place = reading.placement_at(curve, position)?;
+        if !self.a_circle_every_face_holds(reading, edge_curve, curve, "CIRCLE", &place)? {
+            return Ok(None);
+        }
+        let corner = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
+        let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
+        let near = self.point_of_vertex(reading, corner)?;
+        let Ok(axis) = place.axis.normalized() else {
+            return Ok(None);
+        };
+        let far = place.origin + axis.cross(near - place.origin);
+        let and = Surface::Plane(Plane::from_point_and_normal(place.origin, place.axis).map_err(
+            |why| Refusal::TheGeometryIsNotAWorkingShape {
+                id: edge_curve,
+                why,
+            },
+        )?);
+        let there = self.the_arc_between(edge_curve, &place, and, [near, far], along_the_curve)?;
+        let back = self.the_arc_between(edge_curve, &place, and, [far, near], along_the_curve)?;
+
+        let near = self.describe_the_vertex(reading, corner)?;
+        let far = self
+            .builder
+            .add_vertex(far)
+            .map_err(|why| self.refused(edge_curve, why))?;
+        self.vertex_names.push(edge_curve);
+        let mut halves = Vec::with_capacity(2);
+        for (from, to, run) in [(near, far, there), (far, near, back)] {
+            let half = self
+                .builder
+                .add_edge(from, to, run)
+                .map_err(|why| self.refused(edge_curve, why))?;
+            self.edge_names.push(edge_curve);
+            halves.push(half);
+        }
+        let halves = [halves[0], halves[1]];
+        self.halves.insert(edge_curve, halves);
+        Ok(Some(halves))
     }
 
     /// Which way round a closed edge this use of it goes, or `None` for an edge
@@ -822,8 +939,17 @@ impl Walk {
     /// consumer to make it for (§13).
     ///
     /// Where a curved face is along the edge the plane stays too: the walk
-    /// reads the faces there and never this, and a cylinder would change what a
-    /// sphere's seam names from a great circle to a tangency.
+    /// reads the faces there, and a cylinder would change what a sphere's seam
+    /// names from a great circle to a tangency.
+    ///
+    /// **Between a ball and another curved face the walk reads the plane**, so
+    /// the plane is written only where the file's circle has been checked to
+    /// lie on every face along it — [`Walk::a_circle_every_face_holds`]. Such a
+    /// circle is on the ball and on the plane, and a plane crosses a ball in
+    /// one circle, so `rcad_geom::walk` draws it from the pair rather than
+    /// following two surfaces that only touch (`docs/decisions.md` §189.3).
+    /// Where the check fails the run names the ball instead, which is one of
+    /// its own two faces, and the walk reads the faces exactly as it did before.
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -836,10 +962,14 @@ impl Walk {
             id: edge_curve,
             why,
         };
-        let only_flat_faces_along_it = self
-            .surfaces_along_each_edge
-            .get(&edge_curve)
-            .is_some_and(|faces| faces.iter().all(|face| face.as_plane().is_some()));
+        let faces_along_it = self.surfaces_along_each_edge.get(&edge_curve);
+        if let Some(ball) = faces_along_it.and_then(|faces| a_ball_where_curved_faces_meet(faces))
+            && !self.a_circle_every_face_holds(reading, edge_curve, curve, keyword, place)?
+        {
+            return Ok(Surface::Sphere(ball));
+        }
+        let only_flat_faces_along_it =
+            faces_along_it.is_some_and(|faces| faces.iter().all(|face| face.as_plane().is_some()));
         if keyword == "CIRCLE" && only_flat_faces_along_it {
             let radius = reading.real_at(curve, "CIRCLE", 2)?;
             let round = Axis::new(place.origin, place.axis)
@@ -850,6 +980,44 @@ impl Walk {
         let flat =
             Plane::from_point_and_normal(place.origin, place.axis).map_err(not_a_working_shape)?;
         Ok(Surface::Plane(flat))
+    }
+
+    /// Whether the file's `CIRCLE` under this edge lies on the surface of every
+    /// face along it, to within what writing the numbers down costs.
+    ///
+    /// **This is what lets the reader name a run by the file's circle rather
+    /// than by its faces, and the file's word is not taken for it.** Each face's
+    /// surface is asked in closed form, against the circle's centre `c`, unit
+    /// axis `w` and radius `r` — see [`a_surface_holds_the_circle`] for the two
+    /// bounds. A surface this does not have a bound for holds nothing, so the
+    /// run keeps being named by its faces there.
+    ///
+    /// The allowance is the one `Model::validate` gives a corner of a curved
+    /// face: sixteen times the rounding of writing the largest number involved
+    /// down. It is not a modelling tolerance. On the KiCad LED body it passes a
+    /// dome whose centre is the circle's own and a body whose axis the centre
+    /// misses by `2.1e-16`, and it refuses a circle a thousandth of a unit off.
+    fn a_circle_every_face_holds(
+        &self,
+        reading: &Reading<'_>,
+        edge_curve: EntityId,
+        curve: EntityId,
+        keyword: &'static str,
+        place: &crate::geometry::Placement,
+    ) -> Result<bool, Refusal> {
+        if keyword != "CIRCLE" {
+            return Ok(false);
+        }
+        let Some(faces) = self.surfaces_along_each_edge.get(&edge_curve) else {
+            return Ok(false);
+        };
+        let radius = reading.real_at(curve, "CIRCLE", 2)?;
+        let Ok(axis) = place.axis.normalized() else {
+            return Ok(false);
+        };
+        Ok(faces
+            .iter()
+            .all(|face| a_surface_holds_the_circle(face, place.origin, axis, radius)))
     }
 
     /// The arc of a circle or an ellipse that runs from one corner to the other.
@@ -1351,18 +1519,21 @@ impl ProbeWalk {
         if walk_it_backwards {
             oriented.reverse();
         }
-        let edge_count = oriented.len();
-        let mut steps = Vec::with_capacity(edge_count);
+        let mut steps = Vec::with_capacity(oriented.len());
+        let mut every_edge_described = true;
         for use_of_an_edge in oriented {
             match self
                 .walk
                 .describe_the_coedge(reading, use_of_an_edge, walk_it_backwards)
             {
-                Ok(coedge) => steps.push(DraftStep::Along(coedge)),
-                Err(why) => self.refusals.push(why),
+                Ok(coedges) => steps.extend(coedges.into_iter().map(DraftStep::Along)),
+                Err(why) => {
+                    self.refusals.push(why);
+                    every_edge_described = false;
+                }
             }
         }
-        if steps.len() < edge_count {
+        if !every_edge_described {
             return None;
         }
         match self.walk.builder.add_wire(&steps) {
@@ -1448,6 +1619,82 @@ fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
         .min_by(Surface::how_it_sorts_against)
 }
 
+/// The ball among the faces along an edge, when every face along it is curved
+/// and they are not all one surface.
+///
+/// One surface on both sides is a seam, and a seam's run already names its
+/// second surface for the walk to read.
+fn a_ball_where_curved_faces_meet(faces: &[Surface]) -> Option<Sphere> {
+    let all_curved = faces.len() >= 2 && faces.iter().all(|face| face.as_plane().is_none());
+    let one_surface = faces.windows(2).all(|pair| pair[0] == pair[1]);
+    if !all_curved || one_surface {
+        return None;
+    }
+    faces.iter().find_map(|face| {
+        if let Surface::Sphere(ball) = face {
+            Some(*ball)
+        } else {
+            None
+        }
+    })
+}
+
+/// Whether every point of the circle with centre `centre`, unit axis `axis`
+/// and radius `radius` is within the allowance of `surface`.
+///
+/// Write `c`, `w`, `r` for the circle and `e` for a unit direction square to
+/// `w`, so a point of it is `X = c + r·e`.
+///
+/// - **A ball** of centre `s` and radius `ρ`. With `d = c − s` split into
+///   `h = d·w` along the axis and `q = |d − h·w|` across it,
+///   `|X − s|² = h² + |d − h·w + r·e|²`, and the second term runs from
+///   `(r − q)²` to `(r + q)²` as `e` goes round. Both ends are held against `ρ`.
+/// - **A pipe** of axis direction `a` and radius `R`. With `q` the distance
+///   from `c` to the axis and `sin θ = |w × a|`, the part of `r·e` square to
+///   the axis is at least `r·(1 − sin θ)` long and at most `r`, so every point
+///   is between `r·(1 − sin θ) − q` and `r + q` from the axis, and
+///   `|r − R| + q + r·sin θ` bounds how far any point is from the pipe.
+///
+/// These are worked out in plain `f64`, and the allowance is sixteen times
+/// the rounding of the largest number in them, so the few roundings each bound
+/// costs cannot carry a circle that is off by the allowance back onto the
+/// surface — only one that is off by that much less a few ulps.
+///
+/// Anything else holds nothing, which is the safe direction: the run is then
+/// named by its faces as before.
+fn a_surface_holds_the_circle(surface: &Surface, centre: Point, axis: Vector, radius: f64) -> bool {
+    let allowance = |points: [Point; 2], lengths: [f64; 2]| {
+        let largest = points
+            .iter()
+            .map(Point::largest_coordinate_magnitude)
+            .chain(lengths.map(f64::abs))
+            .fold(0.0, f64::max);
+        16.0 * NEAREST_F64_POINT_ROUNDOFF * largest
+    };
+    match surface {
+        Surface::Sphere(ball) => {
+            let off = centre - ball.centre();
+            let along = off.dot(axis);
+            let across = (off - axis * along).length();
+            let room = allowance([centre, ball.centre()], [radius, ball.radius()]);
+            [radius + across, (radius - across).abs()]
+                .into_iter()
+                .all(|round| ((along * along + round * round).sqrt() - ball.radius()).abs() <= room)
+        }
+        Surface::Cylinder(pipe) => {
+            let line = pipe.axis();
+            let tilt = axis.cross(line.direction()).length();
+            let across = line.distance_to_point(centre);
+            let room = allowance([centre, line.origin()], [radius, pipe.radius()]);
+            (radius - pipe.radius()).abs() + across + radius * tilt <= room
+        }
+        Surface::Plane(_) | Surface::Cone(_) | Surface::Torus(_) => false,
+        // A surface kind this reader has no bound for holds nothing, which
+        // names the run by its faces as before.
+        _ => false,
+    }
+}
+
 fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<HalfSpace> {
     let below = |corner: Point| {
         let terms = facing.components().into_iter().zip(corner.coordinates());
@@ -1525,10 +1772,44 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Point, Vector};
+    use rcad_geom::{Axis, Cylinder, Point, Sphere, Surface, Vector};
     use rcad_predicates::{Decision, Point as PredicatePoint};
 
-    use super::a_half_space_holding_both;
+    use super::{a_half_space_holding_both, a_surface_holds_the_circle};
+
+    /// The LED body's circle, written as the file writes it: on its dome
+    /// exactly, and `2.1e-16` off its body's axis. Both hold it, and a circle a
+    /// thousandth of a unit off either is held by neither.
+    #[test]
+    fn the_leds_circle_is_held_by_its_body_and_its_dome_and_a_shifted_one_is_not() {
+        let tilted = Vector::new(-5.551_115_123_126e-17, -1.0, 0.0);
+        let centre = Point::new(1.27, -5.07, 10.0);
+        let axis = tilted.normalized().expect("a direction");
+        let body = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(1.27, -1.27, 10.0), tilted).expect("an axis"),
+                1.5,
+            )
+            .expect("a radius"),
+        );
+        let dome = Surface::Sphere(Sphere::new(centre, 1.5).expect("a radius"));
+
+        for face in [body, dome] {
+            assert!(
+                a_surface_holds_the_circle(&face, centre, axis, 1.5),
+                "{face:?} does not hold the file's own circle"
+            );
+            let shifted = Point::new(1.27, -5.07, 10.001);
+            assert!(
+                !a_surface_holds_the_circle(&face, shifted, axis, 1.5),
+                "{face:?} holds a circle a thousandth off"
+            );
+            assert!(
+                !a_surface_holds_the_circle(&face, centre, axis, 1.501),
+                "{face:?} holds a circle a thousandth wider"
+            );
+        }
+    }
 
     /// A point on the circle of `radius` about `centre`, at `angle` round the
     /// frame `(across, and)`.

@@ -1526,12 +1526,34 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// `kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` (`docs/decisions.md`
 /// §176.2). Two planes cross in a straight line or nowhere, so a run between
 /// them that names a curved surface can only mean that surface.
+///
+/// **A ball and another curved face that name a plane are a ball and that
+/// plane.** Where a ball meets a pipe of its own radius centred on its axis the
+/// two touch all the way round a circle and never cross, so the marcher has no
+/// crossing to follow, and as written down the ball's centre is `2.1e-16` off
+/// the pipe's axis, so no closed form certified by exact signs can place the
+/// circle either (`kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`,
+/// `docs/decisions.md` §189.3). The run's plane is the circle's own, and a plane
+/// crosses a ball in one circle, which is drawn directly. Nothing the kernel
+/// builds names a plane there — its own runs name one of the two faces — so
+/// the name is a reader's, and `rcad-step` writes it only for a circle it has
+/// checked lies on every face along it.
 fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Surface; 2] {
     let both_flat = along.iter().all(|side| side.as_plane().is_some());
+    let both_curved = along.iter().all(|side| side.as_plane().is_none());
+    let a_ball = along
+        .iter()
+        .find(|side| matches!(side, Surface::Sphere(_)))
+        .copied();
     match run.run() {
         EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => [*along[0], *and],
         EdgeRun::PartOfWhereItCrosses { and, .. } if both_flat && and.as_plane().is_none() => {
             [*along[0], *and]
+        }
+        EdgeRun::PartOfWhereItCrosses { and, .. }
+            if both_curved && and.as_plane().is_some() && a_ball.is_some() =>
+        {
+            [*a_ball.expect("the guard found a ball"), *and]
         }
         EdgeRun::Straight
         | EdgeRun::RightRoundWhereItsFacesCross

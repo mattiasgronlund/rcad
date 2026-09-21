@@ -3,66 +3,77 @@
 //! `docs/decisions.md` §189.3: the body of
 //! `kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` meets its dome along a
 //! circle where the two surfaces touch rather than cross. The file names that
-//! circle as a closed edge with one corner, and two things went wrong walking
-//! it: the marcher's points began a quarter turn from that corner, and nothing
-//! said which way round to run them, because where two surfaces touch their
-//! crossing has no direction.
+//! circle as a closed edge with one corner.
 //!
-//! **It does not import yet**, and what stops it now is measured: the marcher
-//! itself, which cannot follow two surfaces that touch all the way round at
-//! every deflection `Model::validate` asks of it. The body's axis is written
-//! `(-5.551115123126E-17, -1, 0)` and the dome's centre sits `3.8` along it, so
-//! as stored the centre is off the axis by `3.8 × 5.55e-17` — about `2.1e-16` —
-//! and the kernel's exact arithmetic says so. The pair as stored does not meet
-//! in the file's circle, which is why no closed form certified by exact signs
-//! can draw it.
+//! The marcher cannot follow two surfaces that touch, and no closed form
+//! certified by exact signs can draw the circle either: the body's axis is
+//! written `(-5.551115123126E-17, -1, 0)` and the dome's centre sits `3.8` along
+//! it, so as stored the centre is off the axis by about `2.1e-16`. But the file
+//! names the circle, so the answer exists. The reader now checks the file's
+//! circle lies on both the body and the dome, and then names the run by the
+//! circle's plane, which the walk crosses with the dome to draw it.
+//!
+//! **None of the nine LEDs imports yet.** The two `_O1.27mm` ones get past the
+//! body and the dome and stop on their flat face with the pin holes. The seven
+//! siblings §188.3 counted as "50 shortenings" get past the body too, and stop
+//! on the dome's own wire, which the mesher will not lay flat.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::Error as Geometry;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile};
 
-/// Both LEDs used to stop on the body, face 8, as a wire that "will not lie
-/// flat". Now neither does. The taller one stops on the marcher following the
-/// body's circle; the shorter gets past the body altogether and stops on its
-/// flat face with the pin holes, whose boundary crosses itself.
+/// Both `_O1.27mm` LEDs now stop on entity `#223`, the flat face with the pin
+/// holes, whose boundary crosses itself. The taller one used to stop on the
+/// marcher following the body's circle.
+///
+/// `CannotTriangulate` is `rcad-mesh`'s, which this crate does not depend on,
+/// so its variant is read off its name.
 #[test]
-fn the_leds_body_no_longer_stops_them_where_it_meets_its_dome() {
-    let taller = why_it_does_not_import("LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step");
-    assert!(
-        matches!(
-            &taller,
-            rcad_topo::Error::ADraftEdgeHasACrossingThatCannotBeFollowed { why, .. }
-                if matches!(**why, Geometry::CannotFollowACrossingBecauseNoStepStaysOnIt { .. })
-        ),
-        "the taller LED stops somewhere other than the marcher on the body's circle: {taller:?}"
-    );
+fn the_leds_body_and_dome_no_longer_stop_them() {
+    for name in [
+        "LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step",
+        "LED_D3.0mm_Horizontal_O1.27mm_Z6.0mm.step",
+    ] {
+        let (entity, why) = why_it_does_not_import(name);
+        assert!(
+            entity == Some(223)
+                && matches!(
+                    &why,
+                    rcad_topo::Error::ADraftFaceCouldNotBeMeshed { why, .. }
+                        if format!("{why:?}").starts_with("BoundaryCrossesItself")
+                ),
+            "{name} stops somewhere other than a boundary crossing itself on #223: \
+             {entity:?} {why:?}"
+        );
+    }
+}
 
-    // `CannotTriangulate` is `rcad-mesh`'s, which this crate does not depend on,
-    // so its variant is read off its name.
-    let shorter = why_it_does_not_import("LED_D3.0mm_Horizontal_O1.27mm_Z6.0mm.step");
+/// One of the seven §188.3 files whose body used to stop the marcher after 50
+/// shortenings on entity `#317`. The body is walked now, and what stops it is
+/// the dome's wire.
+#[test]
+fn a_sibling_led_gets_past_its_body_and_stops_on_its_dome() {
+    let (_, why) = why_it_does_not_import("LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step");
     assert!(
-        matches!(
-            &shorter,
-            rcad_topo::Error::ADraftFaceCouldNotBeMeshed { why, .. }
-                if format!("{why:?}").starts_with("BoundaryCrossesItself")
-        ),
-        "the shorter LED stops somewhere other than a boundary crossing itself: {shorter:?}"
+        matches!(why, rcad_topo::Error::AWireWillNotLieFlatOnItsFace { .. }),
+        "the sibling LED stops somewhere other than its dome's wire: {why:?}"
     );
 }
 
-fn why_it_does_not_import(name: &str) -> rcad_topo::Error {
+/// The file entity a refusal names, if it names one, and why.
+fn why_it_does_not_import(name: &str) -> (Option<u64>, rcad_topo::Error) {
     let bytes = fs::read(corpus().join("kicad").join(name)).expect("the LED is in the corpus");
     let file = StepFile::read(&bytes).expect("it parses");
     let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
         .expect_err("the LED does not import yet");
-    let (Refusal::ThisEntityOfTheSolidWasRefused { why, .. }
-    | Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }) = refused
-    else {
+    if let Refusal::TheSolidTheFileDescribesIsNotOne { why, .. } = refused {
+        return (None, *why);
+    }
+    let Refusal::ThisEntityOfTheSolidWasRefused { entity, why, .. } = refused else {
         panic!("{name} is refused before it reaches the model: {refused:?}");
     };
-    *why
+    (Some(entity.0), *why)
 }
 
 fn corpus() -> PathBuf {
