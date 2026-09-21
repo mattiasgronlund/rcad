@@ -357,6 +357,10 @@ impl Model {
     /// An edge with no face found along it is left alone: that is a coedge no
     /// wire holds, which `check_coedges` refuses under its own name.
     ///
+    /// Shared with [`Model::check_touched_edge`] for the reason
+    /// [`Model::check_wire_closes`] gives. It is a few index lookups per edge, so
+    /// it stays local to what an operation touched.
+    ///
     /// # Errors
     ///
     /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] for a closed edge, which has
@@ -1251,11 +1255,6 @@ impl Model {
     }
 }
 
-/// Every one of `held` named exactly once by `named`, and none of them left out.
-///
-/// The four arenas that sit under something else — coedges under wires, wires
-/// under faces, faces under shells, shells under solids — are all asked this,
-/// with a different pair of lists each time rather than with different code.
 /// Whether an edge bends, every face along it sits on a plane, and its run names
 /// no curved surface — so nothing in the model says where it goes.
 ///
@@ -1264,25 +1263,44 @@ impl Model {
 /// whole closed curve names no surface at all; and a kind of run this crate
 /// does not know names nothing it can read.
 ///
-/// **`SolidView::mesh` refuses by this same rule**, as
-/// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`], and keeps its own copy of it
-/// in `only_a_flat_face_can_place` and `the_curve_a_flat_edge_is_named_by` —
-/// the two should become one call to this (`docs/decisions.md` §187.1).
+/// **This is the one copy of the rule, and both of its askers call it.**
+/// [`Model::check_something_curved_says_where_this_edge_bends`] asks it in the
+/// sweep, and `SolidView::mesh` asks it before walking an edge with only flat
+/// faces along it and refuses by it as
+/// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`]. The mesher used to keep its
+/// own copy, and two copies of a rule that must agree is the drift §44.11 took
+/// out of the length rule (`docs/decisions.md` §187.1).
 pub(crate) fn nothing_curved_says_where_it_bends(
     run: &EdgeRun,
     faces_along_it: impl IntoIterator<Item = Surface>,
 ) -> bool {
-    let a_curve_is_named = match run {
-        EdgeRun::Straight => return false,
-        EdgeRun::PartOfWhereItCrosses { and, .. } => and.as_plane().is_none(),
-        EdgeRun::RightRoundWhereItsFacesCross | _ => false,
-    };
-    !a_curve_is_named
+    *run != EdgeRun::Straight
+        && the_curved_surface_a_run_names(run).is_none()
         && faces_along_it
             .into_iter()
             .all(|surface| surface.as_plane().is_some())
 }
 
+/// The curved surface a run names as the second surface of its crossing, if it
+/// names one.
+///
+/// For an edge whose every face is flat this is what says where it goes — the
+/// circle's own cylinder, for a circle a file imprinted on a flat face.
+pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
+    match run {
+        EdgeRun::PartOfWhereItCrosses { and, .. } if and.as_plane().is_none() => Some(*and),
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::PartOfWhereItCrosses { .. }
+        | _ => None,
+    }
+}
+
+/// Every one of `held` named exactly once by `named`, and none of them left out.
+///
+/// The four arenas that sit under something else — coedges under wires, wires
+/// under faces, faces under shells, shells under solids — are all asked this,
+/// with a different pair of lists each time rather than with different code.
 fn used_exactly_once<K: slotmap::Key>(
     entity: &'static str,
     held: impl Iterator<Item = K>,

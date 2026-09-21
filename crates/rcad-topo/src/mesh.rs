@@ -32,7 +32,10 @@ use smallvec::SmallVec;
 
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
-use crate::validate::{side_of_surface, the_way_it_is_parametrised_about};
+use crate::validate::{
+    nothing_curved_says_where_it_bends, side_of_surface, the_curved_surface_a_run_names,
+    the_way_it_is_parametrised_about,
+};
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
 use crate::{EdgeKey, Error, FaceKey, Invalid, Result, SolidView, VertexKey};
 
@@ -645,7 +648,9 @@ impl BuildingAMesh {
     /// [`Error::MoreMeshPointsThanASolidWillHold`] when the points this edge
     /// alone adds take the mesh past its cap, and
     /// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] for an edge with only flat
-    /// faces along it whose run names no curved surface.
+    /// faces along it whose run names no curved surface — the rule
+    /// [`nothing_curved_says_where_it_bends`], which the sweep refuses by too,
+    /// so only a solid that never went through the sweep reaches that refusal.
     ///
     /// # An edge with only flat faces along it
     ///
@@ -673,10 +678,14 @@ impl BuildingAMesh {
                 .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
         )?;
         let along = the_two_surfaces_either_side(edge, &self.along_each_edge, &back)?;
-        let along = if along.iter().all(|side| side.as_plane().is_some()) {
-            [along[0], the_curve_a_flat_edge_is_named_by(&run, edge)?]
-        } else {
-            along
+        if nothing_curved_says_where_it_bends(run.run(), along) {
+            return Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge: edge.key() });
+        }
+        let along = match the_curved_surface_a_run_names(run.run()) {
+            Some(named) if along.iter().all(|side| side.as_plane().is_some()) => {
+                [along[0], named]
+            }
+            Some(_) | None => along,
         };
 
         let along_it = rcad_geom::walk(
@@ -2206,24 +2215,6 @@ fn only_a_flat_face_can_place(
         .expect("an edge reached through a face has that face along it");
     *edge.stored_run() != EdgeRun::Straight
         && sides.iter().all(|side| side.stored.as_plane().is_some())
-}
-
-/// The curved surface that says where an edge with only flat faces along it
-/// goes: the one its run names, when that one is curved.
-///
-/// # Errors
-///
-/// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] for any other run. A run
-/// naming a plane names where two planes cross, which is a straight line and
-/// not this edge; a whole closed curve names no surface at all.
-fn the_curve_a_flat_edge_is_named_by(run: &NamedRun, edge: EdgeView<'_>) -> Result<Surface> {
-    match run.run() {
-        EdgeRun::PartOfWhereItCrosses { and, .. } if and.as_plane().is_none() => Ok(*and),
-        EdgeRun::Straight
-        | EdgeRun::RightRoundWhereItsFacesCross
-        | EdgeRun::PartOfWhereItCrosses { .. }
-        | _ => Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge: edge.key() }),
-    }
 }
 
 /// A face's surface as the arena holds it, with where that face is placed kept

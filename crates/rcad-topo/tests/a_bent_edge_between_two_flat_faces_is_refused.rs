@@ -8,13 +8,23 @@
 //!
 //! **Named by its own plane, it used to mesh as a square.** The four arcs got no
 //! points between their corners, and the mesh published a deviation that the
-//! circle's middle missed by `2 − √2` of its radius. It is refused now, by name.
-//! Named by its cylinder, the same circle is walked round.
+//! circle's middle missed by `2 − √2` of its radius. `SolidView::mesh` refuses
+//! that as `Error::AnEdgeBendsButEveryFaceAlongItIsFlat` (§176.5), and since
+//! §187.1 `Model::validate` refuses it too, as
+//! `Invalid::AnEdgeBendsButNothingAlongItIsCurved`, by the same rule.
+//!
+//! [`SolidBuilder::build`] runs the sweep over a description before writing it,
+//! so through the builder the sweep's refusal is the one a caller sees and the
+//! mesher's cannot be reached. The mesher's is still reached through `Model`'s
+//! `Deserialize`, which puts a solid in a model without the sweep; the unit
+//! test `a_wall_stored_with_the_wrong_surface_is_refused_rather_than_asserted_against`
+//! in `mesh.rs` is that route. Named by its cylinder, the same circle is walked
+//! round.
 
 use rcad_geom::{Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Picker, Plane, Point, Surface};
 use rcad_geom::{Orientation, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, EdgeKey, Error, Model, Result, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, EdgeKey, Error, Invalid, Model, Result, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 2.0;
 const TOP: f64 = 2.0;
@@ -22,23 +32,23 @@ const TOP: f64 = 2.0;
 #[test]
 fn a_circle_named_only_by_the_plane_it_is_drawn_on_is_refused_rather_than_meshed_as_a_square()
 -> Result<()> {
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
     let mut model = Model::new(rcad_geom::Scale::millimetres(100.0)?);
-    let top = the_top();
-    let slab = a_slab_with_a_circle_on_top(&mut model, Surface::Plane(top))?;
 
-    let meshed = model
-        .solid(slab)?
-        .mesh(Deflection::for_scale(model.scale()), &policy, &mut log);
+    let built = a_slab_with_a_circle_on_top(&mut model, Surface::Plane(the_top()));
 
     assert!(
         matches!(
-            meshed,
-            Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { .. })
+            built,
+            Err(Error::Invalid(
+                Invalid::AnEdgeBendsButNothingAlongItIsCurved
+            ))
         ),
-        "expected the circle to be refused by name, got {:?}",
-        meshed.map(|mesh| mesh.points().len())
+        "expected the sweep to refuse the circle by name, got {built:?}"
+    );
+    assert_eq!(
+        model.solids().count(),
+        0,
+        "a refusal leaves the model as it was"
     );
     Ok(())
 }

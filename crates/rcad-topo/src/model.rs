@@ -720,6 +720,8 @@ impl Model {
         );
         self.check_edge_is_walked_by_two_opposite_coedges(slot)
             .unwrap_or_else(|broken| panic!("a touched edge is broken: {broken}"));
+        self.check_something_curved_says_where_this_edge_bends(slot)
+            .unwrap_or_else(|broken| panic!("a touched edge is broken: {broken}"));
     }
 
     /// The slop check §4.3 budgets for every build — as, since §66.3, the
@@ -1797,6 +1799,38 @@ mod tests {
 
         model
             .place_solid(cube, &a_movement())
+            .expect("this model made the key");
+    }
+
+    /// Every build, for the reason
+    /// [`a_mutation_notices_a_wire_that_no_longer_closes`] gives, and by the
+    /// rule the sweep refuses the same edge by (`docs/decisions.md` §187.1).
+    ///
+    /// A round bar with its wall swapped for a plane leaves each cap circle
+    /// between two flat faces, so nothing in the model says where it bends.
+    #[test]
+    #[should_panic(expected = "a closed edge is walked between two flat faces")]
+    fn a_mutation_notices_an_edge_that_bends_with_nothing_curved_along_it() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = model
+            .add_round_bar(5.0, 10.0, &rcad_geom::Isometry::identity())
+            .expect("a bar five across and ten tall");
+        let wall = model
+            .data
+            .faces
+            .values_mut()
+            .find(|face| face.surface.as_plane().is_none())
+            .expect("a bar has one curved face");
+        wall.surface = rcad_geom::Surface::Plane(
+            rcad_geom::Plane::from_point_and_normal(
+                Point::new(5.0, 0.0, 0.0),
+                Vector::new(1.0, 0.0, 0.0),
+            )
+            .expect("the x axis is a unit normal"),
+        );
+
+        model
+            .place_solid(bar, &a_movement())
             .expect("this model made the key");
     }
 
