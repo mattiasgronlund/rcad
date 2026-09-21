@@ -682,9 +682,7 @@ impl BuildingAMesh {
             return Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge: edge.key() });
         }
         let along = match the_curved_surface_a_run_names(run.run()) {
-            Some(named) if along.iter().all(|side| side.as_plane().is_some()) => {
-                [along[0], named]
-            }
+            Some(named) if along.iter().all(|side| side.as_plane().is_some()) => [along[0], named],
             Some(_) | None => along,
         };
 
