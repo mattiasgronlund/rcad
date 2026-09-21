@@ -9,7 +9,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, Vector,
+};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{
     DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex, Invalid, Model, SolidBuilder,
@@ -131,6 +133,10 @@ struct Walk {
     /// The surfaces either side of each closed edge, filled in before any face
     /// of the shell is described — see [`Walk::find_the_closed_edges`].
     closed_edges: BTreeMap<EntityId, Vec<Surface>>,
+    /// The surfaces of the faces along every edge of the shell, filled in by
+    /// the same pass — [`Walk::the_surface_that_names_the_curve`] reads it to tell a circle
+    /// imprinted on a flat face from one a curved face places.
+    surfaces_along_each_edge: BTreeMap<EntityId, Vec<Surface>>,
 }
 
 impl Walk {
@@ -147,6 +153,7 @@ impl Walk {
             face_names: Vec::new(),
             face_surfaces: Vec::new(),
             closed_edges: BTreeMap::new(),
+            surfaces_along_each_edge: BTreeMap::new(),
         }
     }
 
@@ -208,6 +215,10 @@ impl Walk {
                     else {
                         continue;
                     };
+                    self.surfaces_along_each_edge
+                        .entry(edge_curve)
+                        .or_default()
+                        .push(surface);
                     if an_edge_with_one_corner(reading, edge_curve) {
                         self.closed_edges
                             .entry(edge_curve)
@@ -787,7 +798,57 @@ impl Walk {
             self.point_of_vertex(reading, ends[0])?,
             self.point_of_vertex(reading, ends[1])?,
         ];
-        self.the_arc_between(edge_curve, &place, corners, along_the_curve)
+        let and = self.the_surface_that_names_the_curve(reading, edge_curve, curve, keyword, &place)?;
+        self.the_arc_between(edge_curve, &place, and, corners, along_the_curve)
+    }
+
+    /// The surface an arc's run names beside the faces along it: the curve's
+    /// own plane, or — for a circle every face along which is flat — the
+    /// cylinder of the circle's radius about its axis.
+    ///
+    /// **The plane names nothing when the faces are flat too.** A circle
+    /// imprinted on a flat face has that face's plane on both sides of it, and
+    /// its own plane is the same plane again, so the run said "where this plane
+    /// crosses itself" and the circle's centre and radius never reached the
+    /// model (`docs/decisions.md` §176.2). The cylinder crosses the face in
+    /// exactly the circle, so `rcad_geom::walk` has a curve to walk round.
+    ///
+    /// **An `ELLIPSE` keeps its plane**, and on flat faces is then refused by
+    /// the mesher as an edge that bends with nothing naming it. No single
+    /// surface this kernel holds crosses a plane in a given ellipse and is
+    /// written down from the ellipse alone without choosing a slope for it — a
+    /// tilted cylinder would do, and which tilt is a choice this reader has no
+    /// consumer to make it for (§13).
+    ///
+    /// Where a curved face is along the edge the plane stays too: the walk
+    /// reads the faces there and never this, and a cylinder would change what a
+    /// sphere's seam names from a great circle to a tangency.
+    fn the_surface_that_names_the_curve(
+        &self,
+        reading: &Reading<'_>,
+        edge_curve: EntityId,
+        curve: EntityId,
+        keyword: &'static str,
+        place: &crate::geometry::Placement,
+    ) -> Result<Surface, Refusal> {
+        let not_a_working_shape = |why| Refusal::TheGeometryIsNotAWorkingShape {
+            id: edge_curve,
+            why,
+        };
+        let only_flat_faces_along_it = self
+            .surfaces_along_each_edge
+            .get(&edge_curve)
+            .is_some_and(|faces| faces.iter().all(|face| face.as_plane().is_some()));
+        if keyword == "CIRCLE" && only_flat_faces_along_it {
+            let radius = reading.real_at(curve, "CIRCLE", 2)?;
+            let round = Axis::new(place.origin, place.axis)
+                .and_then(|axis| Cylinder::new(axis, radius))
+                .map_err(not_a_working_shape)?;
+            return Ok(Surface::Cylinder(round));
+        }
+        let flat = Plane::from_point_and_normal(place.origin, place.axis)
+            .map_err(not_a_working_shape)?;
+        Ok(Surface::Plane(flat))
     }
 
     /// The arc of a circle or an ellipse that runs from one corner to the other.
@@ -818,24 +879,19 @@ impl Walk {
         &self,
         edge_curve: EntityId,
         place: &crate::geometry::Placement,
+        and: Surface,
         corners: [Point; 2],
         along_the_curve: bool,
     ) -> Result<EdgeRun, Refusal> {
         if corners[0] == corners[1] {
             return Err(Refusal::AnArcThatStartsAndEndsInTheSamePlace { edge: edge_curve });
         }
-        let flat = Plane::from_point_and_normal(place.origin, place.axis).map_err(|why| {
-            Refusal::TheGeometryIsNotAWorkingShape {
-                id: edge_curve,
-                why,
-            }
-        })?;
         let across = (corners[1] - corners[0]).cross(place.axis);
         let facing = if along_the_curve { across } else { -across };
         let picking = a_half_space_holding_both(corners, facing)
             .ok_or(Refusal::AnArcThisReaderCouldNotName { edge: edge_curve })?;
         Ok(EdgeRun::PartOfWhereItCrosses {
-            and: Surface::Plane(flat),
+            and,
             picked_by: smallvec![Picker::from(picking)],
         })
     }

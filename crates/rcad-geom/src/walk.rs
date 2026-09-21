@@ -1460,10 +1460,22 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// The two surfaces the crossing is between.
 ///
 /// The faces either side name it, except along a seam, where both faces are the
-/// same surface and the run carries the second one itself.
+/// same surface and the run carries the second one itself — and except where
+/// both faces are flat and the run names a curved surface.
+///
+/// **Two flat faces are a seam in all but their bits.** A circle a file
+/// imprinted on a flat face has that face's plane on both sides, written twice
+/// and so not always equal by value: two planes 1.2e-15 apart on
+/// `kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` (`docs/decisions.md`
+/// §176.2). Two planes cross in a straight line or nowhere, so a run between
+/// them that names a curved surface can only mean that surface.
 fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Surface; 2] {
+    let both_flat = along.iter().all(|side| side.as_plane().is_some());
     match run.run() {
         EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => [*along[0], *and],
+        EdgeRun::PartOfWhereItCrosses { and, .. } if both_flat && and.as_plane().is_none() => {
+            [*along[0], *and]
+        }
         EdgeRun::Straight
         | EdgeRun::RightRoundWhereItsFacesCross
         | EdgeRun::PartOfWhereItCrosses { .. } => [*along[0], *along[1]],
@@ -2768,6 +2780,70 @@ mod tests {
                 Err(Error::AnEndOfARunNamesNoPlace),
                 "an end of {end:?} said where it was after all"
             );
+        }
+    }
+
+    /// A quarter circle on a flat face, with a flat face on both sides that are
+    /// the same plane written two ways, is walked round the circle its run's
+    /// cylinder names — not read as the straight line two planes cross in.
+    ///
+    /// The two normals are `(0, 1, −1.158e-15)` and `(5.6e-17, 1, 0)`, the pair
+    /// `docs/decisions.md` §176.2 measured on a KiCad LED. Unequal by value, so
+    /// the seam rule alone never read the run's own surface.
+    #[test]
+    fn two_flat_faces_a_hair_apart_are_walked_along_the_cylinder_their_run_names() {
+        let face = |normal: Vector| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, -1.27, 0.0), normal)
+                    .expect("a normal with a length"),
+            )
+        };
+        let one = face(Vector::new(0.0, 1.0, -1.158_067_919_543e-15));
+        let other = face(Vector::new(5.551_115_123_126e-17, 1.0, 0.0));
+        assert_ne!(one, other, "the two faces are two different values");
+
+        let radius = 1.5;
+        let centre = Point::new(1.27, -1.27, -10.0);
+        let round = Surface::Cylinder(
+            crate::Cylinder::new(
+                crate::Axis::new(centre, Vector::new(0.0, 1.0, 0.0)).expect("an axis"),
+                radius,
+            )
+            .expect("a pipe"),
+        );
+        let from = Point::new(1.27 + radius, -1.27, -10.0);
+        let to = Point::new(1.27, -1.27, -10.0 - radius);
+        let picking = crate::HalfSpace::through_a_point_facing(
+            from,
+            (to - from).cross(Vector::new(0.0, 1.0, 0.0)),
+        )
+        .expect("a chord with a length");
+        let run = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: round,
+                picked_by: smallvec![Picker::from(picking)],
+            },
+            [from, to].map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a picked run");
+
+        let walked = walk(
+            &run,
+            [&one, &other],
+            Deflection::of(0.001).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a quarter circle is walked");
+
+        assert!(
+            walked.points().len() > 4,
+            "a quarter circle at a thousandth came back with {} points",
+            walked.points().len()
+        );
+        for point in walked.points() {
+            let off = (*point - centre).cross(Vector::new(0.0, 1.0, 0.0)).length() - radius;
+            assert!(off.abs() < 1e-12, "{point:?} is {off} off the circle");
         }
     }
 
