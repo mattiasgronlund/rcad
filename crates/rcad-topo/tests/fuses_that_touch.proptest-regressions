@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0f6f99e715cb2c0ecc4bd4ad0d298d32a9574db189f7a7085a7bb731660d825d # shrinks to Drawn { shape: ABarInsideABar { outer: 2, inner: 1, towards: PlusY }, apart: ClearByOne }
