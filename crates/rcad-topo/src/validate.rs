@@ -23,7 +23,7 @@ use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
 use crate::model::{WireData, WireStep};
-use crate::view::{CoedgeView, FaceView, SolidView, WireView};
+use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView};
 use crate::{EdgeView, Error, Invalid, Model, Result};
 
 impl Model {
@@ -582,16 +582,11 @@ impl Model {
                 let WireStep::Pole(vertex) = step else {
                     continue;
                 };
-                let corner = &self.data().vertices[vertex];
-                let pinches = where_it_pinches(&face.surface);
-                let reach = corner
-                    .approximation
-                    .map_or(0.0, Approximation::magnitude)
-                    .max(writing_it_down);
-                if provably_away_from_every_pinch(corner.point, reach, &pinches) {
+                if !self.stands_where_it_pinches(vertex, &face.surface, writing_it_down) {
+                    let at = self.data().vertices[vertex].point;
                     return Err(Invalid::APoleStandsWhereTheSurfaceDoesNotPinch {
-                        at: corner.point,
-                        pinch: nearest(corner.point, &pinches),
+                        at,
+                        pinch: nearest(at, &where_it_pinches(&face.surface)),
                     }
                     .into());
                 }
@@ -1083,6 +1078,7 @@ impl Model {
             .flat_map(|wire| wire.points())
             .map(|corner| corner.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
+        let writing_it_down = self.what_writing_a_point_down_costs(self.largest_coordinate());
         // A closed edge is skipped rather than measured, because the distance
         // between its two ends is zero and that is not how small it is — it is
         // a whole circle. What stands in for it is the radius of the curved
@@ -1118,11 +1114,29 @@ impl Model {
                 // of no radius is a point. So the corners at the apex are passed
                 // over and the smallest circle the face actually carries is what
                 // comes back.
+                //
+                // **A pole is at the apex exactly when the pole check says it
+                // is**, so it is asked that check's own question, of the same
+                // stored corner and surface. A pole a few ulps up the ruling is
+                // one the pole check keeps, and its radius of `2^-51` counted
+                // here refused a sound cone as a range of `1.8e16` (§190.5).
                 Surface::Cone(cone) => {
                     let along = cone.axis().direction();
+                    let stored = &self.data().faces[face.key().slot_in(self.id())].surface;
+                    let at_the_apex: Vec<VertexSlot> = face
+                        .wires()
+                        .flat_map(WireView::steps)
+                        .filter_map(|step| match step {
+                            WireStepView::Pole(corner) => Some(corner.key().slot_in(self.id())),
+                            WireStepView::Along(_) => None,
+                        })
+                        .filter(|&pole| self.stands_where_it_pinches(pole, stored, writing_it_down))
+                        .collect();
                     face.wires()
-                        .flat_map(WireView::points)
-                        .map(|corner| cone.radius_at(along.dot(corner - cone.apex())))
+                        .flat_map(WireView::coedges)
+                        .map(CoedgeView::start)
+                        .filter(|corner| !at_the_apex.contains(&corner.key().slot_in(self.id())))
+                        .map(|corner| cone.radius_at(along.dot(corner.point() - cone.apex())))
                         .filter(|radius| *radius > 0.0)
                         .fold(f64::INFINITY, f64::min)
                         .into()
@@ -1162,6 +1176,32 @@ impl Model {
             }
             Err(other) => Err(other.into()),
         }
+    }
+
+    /// Whether a pole's corner is where `surface` pinches, as far as anyone can
+    /// prove otherwise.
+    ///
+    /// **The one answer to "is this corner the apex"**, asked by the pole check
+    /// to refuse a pole anywhere else and by the dynamic range check to pass the
+    /// apex over. Two copies of the question could draw the line in two places,
+    /// and a pole between them would be kept by one and counted by the other.
+    ///
+    /// The corner is widened by the slop recorded on it or by
+    /// `writing_it_down`, whichever is wider — see
+    /// [`Model::check_every_pole_stands_where_the_surface_pinches`] for why a
+    /// pole is not asked exactly.
+    fn stands_where_it_pinches(
+        &self,
+        vertex: VertexSlot,
+        surface: &Surface,
+        writing_it_down: f64,
+    ) -> bool {
+        let corner = &self.data().vertices[vertex];
+        let reach = corner
+            .approximation
+            .map_or(0.0, Approximation::magnitude)
+            .max(writing_it_down);
+        !provably_away_from_every_pinch(corner.point, reach, &where_it_pinches(surface))
     }
 
     /// How far off its own plane a face's corner is allowed to sit.
