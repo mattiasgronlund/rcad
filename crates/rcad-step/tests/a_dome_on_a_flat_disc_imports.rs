@@ -79,8 +79,7 @@ fn a_rim_that_passes_both_poles_in_the_middle_of_its_edge_imports() {
 
 fn imports(text: &str) -> Import {
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a half ball reads")
+    Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()).expect("a half ball reads")
 }
 
 fn measures_half_a_ball(import: &Import) {

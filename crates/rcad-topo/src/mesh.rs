@@ -727,7 +727,8 @@ impl BuildingAMesh {
         // ball come out walked backwards — a mesh that is wrong rather than one
         // that was refused.
         if edge.is_closed()? {
-            let corner = back.apply_to_point(from.point());            if let Some(first) = points.first()
+            let corner = back.apply_to_point(from.point());
+            if let Some(first) = points.first()
                 && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)
                     .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner))
                 && (*first - corner).dot(stored_way) < 0.0
@@ -798,7 +799,7 @@ impl BuildingAMesh {
     ) -> Result<Vec<Vec<WalkedLoop>>> {
         let Some(whole_turn) = how_far_the_longitude_wraps(stored) else {
             return Ok(vec![walked]);
-        };        // **A loop drawn on a ball bounds two pieces and only one of them is a
+        }; // **A loop drawn on a ball bounds two pieces and only one of them is a
         // patch this can fill.** The triangulator fills the inside of what it
         // is handed, and the inside of a loop in the surface's own two
         // coordinates is the piece holding no pole. When the material is on the
