@@ -6,12 +6,9 @@ reviewed: 2026-09-21
 on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107's
 table. §16.10 governs it: a claim that something cannot be done owes a
 demonstration either way — a gap if a scaling reaches the sign, a limit if not.
-**§174 freed nothing from three of §171's rows** — 119 priced, 115 imports either
-side; a row's count is a ceiling, only the import count settles it (§174.8). Unit
-unchanged.
-
-**Five waves have run, §110–§128**: §109.6 falsified, closed edges 97/323 →
-110/323, §126's failure **§149's oracle, not the kernel**, §121 as `912cd168`.
+**Since §190.2 no corpus file reaches that refusal**: 24 of the 29 that did now
+import (KiCad 114 → 140), and five LEDs stop on the dome's wire. What is left
+is those files' next blockers; whether to pick a new unit is Mattias's.
 
 **What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
 sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150–§168 in turn;
@@ -20,11 +17,14 @@ sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150–§16
 refusals to 0; §184.6 by **§187.3**; §176.5's chord and LED arc by **§187.1–2**;
 §187.4's leaning-bar wrong mesh by **§188.1**; the LED coarse sweep by
 **§188.3**, still 0 of 20; §188.2's pole off the pinch by **§189.1**; the six
-far pipes by **§189.2**, 8000 of 8000.
+far pipes by **§189.2**, 8000 of 8000; §189.3's body meeting its dome by
+**§190.1–2**; §187.1's sweep half by **§190.3**; §189.1's overflow question by
+**§190.4**, a gap, fixed.
 
-**Next and unclaimed: the LED body meeting its dome**, §189.3 — a gap; the fix
-goes in `walk.rs` and `mesh.rs`. Beside it: `validate` passing a flat-only bent edge
-(§187.1's sweep half, `validate.rs`). §189.4 lists the rest. §124, §136.4, §125.6:
+**Next and unclaimed: the dome's wire in `mesh.rs`**, §190.2. Twelve LEDs stop
+on "will not lie flat", depending on where the split circle's second corner
+lands. Beside it: `#223`'s pin-hole face, and the cone's `check_dynamic_range`
+arm (§190.5). §190.6 lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
