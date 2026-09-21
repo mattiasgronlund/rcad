@@ -18,8 +18,8 @@ sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150 by §1
 §151.5 by §163; §163.4 by §165; §165.4 by §166; §166.4 by §167; §167.4 by §168;
 **§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**, one
 acceptance test, nothing downstream of a picker having read the offset; and
-**§181.6's question** by **§182**. **§183 renames the gap §182.6 left**: the
-picking normal, not the offset — `HalfSpace` untouched, and a lane owes the fix.
+**§181.6's question** by **§182**; **§183's picking normal** by **§184**, 793
+refusals to 0; §184.7 left pipes off the axes, far out, unswept.
 
 **Next and unclaimed: the 18 LED files.** §176.2 falsifies §174.5's "coarse edge
 walk" — the walk never runs, because the circle is imprinted on a flat face and

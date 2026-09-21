@@ -29,12 +29,16 @@ waved at: none of their pairs gets past the first half-space tried.*
    brief's form with `at_there − at_here` multiplied out, so no difference of
    two readings is formed. `TwoLinesEitherSideOfThePicker` now carries the
    whole reading, `middle`, rather than a point and a step. The plane-and-pipe
-   caller reads its axis and adds its own step, as before.
+   caller reads its axis and adds its own step, as before. **As first built
+   (`2abe365b`) `δ²` was the squared length of the rounded step, so this was
+   not a polynomial in stored numbers and the window could miss the middle.
+   `67893d98` reads `δ²` as `A/W` instead. §184.7.**
 
 **One thing §183.5 did not foresee: at this pair the exact level cannot run
 unaided.** `2δ²` alone is `5.1e307` and a reading is `3.7e21`, so their product
 overflows and `Exact::times` returns `None`. Every term is degree two in the
-widths and the step, top and bottom alike, so they are slid down by the
+widths and the gap between the axis origins, top and bottom alike, so they are
+slid down by the
 smallest power of two that makes the top fit. That rounds nothing while the slid
 numbers stay normal, and it cancels out of the quotient. The interval form of
 the same polynomial is kept for when even that cannot run. It then overflows to
@@ -168,3 +172,81 @@ how_often_naming_a_crossing_refuses --no-capture`, and the same for
 `a_pair_of_parallel_pipes_answers_one_way_round_and_refuses_the_other`, with
 and without a temporary counter; the new test run against `8ddf072f`'s two
 source files; and `just gate quiet`.
+
+### 184.7 The middle read through the rounded step missed the true middle
+
+*§184.1's third change said the middle was a polynomial in stored numbers. As
+built in `2abe365b` it was not: `δ²` was `|towards|²`, and `towards` is the step
+`the_step_across_to_the_other_axis` rounds once per component. Off the
+coordinate directions that rounding put the true middle outside the window
+119 763 times in 279 636. `67893d98` reads `δ²` as `A/W`, from stored numbers
+only, and the count is 0.*
+
+**Why it did not show before — argued, not measured.** While the middle was
+read as `at_here + share·(at_there − at_here)`, `share` was an enclosure at
+least as wide as the step's rounding, so the rounding could sit inside it. Read
+as one exact quotient, the window is an ulp of the answer. A rounding of `δ²`
+by under an ulp then moves the middle by far more than one wherever the two
+readings nearly cancel. §184.3's sweep checks answers, not windows, and its
+row is the same on `f26e52ea` and `67893d98`, so over that family the defect
+changed no answer; whether a window there missed was not asked. Nobody ran the
+old share-based reading over the search's pairs.
+
+**The search.** Pipes along the same direction off the coordinate axes, 23 303
+pairs, every half-space the row may try asked of each: 279 636 windows, of which
+119 763 did not hold the true middle, decided exactly from the stored numbers.
+After the fix, 0. The search was a temporary harness in the session that wrote
+`67893d98` and was not kept; these three numbers are that session's, in its
+commit message, and were not re-run here.
+
+**One pair, checked the long way.** Two pipes along `(3, 5, 7)` with origins
+`(1.8894988582774552, 1.7546217903306627, 5.900896671941921)` and
+`(20.032907041561735, 41.90286208415537, 41.15749672697364)`, widths
+`8.668044147417756` and `3.5094414748036575`. Worked in Python `fractions` from
+those numbers, the true middle is `-1.209827636296209e-16`; the old window was
+`[-1.0538915031078247e-16, -1.0538915031078239e-16]`, which holds the value read
+through the step and not the true one. `|step|²` is `3.16e-17` of itself off
+`A/W` — a rounding, turned into a middle 15% off by the two readings nearly
+cancelling. Re-run for this section; it prints the same.
+
+**The fix.** `δ² = A/W`, with `A = ‖(c − o) × w‖²` and `W = w·w`, both exact.
+Multiplied through by `W`, top and bottom are polynomials in the two axis
+origins, `w` and the widths:
+`(at_here·(A − W·(r₁² − r₂²)) + at_there·(A + W·(r₁² − r₂²))) / 2A`. The slide
+moves from the step to the gap between the origins and the widths; the bound on
+it gains `w`'s largest component, which does not slide. `Exact::slid_by` became
+`pub(crate)` for the gap, which is itself an exact difference.
+
+**The test.** `the_window_around_the_middle_of_two_leaning_pipes_holds_the_true_middle`,
+in `intersect.rs`'s `mod tests`, is the pair above: every half-space the row may
+try, each window checked exactly against the true middle. **It was not run red.**
+`how_far_in_front_of_the_middle` lost an argument in the fix, so the test does not
+compile against `f26e52ea`. What stands in for the red run is the search on
+`f26e52ea` printing this pair and normal as a miss, which is the same containment
+the test asserts.
+
+**What was re-run on `67893d98`**, since the fix touches every middle reading:
+
+- §184.2's four artifacts, both ways round: the same as §184.2's table, 2 runs
+  each way, each run holding one of the two points, picking plane `z = 41581179`
+  for the first three.
+- The three corpus artifacts: `crash-3f9c76a3` one run, `crash-a2acceac` two,
+  `crash-a-thin-pipe-on-a-fat-ones-skin-cba396f8` two.
+- §184.3's sweep: 1624 both answer, 0 both refuse, 0 disagree, 2348 earlier,
+  1664 side-checked, 0 wrong — the same row.
+- §184.4's rates, the same to the last pair: the band 1.22% and 1.22%, the turned
+  quartic 1.27% and 0.05%, somewhere else 10.58% (217 of 2052), the quartic
+  control 4.24%, the rest 0.00%.
+
+**Still open, and now sharper.** §184.6's first item, pipes off the coordinate
+axes far from the origin, is exactly where this defect lived, and a sweep there
+still does not exist. §184.3's side check assumes the lines sit at
+`thin_z ± R2`, so it needs points on the true lines found another way.
+
+Commands: `just decision 184`; `git show 67893d98`; the probe crates
+`crash-probe/` and `sweep-probe/` copied from `/tmp/rcad-183-probe/` and pointed at
+this tree, `cargo run --release`; `cargo run -p rcad-fuzz-explain --
+where_two_surfaces_cross <file>` on the three corpus artifacts; `python3
+check_184_7.py`; `just t -p rcad-geom --test how_often_naming_a_crossing_refuses
+--no-capture`; `just t
+the_window_around_the_middle_of_two_leaning_pipes_holds_the_true_middle`.
