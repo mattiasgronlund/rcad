@@ -367,7 +367,10 @@ fn power_of_two_bringing_down(largest: f64) -> Option<f64> {
     let biased_exponent = (largest.to_bits() >> 52) & 0x7ff;
     let exponent = (biased_exponent as i64 - 1023).min(1022);
     let power = f64::from_bits(((1023 - exponent) as u64) << 52);
-    debug_assert!(power.is_normal() && (1.0..4.0).contains(&(largest * power)));
+    assert!(
+        power.is_normal() && (1.0..4.0).contains(&(largest * power)),
+        "2^-{exponent} does not bring {largest} into [1, 4)"
+    );
     Some(power)
 }
 
