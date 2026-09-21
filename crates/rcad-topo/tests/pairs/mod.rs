@@ -71,6 +71,8 @@
 // Shared between test binaries, and each one uses a different subset of it.
 #![allow(dead_code)]
 
+use std::ops::RangeInclusive;
+
 use proptest::prelude::*;
 use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -711,16 +713,26 @@ impl Configuration {
             .iter()
             .map(|placed| placed.built_after(movement, self.elsewhere, &mut model))
             .collect();
-        if let Some(turn) = self.turn {
-            let turn = turn.isometry();
-            for &key in &keys {
-                model
-                    .place_solid(key, &turn)
-                    .expect("this model made the key");
-            }
+        match self.turn {
+            Some(turn) => turned_by((model, keys), turn),
+            None => (model, keys),
         }
-        (model, keys)
     }
+}
+
+/// Every solid of a built configuration turned by the same rotation.
+///
+/// The one place a [`Turn`] is applied, for the flat families and the curved
+/// ones alike, so that a curved configuration turned by a [`Turn`] is turned
+/// by exactly the arithmetic a turned flat one is.
+fn turned_by((mut model, keys): (Model, Vec<SolidKey>), turn: Turn) -> (Model, Vec<SolidKey>) {
+    let turn = turn.isometry();
+    for &key in &keys {
+        model
+            .place_solid(key, &turn)
+            .expect("this model made the key");
+    }
+    (model, keys)
 }
 
 impl Placed {
@@ -1585,6 +1597,251 @@ pub fn a_frustum_and_a_block() -> impl Strategy<Value = FrustumAndBlock> {
                     }
                 })
         })
+}
+
+/// A curved fixture that builds itself into a fresh model.
+///
+/// What lets [`Turned`] turn every curved family by one piece of code rather
+/// than one per family.
+pub trait Fixture {
+    /// Build the solids, in the order a fuse should be handed them.
+    fn built(&self) -> (Model, Vec<SolidKey>);
+}
+
+impl Fixture for CurvedPair {
+    fn built(&self) -> (Model, Vec<SolidKey>) {
+        self.build()
+    }
+}
+
+impl Fixture for BallAndBlock {
+    fn built(&self) -> (Model, Vec<SolidKey>) {
+        self.build()
+    }
+}
+
+impl Fixture for BallBarAndBlock {
+    fn built(&self) -> (Model, Vec<SolidKey>) {
+        self.build()
+    }
+}
+
+impl Fixture for FrustumAndBlock {
+    fn built(&self) -> (Model, Vec<SolidKey>) {
+        self.build()
+    }
+}
+
+impl Fixture for LeaningBar {
+    fn built(&self) -> (Model, Vec<SolidKey>) {
+        self.build()
+    }
+}
+
+/// A curved fixture with every solid of it turned by one general rotation.
+///
+/// §191's first row. Every curved family above stands its round solid straight
+/// up `z` at whole-number places, so no curved face any of them builds has an
+/// axis that is not exactly `z` — and the KiCad LED dome of §124 was a curved
+/// face whose axis came in a few ulps off one. This is the same move
+/// [`a_turned_pair`] makes for the flat families, by the same code: the
+/// fixture is built exactly as its unturned family builds it, and then
+/// [`turned_by`] turns every solid in it, so the solids sit where they sat
+/// relative to each other and a refusal is attributable to the rotation and
+/// nothing else. The unturned family is the control row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Turned<P> {
+    /// The fixture as its own family draws it.
+    pub fixture: P,
+    /// The rotation every solid of it is turned by.
+    pub turn: Turn,
+}
+
+impl<P: Fixture> Turned<P> {
+    /// Build the fixture, then turn every solid of it.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        turned_by(self.fixture.built(), self.turn)
+    }
+}
+
+/// Whatever `fixtures` draws, under one general rotation drawn beside it.
+///
+/// Shrinks toward the fixture's own floor turned one sixty-fourth of a turn
+/// about `z`.
+pub fn turned<P: Strategy>(fixtures: P) -> impl Strategy<Value = Turned<P::Value>>
+where
+    P::Value: Fixture,
+{
+    (fixtures, a_turn()).prop_map(|(fixture, turn)| Turned { fixture, turn })
+}
+
+/// A block with a round bar leaning through it: in at the floor, out at the
+/// roof, a whole unit clear of every side wall at both.
+///
+/// §191's second row, and a situation no other family reaches. Every bar
+/// elsewhere in this file stands square to the block's floor, so the floor and
+/// the roof cut it in circles. A bar whose axis leans cuts them in **ellipses**,
+/// and its wall meets the floor along a curve whose every point is a square
+/// root of something other than a radius.
+///
+/// The lean is a whole-number direction, `(lean[0], lean[1], up)`, and the bar
+/// is turned onto it by [`Isometry::rotation`] — the only constructor with a
+/// turn in it — so the axis the model stores is that direction rounded, not
+/// the direction itself. The block is not turned at all, which is the
+/// difference from [`Turned`]: here the bar and the block are no longer square
+/// to each other.
+///
+/// Kept clear of tangency the way [`a_curved_pair`] is, a whole unit of room
+/// between each ellipse and the nearest side wall, because a bar tangent to a
+/// wall is another row's subject. [`CurvedPair`] is the control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeaningBar {
+    /// How wide the block is, and how tall.
+    pub side: u32,
+    /// The bar's radius.
+    pub radius: u32,
+    /// Where the bar's axis passes through the height halfway up the block, in
+    /// the block's own coordinates.
+    pub at: [u32; 2],
+    /// How far the axis leans along `x` and `y` for every `up` it climbs.
+    pub lean: [i32; 2],
+    /// How far the axis climbs for each `lean`.
+    pub up: u32,
+}
+
+impl LeaningBar {
+    /// Build the block and then the bar, in that order.
+    ///
+    /// The bar is built standing on the origin, stood on its middle, turned
+    /// onto its lean about the origin, and then carried to where its axis
+    /// crosses the block's middle height.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let side = f64::from(self.side);
+        let block = model
+            .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a whole-number cube");
+        let length = self.length();
+        let stood_on_its_middle = Isometry::translation(Vector::new(0.0, 0.0, -length / 2.0))
+            .expect("a whole-number shift");
+        let [across, along] = self.lean.map(f64::from);
+        let leaning = Isometry::rotation(
+            &Axis::new(Point::origin(), Vector::new(-along, across, 0.0))
+                .expect("a lean that is never straight up"),
+            across.hypot(along).atan2(f64::from(self.up)),
+        )
+        .expect("a finite turn");
+        let carried = Isometry::translation(Vector::new(
+            f64::from(self.at[0]),
+            f64::from(self.at[1]),
+            side / 2.0,
+        ))
+        .expect("a whole-number shift");
+        let bar = model
+            .add_round_bar(
+                f64::from(self.radius),
+                length,
+                &carried.compose(&leaning.compose(&stood_on_its_middle)),
+            )
+            .expect("a bar long enough to go right through");
+        (model, vec![block, bar])
+    }
+
+    /// How long the bar is: long enough that both caps clear the block by more
+    /// than a unit, whatever it leans by.
+    ///
+    /// Half of it is `side + 2`, and the steepest lean drawn is `√2` across for
+    /// `2` up, whose cosine is `√(2/3)`. A cap's nearest point to the block is
+    /// then at least `(side + 2)·√(2/3) − radius` above the middle, which is more
+    /// than `side/2 + 1` for every side [`a_leaning_bar`] draws.
+    #[must_use]
+    pub fn length(&self) -> f64 {
+        2.0 * f64::from(self.side + 2)
+    }
+}
+
+/// A block with a bar leaning through it, the bar a whole unit clear of every
+/// side wall where it goes in and where it comes out.
+///
+/// The lean is one of the eight whole-number directions one step across for
+/// two to four steps up — so the bar leans between fourteen and thirty-five
+/// degrees off upright. The block is one of the five narrowest that leave
+/// room for the bar at that lean.
+///
+/// Shrinks toward a bar of radius one leaning one along `x` for four up,
+/// through the smallest block that holds it.
+pub fn a_leaning_bar() -> impl Strategy<Value = LeaningBar> {
+    let leans = proptest::sample::select(vec![
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+        [1, 1],
+        [-1, 1],
+        [-1, -1],
+        [1, -1],
+    ]);
+    (1u32..=2, leans, (2u32..=4).prop_map(|up| 6 - up))
+        .prop_flat_map(|(radius, lean, up)| {
+            // The first five sides with room, and not a range of them: rounding
+            // the two ends inward can leave a side with no room between two
+            // that have some.
+            let sides: Vec<u32> = (4u32..)
+                .filter(|&side| {
+                    room_for_a_leaning_bar(side, radius, lean, up)
+                        .iter()
+                        .all(|room| !room.is_empty())
+                })
+                .take(5)
+                .collect();
+            (
+                Just(radius),
+                Just(lean),
+                Just(up),
+                proptest::sample::select(sides),
+            )
+        })
+        .prop_flat_map(|(radius, lean, up, side)| {
+            let [x, y] = room_for_a_leaning_bar(side, radius, lean, up);
+            (Just(side), Just(radius), Just(lean), Just(up), [x, y]).prop_map(
+                |(side, radius, lean, up, at)| LeaningBar {
+                    side,
+                    radius,
+                    at,
+                    lean,
+                    up,
+                },
+            )
+        })
+}
+
+/// Where along `x` and along `y` a leaning bar's axis may cross the block's
+/// middle height and still clear every side wall by a whole unit.
+///
+/// At the floor and the roof the axis has drifted `side/2 · |lean| / up` from
+/// the middle, and the ellipse the bar cuts reaches at most `radius · sec θ`
+/// from its axis, `θ` being the lean off upright. Both ends are rounded inward,
+/// so the unit of room is at least a unit.
+fn room_for_a_leaning_bar(
+    side: u32,
+    radius: u32,
+    lean: [i32; 2],
+    up: u32,
+) -> [RangeInclusive<u32>; 2] {
+    let up = f64::from(up);
+    let across = f64::from(lean[0]).hypot(f64::from(lean[1]));
+    let widest = f64::from(radius) * across.hypot(up) / up;
+    lean.map(|toward| {
+        let drift = f64::from(side) / 2.0 * f64::from(toward.unsigned_abs()) / up;
+        let reach = drift + widest;
+        let low = (1.0 + reach).ceil();
+        let high = (f64::from(side) - 1.0 - reach).floor();
+        // An empty range when the block is too narrow, which the caller reads.
+        let [low, high] = [low, high].map(|end| end.max(0.0) as u32);
+        low..=high
+    })
 }
 
 /// Where the second solid of a degenerate pair sits along one axis.
