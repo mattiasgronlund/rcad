@@ -477,34 +477,20 @@ impl TrueLines {
     /// `other`.
     fn agrees_with(&self, meet: &SurfaceMeet, other: &Cylinder) -> Result<(), String> {
         let crosses = self.d.sign();
-        let SurfaceMeet::Curves(runs) = meet else {
-            return match (meet, crosses) {
-                (SurfaceMeet::Nothing, Ordering::Less) => Ok(()),
-                _ => Err(format!(
-                    "answered {meet:?} where D is {crosses:?} than zero"
-                )),
-            };
+        let wrong_kind = || Err(format!("answered {meet:?} where D is {crosses:?}"));
+        let runs = match meet {
+            SurfaceMeet::Curves(runs) if crosses == Ordering::Greater => runs,
+            SurfaceMeet::Nothing if crosses == Ordering::Less => return Ok(()),
+            SurfaceMeet::Curves(_)
+            | SurfaceMeet::Nothing
+            | SurfaceMeet::TouchAtOnePoint { .. }
+            | SurfaceMeet::SameSurface => return wrong_kind(),
+            _ => return wrong_kind(),
         };
-        if crosses != Ordering::Greater {
-            return Err(format!(
-                "answered {} runs where D is {crosses:?}",
-                runs.len()
-            ));
-        }
         let [first, second] = &runs[..] else {
             return Err(format!("answered {} runs for two lines", runs.len()));
         };
-        let [first, second] = [first, second].map(|run| match run.run() {
-            EdgeRun::PartOfWhereItCrosses { and, picked_by }
-                if *and == Surface::Cylinder(*other) =>
-            {
-                match picked_by[..] {
-                    [Picker::InFrontOf(half_space)] => Ok(half_space),
-                    _ => Err(format!("picked by {picked_by:?}")),
-                }
-            }
-            elsewise => Err(format!("a run {elsewise:?}")),
-        });
+        let [first, second] = [first, second].map(|run| the_one_flat_picker(run, other));
         let [first, second] = [first?, second?];
         let held = [first, second].map(|half_space| {
             self.which_lines_it_holds(half_space)
@@ -520,6 +506,30 @@ impl TrueLines {
                  two true lines"
             ))
         }
+    }
+}
+
+/// The half-space `run` is picked by, where it is a piece of where the pipes
+/// cross cut out of `other` by one flat half-space and nothing else.
+fn the_one_flat_picker(run: &NamedRun, other: &Cylinder) -> Result<HalfSpace, String> {
+    let picked_by = match run.run() {
+        EdgeRun::PartOfWhereItCrosses { and, picked_by } if *and == Surface::Cylinder(*other) => {
+            picked_by
+        }
+        EdgeRun::PartOfWhereItCrosses { .. }
+        | EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | _ => return Err(format!("a run {:?}", run.run())),
+    };
+    let [only] = &picked_by[..] else {
+        return Err(format!("picked by {picked_by:?}"));
+    };
+    match only {
+        Picker::InFrontOf(half_space) => Ok(*half_space),
+        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => {
+            Err(format!("picked by {only:?}"))
+        }
+        _ => Err(format!("picked by {only:?}")),
     }
 }
 
