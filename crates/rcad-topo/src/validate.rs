@@ -1605,10 +1605,11 @@ fn how_close_two_corners_come(view: SolidView<'_>) -> Option<f64> {
 /// way, two chord points of different edges landing on the same double by
 /// accident, needs those edges within a rounding of each other, far below the
 /// halving's floor of half the closest corner pair, so the halving could only
-/// cure it by luck. Measured: of the 1364 finer meshes the whole test suite asked
-/// for, the 886 that refused `CornersCoincide` never gave way to a mesh; and all
-/// 24 sweeps in `rcad-step`'s import tests that reached the floor refuse it
-/// again at 0.005, some forty times finer, only at a later corner (§192.2).
+/// cure it by luck. Measured before §193.1 cut the LED domes open: of the 1364
+/// finer meshes the whole test suite asked for, the 886 that refused
+/// `CornersCoincide` never gave way to a mesh; and all 24 sweeps in
+/// `rcad-step`'s import tests that reached the floor refused it again at 0.005,
+/// some forty times finer, only at a later corner (§193.2).
 fn its_sides_cross(why: &Error) -> bool {
     matches!(
         why,
