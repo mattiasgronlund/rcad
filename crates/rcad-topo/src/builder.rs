@@ -452,10 +452,14 @@ impl SolidBuilder {
     /// in `tests/a_face_bounded_by_two_steps.rs`, is a plate with a **cylinder**
     /// wall — the one case where that gate is open — and a two-step wire is
     /// reachable without one, because `check_edges` asks only that an edge's
-    /// corners lie on the surface its run names and a plane through both corners
-    /// answers that.
+    /// corners lie on the surface its run names and that *something* curved is
+    /// named when every face along the edge is flat (§187.1). A pipe running
+    /// the same way as the segment through both corners answers both: it is
+    /// curved, and each flat face along the edge crosses it in that segment.
     /// `a_flat_two_step_face_that_bounds_nothing_is_not_caught_by_anything`
-    /// builds exactly that solid and it validates.
+    /// builds exactly that solid and it validates. A plane named there used to
+    /// answer as well, and since §187.1 is refused by name — which closes that
+    /// spelling of the hole and not the hole.
     ///
     /// **That gap is the mesh gate's and not this rule's**, and reading the
     /// unknown strictly would not close it: a wire of two *straight* steps is

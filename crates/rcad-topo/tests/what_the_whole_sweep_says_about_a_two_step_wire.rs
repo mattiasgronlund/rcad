@@ -14,13 +14,27 @@
 //!
 //! Both are answered here by handing a whole model to `Model::validate` and
 //! writing down what comes back. The two shapes are the two the arguments were
-//! about, built out of runs that exist today: a run naming a **plane** is not
+//! about, built out of runs that exist today: a run naming a **pipe that
+//! crosses the flat faces along it in a straight line** is not
 //! [`EdgeRun::Straight`], so it takes both the generous reading a fourth kind
 //! of run would get at `two_steps_that_bound_a_face` and the generous reading
-//! `the_ends_are_the_whole_of_it` refuses a fourth kind. That is what makes
-//! these measurements of the real code rather than of a clone.
+//! `the_ends_are_the_whole_of_it` refuses a fourth kind — while being, in fact,
+//! the straight segment between its ends. That is what makes these
+//! measurements of the real code rather than of a clone.
+//!
+//! **The stand-in used to be a run naming a plane**, and since §187.1 the sweep
+//! refuses that by name, as `Invalid::AnEdgeBendsButNothingAlongItIsCurved`,
+//! whenever every face along the edge is flat — which here they all are. That
+//! refusal is about the name and answers neither question, so the run was
+//! swapped for one the new check passes: a curved surface named, and nothing
+//! for it to bend. A pipe named *without* crossing the faces in a line is not
+//! a stand-in either: a flat face's winding walks every run that is not
+//! straight, the edge is then an arc and not the segment the two shapes are
+//! about, and measured with a pipe of radius one along `y` through `(1, 0, 0)`
+//! both tests here came back `Error::Undecidable` from "area swept by a wire
+//! round a normal" rather than answering either question.
 
-use rcad_geom::{EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{Axis, Cylinder, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftFace, DraftStep, DraftVertex, DraftWire, Error, Model, Result, SolidBuilder,
@@ -33,7 +47,7 @@ use rcad_topo::{
 /// `builder.rs` said the length rule was the only thing that asks, so a run
 /// read generously there was "a zero-length edge nobody looks at again". The
 /// model below is that edge — a tetrahedron with one corner written down twice
-/// and an edge of no length between the two copies, running along a plane both
+/// and an edge of no length between the two copies, running along a pipe both
 /// copies sit on, which is a run `the_ends_are_the_whole_of_it` keeps. Every
 /// other thing about the solid is sound: the four faces are the tetrahedron's,
 /// the volume is the tetrahedron's, every edge is walked once each way.
@@ -64,8 +78,9 @@ fn a_zero_length_edge_the_length_rule_keeps_is_still_refused_by_the_whole_sweep(
 /// the solid is flat.
 ///
 /// This is the hole `builder.rs` claimed there was none of. Two edges between
-/// the same two corners, one [`EdgeRun::Straight`] and one naming a plane both
-/// corners lie on, are the same segment written twice — so the face between
+/// the same two corners, one [`EdgeRun::Straight`] and one naming a pipe that
+/// every flat face along it crosses in the line through both corners, are the
+/// same segment written twice — so the face between
 /// them has no area at all. Three checks were named as standing behind the
 /// two-step wire, and on this model none of them fires:
 ///
@@ -75,7 +90,9 @@ fn a_zero_length_edge_the_length_rule_keeps_is_still_refused_by_the_whole_sweep(
 /// - the sweep's **mesh** is what caught the same mistake on a plate with a
 ///   cylinder wall, and the mesh is gated off for a solid that is wholly flat;
 /// - `check_edges` asks only that an edge's corners lie on the surface its run
-///   names, which two corners on a plane through both of them do.
+///   names, which two corners on a pipe through both of them do; and the check
+///   §187.1 added there asks only that *something* curved says where the edge
+///   bends, which a named pipe does, whether or not it bends.
 ///
 /// So this test asserts the gap and not a refusal. The day something does
 /// stand behind a two-step wire on a flat solid, this goes red, and that is the
@@ -117,7 +134,7 @@ fn a_tetrahedron_with_one_corner_written_down_twice(model: &mut Model) -> Result
     let [a, b, c, d] = corners_of_a_tetrahedron(&mut builder)?;
     let also_a = builder.add_vertex(Point::origin())?;
 
-    let no_length = builder.add_edge(a, also_a, along_the_ground())?;
+    let no_length = builder.add_edge(a, also_a, round_a_pipe_through_both_corners())?;
     let to_b = builder.add_edge(also_a, b, EdgeRun::Straight)?;
     let [b_to_c, c_to_a, a_to_d, b_to_d, c_to_d] =
         the_other_five_sides(&mut builder, [a, b, c, d])?;
@@ -148,14 +165,14 @@ fn a_tetrahedron_with_one_corner_written_down_twice(model: &mut Model) -> Result
 }
 
 /// The same tetrahedron with its `AB` side written down twice — once straight
-/// and once as a piece of where the ground meets a plane through both corners —
+/// and once as a piece of where a pipe along `x` meets the faces either side —
 /// and a face of no area between the two copies.
 fn a_tetrahedron_with_one_edge_written_down_twice(model: &mut Model) -> Result<SolidKey> {
     let mut builder = SolidBuilder::new();
     let [a, b, c, d] = corners_of_a_tetrahedron(&mut builder)?;
 
     let straight = builder.add_edge(a, b, EdgeRun::Straight)?;
-    let named = builder.add_edge(a, b, along_the_ground())?;
+    let named = builder.add_edge(a, b, round_a_pipe_through_both_corners())?;
     let [b_to_c, c_to_a, a_to_d, b_to_d, c_to_d] =
         the_other_five_sides(&mut builder, [a, b, c, d])?;
 
@@ -212,16 +229,24 @@ fn corners_of_a_tetrahedron(builder: &mut SolidBuilder) -> Result<[DraftVertex; 
     ])
 }
 
-/// A run naming the ground plane rather than the two ends.
+/// A run naming a pipe of radius five whose axis runs along `x` through
+/// `(0, −3, 4)`, rather than the two ends.
 ///
-/// Every corner used with this sits at height nothing, so `check_edges` reads
-/// each of them exactly on the plane the run names.
-fn along_the_ground() -> EdgeRun {
+/// Every corner used with this is on the `x` axis, exactly five from the
+/// pipe's (`3² + 4² = 5²`), so `check_edges` reads each of them exactly on the
+/// pipe the run names. The pipe runs the same way as the `x` axis, so every
+/// plane through that axis crosses it in straight lines — and one of those
+/// lines is the `x` axis itself. A run along it is the segment between its two
+/// ends, as a plane-named run used to be here.
+fn round_a_pipe_through_both_corners() -> EdgeRun {
+    let pipe = Cylinder::new(
+        Axis::new(Point::new(0.0, -3.0, 4.0), Vector::new(1.0, 0.0, 0.0))
+            .expect("the x axis has a length"),
+        5.0,
+    )
+    .expect("a radius of five");
     EdgeRun::PartOfWhereItCrosses {
-        and: Surface::Plane(
-            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
-                .expect("the z axis is a unit normal"),
-        ),
+        and: Surface::Cylinder(pipe),
         picked_by: smallvec::SmallVec::new(),
     }
 }
