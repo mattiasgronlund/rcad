@@ -19,11 +19,12 @@ sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150–§16
 **§181.6's question** by **§182**; **§183's picking normal** by **§184**, 793
 refusals to 0; §184.6 by **§187.3**; §176.5's chord and LED arc by **§187.1–2**;
 §187.4's leaning-bar wrong mesh by **§188.1**; the LED coarse sweep by
-**§188.3**, still 0 of 20; the six far pipes by **§188.4** — gaps, not fixed.
+**§188.3**, still 0 of 20; §188.2's pole off the pinch by **§189.1**; the six
+far pipes by **§189.2**, 8000 of 8000.
 
-**Next and unclaimed: `validate` passing a `Pole` step off the pinch**, §188.2 —
-a second wrong mesh, refused by the mesher only after the fact. Beside it: the
-far-pipe fix in `intersect.rs` (§188.4). §188.5 lists the rest. §124, §136.4, §125.6:
+**Next and unclaimed: the LED body meeting its dome**, §189.3 — a gap; the fix
+goes in `walk.rs` and `mesh.rs`. Beside it: `validate` passing a flat-only bent edge
+(§187.1's sweep half, `validate.rs`). §189.4 lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
