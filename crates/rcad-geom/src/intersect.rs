@@ -1017,7 +1017,7 @@ fn where_two_pipes_side_by_side_cross(
 /// between the axes, and the picking plane is anchored out there with them so
 /// that it reads that displacement as nothing.
 ///
-/// # Why the plane is anchored between the lines and not on an axis
+/// # Why the first plane tried is anchored between the lines and not on an axis
 ///
 /// Because the normal is only *exactly* square to `along` when the pipes run
 /// along a coordinate direction. Everywhere else
@@ -1038,6 +1038,25 @@ fn where_two_pipes_side_by_side_cross(
 /// is left of it is this anchor's own rounding, an ulp of `across` against an
 /// `X` of about `r₂`, so the lean stops mattering and the radius ratio has to
 /// reach about `2⁵²` to bite. `docs/decisions.md` §164.
+///
+/// # Why it is tried first and not only
+///
+/// The anchor between the lines is a *computed* point, and so is the normal the
+/// ranking hands back. Far from the origin either can cost the answer: §181.2's
+/// pair has the computed anchor `162427` off the thin axis in `z`, and a ranked
+/// normal whose two components stand `132` decades apart, so one `f64` offset
+/// swallows the smaller whole. A plane that does separate its two lines exists —
+/// `z = 41581179`, through the thin pipe's *stored* axis, with one of the
+/// fallback normals — and nothing about the pair says in advance which plane
+/// that will be.
+///
+/// So the separation is proved rather than assumed, the way `orient2d` retries
+/// at a power of two: between the lines first, then each stored axis origin,
+/// each with the ranked normal and then every exactly-square fallback, and the
+/// first half-space [`two_lines_told_apart`] proves is the one used. Nothing is
+/// nudged and no sign is taken that was not certified; a pair none of them
+/// proves is refused exactly as before. Today's half-space is the first tried,
+/// so a pair named before §184 is named by the same plane.
 ///
 /// # Why `X` is not `√(r₁² − across²)`
 ///
@@ -1326,8 +1345,9 @@ fn between_the_two_lines(here: Point, towards: Vector, mine: f64, theirs: f64) -
 /// so the slide cancels out of the quotient and rounds nothing while the slid
 /// numbers stay normal. At §181.2's pair `2δ²` alone is `5.1e307` and a reading
 /// is `3.7e21`, so without it the exact level cannot run at all. The slide is
-/// the smallest that fits, and zero wherever the top already fits, which is
-/// every pair near the origin. §184.
+/// the smallest that fits, and zero wherever the top already fits. It is not
+/// only pairs far from the origin that need it: fat enough pipes do on their
+/// own, and §140's pair, at the origin with the same widths, slides too. §184.
 fn how_far_in_front_of_the_middle(
     picker: HalfSpace,
     one: &Cylinder,
