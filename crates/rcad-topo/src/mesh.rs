@@ -697,11 +697,6 @@ impl BuildingAMesh {
             walking_along_this_edge_refused(edge.key(), why.with_its_surfaces_moved(&there))
         })?;
         let mut points = along_it.points().to_vec();
-        if self.points.len() + points.len() > MOST_POINTS_A_MESH_WILL_HOLD {
-            return Err(Error::MoreMeshPointsThanASolidWillHold {
-                most: MOST_POINTS_A_MESH_WILL_HOLD,
-            });
-        }
         // **A closed edge is stored running the way the longitude of the curved
         // surface either side of it increases** — and *which* curved surface is
         // settled by `Surface`'s own fixed order rather than by which face got
@@ -736,9 +731,22 @@ impl BuildingAMesh {
                 points.reverse();
             }
         }
+        let moved = if *run.run() == EdgeRun::RightRoundWhereItsFacesCross {
+            let ends = [from, to].map(|end| back.apply_to_point(end.point()));
+            put_in_the_poles_a_closed_crossing_passes(&mut points, ends, &along)
+        } else {
+            0.0
+        };
+        if self.points.len() + points.len() > MOST_POINTS_A_MESH_WILL_HOLD {
+            return Err(Error::MoreMeshPointsThanASolidWillHold {
+                most: MOST_POINTS_A_MESH_WILL_HOLD,
+            });
+        }
 
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
-        self.worst = self.worst.max(along_it.deviation().magnitude() + moving);
+        self.worst = self
+            .worst
+            .max(along_it.deviation().magnitude() + moved + moving);
         Ok(points
             .into_iter()
             .map(|along| {
@@ -2579,6 +2587,116 @@ fn the_way_a_closed_edge_where_its_faces_touch_runs(
             the_way_it_is_parametrised_about(&surface, at).cross(gradient_of(&surface, at));
         (longitude != Vector::zero()).then_some(longitude)
     })
+}
+
+/// Make every pole of a ball that a closed crossing runs through one of the
+/// points walked along it, and say how far a walked point was moved to do it.
+///
+/// **The wire walk knows a pole only when a walked point lands on it**
+/// ([`BuildingAMesh::walk_a_wire_round`]). A plane through a ball's axis cuts
+/// it in a circle through both poles, and a walk that steps past a pole
+/// between two points jumps half a turn of longitude with nothing to say which
+/// way. Whether it landed on the pole was luck: at one deflection the walk of
+/// `a_rim_through_both_poles_measures.rs` did, and at every finer one it did
+/// not (§193.3).
+///
+/// The crossing is the whole closed curve, so a pole is on it exactly when
+/// both surfaces hold the pole — two certified predicates and no distance
+/// compared with anything. A pole whose coordinates round off the ball, or
+/// whose sides cannot be decided, is left out, and the walk then goes on as
+/// it did before this existed: [`WalkingAWire::finish`] checks it.
+fn put_in_the_poles_a_closed_crossing_passes(
+    points: &mut Vec<Point>,
+    ends: [Point; 2],
+    along: &[Surface; 2],
+) -> f64 {
+    let mut moved: f64 = 0.0;
+    for (index, ball) in along.iter().enumerate() {
+        let Surface::Sphere(sphere) = ball else {
+            continue;
+        };
+        let other = &along[1 - index];
+        if other == ball {
+            continue;
+        }
+        let pinch = where_this_surface_pinches(ball).expect("a ball pinches at its poles");
+        for up in [1.0, -1.0] {
+            let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
+            if let Some(far) = put_in_a_pole(points, ends, [ball, other], pole, up * pinch) {
+                moved = moved.max(far);
+            }
+        }
+    }
+    moved
+}
+
+/// Put `pole` among `points`, between the two it lies between, when both
+/// surfaces certainly hold it; `None` when they do not, and otherwise how far
+/// a walked point was moved.
+///
+/// **Between which two is read off the crossing's own direction at the
+/// pole.** The plane square to `∇S × ∇T` through the pole cuts a closed
+/// crossing twice, at the pole and somewhere across the curve from it, so the
+/// walked points change side of it twice; the pair nearer the pole is the
+/// one. The two sums of distances compared are about one step against about
+/// the curve's width, so which is smaller is not close.
+///
+/// **A walked point that already reads as this pole is moved onto it** rather
+/// than given a twin beside it. That is [`the_surface_pinches_at`]'s own
+/// equality on the latitude, so nothing is called the pole here that the wire
+/// walk would not already call the pole; a twin would open the pole side
+/// twice. A corner that reads as the pole is left alone, since the wire walk
+/// already turns there.
+fn put_in_a_pole(
+    points: &mut Vec<Point>,
+    ends: [Point; 2],
+    [ball, other]: [&Surface; 2],
+    pole: Point,
+    latitude: f64,
+) -> Option<f64> {
+    let exactly = PredicatePoint::from(pole.coordinates());
+    let holds_it = |surface: &Surface| match side_of_surface(surface, exactly) {
+        Decision::Zero => true,
+        // An exact point is undecidable only past overflow or into the
+        // subnormals; the walk is then left as it was, and checked.
+        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
+        _ => false,
+    };
+    if !holds_it(ball) || !holds_it(other) {
+        return None;
+    }
+    let reads_as_this_pole = |at: Point| ball.coordinates_of(at).1 == latitude;
+    if ends.into_iter().any(reads_as_this_pole) {
+        return None;
+    }
+    let forward = gradient_of(ball, pole).cross(gradient_of(other, pole));
+    if forward == Vector::zero() {
+        return None;
+    }
+
+    let every: Vec<Point> = core::iter::once(ends[0])
+        .chain(points.iter().copied())
+        .chain(core::iter::once(ends[1]))
+        .collect();
+    let ahead = |at: Point| (at - pole).dot(forward) > 0.0;
+    let how_near = |pair: &[Point]| (pair[0] - pole).length() + (pair[1] - pole).length();
+    let gap = every
+        .windows(2)
+        .enumerate()
+        .filter(|(_, pair)| ahead(pair[0]) != ahead(pair[1]))
+        .min_by(|(_, one), (_, other)| how_near(one).total_cmp(&how_near(other)))
+        .map(|(gap, _)| gap)?;
+
+    let walked_either_side = [gap.checked_sub(1), (gap < points.len()).then_some(gap)];
+    for beside in walked_either_side.into_iter().flatten() {
+        if reads_as_this_pole(points[beside]) {
+            let far = (points[beside] - pole).length();
+            points[beside] = pole;
+            return Some(far);
+        }
+    }
+    points.insert(gap, pole);
+    Some(0.0)
 }
 
 /// Which of the two surfaces either side of a closed edge says which way it
