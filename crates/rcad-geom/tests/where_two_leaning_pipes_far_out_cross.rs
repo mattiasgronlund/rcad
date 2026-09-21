@@ -53,6 +53,11 @@ const PAIRS: u32 = 4000;
 /// Also prints, and answers §184.6's question with, how many askings have at
 /// least one exactly-square normal through a stored axis origin whose stored
 /// offset separates the two true lines.
+///
+/// A refusal where one of the kernel's own three normals separates the lines
+/// at some `f64` offset fails the sweep: that plane is one an anchor could
+/// round to, so such a refusal is a gap in the anchor rather than in the
+/// normals the kernel tries.
 #[test]
 fn every_answer_for_two_leaning_pipes_far_out_names_the_true_two_lines() {
     let mut rng = soak::seeded();
@@ -71,6 +76,14 @@ fn every_answer_for_two_leaning_pipes_far_out_names_the_true_two_lines() {
         tally.wrong.len(),
         tally.answered,
         tally.wrong[0]
+    );
+    assert!(
+        tally.refused_though_the_kernels_normals_separate.is_empty(),
+        "{} refusals have a plane between the two lines along one of the three \
+         normals the kernel tries, at an f64 offset some anchor could round to; \
+         the first: {}",
+        tally.refused_though_the_kernels_normals_separate.len(),
+        tally.refused_though_the_kernels_normals_separate[0]
     );
     assert!(
         tally.answered > tally.asked / 2,
@@ -115,6 +128,191 @@ fn the_checker_reads_two_pipes_along_z_the_way_a_hand_does() {
 
     let leaning = HalfSpace::new(Vector::new(0.0, 1.0, 1e-300), 0.0).expect("a half-space");
     assert!(truth.which_lines_it_holds(leaning).is_none());
+
+    let found = truth
+        .offset_along(Vector::new(0.0, 1.0, 0.0))
+        .expect("an offset between y = -4 and y = 4");
+    assert!(found > -4.0 && found < 4.0);
+    assert_eq!(truth.offset_along(Vector::new(1.0, 0.0, 0.0)), None);
+}
+
+/// §187.3 left the six refusals of the shipped sweep unclassified: the kernel's
+/// anchor between the lines was never checked. They are three pairs, each
+/// refused both ways round, and each is a **gap**, not a limit.
+///
+/// **The anchor is not the cause.** The kernel tries the three normals
+/// [`exactly_square_normals`] names, through three anchors, and every anchor
+/// reaches the half-space only as an `f64` offset. For these pairs no `f64`
+/// offset at all separates the two lines along any of the three — the offset
+/// just below the lines and the one just above them are neighbours — so no
+/// anchor, however it was rounded, could have helped.
+///
+/// **The answer exists anyway.** One of the three plus another times a power
+/// of two is a normal the kernel does not try; where that sum rounds nothing
+/// it is exactly square to the pipes, and the plane below separates the two
+/// lines at a stored `f64` offset — the only one that does, in each case.
+#[test]
+fn three_far_pairs_the_sweep_refuses_have_a_plane_between_their_lines() {
+    for (pair, normal, offset) in the_three_far_pairs_refused() {
+        for first in [0, 1] {
+            let [one, other] = [&pair[first], &pair[1 - first]];
+            let truth = TrueLines::of(one, other);
+            assert_eq!(truth.d.sign(), Ordering::Greater, "two lines to separate");
+            assert!(
+                truth.an_offset_that_separates(one).is_none(),
+                "the kernel's own three normals separate {one:?} then {other:?}"
+            );
+            let picker = HalfSpace::new(normal, offset).expect("a half-space");
+            assert!(
+                truth.separates(picker),
+                "{picker:?} between {one:?} and {other:?}"
+            );
+            let [below, above] = truth.the_offsets_either_side(normal);
+            assert_eq!(
+                i128::from(above) - i128::from(below),
+                2,
+                "one offset between"
+            );
+        }
+    }
+}
+
+/// The kernel names the three pairs the witness above separates.
+///
+/// Refused today because `picking_normals_to_try` offers only the three
+/// normals, and for one of the pairs because no anchor it rounds lands on the
+/// one offset that works. Adding the combined normals to that list names two
+/// of the three pairs in a scratch copy; reading the offset off the exact
+/// middle reading as well names all three, and the whole sweep, 8000 of 8000
+/// with 0 wrong.
+#[test]
+#[ignore = "a gap: the kernel does not try the combined normals the witness uses"]
+fn the_kernel_names_the_three_far_pairs_it_refuses() {
+    for (pair, _, _) in the_three_far_pairs_refused() {
+        for first in [0, 1] {
+            let [one, other] = [&pair[first], &pair[1 - first]];
+            let meet = intersect(
+                &Surface::Cylinder(*one),
+                &Surface::Cylinder(*other),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("named");
+            assert_eq!(TrueLines::of(one, other).agrees_with(&meet, other), Ok(()));
+        }
+    }
+}
+
+/// The three pairs, as the shipped sweep stores them, each with the normal and
+/// offset of the one plane between its lines.
+fn the_three_far_pairs_refused() -> [(Pair, Vector, f64); 3] {
+    let pair = |along: [f64; 3], first: ([f64; 3], f64), second: ([f64; 3], f64)| {
+        let along = Vector::new(along[0], along[1], along[2]);
+        let pipes = [first, second].map(|(origin, radius)| a_pipe(origin, along, radius));
+        for pipe in &pipes {
+            assert_eq!(
+                pipe.axis().direction(),
+                along,
+                "stored as the sweep stored it"
+            );
+        }
+        pipes
+    };
+    [
+        (
+            pair(
+                [
+                    0.997_914_952_687_430_2,
+                    0.048_203_658_440_588_28,
+                    -0.042_920_327_535_876_47,
+                ],
+                (
+                    [
+                        2_529_427.444_640_049,
+                        1_366_501.886_231_675_3,
+                        3_033_884.877_176_469_7,
+                    ],
+                    2.195_412_071_002_156e-7,
+                ),
+                (
+                    [
+                        -115_834.714_641_406_2,
+                        1_238_724.149_994_506,
+                        3_147_657.617_016_637,
+                    ],
+                    2.436_858_279_917_065e-10,
+                ),
+            ),
+            Vector::new(
+                0.002_682_520_470_992_279_3,
+                -0.042_920_327_535_876_47,
+                0.014_166_026_102_376_113,
+            ),
+            -8_887.375_273_640_824,
+        ),
+        (
+            pair(
+                [
+                    -0.370_969_535_038_529_14,
+                    -0.047_609_132_857_120_456,
+                    -0.927_423_837_596_322_9,
+                ],
+                (
+                    [
+                        24_540_290.070_906_863,
+                        56_606_264.279_325_97,
+                        -14_386_544.860_929_914,
+                    ],
+                    7.701_328_926_695_451e-5,
+                ),
+                (
+                    [
+                        32_276_980.470_413_595,
+                        57_599_168.241_282_195,
+                        4_955_181.138_043_167,
+                    ],
+                    3.790_722_038_686_428e-8,
+                ),
+            ),
+            Vector::new(
+                -0.014_490_997_462_442_545,
+                -0.927_423_837_596_322_9,
+                0.053_405_531_842_097_474,
+            ),
+            -53_621_933.210_727_125,
+        ),
+        (
+            pair(
+                [
+                    -0.354_922_780_165_156_66,
+                    0.932_075_517_971_945_4,
+                    -0.072_560_656_813_217_91,
+                ],
+                (
+                    [
+                        1_504_102.714_718_239_8,
+                        1_867_872.384_337_559_6,
+                        -3_507_127.772_932_822_4,
+                    ],
+                    3.029_806_612_309_429e-7,
+                ),
+                (
+                    [
+                        1_363_342.939_569_661_6,
+                        2_237_526.708_217_258_6,
+                        -3_535_904.797_988_396,
+                    ],
+                    5.132_383_704_549_067e-11,
+                ),
+            ),
+            Vector::new(
+                0.014_563_679_968_311_647,
+                -0.067_014_988_373_137_34,
+                -0.932_075_517_971_945_4,
+            ),
+            3_165_637.760_007_707_4,
+        ),
+    ]
 }
 
 /// The check refuses the three ways a far-out answer could go wrong while still
@@ -286,6 +484,8 @@ struct Tally {
     not_two_lines: usize,
     some_stored_plane_separates: usize,
     refused_though_a_stored_plane_separates: usize,
+    refused_though_the_kernels_normals_separate: Vec<String>,
+    refused_though_a_combined_normal_separates: usize,
 }
 
 impl Tally {
@@ -324,6 +524,15 @@ impl Tally {
                 if separable {
                     self.refused_though_a_stored_plane_separates += 1;
                 }
+                if truth.d.sign() == Ordering::Greater {
+                    if let Some(picker) = truth.an_offset_that_separates(one) {
+                        self.refused_though_the_kernels_normals_separate
+                            .push(format!("{picker:?}: {one:?} then {other:?}"));
+                    }
+                    if truth.a_combined_normal_that_separates(one).is_some() {
+                        self.refused_though_a_combined_normal_separates += 1;
+                    }
+                }
             }
         }
     }
@@ -333,7 +542,9 @@ impl Tally {
         println!(
             "asked {}, answered {} ({} in runs), refused {} {:?} ({} of them two \
              true lines), wrong {}; not two lines {}; some exactly-square normal \
-             through a stored origin separates in {} askings, {} of them refused",
+             through a stored origin separates in {} askings, {} of them refused; \
+             refused though one of the kernel's three normals separates at some \
+             offset {}, though a combination of two of them does {}",
             self.asked,
             self.answered,
             self.named_in_runs,
@@ -344,6 +555,8 @@ impl Tally {
             self.not_two_lines,
             self.some_stored_plane_separates,
             self.refused_though_a_stored_plane_separates,
+            self.refused_though_the_kernels_normals_separate.len(),
+            self.refused_though_a_combined_normal_separates,
         );
         for wrong in self.wrong.iter().take(5) {
             println!("wrong: {wrong}");
@@ -473,6 +686,92 @@ impl TrueLines {
             })
     }
 
+    /// A half-space, with one of the three exactly-square normals and **any**
+    /// `f64` offset at all, that separates the two lines — or `None` where no
+    /// offset does, so that no anchor the kernel could round to would either.
+    fn an_offset_that_separates(&self, one: &Cylinder) -> Option<HalfSpace> {
+        exactly_square_normals(one).into_iter().find_map(|normal| {
+            self.offset_along(normal)
+                .map(|offset| HalfSpace::new(normal, offset).expect("a half-space"))
+        })
+    }
+
+    /// The same, with a normal outside the three: one of them plus another
+    /// times a power of two, where that sum happens to round nothing.
+    fn a_combined_normal_that_separates(&self, one: &Cylinder) -> Option<HalfSpace> {
+        let base = exactly_square_normals(one);
+        let pairs: Vec<(Vector, Vector)> = (0..base.len())
+            .flat_map(|i| ((i + 1)..base.len()).map(move |j| (i, j)))
+            .map(|(i, j)| (base[i], base[j]))
+            .collect();
+        pairs
+            .into_iter()
+            .flat_map(|(first, second)| {
+                (-80..=80).flat_map(move |power| {
+                    [1.0, -1.0].map(|sign| first + second * (sign * 2f64.powi(power)))
+                })
+            })
+            .filter(|normal| {
+                *normal != Vector::zero()
+                    && dot(&exactly(normal.components()), &self.w).sign() == Ordering::Equal
+            })
+            .find_map(|normal| {
+                self.offset_along(normal)
+                    .map(|offset| HalfSpace::new(normal, offset).expect("a half-space"))
+            })
+    }
+
+    /// An `f64` offset that, with `normal`, separates the two lines.
+    ///
+    /// Moving the offset up, the half-space first holds both lines and then
+    /// not both; its reverse first not both and then both. The largest offset
+    /// whose half-space holds both and the smallest whose reverse holds both
+    /// are found by halving over the `f64`s in order. Any `f64` strictly
+    /// between them holds exactly one line each way, a different one, and
+    /// where the two are neighbours there is none.
+    fn offset_along(&self, normal: Vector) -> Option<f64> {
+        let [below, above] = self.the_offsets_either_side(normal);
+        (i128::from(above) - i128::from(below) > 1).then(|| {
+            from_ordered(
+                i64::try_from((i128::from(above) + i128::from(below)) / 2)
+                    .expect("between two keys"),
+            )
+        })
+    }
+
+    fn the_offsets_either_side(&self, normal: Vector) -> [i64; 2] {
+        let forward_holds_both = |offset: f64| {
+            self.which_lines_it_holds(HalfSpace::new(normal, offset).expect("a half-space"))
+                == Some([true, true])
+        };
+        let reverse_holds_both = |offset: f64| {
+            self.which_lines_it_holds(
+                HalfSpace::new(normal, offset)
+                    .expect("a half-space")
+                    .reversed(),
+            ) == Some([true, true])
+        };
+        let [least, most] = [ordered(-f64::MAX), ordered(f64::MAX)];
+        assert!(forward_holds_both(-f64::MAX) && !forward_holds_both(f64::MAX));
+        assert!(reverse_holds_both(f64::MAX) && !reverse_holds_both(-f64::MAX));
+        let last_true = |holds: &dyn Fn(f64) -> bool, [mut yes, mut no]: [i64; 2]| {
+            while (i128::from(yes) - i128::from(no)).abs() > 1 {
+                let middle = i64::try_from((i128::from(yes) + i128::from(no)) / 2)
+                    .expect("between two keys");
+                if holds(from_ordered(middle)) {
+                    yes = middle;
+                } else {
+                    no = middle;
+                }
+            }
+            yes
+        };
+        [
+            last_true(&forward_holds_both, [least, most]),
+            last_true(&reverse_holds_both, [most, least]),
+        ]
+    }
+
     /// `Ok` where `meet` is the right answer for these two lines, cut out of
     /// `other`.
     fn agrees_with(&self, meet: &SurfaceMeet, other: &Cylinder) -> Result<(), String> {
@@ -531,6 +830,33 @@ fn the_one_flat_picker(run: &NamedRun, other: &Cylinder) -> Result<HalfSpace, St
         }
         _ => Err(format!("picked by {only:?}")),
     }
+}
+
+/// The three normals the kernel builds exactly square to the pipes: the
+/// direction with two components swapped and one negated, which is the
+/// direction crossed with each coordinate axis. None that is zero.
+fn exactly_square_normals(one: &Cylinder) -> Vec<Vector> {
+    let [x, y, z] = one.axis().direction().components();
+    [
+        Vector::new(0.0, z, -y),
+        Vector::new(-z, 0.0, x),
+        Vector::new(y, -x, 0.0),
+    ]
+    .into_iter()
+    .filter(|normal| *normal != Vector::zero())
+    .collect()
+}
+
+/// An `f64` as a whole number that orders the way the `f64`s do, with
+/// neighbours one apart. Negative zero sits one below positive zero.
+fn ordered(value: f64) -> i64 {
+    let bits = i64::from_ne_bytes(value.to_bits().to_ne_bytes());
+    if bits < 0 { !(bits & i64::MAX) } else { bits }
+}
+
+fn from_ordered(key: i64) -> f64 {
+    let bits = if key < 0 { !key | i64::MIN } else { key };
+    f64::from_bits(u64::from_ne_bytes(bits.to_ne_bytes()))
 }
 
 fn exactly(xyz: [f64; 3]) -> [Dyadic; 3] {
