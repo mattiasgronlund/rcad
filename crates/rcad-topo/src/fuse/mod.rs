@@ -490,6 +490,21 @@ pub(crate) enum MeetPoint {
         /// Where it is.
         point: PredicatePoint,
     },
+    /// The second place a closed crossing is cut, across the circle from where
+    /// it starts, when where it starts is a ball's pole.
+    ///
+    /// A closed edge starting at a pole has no direction anyone can read, so
+    /// the circle is cut in two there and each half runs between two corners
+    /// (§194). Named apart from where the curve starts by the two surfaces
+    /// alone, which is what keeps both faces along it and both argument orders
+    /// agreeing.
+    HalfWayRoundAClosedCurve {
+        /// The two surfaces whose crossing this is, in the order the face
+        /// asking carries them.
+        carried_by: [Surface; 2],
+        /// Where it is.
+        point: PredicatePoint,
+    },
     /// A pole of a closed surface, where it pinches to a point.
     ///
     /// The one end of a boundary that is not where curves meet. A ball's skin
@@ -513,6 +528,7 @@ impl MeetPoint {
             MeetPoint::Existing { point, .. }
             | MeetPoint::OfThreeSurfaces { point, .. }
             | MeetPoint::WhereAClosedCurveStarts { point, .. }
+            | MeetPoint::HalfWayRoundAClosedCurve { point, .. }
             | MeetPoint::APoleOfAClosedSurface { point, .. } => *point,
         }
     }

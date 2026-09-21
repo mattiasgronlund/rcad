@@ -1794,6 +1794,9 @@ enum CornerName {
     /// The one point on a closed crossing that nothing else cuts, named by the
     /// two surfaces it runs between.
     RoundACurve([[u64; 9]; 2]),
+    /// The point across a closed crossing from where it starts, named the same
+    /// way, for a crossing that starts at a pole.
+    HalfWayRoundACurve([[u64; 9]; 2]),
     /// A pole of a closed surface, named by that surface and which of its two
     /// poles this is (§38.1).
     Pole([u64; 9], bool),
@@ -1807,10 +1810,10 @@ impl Corners {
                 surfaces, which, ..
             } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
             MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
-                let mut named =
-                    carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
-                named.sort_unstable();
-                CornerName::RoundACurve(named)
+                CornerName::RoundACurve(names_of_the_two_surfaces(carried_by))
+            }
+            MeetPoint::HalfWayRoundAClosedCurve { carried_by, .. } => {
+                CornerName::HalfWayRoundACurve(names_of_the_two_surfaces(carried_by))
             }
             MeetPoint::APoleOfAClosedSurface {
                 surface,
@@ -1828,6 +1831,7 @@ impl Corners {
             MeetPoint::Existing { vertex, .. } => Some(*vertex),
             MeetPoint::OfThreeSurfaces { .. }
             | MeetPoint::WhereAClosedCurveStarts { .. }
+            | MeetPoint::HalfWayRoundAClosedCurve { .. }
             | MeetPoint::APoleOfAClosedSurface { .. } => None,
         };
         let index = match self.at.get(&exactly_at(at)) {
@@ -1939,6 +1943,14 @@ fn names_of_the_three_surfaces(surfaces: &[Surface; 3]) -> [[u64; 9]; 3] {
     named
 }
 
+/// The two surfaces a closed crossing runs between, named either way round and
+/// sorted, so both faces along it name its corners alike.
+fn names_of_the_two_surfaces(carried_by: &[Surface; 2]) -> [[u64; 9]; 2] {
+    let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
+    named.sort_unstable();
+    named
+}
+
 /// A point as three bit patterns, for finding two corners that are the same
 /// point however they were named.
 ///
@@ -1963,8 +1975,10 @@ fn exactly_at(point: Point) -> [u64; 3] {
 
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
-/// either side of it. See [`which_curve_it_is`].
-type EdgeName = ([usize; 2], Option<[[u64; 9]; 2]>);
+/// either side of it. See [`which_curve_it_is`]. The last is which half it is
+/// of a circle cut in two because it started at a pole, where both halves run
+/// between the same two corners; see [`which_half_of_a_circle_cut_at_a_pole`].
+type EdgeName = ([usize; 2], Option<[[u64; 9]; 2]>, Option<bool>);
 
 /// The edges built so far, and how to find one again.
 #[derive(Default)]
@@ -2000,7 +2014,11 @@ impl Edges {
         );
         let at = middle_of(meet.ends[0].point());
         let named = which_curve_it_is(from, to, carried_by);
-        let key = ([from.min(to), from.max(to)], named);
+        let key = (
+            [from.min(to), from.max(to)],
+            named,
+            which_half_of_a_circle_cut_at_a_pole(meet),
+        );
         let edge = match self.between.get(&key) {
             Some(&already) => already,
             None => {
@@ -2349,6 +2367,49 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
     let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
     named.sort_unstable();
     Some(named)
+}
+
+/// Which half a side is of a circle between a ball and a plane that was cut in
+/// two because it started at the ball's pole, or `None` for any other side.
+///
+/// **Both halves run between the same two corners and along the same two
+/// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
+/// arcs of a closed crossing never meet their other half in one answer —
+/// whatever cut the crossing twice kept one arc and threw the other away — but
+/// a circle cut only to give it a direction keeps both: the dome on one side
+/// and the hole in the floor on the other each walk the whole of it.
+///
+/// **What tells them apart is a sign, and no number is built.** `∇ball ×
+/// ∇plane` runs one way round the circle all the way along it, so there is
+/// exactly one half that leaves where the circle starts along it. A side's
+/// material side says whether it leaves its first corner along `∇mine ×
+/// ∇partner` ([`which_arc_this_is`]'s rule); the plane's face has the two the
+/// other way round, and a side walked from the far corner leaves the start
+/// against that direction when it arrives. Both faces along a half, and both
+/// orders of the arguments, come to the same answer.
+///
+/// # Panics
+///
+/// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`],
+/// as [`which_arc_this_is`] does and for the same reason.
+fn which_half_of_a_circle_cut_at_a_pole(meet: &FaceMeet) -> Option<bool> {
+    let walked_from_the_far_corner = match (&meet.ends[0], &meet.ends[1]) {
+        (MeetPoint::WhereAClosedCurveStarts { .. }, MeetPoint::HalfWayRoundAClosedCurve { .. }) => {
+            false
+        }
+        (MeetPoint::HalfWayRoundAClosedCurve { .. }, MeetPoint::WhereAClosedCurveStarts { .. }) => {
+            true
+        }
+        _ => return None,
+    };
+    let along_mine_then_partner = match meet.material_side {
+        Decision::Neg => true,
+        Decision::Pos => false,
+        other => panic!("a side of a face was walked with no material side: {other:?}"),
+    };
+    let mine_is_the_ball = matches!(meet.carried_by[0], Surface::Sphere(_));
+    let along_ball_then_plane = along_mine_then_partner == mine_is_the_ball;
+    Some(along_ball_then_plane != walked_from_the_far_corner)
 }
 
 /// One wire of a piece as sides of the result, turned round when the rule turns

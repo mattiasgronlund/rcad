@@ -81,7 +81,8 @@ use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 use super::bake::BakedFace;
 use super::select::InPlane;
 use super::{
-    FaceMeet, MeetPoint, Sameness, as_exact_as_it_is, gave_up, must_decide, the_other_way,
+    FaceMeet, MeetPoint, Sameness, as_exact_as_it_is, gave_up, middle_of, must_decide,
+    the_other_way,
 };
 
 /// Cut one face into the pieces its cut surfaces leave behind.
@@ -755,6 +756,10 @@ struct Node {
     /// fixed order, and which of their meeting points this is. `None` for a
     /// corner the input already had.
     made_of: Option<([Surface; 3], u8)>,
+    /// Whether this is the second place a closed crossing is cut, across the
+    /// circle from where it starts, because it starts at a ball's pole — see
+    /// [`across_a_circle_that_starts_at_a_pole`].
+    half_way_round: bool,
     /// The crossings running through it, in increasing order.
     crossings: Vec<usize>,
 }
@@ -1115,6 +1120,7 @@ impl<'f> Arrangement<'f> {
                     point: at,
                     vertex: Some(self.face.wires[wire][position].start.vertex),
                     made_of: None,
+                    half_way_round: false,
                     crossings: through,
                 });
             }
@@ -1237,6 +1243,7 @@ impl<'f> Arrangement<'f> {
                         point: place,
                         vertex: None,
                         made_of: Some((sorted, which)),
+                        half_way_round: false,
                         crossings: vec![first, second],
                     });
                 }
@@ -1289,6 +1296,11 @@ impl<'f> Arrangement<'f> {
     /// `fuse(B, A)` disagree — so it goes where
     /// [`walk`](rcad_geom::walk) starts, which §34.4 made a function of the
     /// unordered pair (§31.3).
+    ///
+    /// A circle between a ball and a plane that starts at the ball's pole gets
+    /// a second node straight across from the first, so that it is two edges
+    /// with a direction each rather than one with none — see
+    /// [`across_a_circle_that_starts_at_a_pole`].
     fn start_every_closed_crossing_that_has_no_node(
         &mut self,
         log: &mut ProvenanceLog,
@@ -1321,8 +1333,22 @@ impl<'f> Arrangement<'f> {
                 point,
                 vertex: None,
                 made_of: None,
+                half_way_round: false,
                 crossings: vec![crossing],
             });
+            if let Some(across) = across_a_circle_that_starts_at_a_pole(
+                [&self.surface, &partner],
+                from,
+                middle_of(point),
+            ) {
+                self.nodes.push(Node {
+                    point: across,
+                    vertex: None,
+                    made_of: None,
+                    half_way_round: true,
+                    crossings: vec![crossing],
+                });
+            }
         }
         Ok(())
     }
@@ -1448,6 +1474,7 @@ impl<'f> Arrangement<'f> {
                         point: self.nodes[index].point,
                         vertex: self.nodes[index].vertex,
                         made_of: self.nodes[index].made_of,
+                        half_way_round: self.nodes[index].half_way_round,
                         crossings: self.nodes[index].crossings.clone(),
                     });
                 }
@@ -3003,13 +3030,18 @@ impl<'f> Arrangement<'f> {
                 which,
                 point: self.nodes[node].point,
             },
-            (None, None) => MeetPoint::WhereAClosedCurveStarts {
-                carried_by: [
+            (None, None) => {
+                let carried_by = [
                     self.surface,
                     self.crossings[self.nodes[node].crossings[0]].partner,
-                ],
-                point: self.nodes[node].point,
-            },
+                ];
+                let point = self.nodes[node].point;
+                if self.nodes[node].half_way_round {
+                    MeetPoint::HalfWayRoundAClosedCurve { carried_by, point }
+                } else {
+                    MeetPoint::WhereAClosedCurveStarts { carried_by, point }
+                }
+            }
         }
     }
 
@@ -3182,6 +3214,93 @@ fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) 
         Interval::around(coordinate, reach)
             .expect("a finite seed and a positive reach leave a low end below a high one")
     }))
+}
+
+/// Where a circle between a ball and a plane is cut a second time, when the
+/// one place it starts is a pole of the ball: straight across the circle.
+///
+/// **A closed edge starting at a pole has no direction anyone can read.** It
+/// is stored running the way the ball's longitude runs at its corner, and at a
+/// pole every longitude runs through the one point, so `assemble` refused the
+/// whole fuse with [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`]. A ball
+/// and a block turned a quarter turn about `x` does it: the floor turns into a
+/// plane through the ball's centre standing on the world's `z`, and the circle
+/// starts exactly on the lower pole. Cut in two, each half runs between two
+/// corners and its direction is read the way any edge with two ends is, which
+/// is the same answer `rcad-step` gives the same circle on import (§193.3,
+/// §194).
+///
+/// **Only where the direction is missing**, which is
+/// [`Surface::the_way_its_first_coordinate_runs_at`] having no answer at `at`
+/// — exactly when the rule `assemble` reads comes back zero for a pole. A
+/// circle starting anywhere else keeps its one corner, so no answer that came
+/// back before changes. `at` is the middle of the start's box, the same point
+/// `assemble` reads the rule at.
+///
+/// **Only a ball against a plane**, whose circle has a centre this can name:
+/// the ball's centre dropped onto the plane. `None` for every other pair, and
+/// one of those starting at a pole is still refused where it was.
+///
+/// **And not where the point across is the other pole.** That is a plane
+/// exactly down the ball's polar axis, and cut there each half is a meridian
+/// from pole to pole, whose wire the mesher cannot walk round: the fuse then
+/// refuses `AWireWillNotLieFlatOnItsFace` out of its own mesh, one step later
+/// and less plainly than the named refusal it gives when the circle is left
+/// whole. `degenerate_curved_fuses`'
+/// `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name` holds that
+/// case, and cutting it anyway turned the first of its fuses, the union with
+/// the knife along `x = 0`, into that mesh refusal.
+///
+/// # Its box
+///
+/// The start sits within [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of its largest
+/// coordinate off the circle, and mirroring it through the circle's centre
+/// carries that distance across unchanged. The drop onto the plane and the
+/// mirror round a few units in the last place of the largest coordinate in
+/// play, which a second allowance of the same size covers many times over.
+/// Where both surfaces certify the rounded point is on them, it is used as it
+/// is, as [`where_the_crossing_starts`] does.
+fn across_a_circle_that_starts_at_a_pole(
+    pair: [&Surface; 2],
+    from: Point,
+    at: Point,
+) -> Option<PredicatePoint> {
+    let (ball, flat) = match pair {
+        [Surface::Sphere(ball), Surface::Plane(flat)]
+        | [Surface::Plane(flat), Surface::Sphere(ball)] => (ball, flat),
+        _ => return None,
+    };
+    if Surface::Sphere(*ball)
+        .the_way_its_first_coordinate_runs_at(at)
+        .is_some()
+    {
+        return None;
+    }
+    let centre = flat.project(ball.centre());
+    let across = centre + (centre - from);
+    assert!(
+        across.is_finite(),
+        "a ball and a plane built from finite numbers, crossing in a circle that starts at a \
+         finite place, have a finite point across it"
+    );
+    Surface::Sphere(*ball).the_way_its_first_coordinate_runs_at(across)?;
+    let exact = PredicatePoint::from(across.coordinates());
+    if side_of_surface(pair[0], exact) == Decision::Zero
+        && side_of_surface(pair[1], exact) == Decision::Zero
+    {
+        return Some(exact);
+    }
+    let largest = [across, from, ball.centre()]
+        .map(|point| point.largest_coordinate_magnitude())
+        .into_iter()
+        .fold(1.0, f64::max);
+    let reach = 2.0 * POINT_ALONG_A_CROSSING_ROUNDOFF * largest;
+    Some(PredicatePoint::Constructed(across.coordinates().map(
+        |coordinate| {
+            Interval::around(coordinate, reach)
+                .expect("a finite point and a positive reach leave a low end below a high one")
+        },
+    )))
 }
 
 /// Whether two boxes have any point in common, so that one may be the other.
@@ -5018,6 +5137,9 @@ mod curved {
                 surfaces, which, ..
             } => format!("{surfaces:?}/{which}"),
             MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => format!("{carried_by:?}"),
+            MeetPoint::HalfWayRoundAClosedCurve { carried_by, .. } => {
+                format!("{carried_by:?}/half way round")
+            }
             MeetPoint::APoleOfAClosedSurface {
                 surface,
                 at_the_top,

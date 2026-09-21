@@ -449,9 +449,20 @@ fn the_piece_holds(
 /// A wire with one side whose two ends are the same corner goes right round a
 /// closed curve. On a plane that curve was cut by a ball or a pipe, because two
 /// planes cross in a straight line and a straight line does not close.
+///
+/// **So does a wire of two sides along one ball**, which is the same circle
+/// cut in two because it started at the ball's pole (§194). Its two corners
+/// are a polygon of no area, so read as one it winds round nothing and the disk
+/// it bounds would hold no point at all.
 fn round_wire_of(wire: &[FaceMeet]) -> Option<Surface> {
     match wire {
         [only] if only.ends[0].point() == only.ends[1].point() => Some(only.carried_by[1]),
+        [one, other]
+            if matches!(one.carried_by[1], Surface::Sphere(_))
+                && one.carried_by[1] == other.carried_by[1] =>
+        {
+            Some(one.carried_by[1])
+        }
         _ => None,
     }
 }

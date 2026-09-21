@@ -67,7 +67,13 @@ fn united(model: &Model, block: SolidKey, ball: SolidKey) -> (Model, Vec<SolidKe
     let mut model = model.clone();
     let mut log = ProvenanceLog::new();
     let fused = model
-        .fuse(&[block], &[ball], Rule::Union, &Policy::certified(), &mut log)
+        .fuse(
+            &[block],
+            &[ball],
+            Rule::Union,
+            &Policy::certified(),
+            &mut log,
+        )
         .unwrap_or_else(|why| panic!("the union answers: {why}"));
     assert!(
         log.records().is_empty(),
