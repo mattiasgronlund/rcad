@@ -14,18 +14,16 @@ unchanged.
 110/323, §126's failure **§149's oracle, not the kernel**, §121 as `912cd168`.
 
 **What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
-sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150 by §156;
-§151.5 by §163; §163.4 by §165; §165.4 by §166; §166.4 by §167; §167.4 by §168;
-**§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**, one
-acceptance test, nothing downstream of a picker having read the offset; and
+sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150–§168 in turn;
+**§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**; and
 **§181.6's question** by **§182**; **§183's picking normal** by **§184**, 793
-refusals to 0; §184.6's far pipes by **§187.3**, 0 wrong in 8000; §176.5's
-silent chord and the LED arc by **§187.1–2** — 20 files, not 18, and 0 import.
+refusals to 0; §184.6 by **§187.3**; §176.5's chord and LED arc by **§187.1–2**;
+§187.4's leaning-bar wrong mesh by **§188.1**; the LED coarse sweep by
+**§188.3**, still 0 of 20; the six far pipes by **§188.4** — gaps, not fixed.
 
-**Next and unclaimed: the wrong leaning-bar mesh**, §187.4 item 1 — `mesh()`
-returns `Ok` with χ 3 on a bar whose cap leans 5 across for 1 up, so it comes
-before any refusal. Then the LED files' coarse sweep in `validate.rs` (§187.2),
-which frees none of the 20 alone. §187.5 lists the rest. §124, §136.4, §125.6:
+**Next and unclaimed: `validate` passing a `Pole` step off the pinch**, §188.2 —
+a second wrong mesh, refused by the mesher only after the fact. Beside it: the
+far-pipe fix in `intersect.rs` (§188.4). §188.5 lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
