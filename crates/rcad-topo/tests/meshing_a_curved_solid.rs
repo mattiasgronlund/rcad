@@ -1713,29 +1713,26 @@ fn every_triangle_of_a_random_bar_or_ball_stays_within_the_deviation_its_mesh_re
 
 /// **A defect the soak above found, kept by its own numbers.** A bar of radius
 /// one and ten tall, its top cap leaning five across for every one up, meshed
-/// at a tenth, does not close up into one surface.
+/// at a tenth, used not to close up into one surface.
 ///
 /// The leaning cap cuts the bar in a long ellipse, from five up to fifteen. Near
 /// its top end, where it turns sharpest, three points in a row along it — call
-/// them the first, the middle and the last — are cut off as an ear by **both**
-/// faces that meet there: the cap has the triangle middle–last–first and the
-/// wall has middle–first–last. Those are the same three points facing opposite
-/// ways, and the middle point is in no other triangle. So the pair is a flat
+/// them the first, the middle and the last — were cut off as an ear by **both**
+/// faces that meet there: the cap had the triangle middle–last–first and the
+/// wall had middle–first–last. Those are the same three points facing opposite
+/// ways, and the middle point was in no other triangle. So the pair was a flat
 /// pocket with nothing inside it, pinched off from the rest of the mesh along
-/// the first–last side, which the mesh then uses four times — twice each way,
+/// the first–last side, which the mesh then used four times — twice each way,
 /// the one pattern [`the_mesh_closes_up`]'s balance check says it lets through
-/// and its χ check catches. χ comes out 3 rather than a bar's 2.
+/// and its χ check catches. χ came out 3 rather than a bar's 2, and `mesh`
+/// returned it as `Ok`.
 ///
-/// Measured (probe, not kept): the same fault at radius 1 and fifty tall with
-/// the cap leaning 5, 10, 25 and 45, at several deflections from a tenth to one;
-/// never with a lean of 2 or less. Where the bar sits changes which deflections
-/// show it and not whether it happens: the soak's own find was a bar a tenth
-/// across, turned and moved two thousand units out.
-///
-/// Ignored because it fails; the justfile's `ignored_tests` has to move from 1
-/// to 2 alongside it.
+/// The cap meets the wall there at about eleven degrees, so the two faces see
+/// the same three points as a natural ear. The triangulator now never lets a
+/// curved face draw a side straight across one corner of its boundary: it cuts
+/// that side in half, which puts a point of the wall off the plane of the
+/// ellipse (`docs/decisions.md` §187.4).
 #[test]
-#[ignore = "open: a steep leaning cap and the wall both cut the same ear off the ellipse"]
 fn a_bar_whose_top_leans_five_across_for_one_up_meshes_into_one_closed_surface() {
     let mut model = a_model();
     let bar = model
@@ -1756,6 +1753,60 @@ fn a_bar_whose_top_leans_five_across_for_one_up_meshes_into_one_closed_surface()
         .expect("a bar cut off at a steep angle is a sound bar");
     assert_eq!(euler_characteristic_of(&model, bar), 2);
     meshed(&model, bar, 0.1);
+}
+
+/// The bar above at every whole lean from two, where it never went wrong, to
+/// twenty, at coarse and fine deflections, and once more small, turned and moved
+/// two thousand out the way the soak's own find was. Every side of every mesh is
+/// used by exactly two triangles — the count §23.4 asks for, which is sharper
+/// than [`the_mesh_closes_up`]'s balance and is the one the pocket broke.
+///
+/// The bar is `lean + 5` tall so that the low end of the ellipse stays five
+/// above the bottom cap however far it leans.
+#[test]
+fn a_bar_leaning_anywhere_from_two_to_twenty_across_for_one_up_uses_every_side_twice() {
+    let far_out_and_turned = Isometry::translation(Vector::new(2000.0, -1300.0, 700.0))
+        .expect("a finite shift")
+        .compose(&a_third_of_a_turn_about_a_slanted_axis());
+    for lean in 2..=20 {
+        let lean = f64::from(lean);
+        for (radius, placement, deflections) in [
+            (1.0, Isometry::identity(), &[0.02, 0.1, 0.3, 1.0][..]),
+            (0.1, far_out_and_turned, &[0.003, 0.01, 0.03][..]),
+        ] {
+            let height = radius * (lean + 5.0);
+            let mut model = a_model();
+            let bar = model
+                .add_bar_cut_off_by(
+                    radius,
+                    [
+                        a_cap_square_to_the_axis(0.0, -1.0),
+                        a_leaning_cap(height, lean),
+                    ],
+                    &placement,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a leaning cap that stays above the bottom cap cuts a bar");
+            for &deflection in deflections {
+                let mesh = meshed(&model, bar, deflection);
+                let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
+                for triangle in mesh.triangles() {
+                    let [first, second, third] = triangle.corners();
+                    for (from, to) in [(first, second), (second, third), (third, first)] {
+                        *times_used.entry((from.min(to), from.max(to))).or_default() += 1;
+                    }
+                }
+                for (side, used) in times_used {
+                    assert_eq!(
+                        used, 2,
+                        "leaning {lean} at radius {radius}, meshed at {deflection}: \
+                         the side {side:?} is used {used} times"
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// A ball, a bar, or a bar cut off at an angle, with where it is put.
