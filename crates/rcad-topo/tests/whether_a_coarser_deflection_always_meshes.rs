@@ -90,7 +90,11 @@
 //! [`the_verdict_is_scoped_to_the_family_that_was_swept`] is what stops it being
 //! written wider.
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use std::cell::Cell;
+
+use proptest::prelude::*;
+use proptest::test_runner::{Config, RngAlgorithm, TestCaseError, TestRng, TestRunner};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
@@ -820,4 +824,354 @@ fn the_family_is_the_size_the_verdict_says_it_is() {
             shape.what
         );
     }
+}
+
+/// How many random solids the property below meshes by default, twice each.
+///
+/// The fixed family above is twenty solids at fixed sizes, all at the origin but
+/// one. This widens it to every size, slope and placement the same five curved
+/// kinds can be drawn at, and the count is what keeps it to a second or two of
+/// the suite; a soak is [`SOAK_FACTOR`] times this.
+const CASES: u32 = 32;
+
+/// The environment variable that multiplies [`CASES`] for a soak, read the way
+/// `fuses_that_must_agree.rs` reads it.
+///
+/// ```text
+/// RCAD_SOAK_FACTOR=50 cargo nextest run -p rcad-topo \
+///     --test whether_a_coarser_deflection_always_meshes
+/// ```
+const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
+
+/// The environment variable that reseeds the property below. Unset, the seed is
+/// fixed and a failure reproduces by running the same command again.
+const SOAK_SEED: &str = "RCAD_SOAK_SEED";
+
+/// §176.4's gap closed for this file: the question the fixed family asks, asked
+/// of solids drawn at random.
+///
+/// Each case is one curved solid — a ball, a bar, a frustum, a pointed cone or a
+/// quarter bend — at a random size, put somewhere between the origin and a
+/// million units out, sometimes turned, and meshed at two deflections: a finer
+/// one anywhere from a ten-thousandth of its size to all of it, and a coarser one
+/// up to a thousand times that. **If the finer one meshed, the coarser one has
+/// to mesh too**, into more than nothing. A finer rung that refuses asks nothing
+/// of the coarser one and is only counted.
+#[test]
+fn a_coarser_deflection_meshes_whenever_a_finer_one_did_on_solids_drawn_at_random() {
+    let asked = Cell::new(0_u32);
+    let finer_meshed = Cell::new(0_u32);
+    run(
+        (
+            a_random_solid(),
+            log_uniform(1e-4, 1.0),
+            log_uniform(1.0, 1e3),
+        ),
+        |(drawn, finer_share, coarser_by)| {
+            let shape = drawn.built();
+            asked.set(asked.get() + 1);
+            let finer = how_a_mesh_answered(&shape, finer_share * shape.size);
+            let Rung::Meshed(triangles) = finer else {
+                return Ok(());
+            };
+            finer_meshed.set(finer_meshed.get() + 1);
+            prop_assert!(
+                triangles > 0,
+                "{} meshed at {finer_share} of its size into no triangles",
+                shape.what
+            );
+            let coarser = how_a_mesh_answered(&shape, finer_share * coarser_by * shape.size);
+            prop_assert!(
+                matches!(coarser, Rung::Meshed(triangles) if triangles > 0),
+                "{} meshed at {finer_share} of its size and then answered {} at {} of it",
+                shape.what,
+                coarser.how_it_reads(),
+                finer_share * coarser_by
+            );
+            Ok(())
+        },
+    );
+    println!(
+        "{} of {} random solids meshed at the finer deflection",
+        finer_meshed.get(),
+        asked.get()
+    );
+    assert!(
+        finer_meshed.get() * 2 >= asked.get(),
+        "only {} of {} random solids meshed at the finer deflection, which leaves \
+         too few for the coarser one to be asked about",
+        finer_meshed.get(),
+        asked.get()
+    );
+}
+
+/// **A defect the soak above found, kept by its own numbers.** A turned quarter
+/// bend meshes at a deflection of `1.46`, is refused at every deflection from
+/// `1.47` to `1.57`, and meshes again at `1.58`.
+///
+/// The bend is ring `4.8200302726828` and tube `0.9357021242936023`, turned by
+/// `4.467589615527247` radians — about 256 degrees — about an axis through the
+/// origin along `(0.32268650637944635, -0.6828390663284947,
+/// 0.038820372944909774)`, and moved nowhere. The refusal is the triangulator's
+/// "the boundary crosses itself" on one face. Measured (probe, not kept), in
+/// steps of a hundredth from `1.00` to `1.59`: every step from `1.47` to `1.57`
+/// refused and every other step meshed. The same bend unturned meshes at every
+/// one of those steps, and so does a bend of ring 5 and tube 1 under the same
+/// turn, so the turn and the exact size are both part of it.
+///
+/// That is the non-monotone ladder this file exists to catch, on a kind the
+/// fixed family holds but at a placement it never tries. Ignored because it
+/// fails; the justfile's `ignored_tests` has to move alongside it.
+#[test]
+#[ignore = "open: a turned quarter bend refuses 1.47 to 1.57 between meshes at 1.46 and 1.58"]
+fn a_turned_quarter_bend_meshes_at_every_deflection_coarser_than_one_it_meshed_at() {
+    let mut model = a_model(4.8200302726828 + 0.9357021242936023);
+    let bend = rings::a_quarter_bend(&mut model, 4.8200302726828, 0.9357021242936023);
+    let turn = Isometry::rotation(
+        &Axis::new(
+            Point::origin(),
+            Vector::new(
+                0.32268650637944635,
+                -0.6828390663284947,
+                0.038820372944909774,
+            ),
+        )
+        .expect("a direction with length"),
+        4.467589615527247,
+    )
+    .expect("a finite turn");
+    model
+        .place_solid(bend, &turn)
+        .expect("this model made the key");
+    let shape = Shape {
+        what: "a turned quarter bend".to_owned(),
+        model,
+        solid: bend,
+        size: 4.8200302726828 + 0.9357021242936023,
+    };
+
+    assert!(
+        how_a_mesh_answered(&shape, 1.46).meshed(),
+        "the finer deflection meshes, which is what makes the coarser one a question"
+    );
+    let coarser = how_a_mesh_answered(&shape, 1.5);
+    assert!(
+        coarser.meshed(),
+        "meshed at 1.46 and then answered {} at 1.5",
+        coarser.how_it_reads()
+    );
+}
+
+/// One curved solid of the kinds [`the_family`] holds, with where it is put.
+#[derive(Clone, Debug)]
+struct ARandomSolid {
+    kind: CurvedKind,
+    shift: [f64; 3],
+    turn: Option<([f64; 3], f64)>,
+}
+
+#[derive(Clone, Debug)]
+enum CurvedKind {
+    Ball { radius: f64 },
+    Bar { radius: f64, height: f64 },
+    Frustum { slope: f64, near: f64, far: f64 },
+    PointedCone { slope: f64, far: f64 },
+    QuarterBend { ring: f64, tube: f64 },
+}
+
+impl ARandomSolid {
+    /// The solid in a model of its own, sized the way [`the_family`] sizes one.
+    fn built(&self) -> Shape {
+        let placement = self.placement();
+        let out = Vector::from(self.shift).length();
+        let (what, size) = match self.kind {
+            CurvedKind::Ball { radius } => (format!("ball of radius {radius}"), radius),
+            CurvedKind::Bar { radius, height } => (
+                format!("bar {radius} across and {height} tall"),
+                (2.0 * radius).max(height),
+            ),
+            CurvedKind::Frustum { slope, near, far } => (
+                format!("frustum of slope {slope} from {near} to {far}"),
+                far,
+            ),
+            CurvedKind::PointedCone { slope, far } => {
+                (format!("pointed cone of slope {slope} up to {far}"), far)
+            }
+            CurvedKind::QuarterBend { ring, tube } => (
+                format!("quarter bend of ring {ring} and tube {tube}"),
+                ring + tube,
+            ),
+        };
+        let mut model = a_model(size.max(out));
+        let solid = match self.kind {
+            CurvedKind::Ball { radius } => model
+                .add_ball(radius, &placement)
+                .expect("a ball of positive radius anywhere"),
+            CurvedKind::Bar { radius, height } => model
+                .add_round_bar(radius, height, &placement)
+                .expect("a bar of positive size anywhere"),
+            CurvedKind::Frustum { slope, near, far } => {
+                let frustum = cones::a_frustum(&mut model, slope, near, far);
+                model
+                    .place_solid(frustum, &placement)
+                    .expect("this model made the key");
+                frustum
+            }
+            CurvedKind::PointedCone { slope, far } => {
+                let cone = cones::a_pointed_cone(&mut model, slope, far);
+                model
+                    .place_solid(cone, &placement)
+                    .expect("this model made the key");
+                cone
+            }
+            CurvedKind::QuarterBend { ring, tube } => {
+                let bend = rings::a_quarter_bend(&mut model, ring, tube);
+                model
+                    .place_solid(bend, &placement)
+                    .expect("this model made the key");
+                bend
+            }
+        };
+        Shape {
+            what: format!("{what}, placed by {self:?}"),
+            model,
+            solid,
+            size,
+        }
+    }
+
+    fn placement(&self) -> Isometry {
+        let shift = Isometry::translation(Vector::from(self.shift)).expect("a finite shift");
+        match self.turn {
+            None => shift,
+            Some((direction, angle)) => shift.compose(
+                &Isometry::rotation(
+                    &Axis::new(Point::origin(), Vector::from(direction))
+                        .expect("a direction with length"),
+                    angle,
+                )
+                .expect("a finite turn"),
+            ),
+        }
+    }
+}
+
+/// The five curved kinds of [`the_family`], at sizes and slopes around the ones
+/// it fixes, anywhere from the origin to a million units out.
+fn a_random_solid() -> impl Strategy<Value = ARandomSolid> {
+    let kind = prop_oneof![
+        log_uniform(0.05, 20.0).prop_map(|radius| CurvedKind::Ball { radius }),
+        (log_uniform(0.05, 10.0), log_uniform(0.05, 10.0))
+            .prop_map(|(radius, height)| CurvedKind::Bar { radius, height }),
+        (
+            log_uniform(0.25, 2.0),
+            log_uniform(0.5, 3.0),
+            log_uniform(1.5, 4.0)
+        )
+            .prop_map(|(slope, near, longer_by)| CurvedKind::Frustum {
+                slope,
+                near,
+                far: near * longer_by,
+            }),
+        (log_uniform(0.25, 2.0), log_uniform(0.5, 8.0))
+            .prop_map(|(slope, far)| CurvedKind::PointedCone { slope, far }),
+        (log_uniform(2.0, 10.0), 0.1..0.5_f64).prop_map(|(ring, share)| {
+            CurvedKind::QuarterBend {
+                ring,
+                tube: ring * share,
+            }
+        }),
+    ];
+    (kind, a_shift(), proptest::option::of(a_turn())).prop_map(|(kind, shift, turn)| ARandomSolid {
+        kind,
+        shift,
+        turn,
+    })
+}
+
+/// A move of nothing, of a few units, or of up to a million.
+fn a_shift() -> impl Strategy<Value = [f64; 3]> {
+    let how_far = prop_oneof![Just(0.0), log_uniform(1.0, 100.0), log_uniform(1e3, 1e6)];
+    (how_far, a_direction()).prop_map(|(how_far, direction)| {
+        let length = Vector::from(direction).length();
+        direction.map(|component| component / length * how_far)
+    })
+}
+
+fn a_turn() -> impl Strategy<Value = ([f64; 3], f64)> {
+    (a_direction(), 0.0..core::f64::consts::TAU)
+}
+
+fn a_direction() -> impl Strategy<Value = [f64; 3]> {
+    [-1.0..1.0_f64, -1.0..1.0_f64, -1.0..1.0_f64]
+        .prop_filter("a direction with length", |direction| {
+            Vector::from(*direction).length() > 0.1
+        })
+}
+
+/// A number between `low` and `high` whose logarithm is uniform, so every decade
+/// in the range is drawn as often as every other.
+fn log_uniform(low: f64, high: f64) -> impl Strategy<Value = f64> {
+    (low.log10()..high.log10()).prop_map(|exponent| 10_f64.powf(exponent))
+}
+
+/// Run `property` over [`measured_cases`] draws from the fixed seed, or the one
+/// [`SOAK_SEED`] names.
+///
+/// **Nothing is persisted.** `fuses_that_must_agree.rs` writes a failing seed
+/// into a tracked `proptest-regressions` file; this file does not, because the
+/// seed is fixed and a failure reproduces by running the same command again, and
+/// a regression file written beside a test file is a tracked file a soak edits.
+fn run<T: core::fmt::Debug>(
+    strategy: impl Strategy<Value = T>,
+    property: impl Fn(T) -> Result<(), TestCaseError>,
+) {
+    let mut runner = TestRunner::new_with_rng(
+        Config {
+            cases: measured_cases(),
+            failure_persistence: None,
+            ..Config::default()
+        },
+        fresh_seeded_soak(),
+    );
+    if let Err(why) = runner.run(&strategy, property) {
+        panic!("{why}");
+    }
+}
+
+/// [`CASES`], multiplied by whatever [`SOAK_FACTOR`] says.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number above zero,
+/// or to one whose product is more than a run can count: a soak that silently
+/// ran the default corpus would be worse than one that stopped.
+fn measured_cases() -> u32 {
+    let Ok(factor) = std::env::var(SOAK_FACTOR) else {
+        return CASES;
+    };
+    let factor: u32 = factor
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
+    assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
+    CASES
+        .checked_mul(factor)
+        .unwrap_or_else(|| panic!("{CASES} cases times {factor} is more than one run can count"))
+}
+
+/// The fixed seed, or the one [`SOAK_SEED`] names.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number.
+fn fresh_seeded_soak() -> TestRng {
+    let Ok(seed) = std::env::var(SOAK_SEED) else {
+        return TestRng::deterministic_rng(RngAlgorithm::ChaCha);
+    };
+    let seed: u64 = seed
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_SEED} has to be a whole number, not {seed:?}"));
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&seed.to_le_bytes());
+    TestRng::from_seed(RngAlgorithm::ChaCha, &bytes)
 }

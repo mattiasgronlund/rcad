@@ -12,8 +12,11 @@
 //! wrong — and it also gives `mesh` a consumer that leans on none of M2's new
 //! curved machinery.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
+use proptest::prelude::*;
+use proptest::test_runner::{Config, RngAlgorithm, TestCaseError, TestRng, TestRunner};
 use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
 use rcad_topo::{Error, Mesh, Model, ProfileBuilder, Rule, SolidKey};
@@ -1587,4 +1590,497 @@ fn volume_of(model: &Model, solid: SolidKey) -> f64 {
         )
         .expect("a bar a billion units out measures")
         .volume()
+}
+
+/// How many random bars and balls the property below meshes by default.
+///
+/// [`every_size_of_bar_and_ball_at_every_coarseness_meshes_into_a_closed_surface`]
+/// is a fixed grid, so a soak cannot widen it. This draws from the same ranges
+/// and wider placements, and the count keeps it to well under a second of the
+/// suite; a soak is [`SOAK_FACTOR`] times this.
+const CASES: u32 = 256;
+
+/// The environment variable that multiplies [`CASES`] for a soak, read the way
+/// `fuses_that_must_agree.rs` reads it.
+///
+/// ```text
+/// RCAD_SOAK_FACTOR=50 cargo nextest run -p rcad-topo --test meshing_a_curved_solid
+/// ```
+const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
+
+/// The environment variable that reseeds the property below. Unset, the seed is
+/// fixed and a failure reproduces by running the same command again.
+const SOAK_SEED: &str = "RCAD_SOAK_SEED";
+
+/// §176.4's gap closed for this file: every mesh of a random bar or ball passes
+/// §23.4's oracle, and **no point of any triangle is further from the true
+/// surface than the deviation the mesh publishes**.
+///
+/// The true surface is written down here from the numbers the solid was built
+/// with — a sphere about where the placement put the centre, a cylinder about
+/// where it put the axis, and the two cap planes — and never read back from the
+/// model, so the distance is not the mesher checking itself. A ball is measured
+/// exactly: its furthest point from the centre is a corner and its nearest is
+/// the triangle's closest point. A bar's wall is measured at a grid of points
+/// over each triangle, which can miss the worst point but never invents one, so
+/// any failure is real.
+///
+/// Refusals for a deflection under the floor or for more points than a mesh
+/// holds are honest and counted; any other refusal fails.
+#[test]
+fn every_triangle_of_a_random_bar_or_ball_stays_within_the_deviation_its_mesh_reports() {
+    let asked = Cell::new(0_u32);
+    let answered = Cell::new(0_u32);
+    let closest_to_the_bound = Cell::new(0.0_f64);
+    run(
+        (a_random_bar_or_ball(), log_uniform(0.02, 1e3)),
+        |(drawn, share_of_the_radius)| {
+            asked.set(asked.get() + 1);
+            let placement = drawn.placement();
+            let mut model = a_model();
+            let solid = drawn.built(&mut model, &placement);
+            let deflection = drawn.radius * share_of_the_radius;
+            let outcome = model.solid(solid).expect("this model made the key").mesh(
+                Deflection::of(deflection).expect("a positive length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let mesh = match outcome {
+                Ok(mesh) => mesh,
+                Err(
+                    Error::DeflectionBelowWhatAMeshCanReach { .. }
+                    | Error::MoreMeshPointsThanASolidWillHold { .. }
+                    | Error::Geometry(rcad_geom::Error::TooManyPointsAlongOneCrossing { .. }),
+                ) => return Ok(()),
+                Err(why) => {
+                    return Err(TestCaseError::fail(format!(
+                        "{drawn:?} at a deflection of {deflection}: {why}"
+                    )));
+                }
+            };
+            answered.set(answered.get() + 1);
+            the_mesh_closes_up(&model, solid, &mesh, deflection);
+
+            let claimed = mesh.deviation().magnitude();
+            let truth = TheTrueSurfaces::of(&drawn, &placement);
+            let flat: HashSet<_> = model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .filter(|face| face.surface().as_plane().is_some())
+                .map(|face| face.key())
+                .collect();
+            for triangle in mesh.triangles() {
+                let corners = triangle
+                    .corners()
+                    .map(|corner| mesh.points()[corner as usize]);
+                let strayed =
+                    truth.how_far_a_triangle_strays(corners, flat.contains(&triangle.face()));
+                if claimed > 0.0 {
+                    closest_to_the_bound.set(closest_to_the_bound.get().max(strayed / claimed));
+                }
+                prop_assert!(
+                    strayed <= claimed + truth.what_this_check_rounds_by,
+                    "{drawn:?} at a deflection of {deflection}: the triangle {corners:?} strays \
+                     {strayed} from the true surface, past the {claimed} the mesh reports and \
+                     the {} this check's own arithmetic can be out by",
+                    truth.what_this_check_rounds_by
+                );
+            }
+            Ok(())
+        },
+    );
+    println!(
+        "{} of {} random bars and balls meshed; the worst triangle came to {:.3} of the \
+         deviation its mesh reported",
+        answered.get(),
+        asked.get(),
+        closest_to_the_bound.get()
+    );
+    assert!(
+        answered.get() * 2 >= asked.get(),
+        "only {} of {} random bars and balls meshed, which is not a sweep",
+        answered.get(),
+        asked.get()
+    );
+    assert!(
+        closest_to_the_bound.get() > 0.5,
+        "no triangle came within half of the deviation its mesh reported (the worst was {}), \
+         so the bound is not being tested from below",
+        closest_to_the_bound.get()
+    );
+}
+
+/// **A defect the soak above found, kept by its own numbers.** A bar of radius
+/// one and ten tall, its top cap leaning five across for every one up, meshed
+/// at a tenth, does not close up into one surface.
+///
+/// The leaning cap cuts the bar in a long ellipse, from five up to fifteen. Near
+/// its top end, where it turns sharpest, three points in a row along it — call
+/// them the first, the middle and the last — are cut off as an ear by **both**
+/// faces that meet there: the cap has the triangle middle–last–first and the
+/// wall has middle–first–last. Those are the same three points facing opposite
+/// ways, and the middle point is in no other triangle. So the pair is a flat
+/// pocket with nothing inside it, pinched off from the rest of the mesh along
+/// the first–last side, which the mesh then uses four times — twice each way,
+/// the one pattern [`the_mesh_closes_up`]'s balance check says it lets through
+/// and its χ check catches. χ comes out 3 rather than a bar's 2.
+///
+/// Measured (probe, not kept): the same fault at radius 1 and fifty tall with
+/// the cap leaning 5, 10, 25 and 45, at several deflections from a tenth to one;
+/// never with a lean of 2 or less. Where the bar sits changes which deflections
+/// show it and not whether it happens: the soak's own find was a bar a tenth
+/// across, turned and moved two thousand units out.
+///
+/// Ignored because it fails; the justfile's `ignored_tests` has to move from 1
+/// to 2 alongside it.
+#[test]
+#[ignore = "open: a steep leaning cap and the wall both cut the same ear off the ellipse"]
+fn a_bar_whose_top_leans_five_across_for_one_up_meshes_into_one_closed_surface() {
+    let mut model = a_model();
+    let bar = model
+        .add_bar_cut_off_by(
+            1.0,
+            [
+                a_cap_square_to_the_axis(0.0, -1.0),
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, 10.0), Vector::new(5.0, 0.0, 1.0))
+                    .expect("a direction with length"),
+            ],
+            &Isometry::identity(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a cap leaning five in one, through the axis ten up, cuts right round a bar of radius one");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a bar cut off at a steep angle is a sound bar");
+    assert_eq!(euler_characteristic_of(&model, bar), 2);
+    meshed(&model, bar, 0.1);
+}
+
+/// A ball, a bar, or a bar cut off at an angle, with where it is put.
+#[derive(Clone, Debug)]
+struct ARandomBarOrBall {
+    kind: RoundKind,
+    radius: f64,
+    shift: [f64; 3],
+    turn: Option<([f64; 3], f64)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RoundKind {
+    Ball,
+    Bar {
+        height: f64,
+    },
+    /// The top cap leans `lean` in `x` for every one in `z`, and never so far
+    /// that the two caps meet inside the bar.
+    BarCutOffAtAnAngle {
+        height: f64,
+        lean: f64,
+    },
+}
+
+impl ARandomBarOrBall {
+    fn built(&self, model: &mut Model, placement: &Isometry) -> SolidKey {
+        match self.kind {
+            RoundKind::Ball => model
+                .add_ball(self.radius, placement)
+                .expect("a ball of positive radius anywhere"),
+            RoundKind::Bar { height } => model
+                .add_round_bar(self.radius, height, placement)
+                .expect("a bar of positive size anywhere"),
+            RoundKind::BarCutOffAtAnAngle { height, lean } => model
+                .add_bar_cut_off_by(
+                    self.radius,
+                    [
+                        a_cap_square_to_the_axis(0.0, -1.0),
+                        a_leaning_cap(height, lean),
+                    ],
+                    placement,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a leaning plane that stays above the bottom cap cuts a bar"),
+        }
+    }
+
+    fn placement(&self) -> Isometry {
+        let shift = Isometry::translation(Vector::from(self.shift)).expect("a finite shift");
+        match self.turn {
+            None => shift,
+            Some((direction, angle)) => shift.compose(
+                &Isometry::rotation(
+                    &Axis::new(Point::origin(), Vector::from(direction))
+                        .expect("a direction with length"),
+                    angle,
+                )
+                .expect("a finite turn"),
+            ),
+        }
+    }
+}
+
+fn a_leaning_cap(height: f64, lean: f64) -> Plane {
+    Plane::from_point_and_normal(Point::new(0.0, 0.0, height), Vector::new(lean, 0.0, 1.0))
+        .expect("a direction with length")
+}
+
+/// Radii and heights over the ranges the fixed grid covers, placed anywhere from
+/// the origin to a million units out, sometimes turned.
+fn a_random_bar_or_ball() -> impl Strategy<Value = ARandomBarOrBall> {
+    (
+        0..3_u8,
+        log_uniform(0.01, 100.0),
+        log_uniform(0.001, 20.0),
+        0.05..0.9_f64,
+        a_shift(),
+        proptest::option::of(a_turn()),
+    )
+        .prop_map(
+            |(which, radius, height, share_of_the_steepest, shift, turn)| ARandomBarOrBall {
+                kind: match which {
+                    0 => RoundKind::Ball,
+                    1 => RoundKind::Bar { height },
+                    _ => RoundKind::BarCutOffAtAnAngle {
+                        height,
+                        lean: share_of_the_steepest * height / radius,
+                    },
+                },
+                radius,
+                shift,
+                turn,
+            },
+        )
+}
+
+/// The surfaces a bar or ball is made of, worked out from what it was built with
+/// and where it was put.
+struct TheTrueSurfaces {
+    radius: f64,
+    /// Where the placement put the centre of a ball or the foot of a bar's axis.
+    centre: Point,
+    /// Where it put the bar's axis, `+z` before it was moved.
+    axis: Vector,
+    caps: Vec<(Point, Vector)>,
+    ball: bool,
+    /// A few roundings of the largest coordinate this check works with, which is
+    /// all its own subtractions and products can be out by.
+    what_this_check_rounds_by: f64,
+}
+
+impl TheTrueSurfaces {
+    fn of(drawn: &ARandomBarOrBall, placement: &Isometry) -> Self {
+        let centre = placement.apply_to_point(Point::origin());
+        let axis = placement.apply_to_vector(Vector::new(0.0, 0.0, 1.0));
+        let cap = |at: Point, normal: Vector| {
+            (
+                placement.apply_to_point(at),
+                placement.apply_to_vector(normal.normalized().expect("a direction with length")),
+            )
+        };
+        let (caps, height) = match drawn.kind {
+            RoundKind::Ball => (Vec::new(), 0.0),
+            RoundKind::Bar { height } => (
+                vec![
+                    cap(Point::origin(), Vector::new(0.0, 0.0, 1.0)),
+                    cap(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0)),
+                ],
+                height,
+            ),
+            RoundKind::BarCutOffAtAnAngle { height, lean } => (
+                vec![
+                    cap(Point::origin(), Vector::new(0.0, 0.0, 1.0)),
+                    cap(Point::new(0.0, 0.0, height), Vector::new(lean, 0.0, 1.0)),
+                ],
+                height,
+            ),
+        };
+        let reach = Vector::from(drawn.shift).length() + 2.0 * (drawn.radius + height);
+        Self {
+            radius: drawn.radius,
+            centre,
+            axis,
+            caps,
+            ball: matches!(drawn.kind, RoundKind::Ball),
+            what_this_check_rounds_by: 16.0 * f64::EPSILON * reach,
+        }
+    }
+
+    /// How far the furthest point of the triangle is from the surface it stands
+    /// in for.
+    fn how_far_a_triangle_strays(&self, [a, b, c]: [Point; 3], on_a_cap: bool) -> f64 {
+        if on_a_cap {
+            // A flat triangle is furthest from a plane at one of its corners.
+            return [a, b, c]
+                .iter()
+                .map(|corner| {
+                    self.caps
+                        .iter()
+                        .map(|(at, normal)| (*corner - *at).dot(*normal).abs())
+                        .fold(f64::INFINITY, f64::min)
+                })
+                .fold(0.0, f64::max);
+        }
+        if self.ball {
+            let furthest = [a, b, c]
+                .iter()
+                .map(|corner| (*corner - self.centre).length())
+                .fold(0.0_f64, f64::max);
+            let nearest =
+                (closest_point_on_a_triangle(self.centre, a, b, c) - self.centre).length();
+            return (furthest - self.radius).max(self.radius - nearest);
+        }
+        const STEPS: u32 = 12;
+        let mut worst = 0.0_f64;
+        for i in 0..=STEPS {
+            for j in 0..=STEPS - i {
+                let (s, t) = (
+                    f64::from(i) / f64::from(STEPS),
+                    f64::from(j) / f64::from(STEPS),
+                );
+                let point = a + (b - a) * s + (c - a) * t;
+                let from_the_foot = point - self.centre;
+                let across = (from_the_foot - self.axis * from_the_foot.dot(self.axis)).length();
+                worst = worst.max((across - self.radius).abs());
+            }
+        }
+        worst
+    }
+}
+
+/// The point of triangle `abc` nearest to `p`, copied from
+/// `how_far_a_balls_mesh_strays_when_the_ball_sits_far_from_the_origin.rs`.
+///
+/// The seven cases are the triangle's Voronoi regions — three corners, three
+/// sides, and the inside. Ericson, *Real-Time Collision Detection*, §5.1.5.
+fn closest_point_on_a_triangle(p: Point, a: Point, b: Point, c: Point) -> Point {
+    let ab = b - a;
+    let ac = c - a;
+
+    let ap = p - a;
+    let d1 = ab.dot(ap);
+    let d2 = ac.dot(ap);
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return a;
+    }
+
+    let bp = p - b;
+    let d3 = ab.dot(bp);
+    let d4 = ac.dot(bp);
+    if d3 >= 0.0 && d4 <= d3 {
+        return b;
+    }
+
+    let cp = p - c;
+    let d5 = ab.dot(cp);
+    let d6 = ac.dot(cp);
+    if d6 >= 0.0 && d5 <= d6 {
+        return c;
+    }
+
+    let along_ab = d1 * d4 - d3 * d2;
+    if along_ab <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        return a + ab * (d1 / (d1 - d3));
+    }
+
+    let along_ac = d5 * d2 - d1 * d6;
+    if along_ac <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        return a + ac * (d2 / (d2 - d6));
+    }
+
+    let along_bc = d3 * d6 - d5 * d4;
+    if along_bc <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    }
+
+    let total = along_ab + along_ac + along_bc;
+    a + ab * (along_ac / total) + ac * (along_ab / total)
+}
+
+/// A move of nothing, of a few units, or of up to a million.
+fn a_shift() -> impl Strategy<Value = [f64; 3]> {
+    let how_far = prop_oneof![Just(0.0), log_uniform(1.0, 100.0), log_uniform(1e3, 1e6)];
+    (how_far, a_direction()).prop_map(|(how_far, direction)| {
+        let length = Vector::from(direction).length();
+        direction.map(|component| component / length * how_far)
+    })
+}
+
+fn a_turn() -> impl Strategy<Value = ([f64; 3], f64)> {
+    (a_direction(), 0.0..core::f64::consts::TAU)
+}
+
+fn a_direction() -> impl Strategy<Value = [f64; 3]> {
+    [-1.0..1.0_f64, -1.0..1.0_f64, -1.0..1.0_f64]
+        .prop_filter("a direction with length", |direction| {
+            Vector::from(*direction).length() > 0.1
+        })
+}
+
+/// A number between `low` and `high` whose logarithm is uniform, so every decade
+/// in the range is drawn as often as every other.
+fn log_uniform(low: f64, high: f64) -> impl Strategy<Value = f64> {
+    (low.log10()..high.log10()).prop_map(|exponent| 10_f64.powf(exponent))
+}
+
+/// Run `property` over [`measured_cases`] draws from the fixed seed, or the one
+/// [`SOAK_SEED`] names.
+///
+/// **Nothing is persisted.** `fuses_that_must_agree.rs` writes a failing seed
+/// into a tracked `proptest-regressions` file; this file does not, because the
+/// seed is fixed and a failure reproduces by running the same command again, and
+/// a regression file written beside a test file is a tracked file a soak edits.
+fn run<T: core::fmt::Debug>(
+    strategy: impl Strategy<Value = T>,
+    property: impl Fn(T) -> Result<(), TestCaseError>,
+) {
+    let mut runner = TestRunner::new_with_rng(
+        Config {
+            cases: measured_cases(),
+            failure_persistence: None,
+            ..Config::default()
+        },
+        fresh_seeded_soak(),
+    );
+    if let Err(why) = runner.run(&strategy, property) {
+        panic!("{why}");
+    }
+}
+
+/// [`CASES`], multiplied by whatever [`SOAK_FACTOR`] says.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number above zero,
+/// or to one whose product is more than a run can count: a soak that silently
+/// ran the default corpus would be worse than one that stopped.
+fn measured_cases() -> u32 {
+    let Ok(factor) = std::env::var(SOAK_FACTOR) else {
+        return CASES;
+    };
+    let factor: u32 = factor
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
+    assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
+    CASES
+        .checked_mul(factor)
+        .unwrap_or_else(|| panic!("{CASES} cases times {factor} is more than one run can count"))
+}
+
+/// The fixed seed, or the one [`SOAK_SEED`] names.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number.
+fn fresh_seeded_soak() -> TestRng {
+    let Ok(seed) = std::env::var(SOAK_SEED) else {
+        return TestRng::deterministic_rng(RngAlgorithm::ChaCha);
+    };
+    let seed: u64 = seed
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_SEED} has to be a whole number, not {seed:?}"));
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&seed.to_le_bytes());
+    TestRng::from_seed(RngAlgorithm::ChaCha, &bytes)
 }
