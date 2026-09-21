@@ -930,9 +930,11 @@ impl BuildingAMesh {
             return Ok(None);
         }
         let at_the_pole = self.remember(there.apply_to_point(at_the_pole));
+        self.on_a_cut.insert(at_the_pole);
 
         let mut cuts = Vec::with_capacity(4);
         for &corner in &along {
+            self.on_a_cut.insert(cap.points[corner]);
             let leaving = cap.corners[corner];
             let arriving = [leaving[0], towards];
             cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
