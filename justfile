@@ -112,6 +112,7 @@ gate_steps := "check-plugins \
     check-fuzz-overnight-selftest \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
+    check-gate-fresh-cleanup-selftest \
     check-fuzz-triage-selftest \
     check-fuzz-unit \
     check-fuzz-unit-selftest \
@@ -276,14 +277,20 @@ gate-fresh image="rust:1-bookworm":
     # has just gated — which turned a green run into an exit 1 the moment the
     # trap started firing at all. The `chown` at the end of the container script
     # is the fix; this is what is left when the container dies before reaching
-    # it, and it names the tree rather than leaking in silence.
+    # it — killed, OOM, a docker error — and it still owns the same docker
+    # daemon this recipe already required, so it reaches for a second, throwaway
+    # container to do as root what the host cannot, before it names the tree and
+    # gives up.
     cleanup() {
         rc=$?
         chmod -R u+w "$work" 2>/dev/null || true
-        rm -rf "$work" 2>/dev/null || {
-            echo "gate-fresh: $work is left behind, owned by the container's root" >&2
-            echo "  docker run --rm -v $work:/w {{ image }} rm -rf /w/rcad  removes it" >&2
-        }
+        if ! rm -rf "$work" 2>/dev/null; then
+            docker run --rm -v "$work:/w" '{{ image }}' rm -rf /w/rcad 2>/dev/null || true
+            rm -rf "$work" 2>/dev/null || {
+                echo "gate-fresh: $work is left behind, owned by the container's root" >&2
+                echo "  docker run --rm -v $work:/w {{ image }} rm -rf /w/rcad  removes it" >&2
+            }
+        fi
         exit "$rc"
     }
     trap cleanup EXIT
@@ -1463,8 +1470,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "42" ]; then \
-        echo "found $n check-* recipes, expected 42"; \
+    if [ "$n" != "43" ]; then \
+        echo "found $n check-* recipes, expected 43"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -4913,6 +4920,120 @@ check-gate-fresh-selftest:
         || fail "the stub was handed no clone to mount, so this arm compared nothing"
     [ ! -e "$clone" ] \
         || fail "the clone was left behind at $clone"
+
+# `cleanup`'s plain `rm -rf "$work"` is the one call in the trap that a died
+# container can defeat: root wrote into the tree, `chown` never ran, and no
+# `chmod -R u+w` by this uid reaches a file it does not own. A real root-owned
+# file needs real root to make, which a selftest does not have — so a marker
+# file stands in for it. The fake `docker` from the main run drops the marker
+# inside the mounted tree instead of exiting cleanly, and a fake `rm` ahead of
+# it on `PATH` refuses to remove anything that still carries it, the same
+# refusal the host's own `rm` would hit. Only the fallback `docker run ... rm
+# -rf /w/rcad` — told apart from the main run by its own `-v ...:/w` mount —
+# clears the marker, exactly as a container really would, being root inside
+# too. Everything the fake `rm` does not recognise it hands straight to the
+# real one, so it cannot break anything outside the one case it models.
+[doc("gate-fresh's cleanup reaches for docker when the plain rm on a leftover tree fails.")]
+check-gate-fresh-cleanup-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    mkdir -p "$dir/bin" "$dir/corpus"
+
+    repo="$dir/repo"
+    git init -q -b main "$repo"
+    echo "a tree to clone" >"$repo/README"
+    git -C "$repo" add README
+    git -C "$repo" -c user.email=t@t -c user.name=t commit -q -m one
+
+    # Captured before PATH is narrowed to $dir/bin, so the fake rm below can
+    # still reach the real one, and the fake docker can delete for real.
+    real_rm=$(command -v rm)
+
+    cat >"$dir/bin/docker" <<'STUB'
+    #!/usr/bin/env bash
+    printf '%s\n' "$@" >>"$DOCKER_ARGV"
+    fallback_mount=""
+    clone_mount=""
+    for a in "$@"; do
+        case "$a" in
+            *:/w) fallback_mount="$a" ;;
+            *:/rcad) clone_mount="$a" ;;
+        esac
+    done
+    if [ -n "$fallback_mount" ]; then
+        host="${fallback_mount%%:*}"
+        if [ "${DOCKER_CLEANUP_STATUS:-0}" -eq 0 ]; then
+            "$REAL_RM" -rf "$host/rcad" 2>/dev/null || true
+        fi
+        exit "${DOCKER_CLEANUP_STATUS:-0}"
+    fi
+    host="${clone_mount%%:*}"
+    touch "$host/.root-owned" 2>/dev/null || true
+    exit "${DOCKER_STATUS:-1}"
+    STUB
+    chmod +x "$dir/bin/docker"
+
+    cat >"$dir/bin/rm" <<'STUB'
+    #!/usr/bin/env bash
+    for a in "$@"; do
+        case "$a" in -*) continue ;; esac
+        if [ -e "$a" ] && find "$a" -name .root-owned -print -quit 2>/dev/null | grep -q .; then
+            echo "rm: cannot remove '$a/.root-owned': Operation not permitted" >&2
+            exit 1
+        fi
+    done
+    exec "$REAL_RM" "$@"
+    STUB
+    chmod +x "$dir/bin/rm"
+
+    fail() {
+        echo "gate-fresh cleanup drifted from its own fixtures: $1"
+        [ -f "$dir/said" ] && sed 's/^/    /' "$dir/said"
+        exit 1
+    }
+
+    # The corpus is pointed at an empty directory rather than this machine's,
+    # for the same reason `check-gate-fresh-selftest` does: the recipe only
+    # checks that one is there (§77.6).
+    fresh() {
+        DOCKER_STATUS=5 DOCKER_CLEANUP_STATUS="$1" DOCKER_ARGV="$dir/argv" \
+            REAL_RM="$real_rm" PATH="$dir/bin:$PATH" RCAD_STEP_CORPUS="$dir/corpus" \
+            {{ just_executable() }} --justfile "{{ justfile() }}" \
+            --working-directory "$repo" gate-fresh >"$dir/said" 2>&1
+    }
+
+    # One: the fallback docker removes what the plain rm could not, so the
+    # tree is gone and the exit code is still the died container's own — the
+    # cleanup neither swallows it nor overwrites it with the fallback's.
+    status=0
+    fresh 0 || status=$?
+    [ "$status" -eq 5 ] \
+        || fail "a died container's status 5 came out as $status"
+    grep -qx '/w/rcad' "$dir/argv" \
+        || fail "the fallback docker was never called"
+    work=$(grep -o '^/.*/rcad:/rcad$' "$dir/argv" | head -1 | sed 's#/rcad:/rcad$##')
+    [ -n "$work" ] || fail "no work directory recovered from the stub's log"
+    [ ! -e "$work" ] \
+        || fail "the tree is still at $work after the fallback docker cleaned it"
+
+    # Two: the fallback docker fails too, so the tree is really left behind and
+    # the message names it — but the exit code still carries the original rc,
+    # not the fallback's own failure.
+    rm -f "$dir/argv"
+    status=0
+    fresh 9 || status=$?
+    [ "$status" -eq 5 ] \
+        || fail "a died container's status 5 came out as $status over a failed fallback"
+    grep -qx '/w/rcad' "$dir/argv" \
+        || fail "the fallback docker was never called"
+    work=$(grep -o '^/.*/rcad:/rcad$' "$dir/argv" | head -1 | sed 's#/rcad:/rcad$##')
+    [ -n "$work" ] || fail "no work directory recovered from the stub's log"
+    [ -e "$work" ] \
+        || fail "the tree at $work is gone even though the fallback docker failed"
+    grep -q "is left behind, owned by the container's root" "$dir/said" \
+        || fail "no message named the leftover tree"
 
 # The morning after a night's fuzzing, in one call.
 #
