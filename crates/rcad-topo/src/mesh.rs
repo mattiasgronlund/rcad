@@ -723,6 +723,7 @@ impl BuildingAMesh {
             let corner = back.apply_to_point(from.point());
             if let Some(first) = points.first()
                 && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)
+                    .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner))
                 && (*first - corner).dot(stored_way) < 0.0
             {
                 points.reverse();
@@ -2339,6 +2340,47 @@ fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> O
         forward
     } else {
         -forward
+    })
+}
+
+/// Which way a closed edge runs where its two faces touch at its corner rather
+/// than cross there: the way the longitude of the first curved surface either
+/// side that has one there increases.
+///
+/// [`the_way_a_closed_edge_is_stored_running`] has nothing to read there, because
+/// `∇S × ∇T` has no length, and leaving the points in whatever order the
+/// marcher produced them is what refused the body of
+/// `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm` (`docs/decisions.md` §189.3): the wire
+/// walk climbed two whole turns instead of none.
+///
+/// **The first surface in `Surface`'s own order is not always the one**, and on
+/// that LED it is not: the ball sorts before the pipe, and the corner is the
+/// ball's pole, where its longitude is exactly zero. The STEP reader then has no
+/// winding to orient the edge's two uses by either, and takes the file's own
+/// `CIRCLE`, whose axis is the pipe's. So the pipe's longitude is the way the
+/// wire was written, and a surface further down the order is asked where the
+/// first says nothing.
+///
+/// **This is a hint that is checked, not a decision.** A wire whose points run
+/// the wrong way round climbs two whole turns where it should climb none, and
+/// the mesher refuses the face by `AWireWillNotLieFlatOnItsFace` rather than
+/// drawing it.
+///
+/// `None` where no curved surface either side has a longitude at the corner.
+fn the_way_a_closed_edge_where_its_faces_touch_runs(
+    along: &[Surface; 2],
+    at: Point,
+) -> Option<Vector> {
+    let mut curved: Vec<Surface> = along
+        .iter()
+        .filter(|surface| surface.as_plane().is_none())
+        .copied()
+        .collect();
+    curved.sort_by_key(name_of_surface_bits);
+    curved.into_iter().find_map(|surface| {
+        let longitude =
+            the_way_it_is_parametrised_about(&surface, at).cross(gradient_of(&surface, at));
+        (longitude != Vector::zero()).then_some(longitude)
     })
 }
 

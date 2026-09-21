@@ -790,10 +790,67 @@ fn follow_the_quartic(
             closest: walked.deviation,
         });
     }
+    let points = match the_corner_a_closed_run_starts_at(run) {
+        Some(corner) => {
+            let (start, _) = settled_with_a_bound(surfaces, seed)?;
+            begun_beside(corner, start, walked.points)
+        }
+        None => walked.points,
+    };
     Ok(PointsAlongACrossing {
-        points: walked.points,
+        points,
         deviation: tag,
     })
+}
+
+/// A closed loop the marcher walked from `start`, turned round so that it
+/// begins and ends beside `corner`.
+///
+/// `start` is put back among the points, because it is not an end any more.
+/// The corner goes between the two points it sits between — the nearest and
+/// whichever of its two neighbours is nearer — so splitting that one step at a
+/// point on the curve is all that changes, and a step split at a point on the
+/// curve strays from it less than the step did.
+///
+/// **Turned and never re-marched from the corner**, and that is measured: the
+/// LED's corner sits where its two surfaces touch, and a march begun there
+/// bounds its first point `1.58` off the crossing against a deflection of `1.30`
+/// asked, where the march begun at the seed is walked (§189.3).
+fn begun_beside(corner: Point, start: Point, walked: Vec<Point>) -> Vec<Point> {
+    let mut round = Vec::with_capacity(walked.len() + 1);
+    round.push(start);
+    round.extend(walked);
+    let count = round.len();
+    let how_far = |at: usize| (round[at % count] - corner).length();
+    let nearest = (0..count)
+        .min_by(|one, other| how_far(*one).total_cmp(&how_far(*other)))
+        .expect("the loop holds at least the point it was walked from");
+    let first = if how_far(nearest + count - 1) < how_far(nearest + 1) {
+        nearest
+    } else {
+        nearest + 1
+    };
+    round.rotate_left(first % count);
+    round
+}
+
+/// The corner a closed run starts and ends at, when it names one.
+///
+/// **The points come back with neither end included, so they have to start
+/// beside the corner.** The caller puts the corner back at both ends of what is
+/// walked; a march begun anywhere else hands back a loop that opens with a
+/// chord from the corner to wherever the seed was. A fuse puts its vertex at
+/// the seed ([`where_a_closed_crossing_starts`]), so there the two agree by
+/// construction. A file does not: `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm`'s
+/// body meets its dome at a corner a quarter turn from the seed
+/// (`docs/decisions.md` §189.3).
+///
+/// `None` for a run whose ends are not one named place, which is an open run
+/// or a whole curve nothing has put a corner on yet.
+fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<Point> {
+    let [from, to] = run.ends();
+    (from == to && from != nowhere_in_particular())
+        .then(|| Point::from(from.enclosure().map(middle_of)))
 }
 
 /// The place on the loop this run names that the marcher starts from, settled
@@ -3122,6 +3179,50 @@ mod tests {
                 let axial = out.dot(along) / along.length();
                 (across.hypot(axial) - ring.tube_radius()).abs()
             }
+        }
+    }
+
+    /// A ball through the side of a pipe leaves one loop, and a file that puts
+    /// that loop's corner away from where the marcher starts still gets points
+    /// that begin and end beside the corner (`docs/decisions.md` §189.3).
+    ///
+    /// The marcher starts at `(2, 0, ±√3)`, on the side the ball leans to. The
+    /// corner here is where the loop crosses `z = 0`, at `cos θ = 1/4` round the
+    /// pipe: `(2cos θ − 1)² + 4sin²θ + z² = 4` is `z² = 4cos θ − 1`. It is nearly
+    /// three away from the start, and the walk at a hundredth steps far less than
+    /// that.
+    #[test]
+    fn a_closed_loop_a_file_puts_its_corner_on_is_walked_from_that_corner() {
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 2.0).expect("a radius"));
+        let corner = Point::new(0.5, (4.0_f64 - 0.25).sqrt(), 0.0);
+        let run = NamedRun::new(
+            EdgeRun::RightRoundWhereItsFacesCross,
+            [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a closed run with one corner");
+
+        let walked = walk(
+            &run,
+            [&ball, &pipe],
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("one loop of a ball through a pipe is walked");
+
+        let points = walked.points();
+        let longest_step = points
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).length())
+            .fold(0.0, f64::max);
+        let [first, last] = [points[0], points[points.len() - 1]];
+        for (which, end) in [("first", first), ("last", last)] {
+            let gap = (end - corner).length();
+            assert!(
+                gap <= longest_step,
+                "the {which} point is {gap} from the corner, past the longest step {longest_step}"
+            );
         }
     }
 }
