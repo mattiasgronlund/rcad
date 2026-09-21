@@ -7,24 +7,23 @@ on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107'
 table. §16.10 governs it: a claim that something cannot be done owes a
 demonstration either way — a gap if a scaling reaches the sign, a limit if not.
 **Since §190.2 no corpus file reaches that refusal**: 24 of the 29 that did now
-import (KiCad 114 → 140), and five LEDs stop on the dome's wire. What is left
-is those files' next blockers; whether to pick a new unit is Mattias's.
+import (KiCad 114 → 140), and since §192.1 none stops on the dome's wire.
+What is left is their next blockers; a new unit is Mattias's call.
 
-**What is closed.** §140 with §141.6's band by §143.9; **all four** of §142's
-sites (§154, §142.9 `37f24350`, §164). §145 by §148 and §155; §150–§168 in turn;
-**§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**; and
+**What is closed.** §140–§168 in turn (§142's four sites by §154, `37f24350`,
+§164); **§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**;
 **§181.6's question** by **§182**; **§183's picking normal** by **§184**, 793
 refusals to 0; §184.6 by **§187.3**; §176.5's chord and LED arc by **§187.1–2**;
 §187.4's leaning-bar wrong mesh by **§188.1**; the LED coarse sweep by
 **§188.3**, still 0 of 20; §188.2's pole off the pinch by **§189.1**; the six
 far pipes by **§189.2**, 8000 of 8000; §189.3's body meeting its dome by
-**§190.1–2**; §187.1's sweep half by **§190.3**; §189.1's overflow question by
-**§190.4**, a gap, fixed.
+**§190.1–2**; §187.1's sweep half by **§190.3**; §189.1's overflow by
+**§190.4**; the dome wire by **§192.1**, 18 LEDs to 0; §190.5 by **§192.3**.
 
-**Next and unclaimed: the dome's wire in `mesh.rs`**, §190.2. Twelve LEDs stop
-on "will not lie flat", depending on where the split circle's second corner
-lands. Beside it: `#223`'s pin-hole face, and the cone's `check_dynamic_range`
-arm (§190.5). §190.6 lists the rest. §124, §136.4, §125.6:
+**Next and unclaimed: the dome's slit in `mesh.rs`**, §192.2: its seam is used
+twice onto the same chart points, `CornersCoincide`. Beside it, `validate.rs`
+reports `#223`'s coarse crossing instead of that finer refusal. §192.4 lists the
+rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
