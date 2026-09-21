@@ -560,22 +560,29 @@ impl BuildingAMesh {
     /// circle drawn on it bends. So a boundary is refined from the curved
     /// surface that bends round it, and the flat face along the same edge reads
     /// the points that came out — the same ones, bit for bit.
+    ///
+    /// **So a flat face walks only the edges no curved face will.** Those are
+    /// the ones every face along is flat, and of them only the ones that bend:
+    /// a straight edge's two ends are the whole of it and it gets no entry at
+    /// all. One that bends is a circle imprinted on a flat face, and the
+    /// surface that says where it goes is the one its run names — see
+    /// [`Self::walk`].
     fn walk_the_edges_this_face_can_place(
         &mut self,
         face: FaceView<'_>,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        let stored = the_surface_this_face_is_meshed_on(face);
-        if stored.as_plane().is_some() {
-            return Ok(());
-        }
+        let flat = the_surface_this_face_is_meshed_on(face).as_plane().is_some();
         let room =
             self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
                 if self.along_edge.contains_key(&edge.key()) {
+                    continue;
+                }
+                if flat && !only_a_flat_face_can_place(edge, &self.along_each_edge) {
                     continue;
                 }
                 let walked = self.walk(edge, face, room, policy, log)?;
@@ -622,7 +629,18 @@ impl BuildingAMesh {
     /// Whatever [`rcad_geom::walk`] refuses with, through
     /// [`walking_along_this_edge_refused`], and
     /// [`Error::MoreMeshPointsThanASolidWillHold`] when the points this edge
-    /// alone adds take the mesh past its cap.
+    /// alone adds take the mesh past its cap, and
+    /// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] for an edge with only flat
+    /// faces along it whose run names no curved surface.
+    ///
+    /// # An edge with only flat faces along it
+    ///
+    /// Two planes cross in a straight line or not at all, so for such an edge
+    /// the pair this hands the walk is one face's plane and the curved surface
+    /// the run names — the circle's own cylinder, for a circle a file imprinted
+    /// on a flat face. It is the pair [`rcad_geom::walk`] reads off the same run
+    /// too, handed over already read so that the direction rule for a closed
+    /// edge below sees a curved surface as well.
     fn walk(
         &mut self,
         edge: EdgeView<'_>,
@@ -641,6 +659,11 @@ impl BuildingAMesh {
                 .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
         )?;
         let along = the_two_surfaces_either_side(edge, &self.along_each_edge, &back)?;
+        let along = if along.iter().all(|side| side.as_plane().is_some()) {
+            [along[0], the_curve_a_flat_edge_is_named_by(&run, edge)?]
+        } else {
+            along
+        };
 
         let along_it = rcad_geom::walk(
             &run,
@@ -1292,11 +1315,22 @@ impl BuildingAMesh {
                     walk.arrive(at, stored.coordinates_of(where_it_is), at_a_pole(&start));
 
                     let edge = coedge.edge();
-                    let walked = self
-                        .along_edge
-                        .get(&edge.key())
-                        .cloned()
-                        .unwrap_or_default();
+                    let walked = match self.along_edge.get(&edge.key()) {
+                        Some(walked) => walked.clone(),
+                        // Every edge that is not straight was walked or refused
+                        // by `walk_the_edges_this_face_can_place`, which ran over
+                        // every face first — so a missing entry for one is that
+                        // pass broken, and reading it as "no points" is how a
+                        // circle came out as a triangle (§176.2).
+                        None => {
+                            assert!(
+                                *edge.stored_run() == EdgeRun::Straight,
+                                "an edge that bends was never walked: {:?}",
+                                edge.key()
+                            );
+                            Vec::new()
+                        }
+                    };
                     let running_back = edge.orientation().is_reversed();
                     for step in 0..walked.len() {
                         let at = if running_back {
@@ -2074,6 +2108,42 @@ fn the_two_surfaces_either_side(
         }
     };
     Ok([first.in_the_frame(back), second.in_the_frame(back)])
+}
+
+/// Whether no curved face along `edge` will place it and its two ends are not
+/// the whole of it — so a flat face has to.
+///
+/// # Panics
+///
+/// If `edge` has no face along it at all. It was reached through a face, and
+/// [`SolidView::surfaces_along_each_edge`] lists every face's every edge.
+fn only_a_flat_face_can_place(
+    edge: EdgeView<'_>,
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> bool {
+    let sides = along_each_edge
+        .get(&edge.key())
+        .expect("an edge reached through a face has that face along it");
+    *edge.stored_run() != EdgeRun::Straight
+        && sides.iter().all(|side| side.stored.as_plane().is_some())
+}
+
+/// The curved surface that says where an edge with only flat faces along it
+/// goes: the one its run names, when that one is curved.
+///
+/// # Errors
+///
+/// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] for any other run. A run
+/// naming a plane names where two planes cross, which is a straight line and
+/// not this edge; a whole closed curve names no surface at all.
+fn the_curve_a_flat_edge_is_named_by(run: &NamedRun, edge: EdgeView<'_>) -> Result<Surface> {
+    match run.run() {
+        EdgeRun::PartOfWhereItCrosses { and, .. } if and.as_plane().is_none() => Ok(*and),
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::PartOfWhereItCrosses { .. }
+        | _ => Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge: edge.key() }),
+    }
 }
 
 /// A face's surface as the arena holds it, with where that face is placed kept

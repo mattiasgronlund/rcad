@@ -479,6 +479,26 @@ pub enum Error {
         edge: crate::EdgeKey,
     },
 
+    /// An edge bends, every face along it is flat, and nothing names the curve
+    /// it bends along.
+    ///
+    /// A plane cannot say where a curve drawn on it goes, so an edge that is not
+    /// [`EdgeRun::Straight`](rcad_geom::EdgeRun::Straight) is placed by a curved
+    /// face beside it — and here there is none. The one other thing that can
+    /// place it is a curved surface the run itself names, which is how a circle
+    /// imprinted on a flat face is read from a file. An edge with neither is a
+    /// curve whose centre and size are not in the model at all.
+    ///
+    /// **Meshing it as a chord is what this replaces**, and it was wrong by a
+    /// whole radius: `docs/decisions.md` §176.2. An `ELLIPSE` imprinted on a flat
+    /// face arrives here, and so does a whole circle, which a file names by its
+    /// one corner and no surface.
+    #[error("an edge bends but every face along it is flat and nothing names its curve")]
+    AnEdgeBendsButEveryFaceAlongItIsFlat {
+        /// Which edge.
+        edge: crate::EdgeKey,
+    },
+
     /// Walking this solid's boundaries at this deflection needs more points than
     /// one mesh will hold.
     ///
