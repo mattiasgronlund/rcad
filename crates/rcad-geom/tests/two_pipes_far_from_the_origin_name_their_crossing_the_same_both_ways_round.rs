@@ -23,21 +23,35 @@
 //! ulp of it places the plane on a grid of `6.9e5`, while the two lines it has
 //! to separate stand `3.97` apart. `docs/decisions.md` §181.
 //!
-//! # Why this asserts agreement rather than an answer
+//! # Why it now answers, and what the answer is checked against
 //!
-//! §181.6 leaves open which way the pair should be made to agree: teaching both
-//! orders to answer hands every consumer a plane that cannot resolve the slab,
-//! and refusing both is the smaller change under "crash > corrupt". The
-//! invariant the fuzzer caught is broken either way round, so this pins that and
-//! not the direction.
+//! §182 made both orders agree by making both **refuse**, and this file used to
+//! assert only that they agree, because the order that answered then was wrong:
+//! its picking plane held both lines. §183 measured that a plane which does
+//! separate them exists here — `z = 41581179`, one of the three normals `f64`
+//! can hold exactly square to the axis, through the thin pipe's stored axis —
+//! and §184 reaches it by trying each such plane in turn and proving the
+//! separation rather than assuming it.
+//!
+//! So the second test asserts the answer, and it does not stop at counting
+//! runs: a count of two is what the wrong answer §182 removed also gave. Each
+//! run's picker is asked which side of it two points on the true lines sit, and
+//! each run has to hold exactly one of them, a different one from the other run.
+//! The two points are the thin pipe's axis moved `±R2` along `z`. The true lines
+//! sit within about `1.4e-111` of them — the excess worked out above — while
+//! the two points stand `2·R2` apart, so a plane that puts them on opposite
+//! sides puts the lines on opposite sides too.
+//!
+//! The agreement test stays: it is the invariant the fuzzer caught, and it holds
+//! whichever way a later change moves the answer.
 
 #![forbid(unsafe_code)]
 
 mod fuzzing;
 
 use fuzzing::{bytes_for, two_surfaces_from};
-use rcad_geom::{SurfaceMeet, intersect};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_geom::{EdgeRun, Picker, SurfaceMeet, intersect};
+use rcad_predicates::{Decision, Policy, Point as PredicatePoint, ProvenanceLog};
 
 /// The fat pipe's radius, and the thin pipe's offset off the fat axis.
 const R1: f64 = 5.047645337156084e153;
@@ -89,6 +103,51 @@ fn a_pipe_on_a_fat_pipes_skin_is_named_the_same_way_round_far_from_the_origin() 
         named[0], named[1],
         "the same pair of pipes was named differently by which one was asked about first"
     );
+}
+
+/// Two side-by-side pipes far from the origin cross in two straight lines
+/// whichever is asked about first, and each run holds one of them.
+///
+/// `docs/decisions.md` §184.
+#[test]
+fn a_pipe_on_a_fat_pipes_skin_far_from_the_origin_crosses_it_in_two_lines_either_way_round() {
+    let pair = two_surfaces_from(&bytes_for([2, 2], &SEED)).expect("two pipes");
+    let on_the_lines = [Z + R2, Z - R2].map(|z| PredicatePoint::from([0.0, R1, z]));
+
+    for [first, second] in [[0, 1], [1, 0]] {
+        let met = intersect(
+            &pair[first],
+            &pair[second],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!("asking pipe {first} first did not name the crossing: {met:?}");
+        };
+        assert_eq!(runs.len(), 2, "asking pipe {first} first");
+
+        let held: Vec<[Decision; 2]> = runs
+            .iter()
+            .map(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("one of two lines is a piece of the crossing: {run:?}");
+                };
+                let [Picker::InFrontOf(half_space)] = picked_by.as_slice() else {
+                    panic!("one flat picker per line: {picked_by:?}");
+                };
+                on_the_lines.map(|point| half_space.side_of_point(point))
+            })
+            .collect();
+        let [upper, lower] = [
+            [Decision::Pos, Decision::Neg],
+            [Decision::Neg, Decision::Pos],
+        ];
+        assert!(
+            held == [upper, lower] || held == [lower, upper],
+            "asking pipe {first} first: each run must hold exactly one line, and not the same \
+             one — got {held:?}"
+        );
+    }
 }
 
 /// What a crossing was named, coarsely enough that the two orders' answers are

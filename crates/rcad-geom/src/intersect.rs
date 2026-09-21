@@ -45,13 +45,14 @@ use rcad_predicates::{
     Decision, Filtered, Interval, Measures, Point as PredicatePoint, Policy, Predicate,
     ProvenanceLog, Record, decide, resolve_under_policy,
 };
-use smallvec::smallvec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
     squared_length_enclosing,
 };
-use crate::exact::Exact;
+use crate::exact::{Exact, binary_exponent, multiplied_by_a_power_of_two};
+use crate::half_space::normals_exactly_square_to;
 use crate::{
     Cone, Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere,
     Surface, SurfaceMeet, Torus, Vector,
@@ -457,8 +458,8 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
         picker,
         along.components(),
         &TwoLinesEitherSideOfThePicker {
-            from: origin,
-            to_the_middle: leaning * quotient_or_everything(-reading, squared_normal),
+            middle: how_far_in_front(picker, origin.coordinates())
+                + leaning * quotient_or_everything(-reading, squared_normal),
             up,
             out,
         },
@@ -1074,65 +1075,116 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
     let squared_direction = squared_length_enclosing(exactly(along.components()));
     let towards = the_step_across_to_the_other_axis(one, other);
 
-    let picker = HalfSpace::through_a_point_square_to(
-        between_the_two_lines(here, towards, one.radius(), other.radius()),
-        along,
-        along.cross(towards),
-    )?;
     let sideways = exactly(towards.components());
     let apart = root_enclosing(squared_length_enclosing(sideways));
     let sideways = sideways.map(|part| quotient_or_everything(part, apart));
     let up = cross_enclosing(exactly(along.components()), sideways)
         .map(|part| quotient_or_everything(part, root_enclosing(squared_direction)));
 
-    let [mine, theirs] = [one, other].map(|pipe| Interval::exactly(pipe.radius()));
-    let across = quotient_or_everything(
-        apart * apart + mine * mine - theirs * theirs,
-        Interval::exactly(2.0) * apart,
-    );
-    let there = other.axis().origin().coordinates();
+    let there = other.axis().origin();
     let overlap = how_deeply_two_side_by_side_pipes_overlap_exactly(one, other)
         .as_ref()
         .map_or_else(
             || how_deeply_two_side_by_side_pipes_overlap_enclosing(one, other),
             Exact::enclosure,
         );
-    let squared_gap = how_far_off_an_axis_exactly(there, here.coordinates(), along.components())
-        .as_ref()
-        .map_or_else(
-            || how_far_off_an_axis_enclosing(there, here.coordinates(), along.components()),
-            Exact::enclosure,
-        );
+    let squared_gap = how_far_off_an_axis_exactly(
+        there.coordinates(),
+        here.coordinates(),
+        along.components(),
+    )
+    .as_ref()
+    .map_or_else(
+        || {
+            how_far_off_an_axis_enclosing(
+                there.coordinates(),
+                here.coordinates(),
+                along.components(),
+            )
+        },
+        Exact::enclosure,
+    );
     let out = root_enclosing(quotient_or_everything(
         -overlap,
         Interval::exactly(4.0) * squared_gap * squared_direction,
     ));
 
-    // The middle of the two lines sits `across / apart` of the way from this
-    // pipe's axis to the other's, so the reading there is that same share of the
-    // way between the readings at the two axes. Both are stored points, so both
-    // readings are exact — and `along`'s own component of the step contributes
-    // nothing to either, the picking normal being exactly square to it.
-    //
-    // **Not `normal · towards`, which is exactly zero here and says nothing.**
-    // `towards` was rounded on its way out of `the_step_across_to_the_other_axis`
-    // and the picking normal was then built exactly square to *it*; for a pair
-    // far enough from the origin the true step leans out of that plane by far
-    // more than the two lines are apart. §182.
-    let from_here_to_there =
-        how_far_in_front(picker, there) - how_far_in_front(picker, here.coordinates());
+    let tell_apart = |picker: HalfSpace| {
+        two_lines_told_apart(
+            picker,
+            along.components(),
+            &TwoLinesEitherSideOfThePicker {
+                middle: how_far_in_front_of_the_middle(picker, one, other, towards),
+                up,
+                out,
+            },
+            Surface::Cylinder(*other),
+        )
+    };
 
-    two_lines_told_apart(
-        picker,
-        along.components(),
-        &TwoLinesEitherSideOfThePicker {
-            from: here,
-            to_the_middle: quotient_or_everything(across, apart) * from_here_to_there,
-            up,
-            out,
-        },
-        Surface::Cylinder(*other),
-    )
+    let asked_for = along.cross(towards);
+    let anchors = [
+        between_the_two_lines(here, towards, one.radius(), other.radius()),
+        here,
+        there,
+    ];
+    let normals = picking_normals_to_try(anchors[0], along, asked_for)?;
+
+    let first_try = tell_apart(HalfSpace::through_a_point_facing(anchors[0], normals[0])?);
+    if first_try.is_ok() {
+        return first_try;
+    }
+    for anchor in anchors {
+        for normal in &normals {
+            let Ok(picker) = HalfSpace::through_a_point_facing(anchor, *normal) else {
+                continue;
+            };
+            if let Ok(two_runs) = tell_apart(picker) {
+                return Ok(two_runs);
+            }
+        }
+    }
+    first_try
+}
+
+/// The picking normals to try, in the order they are tried.
+///
+/// First the one [`HalfSpace::through_a_point_square_to`] ranks highest for
+/// `asked_for`, which is the half-space this row built and refused on before
+/// §184 — so a pair that was named before is named by the same plane. Then the
+/// exactly-square fallbacks, each turned to lean the way `asked_for` does,
+/// because negating both a normal and its offset rounds nothing.
+///
+/// Which of the three the ranking puts first is a choice and not a decision, and
+/// §183.2 measured a pair where the choice reads nothing: `asked_for` is itself
+/// exactly square there, so `through_a_point_square_to` takes it unread, and its
+/// two components stand `132` decades apart so one `f64` offset swallows the
+/// smaller whole — which is where the answer is.
+///
+/// # Errors
+///
+/// Whatever [`HalfSpace::through_a_point_square_to`] refuses `through` and
+/// `along` for.
+fn picking_normals_to_try(
+    through: Point,
+    along: Vector,
+    asked_for: Vector,
+) -> Result<SmallVec<[Vector; 4]>> {
+    let ranked = HalfSpace::through_a_point_square_to(through, along, asked_for)?.normal();
+    let mut normals: SmallVec<[Vector; 4]> = smallvec![ranked];
+    normals.extend(
+        normals_exactly_square_to(along)
+            .into_iter()
+            .filter(|normal| *normal != Vector::zero())
+            .map(|normal| {
+                if normal.dot(asked_for) < 0.0 {
+                    -normal
+                } else {
+                    normal
+                }
+            }),
+    );
+    Ok(normals)
 }
 
 /// The step from one pipe's axis across to the other's, square to the shared
@@ -1237,11 +1289,125 @@ fn between_the_two_lines(here: Point, towards: Vector, mine: f64, theirs: f64) -
         here + towards * ((squared_apart + mine * mine - theirs * theirs) / (2.0 * squared_apart));
 
     // Axes that coincide, or a step that left `f64` on the way here. Both are
-    // already refusals: `apart` comes back zero or infinite, `across` divides by
-    // it, and the enclosure the caller builds is everything. Anchoring on the
-    // axis hands that refusal back unchanged instead of turning it into a
-    // `NotFinite` from a half-space built through a point that is not there.
+    // already refusals: `apart` comes back zero or infinite, the middle divides
+    // by its square, and the enclosure the caller builds is everything.
+    // Anchoring on the axis hands that refusal back unchanged instead of turning
+    // it into a `NotFinite` from a half-space built through a point that is not
+    // there.
     if anchor.is_finite() { anchor } else { here }
+}
+
+/// How far in front of `picker` the point midway between the two lines two
+/// side-by-side pipes cut out of each other sits.
+///
+/// Write `δ` for the step between the axes and `rᵢ` for the two widths. The
+/// middle sits `(δ² + r₁² − r₂²) / 2δ²` of the way from one axis to the other,
+/// so each axis' reading counts for how far the middle is from the *other* one:
+///
+/// ```text
+/// (at_here·(δ² − r₁² + r₂²)  +  at_there·(δ² + r₁² − r₂²))  /  2δ²
+/// ```
+///
+/// Both axis origins are stored points, `δ²` is the stored step's own squared
+/// length and the widths are stored, so top and bottom are polynomials in stored
+/// numbers and [`Exact`] holds each with nothing rounded. The one division is
+/// where the enclosure is formed. This is §93's technique, and §29.8 named it as
+/// untried on this half of the row.
+///
+/// **Not `at_here + share·(at_there − at_here)`.** That is the same number, and
+/// with `share` an enclosure its relative width of `2⁻⁵³` lands against the
+/// difference of the two readings rather than against the answer. For §181.2's
+/// pair the readings are `3.7e21` apart, `share` is within `2.7e-265` of one,
+/// and the middle is `9.98e-244` — so the window was `3.7e5` around a number
+/// that needed one of `1.3`.
+///
+/// **The widths and the step are slid down by a power of two first** when the
+/// top would overflow. Every term is degree two in them, top and bottom alike,
+/// so the slide cancels out of the quotient and rounds nothing while the slid
+/// numbers stay normal. At §181.2's pair `2δ²` alone is `5.1e307` and a reading
+/// is `3.7e21`, so without it the exact level cannot run at all. The slide is
+/// the smallest that fits, and zero wherever the top already fits, which is
+/// every pair near the origin. §184.
+fn how_far_in_front_of_the_middle(
+    picker: HalfSpace,
+    one: &Cylinder,
+    other: &Cylinder,
+    towards: Vector,
+) -> Interval {
+    let here = one.axis().origin().coordinates();
+    let there = other.axis().origin().coordinates();
+    the_middle_exactly(picker, here, there, towards, one.radius(), other.radius())
+        .map_or_else(
+            || {
+                let [at_here, at_there] =
+                    [here, there].map(|point| how_far_in_front(picker, point));
+                let squared_apart = squared_length_enclosing(exactly(towards.components()));
+                let [mine, theirs] = [one.radius(), other.radius()].map(squared_enclosing);
+                let twice_squared_apart = Interval::exactly(2.0) * squared_apart;
+                quotient_or_everything(
+                    at_here * (squared_apart - mine + theirs)
+                        + at_there * (squared_apart + mine - theirs),
+                    twice_squared_apart,
+                )
+            },
+            |(top, bottom)| quotient_or_everything(top.enclosure(), bottom.enclosure()),
+        )
+}
+
+/// The top and bottom of [`how_far_in_front_of_the_middle`]'s quotient, each
+/// exactly, or `None` where a product the exact level needs would round even
+/// after the slide.
+fn the_middle_exactly(
+    picker: HalfSpace,
+    here: [f64; 3],
+    there: [f64; 3],
+    towards: Vector,
+    mine: f64,
+    theirs: f64,
+) -> Option<(Exact, Exact)> {
+    let normal = picker.normal().components();
+    let offset = Exact::of(picker.offset());
+    let at_here = Exact::dot_of(normal, here)?.minus(&offset);
+    let at_there = Exact::dot_of(normal, there)?.minus(&offset);
+
+    let [x, y, z] = towards.components();
+    let down = how_far_to_slide_the_lengths_down(
+        at_here.nearest_f64().abs().max(at_there.nearest_f64().abs()),
+        [x.abs(), y.abs(), z.abs(), mine, theirs]
+            .into_iter()
+            .fold(0.0, f64::max),
+    );
+    let slid = |length: f64| {
+        let moved = multiplied_by_a_power_of_two(length, -down);
+        (length == 0.0 || moved.is_normal()).then_some(moved)
+    };
+    let step = [slid(x)?, slid(y)?, slid(z)?];
+    let [mine, theirs] = [slid(mine)?, slid(theirs)?];
+
+    let squared_apart = Exact::dot_of(step, step)?;
+    let widths = Exact::product_of(mine, mine)?.minus(&Exact::product_of(theirs, theirs)?);
+    let top = at_here
+        .times(&squared_apart.minus(&widths))?
+        .plus(&at_there.times(&squared_apart.plus(&widths))?);
+    Some((top, squared_apart.plus(&squared_apart)))
+}
+
+/// The smallest power of two to slide the step and the widths down by so that a
+/// reading as large as `largest_reading` times their squares stays inside `f64`.
+///
+/// The top of the middle's quotient is at most two readings times three squared
+/// lengths, which is under `2⁶` times the largest of each, and `f64` holds
+/// anything under `2¹⁰²⁴`.
+fn how_far_to_slide_the_lengths_down(largest_reading: f64, longest_length: f64) -> i32 {
+    let binade = |value: f64| {
+        if value == 0.0 {
+            0
+        } else {
+            binary_exponent(value).max(0)
+        }
+    };
+    let too_high = binade(largest_reading) + 2 * binade(longest_length) + 6 - 1020;
+    (too_high.max(0) + 1) / 2
 }
 
 /// Two pipes leaning against each other: nothing, one touching point, one closed
@@ -1903,29 +2069,29 @@ fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Po
     )
 }
 
-/// Two endless straight lines, as the point a picking half-space was built
-/// through and two steps off it.
+/// Two endless straight lines, as one reading against a picking half-space and
+/// two steps either side of it.
 ///
 /// Never added up into two points. [`two_lines_told_apart`]'s second doc section
 /// says what adding them up costs.
 struct TwoLinesEitherSideOfThePicker {
-    /// A point the reading `normal · p − offset` can be taken at.
-    from: Point,
-    /// How much that reading changes between `from` and the point midway
-    /// between the two lines.
+    /// How far in front of the picker the point midway between the two lines
+    /// sits: `normal · middle − offset`.
     ///
     /// **Each caller works this out its own way, because what is exact differs
     /// between them, and reading it off a direction is what §182 got wrong.**
     /// A plane cutting a pipe steps along the plane's own *stored* normal, so
-    /// the picking normal's dot with it is an exact sum and the step is real.
+    /// the picking normal's dot with it is an exact sum and the step is real:
+    /// that caller reads the picker at the axis and adds the step.
     /// Two side-by-side pipes step along a direction that was *computed* —
     /// `the_step_across_to_the_other_axis` divides by `w·w` at the end — and the
     /// picking normal is built exactly square to that rounded direction. Its dot
     /// with it is then exactly zero **by construction**, which says nothing at
     /// all about where the true axis-to-axis step points, and for a pair far
     /// from the origin the two disagree by far more than the lines are apart.
-    /// That caller reads the picker at both stored axis origins instead.
-    to_the_middle: Interval,
+    /// That caller reads the picker at both stored axis origins and puts the
+    /// whole of this together as one polynomial over one division (§184).
+    middle: Interval,
     /// The direction the two lines step either way along, scaled to length one.
     up: [Interval; 3],
     /// How far along `up` each of the two steps.
@@ -1971,14 +2137,13 @@ struct TwoLinesEitherSideOfThePicker {
 /// product starts, and the reading the two lines differ by is `±out·δ` against
 /// terms of `2.1e161` that have to cancel first.
 ///
-/// Taken in pieces nothing has to cancel. `normal · from − offset` is what the
-/// picker's own offset rounded away, and `to_the_middle` is the rest of the way
-/// to the middle of the two lines: both are built out of dot products of stored
-/// `f64` triples, so [`Exact`] knows each to its own last bit rather than to a
-/// bit of `2.1e161`. What is left is `±out · (normal · up)`, and its sign is the
-/// sign of `out`, which the caller has already certified.
+/// Taken in pieces nothing has to cancel. `middle` is what the picker reads at
+/// the point midway between the two lines, built by the caller out of dot
+/// products of stored `f64` triples, so [`Exact`] knows it to its own last bit
+/// rather than to a bit of `2.1e161`. What is left is `±out · (normal · up)`,
+/// and its sign is the sign of `out`, which the caller has already certified.
 ///
-/// **§182 is why `to_the_middle` is a reading and not a direction and a length.**
+/// **§182 is why `middle` is a reading and not a direction and a length.**
 /// It used to be `normal · sideways` multiplied by how far along `sideways` the
 /// middle sat, which is sound only while `sideways` is a direction the geometry
 /// really steps along. For two side-by-side pipes it is not: the picking normal
@@ -1987,9 +2152,17 @@ struct TwoLinesEitherSideOfThePicker {
 /// far enough from the origin was answered with a plane holding both lines and a
 /// reverse holding neither. Each caller now works the reading out its own way.
 ///
-/// **The two readings are still whatever they are.** The middle of the two lines
-/// may genuinely sit off the picking plane, and the refusal below is then the
-/// right answer. This stops throwing the reading away; it does not decide it.
+/// **§184 is why it is the whole reading and not a point plus a step.** Written
+/// as `at_here + share·(at_there − at_here)`, with `share` an enclosure, the
+/// step's own relative width of `2⁻⁵³` lands against `at_here` rather than
+/// against the answer: for §181.2's pair that is `3.7e5` of window around a true
+/// middle of `9.98e-244`. Put together as one polynomial over one division it is
+/// the answer's own width instead. Only the caller can write that polynomial,
+/// so only the caller can hand the whole reading over.
+///
+/// **The reading is still whatever it is.** The middle of the two lines may
+/// genuinely sit off the picking plane, and the refusal below is then the right
+/// answer. This stops throwing the reading away; it does not decide it.
 fn two_lines_told_apart(
     picker: HalfSpace,
     along: [f64; 3],
@@ -2004,10 +2177,9 @@ fn two_lines_told_apart(
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
 
-    let middle = how_far_in_front(picker, lines.from.coordinates()) + lines.to_the_middle;
     let either_way = lines.out * dot_enclosing(exactly(normal), lines.up);
 
-    let side = [1.0, -1.0].map(|which| middle + either_way * Interval::exactly(which));
+    let side = [1.0, -1.0].map(|which| lines.middle + either_way * Interval::exactly(which));
     if !(side[0].lo() > 0.0 && side[1].hi() < 0.0) {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }

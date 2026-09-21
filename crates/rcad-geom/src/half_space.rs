@@ -365,7 +365,14 @@ impl HalfSpace {
 ///
 /// One of them is zero when `direction` runs along a coordinate axis, and never
 /// two of them, because a direction with two zero components still has a third.
-fn normals_exactly_square_to(direction: Vector) -> [Vector; 3] {
+///
+/// [`through_a_point_square_to`](HalfSpace::through_a_point_square_to) ranks
+/// these and hands back the best one. A caller that means to *prove* something
+/// about the half-space it gets, rather than to take the best guess, wants all
+/// three: which of them the ranking puts first is a choice, and §183 measured a
+/// pair where the ranking's own winner reads nothing and the one it passed over
+/// separates the two lines by `1.99e243`.
+pub(crate) fn normals_exactly_square_to(direction: Vector) -> [Vector; 3] {
     let [x, y, z] = direction.components();
     [
         Vector::new(0.0, z, -y),
