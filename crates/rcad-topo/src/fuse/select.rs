@@ -661,7 +661,8 @@ fn the_ray_and_the_stored_planes_disagree_about(
         let on_the_side_of_the_reference = match plane.side_of_point(point) {
             Decision::Pos => off_the_plane.turned_round,
             Decision::Neg => !off_the_plane.turned_round,
-            Decision::Zero | Decision::Undecidable { .. } | _ => return false,
+            Decision::Zero | Decision::Undecidable { .. } => return false,
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         };
         let mut disagree = false;
         face.for_each_triangle(|corners| {
