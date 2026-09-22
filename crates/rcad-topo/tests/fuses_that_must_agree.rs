@@ -3140,9 +3140,18 @@ fn every_fuse_a_turned_curved_fixture_refuses_has_an_answer_turned_from_the_upri
              refused upright as well"
         );
     }
+    // Since §202.2 the turned bar and ball refuse nothing on the shipped corpus,
+    // so only the frustum still has refusals to demonstrate. Theirs are pinned at
+    // zero rather than dropped, because a refusal coming back is what this
+    // counts.
+    assert_eq!(
+        (bar.0, ball.0),
+        (0, 0),
+        "a turned bar or ball refused a fuse its upright control answers"
+    );
     assert!(
-        bar.0 > 0 && ball.0 > 0 && frustum.0 > 0,
-        "each turned family refuses something its upright control answers, which is what \
+        frustum.0 > 0,
+        "the turned frustum refuses something its upright control answers, which is what \
          makes this a demonstration rather than an empty loop"
     );
 }

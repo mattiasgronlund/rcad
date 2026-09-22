@@ -1591,9 +1591,8 @@ impl Edge {
     /// `check_edges` too. §39.
     ///
     /// A crossing with **two** curved surfaces and two ends is a pair of balls
-    /// cut twice. Two balls united refuse `ACurvedFaceGoesRightRoundWithNoSeam`
-    /// before an arc of them is ever named (§36.23), and that is one shape of the
-    /// family rather than the family: `fuse([ballA], [ballB, cube])` is a pair of
+    /// cut twice. Two balls united, which cut each other once, are answered
+    /// since §202.1. `fuse([ballA], [ballB, cube])` is a pair of
     /// balls cut twice and is reachable. What stops *it* is a crate down —
     /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, because a corner of such an arc
     /// has two quadrics round it (§31.2's limit under row 4).

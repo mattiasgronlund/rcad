@@ -429,14 +429,12 @@ pub enum Error {
     ///
     /// **One curve on a ball with the material outside it**, which is the whole
     /// ball less a disc: a ball with a cap taken off, or either half of a
-    /// two-ball union. The answer plainly exists — `18π` for two balls of radius
-    /// two whose centres are two apart — and writing it wants the other half of
-    /// what §38.1 built, a *cut* closed face carrying a seam and two poles of
-    /// its own. Nothing builds that, so this one is **a gap**. The piece on the
-    /// other side of the very same curve is answered, cut into patches no more
-    /// than a quarter turn wide, and what tells the two apart is the sign of the
-    /// area the wire encloses in the surface's own two coordinates, because a
-    /// wire keeps its face's material on its left.
+    /// two-ball union. The mesher answers that now by opening the ball along a
+    /// seam half a turn from the rim and cutting from the rim up to both poles
+    /// (§202.1). What still reaches this name is a rim that cut cannot be shown to
+    /// stay inside, and that is **a gap**. What tells the two sides of a curve
+    /// apart is the sign of the area the wire encloses in the surface's own two
+    /// coordinates, because a wire keeps its face's material on its left.
     #[error("a curved face is bounded by one curve right round it and has no seam to open at")]
     ACurvedFaceGoesRightRoundWithNoSeam {
         /// Which face.
