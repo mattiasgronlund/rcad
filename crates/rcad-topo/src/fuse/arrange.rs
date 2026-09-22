@@ -3385,27 +3385,44 @@ fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) 
 /// guessed: a plane a rounding off the pole leaves the walk to start the
 /// circle, as before. A plane through **both** poles holds the polar axis and
 /// its circle is cut at both, which [`across_a_circle_that_starts_at_a_pole`]
-/// already does, so that is `None` here.
+/// already does, so that is `None` here. **So is a plane whose point across from
+/// the pole may be the other pole**, inside the box that function gives the
+/// point across: a turned block's floor holds one pole exactly and misses the
+/// other by `4.4e-16`, and started at its pole as one edge, the turned ball
+/// and block of `a_turned_ball_and_block_closes_an_edge_at_a_pole` came out
+/// with two faces that did not agree which way they faced. Cut at both, as
+/// before, it is answered.
 fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePoint> {
-    let ball = match pair {
-        [Surface::Sphere(ball), Surface::Plane(_)] | [Surface::Plane(_), Surface::Sphere(ball)] => {
-            ball
-        }
+    let (ball, flat) = match pair {
+        [Surface::Sphere(ball), Surface::Plane(flat)]
+        | [Surface::Plane(flat), Surface::Sphere(ball)] => (ball, flat),
         _ => return None,
     };
     let [x, y, z] = ball.centre().coordinates();
-    let on_the_circle: Vec<PredicatePoint> = [z - ball.radius(), z + ball.radius()]
+    let poles = [z - ball.radius(), z + ball.radius()].map(|height| Point::new(x, y, height));
+    let on_it = |pole: &Point| {
+        let exact = PredicatePoint::from(pole.coordinates());
+        pair.iter()
+            .all(|surface| side_of_surface(surface, exact) == Decision::Zero)
+    };
+    let (pole, other) = match poles.map(|pole| on_it(&pole)) {
+        [true, false] => (poles[0], poles[1]),
+        [false, true] => (poles[1], poles[0]),
+        [true, true] | [false, false] => return None,
+    };
+    let centre = flat.project(ball.centre());
+    let across = centre + (centre - pole);
+    let largest = [across, pole, ball.centre()]
+        .map(|point| point.largest_coordinate_magnitude())
         .into_iter()
-        .map(|height| PredicatePoint::from([x, y, height]))
-        .filter(|&pole| {
-            pair.iter()
-                .all(|surface| side_of_surface(surface, pole) == Decision::Zero)
-        })
-        .collect();
-    match on_the_circle.as_slice() {
-        [pole] => Some(*pole),
-        _ => None,
+        .fold(1.0, f64::max);
+    let reach = 2.0 * POINT_ALONG_A_CROSSING_ROUNDOFF * largest;
+    let the_other_pole_may_be_across = (0..3)
+        .all(|axis| (across.coordinates()[axis] - other.coordinates()[axis]).abs() <= reach);
+    if the_other_pole_may_be_across {
+        return None;
     }
+    Some(PredicatePoint::from(pole.coordinates()))
 }
 
 /// Where a circle between a ball and a plane is cut a second time, when the
