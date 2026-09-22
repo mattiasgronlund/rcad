@@ -831,6 +831,7 @@ impl BuildingAMesh {
         // go right round it bounds a patch one way and an **unbounded** region
         // the other. A solid is bounded, so its faces are, so the material is
         // the patch — there is no second case for a sign to tell apart.
+        let widest = whole_turn / 4.0;
         if walked.len() == 1
             && walked[0].closes_on_one_curve
             && !walked[0].goes_right_round
@@ -846,9 +847,8 @@ impl BuildingAMesh {
             else {
                 return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
             };
-            return self.cut_each_narrow_enough(face, stored, vec![one, other], whole_turn / 4.0, room);
+            return self.cut_each_narrow_enough(face, stored, vec![one, other], widest, room);
         }
-        let widest = whole_turn / 4.0;
         if walked.len() == 1
             && let Some((one, other)) = self.open_a_slit(face, stored, &walked[0], room)?
         {

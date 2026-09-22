@@ -35,9 +35,7 @@ use rcad_geom::{
     Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{
-    DraftStep, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
-};
+use rcad_topo::{DraftStep, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 /// A ball less the cap beyond a plane through a point on its equator, for
 /// three sizes, the point at each of the four quarter turns — the chart's own
@@ -203,7 +201,7 @@ fn a_ball_less_a_cap(
         let mut trying = model.clone();
         match skin_bounded_by_one_circle(&mut trying, on_the_equator, ball, lid, skin_runs) {
             Ok(solid) => built.push((trying, solid)),
-            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace { .. })) => (),
+            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace)) => (),
             Err(why) => panic!("{what}: built {skin_runs:?}, refused {why:?}"),
         }
     }
