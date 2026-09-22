@@ -571,12 +571,19 @@ impl Assembly {
                 same.join(one.face, other.face);
             }
         }
-        if !same.joined_anything() {
+        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved)?;
+        let renumbered = self.what_is_left(&joined, &along, &dissolved);
+        // **A closed curve cut where nothing meets it** is joined back up even
+        // where no face was: a pointed cone less a block whose walls are tangent
+        // to its rim keeps the rim in arcs otherwise, and a ring of arcs right
+        // round a cone with no seam is refused (`AWireWillNotLieFlatOnItsFace`)
+        // where the answer is the cone as it stood. Only then: rebuilding every
+        // answer dissolves corners at the poles of a ball that the pole rules
+        // need, measured as 23 failures across the ball-and-block files.
+        if !same.joined_anything() && !renumbered.closed_a_curve_up {
             return Ok(false);
         }
-
-        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved)?;
-        self.rebuild_from(&joined, &along, &dissolved);
+        self.rebuild_from(&joined, renumbered)?;
         Ok(true)
     }
 
@@ -860,28 +867,29 @@ impl Assembly {
     /// If a ring comes out with fewer than three sides, or if a run of edges
     /// that became one edge does not have exactly two ends left. Both mean the
     /// joining above is wrong.
-    fn rebuild_from(&mut self, joined: &[JoinedFace], along: &[[Dart; 2]], dissolved: &[bool]) {
-        let renumbered = self.what_is_left(joined, along, dissolved);
+    fn rebuild_from(&mut self, joined: &[JoinedFace], renumbered: Renumbered) -> Result<()> {
         let edges = self.edges_after_joining(&renumbered);
 
         let faces = joined
             .iter()
-            .map(|face| Face {
-                ancestors: each_one_once(
-                    face.members
+            .map(|face| {
+                Ok(Face {
+                    ancestors: each_one_once(
+                        face.members
+                            .iter()
+                            .flat_map(|&member| self.faces[member].ancestors.iter().copied()),
+                    ),
+                    surface: face.surface,
+                    used: face.used,
+                    is_a_whole_closed_surface: face.is_a_whole_closed_surface,
+                    wires: face
+                        .rings
                         .iter()
-                        .flat_map(|&member| self.faces[member].ancestors.iter().copied()),
-                ),
-                surface: face.surface,
-                used: face.used,
-                is_a_whole_closed_surface: face.is_a_whole_closed_surface,
-                wires: face
-                    .rings
-                    .iter()
-                    .map(|ring| self.sides_of(ring, &renumbered, &edges))
-                    .collect(),
+                        .map(|ring| self.sides_of(ring, &renumbered, &edges))
+                        .collect::<Result<_>>()?,
+                })
             })
-            .collect();
+            .collect::<Result<_>>()?;
 
         self.corners = core::mem::take(&mut self.corners)
             .into_iter()
@@ -890,6 +898,7 @@ impl Assembly {
             .collect();
         self.edges = edges;
         self.faces = faces;
+        Ok(())
     }
 
     /// Which corners and edges the joining leaves, and what they are called now.
@@ -929,7 +938,6 @@ impl Assembly {
             }
         }
 
-        let mut runs = Sameness::of(self.edges.len());
         let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut still_a_corner = vec![false; self.corners.len()];
         for (&(lump, corner), by) in &leaving {
@@ -941,12 +949,18 @@ impl Assembly {
             // joined edge with no ends at all.
             match by[..] {
                 [one, other] if one != other => {
-                    runs.join(one, other);
                     straight_through.insert((lump, corner));
                 }
                 _ => still_a_corner[corner] = true,
             }
         }
+        let kept = self.a_corner_to_keep_on_each_closed_run(&leaving, &straight_through);
+        let closed_a_curve_up = !kept.is_empty();
+        for (lump, corner) in kept {
+            straight_through.remove(&(lump, corner));
+            still_a_corner[corner] = true;
+        }
+        let runs = runs_through(self.edges.len(), &leaving, &straight_through);
 
         let corner_now = numbered(still_a_corner.into_iter());
         let edge_now = numbered(
@@ -959,7 +973,82 @@ impl Assembly {
             runs,
             corner_now,
             edge_now,
+            closed_a_curve_up,
         }
+    }
+
+    /// One corner to keep on each run of edges that closes on itself with every
+    /// corner along it walked straight through.
+    ///
+    /// **A closed curve cut into pieces and joined back up** is such a run: a
+    /// pointed cone's rim, cut where a block's walls are tangent to it and
+    /// holding its own one corner, keeps two edges at every one of those
+    /// corners once the pieces are joined. Folding them all leaves a joined edge
+    /// with no ends at all (`fuses_that_touch.rs`,
+    /// `a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule`).
+    /// The run becomes one closed edge with one corner, as the input had.
+    ///
+    /// **Only a run that is all pieces of one input edge**, which is then a
+    /// closed input edge given back whole. A ball's meridian circle cut at both
+    /// poles is a closed run too, of pieces of two different edges, and closing
+    /// it up puts a closed edge's one corner on a pole, where nothing says which
+    /// way it runs: 22 tests across the ball-and-block files failed when every
+    /// closed run was closed up.
+    ///
+    /// Keeping every corner instead leaves a ring of arcs going right round a
+    /// cone with no seam, which the writer refuses
+    /// (`AWireWillNotLieFlatOnItsFace`) — measured on that same pair.
+    ///
+    /// Which corner is chosen off what the corner *is* and never off its index
+    /// here, which depends on the order the solids were handed over: an input
+    /// vertex first, then the lowest point.
+    fn a_corner_to_keep_on_each_closed_run(
+        &self,
+        leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+        straight_through: &BTreeSet<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        let runs = runs_through(self.edges.len(), leaving, straight_through);
+        let mut corners_of_run: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
+        let mut run_keeps_a_corner: BTreeSet<usize> = BTreeSet::new();
+        let mut pieces_of: BTreeMap<usize, Vec<&[EdgeKey]>> = BTreeMap::new();
+        for (&(lump, corner), by) in leaving {
+            if straight_through.contains(&(lump, corner)) {
+                corners_of_run
+                    .entry(runs.leader(by[0]))
+                    .or_default()
+                    .push((lump, corner));
+            } else {
+                run_keeps_a_corner.extend(by.iter().map(|&edge| runs.leader(edge)));
+            }
+            for &edge in by {
+                pieces_of
+                    .entry(runs.leader(edge))
+                    .or_default()
+                    .push(&self.edges[edge].from);
+            }
+        }
+        corners_of_run
+            .into_iter()
+            .filter(|(run, _)| !run_keeps_a_corner.contains(run))
+            .filter(|(run, _)| is_one_input_edge(&pieces_of[run]))
+            .map(|(_, corners)| {
+                corners
+                    .into_iter()
+                    .min_by(|&(_, one), &(_, other)| self.which_to_keep_first(one, other))
+                    .expect("a run is listed with the corners it walks through")
+            })
+            .collect()
+    }
+
+    fn which_to_keep_first(&self, one: usize, other: usize) -> core::cmp::Ordering {
+        let (one, other) = (&self.corners[one], &self.corners[other]);
+        let (at_one, at_other) = (one.point.coordinates(), other.point.coordinates());
+        one.from.is_none().cmp(&other.from.is_none()).then_with(|| {
+            (0..3)
+                .map(|axis| at_one[axis].total_cmp(&at_other[axis]))
+                .find(|order| order.is_ne())
+                .unwrap_or(core::cmp::Ordering::Equal)
+        })
     }
 
     fn edges_after_joining(&self, renumbered: &Renumbered) -> Vec<Edge> {
@@ -1059,7 +1148,9 @@ impl Assembly {
             arcs.len() > 1,
             "one edge on its own dissolved a corner of itself"
         );
-        if arcs.iter().all(|arc| matches!(arc, WhichArc::TheOnlyOne)) {
+        // A run that closed up is the whole curve, and a whole curve is the one
+        // arc there is.
+        if ends[0] == ends[1] || arcs.iter().all(|arc| matches!(arc, WhichArc::TheOnlyOne)) {
             return WhichArc::TheOnlyOne;
         }
         WhichArc::LeavingACorner {
@@ -1068,7 +1159,12 @@ impl Assembly {
         }
     }
 
-    fn sides_of(&self, ring: &[Dart], renumbered: &Renumbered, edges: &[Edge]) -> Vec<Side> {
+    fn sides_of(
+        &self,
+        ring: &[Dart],
+        renumbered: &Renumbered,
+        edges: &[Edge],
+    ) -> Result<Vec<Side>> {
         let lump = renumbered.lump_of_edge[self.edge_of(ring[0])]
             .expect("a ring is walked along edges that stay");
         let opens = ring
@@ -1105,16 +1201,19 @@ impl Assembly {
             let from = renumbered.corner_now[self.starts_at(dart)]
                 .expect("the step just above skipped every corner walked straight through");
             // A **closed** edge starts and ends at its one corner, so the corner
-            // says nothing about which way this face walks it and the side it
-            // already had is the only thing that does. A closed edge is always a
-            // run of one: its corner has it twice and nothing else, so nothing
-            // was ever joined onto it.
+            // says nothing about which way this face walks it. A closed edge
+            // that was closed already keeps the side it had: its corner has it
+            // twice and nothing else, so nothing was joined onto it. One that a
+            // run of pieces closed up into is asked of the surfaces.
+            let piece = &self.edges[self.edge_of(dart)];
             sides.push(Side {
                 edge,
-                forward: if edges[edge].ends[0] == edges[edge].ends[1] {
+                forward: if edges[edge].ends[0] != edges[edge].ends[1] {
+                    edges[edge].ends[0] == from
+                } else if piece.ends[0] == piece.ends[1] {
                     self.side_of(dart).forward
                 } else {
-                    edges[edge].ends[0] == from
+                    self.walks_a_closed_up_run_the_way_it_is_stored(dart)?
                 },
             });
         }
@@ -1145,7 +1244,62 @@ impl Assembly {
              this one has {}",
             sides.len()
         );
-        sides
+        Ok(sides)
+    }
+
+    /// Whether a face that walks `piece` away from `from` walks the closed edge
+    /// that piece was joined into the way that edge is stored running.
+    ///
+    /// The way the face walks is read off the piece's own arc, which names a
+    /// direction along the crossing out of one of its corners: the face leaves
+    /// `from` along it, so it runs that way where the arc is named from `from`
+    /// and the other way where it is named from the far end, which the face
+    /// arrives at. Against `∇S × ∇T` of the two surfaces that is a sign, and a
+    /// face whose material is inside its partner walks along `∇S × ∇T` — so the
+    /// sign is handed to [`a_closed_crossing_is_walked_the_way_it_is_stored`] as
+    /// that material side, and the stored way is read with the rule
+    /// `Model::validate` reads it back with.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] where the rule cannot tell,
+    /// and [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] where it says the
+    /// crossing has no direction at the arc's corner.
+    ///
+    /// # Panics
+    ///
+    /// If the piece's arc is not named from a corner — a piece of a closed curve
+    /// between two different corners always is — or names a direction square to
+    /// the crossing.
+    fn walks_a_closed_up_run_the_way_it_is_stored(&self, dart: Dart) -> Result<bool> {
+        let piece = &self.edges[self.edge_of(dart)];
+        let from = self.starts_at(dart);
+        let WhichArc::LeavingACorner { corner, towards } = piece.arc else {
+            panic!("a piece of a closed curve between two corners names which arc it is");
+        };
+        let at = self.corners[corner].point;
+        let [one, other] = piece.carried_by;
+        let outward = [gradient_of(&one, at), gradient_of(&other, at)];
+        let along = towards.dot(outward[0].cross(outward[1]));
+        assert!(
+            along != 0.0,
+            "an arc's direction out of its corner is along its crossing"
+        );
+        let walks_along_the_cross = (along > 0.0) == (corner == from);
+        let material_side = if walks_along_the_cross {
+            Decision::Neg
+        } else {
+            Decision::Pos
+        };
+        a_closed_crossing_is_walked_the_way_it_is_stored(
+            [&one, &other],
+            outward,
+            at,
+            material_side,
+        )?
+        .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole {
+            face: self.faces[dart.face].ancestors[0],
+        })
     }
 
     /// Gather the faces into lumps joined by edges, refusing a result that is
@@ -1678,6 +1832,8 @@ struct Renumbered {
     /// What the first edge of each run is called now, or `None` if this edge is
     /// not the first of its run or is gone.
     edge_now: Vec<Option<usize>>,
+    /// Whether some closed curve cut into pieces is joined back into one edge.
+    closed_a_curve_up: bool,
 }
 
 /// One face of the result while it is being put back together out of the pieces
@@ -1799,6 +1955,29 @@ fn numbered(staying: impl Iterator<Item = bool>) -> Vec<Option<usize>> {
             })
         })
         .collect()
+}
+
+/// Whether every piece of a run was cut out of the one same input edge and
+/// nothing else.
+fn is_one_input_edge(pieces: &[&[EdgeKey]]) -> bool {
+    pieces.first().is_some_and(|first| first.len() == 1)
+        && pieces.iter().all(|piece| *piece == pieces[0])
+}
+
+/// Which run of edges each edge is part of, when the edges either side of every
+/// corner walked straight through are one run.
+fn runs_through(
+    edges: usize,
+    leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+    straight_through: &BTreeSet<(usize, usize)>,
+) -> Sameness {
+    let mut runs = Sameness::of(edges);
+    for (at, by) in leaving {
+        if straight_through.contains(at) {
+            runs.join(by[0], by[1]);
+        }
+    }
+    runs
 }
 
 /// The corners built so far, and the two ways to find one again.

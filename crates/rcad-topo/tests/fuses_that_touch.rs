@@ -46,7 +46,7 @@
 //! | the dome on a shaft of its radius | 0 of 66 | 12 of 84 | `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` 66 |
 //! | a ball against a bar's wall | 54 of 54 | 96 of 96 | — |
 //! | a ball inside a bar, touching | 54 of 54 | 96 of 96 | — |
-//! | a cone's apex on a block | 30 of 84 | 60 of 66 | `CannotNameWhichPieceOfACrossingThisIs` 12 |
+//! | a cone's apex on a block | 33 of 90 | 66 of 66 | `CannotNameWhichPieceOfACrossingThisIs` 21, *a point inside a piece of a face* 36 |
 //! | a frustum's cap flush on a block | 0 of 84 | 66 of 66 | *a point inside a piece of a face* 84 |
 //! | a bend lying on a block | 0 of 66 | 0 of 84 | nothing: both rows refuse as a quartic |
 //! | a bend's cap flush against a block | 0 of 66 | 0 of 84 | nothing: the control refuses too |
@@ -128,13 +128,13 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
 
 mod touching;
 
-use touching::{Apart, Drawn, Insides, Shape, both_rows};
+use touching::{Apart, Drawn, Insides, Shape, Slope, both_rows};
 
 /// How many shapes each cell draws, touching and clear together.
 const CASES: u32 = 24;
@@ -264,6 +264,113 @@ fn a_pointed_cone_standing_on_its_apex_on_a_block() {
         touching::a_cones_apex_on_a_block(),
         Expect::TheControlAnswers,
     );
+}
+
+/// A pointed cone of slope a half and height two, its apex on the top of a
+/// 4-block whose walls `x = −1` and `y = 1` are tangent to the cone's rim
+/// circle at `(−1, 0, 2)` and `(0, 1, 2)`, far above the block.
+///
+/// The wall planes cross the cone's surface in curves that touch the rim at
+/// those two points, so the rim is cut there as well as at its own one corner
+/// `(1, 0, 2)`. Joining the cap's pieces back into one face then walked
+/// straight through all three corners, and the rim came back as one edge with
+/// no ends: a panic in `fuse/assemble.rs`, *"a run of edges that became one
+/// edge has two ends left"*, found by the property above from seed
+/// `9bb0dbcd…3910` once the cone's box reached its apex (§202.3).
+///
+/// The inputs meet only at the apex, so every answer is known without the
+/// fuse: the union is both solids as they stand, the intersection is nothing,
+/// and each difference is its first solid. Checked by solid count, by how many
+/// faces each solid keeps, and by where points fall against the two closed
+/// forms.
+#[test]
+fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() {
+    let built = Drawn {
+        shape: Shape::AConesApexOnABlock {
+            slope: Slope::Half,
+            at: [1, 3],
+        },
+        apart: Apart::Touching,
+    }
+    .build();
+    let (block, cone) = (built.first, built.second);
+    let in_block = |p: Point| {
+        let [x, y, z] = p.coordinates();
+        (-1.0..=3.0).contains(&x) && (-3.0..=1.0).contains(&y) && (-4.0..=0.0).contains(&z)
+    };
+    let in_cone = |p: Point| {
+        let [x, y, z] = p.coordinates();
+        (0.0..=2.0).contains(&z) && x.hypot(y) <= 0.5 * z
+    };
+    let samples = [
+        Point::new(0.1, 0.07, 1.03),
+        Point::new(0.3, -0.2, 1.9),
+        Point::new(0.5, -1.5, -2.0),
+        Point::new(2.9, 0.9, -0.1),
+        Point::new(0.9, 0.9, 1.9),
+        Point::new(-0.9, 0.3, 1.5),
+        Point::new(0.2, 0.1, 0.1),
+        Point::new(3.5, 0.0, -1.0),
+    ];
+    let union: fn(bool, bool) -> bool = |a, b| a || b;
+    let intersection: fn(bool, bool) -> bool = |a, b| a && b;
+    let difference: fn(bool, bool) -> bool = |a, b| a && !b;
+    for (one, other, rule, solids, faces, holds) in [
+        (block, cone, Rule::Union, 2, vec![2, 6], union),
+        (cone, block, Rule::Union, 2, vec![2, 6], union),
+        (block, cone, Rule::Intersection, 0, vec![], intersection),
+        (cone, block, Rule::Intersection, 0, vec![], intersection),
+        (block, cone, Rule::Difference, 1, vec![6], difference),
+        (cone, block, Rule::Difference, 1, vec![2], difference),
+    ] {
+        let mut model = built.model.clone();
+        let policy = Policy::certified();
+        let answer = model
+            .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?} refused: {why}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why}"));
+        let pieces = answer.solids().to_vec();
+        assert_eq!(pieces.len(), solids, "{rule:?}: how many solids");
+        let mut got: Vec<usize> = pieces
+            .iter()
+            .map(|&piece| model.solid(piece).expect("an answer's key").faces().count())
+            .collect();
+        got.sort_unstable();
+        assert_eq!(got, faces, "{rule:?}: how many faces each solid has");
+
+        let first_is_block = one == block;
+        for p in samples {
+            let (a, b) = if first_is_block {
+                (in_block(p), in_cone(p))
+            } else {
+                (in_cone(p), in_block(p))
+            };
+            let want = holds(a, b);
+            let inside = pieces.iter().any(|&piece| {
+                match model.solid(piece).expect("an answer's key").classify_point(
+                    p,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                ) {
+                    Containment::Inside => true,
+                    Containment::Outside => false,
+                    said @ (Containment::OnBoundary
+                    | Containment::Undecidable { .. }
+                    | Containment::CannotFollowAFacesTrimming { .. }
+                    | Containment::CannotFireARayAtAFacesSurface { .. }) => {
+                        panic!("{rule:?}: {p:?} is clear of every face and came back {said:?}")
+                    }
+                    other => panic!("{rule:?}: {p:?} came back {other:?}"),
+                }
+            });
+            assert_eq!(
+                inside, want,
+                "{rule:?} (block first: {first_is_block}) at {p:?}"
+            );
+        }
+    }
 }
 
 #[test]

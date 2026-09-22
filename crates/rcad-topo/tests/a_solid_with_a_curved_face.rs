@@ -468,13 +468,26 @@ fn a_box_round_one_curved_face_holds_the_face_and_the_box_round_its_triangles_do
         });
 
         match face.surface() {
-            // The corners' shadows on the axis are `z = 0` and `z = 5`, opened
-            // out by the radius on every axis — so the box is taller than the
-            // bar. Loose and sound, which is what a box that only decides which
-            // pairs to look at has to be.
+            // The discs at `z = 0` and `z = HEIGHT`, boxed exactly: a disc
+            // square to `z` reaches the radius in `x` and `y` and nothing in
+            // `z`. It used to open every axis out by the radius, so the box
+            // stood a radius above and below the bar. What is left in `z` is
+            // the `2⁻⁴⁰` rounding margin each cap circle's turn is taken with,
+            // outward, so the box still holds the whole wall.
             Surface::Cylinder(_) => {
-                assert_eq!(low, Point::new(-RADIUS, -RADIUS, -RADIUS));
-                assert_eq!(high, Point::new(RADIUS, RADIUS, HEIGHT + RADIUS));
+                let [low, high] = [low, high].map(|at| at.coordinates());
+                assert_eq!([low[0], low[1]], [-RADIUS, -RADIUS]);
+                assert_eq!([high[0], high[1]], [RADIUS, RADIUS]);
+                assert!(
+                    (-1e-9..=0.0).contains(&low[2]),
+                    "the wall's box starts at {}",
+                    low[2]
+                );
+                assert!(
+                    (HEIGHT..=HEIGHT + 1e-9).contains(&high[2]),
+                    "the wall's box ends at {}",
+                    high[2]
+                );
                 assert_eq!(
                     round_its_triangles.0,
                     [RADIUS, 0.0, 0.0],

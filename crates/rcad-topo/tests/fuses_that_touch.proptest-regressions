@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 0f6f99e715cb2c0ecc4bd4ad0d298d32a9574db189f7a7085a7bb731660d825d # shrinks to Drawn { shape: ABarInsideABar { outer: 2, inner: 1, towards: PlusY }, apart: ClearByOne }
+cc 9bb0dbcd2316588ce1eba07feb6857499c6ff685e3c2f29b9bcde3bd93de3910 # shrinks to AConesApexOnABlock { slope: Half, at: [1, 3] }, Touching
