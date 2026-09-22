@@ -17,10 +17,11 @@
 //! pole, as `SolidBuilder` writes it, and the edge is stored running the way
 //! the mesh walks it there. All 63 caps answer both ways they can be asked for.
 //!
-//! The sliver on the other side of the plane, which holds neither pole, is
-//! mostly still refused, and by the mesh: a cap bounded by a circle whose one
-//! corner is a pole, and that holds no pole, is a shape `mesh.rs` does not cut
-//! up yet. Those are pinned by name with their counts.
+//! The sliver on the other side of the plane, which holds neither pole,
+//! answers too since §206. It was the last shape `mesh.rs` could not cut up: a
+//! cap bounded by a circle whose one corner is a pole, and that holds no pole.
+//! What stopped it was a cut with no point of its own, and
+//! [`the_sliver_that_holds_no_pole_is_answered_or_refused_by_name`] says how.
 
 use core::f64::consts::PI;
 use std::collections::BTreeMap;
@@ -74,6 +75,18 @@ fn a_block_taken_out_of_a_ball_through_its_south_pole_leaves_the_same_cap() {
 ///
 /// Every answer is sound and measures its closed form within what the mesh
 /// declares; every refusal is one of two, both the mesh's.
+///
+/// **All 126 answer since §206**, where 27 of each 63 did before. What the 72
+/// refusals turned on was a cut of the mesher's own that carried no point: the
+/// sliver's rim has the pole as one of the four corners a coarse walk gives it,
+/// so cutting the sliver in two ran from the pole straight to the corner
+/// opposite, with nothing strictly inside — and the flat face closing the
+/// sliver drew that very pair as its own diagonal. Four triangles on one side is
+/// `TwoPatchesOfTheMeshDrewTheSameSide`; where the flat face picked the other
+/// diagonal instead, the curved face had no point off the plane of its rim, the
+/// solid meshed flat, and §41.6's retry could not rescue a zero its finer meshes
+/// were refused for. `mesh.rs`'s `cut_in_two` now always carries a point of its
+/// own.
 #[test]
 fn the_sliver_that_holds_no_pole_is_answered_or_refused_by_name() {
     let mut by_intersection = BTreeMap::new();
@@ -108,20 +121,12 @@ fn the_sliver_that_holds_no_pole_is_answered_or_refused_by_name() {
     }
     assert_eq!(
         by_intersection,
-        BTreeMap::from([
-            ("answered", 27),
-            ("TwoPatchesOfTheMeshDrewTheSameSide", 30),
-            ("VolumeIsNotPositive", 6),
-        ]),
+        BTreeMap::from([("answered", 63)]),
         "the sliver kept by intersection"
     );
     assert_eq!(
         by_difference,
-        BTreeMap::from([
-            ("answered", 27),
-            ("TwoPatchesOfTheMeshDrewTheSameSide", 18),
-            ("VolumeIsNotPositive", 18),
-        ]),
+        BTreeMap::from([("answered", 63)]),
         "the sliver kept by difference"
     );
 }
