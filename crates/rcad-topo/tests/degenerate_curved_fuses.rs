@@ -459,25 +459,32 @@ fn what_two_balls_that_really_cross_share_is_the_lens_between_them() {
     }
 }
 
-/// What is *round* two crossing balls is refused by name, and the name says
-/// which shape is missing.
+/// Two crossing balls unite into one solid, which is both balls less the lens
+/// they share.
 ///
 /// Each ball keeps the part of its skin **outside** the other, and that piece
-/// holds both of its poles: it is the whole ball less a disc, and writing it
-/// down wants a seam and two poles of its own the way §38.1 wrote an uncut ball.
-/// Nothing builds that yet. A **gap** and not a limit — the answer is `18π` at
-/// two apart — and it is refused rather than filled inside out, which is what it
-/// used to do: before the mesher was taught to tell the two pieces apart this
-/// came back `Ok` measuring 10.40, the lens, where the union is 56.55.
+/// holds both of its poles: it is the whole ball less a disc. That was refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam` until the mesher learned to open such a
+/// face along a seam half a turn from its rim (§202.1). Before the mesher could
+/// tell the two pieces apart at all, this came back `Ok` measuring 10.40, the
+/// lens, where the union is 56.55.
 #[test]
-fn what_is_round_two_crossing_balls_is_refused_for_want_of_a_seam() {
-    for apart in [2.0, 3.0] {
+fn what_is_round_two_crossing_balls_is_their_union() {
+    let one_ball = 4.0 / 3.0 * PI * 8.0;
+    for (apart, lens) in [(2.0, 10.0 * PI / 3.0), (3.0, 11.0 * PI / 12.0)] {
         let mut model = a_model();
         let pair = two_balls_that_cross(&mut model, apart);
-        match refusal(&mut model, &pair, Rule::Union, &Policy::certified()) {
-            Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => (),
-            other => panic!("two balls {apart} apart refused with {other:?}"),
-        }
+        let round = fused(&mut model, &pair, Rule::Union);
+        assert_eq!(
+            round.solids().len(),
+            1,
+            "two balls {apart} apart unite into one solid"
+        );
+        measures(
+            volume_of_at(&model, round.solids(), A_DEFLECTION / 5.0),
+            2.0 * one_ball - lens,
+            Side::Under,
+        );
     }
 }
 
@@ -1040,8 +1047,7 @@ fn a_ball_cut_by_a_plane_that_crosses_its_seam_once_is_answered() {
     );
 }
 
-/// The same ball cut by `x = 2` instead: the cap is answered and what is left
-/// round it is refused by name.
+/// The same ball cut by `x = 2` instead is answered under every rule.
 ///
 /// **How many times the cut meets the seam is not what decides it, and this row
 /// used to say it was.** The circle `x = 2` meets the seam at `(2, 0, ±√12)`,
@@ -1049,11 +1055,12 @@ fn a_ball_cut_by_a_plane_that_crosses_its_seam_once_is_answered() {
 /// the seam is not the difference. `z = 2` cuts the ball into two pieces each
 /// holding one pole; `x = 2` cuts it into a cap holding **no** pole and a
 /// remainder holding **both**. The cap is answered here, at `40π/3`, exactly as
-/// `z = 2`'s is. Only the both-pole piece refuses, and it refuses because
-/// nothing writes a cut closed face with a seam and two poles of its own
-/// (§38.3). The seam-crossing count is a coincidence of these two knives.
+/// `z = 2`'s is. The both-pole piece was refused because nothing wrote a cut
+/// closed face with a seam and two poles of its own (§38.3). The mesher now
+/// opens it along a seam half a turn from its rim (§202.1). The seam-crossing
+/// count is a coincidence of these two knives.
 #[test]
-fn a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it() {
+fn a_ball_cut_off_its_polar_axis_is_answered_under_every_rule() {
     let cap = PI * 4.0 * 10.0 / 3.0;
 
     let mut model = a_model();
@@ -1066,17 +1073,24 @@ fn a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it() {
     assert_eq!(above.solids().len(), 1, "the cap beyond x = 2 is one solid");
     measures(volume_of(&model, above.solids()), cap, Side::Under);
 
-    for rule in [Rule::Union, Rule::Difference] {
+    let the_knife = 12.0 * 12.0 * 12.0;
+    for (rule, closed_form) in [
+        (Rule::Union, A_BIG_BALL - cap + the_knife),
+        (Rule::Difference, A_BIG_BALL - cap),
+    ] {
         let mut model = a_model();
         let ball = model
             .add_ball(4.0, &Isometry::identity())
             .expect("a ball of radius four");
         let knife = block(&mut model, [12.0, 12.0, 12.0], Vector::new(2.0, -6.0, -6.0));
         let pair = Pair::of(ball, knife);
-        match refusal(&mut model, &pair, rule, &Policy::certified()) {
-            Error::ACurvedFaceGoesRightRoundWithNoSeam { .. } => (),
-            other => panic!("{rule:?} of a ball and a knife off its axis gave {other:?}"),
-        }
+        let answer = fused(&mut model, &pair, rule);
+        assert_eq!(
+            answer.solids().len(),
+            1,
+            "{rule:?} of a ball and a knife off its axis is one solid"
+        );
+        measures(volume_of(&model, answer.solids()), closed_form, Side::Under);
     }
 }
 
@@ -2028,7 +2042,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "the same two balls, three apart, really crossing",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "what_is_round_two_crossing_balls_is_refused_for_want_of_a_seam",
+                test: "what_is_round_two_crossing_balls_is_their_union",
             },
         },
         Entry {
@@ -2072,7 +2086,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "a ball cut by a plane meeting its seam twice",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it",
+                test: "a_ball_cut_off_its_polar_axis_is_answered_under_every_rule",
             },
         },
         Entry {

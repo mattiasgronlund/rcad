@@ -15,12 +15,14 @@ What is left is their next blockers; a new unit is Mattias's call.
 to 0), §187.1–3, §188.1–3, §189.1–2 (8000 of 8000), §190.1–4, §192.1–3 (18
 LEDs to 0), §193.1–2 (20 LEDs import), §194.1–4 — each closing the item the
 section before it left; `just decision <n>` for which. Then §195.1–3,
-§196.1, §197.2, §198.1–2, §199.1–3, and §200.1–2 (the leaned half ball and
-§198.1's `runs_up`), each closing an item of the section before.
+§196.1, §197.2, §198.1–2, §199.1–3, §200.1–2 (the leaned half ball and
+§198.1's `runs_up`), and §201.1–3 (the pointed cone's skin, the far pole side,
+the sliver), §202.1–2 (a ball less a disc, a ball cut through its pole),
+each closing an item of the section before.
 
-**Next and unclaimed: a pointed cone fused with a corner-up cube gives a wrong
-answer**, and its own `classify_point` calls inside points outside (§200.3,
-reproducer there, not pinned); §200.4 lists the rest. §124,
+**Next and unclaimed: land the pointed cone's box** — fixed on
+`lane-cone-box-reaches-apex` but not gating (§202.3), so `main` still gives
+§200.3's wrong answer; §202.4 lists the rest. One lane at a time: the disk. §124,
 §136.4, §125.6: deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at
 `opt-level = 0` and its own ~7 s not reproducing; open about that number, not
 the gate.
