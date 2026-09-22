@@ -19,14 +19,14 @@ lune by **§195.1**, its box by **§195.2**, §190.6's circle check by **§195.3
 §195.2's turned ball-and-block by **§196.1** (36 of 36); §196.2's panic
 cutting a half ball twice by **§197.2** (48 of 48 now refused by name);
 §197.1's turned ball-and-block failing at random by **§198.1** (four axes
-measure); one of §197.2's three pins answered by **§198.2**.
+measure); §197.2's three pins by **§198.2** and **§199.1–2**; §198.2's cone
+claim by **§199.3**.
 
-**Next and unclaimed: the two half-ball pins §198.2 moved one blocker on**, in
-different files, side by side: `mesh.rs` cuts a skin whose outer wire is a great
-circle cut at its poles round a one-curve hole; `holds.rs` calls a hole wire of
-two edges along one ball round. §198.3 lists the rest. §124, §136.4, §125.6:
-deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
-its own ~7 s not reproducing; open about that number, not the gate.
+**Next and unclaimed: the half ball leaned 20° and turned −0.4**, refused
+undecided in `fuse/select.rs` (§199.1, pinned); §199.4 lists the rest. §124,
+§136.4, §125.6: deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at
+`opt-level = 0` and its own ~7 s not reproducing; open about that number, not
+the gate.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
