@@ -75,6 +75,7 @@ use rcad_predicates::{
 
 use smallvec::SmallVec;
 
+use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 
@@ -712,8 +713,14 @@ enum HowItRuns {
     },
     /// It closes, so the order is a cyclic one and needs somewhere to start.
     /// `from` is where [`walk`](rcad_geom::walk) starts, which depends on the
-    /// unordered pair of surfaces and on nothing else (§34.4).
-    RoundAClosedCurve { from: PredicatePoint },
+    /// unordered pair of surfaces and on nothing else (§34.4). `node` is the
+    /// same place as the node a crossing with no other node is given there,
+    /// which is a box round `from` wherever the two surfaces do not both
+    /// certify it ([`where_the_crossing_starts`]).
+    RoundAClosedCurve {
+        from: PredicatePoint,
+        node: PredicatePoint,
+    },
     /// It runs on for ever **and bends**, so it has no axis to climb and
     /// nowhere to start: a plane cutting a cone in a parabola or in one branch
     /// of a hyperbola. The order is how far along `n × w` a point sits, for the
@@ -1629,9 +1636,9 @@ impl<'f> Arrangement<'f> {
                 one,
                 other,
             ),
-            HowItRuns::RoundAClosedCurve { from } => {
+            HowItRuns::RoundAClosedCurve { from, node } => {
                 let partner = self.crossings[crossing].partner;
-                round_a_closed_crossing([&self.surface, &partner], from, one, other).ok()?
+                round_a_closed_crossing([&self.surface, &partner], [from, node], one, other).ok()?
             }
         };
         matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
@@ -1684,9 +1691,10 @@ impl<'f> Arrangement<'f> {
                 policy,
                 log,
             ),
-            HowItRuns::RoundAClosedCurve { from } => {
+            HowItRuns::RoundAClosedCurve { from, node } => {
                 let partner = self.crossings[crossing].partner;
-                let decided = round_a_closed_crossing([&self.surface, &partner], from, one, other)?;
+                let decided =
+                    round_a_closed_crossing([&self.surface, &partner], [from, node], one, other)?;
                 must_decide(
                     decided,
                     ALONG_A_CROSSING,
@@ -3230,12 +3238,19 @@ fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) 
 /// is the same answer `rcad-step` gives the same circle on import (§193.3,
 /// §194).
 ///
-/// **Only where the direction is missing**, which is
-/// [`Surface::the_way_its_first_coordinate_runs_at`] having no answer at `at`
-/// — exactly when the rule `assemble` reads comes back zero for a pole. A
-/// circle starting anywhere else keeps its one corner, so no answer that came
-/// back before changes. `at` is the middle of the start's box, the same point
-/// `assemble` reads the rule at.
+/// **Wherever the mesh will call the start a pole**, which is
+/// [`the_surface_pinches_at`] on the latitude the ball reads at `at`, the
+/// middle of the start's box and the point `assemble` reads the rule at. That
+/// holds everywhere [`Surface::the_way_its_first_coordinate_runs_at`] has no
+/// answer, and also within one rounding of `atan2` either side of the axis,
+/// where it has one read off an offset far smaller than the start's own box,
+/// so which way it points means nothing. The test that stood here was the
+/// first alone, so a start that close was left one closed edge, and the mesh
+/// then walked it as if it began at a pole with no pole side to close on: the
+/// turned ball and block at radius 3 was refused as a loop whose corners
+/// coincide, and at 0.001 as a face going right round with no seam (§195.2).
+/// Two spellings of "is this a pole" are how the two disagreed, so this asks
+/// the mesh's. A circle starting anywhere else keeps its one corner.
 ///
 /// **Only a ball against a plane**, whose circle has a centre this can name:
 /// the ball's centre dropped onto the plane. `None` for every other pair, and
@@ -3270,10 +3285,8 @@ fn across_a_circle_that_starts_at_a_pole(
         | [Surface::Plane(flat), Surface::Sphere(ball)] => (ball, flat),
         _ => return None,
     };
-    if Surface::Sphere(*ball)
-        .the_way_its_first_coordinate_runs_at(at)
-        .is_some()
-    {
+    let round = Surface::Sphere(*ball);
+    if !the_surface_pinches_at(&round, round.coordinates_of(at).1) {
         return None;
     }
     let centre = flat.project(ball.centre());
@@ -3321,19 +3334,28 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// is not what it means: a point at the start comes first, by definition of
 /// where the counting begins. Reading that as "these are one point" would fold
 /// every node of the crossing into the start.
+///
+/// **The start is recognised as either of the two things it is held as**: the
+/// walked triple, and the node a crossing is given there, which is a box round
+/// that triple wherever the two surfaces do not both certify it. Both name the
+/// one place by construction, so this compares names rather than coordinates.
+/// Asked as a sum instead, a box round the start swept against the start
+/// straddles zero however far round the other point is: a circle cut across
+/// from a start one rounding off a pole refused every union of a turned ball
+/// and block at radius 3 that way (§195.2).
 fn round_a_closed_crossing(
     pair: [&Surface; 2],
-    from: PredicatePoint,
+    [from, node]: [PredicatePoint; 2],
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> rcad_geom::Result<Decision> {
     if one == other {
         return Ok(Decision::Zero);
     }
-    if one == from {
+    if one == from || one == node {
         return Ok(Decision::Pos);
     }
-    if other == from {
+    if other == from || other == node {
         return Ok(Decision::Neg);
     }
     which_comes_first_round_a_crossing(pair, from, one, other)
@@ -3627,6 +3649,7 @@ fn how_a_crossing_runs(
     match where_a_closed_crossing_starts(run, [surface, partner], log) {
         Ok(from) => Ok(HowItRuns::RoundAClosedCurve {
             from: PredicatePoint::from(from.coordinates()),
+            node: where_the_crossing_starts(surface, partner, from),
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
@@ -5573,7 +5596,7 @@ mod what_the_curved_arrangement_reaches {
             };
             round_a_closed_crossing(
                 [&across, &ring],
-                point(0.0),
+                [point(0.0), point(0.0)],
                 point(core::f64::consts::FRAC_PI_2),
                 point(core::f64::consts::PI),
             )
