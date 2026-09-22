@@ -6019,16 +6019,20 @@ fmt:
 # sibling trees the glob never covered and the hub's own `target/`, which was the
 # single largest at 14 GB.
 #
-# Two are skipped, and both for the same reason as `prune-worktrees`: the tree
-# you are standing in, because you are using it, and any **locked** tree, because
-# a lock means an agent is working in there and deleting its `target/` mid-build
-# is exactly the interruption the lock exists to prevent.
+# Three are skipped, and for the same reasons as `prune-worktrees`: the tree
+# you are standing in, because you are using it; the tree the overnight fuzz
+# unit runs in, because a night deleting its own `fuzz/target` mid-run is the
+# same interruption; and any **locked** tree, because a lock means an agent is
+# working in there and deleting its `target/` mid-build is exactly the
+# interruption the lock exists to prevent.
 [doc("Strip target/ from every worktree git knows about. Skips locked ones.")]
-clean-targets dir=".":
+clean-targets dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
     #!/usr/bin/env bash
     set -euo pipefail
     listing=$(git -C "{{dir}}" worktree list --porcelain)
     here=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    fuzz_tree=$(sed -n "s|^WorkingDirectory=%h|$HOME|p; s|^WorkingDirectory=/|/|p" "{{fuzz_unit}}")
+    [ -n "$fuzz_tree" ] || { echo "{{fuzz_unit}} names no WorkingDirectory, so the overnight fuzz tree cannot be kept"; exit 2; }
     locked=$(awk '/^worktree /{tree = $2} /^locked/{print tree}' <<<"$listing")
     reclaimed=0
     kept=0
@@ -6036,6 +6040,11 @@ clean-targets dir=".":
         [ -d "$tree" ] || continue
         if [ "$tree" = "$here" ]; then
             echo "kept (you are standing in it): $tree"
+            kept=$((kept + 1))
+            continue
+        fi
+        if [ "$tree" = "$fuzz_tree" ]; then
+            echo "kept (the overnight fuzz unit runs in it): $tree"
             kept=$((kept + 1))
             continue
         fi
@@ -6053,14 +6062,15 @@ clean-targets dir=".":
     done
     echo "$(numfmt --to=iec "$reclaimed") reclaimed; $kept worktree(s) kept"
 
-# Pins the two trees `clean-targets` must not touch, and the one it used to miss.
+# Pins the three trees `clean-targets` must not touch, and the one it used to miss.
 #
 # A sweep that deletes too much is noticed within the minute; a sweep that
 # deletes too little says "nothing to clean" and is believed for a month, which
-# is what happened. So the fixture puts a `target/` in all three trees and runs
+# is what happened. So the fixture puts a `target/` in all four trees and runs
 # the sweep from the lane: the **hub's** must go, because it is the biggest and
-# the old path glob never reached it, the **locked** one must survive, and the
-# tree the sweep is standing in must survive.
+# the old path glob never reached it, the **locked** one must survive, the tree
+# a fixture fuzz unit names must survive unlocked (§205.4), and the tree the
+# sweep is standing in must survive.
 [private]
 check-clean-targets-selftest:
     #!/usr/bin/env bash
@@ -6072,11 +6082,13 @@ check-clean-targets-selftest:
     git -C "$dir/main" worktree add -q "$dir/held" -b held
     git -C "$dir/main" worktree add -q "$dir/free" -b free
     git -C "$dir/main" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/held"
-    for tree in main held free; do
+    git -C "$dir/main" worktree add -q "$dir/nightly" -b nightly
+    printf '[Service]\nWorkingDirectory=%s\n' "$dir/nightly" >"$dir/rcad-fuzz.service"
+    for tree in main held free nightly; do
         mkdir -p "$dir/$tree/target/debug"
         head -c 4096 /dev/zero >"$dir/$tree/target/debug/artifact"
     done
-    got=$(just clean-targets "$dir/free")
+    got=$(just clean-targets "$dir/free" "$dir/rcad-fuzz.service")
     fail() {
         echo "clean-targets drifted from its own fixtures: $1"
         echo "--- got ---"; echo "$got"
@@ -6085,11 +6097,14 @@ check-clean-targets-selftest:
     [ ! -d "$dir/main/target" ] || fail "the hub's target/ survived, which is the case the old path glob missed"
     [ -d "$dir/held/target" ] || fail "a locked worktree was swept while an agent was working in it"
     [ -d "$dir/free/target" ] || fail "the sweep deleted the target/ of the tree it was standing in"
+    [ -d "$dir/nightly/target" ] || fail "the sweep deleted the target/ of the tree the overnight fuzz unit runs in"
     grep -qF "kept (locked, an agent is using it): $dir/held" <<<"$got" \
         || fail "the locked worktree was not reported as kept"
     grep -qF "kept (you are standing in it): $dir/free" <<<"$got" \
         || fail "the current worktree was not reported as kept"
-    grep -qE "^[0-9.]+K reclaimed; 2 worktree\(s\) kept$" <<<"$got" \
+    grep -qF "kept (the overnight fuzz unit runs in it): $dir/nightly" <<<"$got" \
+        || fail "the overnight fuzz tree was not reported as kept"
+    grep -qE "^[0-9.]+K reclaimed; 3 worktree\(s\) kept$" <<<"$got" \
         || fail "the tally is wrong, so a sweep that found nothing would read like a tidy machine"
 
 # Remove lane worktrees whose work has landed and whose lane is over.
@@ -6102,6 +6117,10 @@ check-clean-targets-selftest:
 #
 # - **not the hub, and not the tree the recipe runs in.** Git refuses to remove
 #   the hub, and you are using the other one;
+# - **not the tree the overnight fuzz unit runs in,** read from the unit's
+#   `WorkingDirectory`. Its lock and its `fuzz/artifacts/` both keep it today,
+#   but a lock is released by `release-lanes`, and the night's artifacts are
+#   triaged away (§205.4);
 # - **unlocked.** A lock names the agent that owns the tree (§55);
 # - **not holding `main`.** `main` is an ancestor of itself, so without this the
 #   tree carrying it is removed like any merged lane, which happened on
@@ -6123,11 +6142,13 @@ check-clean-targets-selftest:
 # rscene's (`eed893f`) with the three rcad cases added. Branches are never
 # deleted, so a spike that is never merged by design (§50.4) keeps its commits.
 [doc("Remove lane worktrees that are clean, landed on main, unlocked and idle for an hour.")]
-prune-worktrees dir=".":
+prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
     #!/usr/bin/env bash
     set -euo pipefail
     [ -r /proc/self/cwd ] || { echo "no /proc, so nothing can say whether a process is running in a worktree"; exit 2; }
     here=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    fuzz_tree=$(sed -n "s|^WorkingDirectory=%h|$HOME|p; s|^WorkingDirectory=/|/|p" "{{fuzz_unit}}")
+    [ -n "$fuzz_tree" ] || { echo "{{fuzz_unit}} names no WorkingDirectory, so the overnight fuzz tree cannot be kept"; exit 2; }
     landed=(main)
     git -C "$here" rev-parse --verify -q origin/main >/dev/null && landed+=(origin/main)
     now=$(date +%s)
@@ -6155,6 +6176,8 @@ prune-worktrees dir=".":
         idle=$(((now - $(stat -c %Y "$moved")) / 60))
         if [ "$tree" = "$here" ]; then
             keep "you are standing in it"
+        elif [ "$tree" = "$fuzz_tree" ]; then
+            keep "the overnight fuzz unit runs in it"
         elif [ "$locked" = 1 ]; then
             keep "locked, an agent is using it"
         elif [ "$branch" = refs/heads/main ]; then
@@ -6212,9 +6235,10 @@ check-prune-worktrees-selftest:
     git -C "$dir/hub" worktree add -q "$dir/wave" main
     git -C "$dir/hub" worktree add -q "$dir/runner" -b runner
     git -C "$dir/hub" worktree add -q "$dir/merged" -b merged
-    for name in finished just-started unmerged dirty untracked fuzzed locked busy; do
+    for name in finished just-started unmerged dirty untracked fuzzed locked busy nightly; do
         git -C "$dir/hub" worktree add -q --detach "$dir/$name" main
     done
+    printf '[Service]\nWorkingDirectory=%s\n' "$dir/nightly" >"$dir/rcad-fuzz.service"
     git -C "$dir/finished" commit -q --allow-empty -m "landed on origin/main only"
     git -C "$dir/hub" update-ref refs/remotes/origin/main "$(git -C "$dir/finished" rev-parse HEAD)"
     mkdir "$dir/finished/target"; echo build >"$dir/finished/target/out"
@@ -6225,13 +6249,13 @@ check-prune-worktrees-selftest:
     echo new >"$dir/untracked/new"
     mkdir -p "$dir/fuzzed/fuzz/artifacts/target"; echo crash >"$dir/fuzzed/fuzz/artifacts/target/crash-1"
     git -C "$dir/hub" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/locked"
-    for name in wave runner merged finished unmerged dirty untracked fuzzed locked busy; do
+    for name in wave runner merged finished unmerged dirty untracked fuzzed locked busy nightly; do
         gitdir=$(git -C "$dir/$name" rev-parse --absolute-git-dir)
         touch -d '2 hours ago' "$gitdir/HEAD" "$gitdir/logs/HEAD"
     done
     (cd "$dir/busy/" && exec sleep 300) &
     busy=$!
-    got=$(just prune-worktrees "$dir/runner")
+    got=$(just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service")
     fail() {
         echo "prune-worktrees drifted from its own fixtures: $1"
         echo "--- got ---"; echo "$got"
@@ -6252,13 +6276,14 @@ check-prune-worktrees-selftest:
     expect_kept fuzzed "fuzz/artifacts holds files"
     expect_kept locked "locked, an agent is using it"
     expect_kept busy "a process is running in it"
+    expect_kept nightly "the overnight fuzz unit runs in it"
     for name in finished merged; do
         [ ! -e "$dir/$name" ] || fail "the $name tree was not removed"
         grep -qF "removed: $dir/$name " <<<"$got" || fail "the $name tree was not reported as removed"
     done
     [ "$(grep -c '^removed' <<<"$got")" = 2 ] || fail "more than the two finished trees were removed"
-    grep -qxF "9 worktree(s) kept; their branches are untouched either way" <<<"$got" \
-        || fail "the tally is not the nine kept trees"
+    grep -qxF "10 worktree(s) kept; their branches are untouched either way" <<<"$got" \
+        || fail "the tally is not the ten kept trees"
 
 # Where this repo stands, in one call.
 #

@@ -21,7 +21,8 @@ any other.
 A tree is removed only when all of these hold. The recipe's comment says why
 each one is there:
 
-1. It is neither the hub nor the tree the recipe runs in.
+1. It is neither the hub, nor the tree the recipe runs in, nor the tree the
+   overnight fuzz unit runs in (205.4).
 2. It is unlocked.
 3. It does not hold `main` (§60, §76).
 4. Its `HEAD` is on `main` or on `origin/main`.
@@ -30,8 +31,8 @@ each one is there:
 7. Its `logs/HEAD` is an hour old.
 8. No process has its working directory inside it.
 
-rscene's version has 1, 2, 4 (against `origin/main` only), 5, 7 and 8. Three
-changes are rcad's:
+rscene's version has 1 (without the fuzz tree), 2, 4 (against `origin/main`
+only), 5, 7 and 8. Three changes are rcad's besides 205.4:
 
 - **3** is §76's first defect, which rscene does not have because its `main` is
   in the hub.
@@ -71,6 +72,23 @@ Writing the selftest found one bug in the port before it landed. `read` with
 `IFS=$'\t'` folds two tabs in a row into one, so a detached tree's empty branch
 field moved the lock flag into the branch column, and a locked tree read as
 unlocked. The branch is the last field now.
+
+### 205.4 The overnight fuzz tree is kept by name
+
+`rcad-nightly-fuzz` was kept only by its lock, whose reason reads "overnight
+fuzzing", and by the 2103 files in its `fuzz/artifacts/`. Neither is meant to
+protect it. A lock records which agent owns a tree, and `release-lanes` exists
+to drop locks in bulk. The artifacts are triaged away, and a night that finds
+nothing leaves none. With both gone, `prune-worktrees` would remove the tree
+the timer runs in, and `clean-targets` would delete its `fuzz/target` mid-night.
+
+Both recipes now read `WorkingDirectory` from
+`tooling/systemd/rcad-fuzz.service`, with `%h` expanded. They keep that tree,
+locked or not, and fail if the unit names no directory. They read the tracked
+copy, not the installed one, because the tracked copy is what this tree
+means. `check-fuzz-unit` already fails when the two drift apart. Each selftest
+has an unlocked fixture tree that a fixture unit names. Turning the rule off in
+either recipe fails that recipe's selftest on that tree.
 
 rscene also has a `check` mode that `gate` runs, which fails while a removable
 tree is on disk. That was **not** ported. What it checks is this machine's
