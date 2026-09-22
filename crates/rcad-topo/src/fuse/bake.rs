@@ -32,16 +32,16 @@
 //! sentence [`what_trims_this_face`](crate::holds) already says on the other
 //! side of the crate.
 //!
-//! One thing follows that §33.8 and §34.9 both expected to go the other way:
-//! **[`Picker`](rcad_geom::Picker) still needs no `transformed`.** The only
-//! stored picker in the kernel is the one that says which half of a meridian a
-//! seam is, and nothing reads it here.
+//! **An edge's [`Picker`]s are carried, moved into place.** They are the only
+//! thing an edge stores that says which of the two arcs between its ends it is,
+//! and an edge whose ends are two nodes of one closed crossing needs exactly
+//! that to be cut into the right arcs — see [`BakedEdge::picked_by`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    Isometry, MeetOfThree, Orientation, Plane, Point, Surface, WHERE_THREE_SURFACES_MEET,
-    meet_of_three_surfaces, where_a_corner_lands_after_moving,
+    EdgeRun, Isometry, MeetOfThree, Orientation, Picker, Plane, Point, Surface,
+    WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces, where_a_corner_lands_after_moving,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -142,6 +142,13 @@ pub(crate) struct BakedEdge {
     /// The surface of the face on the other side of this edge. Together with the
     /// face's own surface it *is* where the edge runs (§17.4, §31.3).
     pub(crate) across: Surface,
+    /// What picks this edge out of the rest of the curve it runs along, moved
+    /// into place with the face. Empty for an edge whose run carries none.
+    ///
+    /// Two surfaces and two ends do not say which way round a closed curve an
+    /// edge goes: a half ball's skin is bound by two edges between the same two
+    /// poles on one great circle, and only these say which half is which.
+    pub(crate) picked_by: SmallVec<[Picker; 1]>,
 }
 
 /// A corner of an input face, in world coordinates.
@@ -307,6 +314,7 @@ fn bake_the_joined_faces(
                     start,
                     end: corners[&next.slot_in(model.id())].clone(),
                     across: Surface::Plane(side.across),
+                    picked_by: SmallVec::new(),
                 });
             }
             wires.push(walked);
@@ -852,6 +860,10 @@ fn bake_one_face(
                         start: corners[&coedge.start().key().slot_in(model.id())].clone(),
                         end: corners[&coedge.end().key().slot_in(model.id())].clone(),
                         across: surfaces[&across].placed,
+                        picked_by: pickers_moved_into_place(
+                            coedge.edge().stored_run(),
+                            &face.location(),
+                        ),
                     })
                 })
                 .collect()
@@ -866,6 +878,23 @@ fn bake_one_face(
         cuts: Vec::new(),
         bounds,
     }
+}
+
+/// An edge's pickers, moved by the placement its face stands at.
+///
+/// A face standing where it was built is not moved at all, so that a picker
+/// whose plane holds an edge's ends exactly still does.
+fn pickers_moved_into_place(run: &EdgeRun, movement: &Isometry) -> SmallVec<[Picker; 1]> {
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run else {
+        return SmallVec::new();
+    };
+    if *movement == Isometry::identity() {
+        return picked_by.clone();
+    }
+    picked_by
+        .iter()
+        .map(|picker| picker.transformed(movement))
+        .collect()
 }
 
 /// The face on the other side of one edge of this face, or `None` when this same
