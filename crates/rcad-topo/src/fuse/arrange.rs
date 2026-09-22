@@ -3448,6 +3448,17 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// straddles zero however far round the other point is: a circle cut across
 /// from a start one rounding off a pole refused every union of a turned ball
 /// and block at radius 3 that way (§195.2).
+///
+/// **A node can be the start without being named it.** A circle a ball and
+/// a plane cross in starts where the walk starts, and a third surface can
+/// cross the circle right there: the half ball `x ≥ 0` cut by `z ≤ 0.5` has the
+/// circle `z = 0.5` start at `(0, √3/2, 0.5)`, where the `x = 0` circle meets
+/// it. The node there is the meet of three surfaces, a box one ulp wide round
+/// the start rather than the start itself, so no name matches, and the start,
+/// that node and the node across at `(0, −√3/2, 0.5)` all lie on the line
+/// `x = 0, z = 0.5`. The sweep is exactly zero, and read as "these two are
+/// one point" it folded the two places the circles cross into one.
+/// [`the_one_the_start_is`] settles which pair the zero is about.
 fn round_a_closed_crossing(
     pair: [&Surface; 2],
     [from, node]: [PredicatePoint; 2],
@@ -3463,7 +3474,42 @@ fn round_a_closed_crossing(
     if other == from || other == node {
         return Ok(Decision::Neg);
     }
-    which_comes_first_round_a_crossing(pair, from, one, other)
+    let decided = which_comes_first_round_a_crossing(pair, from, one, other)?;
+    // Compared rather than matched: only a proved zero is re-read, and every
+    // other answer goes back as it came (§40).
+    if decided != Decision::Zero || boxes_overlap(one, other) {
+        return Ok(decided);
+    }
+    Ok(the_one_the_start_is(from, one, other))
+}
+
+/// Which of two points that are provably apart is the start, when the two and
+/// the start sweep no area round a closed crossing.
+///
+/// Three points on a conic sweep no area only when two of them are one place,
+/// and `one` and `other` are not: their boxes share nothing. So one of them is
+/// the start, and it is the one whose box the start is in, **provided the
+/// other's box misses the start** — that is what proves the other is not the
+/// start, and it is a proof about boxes, not a distance. The one that is the
+/// start comes first, [`Decision::Pos`] for `one` and [`Decision::Neg`] for
+/// `other`, which is what the named start already answers.
+///
+/// Where both boxes hold the start, or neither does, nothing here says which
+/// of the two is the start, and the answer is [`Decision::Undecidable`] as wide
+/// as the wider box. The second case needs a start that is off the conic, which
+/// a walked start can be by a rounding.
+fn the_one_the_start_is(
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Decision {
+    match (boxes_overlap(one, from), boxes_overlap(other, from)) {
+        (true, false) => Decision::Pos,
+        (false, true) => Decision::Neg,
+        (true, true) | (false, false) => Decision::Undecidable {
+            enclosure: one.uncertainty().max(other.uncertainty()),
+        },
+    }
 }
 
 /// A direction square to the chord between `ends`, in the plane of the circle

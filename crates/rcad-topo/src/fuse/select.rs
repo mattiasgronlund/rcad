@@ -437,10 +437,54 @@ fn the_piece_holds(
                 let corners: Vec<PredicatePoint> =
                     wire.iter().map(|side| side.ends[0].point()).collect();
                 winding += in_plane.winding_around(core::slice::from_ref(&corners), point)?;
+                for side in wire {
+                    winding += in_the_bulge_of(side, in_plane, point)?;
+                }
             }
         }
     }
     Some(winding == 1)
+}
+
+/// One when `point` is between a curved side of a flat piece and the chord
+/// across it, where the corners alone wind nothing round it; zero when it is
+/// not; `None` when the chord cannot say.
+///
+/// **A half disk has two corners**, so the polygon of its corners has no
+/// inside at all and every point of the half disk is between its arc and its
+/// chord. `z ≤ 0.5` cut out of a half ball leaves one on the plane `z = 0.5`.
+///
+/// Only a side whose material is **inside** a ball is counted. What the ball
+/// leaves on the plane is then one disk, and the material is on the left of the
+/// side, so the disk is too: the chord is inside it, and the side is the part
+/// of its rim on the chord's right. So the part of the disk right of the chord
+/// is exactly the bulge, and `point` is already known to be in the disk,
+/// because [`the_piece_holds`] asks every curved side's partner first. A side
+/// whose material is outside its ball bites into the piece instead, and that
+/// bite is what the ball's own sign already took out.
+///
+/// **A pipe the plane crosses leaves an ellipse and the same argument holds**,
+/// but it is not counted yet. Counting it answers two pinned refusals over bars
+/// (`degenerate_curved_fuses.rs`) and turns two more into four faces along one
+/// edge, because two arcs of one ellipse between the same corners are then
+/// named as one edge (`assemble`'s `which_arc_of_a_circle_this_is` reads a
+/// ball's circle only). A cone is not counted either: a plane can cut it in two
+/// branches, and "inside the cone" is then two regions, not one.
+fn in_the_bulge_of(side: &FaceMeet, in_plane: &InPlane, point: PredicatePoint) -> Option<i32> {
+    let a_ball = matches!(side.carried_by[1], Surface::Sphere(_));
+    if !a_ball || side.material_side != Decision::Neg {
+        return Some(0);
+    }
+    // Compared rather than matched, so that `Decision`'s wildcard arm is not
+    // written once more (§40): a zero or an undecided turn is `None` either way.
+    let turn = in_plane.turn(side.ends[0].point(), side.ends[1].point(), point);
+    if turn == Decision::Neg {
+        Some(1)
+    } else if turn == Decision::Pos {
+        Some(0)
+    } else {
+        None
+    }
 }
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire
@@ -921,6 +965,9 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
                 candidates.extend(the_middle_of_a_round_wire(flat, &partner));
             }
         }
+        for side in piece.wires.iter().flatten() {
+            candidates.extend(half_way_into_either_arc(flat, side).into_iter().flatten());
+        }
         return candidates;
     }
     // **A piece bounded by one closed curve has one corner**, and every blend of
@@ -944,6 +991,33 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         .into_iter()
         .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
         .collect()
+}
+
+/// Two points a quarter of the way across the circle a curved side of a flat
+/// piece runs round, one either side of the chord between its ends: half way
+/// from the middle of the chord to where the circle crosses the line square to
+/// it. One of them is between the side and its chord, which is where a half
+/// disk has all of its inside and its corners none (see [`in_the_bulge_of`]).
+///
+/// Which one is not asked, because nothing about a candidate is trusted: each
+/// is placed and proved by the caller. The circle's centre is
+/// [`the_middle_of_a_round_wire`], and its radius comes from the right angle
+/// at the chord's middle, so for an ellipse the points are near rather than on
+/// that line, which is all a candidate needs. `None` for a straight side, and
+/// for a side with nothing to go round or no length to go square to.
+fn half_way_into_either_arc(flat: &Plane, side: &FaceMeet) -> Option<[PredicatePoint; 2]> {
+    let centre = the_middle_of_a_round_wire(flat, &side.carried_by[1])?;
+    let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
+    let chord = end - start;
+    let across = flat.normal().cross(chord).normalized().ok()?;
+    let middle = start + chord * 0.5;
+    let off = across.dot(middle_of(centre) - middle);
+    let reach = (off * off + chord.length_squared() / 4.0).sqrt();
+    let points = [off + reach, off - reach].map(|to| middle + across * (to / 2.0));
+    points
+        .iter()
+        .all(Point::is_finite)
+        .then(|| points.map(|point| PredicatePoint::from(point.coordinates())))
 }
 
 /// The middle of a piece's corners, which is somewhere near it and nowhere in
