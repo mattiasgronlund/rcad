@@ -3043,24 +3043,26 @@ fn what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_
     );
 }
 
-/// A ball half sunk into a block and united with it meshes at a deflection of
-/// `0.3` upright, and **turned, it does not** — pinned, because it is a gap and
-/// not a limit (§16.10), and the fix is not a test lane's.
+/// A ball half sunk into a block and united with it measures the same at a
+/// deflection of `0.3` turned as upright, inside what the two measurements
+/// declare between them.
 ///
-/// §191's volume row found it and shrank it to this. The fuse answers turned
-/// as it does upright, and the answer validates; what refuses is measuring it,
-/// with `MeshError::BoundaryCrossesItself` on the dome. **The demonstration
-/// that it is a gap** is the first half of this test: the same solid put
-/// somewhere else by a rigid movement meshes at the same deflection, and a
-/// rigid movement does not change whether a mesh within a deflection exists.
-/// The dome is the §124 shape in small — a round face whose rim was meant to
-/// be a line of latitude and came in a few ulps off one.
+/// §191's volume row found the turned one refused, with
+/// `MeshError::BoundaryCrossesItself` on the dome, and pinned it here as a gap:
+/// a rigid movement does not change whether a mesh within a deflection exists.
+/// The dome is a cap, cut into four patches by meridians up to its pole from
+/// the rim corners nearest the four quarter turns. On a rim this coarse those
+/// corners are not a quarter apart, and each patch's pole side ran a quarter
+/// turn back from the meridian it arrived up, past the one it had to leave
+/// down, and folded back on itself. The side now ends at the meridian the
+/// patch leaves by (`mesh.rs`, `cut_a_cap_up_to_its_pole`).
 ///
-/// The day this test fails, the mesh refusal is closed and the `0.3` column of
-/// [`turning_a_ball_and_block_together_changes_no_answer_s_volume`] stops
-/// skipping it.
+/// **The tolerance is the two measurements' own bounds added.** Each
+/// `volume_error` bounds `|true − measured|` for its own mesh at this
+/// deflection, and the true volume is the same both ways, so the two measured
+/// volumes can be apart by at most the sum.
 #[test]
-fn a_turned_ball_united_with_a_block_will_not_mesh_where_the_upright_one_does() {
+fn a_turned_ball_united_with_a_block_holds_what_the_upright_one_does() {
     let fixture = Turned {
         fixture: BallAndBlock {
             side: 5,
@@ -3088,20 +3090,24 @@ fn a_turned_ball_united_with_a_block_will_not_mesh_where_the_upright_one_does() 
             .solid(solid)
             .expect("this model made the key")
             .measure(coarse, &Policy::certified(), &mut ProvenanceLog::new())
-            .map(|measured| measured.volume())
+            .unwrap_or_else(|why| panic!("the union meshes at 0.3: {why}"))
     };
 
-    meshed(fixture.fixture.built()).expect("upright, the union meshes at 0.3");
-    match meshed(fixture.build()) {
-        Err(Error::CannotMeshAFace {
-            why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
-            ..
-        }) => {}
-        Ok(volume) => {
-            panic!("the turned union meshes now, holding {volume} — assert the volume instead")
-        }
-        Err(why) => panic!("the turned union refused to mesh some other way: {why}"),
-    }
+    let upright = meshed(fixture.fixture.built());
+    let turned = meshed(fixture.build());
+    let declared = upright.volume_error() + turned.volume_error();
+    // §47.4 item 1: a tolerance nothing can exceed has measured nothing.
+    assert!(
+        declared.is_finite() && declared > 0.0 && declared < upright.volume(),
+        "the two measurements declared {declared}, and nothing is worth asserting against that"
+    );
+    let apart = (turned.volume() - upright.volume()).abs();
+    assert!(
+        apart <= declared,
+        "turned the union holds {}, upright {}: {apart} apart, past the {declared} the two declare",
+        turned.volume(),
+        upright.volume()
+    );
 }
 
 /// Every fuse a turned curved fixture refuses has an answer the kernel can
@@ -3430,7 +3436,7 @@ fn turning_it_moves_no_volume<P: Fixture + core::fmt::Debug>(
 /// Only ever asked of a **turned** answer whose upright twin has just measured
 /// at the same deflection — [`how_much_it_holds`] panics otherwise — so every
 /// refusal let past here is a gap by
-/// [`a_turned_ball_united_with_a_block_will_not_mesh_where_the_upright_one_does`]'s
+/// [`a_turned_ball_united_with_a_block_holds_what_the_upright_one_does`]'s
 /// argument: a rigid movement does not change whether a mesh exists. Two kinds
 /// have turned up, `BoundaryCrossesItself` and a loop with a corner twice.
 fn how_much_it_holds_if_it_meshes(

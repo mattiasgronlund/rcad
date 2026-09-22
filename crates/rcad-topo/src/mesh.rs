@@ -1044,10 +1044,20 @@ impl BuildingAMesh {
             // is one point in space and a whole side of the patch in the
             // surface's coordinates, which is what a `WireStep::Pole` says about
             // a ball this kernel builds.
+            //
+            // **The side ends at the meridian the cut down leaves by, which is
+            // the patch's own first corner, and not a quarter turn back.** The
+            // cuts leave from the rim corners nearest the quarters, and on a
+            // coarse rim those are not a quarter apart: the dome of §191's
+            // turned ball and block has four of them `2.74`, `0.40`, `2.74` and
+            // `0.40` radians apart, so a quarter turn back ran `1.17` past the
+            // next cut's meridian in two patches, the side folded back on
+            // itself, and the mesher refused it as a boundary that crosses
+            // itself. `a_turned_ball_united_with_a_block_holds_what_the_upright_one_does`.
             let corner = one.corners.last().map_or(0.0, |corner| corner[0]);
             one.corners.push([corner, towards]);
             one.points.push(at_the_pole);
-            let back = corner - way * whole_turn / 4.0;
+            let back = one.corners[0][0];
             one.corners.push([back, towards]);
             one.points.push(at_the_pole);
             one.take_in_unwrapped(&cuts[step].the_other_way(), whole_turn);
