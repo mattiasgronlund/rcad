@@ -14,11 +14,13 @@ What is left is their next blockers; a new unit is Mattias's call.
 to 0), §187.1–3, §188.1–3, §189.1–2 (8000 of 8000), §190.1–4, §192.1–3 (18
 LEDs to 0), §193.1–2 (20 LEDs import), §194.1–4 — each closing the item the
 section before it left; `just decision <n>` for which. §194.5's pole-to-pole
-lune by **§195.1**, its box by **§195.2**, §190.6's circle check by **§195.3**.
+lune by **§195.1**, its box by **§195.2**, §190.6's circle check by **§195.3**;
+§195.2's turned ball-and-block by **§196.1** (36 of 36).
 
-**Next and unclaimed: the turned ball-and-block at sizes that are not a power
-of two**, §195.2 — 11 of 36 scaled copies refuse, 9 on a corner met twice in
-one loop. §195.4 lists the rest. §124, §136.4, §125.6:
+**Next and unclaimed: the panic cutting a half ball a second time through its
+polar axis**, §196.2 — `fuse/arrange.rs:1743` on valid input, 48 of 48 cases,
+pinned behind `#[ignore]`; the narrow lune §195.1 left sits behind it. §196.4
+lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
