@@ -1696,43 +1696,105 @@ fn a_ball_where_curved_faces_meet(faces: &[Surface]) -> Option<Sphere> {
 ///   is between `r·(1 − sin θ) − q` and `r + q` from the axis, and
 ///   `|r − R| + q + r·sin θ` bounds how far any point is from the pipe.
 ///
-/// These are worked out in plain `f64`, and the allowance is sixteen times
-/// the rounding of the largest number in them, so the few roundings each bound
-/// costs cannot carry a circle that is off by the allowance back onto the
-/// surface — only one that is off by that much less a few ulps.
+/// These are worked out in plain `f64`, and the allowance is
+/// [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] times the rounding of the largest number
+/// in them, so the few roundings each bound costs cannot carry a circle that
+/// is off by the allowance back onto the surface — only one that is off by
+/// that much less a few ulps.
 ///
 /// Anything else holds nothing, which is the safe direction: the run is then
 /// named by its faces as before.
 fn a_surface_holds_the_circle(surface: &Surface, centre: Point, axis: Vector, radius: f64) -> bool {
-    let allowance = |points: [Point; 2], lengths: [f64; 2]| {
-        let largest = points
+    how_far_off_the_circle_can_be(surface, centre, axis, radius).is_some_and(|(off, largest)| {
+        off <= A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest
+    })
+}
+
+/// How many times [`NEAREST_F64_POINT_ROUNDOFF`] of the largest number
+/// involved a file's `CIRCLE` may sit off a face along its edge and still be
+/// read as lying on it.
+///
+/// **Why a width and not a certified sign.** The files write these circles
+/// off their faces, in exact arithmetic and by any reading of the decimals.
+/// `kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` puts circle `#316` at
+/// `(1.27, -5.07, 10.)` turning about `(-5.551115123126E-17, -1., 0.)`, on
+/// pipe `#324` whose axis starts at `(1.27, -1.27, 10.)` and leans the same
+/// way. The centre is `3.8` along a line leaning `5.6e-17`, so it misses the
+/// pipe's axis by `2.1e-16`, and the pipe's own equation at every point of
+/// the circle has a sign that is not zero. A check that asked the sign would
+/// refuse the circle, and the answer "it is on the face" does not exist for
+/// those numbers — that is a limit, not a gap (`docs/decisions.md` §16.10).
+/// Measured with an allowance of zero, which keeps only circles whose miss
+/// rounds to nothing in `f64`: the KiCad corpus imports 115 files rather
+/// than 160, the 45 lost being the D3.0 and D5.0 horizontal LEDs, 24 relays
+/// and one fuseholder.
+///
+/// **Where sixteen comes from.** It is the sixteen `Model::validate` gives a
+/// corner of a curved face (`MEASURING_SLACK` in `rcad-topo`'s
+/// `validate.rs`), so the reader holds a circle to the standard the validator
+/// holds its corners to. It was not fitted to the corpus, and the corpus
+/// needs much less: over the whole corpus on `b3701c4c`, the furthest a
+/// circle sits off its face in any file that imports is `1.20` of these
+/// units, on `Relay_3PST_COTO_3650.step` and `_3660.step`. An allowance of
+/// `1` loses those two relays (158 imports); every allowance from `4` to
+/// `1000` gives the same 160. The circles sixteen turns away short of `34`
+/// are all in `nist_stc_08_asme1_ap242-e3.stp` and the two Fujitsu `FTR-F1`
+/// relays, which are refused for something else first.
+/// `the_furthest_a_circle_an_imported_file_needs_is_inside_the_allowance`
+/// holds the relay's circle against this number.
+const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
+
+/// The furthest any point of the circle can be from `surface`, and the
+/// largest number the bound was worked out from — see
+/// [`a_surface_holds_the_circle`] for the two bounds. `None` for a surface
+/// with no bound here.
+fn how_far_off_the_circle_can_be(
+    surface: &Surface,
+    centre: Point,
+    axis: Vector,
+    radius: f64,
+) -> Option<(f64, f64)> {
+    let largest_of = |points: [Point; 2], lengths: [f64; 2]| {
+        points
             .iter()
             .map(Point::largest_coordinate_magnitude)
             .chain(lengths.map(f64::abs))
-            .fold(0.0, f64::max);
-        16.0 * NEAREST_F64_POINT_ROUNDOFF * largest
+            .fold(0.0, f64::max)
     };
     match surface {
         Surface::Sphere(ball) => {
             let off = centre - ball.centre();
             let along = off.dot(axis);
             let across = (off - axis * along).length();
-            let room = allowance([centre, ball.centre()], [radius, ball.radius()]);
-            [radius + across, (radius - across).abs()]
-                .into_iter()
-                .all(|round| ((along * along + round * round).sqrt() - ball.radius()).abs() <= room)
+            let [outer, inner] = [radius + across, (radius - across).abs()]
+                .map(|round| ((along * along + round * round).sqrt() - ball.radius()).abs());
+            // Not `f64::max`, which drops a NaN and would hold the circle on
+            // the other bound. `abs` leaves a NaN positive, and `total_cmp`
+            // sorts a positive NaN above everything, so it reaches the
+            // comparison and fails it.
+            let furthest = if outer.total_cmp(&inner).is_ge() {
+                outer
+            } else {
+                inner
+            };
+            Some((
+                furthest,
+                largest_of([centre, ball.centre()], [radius, ball.radius()]),
+            ))
         }
         Surface::Cylinder(pipe) => {
             let line = pipe.axis();
             let tilt = axis.cross(line.direction()).length();
             let across = line.distance_to_point(centre);
-            let room = allowance([centre, line.origin()], [radius, pipe.radius()]);
-            (radius - pipe.radius()).abs() + across + radius * tilt <= room
+            Some((
+                (radius - pipe.radius()).abs() + across + radius * tilt,
+                largest_of([centre, line.origin()], [radius, pipe.radius()]),
+            ))
         }
-        Surface::Plane(_) | Surface::Cone(_) | Surface::Torus(_) => false,
+        Surface::Plane(_) | Surface::Cone(_) | Surface::Torus(_) => None,
         // A surface kind this reader has no bound for holds nothing, which
         // names the run by its faces as before.
-        _ => false,
+        _ => None,
     }
 }
 
@@ -1813,10 +1875,13 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cylinder, Point, Sphere, Surface, Vector};
+    use rcad_geom::{Axis, Cylinder, NEAREST_F64_POINT_ROUNDOFF, Point, Sphere, Surface, Vector};
     use rcad_predicates::{Decision, Point as PredicatePoint};
 
-    use super::{a_half_space_holding_both, a_surface_holds_the_circle};
+    use super::{
+        A_CIRCLE_MAY_MISS_ITS_FACE_BY, a_half_space_holding_both, a_surface_holds_the_circle,
+        how_far_off_the_circle_can_be,
+    };
 
     /// The LED body's circle, written as the file writes it: on its dome
     /// exactly, and `2.1e-16` off its body's axis. Both hold it, and a circle a
@@ -1850,6 +1915,57 @@ mod tests {
                 "{face:?} holds a circle a thousandth wider"
             );
         }
+    }
+
+    /// The worst case [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] publishes, held against
+    /// it (`docs/decisions.md` §15.6): circle `#1359` of
+    /// `kicad/Relay_3PST_COTO_3650.step` on its pipe `#1365`, the furthest off
+    /// its face of any circle in a file that imports.
+    ///
+    /// Its centre is `15.764` along an axis leaning `2.2e-16`, so it misses the
+    /// pipe's axis by `3.5e-15`, which is `1.20` roundings of the pipe's
+    /// `13.462`. That is more than one, so an allowance of the bare rounding
+    /// refuses a file the corpus imports, and it is far under sixteen.
+    #[test]
+    fn the_furthest_a_circle_an_imported_file_needs_is_inside_the_allowance() {
+        let leaning = Vector::new(2.220_446_049_25e-16, 1.0, 0.0);
+        let centre = Point::new(-1.54, 2.302, 11.06);
+        let axis = leaning.normalized().expect("a direction");
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(-1.54, -13.462, 11.06), leaning).expect("an axis"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+
+        let (off, largest) =
+            how_far_off_the_circle_can_be(&pipe, centre, axis, 1.0).expect("a pipe has a bound");
+        let roundings = off / (NEAREST_F64_POINT_ROUNDOFF * largest);
+        assert!(
+            (1.0..1.25).contains(&roundings),
+            "the relay's circle is {roundings} roundings off its pipe, where 1.20 was measured; \
+             the corpus measurement in A_CIRCLE_MAY_MISS_ITS_FACE_BY's doc comment is stale"
+        );
+        assert!(
+            roundings < A_CIRCLE_MAY_MISS_ITS_FACE_BY,
+            "the allowance no longer covers the furthest circle an imported file needs"
+        );
+        assert!(a_surface_holds_the_circle(&pipe, centre, axis, 1.0));
+    }
+
+    /// A NaN in the numbers holds no circle. `f64::max` would drop it and
+    /// answer with the other bound.
+    #[test]
+    fn a_ball_does_not_hold_a_circle_with_a_nan_radius() {
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a radius"));
+        let axis = Vector::new(0.0, 0.0, 1.0);
+        assert!(!a_surface_holds_the_circle(
+            &ball,
+            Point::origin(),
+            axis,
+            f64::NAN
+        ));
     }
 
     /// A point on the circle of `radius` about `centre`, at `angle` round the
