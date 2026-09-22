@@ -6092,118 +6092,173 @@ check-clean-targets-selftest:
     grep -qE "^[0-9.]+K reclaimed; 2 worktree\(s\) kept$" <<<"$got" \
         || fail "the tally is wrong, so a sweep that found nothing would read like a tidy machine"
 
-# Remove lane worktrees whose branch has landed on main.
+# Remove lane worktrees whose work has landed and whose lane is over.
 #
-# A worktree is only removed when it is clean *and* its branch is an ancestor of
-# main; anything else is listed and left alone. The branch itself is never
-# deleted, so a spike that is never merged by design (§50.4) keeps its commits
-# even after its worktree goes.
+# The closing gate runs this, because nothing else reclaims a worktree: the
+# harness sweep keeps any worktree holding a commit (§50.8). A worktree is
+# removed only when every one of these holds, and each is here because it is
+# the only thing that tells a finished lane from a live one or from a tree
+# holding something nowhere else has:
 #
-# The closing gate runs this, because a merge is the only moment when removing a
-# worktree is provably safe, and this repo learned the hard way that nothing
-# reclaims them on its own: the harness sweep keeps any worktree holding unpushed
-# commits, so with no remote configured it kept all 38 for ever (§50.8).
+# - **not the hub, and not the tree the recipe runs in.** Git refuses to remove
+#   the hub, and you are using the other one;
+# - **unlocked.** A lock names the agent that owns the tree (§55);
+# - **not holding `main`.** `main` is an ancestor of itself, so without this the
+#   tree carrying it is removed like any merged lane, which happened on
+#   2026-09-08 (§76). §60 says it lives in a worktree and never the hub;
+# - **HEAD on `main` or on `origin/main`.** Either ref keeps every commit the
+#   tree can reach. Asking about HEAD's commit and never about a branch name is
+#   §76's second fix: a detached tree's `HEAD` resolved through the wrong tree;
+# - **nothing uncommitted, untracked files included;**
+# - **no `fuzz/artifacts/`.** It is gitignored, so a tree holding the only copy
+#   of a crash input reads as clean (§92.3);
+# - **HEAD has not moved for an hour.** A lane that has just started sits at its
+#   base, which is on `main`, clean and unlocked, and the harness does not lock
+#   a workflow lane. `logs/HEAD` rather than `index`, because `git status`
+#   rewrites the index and this recipe runs it;
+# - **no process has its working directory inside it.**
 #
-# Two defects, both demonstrated before either fix was written (§76). First,
-# `main` is an ancestor of itself, so the tree holding it used to fall through
-# to `remove` like any merged lane — this actually happened on 2026-09-08. It
-# gets its own check, ahead of the ancestry test, because §60 says `main` lives
-# in a worktree and never the hub; this recipe honoring that is not optional.
-# Second, a detached tree reports its branch as the literal string `HEAD`, and
-# resolving that string as a ref used to go through whichever tree the command
-# was standing in — from the tree holding `main`, `HEAD` resolved to `main`
-# itself, trivially an ancestor, so a clean detached tree was removed no matter
-# what it held. Its commits sit on no branch, so nothing else protects them: a
-# detached tree is now judged by its own commit (`git -C "$tree" rev-parse
-# HEAD`, no branch name involved at all) and kept unconditionally, the same way
-# a locked or dirty tree is.
-[doc("Remove lane worktrees whose branch has landed on main.")]
+# Until §205 a detached tree was kept whatever it held, and lanes here mostly
+# end detached: on 2026-09-22 this kept 55 trees and removed 7. The rule is
+# rscene's (`eed893f`) with the three rcad cases added. Branches are never
+# deleted, so a spike that is never merged by design (§50.4) keeps its commits.
+[doc("Remove lane worktrees that are clean, landed on main, unlocked and idle for an hour.")]
 prune-worktrees dir=".":
     #!/usr/bin/env bash
     set -euo pipefail
-    repo=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    [ -r /proc/self/cwd ] || { echo "no /proc, so nothing can say whether a process is running in a worktree"; exit 2; }
+    here=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    landed=(main)
+    git -C "$here" rev-parse --verify -q origin/main >/dev/null && landed+=(origin/main)
+    now=$(date +%s)
+    cwds=$(for p in /proc/[0-9]*; do readlink "$p/cwd" 2>/dev/null || true; done)
+    git -C "$here" worktree prune
     kept=0
-    # A lock means an agent is working in there right now — git holds one for the
-    # life of the agent and releases it on exit. Never force past it: the pid in
-    # the lock reason was a live 13-hour session the first time this ran.
-    locked=$(git -C "$repo" worktree list --porcelain \
-        | awk '/^worktree /{tree = $2} /^locked/{print tree}')
-    for tree in $(git -C "$repo" worktree list --porcelain | awk '/^worktree /{print $2}'); do
-        [ "$tree" = "$repo" ] && continue
-        branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-        commit=$(git -C "$tree" rev-parse HEAD 2>/dev/null || echo "")
-        name="$branch"
-        [ "$branch" = "HEAD" ] && name="detached at $(git -C "$tree" rev-parse --short HEAD 2>/dev/null || echo "$commit")"
-        if grep -qxF "$tree" <<<"$locked"; then
-            echo "kept (locked, an agent is using it): $tree"
-            kept=$((kept + 1))
-        elif [ -n "$(git -C "$tree" status --porcelain 2>/dev/null)" ]; then
-            echo "kept (uncommitted changes): $tree"
-            kept=$((kept + 1))
-        elif [ "$branch" = "main" ]; then
-            echo "kept (holds main, which a worktree carries by rule, never the hub -- §60): $tree"
-            kept=$((kept + 1))
-        elif [ "$branch" = "HEAD" ]; then
-            echo "kept (detached; its commits are on no branch, so nothing else protects them): $tree [$name]"
-            kept=$((kept + 1))
-        elif [ -z "$commit" ] || ! git -C "$repo" merge-base --is-ancestor "$commit" main 2>/dev/null; then
-            echo "kept (not merged into main): $tree [$name]"
-            kept=$((kept + 1))
+    keep() {
+        echo "kept ($1): $tree"
+        kept=$((kept + 1))
+    }
+    on_a_landed_ref() {
+        local ref
+        for ref in "${landed[@]}"; do
+            git -C "$here" merge-base --is-ancestor "$head" "$ref" && return 0
+        done
+        return 1
+    }
+    # The first entry is the hub, which `git worktree remove` refuses. `branch`
+    # is last because a detached tree has none, and `read` folds two tabs in a
+    # row into one, which would shift every field after an empty one.
+    while IFS=$'\t' read -r tree head locked branch; do
+        gitdir=$(git -C "$tree" rev-parse --absolute-git-dir)
+        moved="$gitdir/logs/HEAD"
+        [ -f "$moved" ] || moved="$gitdir/HEAD"
+        idle=$(((now - $(stat -c %Y "$moved")) / 60))
+        if [ "$tree" = "$here" ]; then
+            keep "you are standing in it"
+        elif [ "$locked" = 1 ]; then
+            keep "locked, an agent is using it"
+        elif [ "$branch" = refs/heads/main ]; then
+            keep "holds main, which a worktree carries by rule, never the hub -- §60"
+        elif ! on_a_landed_ref; then
+            keep "HEAD ${head:0:8} is not on ${landed[*]}"
+        elif [ -n "$(git -C "$tree" status --porcelain)" ]; then
+            keep "uncommitted changes"
+        elif [ -n "$(find "$tree/fuzz/artifacts" -type f -print -quit 2>/dev/null)" ]; then
+            keep "fuzz/artifacts holds files, and nothing else may have a copy"
+        elif [ "$idle" -lt 60 ]; then
+            keep "HEAD moved $idle minutes ago"
+        elif printf '%s\n' "$cwds" | awk -v p="$tree" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }'; then
+            keep "a process is running in it"
         else
-            git -C "$repo" worktree remove --force "$tree"
-            echo "removed: $tree [$name]"
+            git -C "$here" worktree remove "$tree"
+            echo "removed: $tree [${branch#refs/heads/}${branch:+ }at ${head:0:8}]"
         fi
-    done
-    git -C "$repo" worktree prune
+    done < <(git -C "$here" worktree list --porcelain | awk '
+        function flush() { if (tree != "" && n > 1) print tree "\t" head "\t" locked "\t" branch }
+        /^worktree / { flush(); tree = substr($0, 10); head = ""; branch = ""; locked = 0; n++ }
+        /^HEAD /     { head = $2 }
+        /^branch /   { branch = $2 }
+        /^locked/    { locked = 1 }
+        END          { flush() }')
     echo "$kept worktree(s) kept; their branches are untouched either way"
 
-# Pins the two defects fixed above (§76) — `prune-worktrees` had no selftest at
-# all, which is exactly how both survived to be found live.
+# `prune-worktrees` against a throwaway repository laid out like this one: a
+# detached hub, `main` in a worktree of its own, one worktree for each reason to
+# keep a tree, and two with none.
 #
-# The fixture builds five worktrees off a throwaway `main` and runs the sweep
-# from a sixth, so `main`'s own tree is judged rather than skipped as "the tree
-# you are standing in". `held` is locked, `dirty` carries an uncommitted file,
-# `loose` is detached, and `merged` is fast-forwarded into `main` before the
-# sweep runs, so its commit really is `main`'s ancestor. A guard that kept
-# everything would pass the first four and only the fifth catches it.
+# Each keep case fails exactly one of the recipe's conditions and passes the
+# rest, so deleting any single condition removes exactly one tree it should
+# have kept, and this names which. The two removed trees are the two shapes a
+# finished lane ends in here: detached on a commit only `origin/main` has, and
+# on a branch merged into `main`. The first also holds an ignored `target/`,
+# which `git worktree remove` must not refuse over. Everything is aged two hours
+# except `just-started`, which is the case the age exists for.
 [private]
 check-prune-worktrees-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
-    dir=$(mktemp -d)
-    trap 'git -C "$dir/main" worktree unlock "$dir/held" 2>/dev/null || true; rm -rf "$dir"' EXIT
-    git init -q -b main "$dir/main"
-    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
-    git -C "$dir/main" worktree add -q "$dir/runner" -b runner
-    git -C "$dir/main" worktree add -q "$dir/held" -b held
-    git -C "$dir/main" worktree add -q "$dir/merged" -b merged
-    git -C "$dir/main" worktree add -q "$dir/dirty" -b dirty
-    git -C "$dir/main" worktree add -q --detach "$dir/loose"
-    git -C "$dir/merged" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "landed work"
-    git -C "$dir/main" merge -q merged
-    echo change >"$dir/dirty/uncommitted.txt"
-    git -C "$dir/main" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/held"
+    # Resolved, because `/proc/*/cwd` is, and a symlink in `TMPDIR` would
+    # otherwise make the busy tree look idle.
+    dir=$(realpath "$(mktemp -d)")
+    busy=
+    trap '[ -z "$busy" ] || kill "$busy" 2>/dev/null || true; git -C "$dir/hub" worktree unlock "$dir/locked" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    git init -q -b main "$dir/hub"
+    git -C "$dir/hub" config user.email t@t
+    git -C "$dir/hub" config user.name t
+    printf 'target/\nfuzz/artifacts/\n' >"$dir/hub/.gitignore"
+    git -C "$dir/hub" add .gitignore
+    git -C "$dir/hub" commit -q -m root
+    git -C "$dir/hub" checkout -q --detach
+    git -C "$dir/hub" worktree add -q "$dir/wave" main
+    git -C "$dir/hub" worktree add -q "$dir/runner" -b runner
+    git -C "$dir/hub" worktree add -q "$dir/merged" -b merged
+    for name in finished just-started unmerged dirty untracked fuzzed locked busy; do
+        git -C "$dir/hub" worktree add -q --detach "$dir/$name" main
+    done
+    git -C "$dir/finished" commit -q --allow-empty -m "landed on origin/main only"
+    git -C "$dir/hub" update-ref refs/remotes/origin/main "$(git -C "$dir/finished" rev-parse HEAD)"
+    mkdir "$dir/finished/target"; echo build >"$dir/finished/target/out"
+    git -C "$dir/merged" commit -q --allow-empty -m "landed work"
+    git -C "$dir/wave" merge -q merged
+    git -C "$dir/unmerged" commit -q --allow-empty -m "on no landed ref"
+    echo change >"$dir/dirty/.gitignore"
+    echo new >"$dir/untracked/new"
+    mkdir -p "$dir/fuzzed/fuzz/artifacts/target"; echo crash >"$dir/fuzzed/fuzz/artifacts/target/crash-1"
+    git -C "$dir/hub" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/locked"
+    for name in wave runner merged finished unmerged dirty untracked fuzzed locked busy; do
+        gitdir=$(git -C "$dir/$name" rev-parse --absolute-git-dir)
+        touch -d '2 hours ago' "$gitdir/HEAD" "$gitdir/logs/HEAD"
+    done
+    (cd "$dir/busy/" && exec sleep 300) &
+    busy=$!
     got=$(just prune-worktrees "$dir/runner")
     fail() {
         echo "prune-worktrees drifted from its own fixtures: $1"
         echo "--- got ---"; echo "$got"
         exit 1
     }
-    [ -d "$dir/main" ] || fail "the worktree holding main was removed"
-    [ -d "$dir/held" ] || fail "a locked worktree was removed while an agent was using it"
-    [ -d "$dir/dirty" ] || fail "a worktree with uncommitted changes was removed"
-    [ -d "$dir/loose" ] || fail "a clean detached worktree was removed"
-    [ ! -d "$dir/merged" ] || fail "a clean lane branch merged into main was not removed"
-    grep -qF "kept (holds main" <<<"$got" \
-        || fail "the tree holding main was not given its own kept reason"
-    grep -qF "kept (locked, an agent is using it): $dir/held" <<<"$got" \
-        || fail "the locked worktree was not reported as kept"
-    grep -qF "kept (uncommitted changes): $dir/dirty" <<<"$got" \
-        || fail "the dirty worktree was not reported as kept"
-    grep -qF "kept (detached" <<<"$got" \
-        || fail "the detached worktree was not reported as kept"
-    grep -qF "removed: $dir/merged" <<<"$got" \
-        || fail "a merged lane branch was not reported as removed"
+    [ -d "$dir/hub/.git" ] || fail "the hub was removed"
+    expect_kept() {
+        [ -d "$dir/$1" ] || fail "the $1 tree was removed"
+        grep -F "): $dir/$1" <<<"$got" | grep -qF "kept ($2" \
+            || fail "the $1 tree was not reported as kept for '$2'"
+    }
+    expect_kept wave "holds main"
+    expect_kept runner "you are standing in it"
+    expect_kept just-started "HEAD moved"
+    expect_kept unmerged "HEAD "
+    expect_kept dirty "uncommitted changes"
+    expect_kept untracked "uncommitted changes"
+    expect_kept fuzzed "fuzz/artifacts holds files"
+    expect_kept locked "locked, an agent is using it"
+    expect_kept busy "a process is running in it"
+    for name in finished merged; do
+        [ ! -e "$dir/$name" ] || fail "the $name tree was not removed"
+        grep -qF "removed: $dir/$name " <<<"$got" || fail "the $name tree was not reported as removed"
+    done
+    [ "$(grep -c '^removed' <<<"$got")" = 2 ] || fail "more than the two finished trees were removed"
+    grep -qxF "9 worktree(s) kept; their branches are untouched either way" <<<"$got" \
+        || fail "the tally is not the nine kept trees"
 
 # Where this repo stands, in one call.
 #
