@@ -866,18 +866,27 @@ impl BuildingAMesh {
         //
         // §31.10 item 5 and §35.7 both say this claim is the one lane 5
         // falsifies, and the sentence that stops being true is *"the fuse
-        // refuses a curved solid outright"*. What is still refused is a face
-        // with a hole that is **not** a ring — one loop right round and another
-        // that is not — because then there is nothing to cut across to, and
+        // refuses a curved solid outright"*. The other face with a hole this
+        // cuts is a ball's skin whose outer loop reaches both poles and whose
+        // hole reaches neither, which a half ball cut again leaves: it is cut
+        // from the hole up to each pole instead. What is still refused is any
+        // other face with a hole — one loop right round and another that is
+        // not, say — because then there is nothing to cut across to, and
         // nothing says which piece the hole ends up in. `Model` is
         // `Deserialize` and `validate` is the untrusted-import boundary
         // (§16.11), so that is a refusal rather than an assert.
         if walked.len() != 1 {
-            let Some(patches) = self.cut_a_ring_across(face, stored, &walked, whole_turn, room)?
+            if let Some(patches) =
+                self.cut_a_ring_across(face, stored, &walked, whole_turn, room)?
+            {
+                return Ok(patches);
+            }
+            let Some((one, other)) =
+                self.cut_a_hole_up_to_both_poles(face, stored, &walked, room)?
             else {
                 return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
             };
-            return Ok(patches);
+            return self.cut_each_narrow_enough(face, stored, vec![one, other], widest, room);
         }
         let only = walked.into_iter().next().expect("just checked");
         self.cut_each_narrow_enough(face, stored, vec![only], widest, room)
@@ -1192,6 +1201,119 @@ impl BuildingAMesh {
             patches.push(vec![one]);
         }
         Ok(Some(patches))
+    }
+
+    /// Cut a face on a ball whose outer loop reaches both poles and whose one
+    /// hole reaches neither into two pieces with one loop each, or `None` when
+    /// the face is not that shape or a cut cannot be shown to stay on it.
+    ///
+    /// A half ball cut again by a plane square to its flat face leaves one: its
+    /// outer wire is the great circle through both poles, walked as two edges
+    /// between them, and its hole is the whole small circle the second plane
+    /// cuts. In the ball's two coordinates the outer loop is a rectangle whose
+    /// top and bottom are the two poles and the hole is an island inside it, so
+    /// **two straight cuts along one longitude each** — from the hole's highest
+    /// corner up to the top pole and from its lowest down to the bottom one —
+    /// leave a piece either side, each walked round once.
+    ///
+    /// **Each cut ends on points both pieces already have.** At the hole's end
+    /// that is one of its corners, which the flat face across the hole has too;
+    /// at the pole's end it is the pole, which is one point wherever along its
+    /// side the cut lands (the rule [`where_to_cut`] keeps).
+    ///
+    /// **A cut that is not shown to stay inside the face is refused rather than
+    /// drawn.** Starting at the hole's highest corner means no side of the hole
+    /// reaches above it, because a side is a straight line between two corners in
+    /// these coordinates. The cut then runs to the *nearest* side of the outer
+    /// loop above it, and that side has to be a pole side; one that is not, or
+    /// one lying along the cut, is `None`. Last, each piece has to enclose some
+    /// of the chart the way the face's material does, which is what a piece
+    /// walked inside out would not.
+    fn cut_a_hole_up_to_both_poles(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        walked: &[WalkedLoop],
+        room: f64,
+    ) -> Result<Option<(WalkedLoop, WalkedLoop)>> {
+        let [first, second] = walked else {
+            return Ok(None);
+        };
+        if where_this_surface_pinches(stored) != Some(core::f64::consts::FRAC_PI_2)
+            || first.goes_right_round
+            || second.goes_right_round
+        {
+            return Ok(None);
+        }
+        let (outer, hole) = match [first, second].map(how_much_of_the_chart_this_loop_encloses) {
+            [one, other] if one > 0.0 && other < 0.0 => (first, second),
+            [one, other] if one < 0.0 && other > 0.0 => (second, first),
+            _ => return Ok(None),
+        };
+        if (0..hole.points.len())
+            .any(|at| hole.points[at] == hole.points[(at + 1) % hole.points.len()])
+        {
+            return Ok(None);
+        }
+        let highest = the_corner_furthest(hole, 1.0);
+        let lowest = the_corner_furthest(hole, -1.0);
+        let [up_at, down_at] = [(highest, 1.0), (lowest, -1.0)].map(|(corner, way)| {
+            let [longitude, latitude] = hole.corners[corner];
+            the_pole_side_a_line_from_a_hole_reaches(outer, longitude, latitude, way)
+        });
+        let (Some(up_at), Some(down_at)) = (up_at, down_at) else {
+            return Ok(None);
+        };
+        if up_at.0 == down_at.0 {
+            return Ok(None);
+        }
+
+        let mut opened = outer.clone();
+        let top_corner = [hole.corners[highest][0], up_at.1];
+        let bottom_corner = [hole.corners[lowest][0], down_at.1];
+        let (top, bottom) = if up_at.0 > down_at.0 {
+            opened.corners.insert(up_at.0 + 1, top_corner);
+            opened.points.insert(up_at.0 + 1, outer.points[up_at.0]);
+            opened.corners.insert(down_at.0 + 1, bottom_corner);
+            opened.points.insert(down_at.0 + 1, outer.points[down_at.0]);
+            (up_at.0 + 2, down_at.0 + 1)
+        } else {
+            opened.corners.insert(down_at.0 + 1, bottom_corner);
+            opened.points.insert(down_at.0 + 1, outer.points[down_at.0]);
+            opened.corners.insert(up_at.0 + 1, top_corner);
+            opened.points.insert(up_at.0 + 1, outer.points[up_at.0]);
+            (up_at.0 + 1, down_at.0 + 2)
+        };
+
+        let mut one = opened.between(top, bottom);
+        let mut other = opened.between(bottom, top);
+        let to_the_top =
+            self.points_along_a_cut(face, stored, hole.corners[highest], top_corner, room)?;
+        let from_the_bottom =
+            self.points_along_a_cut(face, stored, bottom_corner, hole.corners[lowest], room)?;
+
+        one.take_in(&from_the_bottom);
+        one.take_in(&hole.between(lowest, highest));
+        one.take_in(&to_the_top);
+        other.take_in(&to_the_top.the_other_way());
+        other.take_in(&hole.between(highest, lowest));
+        other.take_in(&from_the_bottom.the_other_way());
+
+        if [&one, &other]
+            .iter()
+            .any(|piece| how_much_of_the_chart_this_loop_encloses(piece) <= 0.0)
+        {
+            return Ok(None);
+        }
+        for at in [
+            hole.points[highest],
+            hole.points[lowest],
+            outer.points[up_at.0],
+            outer.points[down_at.0],
+        ] {
+            self.on_a_cut.insert(at);
+        }
+        Ok(Some((one, other)))
     }
 
     /// The points strictly between two corners of one face, walked along the
@@ -2007,6 +2129,52 @@ fn where_a_slit_carries_on_to(around: &WalkedLoop, tip: usize) -> Option<(Walked
         return None;
     }
     Some((opened, [tip, far]))
+}
+
+/// The corner of a loop furthest along latitude the way `way`'s sign says: the
+/// highest for `1.0`, the lowest for `-1.0`. The first of them on a tie.
+fn the_corner_furthest(around: &WalkedLoop, way: f64) -> usize {
+    (0..around.corners.len())
+        .reduce(|best, at| {
+            if way * around.corners[at][1] > way * around.corners[best][1] {
+                at
+            } else {
+                best
+            }
+        })
+        .expect("a walked loop has a corner")
+}
+
+/// Where the line along `longitude` from `latitude`, going the way `way`'s sign
+/// says, first meets `around`: the side it meets and the latitude it meets it
+/// at. `None` unless that side is a **pole side** — two corners at one point —
+/// met strictly beyond `latitude`, or when a side of `around` lies along the
+/// line itself, where nothing says which of its points is first.
+fn the_pole_side_a_line_from_a_hole_reaches(
+    around: &WalkedLoop,
+    longitude: f64,
+    latitude: f64,
+    way: f64,
+) -> Option<(usize, f64)> {
+    let count = around.corners.len();
+    let mut nearest: Option<(f64, usize, f64)> = None;
+    for at in 0..count {
+        let onwards = (at + 1) % count;
+        let (here, next) = (around.corners[at], around.corners[onwards]);
+        if !passes(longitude, here[0], next[0]) {
+            continue;
+        }
+        if here[0] == next[0] {
+            return None;
+        }
+        let crossing = here[1] + (longitude - here[0]) / (next[0] - here[0]) * (next[1] - here[1]);
+        let away = (crossing - latitude) * way;
+        if away > 0.0 && nearest.is_none_or(|(least, _, _)| away < least) {
+            nearest = Some((away, at, crossing));
+        }
+    }
+    let (_, at, crossing) = nearest?;
+    (around.points[at] == around.points[(at + 1) % count]).then_some((at, crossing))
 }
 
 /// The running state of a walk round one wire.

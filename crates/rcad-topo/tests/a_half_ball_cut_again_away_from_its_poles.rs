@@ -88,12 +88,12 @@ fn a_half_ball_cut_across_its_polar_axis_measures_half_a_ball_without_its_cap() 
 /// `x <= 0.5` off the half ball `x >= 0`: half a ball with the cap of height
 /// `r − 0.5` beyond `x = 0.5` taken off.
 ///
-/// The answer is put together now: its rim `x = 0` is two edges between the
-/// poles, and they used to be named as one. What refuses is meshing the
-/// skin, which is a half ball's skin with a round hole where the cap came off
-/// — a curved face with a hole that is not a ring of two whole circles.
+/// Its rim `x = 0` is two edges between the poles, which used to be named as
+/// one. Then its skin would not mesh: a half ball's skin with a round hole where
+/// the cap came off is a curved face with a hole that is not a ring of two
+/// whole circles, and it is cut from the hole up to each pole now.
 #[test]
-fn a_half_ball_cut_square_to_its_flat_face_is_refused_by_name_rather_than_panicking() {
+fn a_half_ball_cut_square_to_its_flat_face_measures_half_a_ball_without_its_side_cap() {
     let mut model = a_model();
     let half = half_a_ball(&mut model, Rule::Intersection);
     let before = block(
@@ -101,10 +101,23 @@ fn a_half_ball_cut_square_to_its_flat_face_is_refused_by_name_rather_than_panick
         [7.0 * RADIUS + CUT_AT, 14.0 * RADIUS, 14.0 * RADIUS],
         Vector::new(-7.0 * RADIUS, -7.0 * RADIUS, -7.0 * RADIUS),
     );
-    refused_or_measured(
-        &mut model,
-        [&half, &[before]],
-        "CurvedFaceWithAHoleGoesTooFarRound",
+    let answer = model
+        .fuse(
+            &half,
+            &[before],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a half ball cut square to its flat face is answered")
+        .solids()
+        .to_vec();
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a fuse writes a sound model or writes nothing");
+    assert_eq!(answer.len(), 1);
+    measures(
+        volume_of(&model, &answer),
         a_balls_volume() / 2.0 - a_caps_volume(RADIUS - CUT_AT),
     );
 }
