@@ -970,7 +970,9 @@ impl BuildingAMesh {
     /// A ball cut by a plane square to its polar axis leaves one, and it is
     /// about the simplest curved boolean there is. A plane at any other angle
     /// leaves a loop that climbs in longitude and comes straight back, which
-    /// goes to [`BuildingAMesh::cut_in_two`] instead and needs no pole at all.
+    /// goes to [`BuildingAMesh::cut_in_two`] instead and needs no pole at all —
+    /// unless the plane runs through one pole, when the piece holding the
+    /// other is a cap again, with a pole side in its rim.
     /// Its patch in the sphere's own two coordinates is a
     /// rectangle whose top edge is the pole and whose two sides are one meridian
     /// used twice, and **the model says neither**: a
@@ -1000,20 +1002,22 @@ impl BuildingAMesh {
         whole_turn: f64,
         room: f64,
     ) -> Result<Option<Vec<Vec<WalkedLoop>>>> {
-        if where_this_surface_pinches(stored).is_none() {
+        let Some(pinch) = where_this_surface_pinches(stored) else {
             return Ok(None);
-        }
+        };
         let Some(towards) = self.which_pole_this_cap_reaches(face, stored, cap) else {
             return Ok(None);
         };
 
         // A quarter turn at a time, **the way the loop itself runs**, so that
         // `between` walks a quarter of the way round and not three quarters.
+        let way = if runs_up(cap) { 1.0 } else { -1.0 };
+        let cap = &starting_off_the_poles(cap, pinch);
         let from = cap.corners[0][0];
-        let way = if runs_up(cap, whole_turn) { 1.0 } else { -1.0 };
         let quarters: [f64; 4] =
             [0, 1, 2, 3].map(|step| from + way * f64::from(step) * whole_turn / 4.0);
-        let along = quarters.map(|at| nearest_longitude(cap, at));
+        let cap = &with_a_corner_where_a_pole_side_passes(cap, &quarters, pinch);
+        let along = quarters.map(|at| nearest_corner_off_the_rims_poles(cap, at, pinch));
 
         let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let at_the_pole = stored.point_at(from, towards);
@@ -1155,7 +1159,7 @@ impl BuildingAMesh {
         // rather than assumed, and the two are brought into one longitude frame
         // before anything is measured against a longitude.
         let facing_up = |around: &WalkedLoop| {
-            if runs_up(around, whole_turn) {
+            if runs_up(around) {
                 around.the_other_way().the_other_way()
             } else {
                 around.the_other_way()
@@ -1338,6 +1342,7 @@ impl BuildingAMesh {
             points: Vec::with_capacity(steps - 1),
             closes_on_one_curve: false,
             goes_right_round: false,
+            climbed: 0.0,
         };
         for step in 1..steps {
             let part = step as f64 / steps as f64;
@@ -1401,6 +1406,7 @@ impl BuildingAMesh {
             points: Vec::with_capacity(steps - 1),
             closes_on_one_curve: false,
             goes_right_round: false,
+            climbed: 0.0,
         };
         self.on_a_cut.insert(opened.points[at[0]]);
         self.on_a_cut.insert(opened.points[at[1]]);
@@ -1705,6 +1711,11 @@ struct WalkedLoop {
     /// Whether it went right round the surface, gaining a whole turn of
     /// longitude rather than climbing and coming back.
     goes_right_round: bool,
+    /// How much longitude the walk gained all the way round, as the walk itself
+    /// counted it: pole sides as far as [`WalkingAWire::cross_the_pole`] said
+    /// they run, not the short way round. Only a whole walked loop has one; a
+    /// stretch or a cut says `0`.
+    climbed: f64,
 }
 
 impl WalkedLoop {
@@ -1715,6 +1726,7 @@ impl WalkedLoop {
             points: Vec::new(),
             closes_on_one_curve: false,
             goes_right_round: false,
+            climbed: 0.0,
         };
         let mut at = from;
         loop {
@@ -1751,6 +1763,7 @@ impl WalkedLoop {
             points: self.points.iter().rev().copied().collect(),
             closes_on_one_curve: self.closes_on_one_curve,
             goes_right_round: self.goes_right_round,
+            climbed: -self.climbed,
         }
     }
 }
@@ -1808,41 +1821,143 @@ fn where_this_surface_pinches(surface: &Surface) -> Option<f64> {
     }
 }
 
-/// Whether a loop is walked in the direction the longitude grows.
-fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
-    how_far_the_longitude_climbed(&around.corners, whole) > 0.0
+/// Whether a loop that goes right round is walked in the direction the
+/// longitude grows.
+///
+/// **Read off the longitude the walk itself gained, and never by adding the
+/// corners up the short way round.** A cap whose rim runs through the *other*
+/// pole — a ball cut by a plane through its south pole, keeping the north one —
+/// crosses a pole side there, because a smooth curve through a pole leaves up
+/// the meridian half a turn from the one it came down. A pole side runs as far
+/// as [`WalkingAWire::cross_the_pole`] says, and on a coarse walk that is more
+/// than half a turn, which the short way reads as the long way back: the sum
+/// came out `0` for a cap the walk had counted a whole turn up, the cap was cut
+/// the wrong way round, and the build refused 12 of the 63 solids in
+/// `a_cap_whose_rim_runs_through_the_other_pole.rs` as faces that disagree
+/// which way they face. The walk's own count decides it, the same one
+/// [`WalkingAWire::finish`] decides "right round" by.
+fn runs_up(around: &WalkedLoop) -> bool {
+    assert!(
+        around.goes_right_round,
+        "only a loop that goes right round runs one way round the surface"
+    );
+    around.climbed > 0.0
 }
 
-/// How much longitude a closed walk gains all the way round, whole turns and
-/// all: zero for a loop that comes back the way it went, `±whole` for one that
-/// encircles the surface's axis once.
+/// The same cap, walked from its first corner that is not on a pole.
 ///
-/// The closing step from the last corner to the first is part of it, because a
-/// loop that goes right round is stored as one turn's worth of corners with the
-/// last step left implicit.
-///
-/// **Taking each step the short way round is only right while no step swings
-/// the longitude half a turn, and two kinds do.** [`how_many_steps`] keeps the
-/// angle a step sweeps on the surface under a quarter turn, but that is not
-/// its longitude: a step that passes close by a pole swings the longitude by
-/// nearly half a turn over no distance at all. And a pole side runs as far as
-/// the two meridians either end of it are apart, which is half a turn for a
-/// circle through both poles. At exactly half a turn the short way is a coin
-/// toss on the last bit, which is why [`WalkingAWire::finish`] reads its own
-/// longitude instead of calling this. Only [`runs_up`] still does, and only of
-/// a loop that goes right round: a ring on a pipe, which has no pole, or a cap
-/// on a ball. **A cap whose rim runs through the other pole is still a coin
-/// toss here** — a smooth curve through a pole leaves it up the meridian half
-/// a turn from the one it came down — and it is not fixed yet.
-fn how_far_the_longitude_climbed(corners: &[[f64; 2]], whole: f64) -> f64 {
-    let mut climbed = 0.0;
-    for step in 0..corners.len() {
-        climbed += the_short_way_round(
-            corners[(step + 1) % corners.len()][0] - corners[step][0],
-            whole,
-        );
+/// A rim through a pole leaves it straight up a meridian, so a cut up to the
+/// far pole that leaves from the pole corner runs along the rim's own first
+/// step, and the patches either side of that stretch fold onto each other.
+/// Starting the quarters at a corner off the pole keeps every cut off the rim.
+/// The corners before it move on a whole `climbed`, so the longitudes stay
+/// the walk's own unwrapped ones.
+fn starting_off_the_poles(cap: &WalkedLoop, pinch: f64) -> WalkedLoop {
+    let Some(start) = cap
+        .corners
+        .iter()
+        .position(|corner| corner[1] != pinch && corner[1] != -pinch)
+    else {
+        return cap.clone();
+    };
+    let order = (start..cap.corners.len()).chain(0..start);
+    WalkedLoop {
+        corners: order
+            .clone()
+            .map(|at| {
+                let [longitude, latitude] = cap.corners[at];
+                let on = if at < start { cap.climbed } else { 0.0 };
+                [longitude + on, latitude]
+            })
+            .collect(),
+        points: order.map(|at| cap.points[at]).collect(),
+        ..cap.clone()
     }
-    climbed
+}
+
+/// The cap with a corner put in at each of `quarters` that falls strictly
+/// inside one of its pole sides, so that a cut up to the far pole can leave
+/// from there.
+///
+/// **A cap whose rim runs through the other pole spends much of its turn on
+/// that pole**, as a side from the meridian the rim came down to the one half
+/// a turn round that it leaves up. On a coarse walk that side is most of the
+/// turn: the build's check of the radius 1, lean 0.7, turn 0.4 cap in
+/// `a_cap_whose_rim_runs_through_the_other_pole.rs` walked five corners, two of
+/// them the pole side's ends, spanning under a third of the turn, so three of
+/// the four quarters came back as the same nearest corner and the patches
+/// between them had no width. A corner on the pole side at the quarter's own longitude is
+/// the same point, which is what a pole side is, and a cut from it is a whole
+/// meridian up to the far pole.
+///
+/// The loop's longitudes are the walk's own, unwrapped, and the closing side
+/// runs to the first corner a whole `climbed` on.
+fn with_a_corner_where_a_pole_side_passes(
+    cap: &WalkedLoop,
+    quarters: &[f64],
+    pinch: f64,
+) -> WalkedLoop {
+    let count = cap.corners.len();
+    let mut opened = WalkedLoop {
+        corners: Vec::with_capacity(count + quarters.len()),
+        points: Vec::with_capacity(count + quarters.len()),
+        ..cap.clone()
+    };
+    for at in 0..count {
+        let here = cap.corners[at];
+        opened.corners.push(here);
+        opened.points.push(cap.points[at]);
+        let onwards = (at + 1) % count;
+        let mut there = cap.corners[onwards];
+        if onwards == 0 {
+            there[0] += cap.climbed;
+        }
+        let on_a_pole = here[1] == pinch || here[1] == -pinch;
+        if !on_a_pole || cap.points[at] != cap.points[onwards] || here[1] != there[1] {
+            continue;
+        }
+        let mut passed: Vec<f64> = quarters
+            .iter()
+            .copied()
+            .filter(|&quarter| passes_strictly(quarter, here[0], there[0]))
+            .collect();
+        passed.sort_by(|one, other| {
+            (one - here[0])
+                .abs()
+                .total_cmp(&(other - here[0]).abs())
+        });
+        for quarter in passed {
+            opened.corners.push([quarter, here[1]]);
+            opened.points.push(cap.points[at]);
+        }
+    }
+    opened
+}
+
+/// Whether `at` lies strictly between `one` and `other`, whichever is larger.
+fn passes_strictly(at: f64, one: f64, other: f64) -> bool {
+    one.min(other) < at && at < one.max(other)
+}
+
+/// Which corner of a cap sits nearest a longitude, and of two as near, the one
+/// off the pole.
+///
+/// The end of a pole side shares its longitude with the rim corner beside it,
+/// because the rim leaves the pole up that meridian, and a cut from the pole
+/// end would run along the rim's own step (see [`starting_off_the_poles`]).
+fn nearest_corner_off_the_rims_poles(cap: &WalkedLoop, at: f64, pinch: f64) -> usize {
+    let on_a_pole = |which: usize| {
+        let latitude = cap.corners[which][1];
+        latitude == pinch || latitude == -pinch
+    };
+    (0..cap.corners.len())
+        .min_by(|&one, &other| {
+            let away = |which: usize| (cap.corners[which][0] - at).abs();
+            away(one)
+                .total_cmp(&away(other))
+                .then(on_a_pole(one).cmp(&on_a_pole(other)))
+        })
+        .expect("a walked loop has a corner")
 }
 
 /// Which corner of a loop sits nearest a longitude.
@@ -1881,6 +1996,7 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
         points: chain.points.clone(),
         closes_on_one_curve: chain.closes_on_one_curve,
         goes_right_round: chain.goes_right_round,
+        climbed: chain.climbed,
     }
 }
 
@@ -1904,6 +2020,7 @@ fn unwrapped(chain: &WalkedLoop, whole: f64) -> WalkedLoop {
         points: chain.points.clone(),
         closes_on_one_curve: chain.closes_on_one_curve,
         goes_right_round: chain.goes_right_round,
+        climbed: chain.climbed,
     }
 }
 
@@ -1974,6 +2091,7 @@ fn where_to_cut(around: &WalkedLoop, middle: f64) -> Option<(WalkedLoop, [usize;
         points: Vec::with_capacity(count + 2),
         closes_on_one_curve: false,
         goes_right_round: false,
+        climbed: 0.0,
     };
     let mut moved_to = Vec::with_capacity(count);
     let mut places = Vec::new();
@@ -2474,20 +2592,23 @@ impl WalkingAWire {
         // lune was called a cap wound right round and refused as one with no
         // seam. Only the closing step is left to the short way, and it is an
         // ordinary step of the walk.
-        let goes_right_round = self.closes_on_one_curve
-            && self
-                .wraps
-                .zip(self.corners.first())
-                .is_some_and(|(whole, first)| {
-                    let climbed = self.longitude - first[0]
-                        + the_short_way_round(first[0] - self.longitude, whole);
-                    climbed.abs() >= whole / 2.0
-                });
+        let (climbed, goes_right_round) = match (self.wraps, self.corners.first()) {
+            (Some(whole), Some(first)) => {
+                let climbed =
+                    self.longitude - first[0] + the_short_way_round(first[0] - self.longitude, whole);
+                (
+                    climbed,
+                    self.closes_on_one_curve && climbed.abs() >= whole / 2.0,
+                )
+            }
+            _ => (0.0, false),
+        };
         Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
             closes_on_one_curve: self.closes_on_one_curve,
             goes_right_round,
+            climbed,
         })
     }
 
