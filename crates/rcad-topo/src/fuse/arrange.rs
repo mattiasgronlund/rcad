@@ -61,7 +61,7 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
+    Axis, Cone, Cylinder, EdgeRun, HalfSpace, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, intersect, meet_of_three_surfaces,
     where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
@@ -1744,9 +1744,8 @@ impl<'f> Arrangement<'f> {
                     if self.crossing_of_edge[wire][position] != crossing {
                         continue;
                     }
-                    let from = at_in(&order, self.node_of_corner[wire][position]);
-                    let to = at_in(&order, self.node_of_the_end[wire][position]);
-                    let walked = self.arcs_an_edge_covers(crossing, &order, from, to);
+                    let walked =
+                        self.arcs_an_edge_covers(crossing, &order, [wire, position], policy, log)?;
                     for (step, runs_forward) in walked {
                         assert!(
                             boundary[step].is_none(),
@@ -1819,25 +1818,130 @@ impl<'f> Arrangement<'f> {
     /// the face's material lies on the partner's negative side — which is what
     /// the corner off that partner already says, and what
     /// [`the_side_this_face_lies_on`](crate::holds) reads.
+    ///
+    /// An edge with two ends on a **closed** crossing covers one of the two
+    /// arcs between them: forward from its start to its end, or backward — which
+    /// is forward from its end to its start. Either can pass the node the
+    /// crossing's order starts at, so the steps are counted round and the
+    /// indices of the two ends say nothing about which arc it is. What does is
+    /// the edge itself: [`Arrangement::which_way_an_edge_runs_round`].
     fn arcs_an_edge_covers(
         &self,
         crossing: usize,
         order: &[usize],
-        from: usize,
-        to: usize,
-    ) -> Vec<(usize, bool)> {
-        if from != to {
+        [wire, position]: [usize; 2],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Vec<(usize, bool)>> {
+        let from = at_in(order, self.node_of_corner[wire][position]);
+        let to = at_in(order, self.node_of_the_end[wire][position]);
+        let closes = self.crossings[crossing].order.closes();
+        if from != to && !closes {
             let runs_forward = from < to;
-            return (from.min(to)..from.max(to))
+            return Ok((from.min(to)..from.max(to))
                 .map(|step| (step, runs_forward))
-                .collect();
+                .collect());
         }
-        assert!(
-            self.crossings[crossing].order.closes(),
-            "an edge that starts and ends at one corner runs right round a closed curve"
+        if from == to {
+            assert!(
+                closes,
+                "an edge that starts and ends at one corner runs right round a closed curve"
+            );
+            let runs_forward = self.material_is_left_of_forward(crossing);
+            return Ok((0..order.len()).map(|step| (step, runs_forward)).collect());
+        }
+        let runs_forward =
+            self.which_way_an_edge_runs_round(crossing, [wire, position], policy, log)?;
+        let [low, high] = if runs_forward { [from, to] } else { [to, from] };
+        let steps = (high + order.len() - low) % order.len();
+        Ok((0..steps)
+            .map(|step| ((low + step) % order.len(), runs_forward))
+            .collect())
+    }
+
+    /// Whether an edge with two ends on a closed crossing leaves its start in
+    /// the crossing's forward direction, `∇S × ∇Q`.
+    ///
+    /// **Read off the edge, not off the face.** Which side of the partner the
+    /// face's material lies on says the same thing wherever a corner of the face
+    /// is off the partner, and nothing where every corner is on it — a half ball's
+    /// skin has only its two poles, both on the plane that cut it, and a half
+    /// ball made by intersection and one made by union on the other side of the
+    /// same plane then read alike, so one of the two was cut inside out.
+    ///
+    /// The edge's pickers say which of the two arcs between its ends it is
+    /// ([`the_way_into_an_arc`] has the argument), as a direction from the chord
+    /// into that arc. The edge leaves its start along the tangent there, which
+    /// is `±(∇S × ∇Q)`, and every point of the arc is on the arc's side of the
+    /// chord, so the tangent reads positive against that direction exactly when
+    /// the edge goes the tangent's way.
+    ///
+    /// **A tangent rather than a point in the middle of the edge.** An edge
+    /// stores no curve (§22), so a middle point would have to be built from the
+    /// same picker — and then ordered against the ends by a comparison that can
+    /// refuse — where the tangent is one sign of one product at a node the
+    /// arrangement already holds.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] naming [`WHICH_WAY_AN_EDGE_RUNS_ROUND`] when the
+    /// sign cannot be proved.
+    ///
+    /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the edge is not an
+    /// arc of a circle between a ball and a plane with a picker that tells its
+    /// two arcs apart — the only arcs anything in this kernel has been taught to
+    /// read a picker of, here or in [`holds`](crate::holds). A gap and not a
+    /// limit: the edge is one arc or the other.
+    ///
+    /// # Panics
+    ///
+    /// If the tangent lies along the chord. On a circle that means the two ends
+    /// are one point, and an edge with one corner at both ends never gets here.
+    fn which_way_an_edge_runs_round(
+        &self,
+        crossing: usize,
+        [wire, position]: [usize; 2],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<bool> {
+        let from = self.node_of_corner[wire][position];
+        let ends = [from, self.node_of_the_end[wire][position]].map(|node| self.nodes[node].point);
+        let partner = self.crossings[crossing].partner;
+        let into_the_arc = the_way_into_an_arc(
+            [&self.surface, &partner],
+            ends,
+            &self.face.wires[wire][position].picked_by,
+        )
+        .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow {
+            face: self.face.keys[0],
+        })?;
+        let forward = self.way_out_of(
+            from,
+            Direction {
+                crossing,
+                forward: true,
+            },
         );
-        let runs_forward = self.material_is_left_of_forward(crossing);
-        (0..order.len()).map(|step| (step, runs_forward)).collect()
+        match must_decide(
+            dot_of(forward, into_the_arc).sign(),
+            WHICH_WAY_AN_EDGE_RUNS_ROUND,
+            &ends,
+            Measures::Area,
+            policy,
+            log,
+        )? {
+            Decision::Pos => Ok(true),
+            Decision::Neg => Ok(false),
+            Decision::Zero => {
+                panic!(
+                    "an edge's tangent at its start lies along its chord, so its two ends are one"
+                )
+            }
+            other @ Decision::Undecidable { .. } => {
+                panic!("must_decide handed back an undecided sign: {other:?}")
+            }
+            other => panic!("a predicate came back with a decision nothing here knows: {other:?}"),
+        }
     }
 
     /// Whether the face's material lies on the left of a closed crossing's
@@ -3361,6 +3465,88 @@ fn round_a_closed_crossing(
     which_comes_first_round_a_crossing(pair, from, one, other)
 }
 
+/// A direction square to the chord between `ends`, in the plane of the circle
+/// a ball and a plane cross in, pointing from the chord into the arc
+/// `picked_by` picks rather than into the other arc with the same two ends.
+/// `None` when the pair is not a ball and a plane, or no picker says.
+///
+/// This is `holds`'s own reading of a picker, `the_way_into_an_arc`, taken on
+/// the world boxes the arrangement holds rather than on stored points, and its
+/// argument carries over whole: the whole arc is strictly on one side of its
+/// chord, a picker whose plane holds both ends puts the arc on the side its
+/// normal points to, and so does one with both ends on or in front of it and
+/// the circle's centre on or behind it, which is what a fused arc's picker is.
+/// Only the sign of the picker's normal against the chord is ever read.
+fn the_way_into_an_arc(
+    pair: [&Surface; 2],
+    ends: [PredicatePoint; 2],
+    picked_by: &[Picker],
+) -> Option<[Interval; 3]> {
+    let (ball, flat) = match pair {
+        [Surface::Sphere(ball), Surface::Plane(flat)]
+        | [Surface::Plane(flat), Surface::Sphere(ball)] => (ball, flat),
+        _ => return None,
+    };
+    let [start, end] = ends.map(|at| at.enclosure());
+    let chord = PredicatePoint::Constructed([0, 1, 2].map(|axis| end[axis] - start[axis]));
+    let square_to_the_chord = cross_of(PredicatePoint::from(flat.normal().components()), chord);
+    picked_by.iter().find_map(|picker| {
+        let Picker::InFrontOf(half) = picker else {
+            return None;
+        };
+        if !a_picker_that_tells_the_two_arcs_apart(half, flat, ball, ends) {
+            return None;
+        }
+        let facing = half.normal().components().map(Interval::exactly);
+        let sign = dot_of(facing, square_to_the_chord).sign();
+        if sign == Decision::Pos {
+            Some(square_to_the_chord)
+        } else if sign == Decision::Neg {
+            Some(square_to_the_chord.map(|component| Interval::exactly(0.0) - component))
+        } else {
+            None
+        }
+    })
+}
+
+/// Whether `half` says which of the two arcs between `ends` an edge is, by one
+/// of the two ways [`the_way_into_an_arc`] sets out.
+fn a_picker_that_tells_the_two_arcs_apart(
+    half: &HalfSpace,
+    flat: &Plane,
+    ball: &Sphere,
+    ends: [PredicatePoint; 2],
+) -> bool {
+    let sides = ends.map(|at| half.side_of_point(at));
+    if sides.iter().all(|side| *side == Decision::Zero) {
+        return true;
+    }
+    if !sides
+        .iter()
+        .all(|side| *side == Decision::Zero || *side == Decision::Pos)
+    {
+        return false;
+    }
+    let centre_sits = where_the_circles_centre_sits(half, flat, ball);
+    centre_sits == Decision::Zero || centre_sits == Decision::Neg
+}
+
+/// Which side of `half` the centre of the circle where `flat` cuts `ball` sits
+/// on.
+///
+/// That centre is `c + ((e − n·c)/(n·n)) n`, with `n` and `e` the plane's normal
+/// and offset and `c` the ball's centre. `n·n` is positive, so the sign wanted
+/// is the sign of `(h·c − d)(n·n) + (e − n·c)(h·n)`, with no division in it.
+fn where_the_circles_centre_sits(half: &HalfSpace, flat: &Plane, ball: &Sphere) -> Decision {
+    let normal = flat.normal().components().map(Interval::exactly);
+    let facing = half.normal().components().map(Interval::exactly);
+    let centre = ball.centre().coordinates().map(Interval::exactly);
+    let above = Interval::exactly(flat.offset()) - dot_of(normal, centre);
+    ((dot_of(facing, centre) - Interval::exactly(half.offset())) * dot_of(normal, normal)
+        + above * dot_of(facing, normal))
+    .sign()
+}
+
 /// What picks one curve of a crossing out of the others, empty when the pair
 /// names one curve and there is nothing to pick.
 ///
@@ -4226,6 +4412,10 @@ fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
 /// The name the ordering of two points along a crossing goes by in provenance
 /// records.
 const ALONG_A_CROSSING: &str = "order along a crossing";
+
+/// The name the choice of which of two arcs of a closed crossing an edge runs
+/// along goes by in provenance records.
+const WHICH_WAY_AN_EDGE_RUNS_ROUND: &str = "which way an edge runs round a closed crossing";
 
 /// The name the choice between "the same way" and "opposite ways" along one line
 /// goes by in provenance records.
