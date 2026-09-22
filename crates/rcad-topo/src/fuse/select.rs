@@ -468,8 +468,19 @@ fn the_piece_holds(
 /// (`degenerate_curved_fuses.rs`) and turns two more into four faces along one
 /// edge, because two arcs of one ellipse between the same corners are then
 /// named as one edge (`assemble`'s `which_arc_of_a_circle_this_is` reads a
-/// ball's circle only). A cone is not counted either: a plane can cut it in two
-/// branches, and "inside the cone" is then two regions, not one.
+/// ball's circle only).
+///
+/// **A cone is not counted either, because a plane steeper than its side cuts
+/// it in two branches and "inside the cone" is then two regions, not one.** A
+/// cone face is on one nappe, but the fuse cuts a plane along the whole double
+/// cone and the cone's sign is inside in both nappes. Where the cone's axis
+/// crosses such a plane — the point [`half_way_into_either_arc`] builds round —
+/// can be in the other nappe's region: inside by the sign, on the bulge side of
+/// every chord of the near branch, and outside the solid.
+/// `tests/a_plane_across_a_cone.rs` shows each step on a frustum and a leaning
+/// block. Counting a cone cut in an ellipse would still meet the pipe's
+/// edge-naming gap: with cones counted, two corner-up-cube fuses in
+/// `how_often_a_fuse_with_a_cone_refuses.rs` become four faces along one edge.
 fn in_the_bulge_of(side: &FaceMeet, in_plane: &InPlane, point: PredicatePoint) -> Option<i32> {
     let a_ball = matches!(side.carried_by[1], Surface::Sphere(_));
     if !a_ball || side.material_side != Decision::Neg {
