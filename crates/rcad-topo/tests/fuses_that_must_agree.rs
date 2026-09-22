@@ -2344,10 +2344,11 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
 /// step later; it did not go away**, and the grouping that never puts a hole in a
 /// face now answers both its fuses.
 ///
-/// The old note that the obvious way round is itself refused still holds: putting
-/// the ball in a *side* wall would leave each plane one round crossing, but a
-/// vertical plane through a ball cuts both of its poles —
-/// `degenerate_curved_fuses.rs`'s `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`.
+/// The old note said the obvious way round was itself refused: putting the ball
+/// in a *side* wall would leave each plane one round crossing, but a vertical
+/// plane through a ball cuts both of its poles. Since §195 that cut answers —
+/// `degenerate_curved_fuses.rs`'s `a_ball_cut_by_a_plane_down_its_polar_axis_is_answered`
+/// — and this pin has not been rebuilt round it.
 #[test]
 fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;

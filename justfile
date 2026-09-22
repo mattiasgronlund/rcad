@@ -1023,7 +1023,13 @@ check-fuzz-builds:
 # other three kinds to `_`. A pair that is not a ball and a plane is not cut,
 # and `None` there leaves the fuse where it was before — refusing by
 # `AClosedEdgeOfTheAnswerWouldStartAtAPole` when the start is a pole.
-wildcard_arms := "92"
+#
+#     §195's polar-axis lane  after the merge  84 direct + 7 composite = 91
+#
+# One fewer. `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`
+# matched its refusal and sent every other `Error` to `panic!`; the cut down the
+# polar axis now answers, and the test that replaced it has no match at all.
+wildcard_arms := "91"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
