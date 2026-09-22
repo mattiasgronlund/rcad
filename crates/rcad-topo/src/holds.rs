@@ -389,7 +389,20 @@ fn what_a_curved_face_holds(
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     let mut on_its_boundary = false;
-    for trimming in what_trims_this_face(solid, face)? {
+    if let Surface::Cone(cone) = surface {
+        match is_on_the_nappe_the_face_is_on(face, cone, point)? {
+            Decision::Pos => (),
+            Decision::Zero => on_its_boundary = true,
+            Decision::Neg => return Ok(OnAFace::NotHeld),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(surface, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    let trimmings = what_trims_this_face(solid, face)?;
+    let trimmed_once = trimmings.len() == 1;
+    for trimming in trimmings {
         if !every_piece_of_that_crossing_is_an_edge(
             surface,
             &trimming.surface,
@@ -399,8 +412,12 @@ fn what_a_curved_face_holds(
         )? {
             return Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() });
         }
-        let inwards = the_side_this_face_lies_on(face, &trimming)?
-            .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
+        let inwards = match the_side_this_face_lies_on(face, &trimming)? {
+            Some(side) => Some(side),
+            None if trimmed_once => the_side_the_apex_is_on(surface, &trimming)?,
+            None => None,
+        }
+        .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
         let side = side_of_surface(&trimming.surface, point);
         match side {
             Decision::Zero => on_its_boundary = true,
@@ -417,6 +434,106 @@ fn what_a_curved_face_holds(
     } else {
         OnAFace::Held
     })
+}
+
+/// Whether `point`, taken as being on `cone`, is on the half of it `face` is on:
+/// [`Decision::Pos`] on the face's half, [`Decision::Neg`] on the other,
+/// [`Decision::Zero`] at the apex, where the two halves meet.
+///
+/// **A face on a cone lies on one half of it** — one nappe — and the trimming
+/// loop does not look at which. A cone's surface is both halves, so a point on
+/// the other half is on the surface too, and a trimming only turns it away if
+/// it lies on the far side of one. A pointed cone's only trimming is its cap,
+/// and the whole of the other half lies below the cap, on the side the face
+/// keeps — so without this the skin would hold all of it, and a ray from
+/// inside the cone out through the other half would count two crossings that
+/// are not there (`docs/decisions.md` §200.3).
+///
+/// Which half is read off the face's corners, as the side of a trimming is:
+/// the sign of `(corner − apex) · w`, which no corner may disagree on.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the face has no corner
+/// off the apex to read its half from, or its corners disagree — a face across
+/// the apex, which no builder here makes and a file might.
+///
+/// [`Error::Undecidable`] when a corner's half could not be settled; `point`'s
+/// own comes back as [`Decision::Undecidable`] for the caller to refuse.
+fn is_on_the_nappe_the_face_is_on(
+    face: FaceView<'_>,
+    cone: &rcad_geom::Cone,
+    point: PredicatePoint,
+) -> Result<Decision> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let apex = exactly(cone.apex().coordinates());
+    let up = exactly(cone.axis().direction().components());
+    let how_far_up =
+        |at: [Interval; 3]| dot(core::array::from_fn(|axis| at[axis] - apex[axis]), up).sign();
+
+    let mut faces_half: Option<Decision> = None;
+    for corner in face.wires().flat_map(WireView::points) {
+        let side = how_far_up(exactly(corner.coordinates()));
+        match side {
+            Decision::Zero => (),
+            Decision::Pos | Decision::Neg => match faces_half {
+                None => faces_half = Some(side),
+                Some(already) if already == side => (),
+                Some(_) => return Err(cannot()),
+            },
+            Decision::Undecidable { enclosure } => {
+                let at = PredicatePoint::from(corner.coordinates());
+                return Err(gave_up_on_a_side(&Surface::Cone(*cone), at, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    let faces_half = faces_half.ok_or_else(cannot)?;
+    Ok(match how_far_up(point.enclosure()) {
+        Decision::Zero => Decision::Zero,
+        Decision::Pos if faces_half == Decision::Pos => Decision::Pos,
+        Decision::Neg if faces_half == Decision::Neg => Decision::Pos,
+        Decision::Pos | Decision::Neg => Decision::Neg,
+        Decision::Undecidable { enclosure } => Decision::Undecidable { enclosure },
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    })
+}
+
+/// Which side of its one trimming a cone face lies on when none of its corners
+/// is off that trimming to say — the side the apex is on.
+///
+/// **This is the pointed cone**: one face on one half of a cone, bounded by one
+/// closed curve and nothing else, with its one corner on that curve. A plane,
+/// or a pipe on the same axis, crosses one half of a cone in a closed curve
+/// only by going right round the axis, and that cuts the half into two pieces:
+/// the one reaching the apex, which is bounded, and the one running off to
+/// infinity, which is not. A face is bounded, so it is the first, and the side
+/// of the trimming it lies on is the apex's.
+///
+/// `None` for anything outside that family — a surface that is not a cone, a
+/// trimming that is not a plane or a pipe, or an apex on the trimming itself —
+/// which the caller refuses by name as before.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when the apex's side could not be settled.
+fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Option<Decision>> {
+    let Surface::Cone(cone) = surface else {
+        return Ok(None);
+    };
+    if !matches!(trimming.surface, Surface::Plane(_) | Surface::Cylinder(_)) {
+        return Ok(None);
+    }
+    let apex = PredicatePoint::from(cone.apex().coordinates());
+    match side_of_surface(&trimming.surface, apex) {
+        Decision::Pos => Ok(Some(Decision::Pos)),
+        Decision::Neg => Ok(Some(Decision::Neg)),
+        Decision::Zero => Ok(None),
+        Decision::Undecidable { enclosure } => {
+            Err(gave_up_on_a_side(&trimming.surface, apex, enclosure))
+        }
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
 }
 
 /// Whether a side of `face` runs along only *part* of where its surface crosses

@@ -200,8 +200,12 @@ fn a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses() {
 
 /// The same cubes round a pointed cone, less the side-4 cube centred on the
 /// apex, which answers wrong (the note at the top of the file).
+///
+/// All 40 refused until the pointed cone's face could say which side of its cap
+/// it lies on (`docs/decisions.md` §200.4's first item): its one corner is on
+/// the cap, so no corner said, and every point asked of that face refused.
 #[test]
-fn a_corner_up_cube_round_a_pointed_cones_apex_refuses_everywhere_but_the_middle() {
+fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right_or_refuses() {
     let mut cases = Vec::new();
     for (side, middle) in [(4.0, 1.0), (4.0, 2.5), (6.0, 0.0), (6.0, 1.0), (6.0, 2.5)] {
         for turn in [0.0, 0.7] {
@@ -215,8 +219,12 @@ fn a_corner_up_cube_round_a_pointed_cones_apex_refuses_everywhere_but_the_middle
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 0,
-            refused: [("a point inside a piece of a face", 40)].into()
+            right: 16,
+            refused: [
+                ("a point inside a piece of a face", 8),
+                ("AWireWillNotLieFlatOnItsFace", 16),
+            ]
+            .into()
         }
     );
 }
