@@ -38,7 +38,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Plane, PlaneAgreement, Point, Surface, SurfaceMeet, intersect};
+use rcad_geom::{Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect};
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     orient3d_of_points,
@@ -998,10 +998,53 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
             ));
         }
     }
+    if let Some(towards) = towards_every_flat_sides_material(piece) {
+        candidates.push(PredicatePoint::from(
+            (middle + towards * reach).coordinates(),
+        ));
+    }
     candidates
         .into_iter()
         .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
         .collect()
+}
+
+/// Which way from a curved piece's corners its material lies, as far as the
+/// planes that cut it say: the sum of the way into the material across each of
+/// them, each plane counted once. `None` when no plane cut it, or when the ways
+/// cancel.
+///
+/// **A piece whose corners all lie on one plane is what needs it.** A half
+/// ball's skin cut by a plane that just crosses its flat face has every corner
+/// on that face — the two poles and the two places the cut crosses it — so
+/// every blend of them lands back on the face, where the face's own plane
+/// cannot say which side it is on, and of the six steps from their middle the
+/// ones square to the face go into the cap the cut took off or out of the half
+/// ball. What is kept is the part of the skin inside the half ball *and* on
+/// the kept side of the cut, and the way to it is the two ways added up: one
+/// step each, not the half ball's once for every side it bounds, or the
+/// face's three sides outvote the cut's one and the step goes into the cap
+/// again.
+fn towards_every_flat_sides_material(piece: &Piece) -> Option<Vector> {
+    let mut planes: Vec<(Plane, Decision)> = Vec::new();
+    for side in piece.wires.iter().flatten() {
+        if let Some(flat) = side.carried_by[1].as_plane() {
+            let this = (*flat, side.material_side);
+            if !planes.contains(&this) {
+                planes.push(this);
+            }
+        }
+    }
+    let mut towards = Vector::zero();
+    for (flat, material_side) in &planes {
+        let into = if *material_side == Decision::Neg {
+            -1.0
+        } else {
+            1.0
+        };
+        towards = towards + flat.normal() * into;
+    }
+    towards.normalized().ok()
 }
 
 /// Two points a quarter of the way across the circle a curved side of a flat

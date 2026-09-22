@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 1.0;
 
@@ -57,10 +57,11 @@ fn a_half_ball_cut_square_to_its_flat_face_meshes_closed_wherever_the_cut_is() {
 /// The same cut at `x = 0.5`, leaning about the `y` axis by `lean` and then
 /// turned about the `z` axis by `turn`, both in radians, so that the hole is no
 /// longer square to the ball's equator nor centred on the meridian half way
-/// between the poles' two edges. Up to 30 degrees of lean keeps the circle
-/// clear of the flat face: at a distance `d = 0.5` it reaches
-/// `x = 0.5·cos θ − (√0.75)·sin θ`, which stays positive until `θ = 30°`, and
-/// a turn about the polar axis does not move that.
+/// between the poles' two edges. The circle stays clear of the flat face while
+/// the cut's normal is less than 30 degrees off the `x` axis: its lowest `x` is
+/// `0.5·n_x − (√0.75)·√(1 − n_x²)`, positive while `n_x > √0.75`, and
+/// `n_x = cos lean · cos turn`, so a turn about the polar axis counts as much
+/// as the lean does. Every placement here keeps it clear.
 #[test]
 fn a_half_ball_cut_by_a_leaning_plane_that_misses_its_flat_face_meshes_closed() {
     let twenty_degrees = 20.0_f64.to_radians();
@@ -87,40 +88,90 @@ fn a_half_ball_cut_by_a_leaning_plane_that_misses_its_flat_face_meshes_closed() 
     }
 }
 
-/// Twenty degrees of lean turned back by `0.4` is refused before the skin is
-/// meshed: the fuse cannot find a point inside one piece of a face, and says
-/// `Undecidable` over a record whose inputs are the ball's two poles. Its
-/// neighbours above answer. The closed form is written down so that the day
-/// this is answered it is measured before it asks to be turned round.
+/// Twenty degrees of lean turned back by `0.4` puts the cut's normal just past
+/// 30 degrees off the `x` axis, so the circle dips `0.001` past the flat face
+/// and the skin is left with no hole at all: one piece bounded by the flat
+/// face's half circle and the long way round the cut. Every corner of that
+/// piece is on the flat face, the two poles and the two places the cut crosses
+/// it, and it used to be refused `Undecidable` because no point the fuse tried
+/// could be proved inside it.
 #[test]
-fn a_half_ball_cut_by_a_plane_leaning_twenty_degrees_and_turned_back_is_refused_undecided() {
+fn a_half_ball_cut_by_a_plane_leaning_twenty_degrees_and_turned_back_just_past_its_flat_face() {
+    let (lean, turn) = (20.0_f64.to_radians(), -0.4);
     let mut model = a_model();
     let half = half_a_ball(&mut model);
-    let knife = a_block_up_to(&mut model, 0.5, &leaning(20.0_f64.to_radians(), -0.4));
-    match model.fuse(
-        &half,
-        &[knife],
-        Rule::Intersection,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    ) {
-        Err(why) => assert!(matches!(why, Error::Undecidable { .. }), "{why:?}"),
-        Ok(fused) => {
-            let answer = fused.solids().to_vec();
-            model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .expect("a fuse writes a sound model or writes nothing");
-            assert_eq!(answer.len(), 1);
-            meshes_closed_and_measures(
-                &model,
-                answer[0],
-                0.001,
-                half_a_balls_volume() - a_caps_volume(RADIUS - 0.5),
-                "leaning twenty degrees, turned back",
-            );
-            panic!("answered, one solid, and it measures right: make this test expect an answer");
-        }
+    let knife = a_block_up_to(&mut model, 0.5, &leaning(lean, turn));
+    let answer = cut(&mut model, &half, knife);
+    meshes_closed_and_measures(
+        &model,
+        answer,
+        0.001,
+        what_a_leaning_cut_leaves(lean, turn),
+        "leaning twenty degrees, turned back",
+    );
+}
+
+/// Twenty degrees of lean with every turn from `-0.5` to `0.5`. From `±0.4`
+/// out the circle crosses the flat face and the skin has no hole; inside that
+/// the hole is cut up to both poles. Both kinds answer and measure.
+#[test]
+fn a_half_ball_cut_by_a_plane_leaning_twenty_degrees_answers_at_every_turn() {
+    let lean = 20.0_f64.to_radians();
+    for twentieths in -10..=10 {
+        let turn = f64::from(twentieths) * 0.05;
+        let mut model = a_model();
+        let half = half_a_ball(&mut model);
+        let knife = a_block_up_to(&mut model, 0.5, &leaning(lean, turn));
+        let answer = cut(&mut model, &half, knife);
+        meshes_closed_and_measures(
+            &model,
+            answer,
+            0.001,
+            what_a_leaning_cut_leaves(lean, turn),
+            &format!("leaning twenty degrees, turned {turn}"),
+        );
     }
+}
+
+/// The volume of the half ball `x >= 0` on the near side of the plane half a
+/// radius out along `(cos lean · cos turn, …)`: the half ball less the cap the
+/// plane cuts off, less only the part of that cap the half ball has.
+///
+/// That part is the whole cap while the circle is clear of the flat face. Past
+/// it, the cap's slice at height `t` along the normal is a disk of radius
+/// `ρ = √(1 − t²)` whose centre is `h = t·n_x/√(1 − n_x²)` from the flat face,
+/// measured in the slice, and the part of the disk past the face is the
+/// segment `ρ² acos(h/ρ) − h √(ρ² − h²)`. That is summed over `t` by
+/// Simpson's rule, whose error is far below what meshing loses.
+fn what_a_leaning_cut_leaves(lean: f64, turn: f64) -> f64 {
+    let n_x = lean.cos() * turn.cos();
+    let past_the_face_up_to = (1.0 - n_x * n_x).sqrt();
+    let segment = |t: f64| {
+        let rho = (1.0 - t * t).sqrt();
+        let h = t * n_x / (1.0 - n_x * n_x).sqrt();
+        if h >= rho {
+            return 0.0;
+        }
+        rho * rho * (h / rho).acos() - h * (rho * rho - h * h).sqrt()
+    };
+    let from = 0.5 * RADIUS;
+    let mut the_part_past_the_face = 0.0;
+    if past_the_face_up_to > from {
+        let steps = 2000;
+        let width = (past_the_face_up_to - from) / f64::from(steps);
+        for step in 0..=steps {
+            let weight = if step == 0 || step == steps {
+                1.0
+            } else if step % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            the_part_past_the_face += weight * segment(from + width * f64::from(step));
+        }
+        the_part_past_the_face *= width / 3.0;
+    }
+    half_a_balls_volume() - (a_caps_volume(RADIUS - 0.5) - the_part_past_the_face)
 }
 
 /// Lean by `lean` about the `y` axis, then turn by `turn` about the `z` axis.
