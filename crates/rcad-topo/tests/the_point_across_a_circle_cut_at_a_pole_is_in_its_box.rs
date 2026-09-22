@@ -14,16 +14,16 @@
 //! What is measured is how far the rounded point sits from it, in the widest
 //! coordinate, against the half-width the kernel gives its box.
 
-use core::f64::consts::TAU;
+use core::f64::consts::{PI, TAU};
 
 use rcad_geom::{
-    Axis, Isometry, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Scale, Sphere, Surface,
-    SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
+    Axis, Deflection, Isometry, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Scale, Sphere,
+    Surface, SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
 };
-use rcad_topo::{Model, Rule};
+use rcad_topo::{Model, Rule, SolidKey};
 
 /// Measured on this tree, the worst of 3 824 boxed points sits at about 0.005
 /// of the box's half-width from the true point across: the bound holds with
@@ -62,13 +62,11 @@ fn the_point_across_a_circle_that_starts_at_a_pole_lies_in_its_box() {
 /// sizes from a thousandth to a million: every union that answers is a sound
 /// model.
 ///
-/// **Not every one answers.** Measured on this tree, 25 of the 36 do; the
-/// other 11 are all turned about `x` at a size that is not a power of two, and
-/// refuse either because a face "could not be cut into triangles: the corner
-/// at 5 is in the same place as an earlier one of its own loop" or because "a
-/// curved face is bounded by one curve right round it and has no seam to open
-/// at". Both are refusals and not wrong answers, and what causes them is not
-/// worked out here (§194.5). The count is a floor so that fixing them passes.
+/// **All 36 answer.** Eleven used to refuse, every one turned about `x` at a
+/// size that is not a power of two, because the start of the circle sat
+/// within one `atan2` rounding of the pole without being on the axis, and the
+/// fuse and the mesh disagreed about whether that was a pole (§195.2); the
+/// two tests below pin one of each refusal it came back as.
 #[test]
 fn a_ball_and_block_turned_on_their_side_unite_soundly_at_every_size() {
     let mut answered = 0;
@@ -89,7 +87,7 @@ fn a_ball_and_block_turned_on_their_side_unite_soundly_at_every_size() {
     ] {
         for (direction, steps) in [([1, 0, 0], 16), ([1, 0, 0], 48), ([0, 1, 0], 16)] {
             match a_turned_ball_and_block_united(size, direction, steps) {
-                Ok(model) => {
+                Ok((model, _)) => {
                     model
                         .validate(&Policy::certified(), &mut ProvenanceLog::new())
                         .unwrap_or_else(|why| {
@@ -107,9 +105,56 @@ fn a_ball_and_block_turned_on_their_side_unite_soundly_at_every_size() {
         }
     }
     println!("{answered} unions answered; refused: {refused:#?}");
+    assert_eq!(
+        answered, 36,
+        "not every turned ball and block unites; refused: {refused:#?}"
+    );
+}
+
+/// Radius 3, a quarter turn about `x`: the circle's start is `4.4e-16` off the
+/// ball's axis, so `atan2` reads its latitude as exactly the south pole and the
+/// mesh calls it one, while the fuse, asking whether the longitude had a
+/// direction there, found one and left the circle one closed edge. The mesh
+/// then refused the ball's face as a loop whose corners coincide (§195.2).
+#[test]
+fn a_ball_and_block_turned_at_radius_three_unite_into_the_block_and_half_the_ball() {
+    unites_into_the_block_and_half_the_ball(3.0);
+}
+
+/// Radius 0.001, the same turn: the start is `1e-20` off the axis, the same
+/// disagreement, refused further on as a face that goes right round with no
+/// seam (§195.2).
+#[test]
+fn a_ball_and_block_turned_at_radius_a_thousandth_unite_into_the_block_and_half_the_ball() {
+    unites_into_the_block_and_half_the_ball(0.001);
+}
+
+/// One solid, sound, and as big as the block and the half of the ball
+/// standing out of its floor: `125 s³ + (2/3)π s³`, measured from a mesh
+/// inscribed in the ball, so a little under it.
+fn unites_into_the_block_and_half_the_ball(size: f64) {
+    let (model, solids) = a_turned_ball_and_block_united(size, [1, 0, 0], 16)
+        .unwrap_or_else(|why| panic!("a ball of radius {size} and its block unite: {why}"));
+    assert_eq!(solids.len(), 1, "the ball stands out of the block's floor");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the union at radius {size} is not sound: {why}"));
+    let volume = model
+        .solid(solids[0])
+        .expect("the union made the key")
+        .measure(
+            Deflection::of(size / 1000.0).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the union measures")
+        .volume();
+    let closed_form = (125.0 + 2.0 / 3.0 * PI) * size.powi(3);
+    let apart = (closed_form - volume) / closed_form;
+    println!("radius {size}: measured {volume}, closed form {closed_form}, {apart:e} under");
     assert!(
-        answered >= 25,
-        "only {answered} of the turned balls and blocks unite; refused: {refused:#?}"
+        (0.0..0.001).contains(&apart),
+        "at radius {size} the union measures {volume} against {closed_form}, {apart:e} under"
     );
 }
 
@@ -120,7 +165,7 @@ fn a_turned_ball_and_block_united(
     size: f64,
     direction: [i32; 3],
     steps: u32,
-) -> rcad_topo::Result<Model> {
+) -> rcad_topo::Result<(Model, Vec<SolidKey>)> {
     let mut model = Model::new(Scale::millimetres(20.0 * size).expect("a working size"));
     let block = model
         .add_cube(5.0 * size, &Policy::certified(), &mut ProvenanceLog::new())
@@ -138,7 +183,7 @@ fn a_turned_ball_and_block_united(
             .expect("this model made the key");
     }
     let mut log = ProvenanceLog::new();
-    model.fuse(
+    let fused = model.fuse(
         &[block],
         &[ball],
         Rule::Union,
@@ -150,7 +195,8 @@ fn a_turned_ball_and_block_united(
         "a certified union recorded {} decisions it could not prove",
         log.records().len()
     );
-    Ok(model)
+    let solids = fused.solids().to_vec();
+    Ok((model, solids))
 }
 
 /// The worst the search found, and how often each way out was taken.

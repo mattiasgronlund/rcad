@@ -2386,7 +2386,11 @@ fn poles_of(wire: WireView<'_>) -> HashSet<VertexKey> {
 /// the pole in space too, and the pole side written for it spans no area worth
 /// the name. Widening it past what `atan2` already rounds away would start
 /// throwing out longitudes that mean something.
-fn the_surface_pinches_at(surface: &Surface, latitude: f64) -> bool {
+///
+/// The fuse asks it too, before it decides whether a circle that starts here
+/// needs cutting in two, so that a corner the mesh will call a pole is never
+/// left the one corner of a closed edge (§195.2).
+pub(crate) fn the_surface_pinches_at(surface: &Surface, latitude: f64) -> bool {
     where_this_surface_pinches(surface).is_some_and(|pinch| latitude.abs() == pinch)
 }
 
