@@ -152,12 +152,11 @@ impl<'m> SolidView<'m> {
     ///   whatever the face is trimmed down to. Nothing tighter is available
     ///   without knowing where the trimming runs, and a ball's face may reach
     ///   right round.
-    /// - A **pipe**'s skin is a radius from its axis, and how far *along* that
-    ///   axis a face reaches is settled by its corners: the distance along the
-    ///   axis grows steadily everywhere on a pipe, so it has no high or low spot
-    ///   in the middle of a face and reaches its own furthest on the boundary.
-    ///   So the box round the corners' shadows on the axis, opened out by the
-    ///   radius, holds the face.
+    /// - A **pipe** or a **cone** is bounded by how far along its axis the face
+    ///   reaches, opened out by how far from the axis the surface is there.
+    ///   How far along is *not* settled by the corners alone — a side that is a
+    ///   whole ellipse has one corner — and [`box_the_surface_bounds`] gives the
+    ///   argument for what does settle it.
     ///
     /// # Panics
     ///
@@ -210,7 +209,7 @@ impl<'m> SolidView<'m> {
     /// a stop.
     #[must_use]
     pub fn box_around_one_face(self, face: FaceView<'m>) -> Option<(Point, Point)> {
-        let mut round_it = box_the_surface_bounds(face);
+        let mut round_it = box_the_surface_bounds(self, face);
         if face.surface().as_plane().is_none() {
             return round_it;
         }
@@ -226,7 +225,8 @@ impl<'m> SolidView<'m> {
             else {
                 continue;
             };
-            if let Some(theirs) = box_the_surface_bounds(across) {
+            let side = box_round_a_side_on_an_axis(face.surface(), across.surface(), edge);
+            if let Some(theirs) = side.or_else(|| box_the_surface_bounds(self, across)) {
                 round_it = Some(round_it.map_or(theirs, |mine| both_boxes(mine, theirs)));
             }
         }
@@ -244,43 +244,83 @@ impl<'m> SolidView<'m> {
 /// - A **ball**'s skin is inside the box round its centre a radius each way,
 ///   whatever the face is trimmed down to. Nothing tighter is available without
 ///   knowing where the trimming runs, and a ball's face may reach right round.
-/// - A **pipe**'s skin is a radius from its axis, and how far *along* that axis
-///   a face reaches is settled by its corners: the distance along an axis grows
-///   steadily everywhere on a pipe, so a face has no high or low spot in the
-///   middle and reaches its own furthest on the boundary.
+/// - A **pipe**'s skin is a radius from its axis, so the face is inside the box
+///   round the discs at the least and the most it reaches along the axis.
+/// - A **cone**'s skin is `slope · |up|` from its axis at `up` along it, so the
+///   face is inside the box round the discs at the least and the most it
+///   reaches along the axis, together with the apex: every point of a cone
+///   between two heights on one half of it lies on a straight ruling between
+///   the circle at the higher one and the apex, so inside the hull of that disc
+///   and the apex.
 /// - A **plane** bounds nothing on its own, so this is the box round the
 ///   corners, which holds the face only while every side of it is straight.
 ///   [`SolidView::box_around_one_face`] is what opens that out.
-fn box_the_surface_bounds(face: FaceView<'_>) -> Option<(Point, Point)> {
+///
+/// # How far along its axis a face on a pipe or a cone reaches
+///
+/// Measured as `up`, the distance along the axis from its origin (the apex, on
+/// a cone). **A face has no high or low spot in `up` anywhere inside it except
+/// at a cone's apex**: through every other point of either surface runs a
+/// straight ruling, and `up` changes at a steady non-zero rate along it. So the
+/// least and the most `up` on a face are on its boundary, or at the apex.
+///
+/// The apex is always taken in. That is loose for a frustum, whose face stops
+/// short of the apex, and it is what makes a pointed cone right: its only
+/// corner is on its cap, so without the apex the box stopped at the cap's own
+/// height less a radius, and `classify_point` answered `Outside` for everything
+/// below it (`docs/decisions.md` §200.3). Deciding whether a face holds the apex
+/// is a trimming question that can refuse; taking it in costs only width.
+///
+/// **The boundary is not settled by the corners.** A straight side is a ruling,
+/// along which `up` runs steadily from one end to the other, so its ends — two
+/// corners — are the whole of its reach. A curved side reaches past its ends
+/// wherever `up` turns along it, and a side that is one whole closed curve has
+/// one corner and turns twice: a pipe cut by a tilted plane has an ellipse
+/// there, its one corner may be the lowest point, and a box read off corners
+/// stopped there (`a_box_holds_every_curved_face.rs`). So each curved side adds
+/// every `up` at which the crossing it runs along can turn
+/// ([`where_up_can_turn_along_a_crossing`]); an arc that does not reach one of
+/// those only makes the box wider, never wrong.
+///
+/// **A curved side whose other surface is a pipe or a cone adds nothing**, and
+/// that is a gap and not a proof: those crossings are degree four and nothing
+/// here yet says where `up` turns along one. Such a side is bounded by its
+/// corners as before.
+fn box_the_surface_bounds(solid: SolidView<'_>, face: FaceView<'_>) -> Option<(Point, Point)> {
     let mut low = [f64::INFINITY; 3];
     let mut high = [f64::NEG_INFINITY; 3];
     let mut seen = false;
-    let mut open_out = |at: [f64; 3], by: f64| {
+    let mut open_out = |at: [f64; 3], by: [f64; 3]| {
         seen = true;
         for axis in 0..3 {
-            low[axis] = low[axis].min(at[axis] - by);
-            high[axis] = high[axis].max(at[axis] + by);
+            low[axis] = low[axis].min(at[axis] - by[axis]);
+            high[axis] = high[axis].max(at[axis] + by[axis]);
         }
     };
     match face.surface() {
         Surface::Plane(_) => {
             for corner in face.wires().flat_map(WireView::points) {
-                open_out(corner.coordinates(), 0.0);
+                open_out(corner.coordinates(), [0.0; 3]);
             }
         }
-        Surface::Sphere(ball) => open_out(ball.centre().coordinates(), ball.radius()),
+        Surface::Sphere(ball) => open_out(ball.centre().coordinates(), [ball.radius(); 3]),
         Surface::Cylinder(pipe) => {
             let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
-            for corner in face.wires().flat_map(WireView::points) {
-                let shadow = origin + along * along.dot(corner - origin);
-                open_out(shadow.coordinates(), pipe.radius());
+            for up in how_far_along_its_axis_a_face_reaches(solid, face, RoundAnAxis::Pipe(pipe)) {
+                open_out(
+                    (origin + along * up).coordinates(),
+                    how_far_a_disc_reaches(along, pipe.radius()),
+                );
             }
         }
         Surface::Cone(cone) => {
             let (apex, along) = (cone.apex(), cone.axis().direction());
-            for corner in face.wires().flat_map(WireView::points) {
-                let up = along.dot(corner - apex);
-                open_out((apex + along * up).coordinates(), cone.radius_at(up));
+            let reach = how_far_along_its_axis_a_face_reaches(solid, face, RoundAnAxis::Cone(cone));
+            for up in core::iter::once(0.0).chain(reach) {
+                open_out(
+                    (apex + along * up).coordinates(),
+                    how_far_a_disc_reaches(along, cone.radius_at(up)),
+                );
             }
         }
         // **The whole torus and not the corners' own reach**, unlike a pipe's
@@ -292,11 +332,211 @@ fn box_the_surface_bounds(face: FaceView<'_>) -> Option<(Point, Point)> {
         // the face wraps.
         Surface::Torus(ring) => open_out(
             ring.centre().coordinates(),
-            ring.ring_radius() + ring.tube_radius(),
+            [ring.ring_radius() + ring.tube_radius(); 3],
         ),
         other => panic!("this crate cannot say how far {other:?} reaches"),
     }
     seen.then(|| (Point::from(low), Point::from(high)))
+}
+
+/// How far along each coordinate axis a disc of `radius` square to the unit
+/// direction `square_to` reaches from its centre: `radius · √(1 − a²)` for the
+/// direction's component `a` along that coordinate axis. A disc square to `z`
+/// reaches its radius in `x` and `y` and nothing in `z`.
+fn how_far_a_disc_reaches(square_to: Vector, radius: f64) -> [f64; 3] {
+    square_to
+        .components()
+        .map(|a| radius * (1.0 - a * a).max(0.0).sqrt())
+}
+
+/// A pipe or a cone: the two surfaces a face on which is measured along an
+/// axis.
+///
+/// Exhaustive on purpose: it names the two arms of [`box_the_surface_bounds`]
+/// that share [`how_far_along_its_axis_a_face_reaches`], and nothing else.
+#[derive(Clone, Copy)]
+enum RoundAnAxis {
+    Pipe(rcad_geom::Cylinder),
+    Cone(rcad_geom::Cone),
+}
+
+impl RoundAnAxis {
+    /// Where `up` is measured from: a point on a pipe's axis, a cone's apex.
+    fn origin(self) -> Point {
+        match self {
+            Self::Pipe(pipe) => pipe.axis().origin(),
+            Self::Cone(cone) => cone.apex(),
+        }
+    }
+
+    fn along(self) -> Vector {
+        match self {
+            Self::Pipe(pipe) => pipe.axis().direction(),
+            Self::Cone(cone) => cone.axis().direction(),
+        }
+    }
+
+    fn up_of(self, point: Point) -> f64 {
+        self.along().dot(point - self.origin())
+    }
+}
+
+/// Every `up` the face's boundary can reach its least or its most at: each
+/// corner, and each place a curved side can turn — the argument is on
+/// [`box_the_surface_bounds`].
+///
+/// A curved side lies on this face's surface and on each surface across it: the
+/// face on its other side, and for a piece of a crossing the surface named with
+/// it. Any one of those that says where `up` can turn is enough.
+fn how_far_along_its_axis_a_face_reaches(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    round: RoundAnAxis,
+) -> SmallVec<[f64; 8]> {
+    let mut reach: SmallVec<[f64; 8]> = face
+        .wires()
+        .flat_map(WireView::points)
+        .map(|corner| round.up_of(corner))
+        .collect();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        if *edge.stored_run() == EdgeRun::Straight {
+            continue;
+        }
+        let mut across: SmallVec<[Surface; 2]> = edge
+            .neighbouring_faces()
+            .filter(|&other| other != face.key())
+            .filter_map(|other| solid.faces().find(|used| used.key() == other))
+            .map(FaceView::surface)
+            .collect();
+        if let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run() {
+            across.push(and);
+        }
+        if let Some(turns) = across
+            .iter()
+            .find_map(|other| where_up_can_turn_along_a_crossing(round, other))
+        {
+            reach.extend(turns);
+        }
+    }
+    reach
+}
+
+/// Every `up` at which the crossing of `round` with `other` can turn, or
+/// `None` when this cannot say.
+///
+/// - **A plane** `n · x = n · p`. Write a point of a pipe of radius `r` as
+///   `origin + up · a + r · w`, with `w` a unit direction square to the axis
+///   `a`; on the plane, `up · (n · a) + r · (n · w) = d`, where
+///   `d = n · (p − origin)`. As `w` goes round, `s = n · w` runs between `±m`,
+///   `m = √(1 − (n · a)²)`, and `up = (d − r · s) / (n · a)` turns only where
+///   `s` does — at `s = ±m`. A plane along the axis (`n · a = 0`) crosses a
+///   pipe in lines along it, on which `up` never turns. A cone of slope `k` is
+///   the same with `r = k · |up|`: `up = d / (n · a ± k · s)`, the sign by the
+///   half of the cone, which turns only at `s = ±m` too, giving
+///   `d / (n · a ± k · m)` on either half. Where that divisor is zero the turn
+///   is at infinity, and not on any side.
+/// - **A ball or a ring**, whose whole surface lies within a known reach of its
+///   centre, so the crossing does too.
+fn where_up_can_turn_along_a_crossing(
+    round: RoundAnAxis,
+    other: &Surface,
+) -> Option<SmallVec<[f64; 2]>> {
+    let reach_round = |centre: Point, reach: f64| {
+        let middle = round.up_of(centre);
+        [middle - reach, middle + reach].into_iter().collect()
+    };
+    // `if let` rather than a `match`: `Surface` is `#[non_exhaustive]`, and a
+    // kind this does not name is the `None` the caller already handles, so a
+    // wildcard arm would only restate that.
+    if let Surface::Sphere(ball) = other {
+        return Some(reach_round(ball.centre(), ball.radius()));
+    }
+    if let Surface::Torus(ring) = other {
+        return Some(reach_round(
+            ring.centre(),
+            ring.ring_radius() + ring.tube_radius(),
+        ));
+    }
+    let flat = other.as_plane()?;
+    let across = flat.normal().dot(round.along());
+    let d = -flat.signed_distance_to(round.origin());
+    let most = (1.0 - across * across).max(0.0).sqrt();
+    let turns: SmallVec<[f64; 2]> = match round {
+        RoundAnAxis::Pipe(_) if across == 0.0 => SmallVec::new(),
+        RoundAnAxis::Pipe(pipe) => [-most, most]
+            .into_iter()
+            .map(|s| (d - pipe.radius() * s) / across)
+            .collect(),
+        RoundAnAxis::Cone(cone) => [across + cone.slope() * most, across - cone.slope() * most]
+            .into_iter()
+            .filter(|&divisor| divisor != 0.0)
+            .map(|divisor| d / divisor)
+            .collect(),
+    };
+    // The formula rounds a handful of times, and a slanted bar's ellipse top at
+    // `z = 2` came back as `1.9999999999999998`. Every turn is taken a little
+    // either way — `2⁻⁴⁰` of the sizes it was worked out from — so the rounding
+    // widens the box rather than cutting the face. That margin is measured, not
+    // derived: a divisor itself near rounding is not covered by it.
+    let sizes = round.origin().largest_coordinate_magnitude() + flat.offset().abs() + 1.0;
+    Some(
+        turns
+            .into_iter()
+            .flat_map(|up| {
+                let margin = (up.abs() + sizes) * 2f64.powi(-40);
+                [up - margin, up + margin]
+            })
+            .collect(),
+    )
+}
+
+/// A box round one curved side of a flat face, where the face across it is on
+/// a pipe or a cone, or `None` when it is on anything else.
+///
+/// The side lies where the plane crosses that surface, so how far along the
+/// surface's axis it reaches is settled by its two ends and the places `up`
+/// can turn along the crossing ([`where_up_can_turn_along_a_crossing`]), and
+/// the box round the discs there holds it. A flat face lies inside the hull of
+/// its own boundary, so these boxes and its corners hold the whole face —
+/// which is tighter than the whole of the face across, and a pointed cone's cap
+/// is why that matters: borrowing the skin's box stretched the cap down to the
+/// apex, and the fuse then cut the cap along planes it never reaches.
+///
+/// No apex is needed for a cone: a plane that misses the apex crosses the cone
+/// where `up` is never zero, so one side stays on one half, between the discs
+/// at its least and its most `up`. A plane through the apex turns at `up = 0`,
+/// which puts the apex in.
+fn box_round_a_side_on_an_axis(
+    flat: Surface,
+    across: Surface,
+    edge: EdgeView<'_>,
+) -> Option<(Point, Point)> {
+    let round = if let Surface::Cylinder(pipe) = across {
+        RoundAnAxis::Pipe(pipe)
+    } else if let Surface::Cone(cone) = across {
+        RoundAnAxis::Cone(cone)
+    } else {
+        return None;
+    };
+    let turns = where_up_can_turn_along_a_crossing(round, &flat)?;
+    let ends = [edge.start().point(), edge.end().point()].map(|end| round.up_of(end));
+    let (origin, along) = (round.origin(), round.along());
+    let mut round_it: Option<(Point, Point)> = None;
+    for up in ends.into_iter().chain(turns) {
+        let radius = match round {
+            RoundAnAxis::Pipe(pipe) => pipe.radius(),
+            RoundAnAxis::Cone(cone) => cone.radius_at(up),
+        };
+        let at = (origin + along * up).coordinates();
+        let by = how_far_a_disc_reaches(along, radius);
+        let disc = (
+            Point::from([0, 1, 2].map(|axis| at[axis] - by[axis])),
+            Point::from([0, 1, 2].map(|axis| at[axis] + by[axis])),
+        );
+        round_it = Some(round_it.map_or(disc, |so_far| both_boxes(so_far, disc)));
+    }
+    round_it
 }
 
 /// The smallest box holding both of two boxes.
