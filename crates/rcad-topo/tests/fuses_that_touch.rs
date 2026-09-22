@@ -116,9 +116,12 @@
 //! - **A plane lying along a cone's ruling** needs a slanted face, which no
 //!   whole-number block has; `degenerate_curved_fuses.rs` builds it by hand as
 //!   `a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction`.
-//! - **A cone against a ball or a bar**, and a cone's side against another
-//!   cone: not built yet, and nothing here says whether they would reach their
-//!   touch. A torus against anything curved is refused by name before it could
+//! - **A cone against a ball or a bar**: not built yet, and nothing here says
+//!   whether they would reach their touch. A cone's side against another cone
+//!   *is* built now, as one hand-written pair rather than a cell —
+//!   [`two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them`]
+//!   — and every rule of it is refused by name before the fuse assembles
+//!   anything. A torus against anything curved is refused by name before it could
 //!   (`how_often_a_fuse_with_a_torus_refuses.rs`'s last three rows).
 
 use std::cell::{Cell, RefCell};
@@ -137,7 +140,25 @@ mod touching;
 use touching::{Apart, Drawn, Insides, Shape, Slope, both_rows};
 
 /// How many shapes each cell draws, touching and clear together.
+///
+/// [`SOAK_FACTOR`] multiplies it and [`SOAK_SEED`] replaces the fixed seed, the
+/// way `fuses_that_must_agree.rs` does. With neither set — which is how the gate
+/// runs it — this is 24 shapes from the one fixed seed, and the table at the top
+/// of this file is what that prints.
 const CASES: u32 = 24;
+
+/// The environment variable that multiplies [`CASES`] for a soak.
+///
+/// ```text
+/// RCAD_SOAK_FACTOR=100 cargo nextest run -p rcad-topo --test fuses_that_touch
+/// ```
+const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
+
+/// The environment variable that reseeds every cell.
+///
+/// These tests are deterministic on purpose, so running the same soak twice
+/// draws the same shapes twice. A *spread* needs this varied as well.
+const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 
 #[test]
 fn two_blocks_one_on_the_other() {
@@ -373,6 +394,117 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
     }
 }
 
+/// Two pointed cones base to base on one circle, their rim vertices half a turn
+/// apart — the shape that would hand §204.1's join a run of pieces carrying two
+/// input edges — refused before the fuse assembles anything.
+///
+/// §204.1 joins a closed curve that was cut into pieces back into one edge only
+/// **when every piece came from one input edge**. A run whose pieces are an
+/// edge of *both* solids is the nearest way past that: cut the shared closed
+/// edge at each solid's own vertex and every piece carries two input edges, so
+/// the join keeps no corner and `assemble.rs` panics with *"a run of edges that
+/// became one edge has two ends left"* the way it did before §204.1.
+///
+/// **Both cut points have to have nothing else leaving them**, and a rim vertex
+/// has something else leaving it wherever the face inside the rim carries a
+/// seam ending there — a bar, a frustum, a ball and a bend all do, so one of
+/// the two cut points stays a corner and the run keeps it. A pointed cone's
+/// side is the one face here with a closed wire and no seam, so both solids
+/// have to be pointed cones on one circle, which is two cone faces meeting one
+/// curve: refused by name. The same family with a sphere in place of the second
+/// cone is [`a_ball_on_a_bar_of_the_same_radius`], whose touching row answers
+/// none of its fuses either.
+///
+/// So *this* family is a **limit and not a gap** (§16.10) and the pin is here:
+/// the day either refusal goes, the closed-run join has a second case to
+/// answer. What is **not** settled is a closing run of pieces of two *different*
+/// input edges, or of a fresh crossing curve carrying no input edge at all;
+/// neither has been built and neither has been ruled out.
+#[test]
+fn two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let lower = a_pointed_cone_with_its_vertex_at(
+        &mut model,
+        Point::new(0.0, 0.0, 0.0),
+        2.0,
+        Point::new(2.0, 0.0, 2.0),
+    );
+    let upper = a_pointed_cone_with_its_vertex_at(
+        &mut model,
+        Point::new(0.0, 0.0, 4.0),
+        -2.0,
+        Point::new(-2.0, 0.0, 2.0),
+    );
+    let policy = Policy::certified();
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for (one, other) in [(lower, upper), (upper, lower)] {
+            let why = model
+                .clone()
+                .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                .expect_err("a cone against a cone is refused");
+            assert!(
+                matches!(
+                    why,
+                    Error::Geometry(rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+                ),
+                "{rule:?}: refused {why} instead"
+            );
+        }
+    }
+}
+
+/// A pointed cone of slope one, its apex at `apex`, its base cap `far` up the
+/// `z` axis from there — `far` may point down — and its one vertex wherever
+/// `rim_at` says on the rim circle.
+fn a_pointed_cone_with_its_vertex_at(
+    model: &mut Model,
+    apex: Point,
+    far: f64,
+    rim_at: Point,
+) -> SolidKey {
+    use rcad_geom::{Axis, Cone, EdgeRun, Orientation, Plane, Surface};
+    use rcad_topo::{DraftStep, SolidBuilder};
+
+    let up = Vector::new(0.0, 0.0, 1.0);
+    let skin = Cone::new(Axis::new(apex, up).expect("z is a direction"), 1.0).expect("a slope");
+    let mut builder = SolidBuilder::new();
+
+    let rim = builder.add_vertex(rim_at).expect("a finite point");
+    let circle = builder
+        .add_edge(rim, rim, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the cap plane cuts the cone in one closed curve");
+
+    let [outward, inward] = if far > 0.0 {
+        [Orientation::Forward, Orientation::Reversed]
+    } else {
+        [Orientation::Reversed, Orientation::Forward]
+    };
+    let at = apex + up * far;
+    let plane = Plane::from_point_and_normal(at, up * far.signum()).expect("a unit normal");
+    let cap_coedge = builder.add_coedge(circle, outward).expect("an edge built");
+    let cap_wire = builder
+        .add_wire(&[DraftStep::Along(cap_coedge)])
+        .expect("one closed edge is a wire");
+    let cap = builder
+        .add_face(Surface::Plane(plane), &[cap_wire])
+        .expect("a cap is a plane trimmed by its circle");
+
+    let side_coedge = builder.add_coedge(circle, inward).expect("an edge built");
+    let side_wire = builder
+        .add_wire(&[DraftStep::Along(side_coedge)])
+        .expect("one closed edge is a wire");
+    let side = builder
+        .add_face(Surface::Cone(skin), &[side_wire])
+        .expect("a face on the cone, bounded by its base circle and pinched at the apex");
+
+    builder
+        .add_shell(&[(cap, Orientation::Forward), (side, Orientation::Forward)])
+        .expect("two faces close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a pointed cone described this way is a solid")
+}
+
 #[test]
 fn a_frustums_cap_flush_on_a_block() {
     every_rule_over(
@@ -536,14 +668,14 @@ fn every_rule_over(cell: &str, shapes: impl Strategy<Value = Shape>, expect: Exp
     // prints rather than one draw of it.
     let mut runner = TestRunner::new_with_rng(
         Config {
-            cases: CASES,
+            cases: cases_to_draw(),
             source_file: Some(file!()),
             failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
                 "proptest-regressions",
             ))),
             ..Config::default()
         },
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        seeded(),
     );
     if let Err(why) = runner.run(&both_rows(shapes), |drawn| every_rule_of(&drawn, &tally)) {
         panic!("{cell}: {why}");
@@ -561,6 +693,44 @@ fn every_rule_over(cell: &str, shapes: impl Strategy<Value = Shape>, expect: Exp
              measured rather than pinned"
         ),
     }
+}
+
+/// [`CASES`], multiplied by whatever [`SOAK_FACTOR`] says.
+///
+/// # Panics
+///
+/// If the variable is not a whole number above zero, or if the product is more
+/// than a run can count. A soak that silently ran the shipped corpus while the
+/// operator read the number as the wide one is worse than one that stopped
+/// (§48.2, §50.9).
+fn cases_to_draw() -> u32 {
+    let Ok(factor) = std::env::var(SOAK_FACTOR) else {
+        return CASES;
+    };
+    let factor: u32 = factor
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
+    assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
+    CASES
+        .checked_mul(factor)
+        .unwrap_or_else(|| panic!("{CASES} cases times {factor} is more than one run can count"))
+}
+
+/// The fixed seed, or the one [`SOAK_SEED`] names.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number.
+fn seeded() -> TestRng {
+    let Ok(seed) = std::env::var(SOAK_SEED) else {
+        return TestRng::deterministic_rng(RngAlgorithm::ChaCha);
+    };
+    let seed: u64 = seed
+        .parse()
+        .unwrap_or_else(|_| panic!("{SOAK_SEED} has to be a whole number, not {seed:?}"));
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&seed.to_le_bytes());
+    TestRng::from_seed(RngAlgorithm::ChaCha, &bytes)
 }
 
 /// Every rule both ways round, and every law that has both its sides.
