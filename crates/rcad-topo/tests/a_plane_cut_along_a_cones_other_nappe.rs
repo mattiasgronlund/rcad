@@ -482,7 +482,11 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
             {
                 Containment::Inside => inside = true,
                 Containment::Outside => {}
-                _ => sure = false,
+                Containment::OnBoundary
+                | Containment::Undecidable { .. }
+                | Containment::CannotFollowAFacesTrimming { .. }
+                | Containment::CannotFireARayAtAFacesSurface { .. }
+                | _ => sure = false,
             }
         }
         if sure {
