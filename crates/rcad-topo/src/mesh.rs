@@ -1921,11 +1921,7 @@ fn with_a_corner_where_a_pole_side_passes(
             .copied()
             .filter(|&quarter| passes_strictly(quarter, here[0], there[0]))
             .collect();
-        passed.sort_by(|one, other| {
-            (one - here[0])
-                .abs()
-                .total_cmp(&(other - here[0]).abs())
-        });
+        passed.sort_by(|one, other| (one - here[0]).abs().total_cmp(&(other - here[0]).abs()));
         for quarter in passed {
             opened.corners.push([quarter, here[1]]);
             opened.points.push(cap.points[at]);
@@ -2594,8 +2590,8 @@ impl WalkingAWire {
         // ordinary step of the walk.
         let (climbed, goes_right_round) = match (self.wraps, self.corners.first()) {
             (Some(whole), Some(first)) => {
-                let climbed =
-                    self.longitude - first[0] + the_short_way_round(first[0] - self.longitude, whole);
+                let climbed = self.longitude - first[0]
+                    + the_short_way_round(first[0] - self.longitude, whole);
                 (
                     climbed,
                     self.closes_on_one_curve && climbed.abs() >= whole / 2.0,
