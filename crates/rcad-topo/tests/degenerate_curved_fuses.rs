@@ -1119,11 +1119,7 @@ fn a_ball_cut_by_a_plane_down_its_polar_axis_is_answered() {
                 1,
                 "the {rule:?} of a ball and a knife down its axis at {at:?} is one solid"
             );
-            measures(
-                volume_of(&model, answer.solids()),
-                closed_form,
-                Side::Under,
-            );
+            measures(volume_of(&model, answer.solids()), closed_form, Side::Under);
         }
     }
 }
