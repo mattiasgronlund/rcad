@@ -1321,6 +1321,16 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let partner = self.crossings[crossing].partner;
+            if let Some(pole) = the_one_pole_a_circle_runs_through([&self.surface, &partner]) {
+                self.nodes.push(Node {
+                    point: pole,
+                    vertex: None,
+                    made_of: None,
+                    half_way_round: false,
+                    crossings: vec![crossing],
+                });
+                continue;
+            }
             let Ok(from) = where_a_closed_crossing_starts(
                 &self.crossings[crossing].run,
                 [&self.surface, &partner],
@@ -3241,15 +3251,44 @@ fn where_a_ball_pinches(ball: &Sphere, at_the_top: bool) -> PredicatePoint {
 /// The two are the same question and §35.10's last trap already asks for one
 /// answer to it; this is a third spelling and lane 5 owes the unification.
 ///
+/// **The half-line is aimed at the middle of a side when aiming at the first
+/// corner cannot be counted along.** Aimed at a corner, a half-line through
+/// another corner asks which side of it that corner is, and where both corners
+/// are boxes — every corner of a turned block is — the answer straddles zero.
+/// The middle of a square's face is on both its diagonals, so every corner
+/// fails there. A block turned and centred on a ball's pole puts the pole
+/// exactly there, the pole is the one node the circle through it has, and
+/// there was no other point to ask about (§200.2). Where the half-line is aimed
+/// changes nothing but whether it can be counted: the count is the same along
+/// every half-line from the point.
+///
 /// `None` when the point sits on the line of one of the rim's own sides, or when
-/// a turn could not be settled. Both mean "ask about another point", which the
-/// caller has.
+/// no half-line settles. Both mean "ask about another point", which the caller
+/// may have.
 fn how_often_the_rim_winds_round(
     in_plane: &InPlane,
     rim: &[Vec<PredicatePoint>],
     point: PredicatePoint,
 ) -> Option<i32> {
-    let aim = *rim.iter().flatten().next()?;
+    let corners = rim.iter().flatten().copied();
+    let middles = rim.iter().flat_map(|ring| {
+        (0..ring.len()).map(|index| {
+            let [from, to] = [ring[index], ring[(index + 1) % ring.len()]].map(middle_of);
+            PredicatePoint::from((from + (to - from) * 0.5).coordinates())
+        })
+    });
+    corners
+        .take(1)
+        .chain(middles)
+        .find_map(|aim| how_often_the_rim_winds_round_aiming_at(in_plane, rim, point, aim))
+}
+
+fn how_often_the_rim_winds_round_aiming_at(
+    in_plane: &InPlane,
+    rim: &[Vec<PredicatePoint>],
+    point: PredicatePoint,
+    aim: PredicatePoint,
+) -> Option<i32> {
     let mut winding = 0;
     for (position, ring) in rim.iter().enumerate() {
         let inwards = if position == 0 { 1 } else { -1 };
@@ -3327,6 +3366,46 @@ fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) 
         Interval::around(coordinate, reach)
             .expect("a finite seed and a positive reach leave a low end below a high one")
     }))
+}
+
+/// The pole of the ball a circle between a ball and a plane runs through, when
+/// it runs through exactly one of them.
+///
+/// **That pole is where the circle's one corner goes**, rather than where the
+/// walk happens to start. Started anywhere else, the circle's one edge passes
+/// through the pole part way along, where the ball's longitude jumps half a
+/// turn, and the mesh refused 18 of the 63 caps `a_ball_cut_through_its_pole`
+/// builds with `BoundaryCrossesItself`. Started a rounding off the pole, it was
+/// cut again straight across and the mesh refused the other 18
+/// `AWireWillNotLieFlatOnItsFace`. A cap bounded by one closed edge whose
+/// corner is the pole is the shape `SolidBuilder` builds and the mesh walks
+/// (§200.2).
+///
+/// Only where both surfaces certify the pole is on them, so nothing is
+/// guessed: a plane a rounding off the pole leaves the walk to start the
+/// circle, as before. A plane through **both** poles holds the polar axis and
+/// its circle is cut at both, which [`across_a_circle_that_starts_at_a_pole`]
+/// already does, so that is `None` here.
+fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePoint> {
+    let ball = match pair {
+        [Surface::Sphere(ball), Surface::Plane(_)] | [Surface::Plane(_), Surface::Sphere(ball)] => {
+            ball
+        }
+        _ => return None,
+    };
+    let [x, y, z] = ball.centre().coordinates();
+    let on_the_circle: Vec<PredicatePoint> = [z - ball.radius(), z + ball.radius()]
+        .into_iter()
+        .map(|height| PredicatePoint::from([x, y, height]))
+        .filter(|&pole| {
+            pair.iter()
+                .all(|surface| side_of_surface(surface, pole) == Decision::Zero)
+        })
+        .collect();
+    match on_the_circle.as_slice() {
+        [pole] => Some(*pole),
+        _ => None,
+    }
 }
 
 /// Where a circle between a ball and a plane is cut a second time, when the
