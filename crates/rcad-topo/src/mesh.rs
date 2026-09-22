@@ -1445,6 +1445,37 @@ impl BuildingAMesh {
     /// asking for, and saying so is better than a fudge factor on the
     /// comparison, which is what a piece a rounding over a quarter turn would
     /// otherwise need.
+    ///
+    /// **A piece that is still one whole closed curve gets a cut carrying a
+    /// point of its own**, however little curve there is to step. A cut's two
+    /// ends are points the rest of the model already holds, so a cut with
+    /// nothing strictly inside it is a bare *side* between two shared points —
+    /// and every corner of a piece that is one closed curve sits on that one
+    /// edge, which the face on the other side of it holds whole. That face is
+    /// free to draw the same pair as a triangle's diagonal, and then the side is
+    /// used four times and the mesh is refused
+    /// `TwoPatchesOfTheMeshDrewTheSameSide`. The ball cut through its south pole
+    /// is where it happened: the sliver's rim has the pole as one of the four
+    /// corners a coarse walk gives it, the cut ran from the pole to the corner
+    /// opposite, and the flat face closing the sliver picked exactly that
+    /// diagonal (`the_sliver_that_holds_no_pole_is_answered_or_refused_by_name`).
+    /// A point strictly inside the cut belongs to this face alone (§25.1), so
+    /// there is no pair left for a neighbour to draw — and on a ball it is also
+    /// the one point off the rim's own plane that a coarse sliver would
+    /// otherwise have none of, which is what turned `VolumeIsNotPositive` into
+    /// an answer.
+    ///
+    /// **It is asked for where the collision was shown and not everywhere.**
+    /// Charging every cut a point moved a round bar's measured volume by `3.6e-4` when the bar was
+    /// shifted three thousand units out, against `1.8e-13` before, because a
+    /// point worked out from the chart carries the placement's rounding where
+    /// a corner of the model does not
+    /// (`a_bend_moved_far_out_stays_inside_its_bound_and_slips_further_than_a_bar`).
+    /// **That is a cost bound and not a proof.** Nothing here says a bare cut
+    /// across a piece bounded by more than one closed curve could never meet a
+    /// neighbour's diagonal — only that no solid the gate builds has shown one,
+    /// and that the ones that do reach this go on paying nothing for the
+    /// possibility.
     fn cut_in_two(
         &mut self,
         face: FaceView<'_>,
@@ -1469,7 +1500,8 @@ impl BuildingAMesh {
 
         let leaving = opened.corners[at[1]];
         let arriving = opened.corners[at[0]];
-        let steps = how_many_steps(stored, leaving, arriving, room);
+        let least_steps = if piece.closes_on_one_curve { 2 } else { 1 };
+        let steps = how_many_steps(stored, leaving, arriving, room).max(least_steps);
         if self.points.len() + steps > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
