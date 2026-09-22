@@ -1043,15 +1043,12 @@ impl Assembly {
     fn which_to_keep_first(&self, one: usize, other: usize) -> core::cmp::Ordering {
         let (one, other) = (&self.corners[one], &self.corners[other]);
         let (at_one, at_other) = (one.point.coordinates(), other.point.coordinates());
-        one.from
-            .is_none()
-            .cmp(&other.from.is_none())
-            .then_with(|| {
-                (0..3)
-                    .map(|axis| at_one[axis].total_cmp(&at_other[axis]))
-                    .find(|order| order.is_ne())
-                    .unwrap_or(core::cmp::Ordering::Equal)
-            })
+        one.from.is_none().cmp(&other.from.is_none()).then_with(|| {
+            (0..3)
+                .map(|axis| at_one[axis].total_cmp(&at_other[axis]))
+                .find(|order| order.is_ne())
+                .unwrap_or(core::cmp::Ordering::Equal)
+        })
     }
 
     fn edges_after_joining(&self, renumbered: &Renumbered) -> Vec<Edge> {
@@ -1162,7 +1159,12 @@ impl Assembly {
         }
     }
 
-    fn sides_of(&self, ring: &[Dart], renumbered: &Renumbered, edges: &[Edge]) -> Result<Vec<Side>> {
+    fn sides_of(
+        &self,
+        ring: &[Dart],
+        renumbered: &Renumbered,
+        edges: &[Edge],
+    ) -> Result<Vec<Side>> {
         let lump = renumbered.lump_of_edge[self.edge_of(ring[0])]
             .expect("a ring is walked along edges that stay");
         let opens = ring
@@ -1289,10 +1291,15 @@ impl Assembly {
         } else {
             Decision::Pos
         };
-        a_closed_crossing_is_walked_the_way_it_is_stored([&one, &other], outward, at, material_side)?
-            .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole {
-                face: self.faces[dart.face].ancestors[0],
-            })
+        a_closed_crossing_is_walked_the_way_it_is_stored(
+            [&one, &other],
+            outward,
+            at,
+            material_side,
+        )?
+        .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole {
+            face: self.faces[dart.face].ancestors[0],
+        })
     }
 
     /// Gather the faces into lumps joined by edges, refusing a result that is
@@ -1953,7 +1960,8 @@ fn numbered(staying: impl Iterator<Item = bool>) -> Vec<Option<usize>> {
 /// Whether every piece of a run was cut out of the one same input edge and
 /// nothing else.
 fn is_one_input_edge(pieces: &[&[EdgeKey]]) -> bool {
-    pieces.first().is_some_and(|first| first.len() == 1) && pieces.iter().all(|piece| *piece == pieces[0])
+    pieces.first().is_some_and(|first| first.len() == 1)
+        && pieces.iter().all(|piece| *piece == pieces[0])
 }
 
 /// Which run of edges each edge is part of, when the edges either side of every

@@ -478,7 +478,11 @@ fn a_box_round_one_curved_face_holds_the_face_and_the_box_round_its_triangles_do
                 let [low, high] = [low, high].map(|at| at.coordinates());
                 assert_eq!([low[0], low[1]], [-RADIUS, -RADIUS]);
                 assert_eq!([high[0], high[1]], [RADIUS, RADIUS]);
-                assert!((-1e-9..=0.0).contains(&low[2]), "the wall's box starts at {}", low[2]);
+                assert!(
+                    (-1e-9..=0.0).contains(&low[2]),
+                    "the wall's box starts at {}",
+                    low[2]
+                );
                 assert!(
                     (HEIGHT..=HEIGHT + 1e-9).contains(&high[2]),
                     "the wall's box ends at {}",

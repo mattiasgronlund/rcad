@@ -1029,7 +1029,13 @@ check-fuzz-builds:
 # One fewer. `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`
 # matched its refusal and sent every other `Error` to `panic!`; the cut down the
 # polar axis now answers, and the test that replaced it has no match at all.
-wildcard_arms := "97"
+#
+#     the cone box lane  97 -> 98
+#
+# One more: `fuses_that_touch.rs`'s
+# `a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule`
+# names every `Containment` it refuses and keeps the arm for ones not yet made.
+wildcard_arms := "98"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:

@@ -42,9 +42,15 @@ fn a_frustums_box_stops_at_its_small_cap_and_a_pointed_cones_holds_its_apex() {
             .faces()
             .find(|face| matches!(face.surface(), Surface::Cone(_)))
             .expect("a cone has a face on its cone");
-        view.box_around_one_face(skin).expect("a face is somewhere").0.z()
+        view.box_around_one_face(skin)
+            .expect("a face is somewhere")
+            .0
+            .z()
     };
-    assert!(lowest_of_its_skin(pointed) <= 0.0, "the pointed cone's skin starts above its apex");
+    assert!(
+        lowest_of_its_skin(pointed) <= 0.0,
+        "the pointed cone's skin starts above its apex"
+    );
     let frustum_starts = lowest_of_its_skin(frustum);
     assert!(
         (2.0 - 1e-9..=2.0).contains(&frustum_starts),

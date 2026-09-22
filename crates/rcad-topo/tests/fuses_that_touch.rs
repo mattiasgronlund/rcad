@@ -312,13 +312,16 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
         Point::new(0.2, 0.1, 0.1),
         Point::new(3.5, 0.0, -1.0),
     ];
-    for (one, other, rule, solids, faces) in [
-        (block, cone, Rule::Union, 2, vec![2, 6]),
-        (cone, block, Rule::Union, 2, vec![2, 6]),
-        (block, cone, Rule::Intersection, 0, vec![]),
-        (cone, block, Rule::Intersection, 0, vec![]),
-        (block, cone, Rule::Difference, 1, vec![6]),
-        (cone, block, Rule::Difference, 1, vec![2]),
+    let union: fn(bool, bool) -> bool = |a, b| a || b;
+    let intersection: fn(bool, bool) -> bool = |a, b| a && b;
+    let difference: fn(bool, bool) -> bool = |a, b| a && !b;
+    for (one, other, rule, solids, faces, holds) in [
+        (block, cone, Rule::Union, 2, vec![2, 6], union),
+        (cone, block, Rule::Union, 2, vec![2, 6], union),
+        (block, cone, Rule::Intersection, 0, vec![], intersection),
+        (cone, block, Rule::Intersection, 0, vec![], intersection),
+        (block, cone, Rule::Difference, 1, vec![6], difference),
+        (cone, block, Rule::Difference, 1, vec![2], difference),
     ] {
         let mut model = built.model.clone();
         let policy = Policy::certified();
@@ -344,12 +347,7 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
             } else {
                 (in_cone(p), in_block(p))
             };
-            let want = match rule {
-                Rule::Union => a || b,
-                Rule::Intersection => a && b,
-                Rule::Difference => a && !b,
-                other => panic!("a rule this test does not run: {other:?}"),
-            };
+            let want = holds(a, b);
             let inside = pieces.iter().any(|&piece| {
                 match model.solid(piece).expect("an answer's key").classify_point(
                     p,
@@ -367,7 +365,10 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
                     other => panic!("{rule:?}: {p:?} came back {other:?}"),
                 }
             });
-            assert_eq!(inside, want, "{rule:?} (block first: {first_is_block}) at {p:?}");
+            assert_eq!(
+                inside, want,
+                "{rule:?} (block first: {first_is_block}) at {p:?}"
+            );
         }
     }
 }
