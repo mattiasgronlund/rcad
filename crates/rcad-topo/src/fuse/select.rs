@@ -38,7 +38,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect};
+use rcad_geom::{
+    Cone, EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect,
+};
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     orient3d_of_points,
@@ -424,6 +426,10 @@ fn the_piece_holds(
             Decision::Undecidable { .. } | _ => return None,
         }
     }
+    let flat = piece
+        .surface
+        .as_plane()
+        .expect("a piece measured from inside a plane is a flat piece");
     let mut winding = 0;
     for (position, wire) in piece.wires.iter().enumerate() {
         let inwards = if position == 0 { 1 } else { -1 };
@@ -438,7 +444,7 @@ fn the_piece_holds(
                     wire.iter().map(|side| side.ends[0].point()).collect();
                 winding += in_plane.winding_around(core::slice::from_ref(&corners), point)?;
                 for side in wire {
-                    winding += in_the_bulge_of(side, in_plane, point)?;
+                    winding += in_the_bulge_of(flat, side, in_plane, point)?;
                 }
             }
         }
@@ -470,20 +476,42 @@ fn the_piece_holds(
 /// named as one edge (`assemble`'s `which_arc_of_a_circle_this_is` reads a
 /// ball's circle only).
 ///
-/// **A cone is not counted either, because a plane steeper than its side cuts
-/// it in two branches and "inside the cone" is then two regions, not one.** A
-/// cone face is on one nappe, but the fuse cuts a plane along the whole double
-/// cone and the cone's sign is inside in both nappes. Where the cone's axis
-/// crosses such a plane — the point [`half_way_into_either_arc`] builds round —
-/// can be in the other nappe's region: inside by the sign, on the bulge side of
-/// every chord of the near branch, and outside the solid.
-/// `tests/a_plane_across_a_cone.rs` shows each step on a frustum and a leaning
-/// block. Counting a cone cut in an ellipse would still meet the pipe's
-/// edge-naming gap: with cones counted, two corner-up-cube fuses in
+/// **A cone is counted only where the plane is square to its axis**, which is
+/// the one family of planes that cuts it in a circle. A cap is that family:
+/// every cone this kernel builds is closed by a disc square to its axis, and a
+/// cap cut by a block's plane is a piece bounded by an arc of the rim and the
+/// chord across it — two corners, no polygon, and no point inside it at all
+/// until the bulge is counted (`docs/decisions.md` §200.3's pair refused there).
+///
+/// A steeper plane is still not counted, and that is the limit rather than the
+/// gap: it cuts the cone in two branches, so "inside the cone" on it is two
+/// regions and not one. A cone face is on one nappe, but the fuse cuts a plane
+/// along the whole double cone and the cone's sign is inside in both nappes.
+/// Where the cone's axis crosses such a plane — the point
+/// [`half_way_into_either_arc`] builds round — can be in the other nappe's
+/// region: inside by the sign, on the bulge side of every chord of the near
+/// branch, and outside the solid. `tests/a_plane_across_a_cone.rs` shows each
+/// step on a frustum and a leaning block. A plane square to the axis has
+/// neither half of that: the other nappe does not reach it, and what it leaves
+/// is one disc, exactly as a ball leaves one.
+///
+/// The square-to test is exact and one-sided. The plane's normal and the cone's
+/// axis come out of the same [`Isometry`](rcad_geom::Isometry) applied to the
+/// same direction, so a cap's two are the same `f64` triple bit for bit, or its
+/// exact negation; anything else is read as not square and costs a refusal and
+/// never a wrong answer. Proving a general `|n·a|² (1 + s²) > s²` would widen
+/// this to every ellipse, and that one still meets the pipe's edge-naming gap
+/// above — with cones counted that far, two corner-up-cube fuses in
 /// `how_often_a_fuse_with_a_cone_refuses.rs` become four faces along one edge.
-fn in_the_bulge_of(side: &FaceMeet, in_plane: &InPlane, point: PredicatePoint) -> Option<i32> {
-    let a_ball = matches!(side.carried_by[1], Surface::Sphere(_));
-    if !a_ball || side.material_side != Decision::Neg {
+fn in_the_bulge_of(
+    flat: &Plane,
+    side: &FaceMeet,
+    in_plane: &InPlane,
+    point: PredicatePoint,
+) -> Option<i32> {
+    let one_round_region = matches!(side.carried_by[1], Surface::Sphere(_))
+        || matches!(side.carried_by[1], Surface::Cone(cone) if square_to_the_axis(flat, &cone));
+    if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
     }
     // Compared rather than matched, so that `Decision`'s wildcard arm is not
@@ -496,6 +524,19 @@ fn in_the_bulge_of(side: &FaceMeet, in_plane: &InPlane, point: PredicatePoint) -
     } else {
         None
     }
+}
+
+/// Whether `flat` stands square to `cone`'s axis, so that the two cross in a
+/// circle round it rather than in an ellipse or a pair of branches.
+///
+/// The normal and the direction are compared as they are stored, so this says
+/// yes only to a pair that is the same triple or its exact negation. That is
+/// what a cone's own cap is — [`in_the_bulge_of`] has the argument for why a
+/// stricter answer than the geometry deserves is safe here.
+fn square_to_the_axis(flat: &Plane, cone: &Cone) -> bool {
+    let normal = flat.normal().components();
+    let along = cone.axis().direction().components();
+    normal == along || normal == along.map(|component| -component)
 }
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire

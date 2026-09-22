@@ -25,9 +25,10 @@
 //! A pointed cone whose apex sits inside a small cube stood on its corner used
 //! to answer wrong — both solids back untouched, as if they never met — and was
 //! left out of the file for it. Since the cone's box reaches its apex it
-//! refuses by name, and
-//! [`a_corner_up_cube_centred_on_a_pointed_cones_apex_refuses_rather_than_answering_wrong`]
-//! pins that.
+//! stopped answering wrong, and since `select.rs` counts the bulge between a
+//! cone's arc and its chord half of it answers right;
+//! [`a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_half_and_cannot_mesh_the_rest`]
+//! pins that, and names what stops the other half.
 
 use std::collections::BTreeMap;
 
@@ -189,12 +190,8 @@ fn a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 16,
-            refused: [
-                ("a point inside a piece of a face", 16),
-                ("AWireWillNotLieFlatOnItsFace", 16),
-            ]
-            .into()
+            right: 24,
+            refused: [("AWireWillNotLieFlatOnItsFace", 24)].into()
         }
     );
 }
@@ -220,12 +217,8 @@ fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 16,
-            refused: [
-                ("a point inside a piece of a face", 8),
-                ("AWireWillNotLieFlatOnItsFace", 16),
-            ]
-            .into()
+            right: 20,
+            refused: [("AWireWillNotLieFlatOnItsFace", 20)].into()
         }
     );
 }
@@ -235,11 +228,21 @@ fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right_or_refuses() {
 /// and handed both solids back untouched, because the cone's box stopped at
 /// its cap and the fuse looked at no pair of faces (§202.3).
 ///
-/// With the box reaching the apex every fuse refuses by name instead. That is a
-/// **gap** and not a limit (§16.10): the two solids share volume, so every rule
-/// has an answer to give, and this pins that nothing here gives a wrong one.
+/// With the box reaching the apex every fuse refused by name instead, and §204.2
+/// called that a **gap**: the two solids share volume, so every rule has an
+/// answer to give. Half of the gap is closed. The refusal was the cone's own
+/// big cap, cut by a cube plane into pieces bounded by an arc of the rim and the
+/// chord across it — two corners, no polygon to wind, and no point inside the
+/// piece at all until `select.rs` counted the bulge between the arc and its
+/// chord for a cone as it already did for a ball.
+///
+/// **The four that still refuse are a different gap, in the mesher.** The
+/// intersection's cone face runs right round the apex — the cube holds a
+/// neighbourhood of it — so it is a ring of arcs round a cone with no seam, and
+/// `mesh.rs` cannot walk it (`AWireWillNotLieFlatOnItsFace`, on the wire at
+/// `z ≈ 2.559`). That is `fuse/assemble.rs`'s own note beside `rings_of_each_joined_face`.
 #[test]
-fn a_corner_up_cube_centred_on_a_pointed_cones_apex_refuses_rather_than_answering_wrong() {
+fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_half_and_cannot_mesh_the_rest() {
     let cases: Vec<Case> = [0.0, 0.7]
         .into_iter()
         .map(|turn| Case {
@@ -251,8 +254,8 @@ fn a_corner_up_cube_centred_on_a_pointed_cones_apex_refuses_rather_than_answerin
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 0,
-            refused: [("a point inside a piece of a face", 8)].into()
+            right: 4,
+            refused: [("AWireWillNotLieFlatOnItsFace", 4)].into()
         }
     );
 }
@@ -530,18 +533,17 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
             decided += 1;
         }
     }
-    // 8 000 and not the 10 000 this file first had: once a cone face's box
-    // counted every place its curved sides can turn (§202.3), the fewest any
-    // answer here decided fell to 8879. What moved was not the answer but where
-    // the rays go. Measured on the frustum and side-6 corner-up cube's union,
-    // which decided 9442: its cone face's box reaches z ≈ 17.74, where one cube
-    // plane's ellipse turns far above the arc the face keeps; the solid's box
-    // grows to hold it, its ray targets move with it, and 16040 of that
-    // answer's 20780 undecided points then refused on the frustum's big cap,
-    // whose trimming the ray caster did not follow. That is a gap, not a
-    // limit (§204.3): the floor goes back up when either is fixed.
+    // 8 800, against the 8879 the fewest of the file's 104 answers decides —
+    // the frustum and the side-6 corner-up cube's union, both turns. §204.3 put
+    // this at 8 000 without measuring what the ceiling was; the figure it did
+    // give is right, and reproduces here to the point: 16040 of the 20780
+    // points that answer leaves undecided refuse on `z = 8`, the frustum's big
+    // cap, whose trimming the ray caster does not follow. That is a **gap**, not
+    // a limit (§16.10): the cap is a flat face whose one curved side is an arc
+    // of the cone's rim, and `holds.rs` follows an arc of a ball and no other.
+    // The floor goes up again when it follows this one.
     assert!(
-        decided > 8_000,
+        decided > 8_800,
         "{what}: only {decided} grid points could be classified"
     );
     None
