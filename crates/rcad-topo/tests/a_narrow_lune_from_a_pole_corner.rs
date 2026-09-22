@@ -9,9 +9,9 @@
 //! twice. Every test here aims at that lune.
 //!
 //! None of them gets as far as the mesher. The wedge cannot be built by any of
-//! the three roads tried here without the fuse refusing or panicking first, so
-//! what §195.1 left unmeasured is still unmeasured: these tests stand in front
-//! of it, and the ignored one is the one that reaches it once the fuse does.
+//! the three roads tried here without the fuse refusing first, so what §195.1
+//! left unmeasured is still unmeasured: these tests stand in front of it, and
+//! each fails with the measurement in hand the day its road is answered.
 //!
 //! The ball's seam is the `+x` half of the meridian in `y = 0`, so a knife
 //! turned a quarter turn about the axis lies along the seam.
@@ -57,16 +57,17 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 ///
 /// This is the lune §195.1 did not measure, built the way its own half-turn
 /// test builds the half-turn one, one plane at a time. The first cut answers at
-/// every size. The second panics at every angle, size and rule, in
-/// `arrange.rs`'s `cut_the_crossings_into_arcs`, before the mesher is reached.
-/// The same cuts made the other way round — the turned knife first — refuse by
-/// name instead: see
-/// [`a_wedge_cut_with_the_turned_knife_first_is_refused_by_name`].
+/// every size. The second is refused by name at every angle, size and rule:
+/// "order along a crossing" at 45 degrees, "a point inside a piece of a face"
+/// at the other three. The turned knife's stored plane misses the poles by a
+/// rounding (see [`a_knife_through_the_axis`]), and the refusals' boxes sit that
+/// far beside them. It panicked in `arrange.rs`'s `cut_the_crossings_into_arcs`
+/// until that walked round a closed crossing, §197.
+///
+/// The day a case is answered, it is measured against its closed form and then
+/// fails, asking to be moved into a test that insists on the answer.
 #[test]
-#[ignore = "panics: `two edges of one face run along the same stretch of one crossing` \
-            (fuse/arrange.rs:1743) cutting a half ball a second time through its polar \
-            axis; the narrow lune §195.1 left unmeasured is never reached"]
-fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered() {
+fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_refused_by_name() {
     let rules: [(Rule, ClosedForm); 3] = [
         (Rule::Intersection, |degrees, radius| {
             degrees / 360.0 * a_balls_volume(radius)
@@ -88,17 +89,37 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered() {
                 let first = a_knife_through_the_axis(&mut model, radius, 0.0);
                 let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
                 let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
-                let answer = fused(&mut model, &half, &[second], rule);
-                assert_eq!(
-                    answer.len(),
-                    1,
-                    "the {rule:?} of a half ball of radius {radius} and a knife \
-                     {degrees} degrees round is one solid"
-                );
-                measures(
-                    volume_of(&model, &answer, radius),
-                    closed_form(degrees, radius),
-                );
+                match model.fuse(
+                    &half,
+                    &[second],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ) {
+                    Err(why) => assert_eq!(
+                        which_refusal(&why),
+                        if degrees == 45.0 {
+                            "order along a crossing"
+                        } else {
+                            "a point inside a piece of a face"
+                        },
+                        "the {rule:?} of a half ball of radius {radius} and a knife \
+                         {degrees} degrees round"
+                    ),
+                    Ok(fused) => {
+                        let answer = fused.solids().to_vec();
+                        assert_eq!(answer.len(), 1);
+                        measures(
+                            volume_of(&model, &answer, radius),
+                            closed_form(degrees, radius),
+                        );
+                        panic!(
+                            "the {rule:?} of a half ball of radius {radius} and a knife \
+                             {degrees} degrees round is answered and measures; move it \
+                             into a test that insists on the answer"
+                        );
+                    }
+                }
             }
         }
     }
@@ -294,8 +315,11 @@ fn a_model(radius: f64) -> Model {
 /// polar axis. Its face `x = 0` holds the axis, and no edge of it touches the
 /// ball.
 ///
-/// A turn about the `z` axis leaves `(0, 0, z)` exactly where it was, so the
-/// turned face still holds the poles exactly.
+/// A turn about the `z` axis leaves `(0, 0, z)` exactly where it was, but the
+/// **stored** plane does not hold it exactly: `Plane::transformed` keeps the
+/// offset as a rounded dot product, which is not zero. At radius 1 it is 0 at
+/// 10 and 135 degrees, 8.88e-16 at 45, −4.44e-16 at 90 and 2.22e-16 at 170, so
+/// most of these knives miss the poles by a rounding.
 fn a_knife_through_the_axis(model: &mut Model, radius: f64, degrees: f64) -> SolidKey {
     let knife = block(
         model,

@@ -1196,7 +1196,7 @@ check-wildcards-selftest:
 # Zero is a legitimate answer, and it is where this should end up: it says the
 # last gap somebody parked behind an `#[ignore]` has been closed, and
 # `test-ignored` then has nothing to run and says so.
-ignored_tests := "7"
+ignored_tests := "6"
 
 # An `#[ignore]`d test is a gap somebody parked, and this is what stops it being
 # forgotten.
