@@ -1922,26 +1922,27 @@ impl<'f> Arrangement<'f> {
                 forward: true,
             },
         );
-        match must_decide(
+        let decided = must_decide(
             dot_of(forward, into_the_arc).sign(),
             WHICH_WAY_AN_EDGE_RUNS_ROUND,
             &ends,
             Measures::Area,
             policy,
             log,
-        )? {
-            Decision::Pos => Ok(true),
-            Decision::Neg => Ok(false),
-            Decision::Zero => {
-                panic!(
-                    "an edge's tangent at its start lies along its chord, so its two ends are one"
-                )
-            }
-            other @ Decision::Undecidable { .. } => {
-                panic!("must_decide handed back an undecided sign: {other:?}")
-            }
-            other => panic!("a predicate came back with a decision nothing here knows: {other:?}"),
-        }
+        )?;
+        // Compared rather than matched: `must_decide` hands back a sign or
+        // refuses, so any arm past these three would be a wildcard over a
+        // `#[non_exhaustive]` enum for a case that cannot come (§40).
+        assert_ne!(
+            decided,
+            Decision::Zero,
+            "an edge's tangent at its start lies along its chord, so its two ends are one"
+        );
+        assert!(
+            decided == Decision::Pos || decided == Decision::Neg,
+            "must_decide hands back a sign or refuses, and this came back: {decided:?}"
+        );
+        Ok(decided == Decision::Pos)
     }
 
     /// Whether the face's material lies on the left of a closed crossing's
@@ -3482,11 +3483,14 @@ fn the_way_into_an_arc(
     ends: [PredicatePoint; 2],
     picked_by: &[Picker],
 ) -> Option<[Interval; 3]> {
-    let (ball, flat) = match pair {
-        [Surface::Sphere(ball), Surface::Plane(flat)]
-        | [Surface::Plane(flat), Surface::Sphere(ball)] => (ball, flat),
-        _ => return None,
-    };
+    let flat = pair[0].as_plane().or_else(|| pair[1].as_plane())?;
+    let ball = pair.into_iter().find_map(|surface| {
+        if let Surface::Sphere(ball) = surface {
+            Some(ball)
+        } else {
+            None
+        }
+    })?;
     let [start, end] = ends.map(|at| at.enclosure());
     let chord = PredicatePoint::Constructed([0, 1, 2].map(|axis| end[axis] - start[axis]));
     let square_to_the_chord = cross_of(PredicatePoint::from(flat.normal().components()), chord);
