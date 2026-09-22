@@ -18,9 +18,9 @@
 //! the mesh walks it there. All 63 caps answer both ways they can be asked for.
 //!
 //! The sliver on the other side of the plane, which holds neither pole,
-//! answers too since §206. It was the last shape `mesh.rs` could not cut up: a
-//! cap bounded by a circle whose one corner is a pole, and that holds no pole.
-//! What stopped it was a cut with no point of its own, and
+//! answers now as well — a cap bounded by a circle whose one corner is a pole,
+//! and that holds no pole, was the shape `mesh.rs` could not cut up. What
+//! stopped it was a cut with no point of its own, and
 //! [`the_sliver_that_holds_no_pole_is_answered_or_refused_by_name`] says how.
 
 use core::f64::consts::PI;
@@ -76,7 +76,7 @@ fn a_block_taken_out_of_a_ball_through_its_south_pole_leaves_the_same_cap() {
 /// Every answer is sound and measures its closed form within what the mesh
 /// declares; every refusal is one of two, both the mesh's.
 ///
-/// **All 126 answer since §206**, where 27 of each 63 did before. What the 72
+/// **All 126 answer now**, where 27 of each 63 did before. What the 72
 /// refusals turned on was a cut of the mesher's own that carried no point: the
 /// sliver's rim has the pole as one of the four corners a coarse walk gives it,
 /// so cutting the sliver in two ran from the pole straight to the corner

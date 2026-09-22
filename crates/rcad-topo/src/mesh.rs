@@ -1465,17 +1465,17 @@ impl BuildingAMesh {
     /// otherwise have none of, which is what turned `VolumeIsNotPositive` into
     /// an answer.
     ///
-    /// **It is asked for where the collision is possible and not everywhere.** A
-    /// piece already cut once is bounded partly by cuts of this face's own, and
-    /// no single neighbour holds all of its corners; charging every such cut a
-    /// point moved a round bar's measured volume by `3.6e-4` when the bar was
+    /// **It is asked for where the collision was shown and not everywhere.**
+    /// Charging every cut a point moved a round bar's measured volume by `3.6e-4` when the bar was
     /// shifted three thousand units out, against `1.8e-13` before, because a
     /// point worked out from the chart carries the placement's rounding where
     /// a corner of the model does not
     /// (`a_bend_moved_far_out_stays_inside_its_bound_and_slips_further_than_a_bar`).
-    /// That is a cost bound rather than a proof: nothing here says a bare cut
-    /// across a piece with two boundary chains could never meet a neighbour's
-    /// diagonal, only that no solid this kernel builds has shown one.
+    /// **That is a cost bound and not a proof.** Nothing here says a bare cut
+    /// across a piece bounded by more than one closed curve could never meet a
+    /// neighbour's diagonal — only that no solid the gate builds has shown one,
+    /// and that the ones that do reach this go on paying nothing for the
+    /// possibility.
     fn cut_in_two(
         &mut self,
         face: FaceView<'_>,
