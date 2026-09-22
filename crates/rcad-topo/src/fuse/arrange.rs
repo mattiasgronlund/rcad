@@ -3241,15 +3241,15 @@ fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) 
 /// the ball's centre dropped onto the plane. `None` for every other pair, and
 /// one of those starting at a pole is still refused where it was.
 ///
-/// **And not where the point across is the other pole.** That is a plane
+/// **Including where the point across is the other pole.** That is a plane
 /// exactly down the ball's polar axis, and cut there each half is a meridian
-/// from pole to pole, whose wire the mesher cannot walk round: the fuse then
-/// refuses `AWireWillNotLieFlatOnItsFace` out of its own mesh, one step later
-/// and less plainly than the named refusal it gives when the circle is left
-/// whole. `degenerate_curved_fuses`'
-/// `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name` holds that
-/// case, and cutting it anyway turned the first of its fuses, the union with
-/// the knife along `x = 0`, into that mesh refusal.
+/// from pole to pole, so each half of the ball's skin is a lune whose two
+/// corners are both poles. This used to return `None` there, because the
+/// mesher could not walk that wire and the fuse refused
+/// `AWireWillNotLieFlatOnItsFace` out of its own mesh; the walk now arrives
+/// back at the pole it set off from (§194.5), and `degenerate_curved_fuses`'
+/// `a_ball_cut_by_a_plane_down_its_polar_axis_is_answered` measures all three
+/// rules against both planes that hold the axis.
 ///
 /// # Its box
 ///
@@ -3283,7 +3283,6 @@ fn across_a_circle_that_starts_at_a_pole(
         "a ball and a plane built from finite numbers, crossing in a circle that starts at a \
          finite place, have a finite point across it"
     );
-    Surface::Sphere(*ball).the_way_its_first_coordinate_runs_at(across)?;
     let exact = PredicatePoint::from(across.coordinates());
     if side_of_surface(pair[0], exact) == Decision::Zero
         && side_of_surface(pair[1], exact) == Decision::Zero

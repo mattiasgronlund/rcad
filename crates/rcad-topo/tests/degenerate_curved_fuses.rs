@@ -1080,57 +1080,63 @@ fn a_ball_cut_off_its_polar_axis_keeps_the_cap_and_refuses_what_is_round_it() {
     }
 }
 
-/// A ball cut by a plane down its polar axis is refused by name, which is
-/// §38.3's fix of the panic §37.4 pinned here.
+/// A ball cut by a plane down its polar axis is answered under all three rules,
+/// by either of the two planes that hold the axis.
 ///
 /// §37.4 called `x = 0` "the plane the seam lies in". It is not — the seam lies
 /// in `y = 0` — and what the two planes have in common is the thing that
 /// matters: **both contain the ball's polar axis**, so the great circle each of
 /// them cuts runs through both poles, and the one corner the arrangement puts on
-/// that circle is a pole. A closed edge's two ends are one corner and say nothing
-/// about which way it runs; only the surface's own longitude does, and at a pole
-/// every longitude runs through the one point, so the vector the rule reads is
-/// exactly zero. Both faces along the edge then came back walking it the same
-/// way, and the arena asserted.
+/// that circle is a pole. A closed edge starting at a pole has no direction, so
+/// this was a panic (§37.4), then the refusal
+/// `AClosedEdgeOfTheAnswerWouldStartAtAPole` (§38.3).
 ///
-/// **A gap and not a limit** (§16.10), and the direction rule is not what makes
-/// it one. Given a direction the rule cannot derive, the same fuse goes two steps
-/// further and refuses `ACurvedFaceGoesRightRoundWithNoSeam` under `Union` and
-/// `Difference` and `CannotMeshAFace` under `Intersection`: the piece is half a
-/// ball bounded by one curve right round its skin with the poles *on* that curve
-/// rather than inside the piece, which no face of this kernel holds. §38.3
-/// records that run.
+/// §194.4 cuts such a circle a second time straight across from its start,
+/// which here is the other pole, so each half of the circle is a meridian from
+/// pole to pole and each half of the ball's skin is a lune half a turn wide,
+/// both of whose corners are poles. The mesher's walk round that wire set off
+/// from one pole and never arrived back at it, so it ended half a turn from
+/// where it began and was refused `AWireWillNotLieFlatOnItsFace` (§194.5).
+/// Every volume below is the closed form's, read through an inscribed mesh.
 #[test]
-fn a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name() {
+fn a_ball_cut_by_a_plane_down_its_polar_axis_is_answered() {
+    let half_a_ball = A_BIG_BALL / 2.0;
+    let the_knife = 12.0 * 12.0 * 12.0;
     for at in [Vector::new(0.0, -6.0, -6.0), Vector::new(-6.0, 0.0, -6.0)] {
-        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for (rule, closed_form) in [
+            (Rule::Union, the_knife + half_a_ball),
+            (Rule::Intersection, half_a_ball),
+            (Rule::Difference, half_a_ball),
+        ] {
             let mut model = a_model();
             let ball = model
                 .add_ball(4.0, &Isometry::identity())
                 .expect("a ball of radius four");
             let knife = block(&mut model, [12.0, 12.0, 12.0], at);
-            match refusal(
-                &mut model,
-                &Pair::of(ball, knife),
-                rule,
-                &Policy::certified(),
-            ) {
-                Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. } => (),
-                other => panic!("a cut down the polar axis refused with {other:?}"),
-            }
+            let answer = fused(&mut model, &Pair::of(ball, knife), rule);
+            assert_eq!(
+                answer.solids().len(),
+                1,
+                "the {rule:?} of a ball and a knife down its axis at {at:?} is one solid"
+            );
+            measures(
+                volume_of(&model, answer.solids()),
+                closed_form,
+                Side::Under,
+            );
         }
     }
 }
 
-/// The controls, and they are what say the refusal above is about the **polar
-/// axis** and not about cutting through the middle of a ball.
+/// The controls for the entry above, the same ball cut through the same centre
+/// by planes that do **not** hold its polar axis.
 ///
-/// `z = 0` cuts the same ball through the same centre and is answered: the great
-/// circle is the equator, which runs through no pole, so each half is a cap with
-/// a pole inside it and the mesher cuts it up to that pole. A plane through the
-/// centre leaning by 0.4 of a radian is answered for the same reason. Two
-/// answers either side of one incidence, with the same ball and the same knife
-/// moved, is what says the entry reaches its subject.
+/// `z = 0` is answered: the great circle is the equator, which runs through no
+/// pole, so each half is a cap with a pole inside it and the mesher cuts it up
+/// to that pole. A plane through the centre leaning by 0.4 of a radian is
+/// answered for the same reason. These went through the fuse by a different
+/// road from the polar-axis cut when that one was refused, and they still do:
+/// no circle here starts at a pole, so none is cut in two.
 #[test]
 fn a_ball_cut_through_its_middle_by_a_plane_off_its_polar_axis_is_answered() {
     let half_a_ball = 2.0 / 3.0 * PI * 64.0;
@@ -2078,7 +2084,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             pair: "a ball cut by a plane down its polar axis",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name",
+                test: "a_ball_cut_by_a_plane_down_its_polar_axis_is_answered",
             },
         },
         Entry {

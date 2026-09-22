@@ -1494,6 +1494,9 @@ impl BuildingAMesh {
                 }
             }
         }
+        if !the_walk_comes_back_up_the_edge_it_set_off_along(&steps) {
+            walk.arrive_back_at_the_pole_the_walk_set_off_from();
+        }
         walk.finish()
     }
 
@@ -2014,6 +2017,9 @@ struct WalkingAWire {
     /// leaves by. A pole is a whole side of the patch, so it needs a corner at
     /// each end of it, and only the first is known when the walk gets there.
     still_at_a_pole: Option<(u32, f64)>,
+    /// Whether the first corner is at a pole, so that the loop closes over a
+    /// pole side whose near end the walk only reaches when it ends.
+    set_off_at_a_pole: bool,
     corners: Vec<[f64; 2]>,
     points: Vec<u32>,
 }
@@ -2028,6 +2034,7 @@ impl WalkingAWire {
             will_not_lie_flat: false,
             crossing: None,
             still_at_a_pole: None,
+            set_off_at_a_pole: false,
             corners: Vec::new(),
             points: Vec::new(),
         }
@@ -2058,6 +2065,9 @@ impl WalkingAWire {
     fn arrive(&mut self, at: u32, sits_at: (f64, f64), is_a_pole: bool) {
         let (raw, up) = sits_at;
         if is_a_pole {
+            if self.corners.is_empty() {
+                self.set_off_at_a_pole = true;
+            }
             // Past a pole side whose far end is still open, this is that far
             // end, and its longitude is the next corner's: `leave_the_pole_at`
             // puts it there.
@@ -2281,6 +2291,57 @@ impl WalkingAWire {
             goes_right_round,
         })
     }
+
+    /// Cross the pole side the loop closes over, when the walk set off from a
+    /// corner at a pole and came back to it down a different meridian.
+    ///
+    /// **A lune between two meridians half a turn apart is the case that
+    /// needs it.** A plane down a ball's polar axis cuts it into two halves
+    /// whose wire is two half-meridians, both of whose corners are poles, so
+    /// the walk can only set off from one. The pole side the walk crosses in
+    /// the middle gets a corner at each end from [`WalkingAWire::arrive`]; the
+    /// one it set off from was never arrived at, so it had no near corner and
+    /// the walk ended half a turn from where it began, which the check in
+    /// [`WalkingAWire::finish`] refused (§194.5). This is that arrival: a
+    /// second corner at the same point, at the longitude the walk comes back
+    /// by, and the side crossed the way [`WalkingAWire::cross_the_pole`] reads
+    /// it, which brings the longitude back onto the first corner's for a loop
+    /// that lies flat and a whole turn off for one that does not.
+    ///
+    /// Nothing to do when the walk already stands on that pole, which is a
+    /// ball's own wire closing its last pole step, or when it came back down
+    /// the meridian it left by.
+    ///
+    /// **Not asked of a seam that turns back at the pole with no pole step
+    /// there.** That is a ball's wire with its last pole step taken away, and
+    /// read as a pole side it would be a whole turn and walk as a whole ball.
+    /// A pole side a whole turn wide is what a pole step is written for, so
+    /// the wire without one stays refused, as
+    /// `a_wire_that_will_not_lie_flat_is_refused_rather_than_asserted_against`
+    /// holds; the caller asks
+    /// [`the_walk_comes_back_up_the_edge_it_set_off_along`] first.
+    fn arrive_back_at_the_pole_the_walk_set_off_from(&mut self) {
+        let (Some(whole), Some(&first), Some(&last)) =
+            (self.wraps, self.corners.first(), self.corners.last())
+        else {
+            return;
+        };
+        if !self.set_off_at_a_pole
+            || self.crossing.is_some()
+            || self.still_at_a_pole.is_some()
+            || last[1] == first[1]
+            || self.longitude == first[0]
+        {
+            return;
+        }
+        self.corners.push([self.longitude, first[1]]);
+        self.points.push(self.points[0]);
+        let way = self.which_way_the_pole_side_runs().expect(
+            "the corner before the pole just written is off that pole's latitude, so it says \
+             which way the side runs",
+        );
+        self.longitude += way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole);
+    }
 }
 
 /// The two ends of an edge, in the order the edge is stored running rather than
@@ -2368,6 +2429,17 @@ fn a_seam_turns_back_at(steps: &[WireStepView<'_>], index: usize) -> bool {
     let before = edge_of(&steps[(index + steps.len() - 1) % steps.len()]);
     let after = edge_of(&steps[(index + 1) % steps.len()]);
     before.is_some() && before == after
+}
+
+/// Whether the walk's last step and its first run along one edge, so that the
+/// corner the loop closes on is a seam turning back.
+fn the_walk_comes_back_up_the_edge_it_set_off_along(steps: &[WireStepView<'_>]) -> bool {
+    match (steps.first(), steps.last()) {
+        (Some(WireStepView::Along(first)), Some(WireStepView::Along(last))) => {
+            first.edge().key() == last.edge().key()
+        }
+        _ => false,
+    }
 }
 
 /// How far a pole side between two different meridians runs, given how far
@@ -4094,6 +4166,41 @@ mod tests {
             vec![0, 1, 1, 2],
             "the pole is one point twice"
         );
+    }
+
+    /// Half a ball's skin cut down its polar axis is a lune half a turn wide
+    /// whose two corners are both poles, and the walk round it sets off from
+    /// one of them. It crosses the other pole in the middle and **arrives back
+    /// at the first at the end**, a corner at each end of both pole sides.
+    ///
+    /// Before §194.5 the walk stopped at the last point on the second meridian,
+    /// half a turn from the first corner, and `finish` refused it.
+    #[test]
+    fn a_walk_that_sets_off_from_a_pole_arrives_back_at_it_down_the_other_meridian() {
+        use core::f64::consts::{FRAC_PI_2, PI};
+        let whole = 2.0 * PI;
+        let mut walk = WalkingAWire::new(Some(whole), false);
+        walk.arrive(0, (0.0, FRAC_PI_2), true);
+        walk.arrive(1, (FRAC_PI_2, 0.0), false);
+        walk.arrive(2, (0.0, -FRAC_PI_2), true);
+        walk.turn_at_a_corner_on_a_pole();
+        walk.arrive(3, (-FRAC_PI_2, 0.0), false);
+        walk.arrive_back_at_the_pole_the_walk_set_off_from();
+
+        let walked = walk.finish().expect("a lune half a turn wide lies flat");
+        let three_quarters = 3.0 * FRAC_PI_2;
+        assert_eq!(
+            walked.corners,
+            vec![
+                [FRAC_PI_2, FRAC_PI_2],
+                [FRAC_PI_2, 0.0],
+                [FRAC_PI_2, -FRAC_PI_2],
+                [three_quarters, -FRAC_PI_2],
+                [three_quarters, 0.0],
+                [three_quarters, FRAC_PI_2],
+            ]
+        );
+        assert_eq!(walked.points, vec![0, 1, 2, 2, 3, 0], "each pole twice");
     }
 
     /// A walk that ends at a pole leaves it by the longitude it set off from,
