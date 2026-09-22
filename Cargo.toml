@@ -45,6 +45,14 @@ many_single_char_names = "allow"
 [profile.bench]
 debug = true
 
+# Full debug info more than doubled every test binary, and a worktree links
+# about two hundred of them that kache cannot share, because it caches compiled
+# crates and not links. Line tables are what a backtrace needs for file and line; variable
+# and type info for a debugger is `CARGO_PROFILE_DEV_DEBUG=true` away when
+# wanted. `profile.test` inherits this. docs/decisions.md §203.
+[profile.dev]
+debug = "line-tables-only"
+
 # One draw of the band family marches a nearly-tangent quartic loop in 18 365
 # points, and unoptimised that single test is 90 of the suite's 99 seconds.
 # Splitting its draws was tried and measured and buys nothing, because the cost is
