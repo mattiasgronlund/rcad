@@ -2314,7 +2314,8 @@ impl WalkingAWire {
                     let climbed = self.longitude - first[0]
                         + the_short_way_round(first[0] - self.longitude, whole);
                     climbed.abs() >= whole / 2.0
-                });        Some(WalkedLoop {
+                });
+        Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
             closes_on_one_curve: self.closes_on_one_curve,
