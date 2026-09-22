@@ -1412,7 +1412,9 @@ impl BuildingAMesh {
     /// first-longitude rule is what carries that one.
     ///
     /// **A point walked along an edge that stands at a pole is a pole too**,
-    /// and its side is opened the way a corner's is. A plane through a ball's
+    /// and its side is opened the way a corner's is. So is a point or a corner
+    /// within one rounding of a pole in space, whatever `atan2` reads its
+    /// latitude as ([`the_pole_a_point_sits_within_a_rounding_of`]). A plane through a ball's
     /// axis cuts it in a circle through both poles, and an edge with its one
     /// corner off them passes both in its middle; taking each the short way
     /// round is a coin toss at exactly half a turn (§192.1). A walk that would
@@ -1426,12 +1428,12 @@ impl BuildingAMesh {
     ) -> Option<WalkedLoop> {
         let back = the_frame_this_face_is_meshed_in(face);
         let poles = poles_of(wire);
+        let sits_at_a_pole = |at: Point| {
+            the_surface_pinches_at(stored, stored.coordinates_of(at).1)
+                || the_pole_a_point_sits_within_a_rounding_of(stored, at).is_some()
+        };
         let at_a_pole = |vertex: &VertexView<'_>| {
-            poles.contains(&vertex.key())
-                || the_surface_pinches_at(
-                    stored,
-                    stored.coordinates_of(back.apply_to_point(vertex.point())).1,
-                )
+            poles.contains(&vertex.key()) || sits_at_a_pole(back.apply_to_point(vertex.point()))
         };
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
@@ -1479,7 +1481,7 @@ impl BuildingAMesh {
                         };
                         let where_it_is = back.apply_to_point(self.points[at as usize]);
                         let sits_at = stored.coordinates_of(where_it_is);
-                        let passes_a_pole = the_surface_pinches_at(stored, sits_at.1);
+                        let passes_a_pole = sits_at_a_pole(where_it_is);
                         walk.arrive(at, sits_at, passes_a_pole);
                         if passes_a_pole {
                             walk.turn_at_a_corner_on_a_pole();
@@ -1695,9 +1697,21 @@ fn runs_up(around: &WalkedLoop, whole: f64) -> bool {
 ///
 /// The closing step from the last corner to the first is part of it, because a
 /// loop that goes right round is stored as one turn's worth of corners with the
-/// last step left implicit. No single step can be more than a quarter turn —
-/// [`how_many_steps`] will not walk further than that — so taking each step the
-/// short way round is taking it the way it actually went.
+/// last step left implicit.
+///
+/// **Taking each step the short way round is only right while no step swings
+/// the longitude half a turn, and two kinds do.** [`how_many_steps`] keeps the
+/// angle a step sweeps on the surface under a quarter turn, but that is not
+/// its longitude: a step that passes close by a pole swings the longitude by
+/// nearly half a turn over no distance at all. And a pole side runs as far as
+/// the two meridians either end of it are apart, which is half a turn for a
+/// circle through both poles. At exactly half a turn the short way is a coin
+/// toss on the last bit, which is why [`WalkingAWire::finish`] reads its own
+/// longitude instead of calling this. Only [`runs_up`] still does, and only of
+/// a loop that goes right round: a ring on a pipe, which has no pole, or a cap
+/// on a ball. **A cap whose rim runs through the other pole is still a coin
+/// toss here** — a smooth curve through a pole leaves it up the meridian half
+/// a turn from the one it came down — and it is not fixed yet.
 fn how_far_the_longitude_climbed(corners: &[[f64; 2]], whole: f64) -> f64 {
     let mut climbed = 0.0;
     for step in 0..corners.len() {
@@ -2280,11 +2294,27 @@ impl WalkingAWire {
         // pole to fan up to, and it either found none (refused
         // `ACurvedFaceGoesRightRoundWithNoSeam`) or found the wrong one and
         // handed the triangulator a boundary that crosses itself.
+        //
+        // **It is measured on the walk's own longitude, and not by summing the
+        // corners the short way round.** A pole side runs as far as
+        // `cross_the_pole` said, and between two meridians half a turn apart
+        // that is a half turn, which the short way reads as a coin toss decided
+        // by the last bit of each meridian. A hemisphere bounded by a circle
+        // through both poles crosses two such sides, one each way: read the
+        // short way, `π` from `−1.8925468811915387` to `1.2490457723982544`
+        // came out `−π` and the `−3.1415926535897927` back stayed `−π`, so the
+        // lune was called a cap wound right round and refused as one with no
+        // seam. Only the closing step is left to the short way, and it is an
+        // ordinary step of the walk.
         let goes_right_round = self.closes_on_one_curve
-            && self.wraps.is_some_and(|whole| {
-                how_far_the_longitude_climbed(&self.corners, whole).abs() >= whole / 2.0
-            });
-        Some(WalkedLoop {
+            && self
+                .wraps
+                .zip(self.corners.first())
+                .is_some_and(|(whole, first)| {
+                    let climbed = self.longitude - first[0]
+                        + the_short_way_round(first[0] - self.longitude, whole);
+                    climbed.abs() >= whole / 2.0
+                });        Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
             closes_on_one_curve: self.closes_on_one_curve,
@@ -2437,7 +2467,14 @@ fn a_seam_turns_back_at(steps: &[WireStepView<'_>], index: usize) -> bool {
 
 /// Whether the walk's last step and its first run along one edge, so that the
 /// corner the loop closes on is a seam turning back.
+///
+/// **A wire of one step is not one**: it is a closed edge, walked once, whose
+/// one corner is where it set off and where it ends. When that corner sits at
+/// a pole the loop closes over a pole side like any other.
 fn the_walk_comes_back_up_the_edge_it_set_off_along(steps: &[WireStepView<'_>]) -> bool {
+    if steps.len() == 1 {
+        return false;
+    }
     match (steps.first(), steps.last()) {
         (Some(WireStepView::Along(first)), Some(WireStepView::Along(last))) => {
             first.edge().key() == last.edge().key()
@@ -2682,9 +2719,12 @@ fn the_way_a_closed_edge_where_its_faces_touch_runs(
 ///
 /// The crossing is the whole closed curve, so a pole is on it exactly when
 /// both surfaces hold the pole — two certified predicates and no distance
-/// compared with anything. A pole whose coordinates round off the ball, or
-/// whose sides cannot be decided, is left out, and the walk then goes on as
-/// it did before this existed: [`WalkingAWire::finish`] checks it.
+/// compared with anything. A circle between a ball and a plane that misses
+/// the pole by one rounding or less is given it too, and the miss is charged —
+/// see [`how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it`].
+/// Any other pole whose coordinates round off the ball, or whose sides cannot
+/// be decided, is left out, and the walk then goes on as it did before this
+/// existed: [`WalkingAWire::finish`] checks it.
 fn put_in_the_poles_a_closed_crossing_passes(
     points: &mut Vec<Point>,
     ends: [Point; 2],
@@ -2711,8 +2751,9 @@ fn put_in_the_poles_a_closed_crossing_passes(
 }
 
 /// Put `pole` among `points`, between the two it lies between, when both
-/// surfaces certainly hold it; `None` when they do not, and otherwise how far
-/// a walked point was moved.
+/// surfaces certainly hold it or the crossing passes within one rounding of
+/// it; `None` when neither, and otherwise how far the mesh was moved to put it
+/// there.
 ///
 /// **Between which two is read off the crossing's own direction at the
 /// pole.** The plane square to `∇S × ∇T` through the pole cuts a closed
@@ -2722,11 +2763,14 @@ fn put_in_the_poles_a_closed_crossing_passes(
 /// the curve's width, so which is smaller is not close.
 ///
 /// **A walked point that already reads as this pole is moved onto it** rather
-/// than given a twin beside it. That is [`the_surface_pinches_at`]'s own
-/// equality on the latitude, so nothing is called the pole here that the wire
-/// walk would not already call the pole; a twin would open the pole side
-/// twice. A corner that reads as the pole is left alone, since the wire walk
-/// already turns there.
+/// than given a twin beside it. That is what the wire walk calls a pole —
+/// [`the_surface_pinches_at`]'s equality on the latitude, or one rounding in
+/// space ([`the_pole_a_point_sits_within_a_rounding_of`]) — so nothing is
+/// called the pole here that the wire walk would not already call the pole; a
+/// twin would open the pole side twice. A corner that reads as the pole is left
+/// alone, since the wire walk already turns there, and a twin beside it would
+/// be one rounding away, which the flat face across the edge reads as the same
+/// corner.
 fn put_in_a_pole(
     points: &mut Vec<Point>,
     ends: [Point; 2],
@@ -2742,10 +2786,15 @@ fn put_in_a_pole(
         Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
         _ => false,
     };
-    if !holds_it(ball) || !holds_it(other) {
-        return None;
-    }
-    let reads_as_this_pole = |at: Point| ball.coordinates_of(at).1 == latitude;
+    let reads_as_this_pole = |at: Point| {
+        ball.coordinates_of(at).1 == latitude
+            || the_pole_a_point_sits_within_a_rounding_of(ball, at) == Some(latitude)
+    };
+    let missed_by = if holds_it(ball) && holds_it(other) {
+        0.0
+    } else {
+        how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it([ball, other], pole)?
+    };
     if ends.into_iter().any(reads_as_this_pole) {
         return None;
     }
@@ -2772,11 +2821,92 @@ fn put_in_a_pole(
         if reads_as_this_pole(points[beside]) {
             let far = (points[beside] - pole).length();
             points[beside] = pole;
-            return Some(far);
+            return Some(far.max(missed_by));
         }
     }
     points.insert(gap, pole);
-    Some(0.0)
+    Some(missed_by)
+}
+
+/// How far a circle a ball and a plane cross in passes from `pole`, when the
+/// point of it nearest the pole is within one rounding of the pole; `None`
+/// when it is not, or when the pair is not a ball and a plane.
+///
+/// **A plane meant to hold the ball's axis almost never does.** Its stored
+/// normal and offset are rounded turns of whole numbers, so the exact circle
+/// misses both poles by about `1e-17` and neither is certified on it. Left
+/// out, the walk steps past each pole in about half a turn of longitude, and
+/// whether that is `+π` or `−π` is decided by which side of the pole the
+/// rounding put the circle: the ball and block of side four turned a quarter
+/// turn about `(−1, −3, 0)` came back wound right round and was refused as a
+/// face with no seam; about `(1, 3, 0)` too; and about `(3, −2, 0)` one pole
+/// read as on the circle by `atan2`'s equality and the other, four times as far
+/// off, did not, so the half ball came out a cap round one pole with its rim
+/// through the other and was cut up to the wrong pole.
+///
+/// So the rule is one rounding and not `atan2`'s equality, the same
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of the largest coordinate the fuse
+/// allows a point along a crossing, and it takes both poles of that family in.
+/// Both halves of the ball are then lunes the walk reads the same way whichever
+/// side of each pole the rounding fell. Putting the pole in moves the mesh how
+/// far the pole is from the circle, which is charged, plus the rounding of the
+/// nearest point itself.
+fn how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it(
+    [ball, other]: [&Surface; 2],
+    pole: Point,
+) -> Option<f64> {
+    let (Surface::Sphere(sphere), Surface::Plane(flat)) = (ball, other) else {
+        return None;
+    };
+    let centre = flat.project(sphere.centre());
+    let down = sphere.centre() - centre;
+    let across = (sphere.radius() * sphere.radius() - down.dot(down)).sqrt();
+    let towards = flat.project(pole) - centre;
+    let length = towards.length();
+    // A plane square to the axis cuts a line of latitude, which has no one
+    // point nearest the pole, and a circle too small to square-root is no
+    // circle.
+    if length == 0.0 || !across.is_finite() {
+        return None;
+    }
+    let nearest = centre + towards * (across / length);
+    let rounding = one_rounding_among([nearest, pole, sphere.centre()]);
+    let missed_by = (nearest - pole).length();
+    (missed_by <= rounding).then_some(missed_by + rounding)
+}
+
+/// The latitude of the pole of a ball that `at` sits within one rounding of,
+/// or `None` when it sits near neither or the surface is not a ball.
+///
+/// **A corner can be that close to a pole and still read a longitude of its
+/// own.** A plane through a ball's axis turned a quarter turn about `y` starts
+/// its circle `4.4e-16` off the south pole, where `atan2` reads the latitude
+/// one ulp short of `−π/2` and the longitude as a clean `0`. Walked as an
+/// ordinary corner, the circle swings half a turn round the pole through it,
+/// and which way is the side of the pole the rounding put it on. Walked as a
+/// pole, the swing is a pole side and runs the way the face lies. The pole
+/// cannot be put in beside it instead: the two are one rounding apart and the
+/// flat face across the edge reads them as one corner.
+fn the_pole_a_point_sits_within_a_rounding_of(stored: &Surface, at: Point) -> Option<f64> {
+    let Surface::Sphere(sphere) = stored else {
+        return None;
+    };
+    let pinch = where_this_surface_pinches(stored).expect("a ball pinches at its poles");
+    [1.0, -1.0].into_iter().find_map(|up| {
+        let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
+        ((at - pole).length() <= one_rounding_among([at, pole, sphere.centre()]))
+            .then_some(up * pinch)
+    })
+}
+
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of the largest coordinate of `points`,
+/// and of one.
+fn one_rounding_among(points: [Point; 3]) -> f64 {
+    POINT_ALONG_A_CROSSING_ROUNDOFF
+        * points
+            .map(|point| point.largest_coordinate_magnitude())
+            .into_iter()
+            .fold(1.0, f64::max)
 }
 
 /// Which of the two surfaces either side of a closed edge says which way it

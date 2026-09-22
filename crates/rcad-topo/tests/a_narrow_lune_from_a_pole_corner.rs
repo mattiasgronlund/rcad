@@ -238,13 +238,23 @@ fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_refused_by_name() {
 ///
 /// This is the first cut of every wedge above, so it is pinned here case by
 /// case: whether it answers depends on the angle **and** the size. Where it
-/// answers it is one solid, valid, and measures as half the ball — except at
-/// 135 degrees and radius 1, where the answer passes `Model::validate` and the
-/// mesher then refuses to measure it.
+/// answers it is one solid, valid, and measures as half the ball.
+///
+/// **Every one answers now, and both lists are empty.** 135 degrees at radius 1
+/// was the one answer the mesher refused, as a face going right round with no
+/// seam: the rim's two pole sides are half a turn each, and summed the short
+/// way round a half turn is a coin toss. It measures since
+/// `WalkingAWire::finish` decides "right round" from the walk's own longitude.
+/// The fuse refused 45 degrees at radii 1, 3 and 1000 and 170 degrees at radius
+/// 1, the same way, from the coarse mesh it checks with: there the knife's
+/// stored plane misses both poles by a rounding on the same side, so the kept
+/// half held both and could not be meshed (§197.3). The mesher now puts a pole
+/// in wherever the circle passes within one rounding of it, so both halves are
+/// lunes. The lists stay, so the next refusal has somewhere to be pinned.
 #[test]
 fn a_ball_cut_down_its_polar_axis_off_its_seam_is_answered_or_refused_by_name() {
-    let refused_by_the_fuse = [(45.0, 1.0), (45.0, 1000.0), (45.0, 3.0), (170.0, 1.0)];
-    let refused_by_the_mesher = [(135.0, 1.0)];
+    let refused_by_the_fuse: [(f64, f64); 0] = [];
+    let refused_by_the_mesher: [(f64, f64); 0] = [];
     for turn in [10.0, 45.0, 90.0, 135.0, 170.0] {
         for radius in RADII {
             let mut model = a_model(radius);
