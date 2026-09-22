@@ -54,9 +54,9 @@
 //! > more steeply than the cone's own half-angle** — or when the two do not
 //! > reach each other at all, and nothing has to be cut.
 //!
-//! The second half is not a hedge, it is what the block family measured. Its six
-//! answers are all the one draw whose block misses the frustum, and
-//! `what_the_six_answered_block_fuses_actually_say.rs` is that turned into
+//! The second half is not a hedge, it is what the block family measured. Every
+//! one of its answers comes from a draw whose block misses the frustum, and
+//! `what_the_answered_block_fuses_actually_say.rs` is that turned into
 //! assertions. Without it the sentence above reads as *"a block never fuses with
 //! a cone"*, which the rate below contradicts.
 //!
@@ -331,35 +331,41 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 ///   curve"*. Naming and drawing a hyperbola were the whole of the geometry's
 ///   part; **ordering points along one is the arrangement's**.
 ///
-/// **It has since happened a second time, and the rate did not move at all.**
-/// `arrange`'s `HowItRuns::AlongABend` orders points along a hyperbola now, and
-/// this family still answers 6 of 96 — the same six, the draw whose block misses
-/// the frustum. What changed is all 90 names, and they no longer share one:
-/// `select.rs`'s *a point inside a piece of a face* 60, a corner too far out for
-/// the triangulator 14, a face whose boundary crosses itself 7, and four faces
+/// **It has since happened a second time, and that time the rate did not move at
+/// all.** `arrange`'s `HowItRuns::AlongABend` orders points along a hyperbola now,
+/// and this family still answered 6 of 96 — the same six, the draw whose block
+/// misses the frustum. What changed is all 90 names, and they no longer share
+/// one: `select.rs`'s *a point inside a piece of a face* 60, a corner too far out
+/// for the triangulator 14, a face whose boundary crosses itself 7, and four faces
 /// along one edge 9.
 /// [`what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`]
 /// is that breakdown pinned rather than printed, which is what §15.10 asks of a
 /// rate that stayed still while everything under it moved.
 ///
+/// **A third time, and this time it moved: 15 of 96.** §206's bulge count in
+/// `select.rs` decides cap pieces that used to stop it, and nine more fuses come
+/// back `Ok`. None of the nine is a cut: all nine are of pairs at
+/// `slope · far = 1`, which are disjoint, and they hand an input straight back.
+///
 /// So the assertion here stays a **floor at what has been measured**, in the
 /// shape §19.1 asks for: this family may not answer fewer than it does today.
 /// Re-derive it when it moves; do not relax it.
 ///
-/// # The six are not six cuts, and a count could not say so
+/// # The answers are not cuts, and a count could not say so
 ///
 /// `answered` counts fuses that came back `Ok`. It says nothing about what is in
-/// them, and here the difference matters: **all six answers are one draw of the
-/// sixteen, the one whose block misses the frustum altogether.** The block starts
-/// at `x = 1` and the frustum is never wider than `slope · far`, so they are
-/// disjoint exactly when `slope · far < 1`, and one row of this grid lands there.
+/// them, and here the difference matters: **every answer comes from a draw whose
+/// block misses the frustum altogether.** The block's low corner is at `(1, 1, ·)`
+/// and it only runs further out, so no point of it is nearer the axis than `√2`;
+/// the frustum is never wider than `slope · far`. So `slope · far < √2` makes
+/// them disjoint, and five rows of this grid land there.
 ///
-/// No block in this family has ever taken a piece out of a frustum. What the six
-/// are is the six ways of asking about two solids that do not meet, and every one
+/// No block in this family has ever taken a piece out of a frustum. What the
+/// answers are is ways of asking about two solids that do not meet, and every one
 /// of them hands an input straight back.
 ///
-/// `what_the_six_answered_block_fuses_actually_say.rs` is that finding turned
-/// into assertions: which six, that each is a sound model, that each is the right
+/// `what_the_answered_block_fuses_actually_say.rs` is that finding turned into
+/// assertions: which ones, that each is a sound model, that each is the right
 /// size against a closed form and `measure`'s own bound, that each holds the same
 /// grid of points as the input it must return, and that union and intersection
 /// give the same answer whichever way round they are asked.
@@ -440,11 +446,11 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                 family.named()
             ),
             Family::AFrustumAgainstABlock => assert!(
-                answered >= 6,
-                "{}: this family was measured at 6 answered of 96 the day the hyperbola landed, \
-                 and it answered {answered} of {fuses} here. A cone that could be cut yesterday \
-                 and cannot today is a regression, not a rate: re-derive this number rather than \
-                 relax it (§19.1)",
+                answered >= 15,
+                "{}: this family was measured at 6 answered of 96 the day the hyperbola landed \
+                 and at 15 the day §206's bulge count landed, and it answered {answered} of \
+                 {fuses} here. A cone that could be cut yesterday and cannot today is a \
+                 regression, not a rate: re-derive this number rather than relax it (§19.1)",
                 family.named()
             ),
         }
@@ -1001,31 +1007,36 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
     );
 }
 
-/// What the block family's 90 refusals are, now that none of them is the
+/// What the block family's 81 refusals are, now that none of them is the
 /// ordering.
 ///
-/// §15.10: a rate that moves is published with the list of what moved. **The
-/// rate did not move** — this family answered 6 of 96 before the bend and
-/// answers 6 of 96 after — and every one of the 90 refusals changed its name, so
-/// the list is what there is to publish. Before, all 90 were *"nothing can put
-/// points in order along this curve"*. After, they are four different walls, and
-/// a count on its own could not have said that.
+/// §15.10: a rate that moves is published with the list of what moved. It has
+/// moved twice. First the bend landed and the rate stood still — 6 of 96 either
+/// side — while all 90 refusals changed their name from *"nothing can put points
+/// in order along this curve"* to four different walls. Then §206's bulge count
+/// landed and the rate moved to 15 of 96, and the four walls moved under it.
 ///
 /// The four, measured over this family's own draws rather than taken from
-/// anywhere:
+/// anywhere, with what §206 did to each:
 ///
-/// - **a point inside a piece of a face**, 60. `select.rs` could not say whether
-///   a piece it had cut was in or out. The same wall
-///   `ordering_points_along_an_endless_bend.rs` finds behind all thirty-one of
-///   its grid's refusals.
-/// - **a corner too far out for the triangulator**, 14. A face went to be cut
-///   into triangles and a corner of it was outside the range the triangulator
-///   takes.
-/// - **a face whose boundary crosses itself**, 7. The same step, refusing for
-///   the other of its two reasons.
-/// - **four faces along one edge**, 9. The answer is not something a `Model` can
-///   hold, which is §17.7's catalogued case and not an arithmetic refusal at
-///   all.
+/// - **a point inside a piece of a face**, 60 → **30**. `select.rs` could not say
+///   whether a piece it had cut was in or out. Halved by §206 teaching
+///   `in_the_bulge_of` to count the bulge of a cone whose crossing with the
+///   piece's plane is a circle.
+/// - **four faces along one edge**, 9 → **24**. The answer is not something a
+///   `Model` can hold, which is §17.7's catalogued case and not an arithmetic
+///   refusal at all. It *rose*, and the rise is not a regression: fuses that used
+///   to stop at the wall above now get far enough to reach this one. What they
+///   reach is the edge-naming gap `in_the_bulge_of`'s own doc names —
+///   `assemble`'s `which_arc_of_a_circle_this_is` reads a ball-and-plane circle
+///   only, so two arcs of a cone's rim circle between the same corners are named
+///   as one edge. §206.4 holds it.
+/// - **a corner too far out for the triangulator**, 14 → **18**. A face went to
+///   be cut into triangles and a corner of it was outside the range the
+///   triangulator takes. Same cause as the rise above: more fuses reach the
+///   triangulator at all.
+/// - **a face whose boundary crosses itself**, 7 → **9**. The same step, refusing
+///   for the other of its two reasons, and the same cause again.
 ///
 /// Matched on what each message *is about* rather than on the whole string,
 /// because two of them carry the number of the corner they stopped at and that
@@ -1046,10 +1057,10 @@ fn what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering()
     assert_eq!(
         walls,
         BTreeMap::from([
-            ("a point inside a piece of a face", 60),
-            ("a corner too far out for the triangulator", 14),
-            ("a face whose boundary crosses itself", 7),
-            ("four faces along one edge", 9),
+            ("a point inside a piece of a face", 30),
+            ("a corner too far out for the triangulator", 18),
+            ("a face whose boundary crosses itself", 9),
+            ("four faces along one edge", 24),
         ]),
         "these are the four walls this family was measured against; re-derive them \
          when they move rather than widening the test (§19.1)"

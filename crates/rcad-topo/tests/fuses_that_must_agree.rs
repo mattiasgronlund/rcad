@@ -337,14 +337,20 @@ const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 /// An exact count rather than a floor, because
 /// [`every_frustum_on_the_wider_grid_answers_the_same_whichever_side_comes_first`]
 /// walks a grid that is written out and not drawn, so this is the same number
-/// every run on every machine. Measured: 168 comparisons meant, **106 made**,
-/// out of 336 fuses of which 124 refused — every one of the 124 naming
-/// `select.rs`'s *a point inside a piece of a face*, and none of them coming
-/// back as something a `Model` cannot hold.
+/// every run on every machine. Measured: 168 comparisons meant, **110 made**, out
+/// of 336 fuses of which 108 refused — every one of the 108 naming `select.rs`'s
+/// *a point inside a piece of a face* — and 8 came back as something a `Model`
+/// cannot hold.
+///
+/// It was 106 made, 124 refused and none unholdable until §206's bulge count.
+/// Every comparison that ran still agreed, either side of that: what moved is how
+/// many pairs had both halves to compare. The 8 are the same edge-naming gap
+/// §206.4 holds — two arcs of a cone's rim circle between one pair of corners
+/// named as one edge — surfacing here because more fuses now get that far.
 ///
 /// A drop here is a fuse that stopped answering, which is a regression and not a
 /// draw. Re-derive it when it moves; do not relax it to a floor (§19.1).
-const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 106;
+const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 110;
 
 /// How many of the comparisons a law over a bar leaning through a block has to
 /// have made (§191).

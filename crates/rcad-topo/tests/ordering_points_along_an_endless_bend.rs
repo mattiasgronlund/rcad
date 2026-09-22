@@ -32,6 +32,8 @@
 mod cones;
 mod pairs;
 
+use std::collections::BTreeMap;
+
 use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
@@ -131,10 +133,18 @@ fn not_one_block_on_the_grid_is_refused_for_want_of_an_order_along_its_curve() {
 /// face can still be sorted out around afterwards.
 ///
 /// **Not eighty-four of eighty-four**, which §50.5 named as this lane's bar. The
-/// bar is not met and the reason is not the ordering: every one of the
-/// thirty-one refusals is `fuse/select.rs`'s *a point inside a piece of a face*,
-/// which §49.6 lists as its own open row and which no work on `arrange.rs`
-/// reaches.
+/// bar is not met and the reason is still not the ordering. It used to be one
+/// thing — all thirty-one were `fuse/select.rs`'s *a point inside a piece of a
+/// face*, which §49.6 lists as its own open row and which no work on `arrange.rs`
+/// reaches. Since §206 it is two: **27** of that, and **4** of *an edge would
+/// have 4 faces along it*.
+///
+/// The four are not a regression. §206's bulge count carries those four past
+/// `select.rs` and into `assemble`'s edge naming, where
+/// `which_arc_of_a_circle_this_is` reads a ball-and-plane circle only and so
+/// calls two arcs of a cone's rim circle one edge. The count answered is
+/// unchanged at fifty-three either side, which is what says the move is a
+/// refusal changing its name rather than an answer being lost. §206.4.
 #[test]
 fn fifty_three_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
     let mut answered = 0;
@@ -153,11 +163,22 @@ fn fifty_three_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
         the_grid().len(),
         elsewhere.len()
     );
-    assert!(
-        elsewhere
-            .iter()
-            .all(|named| named == "a point inside a piece of a face"),
-        "the refusals that are left are supposed to be one thing: {elsewhere:#?}"
+    let mut walls: BTreeMap<&str, usize> = BTreeMap::new();
+    for named in &elsewhere {
+        *walls.entry(named.as_str()).or_default() += 1;
+    }
+    println!("and the walls they gave up at are {walls:?}");
+    assert_eq!(
+        walls,
+        BTreeMap::from([
+            ("a point inside a piece of a face", 27),
+            (
+                "the result would not be a solid: an edge would have 4 faces along it",
+                4
+            ),
+        ]),
+        "these are the two walls the grid's refusals were measured against; re-derive them when \
+         they move rather than widening the test (§19.1)"
     );
     assert_eq!(
         answered, 53,

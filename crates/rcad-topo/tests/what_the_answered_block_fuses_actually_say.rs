@@ -1,30 +1,43 @@
-//! What the six answers in `a frustum against a block` actually are.
+//! What the answers in `a frustum against a block` actually are.
 //!
-//! `how_often_a_fuse_with_a_cone_refuses.rs` pins that family at **6 answered of
-//! 96** and re-derives that floor every run. A count is not a check: six fuses
-//! returning `Ok` says six models came back, and says nothing at all about what
-//! is in them. §4.1 ranks a wrong answer below a refusal, so the count on its own
-//! was pinning the cheapest half of the claim.
+//! `how_often_a_fuse_with_a_cone_refuses.rs` pins that family's answered count and
+//! re-derives that floor every run. A count is not a check: a fuse returning `Ok`
+//! says a model came back, and says nothing at all about what is in it. §4.1 ranks
+//! a wrong answer below a refusal, so the count on its own was pinning the
+//! cheapest half of the claim.
 //!
-//! # The six are one draw, and it is the draw where nothing touches
+//! # Every answer is a draw where nothing touches
 //!
 //! The family draws 16 rows and asks six fuses of each — union, intersection and
-//! difference, both ways round. **All six answers come from one row**, and that
-//! row is the one where the block misses the frustum altogether.
+//! difference, both ways round. **All 15 answers come from rows where the block
+//! misses the frustum altogether.**
 //!
-//! The block is always put down with its low corner at `x = 1`, and the frustum
-//! is always about the `z` axis and never wider than `slope · far`. So the two
-//! are disjoint exactly when `slope · far < 1`, which over this grid — slope one
-//! of `1/8`, `1/4`, `1/2`, and `far` a whole number from 6 to 12 — happens for
-//! `slope · far ∈ {0.75, 0.875}` and nothing else. One row of the sixteen lands
-//! there: `slope = 1/8`, `near = 4`, `far = 6`.
+//! How far apart they are takes one comparison. The block is put down with its
+//! low corner at `(1, 1, near + 1)` and only ever runs further out in `x` and `y`,
+//! so every point of it is at least `√2` from the `z` axis. The frustum is about
+//! that axis with its apex at the origin and is never further out than
+//! `slope · far`. So `slope · far < √2` makes them disjoint, and no `z` reasoning
+//! is needed at all.
+//!
+//! Over this grid — slope one of `1/8`, `1/4`, `1/2`, and `far` a whole number
+//! from 6 to 12 — that is `slope = 1/8` with `far ≤ 11`, and five of the sixteen
+//! rows land there. One answers all six of its fuses; three answer both
+//! intersections and `block \ frustum`; the fifth answers none.
+//!
+//! **An earlier version of this file said `slope · far < 1`, and called it
+//! exact.** It is sound but not exact: it compares the block's nearest `x` against
+//! the frustum's widest radius and never looks at `y`, so the three rows at
+//! `slope · far = 1` are disjoint for a reason it cannot see. When they began to
+//! answer, the test below read them as a block reaching into a frustum and said so
+//! in as many words. They are nothing of the kind, and the count that would have
+//! been re-pinned would have recorded the opposite of what happened.
 //!
 //! So the honest sentence about that family is **not** "a block can now take a
 //! piece out of a frustum". It is:
 //!
-//! > No block in this family has ever taken a piece out of a frustum. The six
-//! > fuses that answer are the six ways of asking about a block and a frustum
-//! > that do not meet, and every one of them hands back an input untouched.
+//! > No block in this family has ever taken a piece out of a frustum. The fuses
+//! > that answer are ways of asking about a block and a frustum that do not meet,
+//! > and every one of them hands back an input untouched.
 //!
 //! That is still worth having — a fuse that cannot even tell two disjoint solids
 //! apart would be worse — and it is worth having *pinned*, because "answered" and
@@ -94,11 +107,17 @@ impl Row {
 
     /// Whether the block clears the frustum without touching it.
     ///
-    /// The frustum is about the `z` axis and is never further out than
-    /// `slope · far`; the block starts at `x = 1` and only goes further out. So
-    /// one comparison settles it, and no `z` reasoning is needed at all.
+    /// The block's low corner is at `(1, 1, near + 1)` and it only runs further
+    /// out in both `x` and `y`, so every point of it is at least `√2` from the
+    /// `z` axis. The frustum is about that axis and is never further out than
+    /// `slope · far`. So one comparison settles it, and no `z` reasoning is
+    /// needed at all.
+    ///
+    /// Comparing against `1` instead — the block's nearest `x` — is sound and is
+    /// what this used to do, but it ignores `y` and so misses the three rows at
+    /// `slope · far = 1`, which are disjoint too.
     fn the_block_misses_the_frustum(self) -> bool {
-        self.slope * self.far < 1.0
+        self.slope * self.far < core::f64::consts::SQRT_2
     }
 }
 
@@ -146,7 +165,7 @@ fn a_pair(row: Row) -> (Model, SolidKey, SolidKey) {
 /// **Every fuse of this family that answers is one where the block never reaches
 /// the frustum.**
 ///
-/// The load-bearing half of the `6 answered of 96` pin. What that number counts
+/// The load-bearing half of the `15 answered of 96` pin. What that number counts
 /// is fuses that returned `Ok`; what this asserts is that none of them cut
 /// anything, which is a claim about the answers and not about the count.
 ///
@@ -160,7 +179,7 @@ fn a_pair(row: Row) -> (Model, SolidKey, SolidKey) {
 /// account for the same material as its two inputs. What may not happen is a
 /// meeting pair answering *without* being checked.
 #[test]
-fn the_six_block_and_frustum_fuses_that_answer_are_six_ways_of_missing() {
+fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
     let policy = Policy::certified();
     let rows = the_rows_this_family_draws();
     let clear: Vec<Row> = rows
@@ -175,9 +194,9 @@ fn the_six_block_and_frustum_fuses_that_answer_are_six_ways_of_missing() {
     );
     assert_eq!(
         clear.len(),
-        1,
-        "this family is meant to draw exactly one row whose block clears the frustum, and it \
-         drew {clear:?} — re-derive what the six answers are before trusting anything below"
+        5,
+        "this family is meant to draw five rows whose blocks clear the frustum, and it drew \
+         {clear:?} — re-derive which fuses answer before trusting anything below"
     );
 
     let mut answered_missing = 0;
@@ -234,15 +253,18 @@ fn the_six_block_and_frustum_fuses_that_answer_are_six_ways_of_missing() {
          {refused} refused"
     );
     assert_eq!(
-        answered_missing, 6,
-        "the six answers this family is pinned at are the six fuses of its one clear row, and \
-         {answered_missing} of them came through"
+        answered_missing, 15,
+        "the answers this family is pinned at are all fuses of its clear rows — six from the row \
+         at slope · far = 0.75, and both intersections and `block \\ frustum` from each of the \
+         three at slope · far = 1 — and {answered_missing} of them came through"
     );
     assert_eq!(
         answered_meeting, 0,
-        "a block that reaches into a frustum answered {answered_meeting} times. That is the \
+        "a block that reaches into a frustum answered {answered_meeting} times. That may be the \
          arrangement learning to order points along a hyperbola, which is good news — but it is \
-         not covered by anything here, so give it a check of its own before letting this pass"
+         not covered by anything here, so give it a check of its own before letting this pass. \
+         Check first that the pair really does meet: the last time this fired, all of them were \
+         disjoint and `the_block_misses_the_frustum` was the thing that was wrong"
     );
 }
 
