@@ -15,12 +15,15 @@ What is left is their next blockers; a new unit is Mattias's call.
 to 0), §187.1–3, §188.1–3, §189.1–2 (8000 of 8000), §190.1–4, §192.1–3 (18
 LEDs to 0), §193.1–2 (20 LEDs import), §194.1–4 — each closing the item the
 section before it left; `just decision <n>` for which. Then §195.1–3,
-§196.1, §197.2, §198.1–2, §199.1–3, and §200.1–2 (the leaned half ball and
-§198.1's `runs_up`), each closing an item of the section before.
+§196.1, §197.2, §198.1–2, §199.1–3, §200.1–2 (the leaned half ball and
+§198.1's `runs_up`), and §201.1–3 (the pointed cone's skin, the far pole side,
+the sliver), each closing an item of the section before.
 
-**Next and unclaimed: a pointed cone fused with a corner-up cube gives a wrong
-answer**, and its own `classify_point` calls inside points outside (§200.3,
-reproducer there, not pinned); §200.4 lists the rest. §124,
+**In flight, workflow run `wf_e20ea19a-0a0` off `4514eff4`: the pointed cone's
+box stops half way up**, so `classify_point` answers `Outside` below `z = 4`
+inside it — a wrong answer, and the likely cause of §200.3's wrong fuse
+(§201.1). The same run has the other two open items of §201.5. **Next and
+unclaimed:** the fuse cutting along a cone's other nappe (§201.5). §124,
 §136.4, §125.6: deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at
 `opt-level = 0` and its own ~7 s not reproducing; open about that number, not
 the gate.
