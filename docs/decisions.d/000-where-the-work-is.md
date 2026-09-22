@@ -7,7 +7,8 @@ on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107'
 table. §16.10 governs it: a claim that something cannot be done owes a
 demonstration either way — a gap if a scaling reaches the sign, a limit if not.
 **Since §190.2 no corpus file reaches that refusal**: 24 of the 29 that did now
-import (KiCad 114 → 140), and since §193.1 the LEDs do too (140 → 160).
+import (KiCad 114 → 140), and since §193.1 the LEDs do too (140 → 160);
+§198.1 adds `LED_D5.0mm-3` (161).
 What is left is their next blockers; a new unit is Mattias's call.
 
 **What is closed.** §140–§168 in turn; §169, §176, §182, §184 (793 refusals
@@ -16,14 +17,14 @@ LEDs to 0), §193.1–2 (20 LEDs import), §194.1–4 — each closing the item 
 section before it left; `just decision <n>` for which. §194.5's pole-to-pole
 lune by **§195.1**, its box by **§195.2**, §190.6's circle check by **§195.3**;
 §195.2's turned ball-and-block by **§196.1** (36 of 36); §196.2's panic
-cutting a half ball twice by **§197.2** (48 of 48 now refused by name).
+cutting a half ball twice by **§197.2** (48 of 48 now refused by name);
+§197.1's turned ball-and-block failing at random by **§198.1** (four axes
+measure); one of §197.2's three pins answered by **§198.2**.
 
-**Next and unclaimed: the turned ball-and-block that fails the gate at
-random**, §197.1 — three seeds turned 16 steps about slanting axes, where the
-fuse answers and `measure` refuses or the answer is invalid. The cause is in
-`mesh.rs`, and two unmerged lanes hold the evidence. After it comes
-`mesh.rs:839`, the piece of a ball holding both poles (§197.3). §197.4 lists
-the rest. §124, §136.4, §125.6:
+**Next and unclaimed: the two half-ball pins §198.2 moved one blocker on**, in
+different files, side by side: `mesh.rs` cuts a skin whose outer wire is a great
+circle cut at its poles round a one-curve hole; `holds.rs` calls a hole wire of
+two edges along one ball round. §198.3 lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
