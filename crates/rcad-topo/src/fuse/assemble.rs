@@ -53,7 +53,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
     DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
-    Surface, Vector,
+    Surface, Vector, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -2048,7 +2048,18 @@ impl Edges {
     /// filtering it out afterwards, so one reaching here means the splitter is
     /// wrong — and a *closed* side is not one, which is why the two ends being
     /// the same corner is checked against what carries it.
-    fn of(&mut self, meet: &FaceMeet, from: usize, to: usize, face: FaceKey) -> Result<Side> {
+    ///
+    /// `turned_round` is whether the rule turns this face's piece round, which
+    /// only a closed edge starting at a ball's pole needs to know — see
+    /// [`the_way_a_circle_from_a_pole_is_walked`].
+    fn of(
+        &mut self,
+        meet: &FaceMeet,
+        from: usize,
+        to: usize,
+        face: FaceKey,
+        turned_round: bool,
+    ) -> Result<Side> {
         let (carried_by, along) = (meet.carried_by, meet.along.as_slice());
         assert!(
             from != to
@@ -2086,7 +2097,7 @@ impl Edges {
             }
         };
         let forward = if from == to {
-            which_way_a_closed_edge_is_walked(meet, at)?
+            which_way_a_closed_edge_is_walked(meet, at, turned_round)?
                 .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
         } else {
             self.made[edge].ends[0] == from
@@ -2127,7 +2138,11 @@ impl Edges {
 /// a reader's file, so a crossing this thin is caller input and gets an `Err`
 /// rather than a panic — and a green gate is not a demonstration that no input
 /// reaches it (§16.10).
-fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Result<Option<bool>> {
+fn which_way_a_closed_edge_is_walked(
+    meet: &FaceMeet,
+    at: Point,
+    turned_round: bool,
+) -> Result<Option<bool>> {
     let [mine, partner] = meet.carried_by;
     if the_curved_one_of(&meet.carried_by).is_none() {
         // Two planes cross in a straight line, which does not close, so nothing
@@ -2135,12 +2150,83 @@ fn which_way_a_closed_edge_is_walked(meet: &FaceMeet, at: Point) -> Result<Optio
         // no longitude to run along.
         return Ok(Some(true));
     }
-    a_closed_crossing_is_walked_the_way_it_is_stored(
+    let outward = [gradient_of(&mine, at), gradient_of(&partner, at)];
+    match a_closed_crossing_is_walked_the_way_it_is_stored(
         [&mine, &partner],
-        [gradient_of(&mine, at), gradient_of(&partner, at)],
+        outward,
         at,
         meet.material_side,
-    )
+    )? {
+        Some(forward) => Ok(Some(forward)),
+        None => {
+            let Some(lid) = the_lid_a_circle_from_a_pole_bounds(meet, turned_round) else {
+                return Ok(None);
+            };
+            let runs_along_stored = match which_way_a_closed_crossing_turns(
+                outward,
+                gradient_of(&lid.ball, at),
+                lid.outward,
+            ) {
+                Decision::Pos => true,
+                Decision::Neg => false,
+                Decision::Zero => return Ok(None),
+                Decision::Undecidable { enclosure } => {
+                    return Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure });
+                }
+                other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
+            };
+            Ok(Some(match meet.material_side {
+                Decision::Neg => runs_along_stored,
+                Decision::Pos => !runs_along_stored,
+                other => panic!("a face with no side to its material: {other:?}"),
+            }))
+        }
+    }
+}
+
+/// The ball, and the way out of the answer through the flat face, either side
+/// of a closed edge between a ball and a plane; `None` for any other pair.
+///
+/// **At a pole the mesh stores the edge the way the walk takes it.** Every
+/// longitude runs through the one point, so the rule that orders every other
+/// closed edge has nothing to read there (§38.3), and the mesh leaves the points
+/// in the walk's own order. A circle between a ball and a plane is walked from
+/// the plane's first basis direction towards its second, which is anticlockwise
+/// about that plane's normal — **the plane as the answer stores it**, and the
+/// answer stores a flat face pointing out of its own material. So the reference
+/// the rule reads is the longitude about that normal, `N × ∇C`, in place of the
+/// one about the ball's polar axis: the ball's gradient at a point of the circle
+/// is its radius there, the plane's normal is square to the step from the ball's
+/// centre to the circle's, and `N × (p − c)` is `N × (p − m)`, the way the walk
+/// runs at `p`. That is the direction `SolidBuilder`'s caps are written in too:
+/// the lid walks the rim forward and the skin backward, for every cap in
+/// `a_cap_whose_rim_runs_through_the_other_pole.rs` (§200.2).
+///
+/// Which way `N` points is read off the piece, because a piece's surfaces point
+/// out of its own material and the answer's out of the answer's. A flat piece's
+/// own plane is `N`; a ball's piece has the answer's material on the side of the
+/// plane its own material is, so `N` points to the other side. Either is turned
+/// round with the piece.
+fn the_lid_a_circle_from_a_pole_bounds(meet: &FaceMeet, turned_round: bool) -> Option<Lid> {
+    let (ball, outward) = match meet.carried_by {
+        [Surface::Plane(flat), ball @ Surface::Sphere(_)] => (ball, flat.normal()),
+        [ball @ Surface::Sphere(_), Surface::Plane(flat)] => match meet.material_side {
+            Decision::Neg => (ball, flat.normal()),
+            Decision::Pos => (ball, -flat.normal()),
+            other => panic!("a face with no side to its material: {other:?}"),
+        },
+        _ => return None,
+    };
+    Some(Lid {
+        ball,
+        outward: if turned_round { -outward } else { outward },
+    })
+}
+
+/// What [`the_lid_a_circle_from_a_pole_bounds`] finds.
+struct Lid {
+    ball: Surface,
+    outward: Vector,
 }
 
 /// Which of the two arcs between an edge's two corners this face walks, as the
@@ -2493,7 +2579,7 @@ fn sides_of(
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        sides.push(edges.of(meet, from, to, face)?);
+        sides.push(edges.of(meet, from, to, face, turned_round)?);
     }
     if turned_round {
         sides.reverse();
