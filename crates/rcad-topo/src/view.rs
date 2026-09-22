@@ -1,5 +1,5 @@
 use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
-use rcad_predicates::Approximation;
+use rcad_predicates::{Approximation, Point as PredicatePoint, Policy, ProvenanceLog};
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
@@ -7,7 +7,8 @@ use crate::model::{
     CoedgeData, EdgeData, FaceData, ShellData, SolidData, VertexData, WireData, WireStep,
 };
 use crate::{
-    CoedgeKey, EdgeKey, Error, FaceKey, Model, Result, ShellKey, SolidKey, VertexKey, WireKey,
+    CoedgeKey, EdgeKey, Error, FaceKey, Model, OnAFace, Result, ShellKey, SolidKey, VertexKey,
+    WireKey,
 };
 
 /// A solid, with the location and orientation it is being looked at through.
@@ -264,12 +265,13 @@ impl<'m> SolidView<'m> {
 /// straight ruling, and `up` changes at a steady non-zero rate along it. So the
 /// least and the most `up` on a face are on its boundary, or at the apex.
 ///
-/// The apex is always taken in. That is loose for a frustum, whose face stops
-/// short of the apex, and it is what makes a pointed cone right: its only
-/// corner is on its cap, so without the apex the box stopped at the cap's own
-/// height less a radius, and `classify_point` answered `Outside` for everything
-/// below it (`docs/decisions.md` §200.3). Deciding whether a face holds the apex
-/// is a trimming question that can refuse; taking it in costs only width.
+/// The apex is taken in unless the face is shown not to hold it
+/// ([`the_face_may_reach_its_apex`]). A pointed cone needs it: its only corner
+/// is on its cap, so without the apex the box stopped at the cap's own height
+/// less a radius, and `classify_point` answered `Outside` for everything below
+/// it (`docs/decisions.md` §200.3). A frustum must not have it: its side stops
+/// at its small cap, and a box reaching down to the apex handed the fuse pairs
+/// of faces that never meet (§202.4).
 ///
 /// **The boundary is not settled by the corners.** A straight side is a ruling,
 /// along which `up` runs steadily from one end to the other, so its ends — two
@@ -316,7 +318,8 @@ fn box_the_surface_bounds(solid: SolidView<'_>, face: FaceView<'_>) -> Option<(P
         Surface::Cone(cone) => {
             let (apex, along) = (cone.apex(), cone.axis().direction());
             let reach = how_far_along_its_axis_a_face_reaches(solid, face, RoundAnAxis::Cone(cone));
-            for up in core::iter::once(0.0).chain(reach) {
+            let apex_too = the_face_may_reach_its_apex(solid, face, &reach).then_some(0.0);
+            for up in apex_too.into_iter().chain(reach) {
                 open_out(
                     (apex + along * up).coordinates(),
                     how_far_a_disc_reaches(along, cone.radius_at(up)),
@@ -337,6 +340,40 @@ fn box_the_surface_bounds(solid: SolidView<'_>, face: FaceView<'_>) -> Option<(P
         other => panic!("this crate cannot say how far {other:?} reaches"),
     }
     seen.then(|| (Point::from(low), Point::from(high)))
+}
+
+/// Whether a face on a cone may hold the cone's apex, so that its box has to.
+///
+/// `false` only where the face is **shown** not to: its boundary reaches only
+/// one side of the apex along the axis, and the trimming test
+/// ([`SolidView::what_this_face_holds`]) answers that the apex is off the face.
+/// A frustum's side is the case: its small cap's plane has the apex on the far
+/// side from the big cap. A pointed cone's side answers that it holds it.
+///
+/// Anything else takes the apex in — a boundary on both sides of it, or a
+/// trimming test that refuses — because a box only has to hold the face, and a
+/// refusal costs width and never correctness. The test is run under a
+/// certified policy and what it records is dropped, since it is a bound and
+/// not an answer: a stricter or looser policy could only move the box between
+/// two sizes that both hold the face.
+fn the_face_may_reach_its_apex(solid: SolidView<'_>, face: FaceView<'_>, reach: &[f64]) -> bool {
+    let (Some(least), Some(most)) = (
+        reach.iter().copied().reduce(f64::min),
+        reach.iter().copied().reduce(f64::max),
+    ) else {
+        return true;
+    };
+    if least <= 0.0 && most >= 0.0 {
+        return true;
+    }
+    let Surface::Cone(cone) = face.surface() else {
+        panic!("only a face on a cone has an apex to reach");
+    };
+    let apex = PredicatePoint::from(cone.apex().coordinates());
+    !matches!(
+        solid.what_this_face_holds(face, apex, &Policy::certified(), &mut ProvenanceLog::new()),
+        Ok(OnAFace::NotHeld)
+    )
 }
 
 /// How far along each coordinate axis a disc of `radius` square to the unit

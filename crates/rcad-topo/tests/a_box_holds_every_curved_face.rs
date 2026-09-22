@@ -20,6 +20,38 @@ use rcad_geom::{Axis, Cylinder, EdgeRun, Orientation, Plane, Point, Scale, Surfa
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, DraftStep, Model, SolidBuilder, SolidKey};
 
+mod cones;
+
+/// A cone face's box takes in the apex only when the face can reach it.
+///
+/// A pointed cone of slope a half, height 8, has its one corner on its cap, so
+/// its skin's box has to reach down to the apex at the origin or everything
+/// below the cap is answered `Outside` (§200.3). A frustum of the same cone
+/// from `z = 2` to `z = 8` stops at its small cap: a box that went on down to
+/// the apex handed the fuse pairs of faces its side never meets, and a block
+/// below a frustum lost 24 of its 56 right answers to that (§202.4).
+#[test]
+fn a_frustums_box_stops_at_its_small_cap_and_a_pointed_cones_holds_its_apex() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let pointed = cones::a_pointed_cone(&mut model, 0.5, 8.0);
+    let frustum = cones::a_frustum(&mut model, 0.5, 2.0, 8.0);
+
+    let lowest_of_its_skin = |solid: SolidKey| {
+        let view = model.solid(solid).expect("this model made the key");
+        let skin = view
+            .faces()
+            .find(|face| matches!(face.surface(), Surface::Cone(_)))
+            .expect("a cone has a face on its cone");
+        view.box_around_one_face(skin).expect("a face is somewhere").0.z()
+    };
+    assert!(lowest_of_its_skin(pointed) <= 0.0, "the pointed cone's skin starts above its apex");
+    let frustum_starts = lowest_of_its_skin(frustum);
+    assert!(
+        (2.0 - 1e-9..=2.0).contains(&frustum_starts),
+        "the frustum's skin is boxed from z = {frustum_starts}, where it stops at z = 2"
+    );
+}
+
 /// A round bar of radius one about `+z`, flat at `z = −2` and cut on top by the
 /// plane `x + z = 1`, whose one corner up there is `(1, 0, 0)`: the lowest
 /// point of the ellipse. The ellipse rises to `z = 2` on the far side.
