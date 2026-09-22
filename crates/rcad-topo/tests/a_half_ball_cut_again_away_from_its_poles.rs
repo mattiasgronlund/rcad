@@ -117,33 +117,46 @@ fn a_half_ball_cut_square_to_its_flat_face_is_refused_by_name_rather_than_panick
 /// with its cap of height `r − 0.5` taken off. The ball's near half lies inside
 /// the block and adds nothing.
 ///
-/// Its cells are told apart now, as the intersection twin's are. What refuses
-/// is placing the half disk the cut leaves on `z = 0.5` for `x ≤ 0`: the one
-/// point found inside it is classified against the joined solid, whose flat
-/// face `x = 0` has a round hole walked as two edges between the poles, and
-/// the ray caster cannot follow that hole. The candidate is dropped, no other
-/// is left, and the fuse gives up undecided rather than by name.
+/// Placing the half disk the cut leaves on `z = 0.5` for `x ≤ 0` classifies a
+/// point inside it against the joined solid, and the ray crosses that solid's
+/// flat face `x = 0` inside the ball's round hole. That hole is walked as two
+/// edges between the poles, and it used to be a hole the ray caster could not
+/// follow, so the candidate was dropped and the fuse gave up undecided.
 #[test]
-fn a_ball_joined_to_a_block_down_its_polar_axis_then_cut_across_it_is_refused_rather_than_panicking()
+fn a_ball_joined_to_a_block_down_its_polar_axis_then_cut_across_it_measures_the_block_and_the_far_half_ball()
  {
     let mut model = a_model();
     let joined = half_a_ball(&mut model, Rule::Union);
     let below = a_block_below(&mut model, CUT_AT);
     let the_blocks_part = 6.0 * 12.0 * (6.0 + CUT_AT) * RADIUS.powi(3);
     let the_balls_part = (a_balls_volume() - a_caps_volume(RADIUS - CUT_AT)) / 2.0;
-    refused_or_measured(
-        &mut model,
-        [&joined, &[below]],
-        "Undecidable",
-        the_blocks_part + the_balls_part,
-    );
+    let answer = model
+        .fuse(
+            &joined,
+            &[below],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a ball joined to a block and cut across its polar axis is answered")
+        .solids()
+        .to_vec();
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a fuse writes a sound model or writes nothing");
+    assert_eq!(answer.len(), 1);
+    measures(volume_of(&model, &answer), the_blocks_part + the_balls_part);
 }
 
-/// The joined solid's flat face `x = 0`, which the ray caster has to cross, is
-/// one the trimming of which it cannot follow — whatever point of the face it
-/// is asked about.
+/// The joined solid's flat face `x = 0` is the block's square `|y|, |z| <= 6r`
+/// with the unit disk in `y`, `z` taken out of it, where the ball's near half
+/// went into the block. The disk's rim is one circle walked as two edges from
+/// pole to pole.
 #[test]
-fn the_flat_face_of_a_ball_joined_to_a_block_down_its_polar_axis_cannot_be_followed() {
+fn the_flat_face_of_a_ball_joined_to_a_block_down_its_polar_axis_holds_the_block_and_not_the_hole()
+{
+    use rcad_topo::OnAFace;
+
     let mut model = a_model();
     let joined = half_a_ball(&mut model, Rule::Union);
     let solid = model.solid(joined[0]).expect("this model made the key");
@@ -155,19 +168,32 @@ fn the_flat_face_of_a_ball_joined_to_a_block_down_its_polar_axis_cannot_be_follo
                 .is_some_and(|plane| plane.offset() == 0.0)
         })
         .expect("the block's face x = 0 is kept, with the ball's hole in it");
-    let asked = solid.face_holds_the_point(
-        flat.key(),
-        rcad_predicates::Point::from([0.0, 3.0, 3.0]),
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(
-            asked,
-            Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
-        ),
-        "the day this is followed, the joined-and-cut test above should move: {asked:?}"
-    );
+    let asked = |at: [f64; 3]| {
+        solid
+            .face_holds_the_point(
+                flat.key(),
+                rcad_predicates::Point::from(at),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{at:?} is answered: {why:?}"))
+    };
+    for in_the_hole in [[0.0, 0.0, 0.0], [0.0, 0.2, 0.3], [0.0, -0.6, 0.7]] {
+        assert_eq!(asked(in_the_hole), OnAFace::NotHeld, "{in_the_hole:?}");
+    }
+    for on_the_block in [[0.0, 3.0, 3.0], [0.0, 0.0, 1.5], [0.0, -0.8, -0.7]] {
+        assert_eq!(asked(on_the_block), OnAFace::Held, "{on_the_block:?}");
+    }
+    for on_the_rim in [
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ] {
+        assert_eq!(asked(on_the_rim), OnAFace::OnItsBoundary, "{on_the_rim:?}");
+    }
+    assert_eq!(asked([0.0, 6.0, 0.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([0.0, 7.0, 0.0]), OnAFace::NotHeld);
 }
 
 /// Intersect `arguments` with `tools` and insist it is refused as `refusal`.

@@ -198,7 +198,8 @@ fn a_point_off_the_plane(face: FaceView<'_>, plane: &Plane) -> Option<Point> {
 ///
 /// **A wire that is one whole closed curve has no polygon to walk**, and it is
 /// counted rather than walked. A round bar's cap is one, and so is the round
-/// hole through a block. See [`what_a_round_wire_encloses`].
+/// hole through a block — and so is a circle walked as two arcs from pole to
+/// pole ([`is_one_circle_cut_in_two`]). See [`what_a_round_wire_encloses`].
 fn what_a_flat_face_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -207,16 +208,21 @@ fn what_a_flat_face_holds(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
+    let mut round = Vec::new();
+    for wire in face.wires() {
+        round.push(wire.closes_on_one_edge() || is_one_circle_cut_in_two(solid, face, wire)?);
+    }
     let aim = face
         .wires()
-        .filter(|wire| !wire.closes_on_one_edge())
-        .flat_map(WireView::points)
+        .zip(&round)
+        .filter(|(_, is_round)| !**is_round)
+        .flat_map(|(wire, _)| wire.points())
         .next();
 
     let mut winding = 0i64;
-    for (position, wire) in face.wires().enumerate() {
+    for ((position, wire), is_round) in face.wires().enumerate().zip(round) {
         let inwards = if position == 0 { 1 } else { -1 };
-        if wire.closes_on_one_edge() {
+        if is_round {
             match what_a_round_wire_encloses(solid, face, wire, point)? {
                 Decision::Neg => winding += inwards,
                 Decision::Pos => (),
@@ -271,6 +277,7 @@ fn what_a_round_wire_encloses(
     let edge = coedge.edge();
     match edge.is_closed() {
         Ok(true) => {}
+        Ok(false) if is_one_circle_cut_in_two(solid, face, wire)? => {}
         // The only site of the six that keeps its own name for this. A run kind
         // nothing here knows is not one whole closed crossing as far as this can
         // tell, which is the very thing this refusal is for, and its refusal
@@ -313,9 +320,18 @@ fn walk_one_outline(
         }
     }
 
+    // The corner the half-line aims at is on its line whatever `point` is: two
+    // rows of that determinant are the same, so it is zero exactly. Asked, a
+    // `point` that is a box gets an enclosure round zero and no sign.
     let sides: Vec<Decision> = corners
         .iter()
-        .map(|&corner| decide(corner, aim, target, point, policy, log))
+        .map(|&corner| {
+            if corner == aim {
+                Decision::Zero
+            } else {
+                decide(corner, aim, target, point, policy, log)
+            }
+        })
         .collect();
     let mut winding = 0i64;
     for (index, &from) in corners.iter().enumerate() {
@@ -408,16 +424,82 @@ fn what_a_curved_face_holds(
 ///
 /// A seam is left out: the same face lies on both sides of it, so it trims
 /// nothing, and a ball's seam is part of a crossing in exactly this sense.
+///
+/// So is a wire that is one whole circle walked as two arcs
+/// ([`is_one_circle_cut_in_two`]): each arc is part of the crossing, but the
+/// two together are all of it, and the round-wire count answers such a wire
+/// where §167's family refuses a hole in a flat face.
 fn a_side_of_it_is_part_of_a_crossing(solid: SolidView<'_>, face: FaceView<'_>) -> Result<bool> {
-    for coedge in face.wires().flat_map(WireView::coedges) {
-        let edge = coedge.edge();
-        let is_a_piece = matches!(edge.stored_run(), EdgeRun::PartOfWhereItCrosses { .. })
-            && edge.start().key() != edge.end().key();
-        if is_a_piece && the_face_across(solid, face, edge)?.is_some() {
-            return Ok(true);
+    for wire in face.wires() {
+        if is_one_circle_cut_in_two(solid, face, wire)? {
+            continue;
+        }
+        for coedge in wire.coedges() {
+            let edge = coedge.edge();
+            let is_a_piece = matches!(edge.stored_run(), EdgeRun::PartOfWhereItCrosses { .. })
+                && edge.start().key() != edge.end().key();
+            if is_a_piece && the_face_across(solid, face, edge)?.is_some() {
+                return Ok(true);
+            }
         }
     }
     Ok(false)
+}
+
+/// Whether `wire`, on a flat face, is one whole circle walked as two arcs —
+/// where the face's plane cuts a ball, cut in two because the walk started at
+/// a pole (§194). `fuse/select.rs`'s `round_wire_of` reads the same wire as
+/// round.
+///
+/// **It is proved, not read off the wire having two sides.** Both sides must
+/// have the same ball across them, stored in the face's own frame, so both lie
+/// on the one circle where the face's plane cuts that ball. Two sides of a
+/// closed wire run between the same two corners, so they are either the
+/// circle's two arcs either side of the chord between those corners or the
+/// same arc twice. [`the_way_into_an_arc`] tells those apart: the two arcs of
+/// one circle leave the chord in opposite directions. Anything that does not
+/// settle all of that is `false`, and the face is then asked the way it was
+/// before.
+fn is_one_circle_cut_in_two(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    wire: WireView<'_>,
+) -> Result<bool> {
+    let surface = face.stored_surface();
+    if surface.as_plane().is_none() {
+        return Ok(false);
+    }
+    let coedges: Vec<CoedgeView<'_>> = wire.coedges().collect();
+    let [one, other] = coedges.as_slice() else {
+        return Ok(false);
+    };
+    if one.start().key() == one.end().key() {
+        return Ok(false);
+    }
+    let ends = [one.start(), one.end()].map(|corner| where_it_is_stored(solid, corner.key()));
+    let mut ball: Option<Surface> = None;
+    let mut ways = Vec::new();
+    for coedge in [one, other] {
+        let edge = coedge.edge();
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = edge.stored_run() else {
+            return Ok(false);
+        };
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            return Ok(false);
+        };
+        let across_surface = across.stored_surface();
+        let is_the_one_ball = matches!(across_surface, Surface::Sphere(_))
+            && ball.is_none_or(|known| known == across_surface);
+        if across.location() != face.location() || !is_the_one_ball {
+            return Ok(false);
+        }
+        ball = Some(across_surface);
+        let Some(way) = the_way_into_an_arc(&surface, &across_surface, ends, picked_by) else {
+            return Ok(false);
+        };
+        ways.push(way);
+    }
+    Ok(dot(ways[0], ways[1]).sign() == Decision::Neg)
 }
 
 /// Whether a face with part of a crossing among its sides holds `point`, which
