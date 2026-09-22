@@ -716,6 +716,15 @@ impl Assembly {
     /// that got here came out of [`Assembly::from_the_pieces`] or
     /// [`Assembly::from_one_input_solid`] with an outline of its own, and
     /// joining only ever takes an edge *away* from between two of them.
+    ///
+    /// **A ring whose corners enclose nothing is placed by that same rule**,
+    /// because its corners cannot place it. A half disk has two corners, so the
+    /// hole a half ball pokes through a knife's face, joined across the axis
+    /// from the knife's other half, winds round no area at all (§200.1's two
+    /// knives at 90 degrees, as a union). With one outline found among the other
+    /// rings it is a hole; with none, and it the only such ring, it is the
+    /// outline. Two or more such rings and no outline is the one case the rule
+    /// cannot settle, and that still panics.
     fn rings_round(
         &self,
         members: &[usize],
@@ -726,6 +735,7 @@ impl Assembly {
         let mut walked: BTreeSet<Dart> = BTreeSet::new();
         let mut outline: Option<Vec<Dart>> = None;
         let mut holes = Vec::new();
+        let mut enclosing_nothing = Vec::new();
         for &face in members {
             for wire in 0..self.faces[face].wires.len() {
                 for start in self.whole_ring(face, wire) {
@@ -747,6 +757,7 @@ impl Assembly {
                             outline = Some(ring);
                         }
                         Decision::Neg => holes.push(ring),
+                        Decision::Zero => enclosing_nothing.push(ring),
                         other => panic!(
                             "a ring of a joined face came back winding neither way: {other:?}"
                         ),
@@ -754,10 +765,22 @@ impl Assembly {
                 }
             }
         }
-        let outline = outline.expect(
-            "every face joined here brought an outline of its own and joining only takes edges \
-             away, so the joined face has one too",
-        );
+        let outline = match outline {
+            Some(outline) => {
+                holes.extend(enclosing_nothing);
+                outline
+            }
+            None => {
+                assert!(
+                    enclosing_nothing.len() == 1,
+                    "every face joined here brought an outline of its own and joining only takes \
+                     edges away, so the joined face has one too, and {} rings enclose no area to \
+                     say which it is",
+                    enclosing_nothing.len()
+                );
+                enclosing_nothing.remove(0)
+            }
+        };
         Ok(core::iter::once(outline).chain(holes).collect())
     }
 
