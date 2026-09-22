@@ -22,3 +22,4 @@ cc a22dff6b2f8c19b8f0fbff59daed27dd764129625bb955f168c752ba2c10ea0f # shrinks to
 cc ae27b55dc7223b488f4903f4244a739cecb4b4e749d5cafea4e86f84a31cfe89 # shrinks to Turned { fixture: BallAndBlock { side: 5, radius: 1, at: [3, 3] }, turn: Turn { direction: [1, 0, 0], steps: 16 } }
 cc 7d4e1f9ae66c2a9c7eb4caf7c4d1ddbe415331fbdd2e5ab1236fd4eaf00a3ae2 # shrinks to Turned { fixture: BallAndBlock { side: 4, radius: 1, at: [2, 2] }, turn: Turn { direction: [-1, -3, 0], steps: 16 } }
 cc a8b648d9ec73640bd03b4a6e257a85fa0cc7649388b61712babdf68cb7e8f692 # shrinks to Turned { fixture: BallAndBlock { side: 4, radius: 1, at: [2, 2] }, turn: Turn { direction: [3, -2, 0], steps: 16 } }
+cc 9a699edbb6c6b938d9c9a1c6411fc3785686bc2024a9a061795f1def6ecc7648 # shrinks to Turned { fixture: BallAndBlock { side: 4, radius: 1, at: [2, 2] }, turn: Turn { direction: [3, 1, 0], steps: 16 } }

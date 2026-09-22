@@ -4,9 +4,10 @@
 //! curved face going right round with no seam, or the fuse's own check
 //! refused it as faces that disagree which way they face.
 //!
-//! `fuses_that_must_agree` drew three of them and shrank each to one of the
+//! `fuses_that_must_agree` drew four of them and shrank each to one of the
 //! tests here: seed `7d4e1f9a` about `(−1, −3, 0)`, `a8b648d9` about
-//! `(3, −2, 0)`, and one about `(1, 3, 0)`. Each is the same fixture the suite
+//! `(3, −2, 0)`, `9a699edb` about `(3, 1, 0)`, and one about `(1, 3, 0)`
+//! whose seed nobody kept. Each is the same fixture the suite
 //! builds, by the same code, so it is the same `f64`.
 //!
 //! Turned, the floor is a plane standing up through the ball's centre, and the
@@ -47,6 +48,13 @@ fn a_ball_and_block_turned_a_quarter_turn_about_three_minus_two_measure_what_the
 #[test]
 fn a_ball_and_block_turned_a_quarter_turn_about_one_three_measure_what_they_hold() {
     measure_what_they_hold(turned_about([1, 3, 0]));
+}
+
+/// Seed `9a699edb`, about `(3, 1, 0)`: drawn by this lane's own hunt on the
+/// tree before the fix, the property replaying nothing but what `main` pinned.
+#[test]
+fn a_ball_and_block_turned_a_quarter_turn_about_three_one_measure_what_they_hold() {
+    measure_what_they_hold(turned_about([3, 1, 0]));
 }
 
 /// Every rule answers one solid, sound, and it measures what a block and
