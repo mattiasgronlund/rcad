@@ -11,22 +11,21 @@ import (KiCad 114 → 140), and since §193.1 the LEDs do too (140 → 160);
 §198.1 adds `LED_D5.0mm-3` (161).
 What is left is their next blockers; a new unit is Mattias's call.
 
-**What is closed.** §140–§168 in turn; §169, §176, §182, §184 (793 refusals
-to 0), §187.1–3, §188.1–3, §189.1–2 (8000 of 8000), §190.1–4, §192.1–3 (18
-LEDs to 0), §193.1–2 (20 LEDs import), §194.1–4 — each closing the item the
-section before it left; `just decision <n>` for which. Then §195.1–3,
-§196.1, §197.2, §198.1–2, §199.1–3, §200.1–2 (the leaned half ball and
-§198.1's `runs_up`), and §201.1–3 (the pointed cone's skin, the far pole side,
-the sliver), §202.1–2 (a ball less a disc, a ball cut through its pole),
-§204.1–2 (the pointed cone's box lands; §200.3's wrong answer now refuses),
-each closing an item of the section before.
+**What is closed.** A chain from §140: each section closes the item the one
+before it left, and `just decisions-toc` is the map. Through §194 it was the
+STEP corpus — 793 refusals to 0, 8000 of 8000, the LEDs importing. §195–§202
+is the curved solids: the leaned half ball, the pointed cone's skin, a ball
+less a disc, a ball cut through its pole. Then §204, the pointed cone's box
+lands, and §206 below.
 
-**Next and unclaimed: §200.3's pair answers** — it refuses "a point inside a
-piece of a face", a gap (§204.2); §204.4 lists the rest, the nappe file's
-lowered floor among them. §124,
-§136.4, §125.6: deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at
-`opt-level = 0` and its own ~7 s not reproducing; open about that number, not
-the gate.
+**Next and unclaimed: the cone's rim arc, in two places.** §206.1 answered half
+of §200.3's pair; both next steps are the same shape, a cone's rim arc that a
+routine written for a ball's circle does not know. `is_a_family_this_follows`
+(`holds.rs`) admits only a ball's arc, and until it admits a cone's the nappe
+floor cannot go back to 10 000 (§206.2); `which_arc_of_a_circle_this_is`
+(`assemble.rs`) reads only a ball-and-plane circle, and three counts sit on
+that gap (§206.5). §206.6 lists the rest. §124, §136.4, §125.6 stay deferred —
+§125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0`, not the gate.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
