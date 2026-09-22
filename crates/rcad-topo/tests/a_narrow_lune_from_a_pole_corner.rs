@@ -9,10 +9,10 @@
 //! twice. Every test here aims at that lune.
 //!
 //! Since §200 some wedges are answered, and each of those is measured against
-//! its closed form: 5 cut by two knives and 9 by one prism, all intersections.
-//! The rest are still refused by name, most now at the flat pieces or in
-//! assembly rather than at the curved pieces. A case that moves either way
-//! fails, naming itself.
+//! its closed form: 17 cut by two knives, 13 intersections and 4 unions, and 9
+//! by one prism, all intersections. The rest are still refused by name, most
+//! now at the flat pieces or in assembly rather than at the curved pieces. A
+//! case that moves either way fails, naming itself.
 //!
 //! The ball's seam is the `+x` half of the meridian in `y = 0`, so a knife
 //! turned a quarter turn about the axis lies along the seam.
@@ -57,9 +57,16 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// This is the lune §195.1 did not measure, built the way its own half-turn
 /// test builds the half-turn one, one plane at a time. The first cut answers at
 /// every size. The turned knife's stored plane misses the poles by a rounding
-/// (see [`a_knife_through_the_axis`]). At 90 degrees and radius 1 that sliver
-/// is where a flat piece of `x = 0` is placed on the wrong side of the knife,
-/// which ends in `ResultIsNotManifold` (§200). It panicked in `arrange.rs`'s
+/// (see [`a_knife_through_the_axis`]). At 90 degrees that sliver was where a
+/// flat piece of `x = 0` was placed on the wrong side of the knife, which ended
+/// in `ResultIsNotManifold` (§200.1); see
+/// [`the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane`].
+/// Since the fuse drops a point the ray and the stored planes disagree about,
+/// the 90 degree wedge answers at every size as an intersection and a union,
+/// and so does the 10 degree one at radii 0.001 and 1000. The union needed one
+/// more step: the knife's face then has a half disk hole, two corners that
+/// wind round nothing, and `assemble.rs`'s `rings_round` panicked on it. The
+/// difference is refused at 90 degrees, by name. It panicked in `arrange.rs`'s
 /// `cut_the_crossings_into_arcs` until that walked round a closed crossing,
 /// §197.
 ///
@@ -71,6 +78,18 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
+        (90.0, 1.0, "Intersection"),
+        (90.0, 1.0, "Union"),
+        (90.0, 0.001, "Intersection"),
+        (90.0, 0.001, "Union"),
+        (90.0, 1000.0, "Intersection"),
+        (90.0, 1000.0, "Union"),
+        (90.0, 3.0, "Intersection"),
+        (90.0, 3.0, "Union"),
+        (10.0, 0.001, "Intersection"),
+        (10.0, 0.001, "Union"),
+        (10.0, 1000.0, "Intersection"),
+        (10.0, 1000.0, "Union"),
         (10.0, 3.0, "Intersection"),
         (170.0, 1.0, "Intersection"),
         (170.0, 0.001, "Intersection"),
@@ -120,6 +139,56 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
         }
     }
     assert!(moved.is_empty(), "{}", moved.join("\n"));
+}
+
+/// Why the 90 degree wedge was refused before it answered: the knife turned a
+/// quarter turn holds the axis by its corners and misses it by its stored
+/// plane, so a point in between is inside by the ray and outside by the plane.
+///
+/// `(0, 1.1e-16, -0.5)` is the first point the fuse tried inside the half disk
+/// of `x = 0` that the knife does not cover. The fuse cuts along the stored
+/// plane, which puts that half disk on the outside, and the point with it. The
+/// ray fans the face's corners, `(∓6, ±8.9e-16, z)`, whose triangles hold the
+/// axis exactly, and certifies the point inside. The fuse now drops a point
+/// the two disagree about (`select.rs`'s
+/// `the_ray_and_the_stored_planes_disagree_about`).
+#[test]
+fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane() {
+    let mut model = a_model(1.0);
+    let knife = a_knife_through_the_axis(&mut model, 1.0, 90.0);
+    let view = model.solid(knife).expect("this model made the key");
+    let point = rcad_predicates::Point::from([0.0, 1.110_223_024_625_156_5e-16, -0.5]);
+    let through_the_axis = view
+        .faces()
+        .find(|face| {
+            let mut corners = face
+                .outer_wire()
+                .points()
+                .map(|corner| corner.coordinates());
+            corners.all(|[_, y, _]| y.abs() < 1.0)
+        })
+        .expect("the knife has a face through the axis");
+    let corners: Vec<[f64; 3]> = through_the_axis
+        .outer_wire()
+        .points()
+        .map(|corner| corner.coordinates())
+        .collect();
+    assert!(
+        corners
+            .iter()
+            .all(|corner| corner[1] == -corner[0] * 8.881_784_197_001_252e-16 / 6.0),
+        "the corners hold the axis exactly: {corners:?}"
+    );
+    assert_eq!(
+        through_the_axis.plane().side_of_point(point),
+        rcad_predicates::Decision::Pos,
+        "the stored plane puts the point outside the knife"
+    );
+    assert_eq!(
+        view.classify_uncertain_point(point, &Policy::certified(), &mut ProvenanceLog::new()),
+        rcad_topo::Containment::Inside,
+        "the ray puts it inside"
+    );
 }
 
 /// The same two knives, the turned one first.
@@ -280,6 +349,8 @@ fn moved_from_its_pin(
                         | "CannotTellTheCellsOfAFaceApart"
                         | "ResultIsNotManifold"
                         | "CannotMeshAFace"
+                        | "ACurvedEdgeThatIsPartOfACrossingCannotBeNamed"
+                        | "CannotNameWhichPieceOfACrossingThisIs"
                 ),
                 "{why:?}"
             );
@@ -542,6 +613,12 @@ fn which_refusal(why: &Error) -> &str {
     }
     if let Error::CannotMeshAFace { .. } = why {
         return "CannotMeshAFace";
+    }
+    if let Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed = why {
+        return "ACurvedEdgeThatIsPartOfACrossingCannotBeNamed";
+    }
+    if let Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs) = why {
+        return "CannotNameWhichPieceOfACrossingThisIs";
     }
     panic!("expected a refusal by name, got {why:?}")
 }

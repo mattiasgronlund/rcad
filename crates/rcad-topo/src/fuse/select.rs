@@ -38,7 +38,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect};
+use rcad_geom::{EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect};
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     orient3d_of_points,
@@ -586,6 +586,11 @@ fn settle_against_each(
         if !matches!(placed, Containment::Undecidable { .. }) {
             ray.drain_into(log);
         }
+        if matches!(placed, Containment::Inside | Containment::Outside)
+            && the_ray_and_the_stored_planes_disagree_about(solid, point)
+        {
+            return Ok(None);
+        }
         match placed {
             Containment::Inside => return Ok(Some(Placement::Inside)),
             Containment::Outside => (),
@@ -612,6 +617,67 @@ fn settle_against_each(
         }
     }
     Ok(Some(on.unwrap_or(Placement::Outside)))
+}
+
+/// Whether the ray and the arrangement put `point` on opposite sides of one of
+/// `solid`'s flat faces.
+///
+/// **The two read one face from two descriptions.** The arrangement cuts along
+/// the face's stored plane, which is the face (§17.1). The ray fans the face's
+/// corners into triangles and asks which side of *those* the point is on
+/// (`classify.rs`'s `count_a_polygon`), and a turned solid's corners are not on
+/// its stored planes: turning a block a quarter turn about the `z` axis leaves
+/// the face through the axis with corners `(∓6, ±8.9e-16, z)`, whose triangles
+/// hold the axis exactly, while its stored plane misses the axis by 4.4e-16
+/// (`a_knife_through_the_axis` in `tests/a_narrow_lune_from_a_pole_corner.rs`).
+/// A point between the two is certified on one side by the ray and was proved
+/// on the other side by the arrangement, and the piece it stands for is then
+/// placed on the wrong side of the solid (§200.1).
+///
+/// So a candidate either description could be wrong about is abandoned, as one
+/// the ray cannot honestly place, and the next is tried. Nothing here is a
+/// tolerance: both sides are signs, and a candidate is dropped only when two
+/// signs that were both decided say opposite things. A sign that could not be
+/// decided, or a point on the plane, is left to the ray's own answer, which
+/// already says `OnBoundary` or `Undecidable` wherever it cannot tell.
+fn the_ray_and_the_stored_planes_disagree_about(
+    solid: SolidView<'_>,
+    point: PredicatePoint,
+) -> bool {
+    solid.faces().any(|face| {
+        let Some(plane) = face.surface().as_plane().copied() else {
+            return false;
+        };
+        let every_side_is_straight = face.wires().all(|wire| {
+            wire.coedges()
+                .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)
+        });
+        if !every_side_is_straight {
+            return false;
+        }
+        let Some(off_the_plane) = InPlane::of(&plane) else {
+            return false;
+        };
+        let on_the_side_of_the_reference = match plane.side_of_point(point) {
+            Decision::Pos => off_the_plane.turned_round,
+            Decision::Neg => !off_the_plane.turned_round,
+            Decision::Zero | Decision::Undecidable { .. } | _ => return false,
+        };
+        let mut disagree = false;
+        face.for_each_triangle(|corners| {
+            let [a, b, c] = corners.map(|corner| PredicatePoint::from(corner.coordinates()));
+            let reference = orient3d_of_points(a, b, c, off_the_plane.from);
+            let this_one = orient3d_of_points(a, b, c, point);
+            let decided = |turn: &Decision| matches!(turn, Decision::Pos | Decision::Neg);
+            if decided(&reference)
+                && decided(&this_one)
+                && (reference == this_one) != on_the_side_of_the_reference
+            {
+                disagree = true;
+            }
+        });
+        disagree
+    })
 }
 
 /// Whether the face of `solid` that `point` lies on faces the same way as
