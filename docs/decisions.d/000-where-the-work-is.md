@@ -14,16 +14,13 @@ What is left is their next blockers; a new unit is Mattias's call.
 **What is closed.** §140–§168 in turn; §169, §176, §182, §184 (793 refusals
 to 0), §187.1–3, §188.1–3, §189.1–2 (8000 of 8000), §190.1–4, §192.1–3 (18
 LEDs to 0), §193.1–2 (20 LEDs import), §194.1–4 — each closing the item the
-section before it left; `just decision <n>` for which. §194.5's pole-to-pole
-lune by **§195.1**, its box by **§195.2**, §190.6's circle check by **§195.3**;
-§195.2's turned ball-and-block by **§196.1** (36 of 36); §196.2's panic
-cutting a half ball twice by **§197.2** (48 of 48 now refused by name);
-§197.1's turned ball-and-block failing at random by **§198.1** (four axes
-measure); §197.2's three pins by **§198.2** and **§199.1–2**; §198.2's cone
-claim by **§199.3**.
+section before it left; `just decision <n>` for which. Then §195.1–3,
+§196.1, §197.2, §198.1–2, §199.1–3, and §200.1–2 (the leaned half ball and
+§198.1's `runs_up`), each closing an item of the section before.
 
-**Next and unclaimed: the half ball leaned 20° and turned −0.4**, refused
-undecided in `fuse/select.rs` (§199.1, pinned); §199.4 lists the rest. §124,
+**Next and unclaimed: a pointed cone fused with a corner-up cube gives a wrong
+answer**, and its own `classify_point` calls inside points outside (§200.3,
+reproducer there, not pinned); §200.4 lists the rest. §124,
 §136.4, §125.6: deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at
 `opt-level = 0` and its own ~7 s not reproducing; open about that number, not
 the gate.

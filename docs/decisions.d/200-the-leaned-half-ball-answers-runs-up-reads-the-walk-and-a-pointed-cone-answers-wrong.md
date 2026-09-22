@@ -1,0 +1,151 @@
+## 200. The leaned half ball answers, `runs_up` reads the walk, and a pointed cone gives a wrong answer — 2026-09-22
+
+*One batch, dispatched by §175's skill off `f7e9332c`: workflow run
+`wf_e993188b-e4b`, three Opus lanes. The two lanes that changed `src/` were each
+checked by a Sonnet verifier. The cone lane was test-only, so it had no verifier.
+`f7e9332c` was green by the gate's own record before the batch. `just gate quiet`
+run here on the merge `7067c4b6`: PASS, 2251 run, 2251 passed, 6 skipped. A
+number below is a lane's unless it names a command run here. Numbers that came
+from a probe since removed are marked as the lane's word.*
+
+### 200.1 The leaned half ball was never a hole: the cut crosses the flat face
+
+`lane-leaned-half-ball` (`05206e64`) closes §199.4's first item. It was a gap,
+not a limit. The pin's placement is not the hole §199.1 described. With the
+lean 20° and the turn −0.4, the cut plane's normal has `n_x = cos 20°·cos 0.4 =
+0.8655`, under `√0.75`. So the cut circle dips 0.00102 past the flat face
+`x = 0` (checked by the verifier with the same `python3` line). The skin piece
+is one piece with four corners: both poles, and the two places where the cut
+crosses `x = 0`. All four lie on `x = 0`. Every blend of them lands back on
+`x = 0`, where the side test is undecided (a box 1.1e-13 wide, the lane's word).
+A step along an axis from their middle lands in the cut-off cap or outside the
+half ball. So every candidate point failed, and the fuse refused *a point inside
+a piece of a face*. `in_the_bulge_of` and `half_way_into_either_arc` were not
+involved; they run on flat pieces only.
+
+The fix adds one more candidate point in `candidate_points`' curved branch. It
+steps from the corners' middle along the sum of each cutting plane's material
+direction, counting each plane once. It is tried after all the old candidates.
+
+The pin is now an answer test. A sweep of 21 turns from −0.5 to 0.5 at 20° lean
+answers, validates and measures. The expected volume now takes off only the
+part of the cap that lies inside the half ball, computed by a slice integral.
+The verifier put `fuse/` back to the base: 2 of 4 tests failed, the two new ones.
+
+**It moved two pins in `a_narrow_lune_from_a_pole_corner.rs`, re-pinned here**
+(`7067c4b6`). 14 wedges now answer, validate and measure against their closed
+form: 5 cut by two knives (170° at every radius, 10° at radius 3) and 9 by one
+prism (10° at every radius, 45° at radii 1, 3 and 1000, and 90° and 170° at
+radius 1), all of them intersections. Each test now lists its answered cases,
+and every other case must be refused by name. `ResultIsNotManifold` and
+`CannotMeshAFace` join the accepted names, because most of the other cases now
+get past the curved pieces and refuse later. The lane probed one of them: two
+knives, 90°, radius 1. There a flat half disk of `x = 0` is settled inside the
+knife at `(0, 1.1e-16, −0.5)`. That point lies in the 4.4e-16 sliver between
+the polar axis and the turned knife's stored plane, which misses the poles by a
+rounding. **That is a flat piece placed on the wrong side.** Here it ends in
+`ResultIsNotManifold`, not in a wrong answer. It is an older fault in how flat
+pieces are placed, reached for the first time.
+
+### 200.2 A cap whose rim runs through the other pole is cut the way its walk ran
+
+`lane-runs-up-other-pole` (`d1f7eab9`, `76204dff`) closes the `runs_up` item
+from §198.1. `add_ball` plus a fuse cannot reach that cap: the ball's seam ends
+at the pole the rim runs through, and every such cut was refused
+`CannotTellTheCellsOfAFaceApart` (or `AWireWillNotLieFlatOnItsFace` at lean
+1.1) before `runs_up` was called. That is a separate fuse gap, and it is still
+open. `SolidBuilder` does reach the cap, as a sphere skin bounded by one circle
+whose only corner is the south pole, plus a flat lid.
+
+The lane built 63 caps holding the north pole: radii 0.5, 1 and 2, leans 0.3,
+0.7 and 1.1, and seven turns. On the base all 63 were refused (45
+`CornersCoincide`, 12 `FacesDoNotAgreeWhichWayTheyFace`, 6
+`BoundaryCrossesItself`; the split is the lane's word). The verifier saw the
+first one fail on base `mesh.rs` with `CornersCoincide`. The fix has three
+parts:
+
+1. `WalkedLoop` gets a `climbed` field, set in `WalkingAWire::finish`, and
+   `runs_up` reads it. `how_far_the_longitude_climbed` is gone.
+2. A cap is walked from its first corner that is not on a pole, and it gets a
+   corner on a pole side wherever a quarter turn falls inside that side.
+3. When a quarter turn is equally near two corners, the one off the pole wins.
+
+All 63 now mesh closed, with V − E + F = 2, and measure within `3δ/r` of the
+closed form. No other pin moved.
+
+The lane found a second change and did not keep it. At the far pole the pole
+side ends a quarter turn back, not at the meridian the next cut leaves by.
+Ending it at the leaving meridian makes §191's pinned refusal
+`a_turned_ball_united_with_a_block_will_not_mesh_where_the_upright_one_does`
+answer: 126.82722 turned against 126.82571 upright (the lane's word, from an
+`eprintln` since removed). That would move a pin, so it was left for a lane of
+its own.
+
+### 200.3 A pointed cone fused with a corner-up cube gives a wrong answer
+
+`lane-cone-other-nappe` (`9a4ab1f0`) was test-only. It asked whether §199.3
+point 1 can end in a wrong answer. `a_plane_cut_along_a_cones_other_nappe.rs`
+runs 408 fuses in six families. All 72 answers are right, and the other 336 are
+refused by name. A plane steeper than the cone that also crosses the frustum
+refused 224 of 224 times, so no wrong answer came from that path.
+
+**But a wrong answer exists, and it is left out of the file**, because nothing
+can pin it without an `#[ignore]`. A pointed cone (slope 1/2, height 8) fused
+with a cube of side 4 standing on its corner, centred on the apex: every rule
+answers `Ok` and the model validates, but both solids come back untouched. The
+intersection gives 0 solids where the shared volume is about 4.3964 (a column
+sum, not a closed form). The union gives two solids of 198.0246 in all, where
+the answer is 193.6449. It happens at slopes 1/4 and 1/2 and cube sides 3 to 5.
+The lane's reproducer, not run here, using the new file's `a_pointed_cone`:
+
+```rust
+let policy = Policy::certified();
+let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+let cone = a_pointed_cone(&mut model, 0.5, 8.0);
+let diagonal = Axis::new(Point::origin(), Vector::new(1.0, -1.0, 0.0)).expect("a direction");
+let stood = Isometry::rotation(&diagonal, (1.0f64 / 3.0).sqrt().acos()).expect("a finite turn");
+let placed = Isometry::translation(Vector::new(0.0, 0.0, -2.0 * 3.0f64.sqrt()))
+    .expect("a finite move")
+    .compose(&stood);
+let square = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+    .build(&policy, &mut ProvenanceLog::new())
+    .expect("a square is a profile");
+let cube = model.add_extrusion(&square, 4.0, &placed).expect("a square extrudes");
+let answer = model
+    .fuse(&[cone], &[cube], Rule::Intersection, &policy, &mut ProvenanceLog::new())
+    .expect("the fuse answers");
+model.validate(&policy, &mut ProvenanceLog::new()).expect("and validates");
+assert_eq!(answer.solids().len(), 1); // fails: 0
+```
+
+There is a second wrong answer, with no fuse at all. That pointed cone's own
+`classify_point` answers `Outside` at `(0, 0, 1)`, `(0.1, 0.07, 1.03)` and
+`(−1.4, 0.07, 3.03)`, which are all inside it. Over a half-unit grid it answers
+`Outside` at 106 points inside the cone, and `CannotFollowAFacesTrimming` at
+3385 more. The frustum and the blocks agree with their closed forms everywhere.
+
+Which one causes the fuse's wrong answer is **not shown**. It could be the
+stray cut along the other nappe, or the cone's wrong `classify_point`. What
+points away from the nappe: the frustum against the same cubes never answers
+wrong, and the cone's classification is wrong before any fuse runs.
+
+The merge renamed the file's catch-all `Containment` arm to list each variant,
+because `check-wildcards` counted it as a new wildcard.
+
+### 200.4 What is left
+
+- **The pointed cone's wrong answers, 200.3.** This is first: a wrong answer
+  comes before any refusal. Start with `classify_point` on a pointed cone
+  (`(0, 0, 1)` at slope 1/2), then see whether the fuse's wrong answer goes
+  away with it. The reproducer is in 200.3.
+- The flat half disk placed on the wrong side of a knife through the sliver
+  (200.1). It ends in `ResultIsNotManifold` today.
+- The far pole's pole side ending a quarter turn back (200.2), which would
+  answer §191's pin.
+- `add_ball` plus a cut through a pole refused `CannotTellTheCellsOfAFaceApart`
+  (200.2).
+- Still open from §199.4: the fuse cutting along a cone's other nappe (now
+  known to end in a refusal in 224 of 224 cases), `mesh.rs:839`, and the named
+  refusal for a closed edge that neither direction rule answers.
+
+Commands: `just decision 199.1`, `199.3`, `198.1`, `191`, `16.10`.
