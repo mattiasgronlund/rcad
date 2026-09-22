@@ -127,12 +127,19 @@ fn every_point_of_a_grid_round_a_pointed_cone_is_answered_right() {
 /// cone's box stopped at `z = 4`, the cube's reaches `z = 2√3 ≈ 3.46`, and a
 /// broad phase reading two boxes that miss looks at no pair of faces.
 ///
-/// Now neither answers wrong. **Both refuse**, as the cone's other tallies do
-/// for a cut the fuse cannot place, so this pins the refusal and holds any
-/// answer that does come back against the shapes: the shared volume by a column
-/// sum, which moves by `4.1e-5` from 400 to 800 columns a side and by `1.1e-5`
-/// from 800 to 1600, so `1e-3` beside `measure`'s own bound is far outside what
-/// the sum itself is unsure of.
+/// Neither answers wrong now, and the union answers **right**. The cone's big
+/// cap, cut by a cube plane, leaves pieces bounded by an arc of the rim and the
+/// chord across it; until `select.rs` counted the bulge between the two for a
+/// cone as it already did for a ball, no point could be placed inside such a
+/// piece and both rules refused (§204.2's gap).
+///
+/// The intersection still refuses, and on something else: its cone face runs
+/// right round the apex, which is a ring of arcs round a cone with no seam, and
+/// the mesher cannot walk one. So this holds any answer that does come back
+/// against the shapes — the shared volume by a column sum, which moves by
+/// `4.1e-5` from 400 to 800 columns a side and by `1.1e-5` from 800 to 1600, so
+/// `1e-3` beside `measure`'s own bound is far outside what the sum itself is
+/// unsure of — and pins by name whichever rule does not answer.
 #[test]
 fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
     let policy = Policy::certified();
@@ -151,6 +158,10 @@ fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
             Err(rcad_topo::Error::Undecidable { records }) => {
                 let record = records.records().last().expect("a refusal names why");
                 outcomes.push(format!("{rule:?}: {}", record.predicate()));
+                continue;
+            }
+            Err(rcad_topo::Error::AWireWillNotLieFlatOnItsFace { .. }) => {
+                outcomes.push(format!("{rule:?}: a wire will not lie flat on its face"));
                 continue;
             }
             Err(other) => panic!("{rule:?}: refused as {other:?}"),
@@ -179,8 +190,8 @@ fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
     assert_eq!(
         outcomes,
         [
-            "Intersection: a point inside a piece of a face",
-            "Union: a point inside a piece of a face",
+            "Intersection: a wire will not lie flat on its face",
+            "Union: right",
         ]
     );
 }
