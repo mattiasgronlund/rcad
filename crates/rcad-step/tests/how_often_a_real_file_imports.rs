@@ -665,7 +665,7 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 ///
 /// **Sixteen files carried that reason and thirteen came through**, which is
 /// §44.11 item 5 again and this time from both sides: two met a later blocker
-/// the same run, and `LED_D5.0mm-3` still has the closed-edge reason itself.
+/// the same run, and `LED_D5.0mm-3` still had the closed-edge reason itself.
 /// That last one is the open end of §115 — the reader's hint and the certified
 /// rule disagree about that file, and which of them is right is not measured.
 ///
@@ -707,6 +707,13 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// runs out along and back, and the mesher now cuts the dome in two on from
 /// the slit's inner end instead of handing the triangulator the same points
 /// twice.
+///
+/// **The pole lane then moved it from 160 to 161**, with nothing dropping out:
+/// `LED_D5.0mm-3`, the §115 file named above. The mesher now puts in a ball's
+/// pole when a circle passes within a rounding of it, and calls a walked point
+/// that close to a pole the pole (`docs/decisions.md` §198). Which of those two
+/// freed this file is not measured, and the solid it imports as is checked by
+/// `Model::validate` and nothing else.
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -733,6 +740,7 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
     "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step",
     "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
+    "LED_D5.0mm-3.step",
     "LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step",
     "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step",
     "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_Clear.step",
