@@ -18,16 +18,13 @@
 //! rule that read which arc an edge covers off the plane alone would answer the
 //! same for both — and one of them would come out inside out.
 //!
-//! **One of them is answered**, and measured against its closed form. The other
-//! two are still refused further on, and each test says where. The closed forms
-//! are written down beside them, so the day one is answered it is measured
-//! before it asks to be turned round.
+//! **All three are answered**, and each is measured against its closed form.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 1.0;
 
@@ -207,53 +204,6 @@ fn the_flat_face_of_a_ball_joined_to_a_block_down_its_polar_axis_holds_the_block
     }
     assert_eq!(asked([0.0, 6.0, 0.0]), OnAFace::OnItsBoundary);
     assert_eq!(asked([0.0, 7.0, 0.0]), OnAFace::NotHeld);
-}
-
-/// Intersect `arguments` with `tools` and insist it is refused as `refusal`.
-///
-/// An answer is measured against `closed_form` first, so that the day this is
-/// answered the test says whether the answer is right before it asks to be
-/// turned into one that expects an answer.
-fn refused_or_measured(
-    model: &mut Model,
-    [arguments, tools]: [&[SolidKey]; 2],
-    refusal: &str,
-    closed_form: f64,
-) {
-    match model.fuse(
-        arguments,
-        tools,
-        Rule::Intersection,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    ) {
-        Err(why) => assert_eq!(which_refusal(&why), refusal, "{why:?}"),
-        Ok(fused) => {
-            let answer = fused.solids().to_vec();
-            model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .expect("a fuse writes a sound model or writes nothing");
-            assert_eq!(answer.len(), 1);
-            measures(volume_of(model, &answer), closed_form);
-            panic!("answered, one solid, and it measures right: make this test expect an answer");
-        }
-    }
-}
-
-/// The name of a refusal. Read with `if let` rather than a `match`, because
-/// `Error` is `#[non_exhaustive]` and a catch-all arm here would join the
-/// wildcard ledger (§40) for a helper that panics on anything else anyway.
-fn which_refusal(why: &Error) -> &'static str {
-    if let Error::CannotTellTheCellsOfAFaceApart { .. } = why {
-        return "CannotTellTheCellsOfAFaceApart";
-    }
-    if let Error::CurvedFaceWithAHoleGoesTooFarRound { .. } = why {
-        return "CurvedFaceWithAHoleGoesTooFarRound";
-    }
-    if let Error::Undecidable { .. } = why {
-        return "Undecidable";
-    }
-    panic!("expected a refusal by name, got {why:?}")
 }
 
 fn a_model() -> Model {
