@@ -18,10 +18,10 @@
 //! rule that read which arc an edge covers off the plane alone would answer the
 //! same for both — and one of them would come out inside out.
 //!
-//! **None of them is answered yet.** With the arcs cut the right way round,
-//! each is refused by name further on, and each test says which refusal. The
-//! closed forms are written down beside them, so the day one is answered it is
-//! measured before it asks to be turned round.
+//! **One of them is answered**, and measured against its closed form. The other
+//! two are still refused further on, and each test says where. The closed forms
+//! are written down beside them, so the day one is answered it is measured
+//! before it asks to be turned round.
 
 use core::f64::consts::PI;
 
@@ -52,17 +52,35 @@ const CUT_AT: f64 = 0.5;
 /// `z <= 0.5` off the half ball `x >= 0`: half of a ball with its cap of height
 /// `r − 0.5` taken off.
 ///
-/// Refused by name further on, in working out which cells of a face are which,
-/// once the arcs are cut the right way round.
+/// Three things stood in the way, one after the other. The circle `z = 0.5`
+/// starts where the rim `x = 0` crosses it, so the two places the circles cross
+/// were folded into one and the skin's cells could not be told apart. The top
+/// of the answer is a half disk, whose two corners wind round nothing, so no
+/// point inside it could be found. And its straight side and its round side
+/// run between the same two corners, so they came out one edge with four faces
+/// along it.
 #[test]
-fn a_half_ball_cut_across_its_polar_axis_is_refused_by_name_rather_than_panicking() {
+fn a_half_ball_cut_across_its_polar_axis_measures_half_a_ball_without_its_cap() {
     let mut model = a_model();
     let half = half_a_ball(&mut model, Rule::Intersection);
     let below = a_block_below(&mut model, CUT_AT);
-    refused_or_measured(
-        &mut model,
-        [&half, &[below]],
-        "CannotTellTheCellsOfAFaceApart",
+    let answer = model
+        .fuse(
+            &half,
+            &[below],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a half ball cut across its polar axis is answered")
+        .solids()
+        .to_vec();
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a fuse writes a sound model or writes nothing");
+    assert_eq!(answer.len(), 1);
+    measures(
+        volume_of(&model, &answer),
         (a_balls_volume() - a_caps_volume(RADIUS - CUT_AT)) / 2.0,
     );
 }
@@ -70,7 +88,10 @@ fn a_half_ball_cut_across_its_polar_axis_is_refused_by_name_rather_than_panickin
 /// `x <= 0.5` off the half ball `x >= 0`: half a ball with the cap of height
 /// `r − 0.5` beyond `x = 0.5` taken off.
 ///
-/// Refused by name when the answer is put together, as not a closed surface.
+/// The answer is put together now: its rim `x = 0` is two edges between the
+/// poles, and they used to be named as one. What refuses is meshing the
+/// skin, which is a half ball's skin with a round hole where the cap came off
+/// — a curved face with a hole that is not a ring of two whole circles.
 #[test]
 fn a_half_ball_cut_square_to_its_flat_face_is_refused_by_name_rather_than_panicking() {
     let mut model = a_model();
@@ -83,7 +104,7 @@ fn a_half_ball_cut_square_to_its_flat_face_is_refused_by_name_rather_than_panick
     refused_or_measured(
         &mut model,
         [&half, &[before]],
-        "ResultIsNotManifold",
+        "CurvedFaceWithAHoleGoesTooFarRound",
         a_balls_volume() / 2.0 - a_caps_volume(RADIUS - CUT_AT),
     );
 }
@@ -95,8 +116,15 @@ fn a_half_ball_cut_square_to_its_flat_face_is_refused_by_name_rather_than_panick
 /// the ball's part below the cut on the far side of `x = 0` — half of a ball
 /// with its cap of height `r − 0.5` taken off. The ball's near half lies inside
 /// the block and adds nothing.
+///
+/// Its cells are told apart now, as the intersection twin's are. What refuses
+/// is placing the half disk the cut leaves on `z = 0.5` for `x ≤ 0`: the one
+/// point found inside it is classified against the joined solid, whose flat
+/// face `x = 0` has a round hole walked as two edges between the poles, and
+/// the ray caster cannot follow that hole. The candidate is dropped, no other
+/// is left, and the fuse gives up undecided rather than by name.
 #[test]
-fn a_ball_joined_to_a_block_down_its_polar_axis_then_cut_across_it_is_refused_by_name_rather_than_panicking()
+fn a_ball_joined_to_a_block_down_its_polar_axis_then_cut_across_it_is_refused_rather_than_panicking()
  {
     let mut model = a_model();
     let joined = half_a_ball(&mut model, Rule::Union);
@@ -106,8 +134,39 @@ fn a_ball_joined_to_a_block_down_its_polar_axis_then_cut_across_it_is_refused_by
     refused_or_measured(
         &mut model,
         [&joined, &[below]],
-        "CannotTellTheCellsOfAFaceApart",
+        "Undecidable",
         the_blocks_part + the_balls_part,
+    );
+}
+
+/// The joined solid's flat face `x = 0`, which the ray caster has to cross, is
+/// one the trimming of which it cannot follow — whatever point of the face it
+/// is asked about.
+#[test]
+fn the_flat_face_of_a_ball_joined_to_a_block_down_its_polar_axis_cannot_be_followed() {
+    let mut model = a_model();
+    let joined = half_a_ball(&mut model, Rule::Union);
+    let solid = model.solid(joined[0]).expect("this model made the key");
+    let flat = solid
+        .faces()
+        .find(|face| {
+            face.surface()
+                .as_plane()
+                .is_some_and(|plane| plane.offset() == 0.0)
+        })
+        .expect("the block's face x = 0 is kept, with the ball's hole in it");
+    let asked = solid.face_holds_the_point(
+        flat.key(),
+        rcad_predicates::Point::from([0.0, 3.0, 3.0]),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(
+            asked,
+            Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+        ),
+        "the day this is followed, the joined-and-cut test above should move: {asked:?}"
     );
 }
 
@@ -149,8 +208,11 @@ fn which_refusal(why: &Error) -> &'static str {
     if let Error::CannotTellTheCellsOfAFaceApart { .. } = why {
         return "CannotTellTheCellsOfAFaceApart";
     }
-    if let Error::ResultIsNotManifold { .. } = why {
-        return "ResultIsNotManifold";
+    if let Error::CurvedFaceWithAHoleGoesTooFarRound { .. } = why {
+        return "CurvedFaceWithAHoleGoesTooFarRound";
+    }
+    if let Error::Undecidable { .. } = why {
+        return "Undecidable";
     }
     panic!("expected a refusal by name, got {why:?}")
 }

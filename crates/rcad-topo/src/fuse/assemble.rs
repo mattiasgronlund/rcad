@@ -1099,14 +1099,27 @@ impl Assembly {
         // `Model::validate` reads: a cap circle and the rim of a round hole are
         // one whole curve and have one corner between them. A seam is the third
         // shape a wire comes in — one edge walked both ways, with a pole between
-        // the two walks — and it has four steps once the poles are counted.
-        let closes_on_one = match &sides[..] {
+        // the two walks — and it has four steps once the poles are counted. And
+        // **two different sides that are not both straight** bound a face too, as
+        // `Model::wire_of_two_steps_bounds_a_face` has it: a chord and the arc
+        // across it, which is the half disk a flat cut leaves inside a ball.
+        let straight = |side: &Side| {
+            edges[side.edge]
+                .carried_by
+                .iter()
+                .all(|surface| surface.as_plane().is_some())
+        };
+        let bounds_something = match &sides[..] {
             [only] => edges[only.edge].ends[0] == edges[only.edge].ends[1],
+            [one, other] => one.edge != other.edge && !(straight(one) && straight(other)),
             _ => false,
         };
         assert!(
-            sides.len() >= 3 || closes_on_one || self.faces[ring[0].face].is_a_whole_closed_surface,
-            "a face has at least three sides or one that closes, this one has {}",
+            sides.len() >= 3
+                || bounds_something
+                || self.faces[ring[0].face].is_a_whole_closed_surface,
+            "a face has at least three sides, one that closes, or two not both straight; \
+             this one has {}",
             sides.len()
         );
         sides
@@ -1975,10 +1988,19 @@ fn exactly_at(point: Point) -> [u64; 3] {
 
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
-/// either side of it. See [`which_curve_it_is`]. The last is which half it is
-/// of a circle cut in two because it started at a pole, where both halves run
-/// between the same two corners; see [`which_half_of_a_circle_cut_at_a_pole`].
-type EdgeName = ([usize; 2], Option<[[u64; 9]; 2]>, Option<bool>);
+/// either side of it. See [`which_curve_it_is`]. The third is which of the two
+/// arcs between the same two corners it is of a circle between a ball and a
+/// plane; see [`which_arc_of_a_circle_this_is`].
+///
+/// The fourth is whether the edge is straight: both surfaces either side are
+/// planes. **A straight side and a curved one can share both corners**, and
+/// they are two edges. A half disk is one: `z ≤ 0.5` cut out of a half ball
+/// leaves on the plane `z = 0.5` a chord along `x = 0` and an arc round the
+/// ball, both from `(0, −√3/2, 0.5)` to `(0, √3/2, 0.5)`, and named by their
+/// corners alone the two were one edge with four faces along it. Whether the
+/// surfaces are planes is not a number, so it cannot split one edge in two
+/// the way the surfaces' own names would (see [`which_curve_it_is`]).
+type EdgeName = ([usize; 2], Option<[[u64; 9]; 2]>, Option<bool>, bool);
 
 /// The edges built so far, and how to find one again.
 #[derive(Default)]
@@ -2017,7 +2039,10 @@ impl Edges {
         let key = (
             [from.min(to), from.max(to)],
             named,
-            which_half_of_a_circle_cut_at_a_pole(meet),
+            which_arc_of_a_circle_this_is(meet, from, to),
+            carried_by
+                .iter()
+                .all(|surface| surface.as_plane().is_some()),
         );
         let edge = match self.between.get(&key) {
             Some(&already) => already,
@@ -2369,39 +2394,51 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
     Some(named)
 }
 
-/// Which half a side is of a circle between a ball and a plane that was cut in
-/// two because it started at the ball's pole, or `None` for any other side.
+/// Which of the two arcs between its corners a side is of a circle between a
+/// ball and a plane, or `None` for any other side.
 ///
-/// **Both halves run between the same two corners and along the same two
+/// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
 /// arcs of a closed crossing never meet their other half in one answer —
 /// whatever cut the crossing twice kept one arc and threw the other away — but
-/// a circle cut only to give it a direction keeps both: the dome on one side
-/// and the hole in the floor on the other each walk the whole of it.
+/// two cases keep both. A circle cut only to give it a direction, because it
+/// started at the ball's pole: the dome on one side and the hole in the floor
+/// on the other each walk the whole of it. And a half ball's own rim, the
+/// circle `x = 0` walked as two edges from pole to pole: cut again by
+/// `x ≤ 0.5`, the skin and the flat half disk are both kept whole, and named
+/// by their corners the two edges were one edge with four faces along it.
 ///
 /// **What tells them apart is a sign, and no number is built.** `∇ball ×
 /// ∇plane` runs one way round the circle all the way along it, so there is
-/// exactly one half that leaves where the circle starts along it. A side's
+/// exactly one arc that leaves the lower-numbered corner along it. A side's
 /// material side says whether it leaves its first corner along `∇mine ×
 /// ∇partner` ([`which_arc_this_is`]'s rule); the plane's face has the two the
-/// other way round, and a side walked from the far corner leaves the start
-/// against that direction when it arrives. Both faces along a half, and both
-/// orders of the arguments, come to the same answer.
+/// other way round, and a side walked from the higher-numbered corner leaves
+/// the lower one against that direction when it arrives. Both faces along an
+/// arc, and both orders of the arguments, come to the same answer, because the
+/// corner numbers are the answer's and both faces share them.
 ///
 /// # Panics
 ///
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`],
 /// as [`which_arc_this_is`] does and for the same reason.
-fn which_half_of_a_circle_cut_at_a_pole(meet: &FaceMeet) -> Option<bool> {
-    let walked_from_the_far_corner = match (&meet.ends[0], &meet.ends[1]) {
-        (MeetPoint::WhereAClosedCurveStarts { .. }, MeetPoint::HalfWayRoundAClosedCurve { .. }) => {
-            false
-        }
-        (MeetPoint::HalfWayRoundAClosedCurve { .. }, MeetPoint::WhereAClosedCurveStarts { .. }) => {
-            true
-        }
-        _ => return None,
-    };
+fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Option<bool> {
+    let a_ball_and_a_plane = matches!(
+        meet.carried_by,
+        [Surface::Sphere(_), Surface::Plane(_)] | [Surface::Plane(_), Surface::Sphere(_)]
+    );
+    // A whole ball's seam is walked down and back up by the one face, with a
+    // material side that names the half of the meridian it is and not a side
+    // (`Arrangement::the_whole_surface`), so the rule below would read its two
+    // walks as two arcs. It is one edge, and it has only the one arc to be.
+    let a_seam = meet
+        .ends
+        .iter()
+        .any(|end| matches!(end, MeetPoint::APoleOfAClosedSurface { .. }));
+    if from == to || !a_ball_and_a_plane || a_seam {
+        return None;
+    }
+    let walked_from_the_far_corner = from > to;
     let along_mine_then_partner = match meet.material_side {
         Decision::Neg => true,
         Decision::Pos => false,
