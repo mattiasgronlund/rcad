@@ -538,7 +538,8 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     // plane's ellipse turns far above the arc the face keeps; the solid's box
     // grows to hold it, its ray targets move with it, and 16040 of that
     // answer's 20780 undecided points then refused on the frustum's big cap,
-    // whose trimming the ray caster cannot follow.
+    // whose trimming the ray caster did not follow. That is a gap, not a
+    // limit (§204.3): the floor goes back up when either is fixed.
     assert!(
         decided > 8_000,
         "{what}: only {decided} grid points could be classified"

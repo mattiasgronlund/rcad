@@ -18,11 +18,12 @@ section before it left; `just decision <n>` for which. Then §195.1–3,
 §196.1, §197.2, §198.1–2, §199.1–3, §200.1–2 (the leaned half ball and
 §198.1's `runs_up`), and §201.1–3 (the pointed cone's skin, the far pole side,
 the sliver), §202.1–2 (a ball less a disc, a ball cut through its pole),
+§204.1–2 (the pointed cone's box lands; §200.3's wrong answer now refuses),
 each closing an item of the section before.
 
-**Next and unclaimed: land the pointed cone's box** — fixed on
-`lane-cone-box-reaches-apex` but not gating (§202.3), so `main` still gives
-§200.3's wrong answer; §202.4 lists the rest. One lane at a time: the disk. §124,
+**Next and unclaimed: §200.3's pair answers** — it refuses "a point inside a
+piece of a face", a gap (§204.2); §204.4 lists the rest, the nappe file's
+lowered floor among them. §124,
 §136.4, §125.6: deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at
 `opt-level = 0` and its own ~7 s not reproducing; open about that number, not
 the gate.
