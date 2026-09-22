@@ -491,9 +491,11 @@ fn is_on_the_nappe_the_face_is_on(
     let faces_half = faces_half.ok_or_else(cannot)?;
     Ok(match how_far_up(point.enclosure()) {
         Decision::Zero => Decision::Zero,
-        side @ (Decision::Pos | Decision::Neg) if side == faces_half => Decision::Pos,
+        Decision::Pos if faces_half == Decision::Pos => Decision::Pos,
+        Decision::Neg if faces_half == Decision::Neg => Decision::Pos,
         Decision::Pos | Decision::Neg => Decision::Neg,
-        undecided => undecided,
+        Decision::Undecidable { enclosure } => Decision::Undecidable { enclosure },
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
     })
 }
 
@@ -524,7 +526,8 @@ fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Opt
     }
     let apex = PredicatePoint::from(cone.apex().coordinates());
     match side_of_surface(&trimming.surface, apex) {
-        side @ (Decision::Pos | Decision::Neg) => Ok(Some(side)),
+        Decision::Pos => Ok(Some(Decision::Pos)),
+        Decision::Neg => Ok(Some(Decision::Neg)),
         Decision::Zero => Ok(None),
         Decision::Undecidable { enclosure } => {
             Err(gave_up_on_a_side(&trimming.surface, apex, enclosure))
