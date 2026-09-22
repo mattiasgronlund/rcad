@@ -818,11 +818,12 @@ impl BuildingAMesh {
         // *other* side — the piece holding both poles, which a ball with a cap
         // taken off it is — the answer is the whole ball less a disc, and
         // writing it needs a seam and two poles the way §38.1 wrote an uncut
-        // one. Nothing here builds that yet, so it is refused by name rather
-        // than filled inside out: without this the union of two balls of radius
-        // two whose centres are two apart came back `Ok` measuring 10.40, where
-        // `18π = 56.55` is the union and `10π/3 = 10.47` is the *lens* between
-        // them — the complement of the piece that was asked for.
+        // one. [`BuildingAMesh::open_the_ball_along_a_seam`] puts them in, and
+        // what it cannot open is refused by name rather than filled inside out:
+        // filled, the union of two balls of radius two whose centres are two
+        // apart came back `Ok` measuring 10.40, where `18π = 56.55` is the
+        // union and `10π/3 = 10.47` is the *lens* between them — the
+        // complement of the piece that was asked for.
         //
         // **Only asked of a surface that pinches**, which here is only a ball,
         // and on a pipe there is nothing to ask. A pipe's two coordinates are
@@ -836,7 +837,16 @@ impl BuildingAMesh {
             && where_this_surface_pinches(stored).is_some()
             && how_much_of_the_chart_this_loop_encloses(&walked[0]) <= 0.0
         {
-            return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+            let Some(outer) = self.open_the_ball_along_a_seam(face, stored, &walked[0], room)?
+            else {
+                return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+            };
+            let Some((one, other)) =
+                self.cut_a_hole_up_to_both_poles(face, stored, &[outer, walked[0].clone()], room)?
+            else {
+                return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+            };
+            return self.cut_each_narrow_enough(face, stored, vec![one, other], whole_turn / 4.0, room);
         }
         let widest = whole_turn / 4.0;
         if walked.len() == 1
@@ -890,6 +900,62 @@ impl BuildingAMesh {
         }
         let only = walked.into_iter().next().expect("just checked");
         self.cut_each_narrow_enough(face, stored, vec![only], widest, room)
+    }
+
+    /// The outer loop of a ball less a disc, for a face whose one wire is the
+    /// rim of the disc: a seam from pole to pole and the two poles, the
+    /// rectangle §38.1 walks an uncut ball as. `None` when the surface does not
+    /// pinch or the rim reaches a whole turn round, where no meridian misses it.
+    ///
+    /// **The seam is the meridian half a turn from the middle of the rim**, so
+    /// its two sides, a whole turn apart, both lie strictly outside the
+    /// longitudes the rim runs between and the rim is an island in the
+    /// rectangle — the shape [`BuildingAMesh::cut_a_hole_up_to_both_poles`]
+    /// cuts. Nothing in the model is along it, so its points are made here once
+    /// and used by both sides, which is what makes the two sides one line in
+    /// space. The rectangle is walked anticlockwise, bottom pole side first,
+    /// because the material is inside it.
+    fn open_the_ball_along_a_seam(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        rim: &WalkedLoop,
+        room: f64,
+    ) -> Result<Option<WalkedLoop>> {
+        let (Some(whole), Some(pole)) = (
+            how_far_the_longitude_wraps(stored),
+            where_this_surface_pinches(stored),
+        ) else {
+            return Ok(None);
+        };
+        let (least, most) = longitudes_of(rim);
+        if most - least >= whole {
+            return Ok(None);
+        }
+        let seam = (least + most) / 2.0 - whole / 2.0;
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
+        let [south, north] = [-pole, pole].map(|latitude| {
+            let at = self.remember(there.apply_to_point(stored.point_at(seam, latitude)));
+            self.on_a_cut.insert(at);
+            at
+        });
+        let up = self.points_along_a_cut(face, stored, [seam, -pole], [seam, pole], room)?;
+
+        let mut outer = WalkedLoop {
+            corners: vec![[seam, -pole], [seam + whole, -pole]],
+            points: vec![south, south],
+            closes_on_one_curve: false,
+            goes_right_round: false,
+            climbed: 0.0,
+        };
+        for (corner, &point) in up.corners.iter().zip(&up.points) {
+            outer.corners.push([corner[0] + whole, corner[1]]);
+            outer.points.push(point);
+        }
+        outer.corners.extend([[seam + whole, pole], [seam, pole]]);
+        outer.points.extend([north, north]);
+        outer.take_in(&up.the_other_way());
+        Ok(Some(outer))
     }
 
     /// Cut each piece in two until none of them goes further round than
