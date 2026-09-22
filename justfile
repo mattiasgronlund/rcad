@@ -1029,7 +1029,7 @@ check-fuzz-builds:
 # One fewer. `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`
 # matched its refusal and sent every other `Error` to `panic!`; the cut down the
 # polar axis now answers, and the test that replaced it has no match at all.
-wildcard_arms := "91"
+wildcard_arms := "97"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
