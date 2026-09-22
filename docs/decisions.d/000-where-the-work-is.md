@@ -10,21 +10,15 @@ demonstration either way — a gap if a scaling reaches the sign, a limit if not
 import (KiCad 114 → 140), and since §193.1 the LEDs do too (140 → 160).
 What is left is their next blockers; a new unit is Mattias's call.
 
-**What is closed.** §140–§168 in turn (§142's four sites by §154, `37f24350`,
-§164); **§168.4's pie slice** by **§169**; **§169.4's fused arcs** by **§176**;
-**§181.6's question** by **§182**; **§183's picking normal** by **§184**, 793
-refusals to 0; §184.6 by **§187.3**; §176.5's chord and LED arc by **§187.1–2**;
-§187.4's leaning-bar wrong mesh by **§188.1**; the LED coarse sweep by
-**§188.3**, still 0 of 20; §188.2's pole off the pinch by **§189.1**; the six
-far pipes by **§189.2**, 8000 of 8000; §189.3's body meeting its dome by
-**§190.1–2**; §187.1's sweep half by **§190.3**; §189.1's overflow by
-**§190.4**; the dome wire by **§192.1**, 18 LEDs to 0; §190.5 by **§192.3**;
-§192.2's slit and wrong face by **§193.1–2**, 20 LEDs import; §193.3's disc dome
-by **§194.2–3**, Z2 LEDs as a limit by **§194.1**, a pole fuse by **§194.4**.
+**What is closed.** §140–§168 in turn; §169, §176, §182, §184 (793 refusals
+to 0), §187.1–3, §188.1–3, §189.1–2 (8000 of 8000), §190.1–4, §192.1–3 (18
+LEDs to 0), §193.1–2 (20 LEDs import), §194.1–4 — each closing the item the
+section before it left; `just decision <n>` for which. §194.5's pole-to-pole
+lune by **§195.1**, its box by **§195.2**, §190.6's circle check by **§195.3**.
 
-**Next and unclaimed: a wire whose two corners are both poles**, §194.5 — the
-mesher will not walk the lune, so the fuse will not cut a plane down a ball's
-polar axis. §194.5 lists the rest. §124, §136.4, §125.6:
+**Next and unclaimed: the turned ball-and-block at sizes that are not a power
+of two**, §195.2 — 11 of 36 scaled copies refuse, 9 on a corner met twice in
+one loop. §195.4 lists the rest. §124, §136.4, §125.6:
 deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0` and
 its own ~7 s not reproducing; open about that number, not the gate.
 
