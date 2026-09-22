@@ -17,8 +17,8 @@
 use core::f64::consts::{PI, TAU};
 
 use rcad_geom::{
-    Axis, Deflection, Isometry, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Scale, Sphere, Surface,
-    SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
+    Axis, Deflection, Isometry, POINT_ALONG_A_CROSSING_ROUNDOFF, Plane, Point, Scale, Sphere,
+    Surface, SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -66,7 +66,7 @@ fn the_point_across_a_circle_that_starts_at_a_pole_lies_in_its_box() {
 /// size that is not a power of two, because the start of the circle sat
 /// within one `atan2` rounding of the pole without being on the axis, and the
 /// fuse and the mesh disagreed about whether that was a pole (§195.2); the
-/// two tests above pin one of each refusal it came back as.
+/// two tests below pin one of each refusal it came back as.
 #[test]
 fn a_ball_and_block_turned_on_their_side_unite_soundly_at_every_size() {
     let mut answered = 0;
@@ -105,9 +105,9 @@ fn a_ball_and_block_turned_on_their_side_unite_soundly_at_every_size() {
         }
     }
     println!("{answered} unions answered; refused: {refused:#?}");
-    assert!(
-        answered == 36,
-        "only {answered} of the turned balls and blocks unite; refused: {refused:#?}"
+    assert_eq!(
+        answered, 36,
+        "not every turned ball and block unites; refused: {refused:#?}"
     );
 }
 
