@@ -497,11 +497,20 @@ const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
 /// 0.83% and has not moved from the 0.7% this band was first built on. What
 /// moved was which draw the fixed seed takes.
 ///
-/// So the ends are one fuse to twelve — `0.23%` to `2.8%` — the observed spread
-/// with the ceiling at twice its maximum. The floor is one fuse because one
-/// fuse is the question this row actually asks: whether the family still
-/// reaches the four-faces-along-one-edge configuration it was built to reach.
-/// Zero is the answer that fires.
+/// So the ends are one fuse to twelve — `0.23%` to `2.8%` at 429 fuses — the
+/// observed spread with the ceiling at twice its maximum. The floor is one fuse
+/// because one fuse is the question this row actually asks: whether the family
+/// still reaches the four-faces-along-one-edge configuration it was built to
+/// reach. Zero is the answer that fires.
+///
+/// **So the floor is a count, [`A_SKEW_PAIR_IS_NOT_A_SOLID_AT_LEAST`], and not
+/// a share.** It was written `0.0023`, one fuse in 429, and the number of fuses
+/// is not fixed at 429: cases replayed from
+/// `fuses_that_must_agree.proptest-regressions` are counted too, so it moves
+/// whenever a seed line is added. With the file at eighteen lines the row
+/// counted 1 of 438, under `0.0023`, and failed with the family reaching its
+/// configuration exactly as it was built to. The ceiling is left a share, which
+/// a larger count only moves further inside.
 ///
 /// **The sentence this replaces was true and still misled.** It said a band
 /// this tight is not a flake waiting to happen, because [`measured`] runs from
@@ -511,7 +520,11 @@ const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
 /// the corpus is reshuffled, and §121, §130, §131 and §132 reshuffled it. The
 /// row then failed for six weeks' worth of arithmetic work having changed the
 /// draw, not the kernel's behaviour. §136.5.
-const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0023..=0.028;
+const A_SKEW_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0..=0.028;
+
+/// How many of the skew family's fuses must come back not a solid: one, the
+/// floor [`A_SKEW_PAIR_IS_NOT_A_SOLID`] explains.
+const A_SKEW_PAIR_IS_NOT_A_SOLID_AT_LEAST: usize = 1;
 
 /// The same for its control, where both solids lean the same way.
 ///
@@ -1452,6 +1465,12 @@ fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     });
     tally.report("§22 headline: skew pairs, every rule");
     tally.share_of_answers_that_were_not_solids_must_be_within(A_SKEW_PAIR_IS_NOT_A_SOLID);
+    assert!(
+        tally.not_a_solid.get() >= A_SKEW_PAIR_IS_NOT_A_SOLID_AT_LEAST,
+        "none of {} skew fuses came back not a solid; the family no longer reaches four faces \
+         along one edge",
+        tally.fuses.get()
+    );
 
     let refused = tally.refused.get() as f64 / tally.fuses.get() as f64;
     if this_is_the_shipped_corpus() {
