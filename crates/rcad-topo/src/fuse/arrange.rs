@@ -3417,8 +3417,8 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
         .into_iter()
         .fold(1.0, f64::max);
     let reach = 2.0 * POINT_ALONG_A_CROSSING_ROUNDOFF * largest;
-    let the_other_pole_may_be_across = (0..3)
-        .all(|axis| (across.coordinates()[axis] - other.coordinates()[axis]).abs() <= reach);
+    let the_other_pole_may_be_across =
+        (0..3).all(|axis| (across.coordinates()[axis] - other.coordinates()[axis]).abs() <= reach);
     if the_other_pole_may_be_across {
         return None;
     }
