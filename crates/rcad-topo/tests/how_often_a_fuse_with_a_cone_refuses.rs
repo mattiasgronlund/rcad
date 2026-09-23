@@ -23,9 +23,9 @@
 //!   the block stands upright, cuts a **hyperbola**. `intersect` names it and
 //!   hands back one endless run per nappe. That branch still never closes, and
 //!   `arrange`'s `HowItRuns::AlongABend` orders points along it anyway, so the
-//!   block family's 90 refusals no longer stop there — they stop in four later
+//!   block family's 90 refusals no longer stop there — they stop in five later
 //!   places, which
-//!   `what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`
+//!   `what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering`
 //!   counts one by one;
 //! - anything curved against a cone `intersect` does still refuse outright. For
 //!   a cone against another cone that is the degree-four space curve; for a cone
@@ -338,7 +338,7 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// one: `select.rs`'s *a point inside a piece of a face* 60, a corner too far out
 /// for the triangulator 14, a face whose boundary crosses itself 7, and four faces
 /// along one edge 9.
-/// [`what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`]
+/// [`what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering`]
 /// is that breakdown pinned rather than printed, which is what §15.10 asks of a
 /// rate that stayed still while everything under it moved.
 ///
@@ -346,6 +346,12 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// `select.rs` decides cap pieces that used to stop it, and nine more fuses come
 /// back `Ok`. None of the nine is a cut: all nine are of pairs at
 /// `slope · far = 1`, which are disjoint, and they hand an input straight back.
+///
+/// **A fourth time, and the rate stood still again: 15 of 96.** A cone's rim
+/// circle has its two arcs named apart now, so the 24 that stopped at *four
+/// faces along one edge* get past it — and all 24 stop at the next thing,
+/// `intersect` refusing a pair of surfaces. The breakdown is five walls instead
+/// of four and the floor is where it was.
 ///
 /// So the assertion here stays a **floor at what has been measured**, in the
 /// shape §19.1 asks for: this family may not answer fewer than it does today.
@@ -1011,40 +1017,48 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 /// ordering.
 ///
 /// §15.10: a rate that moves is published with the list of what moved. It has
-/// moved twice. First the bend landed and the rate stood still — 6 of 96 either
-/// side — while all 90 refusals changed their name from *"nothing can put points
-/// in order along this curve"* to four different walls. Then §206's bulge count
-/// landed and the rate moved to 15 of 96, and the four walls moved under it.
+/// moved three times. First the bend landed and the rate stood still — 6 of 96
+/// either side — while all 90 refusals changed their name from *"nothing can put
+/// points in order along this curve"* to four different walls. Then §206's bulge
+/// count landed and the rate moved to 15 of 96, and the four walls moved under
+/// it. Then a cone's rim circle had its two arcs named apart, and the rate stood
+/// still at 15 of 96 while one of the four walls emptied into two new ones.
 ///
-/// The four, measured over this family's own draws rather than taken from
-/// anywhere, with what §206 did to each:
+/// The five, measured over this family's own draws rather than taken from
+/// anywhere:
 ///
-/// - **a point inside a piece of a face**, 60 → **30**. `select.rs` could not say
-///   whether a piece it had cut was in or out. Halved by §206 teaching
+/// - **a point inside a piece of a face**, 60 → 30 → **30**. `select.rs` could
+///   not say whether a piece it had cut was in or out. Halved by §206 teaching
 ///   `in_the_bulge_of` to count the bulge of a cone whose crossing with the
 ///   piece's plane is a circle.
-/// - **four faces along one edge**, 9 → **24**. The answer is not something a
-///   `Model` can hold, which is §17.7's catalogued case and not an arithmetic
-///   refusal at all. It *rose*, and the rise is not a regression: fuses that used
-///   to stop at the wall above now get far enough to reach this one. What they
-///   reach is the edge-naming gap `in_the_bulge_of`'s own doc names —
-///   `assemble`'s `which_arc_of_a_circle_this_is` reads a ball-and-plane circle
-///   only, so two arcs of a cone's rim circle between the same corners are named
-///   as one edge. §206.4 holds it.
-/// - **a corner too far out for the triangulator**, 14 → **18**. A face went to
-///   be cut into triangles and a corner of it was outside the range the
-///   triangulator takes. Same cause as the rise above: more fuses reach the
-///   triangulator at all.
-/// - **a face whose boundary crosses itself**, 7 → **9**. The same step, refusing
-///   for the other of its two reasons, and the same cause again.
+/// - **four faces along one edge**, 9 → 24 → **gone**. The answer was not
+///   something a `Model` can hold, which is §17.7's catalogued case and not an
+///   arithmetic refusal at all. It rose under §206 because fuses that used to
+///   stop at the wall above got far enough to reach it, and what they reached
+///   was the edge-naming gap `in_the_bulge_of`'s own doc named —
+///   `assemble`'s `which_arc_of_a_circle_this_is` read a ball-and-plane circle
+///   only, so two arcs of a cone's rim circle between the same corners were
+///   named as one edge. Naming them apart empties this wall.
+/// - **a corner too far out for the triangulator**, 14 → 18 → **18**. A face
+///   went to be cut into triangles and a corner of it was outside the range the
+///   triangulator takes.
+/// - **a face whose boundary crosses itself**, 7 → 9 → **9**. The same step,
+///   refusing for the other of its two reasons.
+/// - **a cone crossing another curved surface**, **9**, and **a crossing in two
+///   pieces with no half-space to tell them apart**, **15**. Both new, both
+///   `intersect` refusing a pair of surfaces one step past the edge naming, and
+///   together exactly the 24 the emptied wall held. That they are the *same* 24
+///   is measured and not inferred: `tests/which_arc_of_a_cones_rim_a_side_is.rs`
+///   walks this family's own draws and finds the two new names on the same rows,
+///   rules and argument orders the four-faces refusal stood on.
 ///
 /// Matched on what each message *is about* rather than on the whole string,
 /// because two of them carry the number of the corner they stopped at and that
-/// number is a fact about one draw. Anything the four do not describe fails the
-/// test rather than being counted as an other, so a fifth wall cannot arrive
+/// number is a fact about one draw. Anything the five do not describe fails the
+/// test rather than being counted as an other, so a sixth wall cannot arrive
 /// unnoticed.
 #[test]
-fn what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering() {
+fn what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering() {
     let (fuses, answered, gave_up) = how_each_fuse_went(Family::AFrustumAgainstABlock);
     let mut walls: BTreeMap<&'static str, usize> = BTreeMap::new();
     for (named, how_many) in &gave_up {
@@ -1060,16 +1074,20 @@ fn what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering()
             ("a point inside a piece of a face", 30),
             ("a corner too far out for the triangulator", 18),
             ("a face whose boundary crosses itself", 9),
-            ("four faces along one edge", 24),
+            ("a cone crossing another curved surface", 9),
+            (
+                "a crossing in two pieces with no half-space to tell them apart",
+                15
+            ),
         ]),
-        "these are the four walls this family was measured against; re-derive them \
+        "these are the five walls this family was measured against; re-derive them \
          when they move rather than widening the test (§19.1)"
     );
 }
 
-/// Which of the four walls a refusal's message is about.
+/// Which of the five walls a refusal's message is about.
 ///
-/// Panics on anything else, so a fifth wall is a failure and not a silent
+/// Panics on anything else, so a sixth wall is a failure and not a silent
 /// bucket.
 fn which_wall_it_stopped_at(named: &str) -> &'static str {
     if named == "a point inside a piece of a face" {
@@ -1083,8 +1101,11 @@ fn which_wall_it_stopped_at(named: &str) -> &'static str {
             return "a face whose boundary crosses itself";
         }
     }
-    if named.contains("an edge would have 4 faces along it") {
-        return "four faces along one edge";
+    if named.contains("degree-four space curve") {
+        return "a cone crossing another curved surface";
     }
-    panic!("a block against a cone stopped somewhere none of the four names: {named:?}")
+    if named.contains("this crossing comes in two pieces") {
+        return "a crossing in two pieces with no half-space to tell them apart";
+    }
+    panic!("a block against a cone stopped somewhere none of the five names: {named:?}")
 }

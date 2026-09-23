@@ -22,8 +22,9 @@
 //! # The ordering is not the last thing in the way, and this file says which is
 //!
 //! Ordering along the bend takes the grid from thirty-eight answers to
-//! fifty-three, and **not one configuration refuses on the ordering any more**.
-//! The thirty-one that still refuse all give up in the same different place —
+//! fifty-three, and naming the two arcs of a cone's rim circle apart takes it to
+//! fifty-seven; **not one configuration refuses on the ordering any more**. The
+//! twenty-seven that still refuse all give up in the same different place —
 //! `fuse/select.rs`'s *a point inside a piece of a face*, which §49.6 lists
 //! among what stands under its own name. That is a separate gap and the numbers
 //! below never blend the two (§17.7).
@@ -125,28 +126,26 @@ fn not_one_block_on_the_grid_is_refused_for_want_of_an_order_along_its_curve() {
 
 /// How many of the eighty-four answer, and what the rest give up on instead.
 ///
-/// **Fifty-three of eighty-four**, up from the thirty-eight §49.6 measured, and
-/// the thirty-one that are left all give up in one place that is not the
-/// ordering. §15.10 asks what the cases that moved have in common: all fifteen
+/// **Fifty-seven of eighty-four**, up from the thirty-eight §49.6 measured, and
+/// the twenty-seven that are left all give up in one place that is not the
+/// ordering. §15.10 asks what the cases that moved have in common: all nineteen
 /// are configurations the old rule turned down, every one of them has a block
 /// wall cutting the cone in a hyperbola, and every one of them is a wall the
 /// face can still be sorted out around afterwards.
 ///
 /// **Not eighty-four of eighty-four**, which §50.5 named as this lane's bar. The
-/// bar is not met and the reason is still not the ordering. It used to be one
-/// thing — all thirty-one were `fuse/select.rs`'s *a point inside a piece of a
-/// face*, which §49.6 lists as its own open row and which no work on `arrange.rs`
-/// reaches. Since §206 it is two: **27** of that, and **4** of *an edge would
-/// have 4 faces along it*.
+/// bar is not met and the reason is still not the ordering. All twenty-seven are
+/// `fuse/select.rs`'s *a point inside a piece of a face*, which §49.6 lists as
+/// its own open row and which no work on `arrange.rs` reaches.
 ///
-/// The four are not a regression. §206's bulge count carries those four past
-/// `select.rs` and into `assemble`'s edge naming, where
-/// `which_arc_of_a_circle_this_is` reads a ball-and-plane circle only and so
-/// calls two arcs of a cone's rim circle one edge. The count answered is
-/// unchanged at fifty-three either side, which is what says the move is a
-/// refusal changing its name rather than an answer being lost. §206.4.
+/// **It was 53 answered with 27 of that wall and 4 of *an edge would have 4
+/// faces along it*.** §206's bulge count carried those four past `select.rs` and
+/// into `assemble`'s edge naming, where `which_arc_of_a_circle_this_is` read a
+/// ball-and-plane circle only and so called two arcs of a cone's rim circle one
+/// edge. Naming the two arcs apart answers all four, which is why the second
+/// wall is gone rather than smaller. §206.4.
 #[test]
-fn fifty_three_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
+fn fifty_seven_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
     let mut answered = 0;
     let mut elsewhere: Vec<String> = Vec::new();
     for pair in the_grid() {
@@ -170,19 +169,14 @@ fn fifty_three_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
     println!("and the walls they gave up at are {walls:?}");
     assert_eq!(
         walls,
-        BTreeMap::from([
-            ("a point inside a piece of a face", 27),
-            (
-                "the result would not be a solid: an edge would have 4 faces along it",
-                4
-            ),
-        ]),
-        "these are the two walls the grid's refusals were measured against; re-derive them when \
-         they move rather than widening the test (§19.1)"
+        BTreeMap::from([("a point inside a piece of a face", 27)]),
+        "this is the one wall the grid's refusals were measured against; re-derive it when it \
+         moves rather than widening the test (§19.1)"
     );
     assert_eq!(
-        answered, 53,
-        "the grid answered 38 of 84 before the bend could be ordered and 53 after"
+        answered, 57,
+        "the grid answered 38 of 84 before the bend could be ordered, 53 after, and 57 once a \
+         cone's rim circle had its two arcs named apart"
     );
 }
 
@@ -191,13 +185,14 @@ fn fifty_three_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
 ///
 /// A rule that no longer holds is worth a measurement rather than a deleted
 /// line. The rule allows forty of the eighty-four and turns down forty-four.
-/// **Fifteen of the forty-four answer now**; the other twenty-nine stop in
-/// `select.rs`. Of the forty it allows, thirty-eight answer — the same
+/// **Nineteen of the forty-four answer now** — fifteen until a cone's rim circle
+/// had its two arcs named apart, and four more since; the other twenty-five stop
+/// in `select.rs`. Of the forty it allows, thirty-eight answer — the same
 /// thirty-eight as before, and the two that do not are the pair whose top cap
 /// lands exactly in the block's roof, which §49.6 counted separately as a flush
 /// cap and which still refuses.
 #[test]
-fn the_rule_that_said_which_frustums_a_block_could_cut_has_fifteen_exceptions() {
+fn the_rule_that_said_which_frustums_a_block_could_cut_has_nineteen_exceptions() {
     let mut the_rule_said_yes_and_it_answered = 0;
     let mut the_rule_said_no_and_it_answered = 0;
     for pair in the_grid() {
@@ -215,7 +210,7 @@ fn the_rule_that_said_which_frustums_a_block_could_cut_has_fifteen_exceptions() 
         "the rule allowed 40, and the two it allows that still refuse are the flush pair"
     );
     assert_eq!(
-        the_rule_said_no_and_it_answered, 15,
+        the_rule_said_no_and_it_answered, 19,
         "the rule turned down 44 and this many of them answer now"
     );
 }
