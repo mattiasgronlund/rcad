@@ -155,7 +155,10 @@ fn the_rim_the_fuse_cut_is_closed() {
             "a rim that names the plane that cut it is a whole closed curve"
         );
     }
-    assert!(asked > 0, "no edge of the answer carried the new run at all");
+    assert!(
+        asked > 0,
+        "no edge of the answer carried the new run at all"
+    );
 }
 
 /// Every run the fuse wrote on the first solid of the answer, once per coedge.
