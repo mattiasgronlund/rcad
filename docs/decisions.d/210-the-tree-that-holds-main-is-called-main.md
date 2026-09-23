@@ -16,8 +16,11 @@ A name nobody can derive is a name every document has to carry. Six of them
 carried it: five sections of this file and four separate memory notes, each
 spelling the path out so the next session could type it. None of the tooling
 did — `justfile`, `tooling/` and `.claude/` mention it nowhere, because every
-recipe that needs that tree already finds it by the branch it holds. So the
-rename cost exactly the documents, and the code was already immune.
+recipe that needs that tree already finds it by the branch it holds.
+
+The sentence that stood here said the rename therefore cost exactly the
+documents and the code was already immune. That was wrong within the hour, and
+210.4 is what it cost.
 
 It is `rcad-worktrees/main`, moved with `git worktree move` on 2026-09-23.
 `just lanes` now prints `free clean …/main [main]`, where the two halves agree.
@@ -87,3 +90,51 @@ its place.
 selftest, rather than an arbitrary path typed into `git -C`. That is the
 difference the screen is drawing, and it is why the recipe is the right shape
 for this and a looser one would not be.
+
+### 210.4 The move stalled a peer session, and `just lanes` could not have warned
+
+Within the hour, a peer reported every lane of a four-lane batch dying in
+130 ms, before any agent started:
+
+    WorktreeCreate hook failed:
+    /home/mattias/git/mattiasgronlund/rcad-worktrees/wave-1/.claude/hooks/worktree-create.sh: not found
+
+That session had been launched in the tree this section renamed.
+`CLAUDE_PROJECT_DIR` is fixed at session launch and does not follow a
+`git worktree move`, and **all five** repository-local entries in
+`.claude/settings.json` are relative to it — `session-start-hub.sh`,
+`session-start-guardrails.sh`, `worktree-create.sh`, `decisions-zero.sh` and
+the status line. Every one of them pointed at a path that no longer existed.
+The hook bodies were never the problem: they derive the repository from
+`git rev-parse --show-toplevel` at the cwd, so only the lookup path was stale.
+
+**`free clean` on that row is the one cell in `lanes` that carries no
+information.** The check made before the move was `just lanes` plus
+`git status --porcelain`, and both were clean. Neither could have said
+otherwise: that tree is left unlocked *by convention* so any session can merge
+there (§60), which is the same hole as a tree everyone merges in being a tree
+nobody owns. A session having it as its project directory is occupancy that
+neither a lock nor a status can see. So on that row, and only that row, `free`
+means "no lock was taken", never "nobody is there".
+
+**Before moving or removing a worktree, ask the peers.** `ListAgents` and one
+`SendMessage`, not a reading of `lanes`. This was already the rule for finding
+uncommitted work in that tree; the move is the case that shows it applies to a
+tree that is spotless.
+
+**The symlink is refused, and it should stay refused.** The obvious repair is
+`ln -s main …/rcad-worktrees/wave-1`, which is inert to git — `worktree list`
+reports real paths — and fixes all five entries at once. The peer's classifier
+declined it as a shared-resource change and the peer did not ask anyone else to
+type it, which is right twice over: being the hands for another session's
+refusal is the same rule read backwards, and the symlink restores the exact
+name 210.1 removed. A bridge that is never taken down is the stale path back.
+The route is to restart the affected session, which re-resolves
+`CLAUDE_PROJECT_DIR` — and which also moves it out of the tree that holds
+`main`, where no session should have been launched in the first place.
+
+**The fragility is general and outlives this rename.** Any `worktree move`
+breaks the hooks of any session launched in the tree that moved. Deriving the
+repository at run time instead of trusting `CLAUDE_PROJECT_DIR` would close it,
+and that is a `.claude/settings.json` change, which is Mattias's to make and
+not a lane's.
