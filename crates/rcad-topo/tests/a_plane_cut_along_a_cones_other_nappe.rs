@@ -533,17 +533,21 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
             decided += 1;
         }
     }
-    // 8 800, against the 8879 the fewest of the file's 104 answers decides —
-    // the frustum and the side-6 corner-up cube's union, both turns. §204.3 put
-    // this at 8 000 without measuring what the ceiling was; the figure it did
-    // give is right, and reproduces here to the point: 16040 of the 20780
-    // points that answer leaves undecided refuse on `z = 8`, the frustum's big
-    // cap, whose trimming the ray caster does not follow. That is a **gap**, not
-    // a limit (§16.10): the cap is a flat face whose one curved side is an arc
-    // of the cone's rim, and `holds.rs` follows an arc of a ball and no other.
-    // The floor goes up again when it follows this one.
+    // 9 300, against the 9326 the fewest of the file's 104 answers decides.
+    // It was 8 800 against 8879 until `holds.rs` learned to follow a flat face
+    // cut by an arc of a cone's rim: the frustum's big cap, cut in two by a
+    // block's plane, was the face 16040 of one answer's 20780 undecided points
+    // refused on, and §204.3's two candidates — the turning-point box and the
+    // ray caster's outline — were neither of them it.
+    //
+    // What holds the floor now is the other family: a plane that **leans**
+    // against the cone cuts it in a hyperbola, whose inside on that plane is
+    // two regions, so the block's own faces are still refused. That is a limit
+    // rather than a gap for the steeper blocks and a gap for the shallower ones,
+    // whose crossing is an ellipse and so one convex region; telling those two
+    // apart is a sign nothing here takes yet.
     assert!(
-        decided > 8_800,
+        decided > 9_300,
         "{what}: only {decided} grid points could be classified"
     );
     None
