@@ -61,7 +61,7 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, EdgeRun, HalfSpace, MeetOfThree, NamedRun, Orientation,
+    Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, intersect, meet_of_three_surfaces,
     where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
@@ -75,6 +75,7 @@ use rcad_predicates::{
 
 use smallvec::SmallVec;
 
+use crate::holds::{a_picker_that_tells_the_two_arcs_apart, where_a_closed_crossing_is_centred};
 use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
@@ -1898,10 +1899,11 @@ impl<'f> Arrangement<'f> {
     /// sign cannot be proved.
     ///
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the edge is not an
-    /// arc of a circle between a ball and a plane with a picker that tells its
-    /// two arcs apart — the only arcs anything in this kernel has been taught to
-    /// read a picker of, here or in [`holds`](crate::holds). A gap and not a
-    /// limit: the edge is one arc or the other.
+    /// arc of a closed crossing between a plane and a round surface with a
+    /// picker that tells its two arcs apart — a ball's circle, or a cone's
+    /// circle or ellipse, which are the arcs anything in this kernel has been
+    /// taught to read a picker of, here or in [`holds`](crate::holds). A gap
+    /// and not a limit: the edge is one arc or the other.
     ///
     /// # Panics
     ///
@@ -3608,31 +3610,29 @@ fn the_one_the_start_is(
     }
 }
 
-/// A direction square to the chord between `ends`, in the plane of the circle
-/// a ball and a plane cross in, pointing from the chord into the arc
-/// `picked_by` picks rather than into the other arc with the same two ends.
-/// `None` when the pair is not a ball and a plane, or no picker says.
+/// A direction square to the chord between `ends`, in the plane of the closed
+/// curve a round surface and a plane cross in, pointing from the chord into the
+/// arc `picked_by` picks rather than into the other arc with the same two ends.
+/// `None` when the pair is not a plane and a round surface whose crossing
+/// closes, or no picker says.
 ///
-/// This is `holds`'s own reading of a picker, `the_way_into_an_arc`, taken on
-/// the world boxes the arrangement holds rather than on stored points, and its
-/// argument carries over whole: the whole arc is strictly on one side of its
-/// chord, a picker whose plane holds both ends puts the arc on the side its
-/// normal points to, and so does one with both ends on or in front of it and
-/// the circle's centre on or behind it, which is what a fused arc's picker is.
-/// Only the sign of the picker's normal against the chord is ever read.
+/// This is `holds`'s own reading of a picker, [`the_way_into_an_arc`], taken on
+/// the world boxes the arrangement holds rather than on stored points. **The
+/// argument is that function's and is not repeated here**, and neither is its
+/// centre: both callers ask [`where_a_closed_crossing_is_centred`] and
+/// [`a_picker_that_tells_the_two_arcs_apart`], so a ball's circle and a cone's
+/// ellipse are one spelling rather than two that can come to disagree (§23.8,
+/// §211.5). Only the sign of the picker's normal against the chord is ever read.
+///
+/// [`the_way_into_an_arc`]: crate::holds
 fn the_way_into_an_arc(
     pair: [&Surface; 2],
     ends: [PredicatePoint; 2],
     picked_by: &[Picker],
 ) -> Option<[Interval; 3]> {
     let flat = pair[0].as_plane().or_else(|| pair[1].as_plane())?;
-    let ball = pair.into_iter().find_map(|surface| {
-        if let Surface::Sphere(ball) = surface {
-            Some(ball)
-        } else {
-            None
-        }
-    })?;
+    let centred = where_a_closed_crossing_is_centred(pair[0], flat)
+        .or_else(|| where_a_closed_crossing_is_centred(pair[1], flat))?;
     let [start, end] = ends.map(|at| at.enclosure());
     let chord = PredicatePoint::Constructed([0, 1, 2].map(|axis| end[axis] - start[axis]));
     let square_to_the_chord = cross_of(PredicatePoint::from(flat.normal().components()), chord);
@@ -3640,7 +3640,7 @@ fn the_way_into_an_arc(
         let Picker::InFrontOf(half) = picker else {
             return None;
         };
-        if !a_picker_that_tells_the_two_arcs_apart(half, flat, ball, ends) {
+        if !a_picker_that_tells_the_two_arcs_apart(half, flat, &centred, ends) {
             return None;
         }
         let facing = half.normal().components().map(Interval::exactly);
@@ -3653,44 +3653,6 @@ fn the_way_into_an_arc(
             None
         }
     })
-}
-
-/// Whether `half` says which of the two arcs between `ends` an edge is, by one
-/// of the two ways [`the_way_into_an_arc`] sets out.
-fn a_picker_that_tells_the_two_arcs_apart(
-    half: &HalfSpace,
-    flat: &Plane,
-    ball: &Sphere,
-    ends: [PredicatePoint; 2],
-) -> bool {
-    let sides = ends.map(|at| half.side_of_point(at));
-    if sides.iter().all(|side| *side == Decision::Zero) {
-        return true;
-    }
-    if !sides
-        .iter()
-        .all(|side| *side == Decision::Zero || *side == Decision::Pos)
-    {
-        return false;
-    }
-    let centre_sits = where_the_circles_centre_sits(half, flat, ball);
-    centre_sits == Decision::Zero || centre_sits == Decision::Neg
-}
-
-/// Which side of `half` the centre of the circle where `flat` cuts `ball` sits
-/// on.
-///
-/// That centre is `c + ((e − n·c)/(n·n)) n`, with `n` and `e` the plane's normal
-/// and offset and `c` the ball's centre. `n·n` is positive, so the sign wanted
-/// is the sign of `(h·c − d)(n·n) + (e − n·c)(h·n)`, with no division in it.
-fn where_the_circles_centre_sits(half: &HalfSpace, flat: &Plane, ball: &Sphere) -> Decision {
-    let normal = flat.normal().components().map(Interval::exactly);
-    let facing = half.normal().components().map(Interval::exactly);
-    let centre = ball.centre().coordinates().map(Interval::exactly);
-    let above = Interval::exactly(flat.offset()) - dot_of(normal, centre);
-    ((dot_of(facing, centre) - Interval::exactly(half.offset())) * dot_of(normal, normal)
-        + above * dot_of(facing, normal))
-    .sign()
 }
 
 /// What picks one curve of a crossing out of the others, empty when the pair
