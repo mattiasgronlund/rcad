@@ -140,6 +140,14 @@ fn every_point_of_a_grid_round_a_pointed_cone_is_answered_right() {
 /// `4.1e-5` from 400 to 800 columns a side and by `1.1e-5` from 800 to 1600, so
 /// `1e-3` beside `measure`'s own bound is far outside what the sum itself is
 /// unsure of — and pins by name whichever rule does not answer.
+///
+/// **The slack is held to a size first.** Every solid holding a cone's apex used
+/// to publish a `volume_error` of `inf`, which made that comparison pass for any
+/// volume at all — a check that cannot fail. `measure::what_a_cone_tip_costs`
+/// is what made it finite — about a tenth of a percent of the union's volume at
+/// this deflection — and the line below refuses any slack over a five hundredth
+/// of the volume it is checking, so the comparison cannot quietly go vacuous
+/// again.
 #[test]
 fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
     let policy = Policy::certified();
@@ -180,6 +188,10 @@ fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
             )
             .expect("the piece measures");
         let slack = measured.volume_error() + 1e-3;
+        assert!(
+            slack < want / 500.0,
+            "{rule:?}: a slack of {slack} on a volume of {want} says nothing",
+        );
         assert!(
             (measured.volume() - want).abs() <= slack,
             "{rule:?}: volume {}, where the shapes say {want}",
