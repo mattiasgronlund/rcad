@@ -266,7 +266,8 @@ the one structural change is in `rcad-topo` rather than in `rcad-step`.
 **Accepted, shape settled with rscene the same day (§207.7), not built**: §0's
 unit is elsewhere, a new unit is Mattias's call, and rscene asked for no rush.
 Landing it carries a retirement obligation — rscene cites `import.rs:195`'s doc
-comment verbatim and that sentence moves (§207.8).
+comment verbatim and that sentence moves (§207.9). The census that ships with
+the map is cut by what rcad can do about each case, and measured (§207.8).
 
 The rest of this entry is kept as it stood, because the reciprocal rule below
 only works if a withdrawal that gets reversed is visibly reversed rather than

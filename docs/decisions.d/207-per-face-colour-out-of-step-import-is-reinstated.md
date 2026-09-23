@@ -183,7 +183,62 @@ place; adding it then is smaller than carrying it unused until then.
 rscene names rcad only in `kernel.rs`; everything downstream speaks the bare
 handle. A map keyed by `FaceKey` needs no translation anywhere in rscene.
 
-### 207.8 One sentence this will retire
+### 207.8 The census is cut by what the consumer can do, not by entity kind
+
+207.7 settled that the count ships with the map. rscene then specified its
+shape, and the specification is better than the one this side would have
+written: **cut the count by what rscene can do about each case**, because that
+is the only axis its report can act on. A curve colour is about rscene's own
+limits and always will be. A colour on a `CYLINDRICAL_SURFACE` **is** per-face
+colour in substance, addressed one-to-many — a user looking at a flat grey
+cylinder the file coloured is looking at a confidently wrong picture, which is
+the thing §1 ranks below a refusal. Folded together, that sentence cannot be
+said. So the rows do not fold.
+
+rscene also named a case neither side had counted: a styled item whose target
+**is** an `ADVANCED_FACE` — identity in hand, join works — whose chain reaches
+`DRAUGHTING_PRE_DEFINED_COLOUR` rather than three reals. The colour is missing,
+not the face. That is the sharpest sentence available to the seam and a
+different failure from every other row.
+
+Measured here over all 367 corpus files, resolving each `STYLED_ITEM`'s target
+and walking its style chain to whatever colour entity it reaches:
+
+| row | what rcad can do about it | count | share |
+|---|---|---|---|
+| 1 | carried — a face, and three reals | 50,866 | 84.40% |
+| 2 | a face named, with no reals (`DRAUGHTING_PRE_DEFINED_COLOUR`) | 1,332 | 2.21% |
+| 3 | a surface several faces sit on | 1,390 | 2.31% |
+| 4 | a curve or an edge | 5,712 | 9.48% |
+| 5 | anything else, by its own keyword | 970 | 1.61% |
+
+Row 5 is named rather than bucketed, which is rscene's §42 rule against a
+wildcard arm swallowing a new variant, applied to a census: `CARTESIAN_POINT`
+453, `COMPLEX_TRIANGULATED_FACE` 272, `MANIFOLD_SOLID_BREP` 87,
+`AXIS2_PLACEMENT_3D` 65, `GEOMETRIC_CURVE_SET` 49, `SHELL_BASED_SURFACE_MODEL`
+27, `MAPPED_ITEM` 4, `BREP_WITH_VOIDS` 1, and **12 that resolve to nothing at
+all** — a styled item pointing at an absent `#id`, which is
+`Refusal::AReferencePointsNowhere`'s shape arriving somewhere it currently
+cannot be raised. Four more reach no colour entity down any path. Both are
+small and neither should be silent.
+
+The 87 `MANIFOLD_SOLID_BREP`s are the whole-solid case 207.7 sends to
+`Appearance::colour`; they sit in row 5 here only because this cut is by target
+kind and that case already has its own home.
+
+**Two cautions on these numbers, so a builder does not over-read them.** The
+partition of keywords into "surface" and "curve" is this measurement's own, not
+rcad's — row 3 and row 4 move if that set is drawn differently, and the built
+census must pin its partition with a test rather than inherit this one. And
+`OVER_RIDING_STYLED_ITEM` is a styled-item kind rather than a target kind: it is
+orthogonal to this cut, and whatever it resolves to belongs in whichever row its
+target lands in rather than becoming a sixth.
+
+**What rcad still owns.** Whether a row-3 surface colour *could* be placed on
+the faces sitting on it is rcad's judgement and a one-to-many mapping rcad owns.
+The census only names the category; it does not resolve it.
+
+### 207.9 One sentence this will retire
 
 rscene quotes `import.rs:195`'s doc comment **verbatim**, by file and line, in
 its §7 — as the evidence that this reader says out loud that it does not read
