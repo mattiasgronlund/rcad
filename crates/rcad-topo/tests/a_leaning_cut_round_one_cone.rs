@@ -44,7 +44,7 @@ use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Mesh, Model, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
 
 /// Apex at the origin, a half out per unit up. A power of two, so every
 /// corner's `radius = slope · height` is an exact product and the sweep
@@ -61,12 +61,68 @@ const OFFSET: f64 = 27.0;
 /// Where the cutting plane crosses the seam ruling at `y = 0, x > 0`.
 const RIM_HEIGHT: f64 = 6.0;
 
+/// Said the only way it could be said before §216, the rim is a circle and the
+/// cut is 1.45 mm away from where it was asked for.
 #[test]
-fn the_public_builder_hands_the_same_surface_arm_a_rim_that_is_not_a_circle() {
+fn a_rim_that_names_no_cutting_plane_is_answered_as_a_circle() {
+    let (level, worst) = what_the_mesh_put_on_the_rim(EdgeRun::RightRoundWhereItsFacesCross);
+    println!(
+        "a rim with no plane in it: {level} mesh points level with its corner, the furthest of \
+         them {worst} from the plane that was meant to cut the cone"
+    );
+
+    assert!(
+        level > 8,
+        "the rim is one closed curve on the cone, so the mesh carries a ring of points along it; \
+         only {level} came back level with its corner"
+    );
+    assert!(
+        worst > 1.4,
+        "a rim that names no plane stands {worst} off the one that was meant to cut it. A number \
+         this small means one point on a cone started naming an ellipse, which it cannot — so \
+         re-read what this file claims (docs/decisions.md §216)"
+    );
+}
+
+/// The same rim, saying which plane cut it, is the ellipse.
+///
+/// **This is the one that fails without §216's variant.** Said as
+/// [`EdgeRun::RightRoundWhereItCrosses`], the rim's pair is the cone and the
+/// cutting plane rather than the cone twice, so `where_a_plane_cuts_a_cone`
+/// answers it — and that function has built all four shapes since §214.
+#[test]
+fn a_rim_that_names_its_cutting_plane_is_answered_as_the_ellipse() {
+    let (level, worst) = what_the_mesh_put_on_the_rim(EdgeRun::RightRoundWhereItCrosses {
+        and: Surface::Plane(the_cutting_plane()),
+    });
+    println!(
+        "a rim that names its plane: {level} mesh points level with its corner, the furthest of \
+         them {worst} from the plane that was meant to cut the cone"
+    );
+
+    assert_eq!(
+        level, 1,
+        "the ellipse crosses the level of its own corner once and once only, so exactly one mesh \
+         point belongs there; {level} of them says a circle was built again"
+    );
+    assert!(
+        worst < 1e-12,
+        "the corner of the rim is on the cutting plane by construction, and came back {worst} off it"
+    );
+}
+
+/// How many mesh points sit exactly level with the rim's own corner, and how far
+/// the furthest of them stands from the plane that was meant to make the cut.
+///
+/// A ring of mesh points level with `(3, 0, 6)` is the **circle**. The ellipse
+/// meets that level in one point and one only, so the count is what tells the
+/// two answers apart, and the distance from `x + 4z = 27` is how far apart they
+/// are.
+fn what_the_mesh_put_on_the_rim(rim: EdgeRun) -> (usize, f64) {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let solid = a_frustum_split_by_a_leaning_plane(&mut model, &policy, &mut log)
+    let solid = a_frustum_split_by_a_leaning_plane(&mut model, rim, &policy, &mut log)
         .expect("a frustum split in two along a rim on its own cone is a solid");
     model
         .validate(&policy, &mut log)
@@ -82,32 +138,6 @@ fn the_public_builder_hands_the_same_surface_arm_a_rim_that_is_not_a_circle() {
         )
         .expect("the split frustum meshes");
 
-    let (level, worst) = what_the_mesh_put_on_the_rim(&mesh);
-    println!(
-        "mesh points level with the rim's corner: {level}, and the furthest of them stands \
-         {worst} off the plane that was meant to cut the cone"
-    );
-
-    assert!(
-        level > 8,
-        "the rim was meant to be one closed curve on the cone, so the mesh should carry a ring \
-         of points along it; only {level} points came back level with its corner"
-    );
-    assert!(
-        worst > 1.4,
-        "the rim the mesher built stands {worst} off the cutting plane. That is the wrong-answer \
-         this file demonstrates, and a number this small means the arm learned to read the \
-         plane — which is the fix, so re-read what this file claims (docs/decisions.md §214.4)"
-    );
-}
-
-/// How many mesh points sit exactly level with the rim's own corner, and how far
-/// the furthest of them stands from the plane that was meant to make the cut.
-///
-/// A mesh point level with `(3, 0, 6)` is on the **circle** the arm named. The
-/// ellipse meets that level in one point and one only, so a ring of them is the
-/// wrong curve, and its distance from `x + 4z = 27` is how wrong.
-fn what_the_mesh_put_on_the_rim(mesh: &Mesh) -> (usize, f64) {
     let across = (LEAN * LEAN + UP * UP).sqrt();
     let mut level = 0;
     let mut worst: f64 = 0.0;
@@ -121,6 +151,16 @@ fn what_the_mesh_put_on_the_rim(mesh: &Mesh) -> (usize, f64) {
     (level, worst)
 }
 
+/// `x + 4z = 27`, leaning about fourteen degrees across the axis of a cone whose
+/// own half-angle is twenty-seven, so what it cuts is an ellipse.
+fn the_cutting_plane() -> Plane {
+    Plane::from_point_and_normal(
+        Point::new(SLOPE * RIM_HEIGHT, 0.0, RIM_HEIGHT),
+        Vector::new(LEAN, 0.0, UP),
+    )
+    .expect("a normal with a length is a plane")
+}
+
 /// The frustum, its wall cut in two along a closed rim through `(3, 0, 6)`.
 ///
 /// Four faces: the two caps, and two bands **both on the one cone**. The rim
@@ -128,6 +168,7 @@ fn what_the_mesh_put_on_the_rim(mesh: &Mesh) -> (usize, f64) {
 /// — which is the whole point.
 fn a_frustum_split_by_a_leaning_plane(
     model: &mut Model,
+    rim_run: EdgeRun,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> rcad_topo::Result<SolidKey> {
@@ -146,7 +187,7 @@ fn a_frustum_split_by_a_leaning_plane(
         EdgeRun::RightRoundWhereItsFacesCross,
     )?;
     let top_circle = builder.add_edge(top_corner, top_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
-    let rim = builder.add_edge(rim_corner, rim_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let rim = builder.add_edge(rim_corner, rim_corner, rim_run)?;
 
     let bottom = a_cap(&mut builder, BOTTOM, -1.0, bottom_circle, Orientation::Reversed)?;
     let top = a_cap(&mut builder, TOP, 1.0, top_circle, Orientation::Forward)?;

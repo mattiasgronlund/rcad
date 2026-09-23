@@ -722,7 +722,8 @@ impl Model {
             for coedge in face.wires().flat_map(WireView::coedges) {
                 let edge = coedge.edge();
                 match edge.stored_run() {
-                    EdgeRun::RightRoundWhereItsFacesCross => {}
+                    EdgeRun::RightRoundWhereItsFacesCross
+                    | EdgeRun::RightRoundWhereItCrosses { .. } => {}
                     EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } => continue,
                     // A kind of run this crate has never seen may well come
                     // back to the corner it left, and taking it for an open
@@ -1328,9 +1329,15 @@ pub(crate) fn nothing_curved_says_where_it_bends(
 /// circle's own cylinder, for a circle a file imprinted on a flat face.
 pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
     match run {
-        EdgeRun::PartOfWhereItCrosses { and, .. } if and.as_plane().is_none() => Some(*and),
+        EdgeRun::PartOfWhereItCrosses { and, .. }
+        | EdgeRun::RightRoundWhereItCrosses { and }
+            if and.as_plane().is_none() =>
+        {
+            Some(*and)
+        }
         EdgeRun::Straight
         | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. }
         | EdgeRun::PartOfWhereItCrosses { .. }
         | _ => None,
     }

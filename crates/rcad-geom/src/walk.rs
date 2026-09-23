@@ -896,7 +896,9 @@ fn the_seed_this_run_is_picked_up_at(
     let surfaces = [&pair[0], &pair[1]];
     let picked_by: &[Picker] = match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
     };
 
     let mut settled_seeds = Vec::new();
@@ -1567,6 +1569,12 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
         .find(|side| matches!(side, Surface::Sphere(_)))
         .copied();
     match run.run() {
+        // A closed run whose two faces are one surface names its second surface
+        // the same way a ball's seam does, and for the same reason: the pair
+        // either side is one surface twice and says nothing at all. Ahead of the
+        // `along[0] == along[1]` guard below because it carries no `picked_by`
+        // to fall back on — the edge is the whole of the closed curve.
+        EdgeRun::RightRoundWhereItCrosses { and } => [*along[0], *and],
         EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => [*along[0], *and],
         EdgeRun::PartOfWhereItCrosses { and, .. } if both_flat && and.as_plane().is_none() => {
             [*along[0], *and]
@@ -2247,7 +2255,9 @@ fn which_branch_of_a_hyperbola_this_run_is(
     let size = how_big_this_is(&[centre, apex], &[towards, sideways_reach, standing_off]);
     let picked_by: &[Picker] = match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
     };
 
     let mut held = Vec::new();
@@ -2638,7 +2648,9 @@ fn which_of_these_circles_this_run_is(
 
     let picked_by: &[Picker] = match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => &[],
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
     };
     let mut held: Vec<Conic> = Vec::new();
     for circle in on_the_ends {

@@ -192,6 +192,35 @@ pub enum EdgeRun {
     /// (§29.13). What is still outside the vocabulary is a crossing that runs
     /// *through itself*, and that is refused by name rather than said badly.
     RightRoundWhereItsFacesCross,
+    /// Right round the closed curve where the face crosses `and`, so it starts
+    /// and ends at the same vertex — for when the faces either side are the
+    /// same surface and so name no crossing at all.
+    ///
+    /// **A frustum's wall split in two by a leaning plane is why this exists.**
+    /// Both bands are on the one cone, so the pair either side of the rim
+    /// between them names nothing, exactly as a ball's seam does; and the rim is
+    /// closed, so [`EdgeRun::PartOfWhereItCrosses`] — which is *part* of a
+    /// crossing, cut down by `picked_by` — is not what it is either. Without
+    /// this the rim could only be said as [`EdgeRun::RightRoundWhereItsFacesCross`],
+    /// and a reader asked where it runs has one point on a cone and nothing
+    /// else. One point on a cone does not name an ellipse: it names the circle
+    /// through it, which is a **different curve**, and that wrong answer is
+    /// measured at 1.45 mm on a 100 mm solid by
+    /// `rcad-topo/tests/a_leaning_cut_round_one_cone.rs`.
+    ///
+    /// So `and` is the missing second surface, the same job it does in
+    /// `PartOfWhereItCrosses`, and no `picked_by`: the edge is the whole of the
+    /// closed curve rather than a piece of it, which is the whole difference
+    /// between the two.
+    ///
+    /// **This closes**, and [`rcad_topo`'s `EdgeView::is_closed`] is the one
+    /// list that has to say so. `docs/decisions.md` §216.
+    ///
+    /// [`rcad_topo`'s `EdgeView::is_closed`]: https://docs.rs/rcad-topo
+    RightRoundWhereItCrosses {
+        /// The second surface, which the faces either side do not name.
+        and: Surface,
+    },
     /// Part of the curve where the face also crosses `and`, cut down to this
     /// one piece by `picked_by`.
     ///

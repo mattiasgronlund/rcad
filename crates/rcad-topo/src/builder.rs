@@ -748,7 +748,9 @@ fn which_described_face_the_sweep_meant(
 pub(crate) fn the_ends_are_the_whole_of_it(run: &EdgeRun) -> bool {
     match run {
         EdgeRun::Straight => true,
-        EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::PartOfWhereItCrosses { .. } => false,
+        EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. }
+        | EdgeRun::PartOfWhereItCrosses { .. } => false,
         _ => true,
     }
 }
