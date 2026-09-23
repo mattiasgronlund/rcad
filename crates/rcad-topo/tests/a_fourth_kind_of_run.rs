@@ -148,8 +148,8 @@ fn the_four_kinds_of_run_this_crate_was_written_against() {
     assert_eq!(
         refused.to_string(),
         "unknown variant `a fifth kind`, expected one of `Straight`, \
-         `RightRoundWhereItsFacesCross`, `RightRoundWhereItCrosses`, \
-         `PartOfWhereItCrosses`",
+         `RightRoundWhereItsFacesCross`, `PartOfWhereItCrosses`, \
+         `RightRoundWhereItCrosses`",
         "the kinds of `EdgeRun` changed. Every place in this crate that reads a \
          run now has a kind it has never seen, and the two that matter most are \
          `the_ends_are_the_whole_of_it` in `builder.rs` and `check_edges` in \

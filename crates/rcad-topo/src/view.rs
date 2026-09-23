@@ -1273,8 +1273,9 @@ impl<'m> EdgeView<'m> {
     /// has never seen.
     pub fn is_closed(self) -> Result<bool> {
         match self.data().run {
-            EdgeRun::RightRoundWhereItsFacesCross
-            | EdgeRun::RightRoundWhereItCrosses { .. } => Ok(true),
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
+                Ok(true)
+            }
             EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } => Ok(false),
             _ => Err(Error::ACrossingThisCannotBeOrderedAlong),
         }

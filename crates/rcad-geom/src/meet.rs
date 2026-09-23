@@ -192,35 +192,6 @@ pub enum EdgeRun {
     /// (§29.13). What is still outside the vocabulary is a crossing that runs
     /// *through itself*, and that is refused by name rather than said badly.
     RightRoundWhereItsFacesCross,
-    /// Right round the closed curve where the face crosses `and`, so it starts
-    /// and ends at the same vertex — for when the faces either side are the
-    /// same surface and so name no crossing at all.
-    ///
-    /// **A frustum's wall split in two by a leaning plane is why this exists.**
-    /// Both bands are on the one cone, so the pair either side of the rim
-    /// between them names nothing, exactly as a ball's seam does; and the rim is
-    /// closed, so [`EdgeRun::PartOfWhereItCrosses`] — which is *part* of a
-    /// crossing, cut down by `picked_by` — is not what it is either. Without
-    /// this the rim could only be said as [`EdgeRun::RightRoundWhereItsFacesCross`],
-    /// and a reader asked where it runs has one point on a cone and nothing
-    /// else. One point on a cone does not name an ellipse: it names the circle
-    /// through it, which is a **different curve**, and that wrong answer is
-    /// measured at 1.45 mm on a 100 mm solid by
-    /// `rcad-topo/tests/a_leaning_cut_round_one_cone.rs`.
-    ///
-    /// So `and` is the missing second surface, the same job it does in
-    /// `PartOfWhereItCrosses`, and no `picked_by`: the edge is the whole of the
-    /// closed curve rather than a piece of it, which is the whole difference
-    /// between the two.
-    ///
-    /// **This closes**, and [`rcad_topo`'s `EdgeView::is_closed`] is the one
-    /// list that has to say so. `docs/decisions.md` §216.
-    ///
-    /// [`rcad_topo`'s `EdgeView::is_closed`]: https://docs.rs/rcad-topo
-    RightRoundWhereItCrosses {
-        /// The second surface, which the faces either side do not name.
-        and: Surface,
-    },
     /// Part of the curve where the face also crosses `and`, cut down to this
     /// one piece by `picked_by`.
     ///
@@ -260,6 +231,44 @@ pub enum EdgeRun {
         /// [`Picker`] says in the type system rather than in a comment (§33).
         picked_by: SmallVec<[Picker; 1]>,
     },
+    /// Right round the closed curve where the face crosses `and`, so it starts
+    /// and ends at the same vertex — for when the faces either side are the
+    /// same surface and so name no crossing at all.
+    ///
+    /// **A frustum's wall split in two by a leaning plane is why this exists.**
+    /// Both bands are on the one cone, so the pair either side of the rim
+    /// between them names nothing, exactly as a ball's seam does; and the rim is
+    /// closed, so [`EdgeRun::PartOfWhereItCrosses`] — which is *part* of a
+    /// crossing, cut down by `picked_by` — is not what it is either. Without
+    /// this the rim could only be said as
+    /// [`EdgeRun::RightRoundWhereItsFacesCross`], and a reader asked where it
+    /// runs has one point on a cone and nothing else. One point on a cone does
+    /// not name an ellipse: it names the circle through it, which is a
+    /// **different curve**, and that wrong answer is measured at 1.45 mm on a
+    /// 100 mm solid by `rcad-topo/tests/a_leaning_cut_round_one_cone.rs`.
+    ///
+    /// So `and` is the missing second surface, the same job it does in
+    /// [`EdgeRun::PartOfWhereItCrosses`], and no `picked_by`: the edge is the
+    /// whole of the closed curve rather than a piece of it, which is the whole
+    /// difference between the two.
+    ///
+    /// **Last in the list, and that is not tidiness.** A [`Model`] is saved with
+    /// postcard, which writes an enum as its variant's *index*, so putting this
+    /// third would have moved `PartOfWhereItCrosses` from 2 to 3 and silently
+    /// changed the meaning of every saved byte string carrying an edge run.
+    /// Measured: put third, the checked-in writer-fuzz seed `two_cubes_that_write`
+    /// stopped decoding at all —
+    /// `rcad-step/tests/every_model_the_writer_fuzzer_kept_is_written_again.rs`
+    /// went red on `decoded: 0`. A new variant goes on the end.
+    ///
+    /// **This closes**, and `rcad-topo`'s `EdgeView::is_closed` is the one list
+    /// that has to say so. `docs/decisions.md` §216.
+    ///
+    /// [`Model`]: https://docs.rs/rcad-topo
+    RightRoundWhereItCrosses {
+        /// The second surface, which the faces either side do not name.
+        and: Surface,
+    },
 }
 
 impl EdgeRun {
@@ -290,7 +299,8 @@ impl EdgeRun {
     /// no geometry of their own and come back unchanged; they name the crossing
     /// of the two faces either side, and moving those faces moves the crossing.
     /// [`EdgeRun::PartOfWhereItCrosses`] carries a second surface and its
-    /// pickers, and each of those moves by its own type's rule.
+    /// pickers, and [`EdgeRun::RightRoundWhereItCrosses`] carries the second
+    /// surface alone; each of those moves by its own type's rule.
     ///
     /// **The one thing this loses is the exact squareness a picker on an endless
     /// piece was written with**, and [`HalfSpace::transformed`] sets out why —
@@ -301,15 +311,18 @@ impl EdgeRun {
     /// Nothing calls that due yet, so it is not built (§13).
     #[must_use]
     pub fn transformed(&self, movement: &Isometry) -> Self {
-        let EdgeRun::PartOfWhereItCrosses { and, picked_by } = self else {
-            return self.clone();
-        };
-        EdgeRun::PartOfWhereItCrosses {
-            and: and.transformed(movement),
-            picked_by: picked_by
-                .iter()
-                .map(|picker| picker.transformed(movement))
-                .collect(),
+        match self {
+            EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => self.clone(),
+            EdgeRun::RightRoundWhereItCrosses { and } => EdgeRun::RightRoundWhereItCrosses {
+                and: and.transformed(movement),
+            },
+            EdgeRun::PartOfWhereItCrosses { and, picked_by } => EdgeRun::PartOfWhereItCrosses {
+                and: and.transformed(movement),
+                picked_by: picked_by
+                    .iter()
+                    .map(|picker| picker.transformed(movement))
+                    .collect(),
+            },
         }
     }
 }

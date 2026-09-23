@@ -186,10 +186,20 @@ fn a_frustum_split_by_a_leaning_plane(
         bottom_corner,
         EdgeRun::RightRoundWhereItsFacesCross,
     )?;
-    let top_circle = builder.add_edge(top_corner, top_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let top_circle = builder.add_edge(
+        top_corner,
+        top_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
     let rim = builder.add_edge(rim_corner, rim_corner, rim_run)?;
 
-    let bottom = a_cap(&mut builder, BOTTOM, -1.0, bottom_circle, Orientation::Reversed)?;
+    let bottom = a_cap(
+        &mut builder,
+        BOTTOM,
+        -1.0,
+        bottom_circle,
+        Orientation::Reversed,
+    )?;
     let top = a_cap(&mut builder, TOP, 1.0, top_circle, Orientation::Forward)?;
     let lower_band = a_band(&mut builder, skin, bottom_circle, lower_seam, rim)?;
     let upper_band = a_band(&mut builder, skin, rim, upper_seam, top_circle)?;

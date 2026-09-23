@@ -1329,8 +1329,7 @@ pub(crate) fn nothing_curved_says_where_it_bends(
 /// circle's own cylinder, for a circle a file imprinted on a flat face.
 pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
     match run {
-        EdgeRun::PartOfWhereItCrosses { and, .. }
-        | EdgeRun::RightRoundWhereItCrosses { and }
+        EdgeRun::PartOfWhereItCrosses { and, .. } | EdgeRun::RightRoundWhereItCrosses { and }
             if and.as_plane().is_none() =>
         {
             Some(*and)
