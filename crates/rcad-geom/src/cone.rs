@@ -10,7 +10,9 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::exact::{difference, square_of_expansion};
-use crate::intersect::{how_a_plane_leans_against_a_cone, where_a_cones_apex_stands_against_a_plane};
+use crate::intersect::{
+    how_a_plane_leans_against_a_cone, where_a_cones_apex_stands_against_a_plane,
+};
 use crate::isometry::Isometry;
 use crate::plane::Plane;
 use crate::point::{Axis, Point, Vector};

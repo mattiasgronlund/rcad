@@ -27,7 +27,10 @@ fn the_centre(cone: &Cone, flat: &Plane) -> Option<[f64; 3]> {
     let normal = flat.normal().components();
     let apex = cone.apex().coordinates();
     let over: f64 = (0..3).map(|at| normal[at] * along[at]).sum();
-    assert!(over > 0.0, "the closed family has a positive n·along: {over}");
+    assert!(
+        over > 0.0,
+        "the closed family has a positive n·along: {over}"
+    );
     let reach = (flat.offset() - (0..3).map(|at| normal[at] * apex[at]).sum::<f64>()) / over;
     Some(core::array::from_fn(|at| apex[at] + reach * along[at]))
 }
@@ -122,7 +125,10 @@ fn how_far_out_the_cone_reaches(cone: &Cone, from: [f64; 3], way: [f64; 3]) -> f
     let mut outside = 1.0;
     while at(outside) == Decision::Neg {
         outside *= 2.0;
-        assert!(outside < 1e6, "the crossing closes, so the sign has to flip");
+        assert!(
+            outside < 1e6,
+            "the crossing closes, so the sign has to flip"
+        );
     }
     let mut inside = 0.0;
     for _ in 0..200 {
@@ -159,7 +165,10 @@ fn a_parabola_a_hyperbola_and_an_apex_on_the_plane_have_no_centre_here() {
     );
 
     let through_the_apex = Plane::from_coefficients([-0.25, 0.0, 1.0, 0.0]).expect("a plane");
-    assert_eq!(cone.is_cut_in_a_closed_curve_by(&through_the_apex), Some(false));
+    assert_eq!(
+        cone.is_cut_in_a_closed_curve_by(&through_the_apex),
+        Some(false)
+    );
     assert_eq!(
         cone.which_way_a_closed_crossings_centre_lies(&through_the_apex),
         None,

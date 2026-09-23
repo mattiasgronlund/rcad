@@ -543,19 +543,24 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
             decided += 1;
         }
     }
-    // 9 300, against the 9326 the fewest of the file's 104 answers decides.
+    // 9 300, against the 9326 the fewest of the file's 128 answers decides.
     // It was 8 800 against 8879 until `holds.rs` learned to follow a flat face
     // cut by an arc of a cone's rim: the frustum's big cap, cut in two by a
     // block's plane, was the face 16040 of one answer's 20780 undecided points
     // refused on, and §204.3's two candidates — the turning-point box and the
     // ray caster's outline — were neither of them it.
     //
-    // What holds the floor now is the other family: a plane that **leans**
-    // against the cone cuts it in a hyperbola, whose inside on that plane is
-    // two regions, so the block's own faces are still refused. That is a limit
-    // rather than a gap for the steeper blocks and a gap for the shallower ones,
-    // whose crossing is an ellipse and so one convex region; telling those two
-    // apart is a sign nothing here takes yet.
+    // **What holds the floor is not the leaning block's hyperbola**, which is
+    // what this comment claimed until 2026-09-23 and what §208.6 read off it.
+    // The three answers at 9326 are all the side-6 **corner-up cube** centred on
+    // the apex and turned `0.7` about it, on the pointed cone and on the
+    // frustum; every leaning block sits above 10 500. A corner-up cube's faces
+    // lean `acos(1/√3) ≈ 54.7°` off the axis, which for slope one half is inside
+    // the closed family, so each of them cuts an **ellipse** — the doc comment
+    // on `a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses` says
+    // so — and every step here now follows an ellipse arc as it follows a
+    // circle's. The count did not budge for that, so whatever leaves 9326 here
+    // is something else again and nobody has named it.
     assert!(
         decided > 9_300,
         "{what}: only {decided} grid points could be classified"

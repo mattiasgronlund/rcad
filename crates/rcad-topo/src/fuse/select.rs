@@ -38,9 +38,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{
-    EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect,
-};
+use rcad_geom::{EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect};
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     orient3d_of_points,
@@ -533,7 +531,6 @@ fn in_the_bulge_of(
         None
     }
 }
-
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire
 /// that is a polygon.

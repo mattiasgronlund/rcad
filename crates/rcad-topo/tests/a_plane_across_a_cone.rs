@@ -111,7 +111,10 @@ fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_
     assert_eq!(corners.len(), 2, "a piece with two corners: {corners:?}");
     for corner in corners {
         let [x, y, z] = corner.enclosure();
-        assert!(y.lo() == -10.0 && y.hi() == -10.0, "on the wall: {corner:?}");
+        assert!(
+            y.lo() == -10.0 && y.hi() == -10.0,
+            "on the wall: {corner:?}"
+        );
         assert!(
             z.hi() < -20.0,
             "the corner is on the nappe below the apex, where the frustum has no face: {corner:?}"
