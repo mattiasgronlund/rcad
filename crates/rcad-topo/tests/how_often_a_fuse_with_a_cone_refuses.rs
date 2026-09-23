@@ -23,9 +23,9 @@
 //!   the block stands upright, cuts a **hyperbola**. `intersect` names it and
 //!   hands back one endless run per nappe. That branch still never closes, and
 //!   `arrange`'s `HowItRuns::AlongABend` orders points along it anyway, so the
-//!   block family's 90 refusals no longer stop there — they stop in four later
+//!   block family's 90 refusals no longer stop there — they stop in five later
 //!   places, which
-//!   `what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`
+//!   `what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering`
 //!   counts one by one;
 //! - anything curved against a cone `intersect` does still refuse outright. For
 //!   a cone against another cone that is the degree-four space curve; for a cone
@@ -1075,7 +1075,10 @@ fn what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering()
             ("a corner too far out for the triangulator", 18),
             ("a face whose boundary crosses itself", 9),
             ("a cone crossing another curved surface", 9),
-            ("a crossing in two pieces with no half-space to tell them apart", 15),
+            (
+                "a crossing in two pieces with no half-space to tell them apart",
+                15
+            ),
         ]),
         "these are the five walls this family was measured against; re-derive them \
          when they move rather than widening the test (§19.1)"
