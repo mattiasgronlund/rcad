@@ -685,7 +685,10 @@ impl Model {
         let [WireStep::Along(only)] = wire.steps[..] else {
             return false;
         };
-        self.data.edges[self.data.coedges[only].edge].run == EdgeRun::RightRoundWhereItsFacesCross
+        matches!(
+            self.data.edges[self.data.coedges[only].edge].run,
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. }
+        )
     }
 
     /// Whether this wire is two steps that go somewhere and come back a
