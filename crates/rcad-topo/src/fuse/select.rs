@@ -326,8 +326,13 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when no candidate point inside the piece could be
-/// placed against every solid in the set.
+/// [`Error::Undecidable`], under one of **two** names, because two searches
+/// happen here and a caller that cannot tell them apart is told the wrong
+/// thing. [`INSIDE_A_PIECE`] when no candidate was inside the piece at all;
+/// [`PLACED_AGAINST_EVERY_SOLID`] when one was and it could not be classified
+/// against every solid in the set. The first says to look at the piece's
+/// trimming, the second says the piece is fine and a surface further down gave
+/// up — the lens in §216.4 is the second wearing the first's name.
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -346,10 +351,12 @@ fn place_the_piece(
     if against.is_empty() {
         return Ok(Placement::Outside);
     }
+    let mut one_was_inside = false;
     for &candidate in candidates {
         if the_piece_holds(piece, in_plane, candidate) != Some(true) {
             continue;
         }
+        one_was_inside = true;
         let mut trial = ProvenanceLog::new();
         let settled = settle_against_each(
             model, solids, against, candidate, piece, in_plane, policy, &mut trial,
@@ -359,8 +366,13 @@ fn place_the_piece(
             return Ok(placement);
         }
     }
+    let which_search_gave_up = if one_was_inside {
+        PLACED_AGAINST_EVERY_SOLID
+    } else {
+        INSIDE_A_PIECE
+    };
     Err(gave_up(
-        INSIDE_A_PIECE,
+        which_search_gave_up,
         &corners_of(piece).concat(),
         Measures::Length,
         log,
@@ -895,7 +907,11 @@ impl InPlane {
     /// dropping it and stepping off a plane `0.05` from the origin by `0.05`
     /// leaves the reference point so close to the face that the winding fan
     /// cannot be decided, and §17.7's headline refusal rate goes from 20.7% to
-    /// 37.9% — 72 fuses that could not place a point inside a piece of a face.
+    /// 37.9% — 72 fuses that [`place_the_piece`] gave up on. That 72 was counted
+    /// when one name covered both of its searches, so **how it splits between
+    /// [`INSIDE_A_PIECE`] and [`PLACED_AGAINST_EVERY_SOLID`] has not been
+    /// measured**; the total and the two rates still stand, the breakdown has to
+    /// be re-run before anyone quotes one.
     ///
     /// The two reaches are only tries: each is *proved* to be on one side or
     /// abandoned, so which one lands decides nothing. **The second is the same
@@ -1301,7 +1317,19 @@ fn midway_between(one: PredicatePoint, other: PredicatePoint) -> PredicatePoint 
 }
 
 /// The name the search for a point inside a piece goes by in provenance records.
+///
+/// It means what it says and nothing more: not one of the candidates could be
+/// proved to be inside the piece. It is **not** the name for a point that was
+/// inside and could not then be classified — that is
+/// [`PLACED_AGAINST_EVERY_SOLID`], and the two were one string until §216.4
+/// caught it naming the search that had worked.
 const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
+
+/// The name the search for a point the solids can all classify goes by.
+///
+/// A point *was* found inside the piece; what ran out is somewhere to stand
+/// where every solid in the set could say inside, outside or on.
+const PLACED_AGAINST_EVERY_SOLID: &str = "a point in a piece that every solid could place";
 
 /// The name the search for a point off a face's plane goes by.
 const OFF_A_PLANE: &str = "a point off a face's plane";
