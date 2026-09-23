@@ -24,7 +24,12 @@
   "permissions": {
     "allow": [
       "EnterWorktree",
-      "ExitWorktree"
+      "ExitWorktree",
+      "Bash(git worktree lock:*)",
+      "Bash(git worktree unlock:*)",
+      "Bash(mise exec -- just prune-worktrees)",
+      "Bash(mise exec -- just clean-targets)",
+      "Bash(mise exec -- just release-lanes:*)"
     ]
   },
   "worktree": {
