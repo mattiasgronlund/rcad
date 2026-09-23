@@ -206,10 +206,7 @@ fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
         );
         outcomes.push(format!("{rule:?}: right"));
     }
-    assert_eq!(
-        outcomes,
-        ["Intersection: right", "Union: right"]
-    );
+    assert_eq!(outcomes, ["Intersection: right", "Union: right"]);
 }
 
 /// A cube of side 4 stood on its corner, its diagonal upright and its middle on
