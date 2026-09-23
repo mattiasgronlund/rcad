@@ -1,6 +1,6 @@
 ## 0. Where the work is
 
-reviewed: 2026-09-22
+reviewed: 2026-09-23
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files that hang
 on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107's
@@ -30,10 +30,9 @@ that gap (§206.5). §206.6 lists the rest. §124, §136.4, §125.6 stay deferre
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
 
-**parked:** *the hollow*, §104, opened 2026-09-15 — shelling a plane-faced solid
-to a wall of one thickness, roadmap §8's first local operation (§44.1 is why it
-has a name, not M6). **No lane runs, and none will yet:** §13 wants a named
-consumer and `docs/consumers.md` records none; Mattias parked it (§104.2).
+**parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
+thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a
+named consumer, `docs/consumers.md` records none; Mattias parked it (§104.2).
 
 Before it, §53 closed by §103 having earned nothing; §55–§102 are defect fixes.
 
@@ -55,6 +54,8 @@ left. 2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a — 11.3 moved by §171.7. §
   forbidden direction. Mattias parked it under §13; its repro fires at 100 m parts.
 - §191.6 — four wrong answers behind `#[ignore]`, each a `src/` lane; §191.3 meets
   §136.4's direction at ordinary sizes, and §191.4 turns up §124's refusal.
+- §207 — per-face colour out of STEP import: rscene's demand, reinstated over the
+  withdrawal by its owner, so §13 no longer closes it. Shape settled, unscheduled.
 
 This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
 status` prints it, `check-where-the-work-is` holds its shape, §102 says why here.

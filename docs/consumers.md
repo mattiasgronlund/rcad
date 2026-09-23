@@ -255,7 +255,22 @@ Four things rcad may want from it:
   reports whose cause was a starved walk. That is already recorded as rcad's; it
   is repeated here only as evidence of how far the wording travels.
 
-### Withdrawal notice: per-face colour out of STEP import
+### Withdrawal notice: per-face colour out of STEP import — **reinstated 2026-09-23, see `just decision 207`**
+
+**The withdrawal below is spent.** rscene filed the demand on 2026-09-23, its
+owner having overridden the rscene-side reasoning that produced the withdrawal:
+its requirement 2.1.4 is to be met rather than reported around. The consumer is
+named, so §13 no longer closes this, and the costing is `docs/decisions.md`
+§207 — no new parsing, the face identity already exists inside the reader, and
+the one structural change is in `rcad-topo` rather than in `rcad-step`.
+**Accepted, shape settled with rscene the same day (§207.7), not built**: §0's
+unit is elsewhere, a new unit is Mattias's call, and rscene asked for no rush.
+Landing it carries a retirement obligation — rscene cites `import.rs:195`'s doc
+comment verbatim and that sentence moves (§207.8).
+
+The rest of this entry is kept as it stood, because the reciprocal rule below
+only works if a withdrawal that gets reversed is visibly reversed rather than
+quietly deleted. Read it as history from here down.
 
 `docs/decisions.md` §56.7 recorded this as *undecided, not refused* — a
 well-formed demand acknowledged twice in channel and written into no rcad file
