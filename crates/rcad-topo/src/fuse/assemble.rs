@@ -2191,8 +2191,9 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
 /// either side of it. See [`which_curve_it_is`]. The third is which of the two
-/// arcs between the same two corners it is of a circle between a ball and a
-/// plane; see [`which_arc_of_a_circle_this_is`].
+/// arcs between the same two corners it is of a closed crossing between a plane
+/// and a surface that curves right round — a ball's circle, or a cone's rim
+/// circle; see [`which_arc_of_a_circle_this_is`].
 ///
 /// The fourth is whether the edge is straight: both surfaces either side are
 /// planes. **A straight side and a curved one can share both corners**, and
