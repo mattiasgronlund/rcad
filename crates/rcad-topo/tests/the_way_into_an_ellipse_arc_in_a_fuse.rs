@@ -68,9 +68,10 @@ use rcad_geom::{
     Axis, Cone, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale, Surface,
     Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey, WireStepView,
+    Containment, DraftStep, Error, FaceKey, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+    SolidView, WireStepView,
 };
 
 /// Slope a half, so `slope · height` rounds to nothing at the corners.
@@ -162,16 +163,15 @@ fn a_lens_of_a_cone_between_two_leaning_lids_is_a_solid() {
 ///
 /// **It is written as "not that refusal" rather than as an answer**, and that is
 /// a measured limit and not a hedge. This pair walks straight into a *second*
-/// wall once the arc is read: `select.rs` cannot place a point inside a piece of
-/// the bar's own flat end, and refuses `Undecidable` naming "a point inside a
-/// piece of a face" with an infinite enclosure. Two other shapes were tried for
-/// this file and each found a different wall of its own — a half frustum cut
-/// down its axis folds two corners on the cone's two rulings into one node and
-/// refuses `EdgeHasNoLength`, and a block big enough to hold the lens leaves a
-/// piece of its own wall bounded by a hyperbola with two nodes and no third to
-/// wind round. None of the three is about the centre of an ellipse, and none is
-/// this lane's to fix; what this file can say is that the arc is now read, and
-/// it says exactly that.
+/// wall once the arc is read, and the two tests below name it: the lens's own
+/// **cone face** cannot be asked what it holds, so nothing can be classified
+/// against the lens at all. Two other shapes were tried for this file and each
+/// found a different wall of its own — a half frustum cut down its axis folds
+/// two corners on the cone's two rulings into one node and refuses
+/// `EdgeHasNoLength`, and a block big enough to hold the lens leaves a piece of
+/// its own wall bounded by a hyperbola with two nodes and no third to wind
+/// round. None of the three is about the centre of an ellipse; what this file
+/// can say is that the arc is now read, and it says exactly that.
 #[test]
 fn the_arrangement_reads_the_way_into_a_cones_ellipse_arc() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
@@ -190,7 +190,108 @@ fn the_arrangement_reads_the_way_into_a_cones_ellipse_arc() {
             ),
             "under {rule:?} the arrangement gave up on an ellipse arc it can read: {said:?}"
         );
+        assert!(
+            matches!(said, Err(Error::Undecidable { .. })),
+            "under {rule:?} the fuse said something the wall below does not explain: {said:?}"
+        );
     }
+}
+
+/// A point plainly on the piece of cone between the two lids, and the face
+/// refuses to say whether it is on it.
+///
+/// `(2, 0, 4)` is on the cone to the bit — the slope is a half and `0.5 · 4 = 2`
+/// — and it is strictly between the lids: `x + z` is `6` against the lower lid's
+/// `4`, and `z − x` is `2` against the upper lid's `4`. The answer is `Held` and
+/// there is nothing undecidable about it. What comes back is
+/// `AFaceTrimmedByACurveThisCannotFollow` naming that same face.
+///
+/// **The refusal never looks at the point.** `holds.rs`'s
+/// `what_a_face_cut_by_part_of_a_crossing_holds` takes this face — each of its
+/// two sides is `PartOfWhereItCrosses` with a face across it — and asks
+/// `is_a_family_this_follows` first, whose `match` on the face's own surface
+/// answers `false` for every `Surface::Cone` whatever cuts it. So no point of
+/// this face can be asked, and §167's family is the whole of the wall.
+#[test]
+fn the_lenss_cone_face_will_not_say_what_it_holds() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let lens = a_lens_of_a_cone(&mut model);
+    let view = model.solid(lens).expect("this model made the key");
+    let skin = the_piece_of_cone(view);
+    let said = view.face_holds_the_point(
+        skin,
+        PredicatePoint::from(Point::new(2.0, 0.0, 4.0).coordinates()),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(said, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == skin),
+        "the piece of cone said something else about a point on it: {said:?}"
+    );
+}
+
+/// The point the fuse could not place *is* inside its piece, and what stops it
+/// is the lens's cone face.
+///
+/// `select.rs` refuses this pair under the name **"a point inside a piece of a
+/// face"**, which describes the wrong thing. `(0.625, −0.125, 2.75)` is the
+/// middle of the bar's own bottom end — a rectangle four corners round, with no
+/// curve anywhere near it — and the winding puts it inside. The candidate then
+/// goes to classification against the lens, which stops at the cone face and
+/// hands back `CannotFollowAFacesTrimming`; `settle_against_each` reads that as
+/// "this candidate says nothing", every candidate ends the same way, and the
+/// refusal that comes out names the search that in fact succeeded.
+#[test]
+fn the_candidate_the_fuse_gave_up_on_is_stopped_by_the_cone_face() {
+    let (model, lens, _bar) = a_lens_and_a_bar();
+    let view = model.solid(lens).expect("this model made the key");
+    let skin = the_piece_of_cone(view);
+    let said = view.classify_point(
+        Point::new(0.625, -0.125, 2.75),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(said, Containment::CannotFollowAFacesTrimming { face } if face == skin),
+        "the lens placed the bar's own bottom end after all: {said:?}"
+    );
+}
+
+/// And the refusal says so: the record names the solid it could not ask, not the
+/// piece it found points in.
+///
+/// The test above shows the winding succeeded; this one shows `select.rs` no
+/// longer reports it as having failed. `a point inside a piece of a face` is the
+/// other name, kept for the piece whose own outline is what could not be
+/// settled.
+#[test]
+fn the_refusal_names_the_solid_it_could_not_ask() {
+    let (mut model, lens, bar) = a_lens_and_a_bar();
+    let said = model.fuse(
+        &[lens],
+        &[bar],
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let Err(Error::Undecidable { records }) = said else {
+        panic!("the lens and the bar fused after all: {said:?}")
+    };
+    let named = records
+        .records()
+        .last()
+        .map(rcad_predicates::Record::predicate);
+    assert_eq!(named, Some("a solid that can place a piece of a face"));
+}
+
+/// The one face of the lens drawn on a cone.
+fn the_piece_of_cone(view: SolidView<'_>) -> FaceKey {
+    let mut cones = view
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Cone(_)));
+    let skin = cones.next().expect("the lens has a piece of a cone in it");
+    assert!(cones.next().is_none(), "the lens has one piece of a cone");
+    skin.key()
 }
 
 /// The lens, and a bar poking out through its upper lid, in one model.
