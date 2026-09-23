@@ -160,7 +160,7 @@ face used to be refused outright. The second commit narrows the new arm to the
 face's one wire, which restores that test exactly. Which of the two pieces the
 ring cuts the surface into the hole sits in is nobody's answer yet.
 
-### 208.5 A lane's self-reported sha is not evidence
+### 208.5 Two things a lane reported that were not measurements
 
 `cone-rim-arcs` reported a `landed_sha` of
 `39f9d7d09f3e5b9c0c0a3c6d3e5f1b9e00000000` — the right 8-character prefix, then
@@ -170,6 +170,24 @@ a placeholder tail of zeros. The branch tip is
 reported reproduced exactly. Nothing was lost, and the lesson is cheap: a sha in
 a lane's report is a claim like any other, and the one that counts is the one git
 prints.
+
+The second cost more, because it was nearly written down here as fact.
+`cone-rim-family` reported that
+`a_solid_carrying_a_run_along_a_cones_ruling.rs`'s doc comment had gone stale —
+it says the face point-in-solid cannot follow is *"the top cap, a plain flat face
+trimmed by half a circle"*, and after §208.1 that cap answers. True, and the lane
+was right to flag it. But the lane went on to say the refusal *"must now come
+from the flat face down the axis, whose sides are the apex rulings"*, and that
+was an inference, drawn from a test that never prints the face it names.
+
+**It is wrong.** Printing the named face's surface gives
+`Cone { axis: z through the origin, slope: 0.5 }`: the refusal names the **cone
+face**, whose own outline carries the same rim arc. The flat face along the two
+rulings is still never reached, exactly as the old paragraph said. The doc
+comment is corrected here to what was measured, and the first draft of §208.6
+carried the lane's guess as fact until the probe was run. A lane's *"must now
+be"* is a hypothesis with a lane's confidence attached, and §16.10 wants a
+demonstration for those too.
 
 ### 208.6 What is left
 
@@ -190,12 +208,6 @@ prints.
   cone-against-another-curved-surface crossing. Unexplained, and only a guess is
   written down.
 - **A ring bounding a face that also has a hole** (§208.4).
-- A stale paragraph: `a_solid_carrying_a_run_along_a_cones_ruling.rs`'s doc
-  comment on `an_arc_trimmed_face_refuses_point_in_solid_by_name_and_a_closed_one_does_not`
-  says what it catches is *"the top cap, a plain flat face trimmed by half a
-  circle"*. After §208.1 that very cap answers; the refusal must now come from the
-  flat face down the axis, whose sides are the apex rulings. The test still
-  passes and no count moved — it is the prose that is stale.
 - Still deferred, unchanged: §124, §136.4, §125.6, §191.6, §207.
 
 Commands: `just decision 206.6`, `206.2`, `206.5`, `200.3`, `41.6`, `16.10`, `23.8`.

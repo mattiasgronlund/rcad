@@ -320,9 +320,16 @@ fn a_solid_carrying_apex_runs_meshes_to_half_a_frustums_volume() {
 ///
 /// `holds.rs`'s `walk_one_outline` walks a face's outline as a polygon and
 /// refuses the moment a coedge's run is anything but [`EdgeRun::Straight`]. What
-/// that catches here is the **top cap**, a plain flat face trimmed by half a
-/// circle — an arc, which is a [`EdgeRun::PartOfWhereItCrosses`] and has two
-/// different ends. The cone face and the flat face carrying the two rulings are
+/// it catches is an arc — a [`EdgeRun::PartOfWhereItCrosses`], with two
+/// different ends.
+///
+/// **The face it names is the cone face**, measured here by printing the named
+/// face's surface: `Cone { axis: z through the origin, slope: 0.5 }`. It used to
+/// name the **top cap**, a plain flat face trimmed by half the rim circle, and
+/// §208.1 is why it no longer does — a flat face cut by a cone standing square
+/// to it is a family `what_a_face_cut_by_part_of_a_crossing_holds` can follow,
+/// so the cap answers and the walk gets as far as the cone face, whose own
+/// outline carries that same arc. The flat face along the two rulings is still
 /// never reached.
 ///
 /// The whole frustum, built from the same cone by the same builder, **answers
