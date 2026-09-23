@@ -14,21 +14,21 @@ unit is Mattias's call.
 `just decisions-toc` is the map. Through §194 the STEP corpus — 793 refusals to 0,
 8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc, a pointed
 cone's bound, a ring of arcs round an apex; §211–§213 an ellipse arc's centre, a
-ring bounding a face with a hole, a crown repinned as a gap; §215 answers §214's 9
-and names §211.6's floor. **§216** closes the builder half of that floor's run and
-finds §215.3's two gaps were one gate wearing two names.
+ring with a hole, a crown, §214's 9, §211.6's floor named. §216–**§217** close
+that floor's run at both halves, split one refusal name in two, measure the gate.
 
-**Next and unclaimed: the fuse does not write the rim that names its cutter.**
-§216.2 built `EdgeRun::RightRoundWhereItCrosses { and }`, so the builder's 1.45 mm
-wrong answer is gone; `assemble` still writes `RightRoundWhereItsFacesCross`. The
-cutting plane **is** in scope at `Edge::how_it_runs`, the answer's own pairing is
-not, and writing it blind rewrites every round bar's cap circle. A **defect**.
+**Next and unclaimed: the cone-face arm of `is_a_family_this_follows` — the proof
+is the cost, not the arithmetic.** §217.4 widened it: **all 37 108 refusals become
+answers, nothing relocates**, so §216.5's feared second blocker is not there. But
+its sketch proves a cone cut by **two** planes and all 37 108 are **three**, so
+the proved family alone moves 0. Argue connectedness in front of three or more
+first; the far-nappe guard is demonstrated necessary (two wrong answers) and free.
 
-Also open: §216 re-reads §215.3's two — the `cut.kept` conjunct is a **limit**
-(9 326 → 9 326 when deleted, §216.3), the live lever the **cone-face arm** of
-`is_a_family_this_follows` at 37 108 on one answer, and §216.5 says measure past
-the gate first. §216.4's refusal-name split; §215.2's other two walls; §208.6's
-cone-tip bound; §212.6's gap; §124, §136.4, §125.6.
+Also open: §217.5's two doors that never heard of the new run —
+`SolidBuilder::closes_on_one_edge` drifted from `model.rs`'s (§44.11), `validate.rs`
+leaves its `and` unchecked; one lane, a test each. §216.3's `cut.kept` **limit**.
+§217.3's order-not-rule asymmetry, recorded not diagnosed. §215.2's other two
+walls; §208.6's cone-tip bound; §212.6's gap; §124, §136.4, §125.6.
 
 **parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
 thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a
