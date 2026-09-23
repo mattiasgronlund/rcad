@@ -136,3 +136,35 @@ Two lanes of the second batch are not merged and neither is ready:
 §208.3's arm was merged knowing that, deliberately and on the record. It stays
 merged: reverting six lines that are right costs more than carrying them until
 the family that exercises them is built, and §208.3 already says which six.
+
+### 209.5 A limit that rests on someone else's gap is not a limit
+
+`lane-fold-repro-hunt` is not merged for a second reason, found reading it here
+and worth more than the first. Its argument runs: for a coarse mesh to enclose
+zero every point sits on one plane, so both bounding curves lie in that plane,
+so the surface is a torus square to its axis, so the shape is the crown of a
+ring — and the crown of a ring cannot be meshed, so the family is a **limit**
+under §16.10.
+
+The last step is the one that does not hold. §16.10 draws the line at whether
+the *answer exists*: a limit is when it does not, a gap is when it does and the
+arithmetic could not reach it. The crown of a ring is an ordinary solid — the
+lane builds it through `SolidBuilder` and the shell closes, with 20/5/4 chosen
+as a Pythagorean triple so both corners are exact on the quartic. What refuses
+it is `ADraftFaceCouldNotBeMeshed { why: CornersCoincide { position: 4 } }`,
+because the face goes right round the **ring** while a walked loop carries one
+wrapping coordinate and `Torus::point_at` spends it on the tube. That is a gap
+in the mesher, not the absence of an answer.
+
+So the family's verdict is conditional on a defect elsewhere, and it evaporates
+the day that defect is fixed — which is not a thing to write into the tree as a
+limit. §208.4 is the warning: a ring of arcs with no seam was unwalkable until it
+was walked, and nothing in the argument for refusing it had been cone-specific.
+The same widening is generic over any surface that wraps.
+
+What the branch does have is a good demonstration, and it should keep it: the
+crown of a ring, built exactly, refused by name. The right shape for it is a
+test pinning that refusal as a **gap** with the mesher's own reason, plus the
+sliver family the lane says the code's `piece.closes_on_one_curve` actually
+admits and it did not sweep. Then §208.3's arm has something that fails without
+it, which is still what it is missing.
