@@ -245,7 +245,7 @@ fn a_wedge_cut_with_the_turned_knife_first_is_refused_by_name() {
             assert!(
                 matches!(
                     which_refusal(&why),
-                    "a point inside a piece of a face"
+                    "a point in a piece that every solid could place"
                         | "CannotTellTheCellsOfAFaceApart"
                         | "order along a crossing"
                 ),
@@ -253,6 +253,48 @@ fn a_wedge_cut_with_the_turned_knife_first_is_refused_by_name() {
             );
         }
     }
+}
+
+/// The quarter wedge names the second of `place_the_piece`'s two searches.
+///
+/// The test above lets three names through, so it cannot say which of the two
+/// searches gave up. This one says it for one case: a point **was** found
+/// inside the piece, and what ran out is somewhere to stand that every solid
+/// could place. Until §216.4 both searches wrote *a point inside a piece of a
+/// face*, so this fuse wrote down the name of the search that had worked.
+#[test]
+fn a_quarter_wedge_stops_after_a_point_is_found_inside_the_piece_and_not_before() {
+    let radius = 1.0;
+    let mut model = a_model(radius);
+    let ball = model
+        .add_ball(radius, &Isometry::identity())
+        .expect("a ball");
+    let turned = a_knife_through_the_axis(&mut model, radius, 90.0);
+    let half = model
+        .fuse(
+            &[ball],
+            &[turned],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the first cut answers at every size")
+        .solids()
+        .to_vec();
+    let second = a_knife_through_the_axis(&mut model, radius, 0.0);
+    let why = model
+        .fuse(
+            &half,
+            &[second],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("a 90 degree wedge of a ball of radius 1 is refused");
+    assert_eq!(
+        which_refusal(&why),
+        "a point in a piece that every solid could place"
+    );
 }
 
 /// A wedge cut in one fuse, by a prism whose edge **is** the polar axis.
@@ -344,8 +386,7 @@ fn moved_from_its_pin(
             assert!(
                 matches!(
                     which_refusal(&why),
-                    "a point inside a piece of a face"
-                        | "order along a crossing"
+                    "order along a crossing"
                         | "CannotTellTheCellsOfAFaceApart"
                         | "ResultIsNotManifold"
                         | "CannotMeshAFace"
