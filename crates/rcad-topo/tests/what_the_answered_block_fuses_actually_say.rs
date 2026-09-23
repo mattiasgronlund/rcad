@@ -9,7 +9,7 @@
 //! # Every answer is a draw where nothing touches
 //!
 //! The family draws 16 rows and asks six fuses of each — union, intersection and
-//! difference, both ways round. **All 15 answers come from rows where the block
+//! difference, both ways round. **All 24 answers come from rows where the block
 //! misses the frustum altogether.**
 //!
 //! How far apart they are takes one comparison. The block is put down with its
@@ -21,8 +21,12 @@
 //!
 //! Over this grid — slope one of `1/8`, `1/4`, `1/2`, and `far` a whole number
 //! from 6 to 12 — that is `slope = 1/8` with `far ≤ 11`, and five of the sixteen
-//! rows land there. One answers all six of its fuses; three answer both
-//! intersections and `block \ frustum`; the fifth answers none.
+//! rows land there. Four answer all six of their fuses; the fifth answers none.
+//!
+//! **Three of those four used to answer only half their fuses**, and what filled
+//! them in was §215's same-surface arm in `walk`: the union both ways round and
+//! `frustum \ block` were the 9 that stopped on one cone twice, and they are the
+//! difference between 15 answers here and 24.
 //!
 //! **An earlier version of this file said `slope · far < 1`, and called it
 //! exact.** It is sound but not exact: it compares the block's nearest `x` against
@@ -223,6 +227,11 @@ fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
                     .expect("a fuse hands back a sound model or refuses");
                 if row.the_block_misses_the_frustum() {
                     answered_missing += 1;
+                    println!(
+                        "a missing pair answered: {row:?} {rule:?} way {ways_round} round, \
+                         {} pieces",
+                        pieces.len()
+                    );
                     let want = match rule {
                         Rule::Union => 2,
                         Rule::Intersection => 0,
@@ -253,10 +262,12 @@ fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
          {refused} refused"
     );
     assert_eq!(
-        answered_missing, 15,
-        "the answers this family is pinned at are all fuses of its clear rows — six from the row \
-         at slope · far = 0.75, and both intersections and `block \\ frustum` from each of the \
-         three at slope · far = 1 — and {answered_missing} of them came through"
+        answered_missing, 24,
+        "the answers this family is pinned at are all fuses of its clear rows — all six from each \
+         of the four rows at slope · far = 0.75 and slope · far = 1, with the fifth clear row at \
+         slope · far = 1.25 answering none — and {answered_missing} of them came through. The \
+         rows that answered are printed above; re-derive from those rather than from this \
+         sentence"
     );
     assert_eq!(
         answered_meeting, 0,

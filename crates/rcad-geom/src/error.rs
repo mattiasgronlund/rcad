@@ -476,6 +476,10 @@ pub enum Error {
     /// [`EdgeRun::PartOfWhereItCrosses`](crate::EdgeRun::PartOfWhereItCrosses)
     /// exists to say *which* piece of a crossing a run is; with no ends and
     /// no half-space it says nothing at all.
+    ///
+    /// Since §215 it also answers a closed run whose two faces are the one cone.
+    /// That pair names no crossing, so the run's own end is the only thing left
+    /// to put the circle through, and a run with no ends leaves nothing.
     #[error("a piece of a crossing with no ends and nothing picking it is not a piece of anything")]
     ACrossingPieceHasNoEndsAndNothingPickingIt,
 
