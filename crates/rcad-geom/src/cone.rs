@@ -10,7 +10,9 @@ use rcad_predicates::{
 use serde::{Deserialize, Serialize};
 
 use crate::exact::{difference, square_of_expansion};
+use crate::intersect::{how_a_plane_leans_against_a_cone, where_a_cones_apex_stands_against_a_plane};
 use crate::isometry::Isometry;
+use crate::plane::Plane;
 use crate::point::{Axis, Point, Vector};
 use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::{Error, Result};
@@ -232,6 +234,133 @@ impl Cone {
             from_apex.dot(and).atan2(from_apex.dot(across)),
             from_apex.dot(self.axis.direction()),
         )
+    }
+
+    /// Whether `flat` cuts this cone in a curve that closes — a circle or an
+    /// ellipse, on one nappe and bounded — with `None` when the arithmetic
+    /// could not settle it.
+    ///
+    /// This is the one place the question is asked. Three callers in
+    /// `rcad-topo` used to spell it three ways, two of them by comparing the
+    /// stored normal against the stored axis direction and so answering only
+    /// about the circle; `docs/decisions.md` §23.8 is why that is how two
+    /// spellings come to disagree.
+    ///
+    /// # The test, with nothing normalised
+    ///
+    /// With `n` the plane's normal, `a` the axis direction and `s` the slope,
+    /// the curve closes exactly when the angle between `n` and `a` is small
+    /// enough that `cos²θ > sin²α` for `tan α = s`. Cleared of divisions that
+    /// is
+    ///
+    /// ```text
+    /// (n·a)²·(1 + s²)  −  s²·|n|²·|a|²  >  0
+    /// ```
+    ///
+    /// which is [`how_a_plane_leans_against_a_cone`]'s
+    /// `E = (n·a)² − s²‖n × a‖²` written another way, because
+    /// `‖n × a‖² = |n|²|a|² − (n·a)²`. Every term is a polynomial in the stored
+    /// `f64`, so no vector is normalised and nothing is rounded on the way.
+    ///
+    /// **The comparison is strict at both ends.** Equality is a parabola and
+    /// below it is a hyperbola's two branches; neither closes, and both come
+    /// back `Some(false)`.
+    ///
+    /// A plane **square to the axis** is the tidiest member of the closed
+    /// family rather than a case of its own: `n × a` is nothing there, so
+    /// `E = (n·a)² = (a·a)² > 0` for any direction a cone can hold.
+    ///
+    /// # The apex has to be off the plane
+    ///
+    /// With the apex on it there is no closed curve to be had at all — the two
+    /// share a ruling, a pair of rulings, or the apex alone — so that is
+    /// `Some(false)` before the lean is asked at all.
+    ///
+    /// [`how_a_plane_leans_against_a_cone`]: crate::how_a_plane_leans_against_a_cone
+    #[must_use]
+    pub fn is_cut_in_a_closed_curve_by(&self, flat: &Plane) -> Option<bool> {
+        match where_a_cones_apex_stands_against_a_plane(flat, self) {
+            Decision::Pos | Decision::Neg => {}
+            Decision::Zero => return Some(false),
+            Decision::Undecidable { .. } | _ => return None,
+        }
+        match how_a_plane_leans_against_a_cone(flat, self) {
+            Decision::Pos => Some(true),
+            Decision::Zero | Decision::Neg => Some(false),
+            Decision::Undecidable { .. } | _ => None,
+        }
+    }
+
+    /// Which way the centre of the closed curve `flat` cuts this cone in lies
+    /// from the apex, as a direction that is neither normalised nor rounded;
+    /// `None` when the crossing does not close.
+    ///
+    /// The centre itself is
+    ///
+    /// ```text
+    /// apex + ((e − n·apex) / (n·along)) · along
+    /// ```
+    ///
+    /// with `n` and `e` the plane's normal and offset, and `n·along` is
+    /// **positive** whenever this answers at all. A direction and a point come
+    /// back rather than the centre because taking that division would round it,
+    /// and a caller that wants a sign of the centre against something can clear
+    /// the division instead — multiply through by `n·along` and every term is a
+    /// polynomial in numbers that are stored exactly.
+    ///
+    /// A **ball**'s answer to the same question is its own centre with
+    /// `along = n`, so one formula serves both.
+    ///
+    /// # Where the direction comes from
+    ///
+    /// Write `v = x − apex`. A point is on this cone exactly when
+    /// `(1 + s²)(v·w)² − |w|²|v|² = 0` for `w` the stored axis direction and
+    /// `s` the slope, so the quadric's matrix is `A = (1 + s²)·w wᵀ − |w|²·I`.
+    ///
+    /// A conic's centre is the **pole** of the plane that cuts it: the point
+    /// `c` on the plane with `A(c − apex)` running along `n`. There the
+    /// quadratic form has no linear part in the plane's own two directions, so
+    /// the curve is symmetric about `c`, which is what being the centre means.
+    ///
+    /// Expanding `A` against
+    ///
+    /// ```text
+    /// along = (1 + s²)(n·w)·w  −  s²|w|²·n
+    /// ```
+    ///
+    /// gives `w·along = (n·w)|w|²` and then `A·along = s²|w|⁴·n`, so `along`
+    /// runs the way `A⁻¹n` does and walking it from the apex to the plane lands
+    /// on the pole.
+    ///
+    /// # Why `n·along` positive is exactly the closed family
+    ///
+    /// ```text
+    /// n·along = (1 + s²)(n·w)² − s²|n|²|w|²
+    /// ```
+    ///
+    /// which is [`Cone::is_cut_in_a_closed_curve_by`]'s test written out — so
+    /// the circle and the ellipse have it positive, the parabola has it zero
+    /// and has no centre at all, and the hyperbola has it negative. The
+    /// hyperbola does have a centre, and this still refuses it: its two
+    /// branches are not one closed curve for a chord to split.
+    ///
+    /// A plane **square to the axis** falls out as `along = |w|²·n`, so the
+    /// centre is the foot of the perpendicular from the apex — the circle, and
+    /// the case this is a widening of.
+    #[must_use]
+    pub fn which_way_a_closed_crossings_centre_lies(&self, flat: &Plane) -> Option<[Interval; 3]> {
+        if self.is_cut_in_a_closed_curve_by(flat) != Some(true) {
+            return None;
+        }
+        let normal = flat.normal().components().map(Interval::exactly);
+        let axis = self.axis.direction().components().map(Interval::exactly);
+        let dot = |u: [Interval; 3], v: [Interval; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        let squared_slope = Interval::exactly(self.slope) * Interval::exactly(self.slope);
+        let leaning = (Interval::exactly(1.0) + squared_slope) * dot(normal, axis);
+        let spread = squared_slope * dot(axis, axis);
+        Some(core::array::from_fn(|at| {
+            leaning * axis[at] - spread * normal[at]
+        }))
     }
 }
 
