@@ -91,6 +91,7 @@ gate_steps := "check-plugins \
     check-gate-docs-selftest \
     check-lanes-selftest \
     check-release-lanes-selftest \
+    check-ff-main-selftest \
     check-status-selftest \
     check-plan \
     check-plan-selftest \
@@ -1502,8 +1503,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "43" ]; then \
-        echo "found $n check-* recipes, expected 43"; \
+    if [ "$n" != "44" ]; then \
+        echo "found $n check-* recipes, expected 44"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -7342,6 +7343,173 @@ check-release-lanes-selftest:
         || fail "the hub was not reported as left alone"
     grep -qx "0 lane(s) released, 5 left as they were; the hub is never either" <<<"$got" \
         || fail "the hub was counted as a lane"
+
+# Catch the worktree that holds `main` up to `origin/main`, fast-forward only.
+#
+# **It finds that tree by the branch it holds, never by its name.** The tree was
+# called `wave-1` until 2026-09-23 — a batch name from a milestone that ended
+# long before, describing nothing anyone still did there — and every session
+# reached it by typing that path out of memory or out of a handoff. A name
+# nobody can derive is a name every document has to carry, and six of them did.
+# Renaming it `main` fixes the reading; deriving it here fixes the typing, and
+# the second is what stops the next rename from costing anything
+# (docs/decisions.md §210).
+#
+# **It refuses rather than merges.** `--ff-only` is the whole point: this is for
+# a tree that is *behind*, and the three other shapes each mean something
+# different and want a different answer. Already there is a pass and says the
+# sha. Ahead means the work is local and wants a push, not a merge. Diverged
+# means somebody rewrote `main`, and picking a resolution here would pick it
+# unseen. A dirty tree is left untouched whatever the shas say, because that
+# tree is conventionally unlocked and so the work in it names no owner — ask the
+# peers, do not merge over it.
+#
+# **It fetches first**, which `just` itself must never do (§146: a round trip on
+# every recipe is the hub re-park's cost in another currency). This one is typed
+# on purpose, once, and "aligned with `origin/main`" is a claim about the remote
+# and not about whatever a stale remote-tracking ref last said.
+[doc("Fast-forward the worktree that holds main up to origin/main.")]
+ff-main dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo=$(git -C "{{dir}}" rev-parse --show-toplevel)
+    listing=$(git -C "$repo" worktree list --porcelain)
+    if [ -z "$listing" ]; then
+        echo "git worktree list --porcelain printed nothing, so this found no tree holding main"
+        exit 1
+    fi
+    tree=""
+    held=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "worktree "*) tree=${line#worktree } ;;
+            "branch refs/heads/main") held=$tree ;;
+        esac
+    done <<<"$listing"
+    if [ -z "$held" ]; then
+        echo "no worktree has main checked out, so there is nothing to fast-forward"
+        echo "put it back with: git worktree add <path> main   (docs/decisions.md §60)"
+        exit 1
+    fi
+    if [ -n "$(git -C "$held" status --porcelain)" ]; then
+        echo "$held holds main and has uncommitted work in it, so this touched nothing"
+        echo "that tree is left unlocked by convention, so the work in it names no owner: ask the peers"
+        exit 1
+    fi
+    git -C "$held" fetch --quiet origin main
+    before=$(git -C "$held" rev-parse HEAD)
+    onto=$(git -C "$held" rev-parse FETCH_HEAD)
+    short() { git -C "$held" rev-parse --short "$1"; }
+    if [ "$before" = "$onto" ]; then
+        echo "$held is already at origin/main, $(short "$before")"
+        exit 0
+    fi
+    if git -C "$held" merge-base --is-ancestor "$onto" "$before"; then
+        ahead=$(git -C "$held" rev-list --count "$onto..$before")
+        echo "$held: main is $ahead commit(s) ahead of origin/main and behind it in none,"
+        echo "so a fast-forward would throw them away. This shape wants a push:"
+        echo "    git -C $held push origin main"
+        exit 1
+    fi
+    if ! git -C "$held" merge-base --is-ancestor "$before" "$onto"; then
+        echo "$held: main and origin/main have both moved since they last agreed,"
+        echo "so no fast-forward exists. Somebody rewrote one of them; read both before resolving:"
+        echo "    git -C $held log --oneline --left-right main...FETCH_HEAD"
+        exit 1
+    fi
+    gained=$(git -C "$held" rev-list --count "$before..$onto")
+    git -C "$held" merge --ff-only --quiet "$onto"
+    echo "$held: main fast-forwarded $gained commit(s), $(short "$before") -> $(short "$onto")"
+
+# Pins `ff-main` against a repository it builds itself, with a real `origin` on
+# disk, because the live one is in one of these five states at a time.
+#
+# Four of the five are refusals, and they are the cases worth building: a
+# `--ff-only` that has lost its `--ff-only` still passes the one case where the
+# tree is simply behind. The dirty case asserts the *bytes* survive rather than
+# just the exit code, because the wrong answer there merges over work that is on
+# no branch and names no owner.
+[private]
+check-ff-main-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    commit() { git -C "$1" -c user.email=t@t -c user.name=t commit -q "${@:2}"; }
+    grow() {
+        echo "$2" >"$1/f"
+        git -C "$1" add f
+        commit "$1" -m "$2"
+    }
+    git init -q -b main "$dir/origin"
+    commit "$dir/origin" --allow-empty -m "root"
+    git clone -q "$dir/origin" "$dir/hub"
+    git -C "$dir/hub" checkout -q --detach
+    git -C "$dir/hub" worktree add -q "$dir/holder" main
+
+    got=""
+    rc=0
+    run() { got=$(just ff-main "$dir/hub" 2>&1) && rc=0 || rc=$?; }
+    fail() {
+        echo "ff-main drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    at() { git -C "$dir/holder" rev-parse HEAD; }
+
+    # One: nothing to do. A pass, and it names the sha rather than going quiet.
+    run
+    [ "$rc" -eq 0 ] || fail "a tree already at origin/main was reported as a failure"
+    grep -qF "already at origin/main" <<<"$got" || fail "being already there was not said"
+
+    # Two: behind, which is the whole point and the only case that moves.
+    grow "$dir/origin" one
+    grow "$dir/origin" two
+    ahead_of_us=$(git -C "$dir/origin" rev-parse HEAD)
+    run
+    [ "$rc" -eq 0 ] || fail "a tree that was simply behind was not fast-forwarded"
+    [ "$(at)" = "$ahead_of_us" ] || fail "the fast-forward did not land on origin/main"
+    grep -qF "fast-forwarded 2 commit(s)" <<<"$got" || fail "the count of what it gained is wrong"
+    grep -qF "$dir/holder" <<<"$got" || fail "the tree it acted on was not named"
+
+    # Three: uncommitted work, which outranks every sha comparison. The bytes
+    # are on no branch, so a wrong answer here is the only unrecoverable one.
+    grow "$dir/origin" three
+    printf 'work nobody has committed\n' >"$dir/holder/scratch"
+    behind_at=$(at)
+    run
+    [ "$rc" -ne 0 ] || fail "a dirty tree holding main was merged into"
+    grep -qF "names no owner" <<<"$got" || fail "the dirty refusal did not say why it is left alone"
+    [ "$(cat "$dir/holder/scratch")" = "work nobody has committed" ] \
+        || fail "content that is on no branch was destroyed"
+    [ "$(at)" = "$behind_at" ] || fail "the tree moved under uncommitted work"
+    rm "$dir/holder/scratch"
+
+    # Four: ahead. A fast-forward here is a rewind, so it must name the push.
+    # The catch-up runs through the recipe, because the refusal above declines
+    # before it fetches and the tree's own FETCH_HEAD is a commit out of date.
+    run
+    [ "$rc" -eq 0 ] || fail "the tree did not catch up once the uncommitted work was gone"
+    grow "$dir/holder" local-work
+    ours=$(at)
+    run
+    [ "$rc" -ne 0 ] || fail "a main ahead of origin was reported as fast-forwarded"
+    [ "$(at)" = "$ours" ] || fail "commits that were only local were thrown away"
+    grep -qF "push origin main" <<<"$got" || fail "the ahead refusal did not name the push"
+
+    # Five: both moved. No fast-forward exists and picking one would pick it unseen.
+    grow "$dir/origin" theirs
+    run
+    [ "$rc" -ne 0 ] || fail "a diverged main was merged anyway"
+    [ "$(at)" = "$ours" ] || fail "a diverged main moved"
+    grep -qF "both moved since they last agreed" <<<"$got" || fail "divergence was not named as such"
+
+    # Six: nobody holds main at all, which is §76's shape and reads as a quiet
+    # success to anything that only greps the listing for a path.
+    git -C "$dir/hub" worktree remove --force "$dir/holder"
+    run
+    [ "$rc" -ne 0 ] || fail "a repository with main checked out nowhere passed"
+    grep -qF "git worktree add" <<<"$got" || fail "the empty case did not name the way back"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #

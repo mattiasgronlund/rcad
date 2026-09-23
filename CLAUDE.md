@@ -90,7 +90,10 @@ what CI runs — it was called `just default` until 2026-09-08, so an older
 document or a session's memory may still say that. `just check-hub` is the hub
 rule. `just clean-targets` then `just prune-worktrees` reclaims disk, in that
 order, and `just release-lanes <pattern>` unlocks a batch of finished lanes in
-one call. **Reach for those three rather than a sweep of your own** — and they
+one call. **`just ff-main` catches the tree holding `main` up to `origin/main`**
+— it finds that tree by the branch, so never type its path, and it refuses
+rather than merges on all four shapes that are not a fast-forward (§210).
+**Reach for those three rather than a sweep of your own** — and they
 are reached for now: the hand-rolled sweep this paragraph was written against is
 under a fifth of what lane bookkeeping costs, against nearly all of it a
 fortnight ago.
@@ -146,6 +149,15 @@ state moves; never add a checkbox to the roadmap. `docs/decisions.md` §106.
 nothing else happens there. Every session gets a worktree of its own — call
 `EnterWorktree` first thing — and `main` lives checked out in a worktree too,
 never in the hub.
+
+That worktree is `rcad-worktrees/main`, and it was called `wave-1` until
+2026-09-23 — a batch name that outlived its batch by a month and described
+nothing anyone still did there, so an older section or a session's memory may
+still say it. Sections §60, §76, §111, §119, §126 and §146 are left spelling
+the old name on purpose: they describe runs made when that was its name, and
+§210 is the forwarding address. **Do not type either name.** Every recipe that
+needs that tree finds it by the branch it holds, and `just ff-main` is the one
+that catches it up to `origin/main`.
 
 This is not tidiness. `git worktree lock` is this repo's record of who owns a
 tree (§55), and it answers *"fatal: The main working tree cannot be locked or
