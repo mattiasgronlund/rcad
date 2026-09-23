@@ -1412,13 +1412,40 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// finer meshes are read for a sign and thrown away**; nothing a caller measures
 /// is worked out here.
 ///
-/// **What stops it needs no argument about geometry.** Halving a finite length
+/// # A fold is retried; every other refusal still stops it
+///
+/// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] is the one refusal a finer
+/// deflection is *expected* to cure, and it is cured the way a crossing is in
+/// [`the_coarsest_mesh_whose_sides_do_not_cross`]: two patches fold onto each
+/// other when a cut one of them drew lands on a side the other drew, and where
+/// they fall is the mesher's own sampling choice and not the solid's. §206.3 is
+/// that case with both halves in one shape — a sliver of a ball whose coarse
+/// mesh came back flat and whose next mesh folded, so the bulge a third mesh
+/// would have found was never asked for.
+///
+/// **Every other refusal is still the stopping condition and not a failure**:
+/// the coarsest mesh was built and checked, and what this is looking for is a
+/// point off the flat that no mesh of this solid holds. Handing the refusal on
+/// would replace a named answer about the shape with one about a deflection
+/// nobody asked for.
+///
+/// # What stops it
+///
+/// **The first half needs no argument about geometry.** Halving a finite length
 /// reaches zero, and `Deflection::of` refuses a length that is not greater than
-/// zero, so the loop ends whatever any mesh does. Long before that two named
-/// refusals end it on a real solid — `DeflectionBelowWhatAMeshCanReach` at the
-/// floor of the input's own numbers, and `MoreMeshPointsThanASolidWillHold` if a
-/// surface reaches the point cap first — and either way the zero stands and the
-/// caller refuses it.
+/// zero, so the loop ends whatever any mesh does — a fold retried for ever is
+/// still a fold retried on a deflection walking down to nothing.
+///
+/// **Retrying a fold does not loosen the second half either.** Both refusals
+/// that end it on a real solid are raised *before* a triangle is drawn —
+/// `DeflectionBelowWhatAMeshCanReach` when the mesher is asked for a deflection
+/// finer than the walk under this solid's own numbers will take, and
+/// `MoreMeshPointsThanASolidWillHold` while the points are being laid down —
+/// and a fold is only found by `finish`, once the whole mesh is built. So a
+/// solid that folds at every deflection walks the same ladder it would have
+/// walked answering zero at every deflection, and stops on the same rung; what
+/// the retry costs is the meshes between the first fold and that rung, and the
+/// zero stands and the caller refuses it.
 ///
 /// # Errors
 ///
@@ -1438,17 +1465,15 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     }
     let mut room = how_far_across(&coarsest) / 2.0;
     while let Ok(less) = Deflection::of(room) {
-        // A finer mesh that refuses is the stopping condition and not a
-        // failure: the coarsest one was built and checked, and what this is
-        // looking for is a point off the flat that no mesh of this solid holds.
-        // Handing the refusal on would replace a named answer about the shape
-        // with one about a deflection nobody asked for.
-        let Ok(finer) = view.mesh(less, policy, log) else {
-            break;
-        };
-        let enclosed = signed_volume_over(&finer);
-        if enclosed != 0.0 {
-            return Ok(enclosed);
+        match view.mesh(less, policy, log) {
+            Ok(finer) => {
+                let enclosed = signed_volume_over(&finer);
+                if enclosed != 0.0 {
+                    return Ok(enclosed);
+                }
+            }
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
+            Err(_) => break,
         }
         room /= 2.0;
     }
