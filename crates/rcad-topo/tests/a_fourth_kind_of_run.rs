@@ -1,4 +1,24 @@
-//! A fourth kind of [`EdgeRun`] must not arrive in silence either.
+//! A new kind of [`EdgeRun`] must not arrive in silence either.
+//!
+//! # The fourth kind arrived, and this file is what made it loud
+//!
+//! §216 added [`EdgeRun::RightRoundWhereItCrosses`] — a closed rim that carries
+//! the surface making the cut, for a frustum's wall split in two by a leaning
+//! plane. It is the arrival this file was written against, and it went the way
+//! the file says it should: the list below went red, and naming the kind at
+//! every site that reads one was what turned it green again. Four sites in
+//! `rcad-topo` had to be told about it —
+//! [`EdgeView::is_closed`](rcad_topo::EdgeView::is_closed),
+//! `the_ends_are_the_whole_of_it` in `builder.rs`,
+//! `the_curved_surface_a_run_names` and
+//! `check_closed_edges_are_walked_the_way_their_surfaces_wind` in `validate.rs`
+//! — and the fourth of those is the one that caught it at run time: the sweep
+//! refused the new rim under `ACrossingThisCannotBeOrderedAlong` with no
+//! compile error anywhere, exactly as the paragraphs below predicted.
+//!
+//! So the numbers in the tables further down are the measurements that were
+//! made on a clone before that happened, and they still say what they said.
+//! What a **fifth** kind gets is what this file now asks about.
 //!
 //! `a_sixth_kind_of_surface.rs` is this test's twin and says the argument in
 //! full: [`Surface`](rcad_geom::Surface) is `#[non_exhaustive]` and lives in
@@ -120,15 +140,16 @@ use serde::de::value::{Error as ReadError, StrDeserializer};
 /// a different one, and a sweep that refused less would let the difference
 /// through both doors.
 #[test]
-fn the_three_kinds_of_run_this_crate_was_written_against() {
-    let name: StrDeserializer<ReadError> = "a fourth kind".into_deserializer();
+fn the_four_kinds_of_run_this_crate_was_written_against() {
+    let name: StrDeserializer<ReadError> = "a fifth kind".into_deserializer();
     let refused =
         EdgeRun::deserialize(name).expect_err("`EdgeRun` read back a kind that does not exist");
 
     assert_eq!(
         refused.to_string(),
-        "unknown variant `a fourth kind`, expected one of `Straight`, \
-         `RightRoundWhereItsFacesCross`, `PartOfWhereItCrosses`",
+        "unknown variant `a fifth kind`, expected one of `Straight`, \
+         `RightRoundWhereItsFacesCross`, `PartOfWhereItCrosses`, \
+         `RightRoundWhereItCrosses`",
         "the kinds of `EdgeRun` changed. Every place in this crate that reads a \
          run now has a kind it has never seen, and the two that matter most are \
          `the_ends_are_the_whole_of_it` in `builder.rs` and `check_edges` in \
@@ -138,15 +159,16 @@ fn the_three_kinds_of_run_this_crate_was_written_against() {
     );
 }
 
-/// The two runs that are allowed to bring an edge back to the corner it left.
+/// The three runs that are allowed to bring an edge back to the corner it left.
 ///
-/// Both are named, and everything else — [`EdgeRun::Straight`] today, a fourth
-/// kind tomorrow — is refused. Trimming this list to one, or widening it to
+/// All three are named, and everything else — [`EdgeRun::Straight`] today, a
+/// fifth kind tomorrow — is refused. Trimming this list, or widening it to
 /// "anything that is not straight", is what this pins.
 #[test]
 fn only_a_run_that_names_a_curve_may_start_and_finish_at_one_corner() {
     for run in [
         EdgeRun::RightRoundWhereItsFacesCross,
+        EdgeRun::RightRoundWhereItCrosses { and: a_plane() },
         EdgeRun::PartOfWhereItCrosses {
             and: a_plane(),
             picked_by: smallvec::SmallVec::new(),

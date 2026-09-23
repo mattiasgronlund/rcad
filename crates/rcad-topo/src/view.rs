@@ -1233,6 +1233,14 @@ impl<'m> EdgeView<'m> {
     /// [`the_ends_are_the_whole_of_it`](crate::SolidBuilder) was pulled back
     /// into one list to stop (§44.11).
     ///
+    /// **Two kinds close, and the second one arrived here rather than at the six.**
+    /// [`EdgeRun::RightRoundWhereItCrosses`] is a closed curve that carries the
+    /// surface making the cut, for a rim whose two faces are the one surface —
+    /// a frustum's wall split in two by a leaning plane. It is closed for
+    /// exactly the reason the first one is, so it is one word on this line and
+    /// nothing at the six sites, which is the whole of what pulling the rule
+    /// together bought. `docs/decisions.md` §216.
+    ///
     /// # Why this refuses rather than answering `false`
     ///
     /// It used to be `run == EdgeRun::RightRoundWhereItsFacesCross`, a bare `==`
@@ -1265,7 +1273,9 @@ impl<'m> EdgeView<'m> {
     /// has never seen.
     pub fn is_closed(self) -> Result<bool> {
         match self.data().run {
-            EdgeRun::RightRoundWhereItsFacesCross => Ok(true),
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
+                Ok(true)
+            }
             EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } => Ok(false),
             _ => Err(Error::ACrossingThisCannotBeOrderedAlong),
         }
