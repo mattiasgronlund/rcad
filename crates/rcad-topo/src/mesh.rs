@@ -1634,8 +1634,9 @@ impl BuildingAMesh {
     /// and so do both corners of a pole side — which is the whole reason
     /// identity lives in this table and not in the triangulator's index (§25.6).
     ///
-    /// `None` when the walk does not come back to the longitude it set off
-    /// from — see [`WalkingAWire::finish`].
+    /// `None` when the walk wound round the surface and this wire is not one
+    /// that may — see [`WalkingAWire::finish`] and
+    /// [`WalkingAWire::may_come_back_a_whole_turn_on`].
     ///
     /// **The walk sets off from a corner that has a longitude of its own where
     /// there is one.** A corner at a pole has none — `coordinates_of` answers
@@ -1671,9 +1672,15 @@ impl BuildingAMesh {
         let at_a_pole = |vertex: &VertexView<'_>| {
             poles.contains(&vertex.key()) || sits_at_a_pole(back.apply_to_point(vertex.point()))
         };
+        let mut used = HashSet::new();
+        let the_only_wire_of_its_face_with_no_seam = face.wire_count() == 1
+            && wire
+                .coedges()
+                .all(|coedge| used.insert(coedge.edge().key()));
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
             wire.closes_on_one_edge(),
+            the_only_wire_of_its_face_with_no_seam,
         );
 
         let steps = steps_from_somewhere_that_has_a_longitude(wire, &at_a_pole);
@@ -2407,6 +2414,14 @@ struct WalkingAWire {
     /// longitude it left. Whether it *did* is measured in
     /// [`WalkingAWire::finish`] and is a different question.
     closes_on_one_curve: bool,
+    /// Whether this wire is the only one of its face and no edge of it is used
+    /// twice, so that none of its sides is a seam. Part of
+    /// [`WalkingAWire::may_come_back_a_whole_turn_on`]; the rest is measured as
+    /// the walk goes.
+    the_only_wire_of_its_face_with_no_seam: bool,
+    /// Whether the walk ever stood at a pole — a pole step, a corner on one, or
+    /// a point along an edge that passes one.
+    stood_at_a_pole: bool,
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
@@ -2429,10 +2444,16 @@ struct WalkingAWire {
 }
 
 impl WalkingAWire {
-    fn new(wraps: Option<f64>, closes_on_one_curve: bool) -> Self {
+    fn new(
+        wraps: Option<f64>,
+        closes_on_one_curve: bool,
+        the_only_wire_of_its_face_with_no_seam: bool,
+    ) -> Self {
         Self {
             wraps,
             closes_on_one_curve,
+            the_only_wire_of_its_face_with_no_seam,
+            stood_at_a_pole: false,
             longitude: 0.0,
             started: false,
             will_not_lie_flat: false,
@@ -2469,6 +2490,7 @@ impl WalkingAWire {
     fn arrive(&mut self, at: u32, sits_at: (f64, f64), is_a_pole: bool) {
         let (raw, up) = sits_at;
         if is_a_pole {
+            self.stood_at_a_pole = true;
             if self.corners.is_empty() {
                 self.set_off_at_a_pole = true;
             }
@@ -2621,8 +2643,8 @@ impl WalkingAWire {
     }
 
     /// The loop, or `None` if it will not lie flat: the walk stood still at a
-    /// pole on a surface that does not pinch to one, or it came back to a
-    /// different longitude from the one it set off at.
+    /// pole on a surface that does not pinch to one, or it wound round the
+    /// surface when this wire is not one that may.
     ///
     /// **A refusal and not an assert, and the difference is `Deserialize`.**
     /// `Model` derives it and [`SolidView::mesh`] is public, so a wire this
@@ -2665,15 +2687,6 @@ impl WalkingAWire {
             self.longitude +=
                 way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole);
         }
-        // A wire made of one whole closed curve is *allowed* to come back a
-        // whole turn on — a cap circle of a tube the fuse cut out of a bar's
-        // wall is one — so the check below is not about it.
-        if let (Some(whole), Some(first)) = (self.wraps, self.corners.first())
-            && !self.closes_on_one_curve
-            && (self.longitude - first[0]).abs() >= whole / 2.0
-        {
-            return None;
-        }
         // **Whether it went right round the surface is measured and not read
         // off the wire**, and that is §39.7 item 1. One coedge whose two ends
         // are one corner runs right round the curve its two faces cross in —
@@ -2696,14 +2709,26 @@ impl WalkingAWire {
         // lune was called a cap wound right round and refused as one with no
         // seam. Only the closing step is left to the short way, and it is an
         // ordinary step of the walk.
+        //
+        // **And it is the same number the refusal is read off.** The walk's own
+        // gain stops one step short of the loop — the step back onto the first
+        // corner is the closing one — so a ring of three arcs round a cone's
+        // apex came back `−5.235987755982988` where a whole turn is `6.283…`,
+        // and a check on the gain alone read that as a wire that had not come
+        // back to the longitude it set off from. With the closing step counted
+        // it is `−6.283185307179586` exactly: once right round. What is left
+        // over after the whole turns are taken out is always the closing step,
+        // never the error, so there is nothing else here to threshold.
         let (climbed, goes_right_round) = match (self.wraps, self.corners.first()) {
             (Some(whole), Some(first)) => {
                 let climbed = self.longitude - first[0]
                     + the_short_way_round(first[0] - self.longitude, whole);
-                (
-                    climbed,
-                    self.closes_on_one_curve && climbed.abs() >= whole / 2.0,
-                )
+                let went_round = climbed.abs() >= whole / 2.0;
+                if went_round && !self.closes_on_one_curve && !self.may_come_back_a_whole_turn_on()
+                {
+                    return None;
+                }
+                (climbed, went_round)
             }
             _ => (0.0, false),
         };
@@ -2714,6 +2739,49 @@ impl WalkingAWire {
             goes_right_round,
             climbed,
         })
+    }
+
+    /// Whether this wire is allowed to end a whole turn of longitude on from
+    /// where it set off — a **ring**, one simple closed curve drawn on the
+    /// surface, rather than a boundary that has to close in the chart.
+    ///
+    /// A wire that uses an edge twice uses it as a **seam**: the two sides of
+    /// one meridian, which the patch lies between, so the walk down the far
+    /// side has to bring the longitude back to where the walk up the near side
+    /// left it. A wire that stands at a **pole** has a side of the patch whose
+    /// width came from [`WalkingAWire::cross_the_pole`] rather than from a step
+    /// of a curve, and a wire through a pole is not a wire round one anyway.
+    /// Neither of those may wind, and that is what this keeps out.
+    ///
+    /// **And a ring is only a cap when it is the face's one wire.** A face with
+    /// a hole in it that a ring of arcs also bounds is a different shape with a
+    /// different argument to make: which of the two pieces the ring cuts the
+    /// surface into the hole sits in, and nothing here says. A frustum's band
+    /// between its own near cap circle and a ring of arcs from a cube's upper
+    /// planes is one, and letting its ring through sent
+    /// [`BuildingAMesh::cut_a_ring_across`] a pair it could not cut: the fuse
+    /// answered and the mesh came back `BoundaryCrossesItself`, where before
+    /// the face was refused outright. So it is refused outright still, by the
+    /// same name, and the ring a cone's apex needs is the one wire case alone.
+    ///
+    /// **What is left may, and a cone is where it has to.** A pointed cone
+    /// inside a cube stood on its corner keeps a piece of nappe round the apex
+    /// bounded by three arcs, one from each of the cube's upper planes, meeting
+    /// at three corners off the apex. Three distinct edges, no seam, no pole
+    /// step and no corner on the apex — so the ring closes right round the
+    /// longitude, and the face is the piece of the nappe the apex is in.
+    /// [`BuildingAMesh::cut_a_cap_up_to_its_pole`] is what fills it, and
+    /// [`BuildingAMesh::which_pole_this_cap_reaches`] is what says which of the
+    /// two pieces the ring bounds is the face: the step the wire takes in space
+    /// against `∇S × ∇T` says which side of the cutting surface the material is
+    /// on, and the apex either is on that side or the face is the unbounded
+    /// rest of the nappe, which is no face at all and stays refused.
+    ///
+    /// One coedge whose two ends are its one corner is a ring too, and it is
+    /// the one this kernel already meshed: `closes_on_one_curve` says it, the
+    /// caller asks it first, and it needs none of the reasoning above.
+    fn may_come_back_a_whole_turn_on(&self) -> bool {
+        self.the_only_wire_of_its_face_with_no_seam && !self.stood_at_a_pole
     }
 
     /// Cross the pole side the loop closes over, when the walk set off from a
@@ -4674,7 +4742,7 @@ mod tests {
     #[test]
     fn a_pole_between_two_meridians_gets_a_corner_at_each_end_of_it() {
         let whole = 2.0 * core::f64::consts::PI;
-        let mut walk = WalkingAWire::new(Some(whole), false);
+        let mut walk = WalkingAWire::new(Some(whole), false, false);
         walk.arrive(0, (core::f64::consts::FRAC_PI_2, -0.5), false);
         walk.arrive(1, (0.0, -core::f64::consts::FRAC_PI_2), true);
         walk.arrive(2, (core::f64::consts::PI, 0.0), false);
@@ -4707,7 +4775,7 @@ mod tests {
     fn a_walk_that_sets_off_from_a_pole_arrives_back_at_it_down_the_other_meridian() {
         use core::f64::consts::{FRAC_PI_2, PI};
         let whole = 2.0 * PI;
-        let mut walk = WalkingAWire::new(Some(whole), false);
+        let mut walk = WalkingAWire::new(Some(whole), false, false);
         walk.arrive(0, (0.0, FRAC_PI_2), true);
         walk.arrive(1, (FRAC_PI_2, 0.0), false);
         walk.arrive(2, (0.0, -FRAC_PI_2), true);
@@ -4736,7 +4804,7 @@ mod tests {
     #[test]
     fn a_walk_that_ends_at_a_pole_closes_the_side_back_to_where_it_started() {
         let whole = 2.0 * core::f64::consts::PI;
-        let mut walk = WalkingAWire::new(Some(whole), false);
+        let mut walk = WalkingAWire::new(Some(whole), false, false);
         walk.arrive(0, (core::f64::consts::FRAC_PI_2, -0.5), false);
         walk.arrive(1, (0.0, -0.9), false);
         walk.arrive(2, (0.0, -core::f64::consts::FRAC_PI_2), true);
@@ -4756,6 +4824,51 @@ mod tests {
             vec![0, 1, 2, 2],
             "the pole is one point twice"
         );
+    }
+
+    /// A ring of arcs right round a cone's apex closes a whole turn on, and the
+    /// walk's own gain is one step short of saying so.
+    ///
+    /// Six corners a sixth of a turn apart, which is the shape §206.6's face
+    /// has: three arcs from the cube's three upper planes, each walked into two
+    /// corners. The walk stops at the sixth, `−5.235987755982988` from the
+    /// first, and the step back onto the first is the sixth of a turn that is
+    /// missing. `climbed` counts it and comes to a whole turn exactly.
+    #[test]
+    fn a_ring_of_arcs_round_a_pinch_comes_back_a_whole_turn_on() {
+        let whole = 2.0 * core::f64::consts::PI;
+        let mut walk = WalkingAWire::new(Some(whole), false, true);
+        for step in 0..6 {
+            walk.arrive(step, (-f64::from(step) * whole / 6.0, 2.5), false);
+        }
+
+        let walked = walk.finish().expect("a ring lies flat");
+        assert_eq!(walked.climbed, -whole, "once right round");
+        assert!(walked.goes_right_round);
+        assert!(
+            !walked.closes_on_one_curve,
+            "three arcs are not one closed curve, and this is the case that used to \
+             turn on being one"
+        );
+    }
+
+    /// The same walk over a wire that uses one of its edges twice will not lie
+    /// flat, exactly as it did not before.
+    ///
+    /// An edge used twice is a **seam** — the two sides of one meridian, with
+    /// the patch between them — so the walk down the far side has to bring the
+    /// longitude back to where the walk up the near side left it. A seam that
+    /// ends a whole turn on has not done that, and nothing about a ring makes
+    /// it acceptable. A face with a hole is refused here for the same reason
+    /// and by the same flag.
+    #[test]
+    fn a_wire_with_a_seam_that_ends_a_whole_turn_on_still_will_not_lie_flat() {
+        let whole = 2.0 * core::f64::consts::PI;
+        let mut walk = WalkingAWire::new(Some(whole), false, false);
+        for step in 0..6 {
+            walk.arrive(step, (-f64::from(step) * whole / 6.0, 2.5), false);
+        }
+        assert!(walk.finish().is_none());
     }
 
     /// A ball, with its seam moved to whichever half of whichever meridian.
