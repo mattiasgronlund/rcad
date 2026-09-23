@@ -773,6 +773,19 @@ impl BuildingAMesh {
                     .ok_or(Error::AWireWillNotLieFlatOnItsFace { face: face.key() })?,
             );
         }
+        // **A wire that winds is only allowed beside wires that wind too.** The
+        // loops of a face cut the chart into stretches, and the one the face is
+        // has every one of its wires in its boundary. Two that go right round
+        // bound the band between them and
+        // [`BuildingAMesh::cut_a_ring_across`] cuts it; one that goes right
+        // round beside one that does not says nothing about which side of the
+        // winding one the other sits, so the face is refused the way a wire
+        // that will not lie flat has always been refused.
+        if walked.iter().any(|around| around.goes_right_round)
+            && !walked.iter().all(|around| around.goes_right_round)
+        {
+            return Err(Error::AWireWillNotLieFlatOnItsFace { face: face.key() });
+        }
         for patch in self.cut_off_what_goes_too_far_round(face, &stored, walked, room)? {
             self.hand_over(face, &stored, patch, room, log)?;
         }
@@ -879,12 +892,17 @@ impl BuildingAMesh {
         // refuses a curved solid outright"*. The other face with a hole this
         // cuts is a ball's skin whose outer loop reaches both poles and whose
         // hole reaches neither, which a half ball cut again leaves: it is cut
-        // from the hole up to each pole instead. What is still refused is any
-        // other face with a hole — one loop right round and another that is
-        // not, say — because then there is nothing to cut across to, and
-        // nothing says which piece the hole ends up in. `Model` is
-        // `Deserialize` and `validate` is the untrusted-import boundary
-        // (§16.11), so that is a refusal rather than an assert.
+        // from the hole up to each pole instead. A face with one loop right
+        // round and another that is not has already been refused in
+        // [`BuildingAMesh::cut_up`], because nothing says which side of the
+        // winding loop the other sits. `Model` is `Deserialize` and `validate`
+        // is the untrusted-import boundary (§16.11), so that is a refusal
+        // rather than an assert.
+        //
+        // **The two curves need not be one closed curve each.** A frustum's
+        // band between its own near cap circle and a ring of arcs a cube's
+        // upper planes cut is a ring too, and the arcs are the ring §208.4
+        // taught the walk to come back a whole turn on.
         if walked.len() != 1 {
             if let Some(patches) =
                 self.cut_a_ring_across(face, stored, &walked, whole_turn, room)?
@@ -1247,12 +1265,39 @@ impl BuildingAMesh {
         let from = up.corners[0][0];
         let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
         let along_the_top = quarters.map(|at| nearest_longitude(&up, at));
-        let along_the_bottom = quarters.map(|at| nearest_longitude(&down, at));
+        // **Each quarter is brought into the bottom loop's own turn first.**
+        // Both loops run a whole turn, but each starts wherever the pair that
+        // cut it started, so a quarter taken off the top can land outside the
+        // longitudes the bottom's corners run between — and
+        // [`nearest_longitude`] would then answer the same end corner for two
+        // different quarters. A frustum's band, ringed by a corner-up cube's
+        // arcs, has its bottom running `-2.66` to `3.58` against a top running
+        // `0` to `6.28`: the quarter at `4.71` fell off the end, a patch took a
+        // sliver of the bottom where it took a quarter of the top, and the mesh
+        // came back `BoundaryCrossesItself`.
+        //
+        // **A bar through a block was cut that way too**, and it took letting
+        // the frustum's ring in to notice: its bottom corners came back
+        // `[1, 2, 3, 3]` for the four quarters, so one patch had no width along
+        // the bottom at all and the next spanned half the turn — which is what
+        // [`BuildingAMesh::cut_off_what_goes_too_far_round`]'s own argument says
+        // no patch may do.
+        let along_the_bottom =
+            quarters.map(|at| nearest_longitude(&down, in_the_turn_of(&down, at, whole_turn)));
 
         let mut cuts = Vec::with_capacity(4);
         for step in 0..4 {
             let leaving = up.corners[along_the_top[step]];
-            let arriving = down.corners[along_the_bottom[step]];
+            let landing = down.corners[along_the_bottom[step]];
+            // The same place on the surface, at whichever of its longitudes
+            // lies nearest the corner the cut sets off from, so the cut runs
+            // across the band and not a whole turn round it. A shift of no
+            // turns leaves the longitude byte for byte, which is why the turns
+            // are taken off rather than the difference added back on.
+            let arriving = [
+                landing[0] - whole_turns_between(landing[0], leaving[0], whole_turn),
+                landing[1],
+            ];
             self.on_a_cut.insert(up.points[along_the_top[step]]);
             self.on_a_cut.insert(down.points[along_the_bottom[step]]);
             cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
@@ -1673,14 +1718,13 @@ impl BuildingAMesh {
             poles.contains(&vertex.key()) || sits_at_a_pole(back.apply_to_point(vertex.point()))
         };
         let mut used = HashSet::new();
-        let the_only_wire_of_its_face_with_no_seam = face.wire_count() == 1
-            && wire
-                .coedges()
-                .all(|coedge| used.insert(coedge.edge().key()));
+        let no_side_of_this_wire_is_a_seam = wire
+            .coedges()
+            .all(|coedge| used.insert(coedge.edge().key()));
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
             wire.closes_on_one_edge(),
-            the_only_wire_of_its_face_with_no_seam,
+            no_side_of_this_wire_is_a_seam,
         );
 
         let steps = steps_from_somewhere_that_has_a_longitude(wire, &at_a_pole);
@@ -2087,17 +2131,29 @@ fn nearest_longitude(around: &WalkedLoop, at: f64) -> usize {
         .expect("a walked loop has a corner")
 }
 
+/// A longitude moved by whole turns into the turn a loop's own corners run in,
+/// so that [`nearest_longitude`] answers a corner of the stretch it names rather
+/// than whichever end of the loop is closest.
+///
+/// A loop that goes right round spans one whole turn, so every longitude has
+/// exactly one place in it and the answer is never a choice. A longitude already
+/// in that turn comes back byte for byte, which is what keeps a ring the mesher
+/// already cut meshing exactly as it did.
+fn in_the_turn_of(around: &WalkedLoop, at: f64, whole: f64) -> f64 {
+    let least = least_longitude(around);
+    at - ((at - least) / whole).floor() * whole
+}
+
+/// How many whole turns of longitude have to come off `at` to bring it within
+/// half a turn of `of`, as an angle.
+fn whole_turns_between(at: f64, of: f64, whole: f64) -> f64 {
+    ((at - of) / whole).round() * whole
+}
+
 /// One loop's longitudes moved by whole turns into the frame another was walked
 /// in.
 fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> WalkedLoop {
-    let least = |around: &WalkedLoop| {
-        around
-            .corners
-            .iter()
-            .map(|corner| corner[0])
-            .fold(f64::MAX, f64::min)
-    };
-    let by = ((least(frame) - least(chain)) / whole).round() * whole;
+    let by = ((least_longitude(frame) - least_longitude(chain)) / whole).round() * whole;
     WalkedLoop {
         corners: chain
             .corners
@@ -2109,6 +2165,15 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
         goes_right_round: chain.goes_right_round,
         climbed: chain.climbed,
     }
+}
+
+/// The lowest longitude any corner of a loop sits at.
+fn least_longitude(around: &WalkedLoop) -> f64 {
+    around
+        .corners
+        .iter()
+        .map(|corner| corner[0])
+        .fold(f64::MAX, f64::min)
 }
 
 /// The same corners with the whole turns put back, so that no step in the chain
@@ -2414,11 +2479,10 @@ struct WalkingAWire {
     /// longitude it left. Whether it *did* is measured in
     /// [`WalkingAWire::finish`] and is a different question.
     closes_on_one_curve: bool,
-    /// Whether this wire is the only one of its face and no edge of it is used
-    /// twice, so that none of its sides is a seam. Part of
-    /// [`WalkingAWire::may_come_back_a_whole_turn_on`]; the rest is measured as
-    /// the walk goes.
-    the_only_wire_of_its_face_with_no_seam: bool,
+    /// Whether no edge of this wire is used twice, so that none of its sides is
+    /// a seam. Part of [`WalkingAWire::may_come_back_a_whole_turn_on`]; the rest
+    /// is measured as the walk goes.
+    no_side_of_this_wire_is_a_seam: bool,
     /// Whether the walk ever stood at a pole — a pole step, a corner on one, or
     /// a point along an edge that passes one.
     stood_at_a_pole: bool,
@@ -2447,12 +2511,12 @@ impl WalkingAWire {
     fn new(
         wraps: Option<f64>,
         closes_on_one_curve: bool,
-        the_only_wire_of_its_face_with_no_seam: bool,
+        no_side_of_this_wire_is_a_seam: bool,
     ) -> Self {
         Self {
             wraps,
             closes_on_one_curve,
-            the_only_wire_of_its_face_with_no_seam,
+            no_side_of_this_wire_is_a_seam,
             stood_at_a_pole: false,
             longitude: 0.0,
             started: false,
@@ -2753,16 +2817,17 @@ impl WalkingAWire {
     /// of a curve, and a wire through a pole is not a wire round one anyway.
     /// Neither of those may wind, and that is what this keeps out.
     ///
-    /// **And a ring is only a cap when it is the face's one wire.** A face with
-    /// a hole in it that a ring of arcs also bounds is a different shape with a
-    /// different argument to make: which of the two pieces the ring cuts the
-    /// surface into the hole sits in, and nothing here says. A frustum's band
+    /// **A ring is a cap only when it is the face's one wire**, and where it is
+    /// not, [`BuildingAMesh::cut_off_what_goes_too_far_round`] is what says
+    /// which shape the face is. A face on a surface that wraps whose wires
+    /// *all* go right round is a band between the two of them and nothing else,
+    /// because the loops cut the chart into stretches and only the one between
+    /// them has both in its boundary — that is
+    /// [`BuildingAMesh::cut_a_ring_across`]'s shape, and a frustum's band
     /// between its own near cap circle and a ring of arcs from a cube's upper
-    /// planes is one, and letting its ring through sent
-    /// [`BuildingAMesh::cut_a_ring_across`] a pair it could not cut: the fuse
-    /// answered and the mesh came back `BoundaryCrossesItself`, where before
-    /// the face was refused outright. So it is refused outright still, by the
-    /// same name, and the ring a cone's apex needs is the one wire case alone.
+    /// planes is one. A face with a wire that winds beside one that does not
+    /// is the shape nobody has an answer for, and it is refused there rather
+    /// than here.
     ///
     /// **What is left may, and a cone is where it has to.** A pointed cone
     /// inside a cube stood on its corner keeps a piece of nappe round the apex
@@ -2781,7 +2846,7 @@ impl WalkingAWire {
     /// the one this kernel already meshed: `closes_on_one_curve` says it, the
     /// caller asks it first, and it needs none of the reasoning above.
     fn may_come_back_a_whole_turn_on(&self) -> bool {
-        self.the_only_wire_of_its_face_with_no_seam && !self.stood_at_a_pole
+        self.no_side_of_this_wire_is_a_seam && !self.stood_at_a_pole
     }
 
     /// Cross the pole side the loop closes over, when the walk set off from a
