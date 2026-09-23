@@ -68,8 +68,8 @@
 //! built here by narrowing the block that cuts the ball until its own side faces
 //! do the chopping, and of the 270 that answer **not one of their 2 700 meshes
 //! folds**; the chop puts the rim's own arc off the plane of the cut, so none of
-//! them comes back flat either. The bare cut is reached — 150 cuts of 1 704 in
-//! that sweep take `steps = 1` — it just meets nothing.
+//! them comes back flat either. The bare cut is reached — 93 cuts of the 2 798
+//! that sweep takes are `steps = 1` — it just meets nothing.
 //!
 //! So §208.3's arm still has no test that fails without it, and
 //! `the_arm_removal_experiment` is the run that says so rather than a paragraph
@@ -199,7 +199,7 @@ fn no_sliver_cut_through_a_balls_pole_folds_at_any_deflection() {
 /// fraction of the rim's own radius so the chop lands in the same place on every
 /// rim. **288 solids, 270 of which answer, and not one of their 2 700 meshes
 /// folds.** The bare cut is real — instrumenting `cut_in_two` over this sweep
-/// showed 150 cuts of 1 704 taken with `steps = 1` — but the chop also puts the
+/// showed 93 cuts of 2 798 taken with `steps = 1` — but the chop also puts the
 /// rim's own arc off the plane of the cut, so no coarse mesh here comes back
 /// flat and none of them reaches the rescue's ladder at all.
 ///
