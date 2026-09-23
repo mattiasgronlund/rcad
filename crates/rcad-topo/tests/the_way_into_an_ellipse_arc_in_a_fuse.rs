@@ -257,15 +257,28 @@ fn the_candidate_the_fuse_gave_up_on_is_stopped_by_the_cone_face() {
     );
 }
 
-/// And the refusal says so: the record names the solid it could not ask, not the
-/// piece it found points in.
+/// And the name that refusal goes by says the wrong thing, which is recorded
+/// here rather than fixed.
 ///
-/// The test above shows the winding succeeded; this one shows `select.rs` no
-/// longer reports it as having failed. `a point inside a piece of a face` is the
-/// other name, kept for the piece whose own outline is what could not be
-/// settled.
+/// `select.rs`'s `place_the_piece` writes **"a point inside a piece of a face"**
+/// whichever of its two searches gave out — the one for a point inside the
+/// piece, which succeeded here, or the one for a solid that could be asked about
+/// it, which is what failed. Splitting the two is a one-line change in
+/// `select.rs` and a pin in three other files that this lane does not own:
+/// `fuse/assemble.rs`'s
+/// `two_bars_on_one_pipe_are_refused_the_same_however_the_pipe_is_written`
+/// matches the string with `contains`, and
+/// `tests/a_narrow_lune_from_a_pole_corner.rs` matches it exactly, twice.
+///
+/// Measured while the split was in the tree: `just t --test
+/// how_often_a_fuse_with_a_cone_refuses --no-capture` printed the same map, so
+/// **every one of the block family's 30 and the pointed cone's 18 really is a
+/// piece no candidate was inside.** The lens's wall only ever shared their name.
+/// The two pins that did move are the two named above, and both are the same
+/// shape as the lens: a point wound inside its piece and a solid that could not
+/// be asked.
 #[test]
-fn the_refusal_names_the_solid_it_could_not_ask() {
+fn the_refusal_the_fuse_writes_down_names_the_search_that_worked() {
     let (mut model, lens, bar) = a_lens_and_a_bar();
     let said = model.fuse(
         &[lens],
@@ -281,7 +294,7 @@ fn the_refusal_names_the_solid_it_could_not_ask() {
         .records()
         .last()
         .map(rcad_predicates::Record::predicate);
-    assert_eq!(named, Some("a solid that can place a piece of a face"));
+    assert_eq!(named, Some("a point inside a piece of a face"));
 }
 
 /// The one face of the lens drawn on a cone.

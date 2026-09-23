@@ -326,21 +326,8 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] two ways, under two names, because they send whoever
-/// reads the record to two different places.
-///
-/// [`INSIDE_A_PIECE`] when **no candidate was inside the piece**: the winding or
-/// a curved side's sign is what could not be settled, and the piece's own
-/// outline is where to look.
-///
-/// [`NOWHERE_TO_PLACE_IT_FROM`] when one was, and **no solid in the set could be
-/// asked about it**: every candidate inside the piece came back from
-/// [`settle_against_each`] saying nothing, which is a solid whose own faces
-/// classification cannot follow, and that solid is where to look. The lens of
-/// `tests/the_way_into_an_ellipse_arc_in_a_fuse.rs` is one — every candidate in
-/// the bar's own flat bottom end is wound inside it, and the lens's piece of a
-/// cone refuses to say what it holds. Under one name that read as a winding that
-/// failed on a rectangle, which it never was.
+/// [`Error::Undecidable`] when no candidate point inside the piece could be
+/// placed against every solid in the set.
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -359,12 +346,10 @@ fn place_the_piece(
     if against.is_empty() {
         return Ok(Placement::Outside);
     }
-    let mut one_was_inside = false;
     for &candidate in candidates {
         if the_piece_holds(piece, in_plane, candidate) != Some(true) {
             continue;
         }
-        one_was_inside = true;
         let mut trial = ProvenanceLog::new();
         let settled = settle_against_each(
             model, solids, against, candidate, piece, in_plane, policy, &mut trial,
@@ -374,12 +359,12 @@ fn place_the_piece(
             return Ok(placement);
         }
     }
-    let name = if one_was_inside {
-        NOWHERE_TO_PLACE_IT_FROM
-    } else {
-        INSIDE_A_PIECE
-    };
-    Err(gave_up(name, &corners_of(piece).concat(), Measures::Length, log))
+    Err(gave_up(
+        INSIDE_A_PIECE,
+        &corners_of(piece).concat(),
+        Measures::Length,
+        log,
+    ))
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
@@ -1317,10 +1302,6 @@ fn midway_between(one: PredicatePoint, other: PredicatePoint) -> PredicatePoint 
 
 /// The name the search for a point inside a piece goes by in provenance records.
 const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
-
-/// The name a piece with points inside it and no solid able to place them goes
-/// by in provenance records.
-const NOWHERE_TO_PLACE_IT_FROM: &str = "a solid that can place a piece of a face";
 
 /// The name the search for a point off a face's plane goes by.
 const OFF_A_PLANE: &str = "a point off a face's plane";
