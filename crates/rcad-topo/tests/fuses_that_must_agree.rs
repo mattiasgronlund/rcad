@@ -4661,6 +4661,14 @@ impl Run {
                 and: WhatItSitsOn::of(&and),
                 picked_by: picked_by.iter().map(Picking::of).collect(),
             },
+            // Named rather than left to the wildcard, because it exists (§40).
+            // It gets no `Run` shape: the fuse never writes it — `assemble`
+            // still names a closed rim `RightRoundWhereItsFacesCross`, and only
+            // `SolidBuilder` can say which surface cut one (§216) — so a shape
+            // here would be one nothing reaches (§13).
+            EdgeRun::RightRoundWhereItCrosses { .. } => {
+                panic!("the fuse does not write a rim that names its cutting surface; §216")
+            }
             other => panic!("this file does not know how to write {other:?} down"),
         }
     }
