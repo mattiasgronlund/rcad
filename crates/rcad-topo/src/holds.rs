@@ -49,9 +49,7 @@
 //! shown of the face in hand, and the side is read off the way the wire runs
 //! rather than off a corner, because every corner sits on every cut.
 
-use rcad_geom::{
-    Cone, EdgeRun, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, intersect,
-};
+use rcad_geom::{Cone, EdgeRun, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{
     Decision, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog,
     Record,
