@@ -148,9 +148,17 @@ fn a_lens_of_a_cone_between_two_leaning_lids_is_a_solid() {
 /// `arrange.rs`'s `the_way_into_an_arc` looked for a `Surface::Sphere` among the
 /// pair, found a cone, and returned `None` — and its one caller,
 /// `which_way_an_edge_runs_round`, turns that `None` into
-/// `AFaceTrimmedByACurveThisCannotFollow` by an `ok_or`. So the base answers
-/// that error and this test fails; with the two copies folded into one it does
-/// not, and this test passes.
+/// `AFaceTrimmedByACurveThisCannotFollow` by an `ok_or`. Run against
+/// `3ce21631` in a clone of its own, this test comes back
+/// `Err(AFaceTrimmedByACurveThisCannotFollow { face: FaceSlot(1v1) })` under
+/// `Rule::Union` while the fixture above passes; with the two copies folded
+/// into one it passes.
+///
+/// The centre is really asked, and of an ellipse. Instrumenting
+/// `where_the_curves_centre_sits` with the lens in hand prints 45 calls, every
+/// one of them `Neg` and every one of them measured from `Point([0, 0, 0])` —
+/// the cone's apex, which is the cone arm of `where_a_closed_crossing_is
+/// _centred` and not a ball's centre.
 ///
 /// **It is written as "not that refusal" rather than as an answer**, and that is
 /// a measured limit and not a hedge. This pair walks straight into a *second*
