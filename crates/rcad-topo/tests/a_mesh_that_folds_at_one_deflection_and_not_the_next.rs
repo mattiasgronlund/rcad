@@ -232,11 +232,7 @@ fn turn_about(direction: Vector, angle: f64) -> Isometry {
 
 /// A ball of `radius` about the origin fused by `rule` with a block three radii
 /// wide whose bottom face sits where `placed` puts it.
-fn fused(
-    radius: f64,
-    placed: &Isometry,
-    rule: Rule,
-) -> (Model, Result<Vec<SolidKey>, Error>) {
+fn fused(radius: f64, placed: &Isometry, rule: Rule) -> (Model, Result<Vec<SolidKey>, Error>) {
     let mut model = Model::new(Scale::millimetres(25.0 * radius).expect("a positive size"));
     let ball = model
         .add_ball(radius, &Isometry::identity())
