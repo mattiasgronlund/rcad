@@ -1070,6 +1070,46 @@ pub(crate) fn where_a_closed_crossing_is_centred(
 /// thing this test exists to refuse. `Some(false)` and `None` are both refused,
 /// so an undecided sign costs a refusal and never a wrong answer.
 ///
+/// **A face keeping the cone's *outside* is refused, and that is a limit and not
+/// a conjunct in the way.** `cut.kept == Decision::Neg` is what says so, and
+/// deleting it moves nothing. Read this before reaching for it again
+/// (`docs/decisions.md` §215.3 asked, and this is the answer):
+///
+/// - The argument above does not carry. The inside of an ellipse is convex; the
+///   **outside** of one is not, so "any number of convex pieces meet in one" says
+///   nothing about the region left over, and that region really can be two
+///   pieces. `a_slab_the_cones_circle_splits_in_two_is_never_answered_wrong`, in
+///   `tests/a_plane_cut_along_a_cones_other_nappe.rs`, builds one through the
+///   public API: a slab 2 wide and 12 long across a slope-one-half cone, whose
+///   top face at `z = 6` the cone's radius-3 circle runs into at one long side
+///   and out at the other, leaving the part of that face outside the cone in two
+///   pieces with the circle between them. Admitting it here would let
+///   [`held_in_front_of_all`] call a point in the *other* piece a point on this
+///   face, which is a wrong answer and not a refusal.
+/// - Widening it would also move no number, because two more things sit behind
+///   it. [`where_a_side_lies`] reads a straight side against a cone only as
+///   [`Lies::Beside`]`(`[`Decision::Neg`]`)` — and it is right to: a segment
+///   between two points *outside* a convex region can run straight through it,
+///   where one between two points inside cannot. And the ellipse such a face is
+///   ringed by is **closed**, so neither of its ends is on any of the straight
+///   cuts, which is [`where_a_side_lies`]'s `[..] => Lies::Across` arm.
+/// - Measured, on the `Union` answer of the side-6 corner-up cube centred on the
+///   pointed cone's apex and turned `0.7`
+///   (`a_corner_up_cube_round_a_pointed_cones_apex_answers_right`'s case, whose
+///   9 326 decided grid points are the floor §215.3 named): deleting the
+///   conjunct leaves 9 326, and deleting it *and* letting a straight side read
+///   `Beside(Pos)` against a cone leaves 9 326 again, with all 13 187 refusals
+///   moving from this gate to that `Lies::Across`.
+///
+/// So the family of fixes is "loosen what this admits", and it is the only one
+/// that keeps the shape of [`what_a_face_cut_by_part_of_a_crossing_holds`] — it
+/// asks one question, "is `point` in front of every cut", and a region in two
+/// pieces has no such answer. Anything that does follow a kept outside has to
+/// decide whether the leftover region is connected, which is a predicate nobody
+/// here has, over a shape nobody here builds: where the ellipse meets the
+/// straight cuts. That is a part with no named consumer (§13), and until one
+/// appears this refuses.
+///
 /// On a sphere, it is planes through the centre: each cuts the sphere into two
 /// halves, and any number of halves meet in one piece, where planes that miss
 /// the centre can leave two caps with nothing between them.

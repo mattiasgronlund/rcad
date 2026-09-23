@@ -281,6 +281,42 @@ fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right() {
     );
 }
 
+/// The shape `holds.rs`'s `is_a_family_this_follows` refuses a kept **outside**
+/// for, built through the public API so the refusal has something to point at.
+///
+/// A slab 2 wide and 12 long, standing from `z = 1` to `z = 6` across the
+/// pointed cone's axis. At its top the cone's circle has radius 3 — wider than
+/// the slab and shorter than it — so the circle runs in at one long side of that
+/// face and out at the other, and what is left of the face **outside** the cone
+/// is two pieces with the circle between them. That is the whole reason
+/// `is_a_family_this_follows` keeps `cut.kept == Decision::Neg`: a face keeping
+/// the cone's inside is one convex piece, and a face keeping its outside is this.
+///
+/// Every rule here refuses, and no rule answers wrong, which is what the name
+/// says and all this file ever asks. The refusal is not `holds.rs`'s — it comes
+/// earlier, where a piece of a face wants a point inside it — so this pins the
+/// shape rather than the conjunct. What it is for is that the doc comment on
+/// `is_a_family_this_follows` names a region in two pieces, and §16.10 wants a
+/// shape and not a sentence.
+#[test]
+fn a_slab_the_cones_circle_splits_in_two_is_never_answered_wrong() {
+    let case = Case {
+        cone: THE_POINTED_CONE,
+        block: BoxShape {
+            size: [2.0, 12.0, 5.0],
+            placed: moved([-1.0, -6.0, 1.0]),
+        },
+        solids: OVERLAPPING,
+    };
+    assert_eq!(
+        tally(&[case]),
+        Tally {
+            right: 0,
+            refused: [("a point inside a piece of a face", 4)].into()
+        }
+    );
+}
+
 /// The closed forms every answer is held against have to say the same as the
 /// model about the two inputs, or they check nothing.
 #[test]
