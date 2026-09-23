@@ -17,7 +17,7 @@
 //!
 //! **What this file measures is that the fuse never sees the difference
 //! today.** Two bars stacked end to end on one axis share their wall pipe, and
-//! the union stops at `"a point inside a piece of a face"` — the standing
+//! the union stops at `"a point in a piece that every solid could place"` — the standing
 //! curved-piece refusal `fusing_two_bars_side_by_side.rs` names — *before* any
 //! corner is named. It stops there identically whether the wall is spelled once
 //! or twice, and identically either way round. So the second spelling costs
@@ -232,7 +232,7 @@ fn what_the_union_says(upper_axis_origin: f64) -> [String; 2] {
 ///
 /// Four runs: one spelling and two, each fused both ways round. All four must
 /// say the same thing. Today all four are the standing curved-piece refusal, and
-/// [`the_stacked_bars_stop_at_the_curved_piece_the_fan_cannot_walk`] names it —
+/// [`the_stacked_bars_stop_where_no_solid_could_place_the_curved_pieces_point`] names it —
 /// so this test is about agreement and that one is about where the agreement
 /// sits.
 #[test]
@@ -259,17 +259,20 @@ fn spelling_the_wall_of_a_stacked_bar_twice_changes_nothing_the_fuse_says() {
 /// Not `is_err()`: the worth of this is *which* refusal, because it is the one
 /// that keeps the spelling from ever being asked about. The union of two bars
 /// on one axis cuts each wall by the other's cap plane, which leaves a piece of
-/// a cylinder bounded by arcs, and the winding fan has never been able to place
-/// a point inside one of those (§48, `fusing_two_bars_side_by_side.rs`).
+/// a cylinder bounded by arcs. The winding fan **does** find a point inside one
+/// of those; what nothing can do is place that point against both bars (§48,
+/// `fusing_two_bars_side_by_side.rs`). §217 split the one refusal name that used
+/// to cover both searches, and this is the half that actually fires here — the
+/// sentence above said the fan could not wind a point, and it was never the fan.
 ///
 /// **This is the masking, and it is why §51.7's row stays booked.** Lift this
 /// refusal and the spelling question is live again.
 #[test]
-fn the_stacked_bars_stop_at_the_curved_piece_the_fan_cannot_walk() {
+fn the_stacked_bars_stop_where_no_solid_could_place_the_curved_pieces_point() {
     for spelling in [LOWER_ORIGIN, UPPER_ORIGIN] {
         for said in what_the_union_says(spelling) {
             assert!(
-                said.contains("a point inside a piece of a face"),
+                said.contains("a point in a piece that every solid could place"),
                 "the stacked bars stopped somewhere else with the wall named at {spelling}: {said}"
             );
         }

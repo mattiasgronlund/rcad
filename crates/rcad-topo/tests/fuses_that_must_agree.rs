@@ -1684,7 +1684,7 @@ fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
                 .last()
                 .expect("a refusal names a decision")
                 .predicate(),
-            "a point inside a piece of a face",
+            "a point in a piece that every solid could place",
             "pinning what happens today: `A \\ A` over a bar is refused, not answered"
         ),
         Ok(fused) => panic!(
@@ -1706,7 +1706,7 @@ fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
 /// the flat families, asserted here for real rather than pinned.
 ///
 /// **This is what makes the row above a statement about a pipe.** The bar
-/// refuses `A \ A` on [`A_POINT_INSIDE_A_PIECE_OF_A_FACE`] and the ball does
+/// refuses `A \ A` on [`A_POINT_EVERY_SOLID_COULD_PLACE`] and the ball does
 /// not, so §36.16's row is not *"two coincident curved faces"* — it is two
 /// coincident faces on a surface that closes round a seam, and a ball's skin has
 /// no seam a difference has to walk along. Which of those two the fix is aimed
@@ -2143,7 +2143,7 @@ fn what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does() {
 /// The first fuse answers every time. The second is handed half a ball whose
 /// flat face lies exactly in the block's floor and whose skin lies exactly on a
 /// piece of the answer's own boundary, and that is §36.16's coincident-surface
-/// row: it refuses, naming [`A_POINT_INSIDE_A_PIECE_OF_A_FACE`], on **61 of 61**
+/// row: it refuses, naming [`A_POINT_EVERY_SOLID_COULD_PLACE`], on **61 of 61**
 /// of the shipped corpus.
 ///
 /// So this pins the refusal over the whole family rather than reporting a green
@@ -2193,7 +2193,7 @@ fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
     });
     tally.nothing_was_compared_because_it_all_refused(
         "absorption over a ball, which refuses",
-        A_POINT_INSIDE_A_PIECE_OF_A_FACE,
+        A_POINT_EVERY_SOLID_COULD_PLACE,
     );
 }
 
@@ -2203,7 +2203,7 @@ fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
 /// Two ways to the same half ball: cut the dent and then cut the dent's
 /// complement back out of the block, against sharing the block with the ball
 /// once. The second cut is handed the dent, whose skin is the ball's own, so it
-/// refuses on [`A_POINT_INSIDE_A_PIECE_OF_A_FACE`] on 61 of 61. Pinned, with
+/// refuses on [`A_POINT_EVERY_SOLID_COULD_PLACE`] on 61 of 61. Pinned, with
 /// [`taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`]
 /// as the flat control.
 #[test]
@@ -2258,7 +2258,7 @@ fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share
     });
     tally.nothing_was_compared_because_it_all_refused(
         "A \\ (A \\ B) = A ∩ B over a ball, which refuses",
-        A_POINT_INSIDE_A_PIECE_OF_A_FACE,
+        A_POINT_EVERY_SOLID_COULD_PLACE,
     );
 }
 
@@ -3600,7 +3600,12 @@ const ORDER_ALONG_A_LINE: &str = "order along a crossing";
 /// §36.16's row. `a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all` is
 /// the plainest shape that reaches it, and every law that puts an answer back
 /// against one of its own inputs reaches it too.
-const A_POINT_INSIDE_A_PIECE_OF_A_FACE: &str = "a point inside a piece of a face";
+///
+/// **This was *a point inside a piece of a face* until §217**, which split that
+/// one name in two. The whole family moved to the other side of the split — all
+/// 67 of these refusals found a point inside the piece and could not place it
+/// against every solid — so this is repointed rather than widened to hold both.
+const A_POINT_EVERY_SOLID_COULD_PLACE: &str = "a point in a piece that every solid could place";
 
 /// The refusal §30.8 item 10 owns, as [`fused`] names it.
 ///

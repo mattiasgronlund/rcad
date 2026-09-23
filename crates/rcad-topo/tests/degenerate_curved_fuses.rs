@@ -1248,8 +1248,9 @@ fn a_bar_and_a_copy_of_it(model: &mut Model) -> Pair {
     Pair::of(one, other)
 }
 
-/// Two coincident curved faces are refused, and what it gives up on is placing a
-/// point inside a piece of one of them.
+/// Two coincident curved faces are refused, and since §217 the name says which
+/// of the two searches gave up: a point inside a piece **was** found, and what
+/// could not be done was placing it against both solids.
 ///
 /// The point it names is `(2, 0, 0)`, the bar's own seam corner, and the
 /// enclosure is infinite rather than merely wide — nothing was nearly decided.
@@ -1257,15 +1258,24 @@ fn a_bar_and_a_copy_of_it(model: &mut Model) -> Pair {
 /// shape; two copies of one bar is plainer still, and it is the same refusal
 /// under a tolerant policy, so it is not a budget question.
 ///
+/// **This test was called `..._for_want_of_a_point_inside_a_piece` until §217,
+/// and that name said the opposite of what happens.** §37's and §39's tables
+/// cite it under the old name and under the old refusal *a point inside a piece
+/// of a face*; they record what was measured when they were written, and this
+/// is the forwarding address.
+///
 /// **A gap and not a limit** (§16.10): the answer exists and is the bar.
 #[test]
-fn a_bar_and_a_copy_of_it_in_the_same_place_are_refused_for_want_of_a_point_inside_a_piece() {
+fn a_bar_and_a_copy_of_it_in_the_same_place_are_refused_though_a_point_inside_was_found() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
             let mut model = a_model();
             let pair = a_bar_and_a_copy_of_it(&mut model);
             let why = refusal(&mut model, &pair, rule, &policy);
-            assert_eq!(what_it_gave_up_on(&why), "a point inside a piece of a face");
+            assert_eq!(
+                what_it_gave_up_on(&why),
+                "a point in a piece that every solid could place"
+            );
         }
     }
 }
@@ -2117,7 +2127,7 @@ fn the_rest() -> Vec<Entry> {
             case: Case::Fused {
                 build: a_bar_and_a_copy_of_it,
                 rule: Rule::Union,
-                outcome: Outcome::GaveUp("a point inside a piece of a face"),
+                outcome: Outcome::GaveUp("a point in a piece that every solid could place"),
             },
         },
         Entry {
@@ -2241,6 +2251,9 @@ fn what_happened(build: fn(&mut Model) -> Pair, rule: Rule) -> Outcome {
                 .predicate()
             {
                 "a point inside a piece of a face" => "a point inside a piece of a face",
+                "a point in a piece that every solid could place" => {
+                    "a point in a piece that every solid could place"
+                }
                 "order along a crossing" => "order along a crossing",
                 "which way a crossing runs" => "which way a crossing runs",
                 other => panic!("a refusal named {other:?}, which no row expects"),

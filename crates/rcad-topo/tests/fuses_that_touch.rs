@@ -595,20 +595,21 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
 /// first, in assembly, where the two arcs of one ball-and-plane circle between
 /// the same two corners were given one edge name, until §198 told them apart;
 /// then `AWireWillNotLieFlatOnItsFace`, out of the mesher, until §208.4 let a
-/// ring of arcs be walked. Move the ball over to `(1, 2)` on a cube of side four
-/// and it is refused `NotFinite` on *"point on a plane"* instead, a coordinate
-/// worked out as infinity or not a number out of whole-number input.
+/// ring of arcs be walked.
 ///
-/// **The third name is pinned as measured and not as understood.** It is raised
-/// in one place, `Arrangement::the_whole_surface`, reached when a face's
-/// arrangement holds no arcs at all and refusing there for every surface but a
-/// ball. The face it names is in the fuse's own working model rather than in the
-/// caller's — `Model::face` on it answers `KeyFromAnotherModel` — so nothing
-/// outside the kernel can say which surface it is on, and the provenance log for
-/// this fuse comes back empty. What is certain is only what this test asserts:
-/// the pair was refused before and is refused now, so nothing here got a wrong
-/// answer where it used to get none. Whether the name fits the face is a
-/// question for a lane with the fuse's working model in its hands.
+/// **The ball moved over to `(1, 2)` on a cube of side four was refused too, and
+/// answers since §217.** It was `Geometry(NotFinite)` — a coordinate worked out
+/// as infinity or not a number out of whole-number input, raised in
+/// `Arrangement::the_whole_surface` and pinned then as measured rather than as
+/// understood. What moved it is the only thing §217 changed here: the fuse now
+/// writes the surface that cut a closed rim. That block's wall plane cuts the
+/// ball in a circle whose two faces are the one sphere, and a rim whose two
+/// faces name one surface is exactly what the new run exists for.
+///
+/// **Why that makes this particular coordinate finite was not chased**, so the
+/// row is kept and asserts the two solids rather than being deleted: a row that
+/// refused once and answers now is the cheapest guard there is against it
+/// refusing again, and the mechanism is a question for whoever wants it.
 ///
 /// Three rows say the answer exists and this kernel can hold it:
 ///
@@ -657,8 +658,9 @@ fn a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_s
         Some("ACurvedFaceGoesRightRoundWithNoSeam")
     );
     assert_eq!(
-        refused(4.0, [1.0, 2.0, 6.0], 2.0).as_deref(),
-        Some("Geometry(NotFinite)")
+        refused(4.0, [1.0, 2.0, 6.0], 2.0),
+        None,
+        "refused Geometry(NotFinite) until §217 named the plane that cut the rim"
     );
     assert_eq!(refused(2.0, [1.0, 1.0, 5.0], 2.0), None, "one unit higher");
     assert_eq!(refused(4.0, [1.0, 2.0, 7.0], 2.0), None, "one unit higher");

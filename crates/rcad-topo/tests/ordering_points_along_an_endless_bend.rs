@@ -24,10 +24,11 @@
 //! Ordering along the bend takes the grid from thirty-eight answers to
 //! fifty-three, and naming the two arcs of a cone's rim circle apart takes it to
 //! fifty-seven; **not one configuration refuses on the ordering any more**. The
-//! twenty-seven that still refuse all give up in the same different place —
-//! `fuse/select.rs`'s *a point inside a piece of a face*, which §49.6 lists
-//! among what stands under its own name. That is a separate gap and the numbers
-//! below never blend the two (§17.7).
+//! twenty-seven that still refuse all give up in `fuse/select.rs`, which §49.6
+//! lists among what stands under its own name — twenty-five of them for want of
+//! any point inside the piece, and two where a point was found and no solid
+//! could place it. §217 split those two names apart. That is a separate gap and
+//! the numbers below never blend it with the ordering (§17.7).
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -135,8 +136,11 @@ fn not_one_block_on_the_grid_is_refused_for_want_of_an_order_along_its_curve() {
 ///
 /// **Not eighty-four of eighty-four**, which §50.5 named as this lane's bar. The
 /// bar is not met and the reason is still not the ordering. All twenty-seven are
-/// `fuse/select.rs`'s *a point inside a piece of a face*, which §49.6 lists as
-/// its own open row and which no work on `arrange.rs` reaches.
+/// `fuse/select.rs`, which §49.6 lists as its own open row and which no work on
+/// `arrange.rs` reaches — and since §217 they are seen to be **two** walls and
+/// not one: twenty-five where no candidate was inside the piece at all, and
+/// **two** where one was found and no solid could place it. They wore a single
+/// name until that split, which is the whole of what §216.4 found.
 ///
 /// **It was 53 answered with 27 of that wall and 4 of *an edge would have 4
 /// faces along it*.** §206's bulge count carried those four past `select.rs` and
@@ -169,9 +173,12 @@ fn fifty_seven_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
     println!("and the walls they gave up at are {walls:?}");
     assert_eq!(
         walls,
-        BTreeMap::from([("a point inside a piece of a face", 27)]),
-        "this is the one wall the grid's refusals were measured against; re-derive it when it \
-         moves rather than widening the test (§19.1)"
+        BTreeMap::from([
+            ("a point in a piece that every solid could place", 2),
+            ("a point inside a piece of a face", 25),
+        ]),
+        "these are the walls the grid's refusals were measured against; re-derive them when they \
+         move rather than widening the test (§19.1)"
     );
     assert_eq!(
         answered, 57,

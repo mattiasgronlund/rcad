@@ -3553,9 +3553,12 @@ mod tests {
     ///
     /// The defect wants two solids flush on a shared curved face and one of them
     /// holding its axis the other way round. Two bars on one line is that pair,
-    /// and the fuse does not reach it: it stops at *a point inside a piece of a
-    /// face*, undecidable, and stops there **just the same when both bars spell
-    /// the pipe the same way**. So the fold above is demonstrated on the names
+    /// and the fuse does not reach it: it stops at *a point in a piece that
+    /// every solid could place*, undecidable, and stops there **just the same
+    /// when both bars spell the pipe the same way**. A point *was* found inside
+    /// the piece here; what could not be done was classifying it against both
+    /// bars, and §216.4 split the two so this pin says which. So the fold above
+    /// is demonstrated on the names
     /// it fixes and not on an answer, and nothing here should be read as saying
     /// the fuse handles two solids on one pipe.
     ///
@@ -3598,7 +3601,7 @@ mod tests {
             "the spelling of the pipe changed how far the fuse got"
         );
         assert!(
-            both_ways_round.contains("a point inside a piece of a face"),
+            both_ways_round.contains("a point in a piece that every solid could place"),
             "the wall moved, so the fold can be demonstrated on an answer now: {both_ways_round}"
         );
     }
