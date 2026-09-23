@@ -571,8 +571,17 @@ enum WhatARunLiesOn {
 /// of the machinery for a degree-four or degree-eight curve with a cone or a
 /// torus in it exists.
 ///
+/// **One cone twice is not one of those pairs**, and that is the one place the
+/// evaluator says more than the namer's table does: the namer answers it as one
+/// surface, and a run right round where that surface meets itself is a circle
+/// the run's own end names (§214). Every other run on that pair still refuses.
+///
+/// [`Error::ACrossingPieceHasNoEndsAndNothingPickingIt`] for such a closed run
+/// with no ends, which leaves nothing to put the circle through.
+///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed for a degree-four
-/// crossing comes out as something that is not a point.
+/// crossing comes out as something that is not a point, or when that circle's
+/// own numbers do not come out finite.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller named
 /// as closed between a plane and a cone that cross in a parabola or a
@@ -692,6 +701,18 @@ fn what_a_run_between_these_two_lies_on(
         | [Surface::Cylinder(pipe), Surface::Cone(cone)] => {
             where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, policy, log)
                 .map(WhatARunLiesOn::Conic)
+        }
+        // One cone twice, which is one surface and crosses nothing. `intersect`
+        // has said so since it was written — its `SameSurface` arm — and this
+        // had no arm for the pair at all, so a fuse that cut a cone face in two
+        // was told a frustum and a block held a second curved surface between
+        // them (§214). A **guarded** arm on purpose: the refusal below still
+        // covers a cone against a different cone, and a sixth kind of `Surface`
+        // is still a compile error here, which a wildcard would have cost.
+        [Surface::Cone(one), Surface::Cone(other)]
+            if one == other && run.run() == &EdgeRun::RightRoundWhereItsFacesCross =>
+        {
+            the_circle_a_closed_run_round_one_cone_lies_on(&one, run).map(WhatARunLiesOn::Conic)
         }
         [Surface::Cone(_), Surface::Sphere(_) | Surface::Cone(_)]
         | [Surface::Sphere(_), Surface::Cone(_)] => {
@@ -2632,6 +2653,63 @@ fn which_of_these_circles_this_run_is(
         [only] => Ok(*only),
         _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
     }
+}
+
+/// The circle a closed run whose two faces are the one cone lies on: through
+/// the run's own end, square to the cone's axis.
+///
+/// **The pair of surfaces names nothing here**, the way a ball crossed with
+/// itself names nothing, so what names the curve is the run. It is closed, so
+/// its two ends are one point; the closed curve on a cone through a point and
+/// square to the axis is the circle centred where the axis is level with that
+/// point, of the radius it stands out by. Nothing about it is degree four.
+///
+/// # What the run does not say, and what that costs
+///
+/// Which plane made the cut. A plane leaning across the axis cuts a cone in an
+/// **ellipse**, which is closed too, and a run that came off such a cut carries
+/// nothing here to tell it from a circle — so this names the circle and is wrong
+/// about that curve. §214.4's fix (d) is what would tell them apart, by writing
+/// the cutting plane into the run; this is (a), which is smaller and is what
+/// §214.4 recommends. The one family measured against it moved no answers, only
+/// refusals: `how_often_a_fuse_with_a_cone_refuses.rs`.
+///
+/// # Errors
+///
+/// [`Error::ACrossingPieceHasNoEndsAndNothingPickingIt`] for a closed run whose
+/// ends name nowhere at all. Nothing in this crate builds such a run — a
+/// [`NamedRun`] with no ends comes out of [`intersect`](crate::intersect), which
+/// answers this pair as one surface and never names a run for it — but [`walk`]
+/// is public and takes one.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the circle's own numbers do
+/// not come out finite.
+fn the_circle_a_closed_run_round_one_cone_lies_on(cone: &Cone, run: &NamedRun) -> Result<Conic> {
+    let Some(end) = run
+        .ends()
+        .into_iter()
+        .find(|end| *end != nowhere_in_particular())
+        .map(|end| Point::from(end.enclosure().map(middle_of)))
+    else {
+        return Err(Error::ACrossingPieceHasNoEndsAndNothingPickingIt);
+    };
+
+    let along = cone.axis().direction();
+    let up = along * along.length().recip();
+    let reach = (end - cone.apex()).dot(up);
+    let middle = cone.apex() + up * reach;
+    let radius = (end - middle).length();
+    let (across, and) = cone.basis();
+    let circle = Conic {
+        centre: middle,
+        across: across * radius,
+        and: and * radius,
+        size: how_big_this_is(&[middle, end, cone.apex()], &[radius, reach]),
+    };
+    if !(circle.centre.is_finite() && circle.across.is_finite() && circle.and.is_finite()) {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
+    Ok(circle)
 }
 
 /// The largest magnitude anything about a conic was worked out from.
