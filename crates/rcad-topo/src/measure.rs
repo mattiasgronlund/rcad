@@ -293,7 +293,7 @@ impl SolidView<'_> {
     /// One walk over the faces rather than three, because the two error terms
     /// are both a share of the very area being summed.
     fn skin_of(self, mesh: &Mesh) -> Skin {
-        let radii = radius_of_each_face(self, mesh);
+        let bends = bend_of_each_face(self, mesh);
         let deviation = mesh.deviation().magnitude();
         let mut skin = Skin {
             area: 0.0,
@@ -302,14 +302,20 @@ impl SolidView<'_> {
         };
         for (face, area) in areas_of_each_face(mesh) {
             skin.area += area;
-            let Some(radius) = radii[&face] else {
+            let bend = bends[&face];
+            if let Some(charge) = bend.tip_charge {
+                skin.area_error += charge.more_surface;
+                skin.volume_error += charge.hidden_space;
+                continue;
+            }
+            let Some(radius) = bend.radius else {
                 continue;
             };
             skin.area_error += how_much_more_surface_there_can_be(area, radius, deviation);
             skin.volume_error +=
                 how_much_space_hides_under_a_flat_stand_in(area, radius, deviation);
         }
-        skin.area_error += deviation * rim_of_the_flat_faces(mesh, &radii);
+        skin.area_error += deviation * rim_of_the_flat_faces(mesh, &bends);
         skin
     }
 
@@ -827,7 +833,7 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
 /// Counted once for each flat face along a side, which is what makes a bar's two
 /// caps cost twice one rim. A side used twice by the *same* face is a seam and
 /// is not a rim at all, so it is skipped by construction.
-fn rim_of_the_flat_faces(mesh: &Mesh, radii: &HashMap<FaceKey, Option<f64>>) -> f64 {
+fn rim_of_the_flat_faces(mesh: &Mesh, bends: &HashMap<FaceKey, Bend>) -> f64 {
     let mut first_seen: HashMap<(u32, u32), FaceKey> = HashMap::new();
     let mut rim = 0.0;
     for triangle in mesh.triangles() {
@@ -843,7 +849,7 @@ fn rim_of_the_flat_faces(mesh: &Mesh, radii: &HashMap<FaceKey, Option<f64>>) -> 
             }
             let length = mesh.points()[from as usize].distance_to(mesh.points()[to as usize]);
             for face in [already, triangle.face()] {
-                if radii[&face].is_none() {
+                if bends[&face].radius.is_none() {
                     rim += length;
                 }
             }
@@ -891,26 +897,22 @@ fn how_far_the_solid_reaches_from(mesh: &Mesh, centroid: Point) -> f64 {
 /// it bounds a pipe's. `R` varies over the face, so the smallest of it is the
 /// one that bounds the lot.
 ///
-/// **A face that reaches its apex gets zero, and the bounds then come back
-/// infinite.** That is honest and it is a **gap**: within `deviation` of the
-/// apex there is no inner offset cone at all — its own apex has moved
-/// `deviation·√(1 + slope²)/slope` up the axis — so no argument of this shape
-/// covers the tip, and the number this hands back must not pretend otherwise.
-/// What closes it is splitting the face at `v = 2·deviation·√(1 + slope²)/slope`
-/// and charging the tip its **whole** size rather than a share of it: the cone
-/// above that split has `R ≥ 2·deviation`, and the tip below it holds at most
-/// `4π·deviation²(1 + slope²)^{3/2}/slope` of area and
-/// `(8π/3)·deviation³(1 + slope²)^{3/2}/slope` of volume, both of which are
-/// bounded outright. That wants a bound taking two numbers rather than one, and
-/// its consumer is a pointed cone somebody wants a measured volume for.
+/// **A face that reaches its apex gets zero, and on its own that makes both
+/// bounds infinite.** Within `deviation` of the apex there is no inner offset
+/// cone at all — its own apex has moved `deviation·√(1 + slope²)/slope` up the
+/// axis — so no argument of this shape covers the tip. [`what_a_cone_tip_costs`]
+/// is what covers it, and a face that reaches in there comes back with its whole
+/// charge already worked out rather than a radius to work one out from — because
+/// that charge is a sum over the face's own triangles and not a factor on its
+/// area. Every other face is left exactly as it was.
 ///
 /// # Panics
 ///
 /// On a surface this has not been taught. [`Surface`] grows a variant at every
 /// milestone, and a surface measured by not being measured is worse than a stop.
-fn radius_of_each_face(solid: SolidView<'_>, mesh: &Mesh) -> HashMap<FaceKey, Option<f64>> {
+fn bend_of_each_face(solid: SolidView<'_>, mesh: &Mesh) -> HashMap<FaceKey, Bend> {
     let mut cones: HashMap<FaceKey, Cone> = HashMap::new();
-    let mut radii: HashMap<FaceKey, Option<f64>> = solid
+    let mut bends: HashMap<FaceKey, Bend> = solid
         .faces()
         .map(|face| {
             let radius = match face.surface() {
@@ -940,7 +942,13 @@ fn radius_of_each_face(solid: SolidView<'_>, mesh: &Mesh) -> HashMap<FaceKey, Op
                 Surface::Torus(ring) => Some(ring.tube_radius()),
                 other => panic!("this crate cannot say how far {other:?} bends"),
             };
-            (face.key(), radius)
+            (
+                face.key(),
+                Bend {
+                    radius,
+                    tip_charge: None,
+                },
+            )
         })
         .collect();
 
@@ -953,16 +961,191 @@ fn radius_of_each_face(solid: SolidView<'_>, mesh: &Mesh) -> HashMap<FaceKey, Op
         for corner in triangle.corners() {
             let at = mesh.points()[corner as usize];
             let here = cone.radius_at(along.dot(at - cone.apex())) * steepness;
-            let slot = radii
+            let slot = bends
                 .get_mut(&triangle.face())
                 .expect("every face of the solid is in the table");
-            *slot = Some(
-                slot.expect("a cone face was put in with a radius")
+            slot.radius = Some(
+                slot.radius
+                    .expect("a cone face was put in with a radius")
                     .min(here),
             );
         }
     }
-    radii
+
+    let deviation = mesh.deviation().magnitude();
+    for (face, cone) in cones {
+        let split = 2.0 * deviation * (1.0 + cone.slope() * cone.slope());
+        let slot = bends
+            .get_mut(&face)
+            .expect("every face of the solid is in the table");
+        if slot.radius.expect("a cone face was put in with a radius") < split {
+            slot.tip_charge = Some(what_a_cone_tip_costs(mesh, face, &cone, deviation));
+        }
+    }
+    bends
+}
+
+/// How far one face bends, and what it costs where that is not a question a
+/// radius can answer.
+#[derive(Clone, Copy)]
+struct Bend {
+    /// The smallest radius of normal curvature the face reaches, or `None`
+    /// where the face does not bend at all and is exact.
+    radius: Option<f64>,
+    /// What this face costs outright, on a cone face that reaches inside its
+    /// own tip. `None` on every other face, which is charged off `radius` as
+    /// it always was.
+    tip_charge: Option<Charge>,
+}
+
+/// What one face costs the two published bounds.
+#[derive(Clone, Copy)]
+struct Charge {
+    more_surface: f64,
+    hidden_space: f64,
+}
+
+/// What a cone face that reaches near its own apex costs, summed over its own
+/// triangles.
+///
+/// **Where the split goes, and why there.** The inner offset cone — the same
+/// cone slid `deviation·√(1 + slope²)/slope` up its own axis — is what
+/// [`how_much_more_surface_there_can_be`] projects onto, and it does not exist
+/// below its own apex. Splitting at `v = 2·deviation·√(1 + slope²)/slope`
+/// leaves everything above it with a radius of normal curvature
+/// `slope·v·√(1 + slope²) ≥ 2·deviation·(1 + slope²)`, clear of the deviation
+/// by more than the deviation itself. That radius is what the split is written
+/// in terms of here, because that is what the triangles are measured against.
+///
+/// **The split runs through the triangles and not between them.** A pointed
+/// cone is meshed as a fan from its apex — a cone is developable, so every
+/// edge from the apex to the rim lies exactly on the surface — and **every one
+/// of those triangles has a corner at the apex**. Sorting whole triangles above
+/// and below the split would put the entire face below it, and charging the
+/// entire face at the split radius is a factor that does not depend on the
+/// deviation at all: a bound that never shrinks.
+///
+/// **So the face is cut into bands of radius, each doubling on the last**, and
+/// each band is charged off the radius at its own floor. The radius of normal
+/// curvature is a fixed multiple of the height up the axis, which runs linearly
+/// across a flat triangle, so what a band takes from one triangle is
+/// [`the_share_of_a_triangle_below`] a height — a ratio of areas that needs no
+/// clipping. A band's area grows like its radius squared while the factor
+/// charged to it falls like one over that radius, so the sum is dominated by the
+/// outermost band and comes out `O(deviation)`, which is the same order the
+/// bound on a ball already has. Ten or so bands cover a cone of any size that
+/// `f64` holds.
+///
+/// **What the tip below the split can hold.** A cone of height `v` has
+/// `π·slope·v²·√(1 + slope²)` of side and `π·slope²·v³/3` of volume; at the
+/// split those are `4π·deviation²(1 + slope²)^{3/2}/slope` and
+/// `(8π/3)·deviation³(1 + slope²)^{3/2}/slope`. This face's own share of the tip
+/// is no bigger than the whole of it, and the triangles standing in for that
+/// share are chords of it, so the space between the two skins down there is
+/// inside the same piece — whatever part of the tip the face covers, and however
+/// it is meshed.
+///
+/// **The tip is charged the cheaper of its whole size and the plain bound**, so
+/// no face is charged more than it was before this existed: a truncated cone
+/// whose near cap stops just short of the split still has a real radius, and
+/// taking the tip's whole size there would loosen a bound already earned. Where
+/// the face does reach the apex the plain bound is infinite and the whole size
+/// wins by default.
+///
+/// **A slope of nothing makes the tip infinite, and that is the truth** — a cone
+/// that flat has a tip stretching away for ever. `Cone::new` refuses a slope of
+/// zero, so nobody can build one; a slope small enough to make the tip bigger
+/// than the plain bound is charged the plain bound by the line above.
+fn what_a_cone_tip_costs(mesh: &Mesh, face: FaceKey, cone: &Cone, deviation: f64) -> Charge {
+    let steepness = cone.slope().hypot(1.0);
+    let along = cone.axis().direction();
+    let mut triangles = Vec::new();
+    let mut widest = 0.0f64;
+    let mut smallest = f64::INFINITY;
+    for (at, triangle) in mesh.triangles().iter().enumerate() {
+        if triangle.face() != face {
+            continue;
+        }
+        let mut radii = triangle.corners().map(|corner| {
+            let point = mesh.points()[corner as usize];
+            cone.radius_at(along.dot(point - cone.apex())) * steepness
+        });
+        radii.sort_by(f64::total_cmp);
+        widest = widest.max(radii[2]);
+        smallest = smallest.min(radii[0]);
+        triangles.push((radii, area_of(mesh, &mesh.triangles()[at..=at])));
+    }
+
+    let area_below = |level: f64| -> f64 {
+        triangles
+            .iter()
+            .map(|(radii, area)| area * the_share_of_a_triangle_below(radii, level))
+            .sum()
+    };
+
+    let split = 2.0 * deviation * steepness * steepness;
+    let mut charge = the_whole_tip_below(cone, deviation);
+    let under_the_split = area_below(split);
+    charge.more_surface = charge.more_surface.min(how_much_more_surface_there_can_be(
+        under_the_split,
+        smallest,
+        deviation,
+    ));
+    charge.hidden_space = charge
+        .hidden_space
+        .min(how_much_space_hides_under_a_flat_stand_in(
+            under_the_split,
+            smallest,
+            deviation,
+        ));
+
+    let mut floor = split;
+    let mut taken = under_the_split;
+    while floor < widest {
+        floor *= 2.0;
+        let reached = area_below(floor);
+        let band = reached - taken;
+        taken = reached;
+        charge.more_surface += how_much_more_surface_there_can_be(band, floor * 0.5, deviation);
+        charge.hidden_space +=
+            how_much_space_hides_under_a_flat_stand_in(band, floor * 0.5, deviation);
+    }
+    charge
+}
+
+/// All the side and all the space a cone can hold below the split, which is
+/// what a face reaching its apex is charged for the part of itself down there.
+fn the_whole_tip_below(cone: &Cone, deviation: f64) -> Charge {
+    let pi = core::f64::consts::PI;
+    let steepness = cone.slope().hypot(1.0);
+    let spread = steepness * steepness * steepness / cone.slope().abs();
+    Charge {
+        more_surface: 4.0 * pi * deviation * deviation * spread,
+        hidden_space: 8.0 * pi * deviation * deviation * deviation * spread / 3.0,
+    }
+}
+
+/// How much of a triangle's area lies below a `level`, as a share of the whole,
+/// where each corner is at the height its entry in `radii` says and the height
+/// runs linearly between them.
+///
+/// `radii` is sorted. A plane below the lowest corner cuts off nothing and one
+/// above the highest cuts off everything; in between it cuts off a triangle
+/// similar to the one the lowest corner is in, or leaves one similar to the one
+/// the highest corner is in, and a similar triangle's share is the product of
+/// the two ratios along the sides it is cut from.
+fn the_share_of_a_triangle_below(radii: &[f64; 3], level: f64) -> f64 {
+    let [low, middle, high] = *radii;
+    if level <= low {
+        return 0.0;
+    }
+    if level >= high {
+        return 1.0;
+    }
+    if level <= middle {
+        return (level - low) * (level - low) / ((middle - low) * (high - low));
+    }
+    1.0 - (high - level) * (high - level) / ((high - middle) * (high - low))
 }
 
 /// Where one mesh triangle's three corners are.
