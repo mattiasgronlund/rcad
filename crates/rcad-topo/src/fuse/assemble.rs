@@ -1457,9 +1457,59 @@ impl Assembly {
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
     /// curved crossing.
     fn how_each_edge_runs(&self) -> Result<Vec<EdgeRun>> {
+        let cut_by = self.the_surface_that_cut_each_closed_rim();
         self.edges
             .iter()
-            .map(|edge| edge.how_it_runs(&self.corners))
+            .zip(cut_by)
+            .map(|(edge, cut_by)| edge.how_it_runs(&self.corners, cut_by))
+            .collect()
+    }
+
+    /// Which surface cut each edge, for a closed rim whose two faces **in the
+    /// answer** sit on the one surface and so name nothing between them.
+    ///
+    /// [`Edge::carried_by`] is the pair of faces that *met*, so the cutting
+    /// plane is in scope down in [`Edge::how_it_runs`]. What is not in scope
+    /// there is which two faces of the answer ended up either side of the
+    /// finished rim, and that is what decides this: a round bar's cap circle has
+    /// a cylinder one side and a plane the other, and the two of them say where
+    /// it runs; a frustum's wall cut in two by a tool plane has the one cone
+    /// both sides, which says nothing at all, and
+    /// [`EdgeRun::RightRoundWhereItCrosses`] is that rim naming the surface that
+    /// cut it instead (`docs/decisions.md` §216).
+    ///
+    /// `None` everywhere else, which is where [`EdgeRun::RightRoundWhereItsFacesCross`]
+    /// stays. Three shapes come back `None` for a reason worth naming: an edge
+    /// that is not closed, which is not this kind of run at all; an edge other
+    /// than two faces claim, which [`Assembly::group_into_shells`] refuses as
+    /// [`Error::ResultIsNotManifold`] a step later under its own name rather
+    /// than here; and a crossing whose pair does not name one surface of the
+    /// answer and one other, which leaves nothing to put in `and`.
+    fn the_surface_that_cut_each_closed_rim(&self) -> Vec<Option<Surface>> {
+        let mut claimants: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
+        for (face, walked) in self.faces.iter().enumerate() {
+            for side in walked.wires.iter().flatten() {
+                claimants[side.edge].push(face);
+            }
+        }
+        self.edges
+            .iter()
+            .zip(&claimants)
+            .map(|(edge, by)| {
+                if edge.ends[0] != edge.ends[1] {
+                    return None;
+                }
+                let [one, other] = <[usize; 2]>::try_from(by.as_slice()).ok()?;
+                let either_side = self.faces[one].surface;
+                if self.faces[other].surface != either_side {
+                    return None;
+                }
+                match edge.carried_by {
+                    [met, across] if met == either_side && across != either_side => Some(across),
+                    [across, met] if met == either_side && across != either_side => Some(across),
+                    _ => None,
+                }
+            })
             .collect()
     }
 
@@ -1680,18 +1730,25 @@ impl Edge {
     /// *piece* of a crossing, and which piece is
     /// [`Edge::arc`](which_arc_this_is).
     ///
+    /// `cut_by` is the one thing this cannot work out for itself:
+    /// [`Assembly::the_surface_that_cut_each_closed_rim`] says why, and a rim
+    /// that comes with one names it rather than its two faces.
+    ///
     /// # Errors
     ///
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
     /// curved crossing that nothing told from its sibling.
-    fn how_it_runs(&self, corners: &[Corner]) -> Result<EdgeRun> {
+    fn how_it_runs(&self, corners: &[Corner], cut_by: Option<Surface>) -> Result<EdgeRun> {
         let flat = self
             .carried_by
             .iter()
             .all(|surface| surface.as_plane().is_some());
         match (flat, self.ends[0] == self.ends[1]) {
             (true, false) => Ok(EdgeRun::Straight),
-            (_, true) => Ok(EdgeRun::RightRoundWhereItsFacesCross),
+            (_, true) => Ok(match cut_by {
+                Some(and) => EdgeRun::RightRoundWhereItCrosses { and },
+                None => EdgeRun::RightRoundWhereItsFacesCross,
+            }),
             (false, false) => match self.arc {
                 WhichArc::TheOnlyOne => Ok(EdgeRun::Straight),
                 WhichArc::LeavingACorner { corner, towards } => {
