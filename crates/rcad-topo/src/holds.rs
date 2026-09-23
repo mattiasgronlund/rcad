@@ -951,7 +951,12 @@ fn the_way_into_an_arc(
 
 /// Whether `half` says which of the two arcs between `ends` an edge is, by one
 /// of the two ways [`the_way_into_an_arc`] sets out.
-fn a_picker_that_tells_the_two_arcs_apart(
+///
+/// The fuse's own arrangement asks the same question of the same two ways, on
+/// the boxes it solved for rather than on stored corners, so it asks this
+/// (§23.8, and §211.5 for the three spellings of the closed-curve test that
+/// went the same way).
+pub(crate) fn a_picker_that_tells_the_two_arcs_apart(
     half: &HalfSpace,
     flat: &Plane,
     centred: &WhereTheCurveIsCentred,
@@ -1004,7 +1009,7 @@ fn where_the_curves_centre_sits(
 ///
 /// The centre itself is not formed, because forming it divides and
 /// [`where_the_curves_centre_sits`] wants a sign of it (§168).
-struct WhereTheCurveIsCentred {
+pub(crate) struct WhereTheCurveIsCentred {
     from: Point,
     along: [Interval; 3],
 }
@@ -1029,7 +1034,7 @@ struct WhereTheCurveIsCentred {
 /// are not one closed curve for a chord to split in two.
 ///
 /// [`Cone::which_way_a_closed_crossings_centre_lies`]: rcad_geom::Cone::which_way_a_closed_crossings_centre_lies
-fn where_a_closed_crossing_is_centred(
+pub(crate) fn where_a_closed_crossing_is_centred(
     surface: &Surface,
     flat: &Plane,
 ) -> Option<WhereTheCurveIsCentred> {
