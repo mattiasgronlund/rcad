@@ -42,21 +42,22 @@ fn a_model() -> Model {
 /// Two faces, one edge, one vertex and no seam: the apex is where the cone's
 /// own second coordinate runs out rather than a corner of the model.
 ///
-/// # A pointed cone has no finite published bound, and this pins that
+/// # A pointed cone has a finite published bound, and this pins that a caller
+/// can reach it
 ///
 /// The bound the kernel publishes for a curved face is an offset-surface
 /// argument: the mesh sits between the surface and the same surface a deviation
 /// inside the material. A cone has no such inner surface within a deviation of
-/// its apex, so the smallest radius of curvature over the face is zero and
-/// `volume_error()` comes back infinite —
-/// `crates/rcad-topo/tests/a_solid_with_a_cone_face.rs` carries the derivation
-/// and asserts the same thing from the inside.
+/// its apex, so the smallest radius of curvature over the face is zero, and
+/// `volume_error()` used to come back infinite for every solid holding an apex.
+/// The tip is charged its whole size now instead — `what_a_cone_tip_costs` in
+/// `rcad-topo`, and `crates/rcad-topo/tests/a_solid_with_a_cone_face.rs`
+/// asserts the same thing from the inside.
 ///
-/// That matters out here because `x <= infinity` holds for every finite `x`:
-/// comparing the volume against this bound would be an assertion that cannot
-/// fail. So the bound is asserted to be infinite, which is a real fact about
-/// this kernel and worth a caller knowing, and `πr²h/3` is checked against a
-/// **stated share of the deflection** instead.
+/// That matters out here because it is the difference between a measurement a
+/// caller can act on and one they cannot: `x <= infinity` holds for every
+/// finite `x`, so the comparison this test now makes against the bound was an
+/// assertion that could not fail. It fails now if the bound is wrong.
 #[test]
 fn a_pointed_cone_is_described_measured_and_named_from_the_front_door() {
     let mut model = a_model();
@@ -85,21 +86,15 @@ fn a_pointed_cone_is_described_measured_and_named_from_the_front_door() {
         .expect("this model made the key")
         .measure(how_fine, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a pointed cone measures");
-    assert!(
-        !measured.volume_error().is_finite(),
-        "a face reaching its apex has no offset surface within a deviation of it, and the \
-         published bound says so rather than pretending: it came back {}",
-        measured.volume_error()
-    );
-
     let radius = SLOPE * HOW_FAR_UP_THE_RIM_SITS;
     let height = HOW_FAR_UP_THE_RIM_SITS;
     let volume = core::f64::consts::PI * radius * radius * height / 3.0;
     let area = core::f64::consts::PI
         * (radius * (radius * radius + height * height).sqrt() + radius * radius);
-    // A statement about *this test* and not a published bound — see the doc
-    // above. The mesh is inscribed in a convex solid, so its volume is below the
-    // true one and short of it by no more than the deflection times the skin.
+    // A statement about *this test* and not about the bound: the mesh is
+    // inscribed in a convex solid, so its volume is below the true one, and the
+    // deflection times the skin is what this test settled for before the bound
+    // was finite.
     let room = deflection * area;
     println!(
         "a pointed cone at a deflection of {deflection}: volume {} against πr²h/3 = {volume}, \
@@ -109,9 +104,17 @@ fn a_pointed_cone_is_described_measured_and_named_from_the_front_door() {
         measured.volume_error(),
     );
     assert!(
-        measured.volume() <= volume && volume - measured.volume() < room,
-        "the mesh holds {} and πr²h/3 is {volume}, which is not short of it by less than {room}",
-        measured.volume()
+        (measured.volume() - volume).abs() <= measured.volume_error(),
+        "the mesh holds {} and πr²h/3 is {volume}, which the published bound of {} does not cover",
+        measured.volume(),
+        measured.volume_error()
+    );
+    assert!(
+        measured.volume() <= volume && measured.volume_error() < room,
+        "the mesh of a convex solid holds {} against {volume}, with a bound of {} that has to \
+         beat the {room} this test used to settle for",
+        measured.volume(),
+        measured.volume_error()
     );
 }
 

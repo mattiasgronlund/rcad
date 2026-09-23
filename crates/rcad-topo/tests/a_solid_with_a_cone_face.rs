@@ -120,14 +120,20 @@ fn a_frustum_measures_the_closed_form_within_the_published_bound() {
 /// # Two things about it that a frustum does not have, and both are reported
 /// rather than papered over
 ///
-/// **The published error bound on it is infinite.** The bound the kernel
-/// publishes for a curved face is an offset-surface argument: project the mesh
-/// onto the surface `deviation` inside the material and read the area back out.
-/// For a cone that inner surface is the same cone shifted
-/// `deviation·√(1 + slope²)/slope` up its own axis — so **within that distance
-/// of the apex there is no inner surface at all**, and the smallest radius of
-/// normal curvature over the face is zero. `how_tightly_a_cone_bends_over`
-/// carries the derivation and names what would close it.
+/// **Its bound is earned in two pieces, because the offset surface runs out.**
+/// The bound the kernel publishes for a curved face is an offset-surface
+/// argument: project the mesh onto the surface `deviation` inside the material
+/// and read the area back out. For a cone that inner surface is the same cone
+/// shifted `deviation·√(1 + slope²)/slope` up its own axis — so **within that
+/// distance of the apex there is no inner surface at all**, and the smallest
+/// radius of normal curvature over the face is zero. Every solid holding an
+/// apex published `inf` for that reason, which was honest and useless: a
+/// measured volume with an infinite bound cannot be held against anything.
+/// `what_a_cone_tip_costs` closes it. The tip below the split is charged its
+/// whole size, which needs no offset surface to argue from, and everything
+/// above the split is cut into bands of radius that each have one.
+/// `what_a_cone_tip_costs_a_bound.rs` is the measurement, and it pins the
+/// bound falling like the deflection rather than sitting still.
 ///
 /// **And there is still a deflection it will not mesh at, but the apex is no
 /// longer what stops it.** A cone's local radius shrinks to nothing at the apex,
@@ -158,8 +164,10 @@ fn a_frustum_measures_the_closed_form_within_the_published_bound() {
 /// `a_pointed_cone_is_stopped_by_how_many_points_a_patch_holds_and_no_longer_by_its_apex`
 /// is the measurement.
 ///
-/// So this checks the closed form against a **stated share of the deflection**
-/// rather than dressing an unpublished number as a bound.
+/// So this checks the closed form against the **published bound**, which there
+/// now is one of. It used to check against a stated share of the deflection
+/// instead, and said so, because dressing an unpublished number as a bound
+/// would have been the dishonest half of the choice.
 #[test]
 fn a_pointed_cone_meshes_and_measures_its_closed_form() {
     let policy = Policy::certified();
@@ -195,29 +203,40 @@ fn a_pointed_cone_meshes_and_measures_its_closed_form() {
     );
 
     assert!(
-        !measured.volume_error().is_finite() && !measured.area_error().is_finite(),
-        "a face reaching its apex has no offset surface within a deviation of it, and the \
-         published bound says so rather than pretending"
-    );
-
-    // A statement about *this test* and not a published bound — see the doc
-    // above. The mesh is inscribed in a convex solid, so its volume is below the
-    // true one and by no more than the deflection times the solid's skin.
-    let room = deflection * area;
-    assert!(
-        measured.volume() <= volume && volume - measured.volume() < room,
-        "the mesh's volume {} is inside πr²h/3 = {volume} by more than {room}",
-        measured.volume()
+        (measured.volume() - volume).abs() <= measured.volume_error(),
+        "the mesh's volume {} misses πr²h/3 = {volume} by more than the bound {}",
+        measured.volume(),
+        measured.volume_error()
     );
     // **Area is not one-sided and a cone is where that shows.** An inscribed
     // triangulation of a ruled surface can have *more* area than the surface —
     // Schwarz's lantern is the classical example, and a cone is a lantern with
-    // one radius shrinking. So this is a two-sided comparison where the volume's
-    // is one-sided, and asserting `<=` here would be asserting something false.
+    // one radius shrinking. So this is a two-sided comparison where the one
+    // below it is one-sided, and asserting `<=` here would be asserting
+    // something false.
     assert!(
-        (measured.surface_area() - area).abs() < room,
-        "the mesh's area {} misses πr√(r² + h²) + πr² = {area} by more than {room}",
-        measured.surface_area()
+        (measured.surface_area() - area).abs() <= measured.area_error(),
+        "the mesh's area {} misses πr√(r² + h²) + πr² = {area} by more than the bound {}",
+        measured.surface_area(),
+        measured.area_error()
+    );
+
+    // Two statements about *this test* and not about the published bound. The
+    // mesh is inscribed in a convex solid, so its volume is below the true one;
+    // and the bound is worth having only if it is tighter than the deflection
+    // times the solid's skin, which is what the test asserted before there was
+    // a bound to assert against.
+    let room = deflection * area;
+    assert!(
+        measured.volume() <= volume,
+        "the mesh of a convex solid cannot hold more than the solid: {} against {volume}",
+        measured.volume()
+    );
+    assert!(
+        measured.volume_error() < room && measured.area_error() < room,
+        "bounds of {} and {} are no better than the {room} this test used to settle for",
+        measured.volume_error(),
+        measured.area_error()
     );
 }
 
