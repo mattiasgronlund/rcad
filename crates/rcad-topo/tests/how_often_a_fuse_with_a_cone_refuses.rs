@@ -350,8 +350,16 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// **A fourth time, and the rate stood still again: 15 of 96.** A cone's rim
 /// circle has its two arcs named apart now, so the 24 that stopped at *four
 /// faces along one edge* get past it — and all 24 stop at the next thing,
-/// `intersect` refusing a pair of surfaces. The breakdown is five walls instead
-/// of four and the floor is where it was.
+/// `rcad_geom::walk` refusing a pair of surfaces. The breakdown is five walls
+/// instead of four and the floor is where it was.
+///
+/// **`intersect` is not what refuses them**, which this doc said until §214 went
+/// looking: no call to `intersect` is on the stack at all. The mesher reaches
+/// `walk` from the fuse's own volume measurement for shell nesting, and `walk`
+/// asks its own question about a pair. For the 9 that pair is one cone twice —
+/// `intersect` has an arm for exactly that and answers `SameSurface`, while
+/// `walk` has none and falls through to *a cone crossing another curved
+/// surface*, which the model does not contain. §214.
 ///
 /// So the assertion here stays a **floor at what has been measured**, in the
 /// shape §19.1 asks for: this family may not answer fewer than it does today.
@@ -1046,11 +1054,17 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 ///   refusing for the other of its two reasons.
 /// - **a cone crossing another curved surface**, **9**, and **a crossing in two
 ///   pieces with no half-space to tell them apart**, **15**. Both new, both
-///   `intersect` refusing a pair of surfaces one step past the edge naming, and
-///   together exactly the 24 the emptied wall held. That they are the *same* 24
-///   is measured and not inferred: `tests/which_arc_of_a_cones_rim_a_side_is.rs`
-///   walks this family's own draws and finds the two new names on the same rows,
-///   rules and argument orders the four-faces refusal stood on.
+///   `rcad_geom::walk` refusing a pair of surfaces one step past the edge naming,
+///   and together exactly the 24 the emptied wall held. The 9 are a **defect**:
+///   the pair is one cone twice and the message names a second curved surface the
+///   model has not got. The 15 are a gap and their name is honest — the pair
+///   really is a wall plane and the cone. §214 has the stack for both.
+///
+///   **That they are the same 24 was inferred, not measured**, which this doc
+///   said the opposite of: `tests/which_arc_of_a_cones_rim_a_side_is.rs` walks
+///   §49.6's four-configuration grid and contains no `Family` or `Draw(` at all,
+///   so it cannot have pinned rows of this family. §214 got the 24 by a census of
+///   this family instead, and they are the same 24.
 ///
 /// Matched on what each message *is about* rather than on the whole string,
 /// because two of them carry the number of the corner they stopped at and that

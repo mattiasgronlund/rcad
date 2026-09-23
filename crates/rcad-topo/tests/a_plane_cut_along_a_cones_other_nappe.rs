@@ -29,8 +29,9 @@
 //! arc and its chord half of it answers right; and since §208.4 walks a ring of
 //! arcs round an apex the other half does too.
 //! [`a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right`]
-//! pins that. The frustum's cube keeps a refusal of its own, and
-//! [`a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses`] pins it.
+//! pins that. The frustum's cube kept a refusal of its own until §212 let a ring
+//! bound a face that also has a hole, and
+//! [`a_corner_up_cube_round_a_frustums_apex_answers_right`] pins that it is gone.
 
 use std::collections::BTreeMap;
 
@@ -175,8 +176,17 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
 /// frustum. Every plane of the cube leans less steeply than the cone, so each
 /// cuts one nappe in an ellipse — and the three lower planes cut the lower
 /// nappe, where the frustum has no face.
+///
+/// Half of these refused `AWireWillNotLieFlatOnItsFace` until §212. The
+/// intersection's cone face is the frustum's **band**, ringed by arcs round the
+/// apex and holed by the frustum's own near cap, and §208.4 walked a ring only
+/// when it was its face's one wire. Two wires that each go right round bound the
+/// band between them and nothing else, so the walk takes them now and all 48 are
+/// right. The name says so rather than keeping `_or_refuses` over a body that
+/// does not, exactly as
+/// [`a_corner_up_cube_round_a_pointed_cones_apex_answers_right`] did.
 #[test]
-fn a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses() {
+fn a_corner_up_cube_round_a_frustums_apex_answers_right() {
     let mut cases = Vec::new();
     for side in [4.0, 6.0] {
         for middle in [0.0, 1.0, 2.5] {
@@ -192,8 +202,8 @@ fn a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 24,
-            refused: [("AWireWillNotLieFlatOnItsFace", 24)].into()
+            right: 48,
+            refused: BTreeMap::new()
         }
     );
 }
@@ -247,10 +257,11 @@ fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right() {
 /// neighbourhood of it — so it is a ring of arcs round a cone with no seam, and
 /// `mesh.rs` could not walk it (`AWireWillNotLieFlatOnItsFace`, on the wire at
 /// `z ≈ 2.559`). It walks one now, so all eight are right and the name no longer
-/// says half. A ring is only walked when it is its face's **one** wire; a
-/// frustum's band, ringed by arcs and holed by its own near cap, is still
-/// refused, and `a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses`
-/// above is what holds that line.
+/// says half. §208.4 walked a ring only when it was its face's **one** wire, so a
+/// frustum's band — ringed by arcs and holed by its own near cap — stayed
+/// refused; §212 walked that too, and
+/// [`a_corner_up_cube_round_a_frustums_apex_answers_right`] above is what holds
+/// the line now that there is no refusal left in this file to hold.
 #[test]
 fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right() {
     let cases: Vec<Case> = [0.0, 0.7]
@@ -412,11 +423,10 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 }
 
 /// Every way a fuse in this file refuses today.
-const REFUSALS: [&str; 4] = [
+const REFUSALS: [&str; 3] = [
     "a point inside a piece of a face",
     "order along a crossing",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
-    "AWireWillNotLieFlatOnItsFace",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the
@@ -543,7 +553,7 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
             decided += 1;
         }
     }
-    // 9 300, against the 9326 the fewest of the file's 128 answers decides.
+    // 9 300, against the 9326 the fewest of the file's 152 answers decides.
     // It was 8 800 against 8879 until `holds.rs` learned to follow a flat face
     // cut by an arc of a cone's rim: the frustum's big cap, cut in two by a
     // block's plane, was the face 16040 of one answer's 20780 undecided points
@@ -552,15 +562,20 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     //
     // **What holds the floor is not the leaning block's hyperbola**, which is
     // what this comment claimed until 2026-09-23 and what §208.6 read off it.
-    // The three answers at 9326 are all the side-6 **corner-up cube** centred on
+    // The four answers at 9326 are all the side-6 **corner-up cube** centred on
     // the apex and turned `0.7` about it, on the pointed cone and on the
     // frustum; every leaning block sits above 10 500. A corner-up cube's faces
     // lean `acos(1/√3) ≈ 54.7°` off the axis, which for slope one half is inside
     // the closed family, so each of them cuts an **ellipse** — the doc comment
-    // on `a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses` says
-    // so — and every step here now follows an ellipse arc as it follows a
-    // circle's. The count did not budge for that, so whatever leaves 9326 here
-    // is something else again and nobody has named it.
+    // on `a_corner_up_cube_round_a_frustums_apex_answers_right` says so — and
+    // every step here now follows an ellipse arc as it follows a circle's. The
+    // count did not budge for that, so whatever leaves 9326 here is something
+    // else again and nobody has named it. §211.
+    //
+    // It was three answers and 128 until §212 let the frustum's band be meshed
+    // through a hole: the frustum's own `Difference (cone first: false)` was one
+    // of that test's 24 refusals and now decides 9326 too, which is the same
+    // shape reaching the same floor and not a new cause.
     assert!(
         decided > 9_300,
         "{what}: only {decided} grid points could be classified"

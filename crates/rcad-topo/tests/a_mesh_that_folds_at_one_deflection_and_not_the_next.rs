@@ -332,14 +332,17 @@ fn the_crown_of_a_ring_is_a_gap_in_the_mesher_and_not_a_limit_of_the_shape() {
 /// `crates/rcad-topo/src/validate.rs`:
 ///
 /// ```text
-/// $ mise exec -- just t -E 'binary(a_mesh_that_folds_at_one_deflection_and_not_the_next)'
-///      Summary [   9.135s] 4 tests run: 4 passed, 0 skipped
-/// $ mise exec -- just t -p rcad-topo
-///      Summary [  39.963s] 884 tests run: 884 passed, 6 skipped
+/// $ mise exec -- just t --no-fail-fast
+///      Summary [  63.289s] 2299 tests run: 2298 passed, 1 failed, 6 skipped
+///         FAIL a_mesh_that_folds_at_one_deflection_and_not_the_next the_arm_removal_experiment
 /// $ git checkout -- crates/rcad-topo/src/validate.rs
-/// $ mise exec -- just t -p rcad-topo
-///      Summary [  39.513s] 884 tests run: 884 passed, 6 skipped
 /// ```
+///
+/// That run is the **whole workspace** on the merged tree of §211–§214, and the
+/// one test it fails is this one, which reads the arm's text. An earlier
+/// transcript here showed `884 passed` twice for `-p rcad-topo`; it was taken
+/// before this test existed and stopped being reproducible the moment it did,
+/// since taking the arm out is exactly what this test fails on.
 ///
 /// **So this file does not close §208.3's hole, and says so rather than
 /// implying it.** Neither family it adds reaches the rescue's ladder at all:

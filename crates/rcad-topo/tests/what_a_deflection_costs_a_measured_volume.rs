@@ -392,17 +392,22 @@ fn a_curved_pair_obeys_inclusion_and_exclusion_inside_the_error_the_four_declare
             "at a deflection of {how_fine} the two sides of the law differ by {out_by}, \
              and the four measurements only declared {allowed}"
         );
-        // **And a hundredth of the tolerance is all it uses**, which is the
+        // **And a thirtieth of the tolerance is all it uses**, which is the
         // honest thing to say about it: the four bounds added up would still
-        // pass a fuse whose volume was seventy times further out than this one
-        // is. The errors on the four sides are the same shells charged twice
-        // with opposite signs, so they cancel and the sum does not know it.
+        // pass a fuse whose volume was about thirty-five times further out than
+        // this one is. The errors on the four sides are the same shells charged
+        // twice with opposite signs, so they cancel and the sum does not know it.
         // Pinning the share is what gives the check teeth; it is a pin on this
-        // pair's arithmetic and it will move if the mesher does.
+        // pair's arithmetic and it will move if the mesher does — and §212 moved
+        // it. This pair's ring was being cut into one patch with no width along
+        // the bottom and one spanning half the turn, because the four quarters
+        // came off the outer loop's first corner and the last two both matched
+        // the inner loop's end; it is cut into four proper quarters now, and the
+        // share at a deflection of 0.1 went from under a hundredth to 0.0276.
         assert!(
-            out_by.abs() < 0.02 * allowed,
+            out_by.abs() < 0.03 * allowed,
             "at a deflection of {how_fine} the law is {out_by} out, which is more of the \
-             declared {allowed} than the hundredth this pair has ever used"
+             declared {allowed} than the thirtieth this pair has ever used"
         );
         println!(
             "deflection {how_fine}: the law is {out_by:.6e} out of a declared {allowed:.6e}, \

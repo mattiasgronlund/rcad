@@ -32,7 +32,7 @@
 //! in a hyperbola. A hyperbola branch never closes, so two corners on it leave
 //! one arc and not two; naming an arc there would put two edges where the answer
 //! has one, and the answer would come back **wrong** rather than refused. That
-//! is why `a_plane_cuts_a_cone_in_a_closed_curve` asks for a proved sign instead
+//! is why `Cone::is_cut_in_a_closed_curve_by` asks for a proved sign instead
 //! of assuming a plane-and-cone crossing closes, and these answers coming back
 //! sound is what says the `None` side of it holds too.
 
