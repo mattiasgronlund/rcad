@@ -23,14 +23,16 @@
 //!   the block stands upright, cuts a **hyperbola**. `intersect` names it and
 //!   hands back one endless run per nappe. That branch still never closes, and
 //!   `arrange`'s `HowItRuns::AlongABend` orders points along it anyway, so the
-//!   block family's 90 refusals no longer stop there — they stop in five later
+//!   block family's 90 refusals no longer stop there — they stop in four later
 //!   places, which
-//!   `what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering`
+//!   `what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`
 //!   counts one by one;
-//! - anything curved against a cone `intersect` does still refuse outright. For
-//!   a cone against another cone that is the degree-four space curve; for a cone
-//!   coaxial with a pipe it is two circles, which `intersect` names now, and the
-//!   refusal moves one step later to `three_surfaces.rs`.
+//! - anything curved against a cone `intersect` does still refuse outright, and
+//!   **one cone twice is not that pair**: `intersect` has always answered it as
+//!   one surface, and since §214 `walk` does too. For a cone against a *different*
+//!   cone the refusal is the degree-four space curve; for a cone coaxial with a
+//!   pipe it is two circles, which `intersect` names now, and the refusal moves
+//!   one step later to `three_surfaces.rs`.
 //!
 //! The families are chosen to measure each of those rather than to average them
 //! away.
@@ -338,7 +340,7 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// one: `select.rs`'s *a point inside a piece of a face* 60, a corner too far out
 /// for the triangulator 14, a face whose boundary crosses itself 7, and four faces
 /// along one edge 9.
-/// [`what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering`]
+/// [`what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`]
 /// is that breakdown pinned rather than printed, which is what §15.10 asks of a
 /// rate that stayed still while everything under it moved.
 ///
@@ -358,8 +360,17 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// `walk` from the fuse's own volume measurement for shell nesting, and `walk`
 /// asks its own question about a pair. For the 9 that pair is one cone twice —
 /// `intersect` has an arm for exactly that and answers `SameSurface`, while
-/// `walk` has none and falls through to *a cone crossing another curved
-/// surface*, which the model does not contain. §214.
+/// `walk` had none and fell through to *a cone crossing another curved surface*,
+/// which the model does not contain. §214.
+///
+/// **A fifth time, and it moved again: 24 of 96.** `walk` has that arm now —
+/// §214.4's fix (a), the circle a closed run on one cone names through its own
+/// end — and the 9 are answers. The 15 stay, and they are a gap rather than a
+/// defect: that pair really is the block's wall plane and the cone. Four walls
+/// again. The smallest of the nine is
+/// `tests/a_frustum_and_a_block_that_do_not_touch.rs`, which asks the kernel
+/// whether its two solids touch rather than asserting it from this paragraph —
+/// they do not.
 ///
 /// So the assertion here stays a **floor at what has been measured**, in the
 /// shape §19.1 asks for: this family may not answer fewer than it does today.
@@ -460,11 +471,12 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                 family.named()
             ),
             Family::AFrustumAgainstABlock => assert!(
-                answered >= 15,
-                "{}: this family was measured at 6 answered of 96 the day the hyperbola landed \
-                 and at 15 the day §206's bulge count landed, and it answered {answered} of \
-                 {fuses} here. A cone that could be cut yesterday and cannot today is a \
-                 regression, not a rate: re-derive this number rather than relax it (§19.1)",
+                answered >= 24,
+                "{}: this family was measured at 6 answered of 96 the day the hyperbola landed, \
+                 at 15 the day §206's bulge count landed and at 24 the day `walk` learnt that \
+                 one cone twice is one surface (§214), and it answered {answered} of {fuses} \
+                 here. A cone that could be cut yesterday and cannot today is a regression, not \
+                 a rate: re-derive this number rather than relax it (§19.1)",
                 family.named()
             ),
         }
@@ -1021,18 +1033,20 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
     );
 }
 
-/// What the block family's 81 refusals are, now that none of them is the
+/// What the block family's 72 refusals are, now that none of them is the
 /// ordering.
 ///
 /// §15.10: a rate that moves is published with the list of what moved. It has
-/// moved three times. First the bend landed and the rate stood still — 6 of 96
+/// moved four times. First the bend landed and the rate stood still — 6 of 96
 /// either side — while all 90 refusals changed their name from *"nothing can put
 /// points in order along this curve"* to four different walls. Then §206's bulge
 /// count landed and the rate moved to 15 of 96, and the four walls moved under
 /// it. Then a cone's rim circle had its two arcs named apart, and the rate stood
-/// still at 15 of 96 while one of the four walls emptied into two new ones.
+/// still at 15 of 96 while one of the four walls emptied into two new ones. Then
+/// `walk` learnt the pair that is one cone twice, and the 9 that wall held became
+/// answers: **24 of 96**, and four walls again.
 ///
-/// The five, measured over this family's own draws rather than taken from
+/// The four, measured over this family's own draws rather than taken from
 /// anywhere:
 ///
 /// - **a point inside a piece of a face**, 60 → 30 → **30**. `select.rs` could
@@ -1052,27 +1066,31 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 ///   triangulator takes.
 /// - **a face whose boundary crosses itself**, 7 → 9 → **9**. The same step,
 ///   refusing for the other of its two reasons.
-/// - **a cone crossing another curved surface**, **9**, and **a crossing in two
-///   pieces with no half-space to tell them apart**, **15**. Both new, both
-///   `rcad_geom::walk` refusing a pair of surfaces one step past the edge naming,
-///   and together exactly the 24 the emptied wall held. The 9 are a **defect**:
-///   the pair is one cone twice and the message names a second curved surface the
-///   model has not got. The 15 are a gap and their name is honest — the pair
-///   really is a wall plane and the cone. §214 has the stack for both.
+/// - **a cone crossing another curved surface**, 9 → **gone**. A **defect**, and
+///   §214.4 ruled it one: the pair was one cone twice, `==` true bit for bit, and
+///   the message named a second curved surface a frustum and a block have not got
+///   between them. `walk` answers that pair now — the circle the run's own end
+///   names — and all 9 became answers.
+/// - **a crossing in two pieces with no half-space to tell them apart**, **15**,
+///   and they **stay**. A gap, and their name is honest: the pair there really is
+///   the block's wall plane and the cone, a genuine hyperbola whose two branches
+///   are both held by the run's picker. §214.4 says why that is a different kind
+///   of thing from the 9.
 ///
-///   **That they are the same 24 was inferred, not measured**, which this doc
-///   said the opposite of: `tests/which_arc_of_a_cones_rim_a_side_is.rs` walks
-///   §49.6's four-configuration grid and contains no `Family` or `Draw(` at all,
-///   so it cannot have pinned rows of this family. §214 got the 24 by a census of
-///   this family instead, and they are the same 24.
+///   The 9 and the 15 together were exactly the 24 the four-faces wall emptied
+///   into, and **that they are the same 24 was inferred, not measured**, which
+///   this doc said the opposite of: `tests/which_arc_of_a_cones_rim_a_side_is.rs`
+///   walks §49.6's four-configuration grid and contains no `Family` or `Draw(` at
+///   all, so it cannot have pinned rows of this family. §214 got the 24 by a
+///   census of this family instead, and they are the same 24.
 ///
 /// Matched on what each message *is about* rather than on the whole string,
 /// because two of them carry the number of the corner they stopped at and that
-/// number is a fact about one draw. Anything the five do not describe fails the
-/// test rather than being counted as an other, so a sixth wall cannot arrive
-/// unnoticed.
+/// number is a fact about one draw. Anything the four do not describe fails the
+/// test rather than being counted as an other, so a fifth wall cannot arrive
+/// unnoticed — including the cone one coming back.
 #[test]
-fn what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering() {
+fn what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering() {
     let (fuses, answered, gave_up) = how_each_fuse_went(Family::AFrustumAgainstABlock);
     let mut walls: BTreeMap<&'static str, usize> = BTreeMap::new();
     for (named, how_many) in &gave_up {
@@ -1088,21 +1106,23 @@ fn what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering()
             ("a point inside a piece of a face", 30),
             ("a corner too far out for the triangulator", 18),
             ("a face whose boundary crosses itself", 9),
-            ("a cone crossing another curved surface", 9),
             (
                 "a crossing in two pieces with no half-space to tell them apart",
                 15
             ),
         ]),
-        "these are the five walls this family was measured against; re-derive them \
+        "these are the four walls this family was measured against; re-derive them \
          when they move rather than widening the test (§19.1)"
     );
 }
 
-/// Which of the five walls a refusal's message is about.
+/// Which of the four walls a refusal's message is about.
 ///
-/// Panics on anything else, so a sixth wall is a failure and not a silent
-/// bucket.
+/// Panics on anything else, so a fifth wall is a failure and not a silent
+/// bucket. *A cone crossing another curved surface* was the fifth until `walk`
+/// learnt the pair that is one cone twice, and it is left out rather than kept as
+/// an empty bucket: this family coming back to it is the regression the panic is
+/// here to name.
 fn which_wall_it_stopped_at(named: &str) -> &'static str {
     if named == "a point inside a piece of a face" {
         return "a point inside a piece of a face";
@@ -1115,11 +1135,8 @@ fn which_wall_it_stopped_at(named: &str) -> &'static str {
             return "a face whose boundary crosses itself";
         }
     }
-    if named.contains("degree-four space curve") {
-        return "a cone crossing another curved surface";
-    }
     if named.contains("this crossing comes in two pieces") {
         return "a crossing in two pieces with no half-space to tell them apart";
     }
-    panic!("a block against a cone stopped somewhere none of the five names: {named:?}")
+    panic!("a block against a cone stopped somewhere none of the four names: {named:?}")
 }
