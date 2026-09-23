@@ -16,16 +16,16 @@ before it left, and `just decisions-toc` is the map. Through §194 it was the
 STEP corpus — 793 refusals to 0, 8000 of 8000, the LEDs importing. §195–§202
 is the curved solids: the leaned half ball, the pointed cone's skin, a ball
 less a disc, a ball cut through its pole. Then §204, the pointed cone's box
-lands, and §206 below.
+lands, §206, and §208 — the cone's rim arc, in both the places §206.6 named.
 
-**Next and unclaimed: the cone's rim arc, in two places.** §206.1 answered half
-of §200.3's pair; both next steps are the same shape, a cone's rim arc that a
-routine written for a ball's circle does not know. `is_a_family_this_follows`
-(`holds.rs`) admits only a ball's arc, and until it admits a cone's the nappe
-floor cannot go back to 10 000 (§206.2); `which_arc_of_a_circle_this_is`
-(`assemble.rs`) reads only a ball-and-plane circle, and three counts sit on
-that gap (§206.5). §206.6 lists the rest. §124, §136.4, §125.6 stay deferred —
-§125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0`, not the gate.
+**Next and unclaimed: the cone's tip has no bound.** §208 closed §0's last item
+both ways. What blocks the next step is `measure.rs`: `radius_of_each_face`
+gives a cone face reaching its apex a radius of 0, so any solid holding an apex
+publishes an `inf` bound, and `lane-cone-apex-ring` — the mesher fix making all
+eight of §200.3's fuses answer — sits unmerged behind it (§208.4). Its own doc
+comment carries the fix. §208.6 lists the rest. §124, §136.4, §125.6 stay
+deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0`, not
+the gate.
 
 The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
 the lever, healing is refused by name in §42.9, and §45.2 governs every count.
