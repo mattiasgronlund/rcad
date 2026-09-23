@@ -4,36 +4,33 @@ reviewed: 2026-09-23
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files that hang
 on that one refusal and nothing else. Chosen by Mattias on 2026-09-15 off §107's
-table. §16.10 governs it: a claim that something cannot be done owes a
-demonstration either way — a gap if a scaling reaches the sign, a limit if not.
-**Since §190.2 no corpus file reaches that refusal**: 24 of the 29 that did now
-import (KiCad 114 → 140), and since §193.1 the LEDs do too (140 → 160);
-§198.1 adds `LED_D5.0mm-3` (161).
-What is left is their next blockers; a new unit is Mattias's call.
+table, which holds the measurement that chose it: roadmap §4.2 is not the lever,
+healing is refused by name in §42.9, §45.2 governs every count. §16.10 governs —
+a claim that something cannot be done owes a demonstration either way, a gap if a
+scaling reaches the sign, a limit if not. **Since §190.2 no corpus file reaches
+that refusal**: 24 of the 29 that did now import (KiCad 114 → 140), since §193.1
+the LEDs do (160), §198.1 adds `LED_D5.0mm-3` (161); a new unit is Mattias's call.
 
 **What is closed.** A chain from §140: each section closes the item the one
 before it left, and `just decisions-toc` is the map. Through §194 it was the
 STEP corpus — 793 refusals to 0, 8000 of 8000, the LEDs importing. §195–§202
-is the curved solids: the leaned half ball, the pointed cone's skin, a ball
-less a disc, a ball cut through its pole. Then §204, the pointed cone's box
-lands, §206, and §208 — the cone's rim arc, in both the places §206.6 named.
+is the curved solids; then §204, §206, §208 — the cone's rim arc in both the
+places §206.6 named — and §209, which gives a pointed cone a finite bound
+(`inf` → `0.1501600338829092` at a deflection of `0.002`) and walks a ring of
+arcs round an apex, so all eight of §200.3's fuses answer.
 
-**Next and unclaimed: the cone's tip has no bound.** §208 closed §0's last item
-both ways. What blocks the next step is `measure.rs`: `radius_of_each_face`
-gives a cone face reaching its apex a radius of 0, so any solid holding an apex
-publishes an `inf` bound, and `lane-cone-apex-ring` — the mesher fix making all
-eight of §200.3's fuses answer — sits unmerged behind it (§208.4). Its own doc
-comment carries the fix. §208.6 lists the rest. §124, §136.4, §125.6 stay
-deferred — §125.6's 90 s–5.5 min is `rcad-fuzz-explain` at `opt-level = 0`, not
-the gate.
-
-The measurement that chose it is closed and §107 holds it — roadmap §4.2 is not
-the lever, healing is refused by name in §42.9, and §45.2 governs every count.
+**Next and unclaimed: an ellipse arc has no centre to be cut by.**
+`the_way_into_an_arc` asks `the_point_a_circle_cut_by_a_plane_is_centred_under`
+first, which needs a **circle**, so an ellipse arc returns `None` before any
+widened predicate is asked — why `lane-one-closed-curve-test` moved the nappe
+floor 9326 → 9326 and is unmerged (§209.4). The centre is constructible, where
+the plane meets the line through the apex conjugate to the plane. §208.6 lists
+the rest; §124, §136.4, §125.6 stay deferred — §125.6's 90 s–5.5 min is
+`rcad-fuzz-explain` at `opt-level = 0`, not the gate.
 
 **parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
 thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a
 named consumer, `docs/consumers.md` records none; Mattias parked it (§104.2).
-
 Before it, §53 closed by §103 having earned nothing; §55–§102 are defect fixes.
 
 **the board is not here.** `docs/plan.md` has one line per roadmap item with its
@@ -59,4 +56,3 @@ left. 2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a — 11.3 moved by §171.7. §
 
 This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
 status` prints it, `check-where-the-work-is` holds its shape, §102 says why here.
-
