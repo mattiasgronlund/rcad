@@ -52,9 +52,8 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    Cone, DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement,
-    Point, Surface, Vector, how_a_plane_leans_against_a_cone,
-    where_a_cones_apex_stands_against_a_plane, which_way_a_closed_crossing_turns,
+    DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
+    Surface, Vector, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -2713,8 +2712,9 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 ///
 /// Nothing above is about a ball. The sign rule needs the crossing to close and
 /// `∇round × ∇plane` never to vanish along it, and
-/// [`a_plane_cuts_a_cone_in_a_closed_curve`] is that property decided exactly
-/// for a cone — the circle a cap plane leaves, and the ellipse any steeper
+/// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by)
+/// is that property decided exactly
+/// for a cone — the circle a cap plane leaves, and the ellipse any leaning
 /// plane leaves, both of them on one nappe. A hyperbola and a parabola never
 /// close and stay [`None`], because two corners on an endless bend really do
 /// leave one arc.
@@ -2726,7 +2726,7 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 /// rim rather than a rule that had to be carried over. A cone's own singular
 /// point, its apex, is not one of these poles and needs no guard here either: a
 /// crossing this function names has the apex **off** the plane, which is half
-/// of what `a_plane_cuts_a_cone_in_a_closed_curve` asks, so the curve does not
+/// of what `Cone::is_cut_in_a_closed_curve_by` asks, so the curve does not
 /// pass through it. `tests/which_arc_of_a_cones_rim_a_side_is.rs` fuses a
 /// pointed cone — the shape that has an apex on its own face — and gets a sound
 /// answer.
@@ -2764,7 +2764,10 @@ fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Opt
 ///
 /// A ball and a plane cut a circle whenever they cut anything at all. A cone and
 /// a plane cut seven different shapes and only two of them close, which is
-/// [`a_plane_cuts_a_cone_in_a_closed_curve`]'s question.
+/// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by)'s
+/// question — one predicate in `rcad-geom`, asked here and by `select.rs`'s
+/// `in_the_bulge_of` and `holds.rs`'s `is_a_family_this_follows`, so the three
+/// cannot drift apart (§23.8, §208.6).
 ///
 /// **A pipe and a plane cut an ellipse that closes too, and it is not named
 /// here.** Nothing above is wrong about it; it is `select.rs`'s bulge count that
@@ -2777,7 +2780,7 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
             return Some(true);
         }
         if let Surface::Cone(cone) = round {
-            return a_plane_cuts_a_cone_in_a_closed_curve(flat, cone);
+            return cone.is_cut_in_a_closed_curve_by(flat);
         }
         Some(false)
     };
@@ -2787,43 +2790,6 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
         Some(1)
     } else {
         None
-    }
-}
-
-/// Whether a plane meets one nappe of a cone in a curve that closes: a circle or
-/// an ellipse, and `Some(false)` for the five shapes that do not.
-///
-/// The two signs [`intersect`](rcad_geom::intersect) splits its own table on,
-/// asked of the very functions it asks — the same door
-/// [`a_plane_cuts_a_cone_in_rulings`] opens, reading one row further along.
-/// With the apex **off** the plane the crossing is a conic, and `E = (n·w)² −
-/// slope²‖n × w‖²` says which one: above nothing it leans steeper than the
-/// cone's own side and cuts an ellipse, which closes on one nappe; level with it
-/// cuts a parabola and shallower cuts a hyperbola, and neither of those ever
-/// closes. With the apex **on** the plane there is no closed curve to be had at
-/// all — the two share a ruling, a pair of rulings, or the apex alone.
-///
-/// A plane square to the axis is the `E > 0` row's tidiest member and needs no
-/// row of its own: `n × w` is nothing there, so `E = (n·w)² > 0`. That is the
-/// case `select.rs`'s `square_to_the_axis` picks out by comparing the stored
-/// triples, and this is the same family decided by its arithmetic instead — so
-/// the rim of every cap this kernel builds arrives here as a circle, and a
-/// block's leaning plane arrives as an ellipse.
-///
-/// **Neither sign is rounded and [`None`] is the third answer**, for the same
-/// reason [`a_plane_cuts_a_cone_in_rulings`] gives: reading an undecided sign
-/// either way names an arc that may not exist, and a refusal is what this
-/// kernel spends instead.
-fn a_plane_cuts_a_cone_in_a_closed_curve(flat: &Plane, cone: &Cone) -> Option<bool> {
-    match where_a_cones_apex_stands_against_a_plane(flat, cone) {
-        Decision::Pos | Decision::Neg => {}
-        Decision::Zero => return Some(false),
-        Decision::Undecidable { .. } | _ => return None,
-    }
-    match how_a_plane_leans_against_a_cone(flat, cone) {
-        Decision::Pos => Some(true),
-        Decision::Zero | Decision::Neg => Some(false),
-        Decision::Undecidable { .. } | _ => None,
     }
 }
 

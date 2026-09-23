@@ -49,7 +49,7 @@
 //! shown of the face in hand, and the side is read off the way the wire runs
 //! rather than off a corner, because every corner sits on every cut.
 
-use rcad_geom::{Cone, EdgeRun, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, intersect};
+use rcad_geom::{EdgeRun, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{
     Decision, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog,
     Record,
@@ -855,30 +855,51 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 ///
 /// # What the picker has to say, and why the reading is then sound
 ///
-/// The arc's own circle is where the flat one of the two surfaces cuts the round
-/// one — a ball, or a cone the plane stands square to, which are the two whose
-/// crossing with a plane is a circle
-/// ([`the_point_a_circle_cut_by_a_plane_is_centred_under`]). Its chord line
-/// splits that circle in two, and the whole of this arc is
-/// strictly on one side of the line, because a line meets a circle at two points
-/// and those two are the arc's own ends. So "which of the two arcs" *is* "which
-/// side of the chord", and `square_to_the_chord` below names the two sides — the
-/// chord read off the corners as they are stored, which for a fused solid is a
-/// rounded world frame and is the same frame every other step here reads
-/// (§17.3, §168). The picker has to settle which side, and it does so in one of
-/// two ways:
+/// The arc's own curve is where the flat one of the two surfaces cuts the round
+/// one, and it has to be a curve that **closes**: a ball's circle, a cone's
+/// circle, or a cone's ellipse ([`where_a_closed_crossing_is_centred`]). Its
+/// chord line splits that curve in two, and the whole of this arc is strictly on
+/// one side of the line, because a line meets a conic at two points and those
+/// two are the arc's own ends. So "which of the two arcs" *is* "which side of
+/// the chord", and `square_to_the_chord` below names the two sides — the chord
+/// read off the corners as they are stored, which for a fused solid is a rounded
+/// world frame and is the same frame every other step here reads (§17.3, §168).
+/// The picker has to settle which side, and it does so in one of two ways:
 ///
 /// - **Its plane holds both ends**, which is §167's test and what a face built
-///   by hand gives. That plane then meets the circle's plane in the chord line
+///   by hand gives. That plane then meets the curve's plane in the chord line
 ///   itself, and the arc is in front, so the arc is on the side the normal
 ///   points to.
-/// - **Both ends are on or in front of it and the circle's centre is on or
-///   behind it** ([`where_the_circles_centre_sits`]), which is what a fused arc
-///   gives. The whole arc is on or in front of the picker, and the picker is at
-///   or above the centre, so the whole arc is in the closed half of the circle
-///   the normal points to from the centre. The arc's own midpoint is in there
-///   with it, and a midpoint sits a radius from the centre square to the chord,
-///   on the arc's side of it — so the normal reads positive against that side.
+/// - **Both ends are on or in front of it and the curve's centre is on or
+///   behind it** ([`where_the_curves_centre_sits`]), which is what a fused arc
+///   gives.
+///
+/// # Why the second way works, on a circle and then on an ellipse
+///
+/// On a **circle**: the whole arc is on or in front of the picker and the picker
+/// is at or above the centre, so the whole arc is in the closed half of the
+/// circle the normal points to from the centre. The arc's own midpoint is in
+/// there with it, and a midpoint sits a radius from the centre square to the
+/// chord, on the arc's side of it — so the normal reads positive against that
+/// side.
+///
+/// **That last step is the circle's alone and does not carry over.** On an
+/// ellipse a midpoint does not sit square to the chord from the centre, so
+/// anyone repeating the sentence with "ellipse" written in has said something
+/// false. What carries over is that the whole claim is **affine**:
+///
+/// - Everything happens inside the curve's own plane. Restricted to it the
+///   picker is an affine function `f`, the hypothesis is `f ≥ 0` all along the
+///   arc and `f ≤ 0` at the centre, and the conclusion is that `f` grows across
+///   the chord from the sibling arc towards this one.
+/// - An affine map of that plane leaves every word of both alone. A chord stays
+///   a chord, the two arcs stay the two arcs, the centre of a conic stays its
+///   centre, a half-plane stays a half-plane, and an affine function stays
+///   affine, so which side of the chord it grows towards is unchanged. Being
+///   *square* to something is not preserved — and neither the hypothesis nor the
+///   conclusion mentions it.
+/// - Some affine map of the plane carries any ellipse to a circle, and the
+///   circle is the paragraph above.
 ///
 /// Either way the arc is on the side of the chord the picker's normal points to,
 /// so `square_to_the_chord` turned round to read positive against that normal
@@ -886,12 +907,15 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// the picker; how nearly square to the chord its normal is never comes into it,
 /// and neither does how far the fuse lowered its plane.
 ///
-/// **The tangent goes the same way.** Every point of the arc is off the chord on
-/// the arc's own side — `(p − end) · into_the_arc > 0` for each of them — so the
+/// **The tangent goes the same way**, and it needs no affine argument because it
+/// never mentioned the centre. Every point of the arc is off the chord on the
+/// arc's own side — `(p − end) · into_the_arc > 0` for each of them — so the
 /// direction the arc leaves either end in, being a limit of those, reads
 /// non-negative against `into_the_arc` too. It reads zero only where the tangent
-/// lies along the chord, which on a circle means the two ends are one point.
-/// That is why steps 1 and 3 can read a *direction* off this same vector.
+/// lies along the chord, which means the chord is tangent there; a line meets a
+/// conic at two points, so a chord tangent at one of its ends has its two ends at
+/// one point. That is why steps 1 and 3 can read a *direction* off this same
+/// vector.
 fn the_way_into_an_arc(
     surface: &Surface,
     across: &Surface,
@@ -899,8 +923,8 @@ fn the_way_into_an_arc(
     picked_by: &[Picker],
 ) -> Option<[Interval; 3]> {
     let flat = surface.as_plane().or_else(|| across.as_plane())?;
-    let under = the_point_a_circle_cut_by_a_plane_is_centred_under(surface, flat)
-        .or_else(|| the_point_a_circle_cut_by_a_plane_is_centred_under(across, flat))?;
+    let centred = where_a_closed_crossing_is_centred(surface, flat)
+        .or_else(|| where_a_closed_crossing_is_centred(across, flat))?;
     let [from, to] = ends.map(|at| at.coordinates());
     let chord =
         core::array::from_fn(|axis| Interval::exactly(to[axis]) - Interval::exactly(from[axis]));
@@ -914,7 +938,7 @@ fn the_way_into_an_arc(
                 return None;
             }
         };
-        if !a_picker_that_tells_the_two_arcs_apart(half, flat, under, asked) {
+        if !a_picker_that_tells_the_two_arcs_apart(half, flat, &centred, asked) {
             return None;
         }
         match dot(exactly(half.normal().components()), square_to_the_chord).sign() {
@@ -930,7 +954,7 @@ fn the_way_into_an_arc(
 fn a_picker_that_tells_the_two_arcs_apart(
     half: &HalfSpace,
     flat: &Plane,
-    under: Point,
+    centred: &WhereTheCurveIsCentred,
     ends: [PredicatePoint; 2],
 ) -> bool {
     let sides = ends.map(|at| half.side_of_point(at));
@@ -944,67 +968,82 @@ fn a_picker_that_tells_the_two_arcs_apart(
         return false;
     }
     matches!(
-        where_the_circles_centre_sits(half, flat, under),
+        where_the_curves_centre_sits(half, flat, centred),
         Decision::Zero | Decision::Neg
     )
 }
 
-/// Which side of `half` the centre of the circle `flat` cuts sits on, given the
-/// point that circle is centred straight out from along `flat`'s normal.
+/// Which side of `half` the centre of the closed curve `flat` cuts sits on.
 ///
-/// That centre is `c + ((e − n·c)/(n·n)) n`, with `n` and `e` the plane's normal
-/// and offset and `c` the point handed in, and the division is left out rather
-/// than taken: `n·n` is positive, so the sign wanted is the sign of
-/// `(h·c − d)(n·n) + (e − n·c)(h·n)`, a polynomial in numbers that are stored
-/// exactly. How big the round surface is never comes into it.
-fn where_the_circles_centre_sits(half: &HalfSpace, flat: &Plane, under: Point) -> Decision {
+/// That centre is `from + ((e − n·from)/(n·along)) along`, with `n` and `e` the
+/// plane's normal and offset, and the division is left out rather than taken:
+/// `n·along` is positive, so the sign wanted is the sign of
+///
+/// ```text
+/// (h·from − d)(n·along)  +  (e − n·from)(h·along)
+/// ```
+///
+/// which is a polynomial in numbers that are stored exactly. How big the round
+/// surface is never comes into it.
+fn where_the_curves_centre_sits(
+    half: &HalfSpace,
+    flat: &Plane,
+    centred: &WhereTheCurveIsCentred,
+) -> Decision {
     let normal = exactly(flat.normal().components());
     let facing = exactly(half.normal().components());
-    let centre = exactly(under.coordinates());
-    let above = Interval::exactly(flat.offset()) - dot(normal, centre);
-    ((dot(facing, centre) - Interval::exactly(half.offset())) * dot(normal, normal)
-        + above * dot(facing, normal))
+    let from = exactly(centred.from.coordinates());
+    let above = Interval::exactly(flat.offset()) - dot(normal, from);
+    ((dot(facing, from) - Interval::exactly(half.offset())) * dot(normal, centred.along)
+        + above * dot(facing, centred.along))
     .sign()
 }
 
-/// The point the circle where `flat` cuts `surface` is centred straight out
-/// from along `flat`'s normal, or `None` when the two do not cross in a circle.
+/// Where the closed curve `flat` cuts a round surface in is centred: walk
+/// `along` from `from` until the plane is reached.
 ///
-/// A plane cuts a **ball** in a circle centred at the foot of the perpendicular
-/// from the ball's centre, whatever the plane, so the ball's centre is the
-/// point. A plane square to a **cone**'s axis cuts it in a circle centred where
-/// the axis crosses the plane, and the normal runs along that axis, so that is
-/// the foot of the perpendicular from the apex and the apex is the point.
-/// [`where_the_circles_centre_sits`]'s one formula then serves both: with
-/// `n = ±w` for `w` the axis direction, `c + ((e − n·c)/(n·n)) n` is the point
-/// `apex + ((e − n·apex)/(n·w)) w` written another way.
-///
-/// **A plane leaned off the axis is refused**, which is the limit
-/// [`what_a_face_cut_by_part_of_a_crossing_holds`] sets out: leaned it cuts the
-/// cone in an ellipse or in a pair of hyperbola branches, neither of which has a
-/// chord that splits one circle in two. The test compares the normal and the
-/// direction as they are stored, so it says yes only to the same triple or its
-/// exact negation — which is what a cone's own cap is, both coming out of one
-/// movement applied to one direction. `fuse/select.rs`'s `square_to_the_axis`
-/// is the same test and carries the argument for why a stricter answer than the
-/// geometry deserves costs a refusal and never a wrong answer.
-fn the_point_a_circle_cut_by_a_plane_is_centred_under(
-    surface: &Surface,
-    flat: &Plane,
-) -> Option<Point> {
-    match surface {
-        Surface::Sphere(ball) => Some(ball.centre()),
-        Surface::Cone(cone) => square_to_the_axis(flat, cone).then(|| cone.apex()),
-        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => None,
-    }
+/// The centre itself is not formed, because forming it divides and
+/// [`where_the_curves_centre_sits`] wants a sign of it (§168).
+struct WhereTheCurveIsCentred {
+    from: Point,
+    along: [Interval; 3],
 }
 
-/// Whether `flat` stands square to `cone`'s axis, so the two cross in a circle
-/// and what the cone's inside leaves on the plane is one disc.
-fn square_to_the_axis(flat: &Plane, cone: &Cone) -> bool {
-    let normal = flat.normal().components();
-    let along = cone.axis().direction().components();
-    normal == along || normal == along.map(|component| -component)
+/// How the curve where `flat` cuts `surface` is centred, or `None` when the two
+/// do not cross in a curve that closes.
+///
+/// A plane cuts a **ball** in a circle centred at the foot of the perpendicular
+/// from the ball's centre, whatever the plane, so `from` is that centre and
+/// `along` is the plane's own normal — every component of it stored exactly, so
+/// a ball's answer here is the arithmetic it always was, to the bit.
+///
+/// A **cone** hands back its apex and
+/// [`Cone::which_way_a_closed_crossings_centre_lies`], which carries the
+/// argument. A plane square to the axis is the circle and falls out of it as
+/// `along = |w|²·n`; a plane leaned off the axis by less than the cone's own
+/// half angle cuts an **ellipse**, whose centre is the pole of the plane and not
+/// where the axis crosses it.
+///
+/// **The parabola and the hyperbola are refused**, and that is a limit rather
+/// than a gap: a parabola has no centre at all, and a hyperbola's two branches
+/// are not one closed curve for a chord to split in two.
+///
+/// [`Cone::which_way_a_closed_crossings_centre_lies`]: rcad_geom::Cone::which_way_a_closed_crossings_centre_lies
+fn where_a_closed_crossing_is_centred(
+    surface: &Surface,
+    flat: &Plane,
+) -> Option<WhereTheCurveIsCentred> {
+    match surface {
+        Surface::Sphere(ball) => Some(WhereTheCurveIsCentred {
+            from: ball.centre(),
+            along: exactly(flat.normal().components()),
+        }),
+        Surface::Cone(cone) => Some(WhereTheCurveIsCentred {
+            from: cone.apex(),
+            along: cone.which_way_a_closed_crossings_centre_lies(flat)?,
+        }),
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => None,
+    }
 }
 
 /// Whether the part of `surface` in front of every cut is connected and has
@@ -1012,21 +1051,33 @@ fn square_to_the_axis(flat: &Plane, cone: &Cone) -> bool {
 /// [`what_a_face_cut_by_part_of_a_crossing_holds`]'s argument rests on.
 ///
 /// On a plane, that is half-planes, the insides of balls, and the inside of a
-/// cone the plane stands square to — each of those three leaves a convex piece
-/// of the plane, and any number of convex pieces meet in one. A cone the plane
-/// leans against leaves an ellipse's inside, which is convex too, or a
-/// hyperbola's, which is two pieces; telling those apart is not a sign this
-/// takes, so only square counts.
+/// cone whose crossing with the plane **closes** — each of those three leaves a
+/// convex piece of the plane, and any number of convex pieces meet in one.
+///
+/// What this needs of the cone is that the region be one piece, which is
+/// [`Cone::is_cut_in_a_closed_curve_by`]'s question and not the narrower circle.
+/// A circle's inside is a disc and an ellipse's inside is an ellipse's inside;
+/// both are convex, so both leave one piece and
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`]'s argument is the same
+/// argument word for word with "disc" read as "convex region". Neither the
+/// parabola nor the hyperbola is admitted: the parabola's inside is unbounded,
+/// and the hyperbola's is two pieces with nothing between them, which is the one
+/// thing this test exists to refuse. `Some(false)` and `None` are both refused,
+/// so an undecided sign costs a refusal and never a wrong answer.
 ///
 /// On a sphere, it is planes through the centre: each cuts the sphere into two
 /// halves, and any number of halves meet in one piece, where planes that miss
 /// the centre can leave two caps with nothing between them.
+///
+/// [`Cone::is_cut_in_a_closed_curve_by`]: rcad_geom::Cone::is_cut_in_a_closed_curve_by
 fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
     match surface {
         Surface::Plane(flat) => cuts.iter().all(|cut| match cut.surface {
             Surface::Plane(_) => true,
             Surface::Sphere(_) => cut.kept == Decision::Neg,
-            Surface::Cone(cone) => cut.kept == Decision::Neg && square_to_the_axis(flat, &cone),
+            Surface::Cone(cone) => {
+                cut.kept == Decision::Neg && cone.is_cut_in_a_closed_curve_by(flat) == Some(true)
+            }
             Surface::Cylinder(_) | Surface::Torus(_) | _ => false,
         }),
         Surface::Sphere(ball) => {
@@ -1112,12 +1163,12 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 /// - A straight side against a plane lies where its ends do.
 /// - A straight side against a ball it has both ends in or on is inside it,
 ///   because a ball holds every segment between two of its points.
-/// - A straight side of a **flat** face against a cone that face stands square
-///   to, both ends in or on it, is inside it too — not because the cone is
-///   convex, which a double cone is not, but because what it leaves on a plane
-///   square to its axis is one round disc, and a disc holds every segment
-///   between two of its points. Square to the axis is what
-///   [`is_a_family_this_follows`] has already asked of every cone here.
+/// - A straight side of a **flat** face against a cone it crosses in a curve
+///   that closes, both ends in or on it, is inside it too — not because the cone
+///   is convex, which a double cone is not, but because what it leaves on such a
+///   plane is one convex region, and a convex region holds every segment between
+///   two of its points. A closed crossing is what [`is_a_family_this_follows`]
+///   has already asked of every cone here.
 /// - An arc against a plane that holds both its ends: that plane meets the arc's
 ///   own plane in the line through the two ends, which is the chord, and the arc
 ///   is the whole of the side of the chord [`the_way_into_an_arc`] points to. So
@@ -1164,7 +1215,7 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             Surface::Cone(cone)
                 if surface
                     .as_plane()
-                    .is_some_and(|own| square_to_the_axis(own, &cone))
+                    .is_some_and(|own| cone.is_cut_in_a_closed_curve_by(own) == Some(true))
                     && ends.iter().all(|end| *end != Decision::Pos) =>
             {
                 Lies::Beside(Decision::Neg)

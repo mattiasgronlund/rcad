@@ -39,7 +39,7 @@
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Cone, EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect,
+    EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -476,14 +476,15 @@ fn the_piece_holds(
 /// named as one edge (`assemble`'s `which_arc_of_a_circle_this_is` reads a
 /// ball's circle only).
 ///
-/// **A cone is counted only where the plane is square to its axis**, which is
-/// the one family of planes that cuts it in a circle. A cap is that family:
-/// every cone this kernel builds is closed by a disc square to its axis, and a
-/// cap cut by a block's plane is a piece bounded by an arc of the rim and the
-/// chord across it — two corners, no polygon, and no point inside it at all
-/// until the bulge is counted (`docs/decisions.md` §200.3's pair refused there).
+/// **A cone is counted where the plane cuts it in a curve that closes**, which
+/// is a circle for a cap's own plane and an ellipse for every plane leaned off
+/// the axis by less than the cone's own half angle. A cap cut by a block's plane
+/// is a piece bounded by an arc of the rim and the chord across it — two
+/// corners, no polygon, and no point inside it at all until the bulge is counted
+/// (`docs/decisions.md` §200.3's pair refused there), and a block's own face cut
+/// by a leaning cone is the same piece bounded by an arc of an ellipse.
 ///
-/// A steeper plane is still not counted, and that is the limit rather than the
+/// A shallower plane is still not counted, and that is the limit rather than the
 /// gap: it cuts the cone in two branches, so "inside the cone" on it is two
 /// regions and not one. A cone face is on one nappe, but the fuse cuts a plane
 /// along the whole double cone and the cone's sign is inside in both nappes.
@@ -491,18 +492,24 @@ fn the_piece_holds(
 /// [`half_way_into_either_arc`] builds round — can be in the other nappe's
 /// region: inside by the sign, on the bulge side of every chord of the near
 /// branch, and outside the solid. `tests/a_plane_across_a_cone.rs` shows each
-/// step on a frustum and a leaning block. A plane square to the axis has
+/// step on a frustum and a leaning block. A plane whose crossing closes has
 /// neither half of that: the other nappe does not reach it, and what it leaves
-/// is one disc, exactly as a ball leaves one.
+/// is one convex region, exactly as a ball leaves one disc. The parabola on the
+/// boundary is refused with the hyperbola, because it does not close either.
 ///
-/// The square-to test is exact and one-sided. The plane's normal and the cone's
-/// axis come out of the same [`Isometry`](rcad_geom::Isometry) applied to the
-/// same direction, so a cap's two are the same `f64` triple bit for bit, or its
-/// exact negation; anything else is read as not square and costs a refusal and
-/// never a wrong answer. Proving a general `|n·a|² (1 + s²) > s²` would widen
-/// this to every ellipse, and that one still meets the pipe's edge-naming gap
-/// above — with cones counted that far, two corner-up-cube fuses in
-/// `how_often_a_fuse_with_a_cone_refuses.rs` become four faces along one edge.
+/// **The test this asks is one-sided, and it is
+/// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by).**
+/// What this count needs is that the cone leave *one* region on the plane and
+/// that its boundary bulge the same way all along; a closed crossing is exactly
+/// that, and an undecided or open one is read as no bulge, which costs a refusal
+/// and never a wrong answer.
+///
+/// It used to compare the stored normal against the stored axis direction, so
+/// only a cap's own plane counted, and `holds.rs` and `assemble.rs` each spelled
+/// the question again (§23.8, §208.6). There is one spelling now, in
+/// `rcad-geom`, and the ellipse is admitted: the sign
+/// `(n·a)²(1 + s²) − s²|n|²|a|² > 0` is exact, and the region an ellipse's
+/// inside leaves on a plane is one convex piece just as a circle's is.
 fn in_the_bulge_of(
     flat: &Plane,
     side: &FaceMeet,
@@ -510,7 +517,8 @@ fn in_the_bulge_of(
     point: PredicatePoint,
 ) -> Option<i32> {
     let one_round_region = matches!(side.carried_by[1], Surface::Sphere(_))
-        || matches!(side.carried_by[1], Surface::Cone(cone) if square_to_the_axis(flat, &cone));
+        || matches!(side.carried_by[1], Surface::Cone(cone)
+            if cone.is_cut_in_a_closed_curve_by(flat) == Some(true));
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
     }
@@ -526,18 +534,6 @@ fn in_the_bulge_of(
     }
 }
 
-/// Whether `flat` stands square to `cone`'s axis, so that the two cross in a
-/// circle round it rather than in an ellipse or a pair of branches.
-///
-/// The normal and the direction are compared as they are stored, so this says
-/// yes only to a pair that is the same triple or its exact negation. That is
-/// what a cone's own cap is — [`in_the_bulge_of`] has the argument for why a
-/// stricter answer than the geometry deserves is safe here.
-fn square_to_the_axis(flat: &Plane, cone: &Cone) -> bool {
-    let normal = flat.normal().components();
-    let along = cone.axis().direction().components();
-    normal == along || normal == along.map(|component| -component)
-}
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire
 /// that is a polygon.

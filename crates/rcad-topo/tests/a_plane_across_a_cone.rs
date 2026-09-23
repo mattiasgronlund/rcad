@@ -8,7 +8,7 @@
 //! things read the surface rather than the face:
 //!
 //! 1. **The fuse cuts a plane face along the whole crossing**, not only where
-//!    the cone's face is. [`a_block_leaning_through_a_frustum_is_cut_along_the_cone_far_above_the_frustum`].
+//!    the cone's face is. [`a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_face`].
 //! 2. **"Inside the cone" is the cone's sign**, and on a plane steeper than the
 //!    cone that sign is inside in two separate regions, one per nappe.
 //!    [`on_a_block_wall_inside_the_cone_is_two_regions_either_side_of_the_apex`].
@@ -19,7 +19,7 @@
 //! [`where_the_axis_crosses_a_leaning_face_is_inside_the_cone_and_outside_the_frustum`].
 //! A ball's inside on a plane is one disk, and the bulge argument leans on that.
 
-use rcad_geom::{Axis, Cone, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Cone, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -63,17 +63,33 @@ fn a_leaning_block(model: &mut Model) -> SolidKey {
     block
 }
 
-/// The block's leaning face is cut along the cone at `z ≈ 18.7`, more than
-/// twice as high as the frustum's top at `z = 8`, and that is the piece the fuse
-/// cannot find a point in.
+/// The block's `y = −10` wall is cut along the cone at `z ≈ −20`, on the nappe
+/// below the apex where the frustum has no face at all, and that is the piece
+/// the fuse cannot find a point in.
 ///
-/// Nothing of the frustum is up there. The cut is the cone's surface carried on
-/// past its face, which is `fuse/cuts.rs`'s own rule — a surface reaches past
+/// Nothing of the frustum is down there. The cut is the cone's surface carried
+/// on past its face, which is `fuse/cuts.rs`'s own rule — a surface reaches past
 /// the face carrying it — applied to a cone. So a flat piece's side "along the
 /// cone" is along the double cone, and the branch it follows need not be the
 /// face's.
+///
+/// # This used to be a piece of the block's top face, up at `z ≈ 18.7`
+///
+/// That piece is answered now, and the two planes below say why. The top face
+/// leans three eighths the *other* way, so its normal is within the cone's own
+/// half angle of the axis and its crossing is an **ellipse**: one closed curve
+/// on one nappe, whose inside on that plane is one convex region. Since §211
+/// that is what `select.rs`'s `in_the_bulge_of` counts and what `holds.rs` can
+/// read an arc's own side of a chord from, so the piece gets a point inside it
+/// and the fuse walks on.
+///
+/// The wall is the family that is still refused and rightly: `y = −10` is
+/// parallel to the axis, so it cuts a **hyperbola**, and "inside the cone" on it
+/// is two regions with the band round the apex between them —
+/// [`on_a_block_wall_inside_the_cone_is_two_regions_either_side_of_the_apex`] is
+/// that same wall. A refusal there is the limit and not a gap.
 #[test]
-fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_far_above_the_frustum() {
+fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_face() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let cone = the_frustum(&mut model);
@@ -94,15 +110,30 @@ fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_far_above_the_frustum
     let corners = record.inputs();
     assert_eq!(corners.len(), 2, "a piece with two corners: {corners:?}");
     for corner in corners {
-        let [x, _, z] = corner.enclosure();
+        let [x, y, z] = corner.enclosure();
+        assert!(y.lo() == -10.0 && y.hi() == -10.0, "on the wall: {corner:?}");
         assert!(
-            z.lo() > 18.0 && z.hi() < 19.0,
-            "the corner is where the leaning face's top edge meets the cone, far above the \
-             frustum: {corner:?}"
+            z.hi() < -20.0,
+            "the corner is on the nappe below the apex, where the frustum has no face: {corner:?}"
         );
-        // On the leaning plane, `x = 3/8 · (z + 1)`, to a rounding.
-        assert!((x.lo() - 0.375 * (z.lo() + 1.0)).abs() < 1e-9, "{corner:?}");
+        // On the cone, `x² + y² = (z/2)²`, to a rounding.
+        let across = (x.lo() * x.lo() + y.lo() * y.lo()).sqrt();
+        assert!((across - 0.5 * z.lo().abs()).abs() < 1e-9, "{corner:?}");
     }
+
+    let skin = Cone::new(Axis::z(), 0.5).expect("a positive slope");
+    let wall = Plane::from_coefficients([0.0, 1.0, 0.0, 10.0]).expect("a plane");
+    assert_eq!(
+        skin.is_cut_in_a_closed_curve_by(&wall),
+        Some(false),
+        "a wall parallel to the axis cuts a hyperbola, which never closes"
+    );
+    let top = Plane::from_coefficients([0.375, 0.0, 1.0, -20.0]).expect("a plane");
+    assert_eq!(
+        skin.is_cut_in_a_closed_curve_by(&top),
+        Some(true),
+        "the block's top face leans the other way and cuts an ellipse, which closes"
+    );
 }
 
 /// On the plane `y = −10`, which is a wall of the leaning block, the cone's
