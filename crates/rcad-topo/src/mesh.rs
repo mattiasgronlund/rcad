@@ -1673,13 +1673,14 @@ impl BuildingAMesh {
             poles.contains(&vertex.key()) || sits_at_a_pole(back.apply_to_point(vertex.point()))
         };
         let mut used = HashSet::new();
-        let every_edge_used_once = wire
-            .coedges()
-            .all(|coedge| used.insert(coedge.edge().key()));
+        let the_only_wire_of_its_face_with_no_seam = face.wire_count() == 1
+            && wire
+                .coedges()
+                .all(|coedge| used.insert(coedge.edge().key()));
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
             wire.closes_on_one_edge(),
-            every_edge_used_once,
+            the_only_wire_of_its_face_with_no_seam,
         );
 
         let steps = steps_from_somewhere_that_has_a_longitude(wire, &at_a_pole);
@@ -2413,10 +2414,11 @@ struct WalkingAWire {
     /// longitude it left. Whether it *did* is measured in
     /// [`WalkingAWire::finish`] and is a different question.
     closes_on_one_curve: bool,
-    /// Whether no edge of this wire is used twice, so that none of its sides is
-    /// a seam. Half of [`WalkingAWire::may_come_back_a_whole_turn_on`]; the
-    /// other half is measured as the walk goes.
-    every_edge_used_once: bool,
+    /// Whether this wire is the only one of its face and no edge of it is used
+    /// twice, so that none of its sides is a seam. Part of
+    /// [`WalkingAWire::may_come_back_a_whole_turn_on`]; the rest is measured as
+    /// the walk goes.
+    the_only_wire_of_its_face_with_no_seam: bool,
     /// Whether the walk ever stood at a pole — a pole step, a corner on one, or
     /// a point along an edge that passes one.
     stood_at_a_pole: bool,
@@ -2442,11 +2444,15 @@ struct WalkingAWire {
 }
 
 impl WalkingAWire {
-    fn new(wraps: Option<f64>, closes_on_one_curve: bool, every_edge_used_once: bool) -> Self {
+    fn new(
+        wraps: Option<f64>,
+        closes_on_one_curve: bool,
+        the_only_wire_of_its_face_with_no_seam: bool,
+    ) -> Self {
         Self {
             wraps,
             closes_on_one_curve,
-            every_edge_used_once,
+            the_only_wire_of_its_face_with_no_seam,
             stood_at_a_pole: false,
             longitude: 0.0,
             started: false,
@@ -2747,6 +2753,17 @@ impl WalkingAWire {
     /// of a curve, and a wire through a pole is not a wire round one anyway.
     /// Neither of those may wind, and that is what this keeps out.
     ///
+    /// **And a ring is only a cap when it is the face's one wire.** A face with
+    /// a hole in it that a ring of arcs also bounds is a different shape with a
+    /// different argument to make: which of the two pieces the ring cuts the
+    /// surface into the hole sits in, and nothing here says. A frustum's band
+    /// between its own near cap circle and a ring of arcs from a cube's upper
+    /// planes is one, and letting its ring through sent
+    /// [`BuildingAMesh::cut_a_ring_across`] a pair it could not cut: the fuse
+    /// answered and the mesh came back `BoundaryCrossesItself`, where before
+    /// the face was refused outright. So it is refused outright still, by the
+    /// same name, and the ring a cone's apex needs is the one wire case alone.
+    ///
     /// **What is left may, and a cone is where it has to.** A pointed cone
     /// inside a cube stood on its corner keeps a piece of nappe round the apex
     /// bounded by three arcs, one from each of the cube's upper planes, meeting
@@ -2764,7 +2781,7 @@ impl WalkingAWire {
     /// the one this kernel already meshed: `closes_on_one_curve` says it, the
     /// caller asks it first, and it needs none of the reasoning above.
     fn may_come_back_a_whole_turn_on(&self) -> bool {
-        self.every_edge_used_once && !self.stood_at_a_pole
+        self.the_only_wire_of_its_face_with_no_seam && !self.stood_at_a_pole
     }
 
     /// Cross the pole side the loop closes over, when the walk set off from a
@@ -4842,7 +4859,8 @@ mod tests {
     /// the patch between them — so the walk down the far side has to bring the
     /// longitude back to where the walk up the near side left it. A seam that
     /// ends a whole turn on has not done that, and nothing about a ring makes
-    /// it acceptable.
+    /// it acceptable. A face with a hole is refused here for the same reason
+    /// and by the same flag.
     #[test]
     fn a_wire_with_a_seam_that_ends_a_whole_turn_on_still_will_not_lie_flat() {
         let whole = 2.0 * core::f64::consts::PI;
