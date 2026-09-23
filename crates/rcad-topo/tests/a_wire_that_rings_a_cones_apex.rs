@@ -88,11 +88,7 @@ fn the_ring_is_fanned_up_to_one_point_at_the_apex() {
     let piece = model
         .solid(answer[0])
         .expect("this model made the key")
-        .mesh(
-            how_fine(),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
+        .mesh(how_fine(), &Policy::certified(), &mut ProvenanceLog::new())
         .expect("the shared piece meshes");
 
     let at_the_apex: Vec<u32> = (0..piece.points().len())
@@ -150,9 +146,21 @@ fn the_four_new_answers_and_the_shared_piece_add_up_to_the_two_solids() {
         // its own `134.041`, and no answer here holds more cone than that.
         let slack = 0.05;
         for (what, got, want) in [
-            ("the union and the shared piece", both + shared, cone_volume + cube_volume),
-            ("the cone less the cube, and the shared piece", cone_less_cube + shared, cone_volume),
-            ("the cube less the cone, and the shared piece", cube_less_cone + shared, cube_volume),
+            (
+                "the union and the shared piece",
+                both + shared,
+                cone_volume + cube_volume,
+            ),
+            (
+                "the cone less the cube, and the shared piece",
+                cone_less_cube + shared,
+                cone_volume,
+            ),
+            (
+                "the cube less the cone, and the shared piece",
+                cube_less_cone + shared,
+                cube_volume,
+            ),
         ] {
             assert!(
                 (got - want).abs() <= slack,
@@ -176,14 +184,9 @@ fn fuse(turn: f64, rule: Rule, cone_first: bool) -> (Model, Vec<SolidKey>) {
         .expect("a finite turn")
         .compose(&down)
         .compose(&stood);
-    let square = ProfileBuilder::new(vec![
-        [0.0, 0.0],
-        [SIDE, 0.0],
-        [SIDE, SIDE],
-        [0.0, SIDE],
-    ])
-    .build(&policy, &mut ProvenanceLog::new())
-    .expect("a square is a profile");
+    let square = ProfileBuilder::new(vec![[0.0, 0.0], [SIDE, 0.0], [SIDE, SIDE], [0.0, SIDE]])
+        .build(&policy, &mut ProvenanceLog::new())
+        .expect("a square is a profile");
     let cube = model
         .add_extrusion(&square, SIDE, &placed)
         .expect("a square extrudes");
@@ -195,7 +198,9 @@ fn fuse(turn: f64, rule: Rule, cone_first: bool) -> (Model, Vec<SolidKey>) {
     };
     let answer = model
         .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("{rule:?} (cone first: {cone_first}) at turn {turn}: {why:?}"));
+        .unwrap_or_else(|why| {
+            panic!("{rule:?} (cone first: {cone_first}) at turn {turn}: {why:?}")
+        });
     let solids = answer.solids().to_vec();
     (model, solids)
 }
