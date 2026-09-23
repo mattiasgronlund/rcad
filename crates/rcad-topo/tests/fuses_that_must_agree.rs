@@ -337,20 +337,22 @@ const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 /// An exact count rather than a floor, because
 /// [`every_frustum_on_the_wider_grid_answers_the_same_whichever_side_comes_first`]
 /// walks a grid that is written out and not drawn, so this is the same number
-/// every run on every machine. Measured: 168 comparisons meant, **110 made**, out
+/// every run on every machine. Measured: 168 comparisons meant, **114 made**, out
 /// of 336 fuses of which 108 refused — every one of the 108 naming `select.rs`'s
-/// *a point inside a piece of a face* — and 8 came back as something a `Model`
-/// cannot hold.
+/// *a point inside a piece of a face* — and **none** came back as something a
+/// `Model` cannot hold.
 ///
-/// It was 106 made, 124 refused and none unholdable until §206's bulge count.
-/// Every comparison that ran still agreed, either side of that: what moved is how
-/// many pairs had both halves to compare. The 8 are the same edge-naming gap
-/// §206.4 holds — two arcs of a cone's rim circle between one pair of corners
-/// named as one edge — surfacing here because more fuses now get that far.
+/// It has moved twice. It was 106 made, 124 refused and none unholdable until
+/// §206's bulge count, which took it to 110 made, 108 refused and **8
+/// unholdable**. Those 8 were the edge-naming gap §206.4 held — two arcs of a
+/// cone's rim circle between one pair of corners named as one edge — surfacing
+/// here because more fuses got that far. Naming the two arcs apart closes all 8,
+/// and four of them become comparisons. Every comparison that ran still agreed,
+/// either side of both moves.
 ///
 /// A drop here is a fuse that stopped answering, which is a regression and not a
 /// draw. Re-derive it when it moves; do not relax it to a floor (§19.1).
-const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 110;
+const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 114;
 
 /// How many of the comparisons a law over a bar leaning through a block has to
 /// have made (§191).
@@ -2586,11 +2588,11 @@ fn swapping_the_two_sides_of_a_block_and_a_frustum_changes_not_one_bit() {
 /// fuse answers if and only if the cone, carried up to the block's roof, is
 /// still narrower than the distance to the nearest side wall*, and this file
 /// asserted it over these eighty-four. `arrange`'s third `HowItRuns` variant
-/// puts points in order along a hyperbola now, so fifteen of the forty-four the
+/// puts points in order along a hyperbola now, so nineteen of the forty-four the
 /// rule turned down answer instead.
 /// `tests/ordering_points_along_an_endless_bend.rs` is where that death is
-/// measured — none refused for want of an order, fifty-three answering, and the
-/// fifteen the rule was wrong about — and re-asserting any of it here would be a
+/// measured — none refused for want of an order, fifty-seven answering, and the
+/// nineteen the rule was wrong about — and re-asserting any of it here would be a
 /// second copy of one measurement.
 ///
 /// What is left for *this* file is the law this file is for, asked over the grid

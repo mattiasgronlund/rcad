@@ -52,8 +52,9 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
-    Surface, Vector, which_way_a_closed_crossing_turns,
+    Cone, DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement,
+    Point, Surface, Vector, how_a_plane_leans_against_a_cone,
+    where_a_cones_apex_stands_against_a_plane, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -2681,8 +2682,10 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
     Some(named)
 }
 
-/// Which of the two arcs between its corners a side is of a circle between a
-/// ball and a plane, or `None` for any other side.
+/// Which of the two arcs between its corners a side is of a closed crossing
+/// between a plane and a surface that curves right round — a ball's circle, or
+/// a cone's rim circle and the ellipse a steeper plane leaves — or `None` for
+/// any other side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -2695,7 +2698,7 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 /// `x ≤ 0.5`, the skin and the flat half disk are both kept whole, and named
 /// by their corners the two edges were one edge with four faces along it.
 ///
-/// **What tells them apart is a sign, and no number is built.** `∇ball ×
+/// **What tells them apart is a sign, and no number is built.** `∇round ×
 /// ∇plane` runs one way round the circle all the way along it, so there is
 /// exactly one arc that leaves the lower-numbered corner along it. A side's
 /// material side says whether it leaves its first corner along `∇mine ×
@@ -2705,15 +2708,34 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 /// arc, and both orders of the arguments, come to the same answer, because the
 /// corner numbers are the answer's and both faces share them.
 ///
+/// # A cone's rim circle is the same shape of thing, and its seam is not
+///
+/// Nothing above is about a ball. The sign rule needs the crossing to close and
+/// `∇round × ∇plane` never to vanish along it, and
+/// [`a_plane_cuts_a_cone_in_a_closed_curve`] is that property decided exactly
+/// for a cone — the circle a cap plane leaves, and the ellipse any steeper
+/// plane leaves, both of them on one nappe. A hyperbola and a parabola never
+/// close and stay [`None`], because two corners on an endless bend really do
+/// leave one arc.
+///
+/// **The seam guard below is the ball's and stays the ball's.**
+/// [`MeetPoint::APoleOfAClosedSurface`] has one maker in this crate,
+/// `Arrangement::the_whole_surface`, and that refuses every surface but a ball
+/// — so no cone-and-plane side can carry one, and the guard is a no-op for the
+/// rim rather than a rule that had to be carried over. A cone's own singular
+/// point, its apex, is not one of these poles and needs no guard here either: a
+/// crossing this function names has the apex **off** the plane, which is half
+/// of what `a_plane_cuts_a_cone_in_a_closed_curve` asks, so the curve does not
+/// pass through it. `tests/which_arc_of_a_cones_rim_a_side_is.rs` fuses a
+/// pointed cone — the shape that has an apex on its own face — and gets a sound
+/// answer.
+///
 /// # Panics
 ///
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`],
 /// as [`which_arc_this_is`] does and for the same reason.
 fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Option<bool> {
-    let a_ball_and_a_plane = matches!(
-        meet.carried_by,
-        [Surface::Sphere(_), Surface::Plane(_)] | [Surface::Plane(_), Surface::Sphere(_)]
-    );
+    let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
     // A whole ball's seam is walked down and back up by the one face, with a
     // material side that names the half of the meridian it is and not a side
     // (`Arrangement::the_whole_surface`), so the rule below would read its two
@@ -2722,7 +2744,7 @@ fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Opt
         .ends
         .iter()
         .any(|end| matches!(end, MeetPoint::APoleOfAClosedSurface { .. }));
-    if from == to || !a_ball_and_a_plane || a_seam {
+    if from == to || a_seam {
         return None;
     }
     let walked_from_the_far_corner = from > to;
@@ -2731,9 +2753,77 @@ fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Opt
         Decision::Pos => false,
         other => panic!("a side of a face was walked with no material side: {other:?}"),
     };
-    let mine_is_the_ball = matches!(meet.carried_by[0], Surface::Sphere(_));
-    let along_ball_then_plane = along_mine_then_partner == mine_is_the_ball;
-    Some(along_ball_then_plane != walked_from_the_far_corner)
+    let mine_is_the_round_one = round_one == 0;
+    let along_the_round_one_then_the_plane = along_mine_then_partner == mine_is_the_round_one;
+    Some(along_the_round_one_then_the_plane != walked_from_the_far_corner)
+}
+
+/// Which of two surfaces a closed crossing runs round — `0` or `1` — or `None`
+/// when this pair has no closed crossing to name.
+///
+/// A ball and a plane cut a circle whenever they cut anything at all. A cone and
+/// a plane cut seven different shapes and only two of them close, which is
+/// [`a_plane_cuts_a_cone_in_a_closed_curve`]'s question.
+///
+/// **A pipe and a plane cut an ellipse that closes too, and it is not named
+/// here.** Nothing above is wrong about it; it is `select.rs`'s bulge count that
+/// does not reach a pipe yet (`in_the_bulge_of`), so a side of one never gets
+/// this far, and a row with no consumer is a row nobody re-derives (§13).
+fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Option<usize> {
+    let closes_round = |round: &Surface, flat: &Surface| {
+        let flat = flat.as_plane()?;
+        if matches!(round, Surface::Sphere(_)) {
+            return Some(true);
+        }
+        if let Surface::Cone(cone) = round {
+            return a_plane_cuts_a_cone_in_a_closed_curve(flat, cone);
+        }
+        Some(false)
+    };
+    if closes_round(&carried_by[0], &carried_by[1]) == Some(true) {
+        Some(0)
+    } else if closes_round(&carried_by[1], &carried_by[0]) == Some(true) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// Whether a plane meets one nappe of a cone in a curve that closes: a circle or
+/// an ellipse, and `Some(false)` for the five shapes that do not.
+///
+/// The two signs [`intersect`](rcad_geom::intersect) splits its own table on,
+/// asked of the very functions it asks — the same door
+/// [`a_plane_cuts_a_cone_in_rulings`] opens, reading one row further along.
+/// With the apex **off** the plane the crossing is a conic, and `E = (n·w)² −
+/// slope²‖n × w‖²` says which one: above nothing it leans steeper than the
+/// cone's own side and cuts an ellipse, which closes on one nappe; level with it
+/// cuts a parabola and shallower cuts a hyperbola, and neither of those ever
+/// closes. With the apex **on** the plane there is no closed curve to be had at
+/// all — the two share a ruling, a pair of rulings, or the apex alone.
+///
+/// A plane square to the axis is the `E > 0` row's tidiest member and needs no
+/// row of its own: `n × w` is nothing there, so `E = (n·w)² > 0`. That is the
+/// case `select.rs`'s `square_to_the_axis` picks out by comparing the stored
+/// triples, and this is the same family decided by its arithmetic instead — so
+/// the rim of every cap this kernel builds arrives here as a circle, and a
+/// block's leaning plane arrives as an ellipse.
+///
+/// **Neither sign is rounded and [`None`] is the third answer**, for the same
+/// reason [`a_plane_cuts_a_cone_in_rulings`] gives: reading an undecided sign
+/// either way names an arc that may not exist, and a refusal is what this
+/// kernel spends instead.
+fn a_plane_cuts_a_cone_in_a_closed_curve(flat: &Plane, cone: &Cone) -> Option<bool> {
+    match where_a_cones_apex_stands_against_a_plane(flat, cone) {
+        Decision::Pos | Decision::Neg => {}
+        Decision::Zero => return Some(false),
+        Decision::Undecidable { .. } | _ => return None,
+    }
+    match how_a_plane_leans_against_a_cone(flat, cone) {
+        Decision::Pos => Some(true),
+        Decision::Zero | Decision::Neg => Some(false),
+        Decision::Undecidable { .. } | _ => None,
+    }
 }
 
 /// One wire of a piece as sides of the result, turned round when the rule turns
