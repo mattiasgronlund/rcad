@@ -112,5 +112,9 @@ ways and `Difference` cone-first. Then re-derive
 `what_stops_a_block_and_a_cone_now_is_five_named_things_and_not_the_ordering`,
 which should lose its 9.
 
+§215 built it, and the test named on the line above is called
+`..._four_named_things_...` now — the count is in the name, so the name moves with
+it, which is what happened the last time it moved (`6e6ab6db`, four → five).
+
 One loose end, not chased: a third disjoint draw answers, so whatever decides that
 a cut survives into the answer differs between it and the three that refuse.

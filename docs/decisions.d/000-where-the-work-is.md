@@ -10,25 +10,25 @@ limit if not. **Since §190.2 no corpus file reaches it**: 24 of 29 import (KiCa
 114 → 140), the LEDs since §193.1 (160), §198.1 adds `LED_D5.0mm-3` (161); a new
 unit is Mattias's call.
 
-**What is closed.** A chain from §140, each section closing what the one before
-left; `just decisions-toc` is the map. Through §194 the STEP corpus — 793 refusals
-to 0, 8000 of 8000. §195–§202 the curved solids; §204, §206, §208 the cone's rim
-arc in both places §206.6 named; §209 a pointed cone's finite bound and a ring of
-arcs walked round an apex. **§211 gives an ellipse arc its centre**, the pole of
-the cutting plane; §212 lets a ring bound a face that also has a hole, so
-`a_plane_cut_along_a_cones_other_nappe.rs` reads 48 of 48 with no refusal left;
-§213 repins the crown of a ring as a gap, and §214 is read-only.
+**What is closed.** A chain from §140, each closing what the one before left;
+`just decisions-toc` is the map. Through §194 the STEP corpus — 793 refusals to 0,
+8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc, a pointed
+cone's bound, a ring of arcs round an apex; §211–§213 an ellipse arc's centre, a
+ring bounding a face with a hole, a crown repinned as a gap. **§215 answers §214's
+9**, folds §211.8's fourth centre spelling — §211.1's defect still live in the fuse
+— and names §211.6's floor: two gaps, four faces not one, no arithmetic in either.
 
-**Next and unclaimed: nine fuses refuse naming a surface the model has not got.**
-§214 — the 24 frustum-against-a-block walls stop in `rcad_geom::walk`, not
-`intersect` as §208.2 guessed, reached from the mesher inside the fuse's own volume
-measurement. For 9 the pair is **one cone twice**: `intersect` has an arm for it
-and answers, `what_a_run_between_these_two_lies_on` has none and refuses as *a cone
-crossing another curved surface*. A **defect** on a question that has an answer.
-§214.4 names the family of fixes and recommends (a), §214.5 the case to build.
+**Next and unclaimed: the run does not say which plane cut the cone.** §215.1's arm
+answers a closed run on one cone as the circle through its end; a leaning plane cuts
+an **ellipse**, closed too, which it would name a circle and answer wrong — §4.1's
+worst direction. Measured unreached today (both corner-up-cube families, every plane
+leaning, carry no cone-crossing refusal either side of the change), **why is not
+known**. §214.4's **(d)**, in what `assemble` writes, is the fix. A **defect**.
 
-Also open: `measure.rs`'s cone-tip bound (§208.6); the 9 326 floor's cause, **unnamed**
-and not the ellipse arc this row claimed (§211.6); §212.6's gap; §124, §136.4, §125.6.
+Also open: 215.3's two gaps, the cheaper being a flat face that keeps a cone's
+outside and is followable but not followed (9 326 → about 23 094 on that file);
+215.2's three measured walls (`select.rs`, `fold_the_nodes`, a two-node hyperbola
+wall); `measure.rs`'s cone-tip bound (§208.6); §212.6's gap; §124, §136.4, §125.6.
 
 **parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
 thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a
