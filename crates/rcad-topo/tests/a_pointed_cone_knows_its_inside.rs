@@ -133,21 +133,31 @@ fn every_point_of_a_grid_round_a_pointed_cone_is_answered_right() {
 /// cone as it already did for a ball, no point could be placed inside such a
 /// piece and both rules refused (§204.2's gap).
 ///
-/// The intersection still refuses, and on something else: its cone face runs
-/// right round the apex, which is a ring of arcs round a cone with no seam, and
-/// the mesher cannot walk one. So this holds any answer that does come back
-/// against the shapes — the shared volume by a column sum, which moves by
-/// `4.1e-5` from 400 to 800 columns a side and by `1.1e-5` from 800 to 1600, so
-/// `1e-3` beside `measure`'s own bound is far outside what the sum itself is
-/// unsure of — and pins by name whichever rule does not answer.
+/// **The intersection answers right too now**, and it was the last of §200.3's
+/// eight to. It used to refuse: its cone face runs right round the apex, which
+/// is a ring of arcs round a cone with no seam, and the mesher could not walk
+/// one until §208.4. Both answers are held against the shapes — the shared
+/// volume by a column sum, which moves by `4.1e-5` from 400 to 800 columns a
+/// side and by `1.1e-5` from 800 to 1600, so the `1e-3` added to `measure`'s own
+/// bound is far outside what the sum itself is unsure of.
 ///
 /// **The slack is held to a size first.** Every solid holding a cone's apex used
 /// to publish a `volume_error` of `inf`, which made that comparison pass for any
-/// volume at all — a check that cannot fail. `measure::what_a_cone_tip_costs`
-/// is what made it finite — about a tenth of a percent of the union's volume at
-/// this deflection — and the line below refuses any slack over a five hundredth
-/// of the volume it is checking, so the comparison cannot quietly go vacuous
-/// again.
+/// volume at all — a check that cannot fail. `measure::what_a_cone_tip_costs` is
+/// what made it finite, and the line below refuses a slack that is not a small
+/// share of the volume it is checking, so the comparison cannot quietly go
+/// vacuous again.
+///
+/// A hundredth is the share, and the two rules sit either side of where a
+/// tighter one could go. At this deflection the union's slack is
+/// `0.20872487972302164` on `193.64491337804006`, about a tenth of a percent;
+/// the intersection's is `0.018084103879991164` on `4.39637317512444`, about
+/// four tenths. The intersection is the tighter case because it
+/// is almost all apex — the tip the bound charges whole is nearly the whole of
+/// what the two solids share, where in the union it is a crumb of a much larger
+/// body. So a five-hundredth would hold for the union and fail for the
+/// intersection while both are right, which is a threshold measuring the shape
+/// rather than the check.
 #[test]
 fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
     let policy = Policy::certified();
@@ -168,10 +178,6 @@ fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
                 outcomes.push(format!("{rule:?}: {}", record.predicate()));
                 continue;
             }
-            Err(rcad_topo::Error::AWireWillNotLieFlatOnItsFace { .. }) => {
-                outcomes.push(format!("{rule:?}: a wire will not lie flat on its face"));
-                continue;
-            }
             Err(other) => panic!("{rule:?}: refused as {other:?}"),
         };
         model
@@ -188,8 +194,9 @@ fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
             )
             .expect("the piece measures");
         let slack = measured.volume_error() + 1e-3;
+        println!("{rule:?}: a slack of {slack} on a volume of {want}");
         assert!(
-            slack < want / 500.0,
+            slack < want / 100.0,
             "{rule:?}: a slack of {slack} on a volume of {want} says nothing",
         );
         assert!(
@@ -201,10 +208,7 @@ fn a_pointed_cone_and_a_cube_round_its_apex_are_never_handed_back_untouched() {
     }
     assert_eq!(
         outcomes,
-        [
-            "Intersection: a wire will not lie flat on its face",
-            "Union: right",
-        ]
+        ["Intersection: right", "Union: right"]
     );
 }
 

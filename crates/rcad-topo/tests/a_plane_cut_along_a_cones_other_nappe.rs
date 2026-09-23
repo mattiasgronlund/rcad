@@ -25,10 +25,12 @@
 //! A pointed cone whose apex sits inside a small cube stood on its corner used
 //! to answer wrong — both solids back untouched, as if they never met — and was
 //! left out of the file for it. Since the cone's box reaches its apex it
-//! stopped answering wrong, and since `select.rs` counts the bulge between a
-//! cone's arc and its chord half of it answers right;
-//! [`a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_half_and_cannot_mesh_the_rest`]
-//! pins that, and names what stops the other half.
+//! stopped answering wrong; since `select.rs` counts the bulge between a cone's
+//! arc and its chord half of it answers right; and since §208.4 walks a ring of
+//! arcs round an apex the other half does too.
+//! [`a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right`]
+//! pins that. The frustum's cube keeps a refusal of its own, and
+//! [`a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses`] pins it.
 
 use std::collections::BTreeMap;
 
@@ -201,9 +203,13 @@ fn a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses() {
 ///
 /// All 40 refused until the pointed cone's face could say which side of its cap
 /// it lies on (`docs/decisions.md` §200.4's first item): its one corner is on
-/// the cap, so no corner said, and every point asked of that face refused.
+/// the cap, so no corner said, and every point asked of that face refused. That
+/// left 20 right and 20 refused `AWireWillNotLieFlatOnItsFace` — the half whose
+/// cone face runs right round the apex, a ring of arcs with no seam that the
+/// mesher could not walk. §208.4 taught it to, and all 40 are right now. The
+/// name says so rather than keeping `_or_refuses` over a body that does not.
 #[test]
-fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right_or_refuses() {
+fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right() {
     let mut cases = Vec::new();
     for (side, middle) in [(4.0, 1.0), (4.0, 2.5), (6.0, 0.0), (6.0, 1.0), (6.0, 2.5)] {
         for turn in [0.0, 0.7] {
@@ -217,8 +223,8 @@ fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 20,
-            refused: [("AWireWillNotLieFlatOnItsFace", 20)].into()
+            right: 40,
+            refused: [].into()
         }
     );
 }
@@ -230,19 +236,23 @@ fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right_or_refuses() {
 ///
 /// With the box reaching the apex every fuse refused by name instead, and §204.2
 /// called that a **gap**: the two solids share volume, so every rule has an
-/// answer to give. Half of the gap is closed. The refusal was the cone's own
+/// answer to give. The gap is closed now, in two halves. The first was the cone's own
 /// big cap, cut by a cube plane into pieces bounded by an arc of the rim and the
 /// chord across it — two corners, no polygon to wind, and no point inside the
 /// piece at all until `select.rs` counted the bulge between the arc and its
 /// chord for a cone as it already did for a ball.
 ///
-/// **The four that still refuse are a different gap, in the mesher.** The
-/// intersection's cone face runs right round the apex — the cube holds a
+/// **The other half was a different gap, in the mesher, and §208.4 closed it.**
+/// The intersection's cone face runs right round the apex — the cube holds a
 /// neighbourhood of it — so it is a ring of arcs round a cone with no seam, and
-/// `mesh.rs` cannot walk it (`AWireWillNotLieFlatOnItsFace`, on the wire at
-/// `z ≈ 2.559`). That is `fuse/assemble.rs`'s own note beside `rings_of_each_joined_face`.
+/// `mesh.rs` could not walk it (`AWireWillNotLieFlatOnItsFace`, on the wire at
+/// `z ≈ 2.559`). It walks one now, so all eight are right and the name no longer
+/// says half. A ring is only walked when it is its face's **one** wire; a
+/// frustum's band, ringed by arcs and holed by its own near cap, is still
+/// refused, and `a_corner_up_cube_round_a_frustums_apex_answers_right_or_refuses`
+/// above is what holds that line.
 #[test]
-fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_half_and_cannot_mesh_the_rest() {
+fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right() {
     let cases: Vec<Case> = [0.0, 0.7]
         .into_iter()
         .map(|turn| Case {
@@ -254,8 +264,8 @@ fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_half_and_cannot_mesh
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 4,
-            refused: [("AWireWillNotLieFlatOnItsFace", 4)].into()
+            right: 8,
+            refused: [].into()
         }
     );
 }

@@ -590,13 +590,25 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
 ///
 /// A cube of side two and a ball of radius two whose south pole rests on the
 /// middle of the cube's top, at `(1, 1, 2)`. Every number is whole and the touch
-/// is exact. The union is refused `AWireWillNotLieFlatOnItsFace`: it used to be
-/// refused `ResultIsNotManifold` earlier, in assembly, where the two arcs of one
-/// ball-and-plane circle between the same two corners were given one edge name,
-/// and since §198 they are told apart. Move the ball over to
-/// `(1, 2)` on a cube of side four and it is refused `NotFinite` on *"point on a
-/// plane"* instead, a coordinate worked out as infinity or not a number out of
-/// whole-number input.
+/// is exact. The union is refused `ACurvedFaceGoesRightRoundWithNoSeam`. It has
+/// been refused all along and the name has moved twice: `ResultIsNotManifold`
+/// first, in assembly, where the two arcs of one ball-and-plane circle between
+/// the same two corners were given one edge name, until §198 told them apart;
+/// then `AWireWillNotLieFlatOnItsFace`, out of the mesher, until §208.4 let a
+/// ring of arcs be walked. Move the ball over to `(1, 2)` on a cube of side four
+/// and it is refused `NotFinite` on *"point on a plane"* instead, a coordinate
+/// worked out as infinity or not a number out of whole-number input.
+///
+/// **The third name is pinned as measured and not as understood.** It is raised
+/// in one place, `Arrangement::the_whole_surface`, reached when a face's
+/// arrangement holds no arcs at all and refusing there for every surface but a
+/// ball. The face it names is in the fuse's own working model rather than in the
+/// caller's — `Model::face` on it answers `KeyFromAnotherModel` — so nothing
+/// outside the kernel can say which surface it is on, and the provenance log for
+/// this fuse comes back empty. What is certain is only what this test asserts:
+/// the pair was refused before and is refused now, so nothing here got a wrong
+/// answer where it used to get none. Whether the name fits the face is a
+/// question for a lane with the fuse's working model in its hands.
 ///
 /// Three rows say the answer exists and this kernel can hold it:
 ///
@@ -633,13 +645,16 @@ fn a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_s
                 assert_eq!(united.solids().len(), 2, "two solids that touch at a point");
                 None
             }
-            Err(why) => Some(named(&why)),
+            Err(why) => {
+                println!("a ball of {radius} at {centre:?} on a cube of {side}: {why:?}");
+                Some(named(&why))
+            }
         }
     };
 
     assert_eq!(
         refused(2.0, [1.0, 1.0, 4.0], 2.0).as_deref(),
-        Some("AWireWillNotLieFlatOnItsFace")
+        Some("ACurvedFaceGoesRightRoundWithNoSeam")
     );
     assert_eq!(
         refused(4.0, [1.0, 2.0, 6.0], 2.0).as_deref(),
