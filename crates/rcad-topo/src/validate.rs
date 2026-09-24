@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rcad_geom::{
     Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
     Plane, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS,
-    Scale, Surface, Vector, which_way_a_closed_crossing_turns,
+    Scale, Surface, Vector, which_two_surfaces_a_run_is_between, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -770,9 +770,9 @@ impl Model {
                 let outward = |used: FaceView<'_>| {
                     gradient_of(&used.surface(), at) * used.orientation().sign()
                 };
-                let names_it = what_says_which_way_this_closed_edge_winds(
+                let names_it = which_two_surfaces_a_run_is_between(
                     edge.stored_run(),
-                    [face.surface(), across.surface()],
+                    [&face.surface(), &across.surface()],
                 );
                 let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
                     [&names_it[0], &names_it[1]],
@@ -1880,36 +1880,6 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
     }
 }
 
-/// The pair [`a_closed_crossing_is_walked_the_way_it_is_stored`] reads a
-/// winding off: the two faces either side, or the face and the run's own second
-/// surface where neither face is curved.
-///
-/// Two planes cross in a straight line, which does not close, so a closed edge
-/// between two flat faces is named by nothing the pair says. A circle a file
-/// imprinted on a flat face is exactly that — the one plane written twice and a
-/// hair apart — and the run carries the circle's own cylinder, measured, which
-/// is what this hands through (`docs/decisions.md` §219.6).
-///
-/// **This asks the question `rcad-geom`'s `the_two_surfaces_it_runs_between`
-/// already answers**, and §23.8 says two spellings of one question is how two
-/// answers come to disagree. That one is private to `walk.rs` and answers for
-/// this run kind unconditionally, which is order-dependent where `and` repeats
-/// one of the two faces; this one is held to the case the callee refuses on and
-/// nothing wider. Closing it properly means one public answer in `rcad-geom`
-/// that both read.
-fn what_says_which_way_this_closed_edge_winds(run: &EdgeRun, along: [Surface; 2]) -> [Surface; 2] {
-    match run {
-        EdgeRun::RightRoundWhereItCrosses { and } if the_curved_one_of(&along).is_none() => {
-            [along[0], *and]
-        }
-        EdgeRun::Straight
-        | EdgeRun::RightRoundWhereItsFacesCross
-        | EdgeRun::PartOfWhereItCrosses { .. }
-        | EdgeRun::RightRoundWhereItCrosses { .. }
-        | _ => along,
-    }
-}
-
 /// Whether a wire walks a closed crossing the way that edge is stored running.
 ///
 /// **The closed-edge direction rule, in one place.** A closed edge starts and
@@ -1962,8 +1932,8 @@ fn what_says_which_way_this_closed_edge_winds(run: &EdgeRun, along: [Surface; 2]
 /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] if neither surface is curved. Two
 /// planes cross in a straight line, which does not close, so no closed edge is
 /// named by a flat pair. A run that carries the curved surface itself is not a
-/// flat pair at all, and [`what_says_which_way_this_closed_edge_winds`] is
-/// where the caller swaps it in — this is bad caller input rather than a broken
+/// flat pair at all, and [`which_two_surfaces_a_run_is_between`] is where the
+/// caller swaps it in — this is bad caller input rather than a broken
 /// invariant, because `Model` derives `Deserialize` and nothing upstream of
 /// this check has confirmed the edge's own claim is possible
 /// (`docs/decisions.md` §39.7 item 4, not §16.11 — that section is about the

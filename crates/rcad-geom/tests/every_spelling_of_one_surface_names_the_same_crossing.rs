@@ -3,7 +3,7 @@
 //!
 //! §219.8 asked for this file. `two_spheres_a_hair_apart_are_one_sphere_and_a_
 //! second_surface.rs` is one case of it, drawn by hand: a ball written twice
-//! 1e-15 apart used to slip past `the_two_surfaces_it_runs_between`'s
+//! 1e-15 apart used to slip past `which_two_surfaces_a_run_is_between`'s
 //! `along[0] == along[1]` guard, so the pair either side went to
 //! `where_two_balls_cut`, which answers **finitely and wrongly** — a great
 //! circle of the ball's own radius through its own centre, in the plane halfway
@@ -13,7 +13,7 @@
 //! # The oracle is the same surface written twice bit for bit
 //!
 //! Two runs that must agree, and they must agree **exactly**, not within a
-//! tolerance. Every arm of `the_two_surfaces_it_runs_between` that fires hands
+//! tolerance. Every arm of [`which_two_surfaces_a_run_is_between`] that fires hands
 //! back `[along[0], and]`: the seam arm does, the two flat faces arm does, the
 //! curved-face-and-plane arm does (it takes the ball if there is one and
 //! `along[0]` otherwise, and here both faces are the same kind), and the
@@ -57,11 +57,18 @@
 //!
 //! # Which arms this reaches, and the one it cannot close
 //!
-//! `which_arm_the_respelt_pair_reaches` mirrors the guards of
-//! `the_two_surfaces_it_runs_between`, which is private. It is a **counter and
-//! never an oracle** — nothing is asserted from it — and it is here so that the
-//! report says which arms were actually drawn rather than leaving it to be
-//! believed.
+//! `which_arm_the_respelt_pair_reaches` asks the public answer whether any arm
+//! caught the pair — one that did not hands back the pair either side — and
+//! names the arm that did by the shape of the draw, which is all that tells
+//! them apart once `and` is neither face. It used to restate the function's
+//! guards, because the function was private; since §221.5 it is public and the
+//! copy is gone. It is a **counter and never an oracle** — nothing is asserted
+//! from it — and it is here so that the report says which arms were actually
+//! drawn rather than leaving it to be believed.
+//!
+//! What *is* asserted from the public answer is the pair itself: every draw
+//! that an arm catches has to hand the kernel exactly the pair the surface
+//! written once does, before either door is asked anything.
 //!
 //! Four arms are reached and agree. The fifth bucket is the **fallthrough**, and
 //! since §220.4 all that reaches it is two flat faces whose run names a third
@@ -104,6 +111,7 @@ use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point,
     Sphere, Surface, Torus, Vector, walk, where_a_closed_crossing_starts,
+    which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use smallvec::smallvec;
@@ -230,13 +238,13 @@ fn how_a_run_is_said() -> impl Strategy<Value = HowTheRunIsSaid> {
     ]
 }
 
-/// Which arm of `the_two_surfaces_it_runs_between` a re-spelt pair reaches.
+/// Which arm of [`which_two_surfaces_a_run_is_between`] a re-spelt pair reaches.
 ///
 /// A counter and never an oracle. Nothing below asserts an answer from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Arm {
     /// `RightRoundWhereItCrosses { and }`, which takes `and` whatever is either
-    /// side of it. §216.
+    /// side of it, so long as `and` is neither face. §216, §221.5.
     AClosedRunCarriesItsSecondSurface,
     /// `both_flat && and.as_plane().is_none()`. §176.2's two planes 1.2e-15
     /// apart with a curved `and`.
@@ -309,7 +317,15 @@ impl Tally {
         let control = what_the_kernel_says(&run, [&once, &once]);
         let respelt = what_the_kernel_says(&run, [&once, &twice]);
 
-        let arm = which_arm_the_respelt_pair_reaches(drawn.said, &once, &twice, &and);
+        let arm = which_arm_the_respelt_pair_reaches(run.run(), drawn.said, &once, &twice, &and);
+        if EVERY_CLOSED_ARM.contains(&arm) {
+            assert_eq!(
+                which_two_surfaces_a_run_is_between(run.run(), [&once, &twice]),
+                which_two_surfaces_a_run_is_between(run.run(), [&once, &once]),
+                "{arm:?}: one surface written twice was read as a different pair from the one \
+                 written once.\n  the face: {once:?}\n  written again: {twice:?}\n  run: {run:?}"
+            );
+        }
         let mut arms = self.arms.borrow_mut();
         let saw = arms.entry(arm).or_default();
         saw.reached += 1;
@@ -502,33 +518,32 @@ fn what_the_kernel_says(run: &NamedRun, along: [&Surface; 2]) -> WhatTheKernelSa
     }
 }
 
-/// The guards of `the_two_surfaces_it_runs_between`, read off the surfaces this
-/// file built rather than off the private function.
+/// Whether an arm caught the pair, as the public answer says, and which one, as
+/// the draw's shape says.
 ///
-/// The third-surface arm's `and != along[0] && and != along[1]` is not repeated
-/// here because the caller has already put those draws in
-/// [`Tally::and_repeated_the_face`] and returned: a draw that reaches this has
-/// an `and` that is neither face. The seam arm is not repeated either, for the
-/// same reason one step earlier — a draw whose nudge folded never reaches this.
+/// An arm that catches a pair hands back `[once, and]`; none catching it hands
+/// back `[once, twice]`, and `and` is never `twice` here — the caller has put
+/// those draws in [`Tally::and_repeated_the_face`] and returned, and a draw
+/// whose nudge folded never gets this far either. Past that, `once` and `twice`
+/// are one kind of surface, so which arm caught it is only whether the faces
+/// are flat, whether `and` is, and how the run is said.
 fn which_arm_the_respelt_pair_reaches(
+    run: &EdgeRun,
     said: HowTheRunIsSaid,
     once: &Surface,
     twice: &Surface,
     and: &Surface,
 ) -> Arm {
+    if which_two_surfaces_a_run_is_between(run, [once, twice]) == [*once, *twice] {
+        return Arm::NoArmCatchesIt;
+    }
     let HowTheRunIsSaid::APieceOfIt { .. } = said else {
         return Arm::AClosedRunCarriesItsSecondSurface;
     };
-    let both_flat = once.as_plane().is_some() && twice.as_plane().is_some();
-    let both_curved = once.as_plane().is_none() && twice.as_plane().is_none();
-    if both_flat && and.as_plane().is_none() {
-        Arm::TwoFlatFacesAndACurvedSecond
-    } else if both_curved && and.as_plane().is_some() {
-        Arm::ACurvedFaceAndAPlane
-    } else if both_curved && and.as_plane().is_none() {
-        Arm::TwoCurvedFacesAndAThirdCurvedOne
-    } else {
-        Arm::NoArmCatchesIt
+    match (once.as_plane().is_some(), and.as_plane().is_some()) {
+        (true, _) => Arm::TwoFlatFacesAndACurvedSecond,
+        (false, true) => Arm::ACurvedFaceAndAPlane,
+        (false, false) => Arm::TwoCurvedFacesAndAThirdCurvedOne,
     }
 }
 

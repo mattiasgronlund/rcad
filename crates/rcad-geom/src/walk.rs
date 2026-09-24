@@ -345,7 +345,7 @@ pub fn walk(
         return Ok(nothing_between_the_ends());
     }
 
-    let pair = the_two_surfaces_it_runs_between(run, along);
+    let pair = which_two_surfaces_a_run_is_between(run.run(), along);
     let conic = match what_a_run_between_these_two_lies_on(pair, run, policy, log)? {
         WhatARunLiesOn::StraightLine => return Ok(nothing_between_the_ends()),
         WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
@@ -477,7 +477,7 @@ pub fn where_a_closed_crossing_starts(
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
     let certified = Policy::certified();
-    let pair = the_two_surfaces_it_runs_between(run, along);
+    let pair = which_two_surfaces_a_run_is_between(run.run(), along);
     match what_a_run_between_these_two_lies_on(pair, run, &certified, log)? {
         WhatARunLiesOn::StraightLine => Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
         WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
@@ -1603,21 +1603,50 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// run whose two faces really do cross names both of them already, so
 /// `rcad-topo`'s `the_surface_that_names_it_twice` puts one of the pair in `and`
 /// — bit for bit, it is one of the two [`Surface`]s that came in. That is the
-/// writer saying "`and` adds nothing here", and it is why this arm asks whether
+/// writer saying "`and` adds nothing here", and it is why this asks whether
 /// `and` is a third surface rather than whether the two faces are one.
-fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Surface; 2] {
+///
+/// **That holds for a closed run too, and it is asked first for both kinds.**
+/// A closed run used to take `[along[0], and]` whatever was either side, so
+/// `and` equal to `along[0]` came back as one surface twice — a pair that names
+/// no crossing at all — while the same edge with its faces listed the other way
+/// round came back as the honest pair. Which face a caller happens to list first
+/// is not a fact about the edge, so the answer may not depend on it; the pair
+/// either side is what both orders agree on (`docs/decisions.md` §23.8, §221.5).
+/// Nothing writes that run today — the fuse puts a cutting surface in `and` only
+/// where both faces are one surface and the cutter is not it, and `rcad-step`
+/// only a surface that is neither face — so this is the answer for a model
+/// built by hand or read back from bytes.
+///
+/// # One answer, read by everyone who asks
+///
+/// [`walk`] and [`where_a_closed_crossing_starts`] read the pair off this, and
+/// `rcad-topo`'s `Model::validate` and mesher read it off this too, so that the
+/// curve a closed edge is checked for winding along is the curve that was
+/// walked. Three copies of this question stood in three places until §221.5,
+/// and two of them had drifted from it: which is the shape §23.8 kept finding.
+///
+/// Asking it twice changes nothing: every pair it hands back names `and` as one
+/// of its two surfaces, or is the pair either side where `and` said nothing, so
+/// handing the answer back in gives the same answer again.
+pub fn which_two_surfaces_a_run_is_between(run: &EdgeRun, along: [&Surface; 2]) -> [Surface; 2] {
     let both_flat = along.iter().all(|side| side.as_plane().is_some());
     let both_curved = along.iter().all(|side| side.as_plane().is_none());
     let a_ball = along
         .iter()
         .find(|side| matches!(side, Surface::Sphere(_)))
         .copied();
-    match run.run() {
+    match run {
+        EdgeRun::RightRoundWhereItCrosses { and } | EdgeRun::PartOfWhereItCrosses { and, .. }
+            if and == along[0] || and == along[1] =>
+        {
+            [*along[0], *along[1]]
+        }
         // A closed run whose two faces are one surface names its second surface
         // the same way a ball's seam does, and for the same reason: the pair
-        // either side is one surface twice and says nothing at all. Ahead of the
-        // `along[0] == along[1]` guard below because it carries no `picked_by`
-        // to fall back on — the edge is the whole of the closed curve.
+        // either side is one surface twice and says nothing at all. It needs no
+        // `along[0] == along[1]` guard because it carries no `picked_by` to fall
+        // back on — the edge is the whole of the closed curve.
         EdgeRun::RightRoundWhereItCrosses { and } => [*along[0], *and],
         EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => [*along[0], *and],
         EdgeRun::PartOfWhereItCrosses { and, .. } if both_flat && and.as_plane().is_none() => {
@@ -1626,14 +1655,11 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
         EdgeRun::PartOfWhereItCrosses { and, .. } if both_curved && and.as_plane().is_some() => {
             [*a_ball.unwrap_or(along[0]), *and]
         }
-        // Two curved faces and a curved `and` that is neither of them: the
-        // second surface the run carries is a third surface, which is what a
-        // reader writes only when the pair either side names nothing. `and`
-        // repeating one of the two faces is the fuse saying the opposite, and
-        // that pair stays where it is.
-        EdgeRun::PartOfWhereItCrosses { and, .. }
-            if both_curved && and.as_plane().is_none() && and != along[0] && and != along[1] =>
-        {
+        // Two curved faces and a curved `and` that is neither of them — the
+        // first arm took the ones that repeat a face: the second surface the run
+        // carries is a third surface, which is what a reader writes only when
+        // the pair either side names nothing.
+        EdgeRun::PartOfWhereItCrosses { and, .. } if both_curved && and.as_plane().is_none() => {
             [*along[0], *and]
         }
         EdgeRun::Straight

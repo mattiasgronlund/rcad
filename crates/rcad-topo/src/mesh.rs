@@ -22,6 +22,7 @@ use std::collections::{HashMap, HashSet};
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
+    which_two_surfaces_a_run_is_between,
 };
 use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
 use rcad_predicates::{
@@ -742,15 +743,16 @@ impl BuildingAMesh {
         // `[ball, ball]`, which [`put_in_the_poles_a_closed_crossing_passes`]
         // reads as a ball crossed with itself and walks straight past. The pair
         // below is the one `rcad_geom::walk` read off the same run to draw the
-        // circle with (`the_two_surfaces_it_runs_between`), so the poles are put
-        // in on the curve that was actually walked.
+        // circle with (`which_two_surfaces_a_run_is_between`), so the poles are
+        // put in on the curve that was actually walked.
         let ends = [from, to].map(|end| back.apply_to_point(end.point()));
         let moved = match run.run() {
-            EdgeRun::RightRoundWhereItsFacesCross => {
-                put_in_the_poles_a_closed_crossing_passes(&mut points, ends, &along)
-            }
-            EdgeRun::RightRoundWhereItCrosses { and } => {
-                put_in_the_poles_a_closed_crossing_passes(&mut points, ends, &[along[0], *and])
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
+                put_in_the_poles_a_closed_crossing_passes(
+                    &mut points,
+                    ends,
+                    &which_two_surfaces_a_run_is_between(run.run(), [&along[0], &along[1]]),
+                )
             }
             EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } | _ => 0.0,
         };
@@ -5157,15 +5159,8 @@ mod tests {
                 "a curved edge of a shape this size takes more than eight pieces"
             );
             let slack = along_it.deviation().magnitude();
-            let has_to_be_on: Vec<Surface> = match run.run() {
-                EdgeRun::PartOfWhereItCrosses { and, .. } if along[0] == along[1] => {
-                    vec![along[0], *and]
-                }
-                EdgeRun::Straight
-                | EdgeRun::RightRoundWhereItsFacesCross
-                | EdgeRun::PartOfWhereItCrosses { .. }
-                | _ => vec![along[0], along[1]],
-            };
+            let has_to_be_on =
+                which_two_surfaces_a_run_is_between(run.run(), [&along[0], &along[1]]);
             for &point in along_it.points() {
                 let at = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
                     Interval::around(coordinate, slack).expect("a bound is a length")

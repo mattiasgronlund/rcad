@@ -126,7 +126,7 @@ pub use crate::torus::{SIDE_OF_TORUS, Torus};
 pub use crate::walk::{
     MOST_POINTS_ALONG_ONE_CROSSING, POINT_ALONG_A_CROSSING_ROUNDOFF,
     POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF, PointsAlongACrossing, ROOM_LEFT_TO_REFINE_A_WALK, walk,
-    where_a_closed_crossing_starts,
+    where_a_closed_crossing_starts, which_two_surfaces_a_run_is_between,
 };
 pub use crate::which_way_a_closed_crossing_turns::which_way_a_closed_crossing_turns;
 
