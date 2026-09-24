@@ -326,18 +326,12 @@ fn where_a_plane_and_a_pipe_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
-    let normal = flat.normal().components();
-    let along = pipe.axis().direction().components();
     let at = [
         PredicatePoint::from(flat.origin().coordinates()),
         PredicatePoint::from(pipe.axis().origin().coordinates()),
     ];
 
-    let leans = Question {
-        named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
-        enclosing: || dot_enclosing(exactly(normal), exactly(along)),
-        exactly: || Exact::dot_of(normal, along),
-    };
+    let leans = how_the_plane_leans_against_the_axis(flat, pipe);
     // Dimensionless: both are direction components of order one. `Measures` has
     // no arm for that and §27.2 declined to add one, on the grounds that level 3
     // always decides such a question and no record would ever be written. It can
@@ -374,6 +368,39 @@ fn where_a_plane_and_a_pipe_cross(
         )?])),
         Decision::Neg => Ok(SurfaceMeet::Nothing),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+}
+
+/// How a plane leans against a pipe's axis: the sign of `n·w`, **proved and
+/// never rounded**.
+///
+/// [`Decision::Zero`] and the plane holds the axis's direction, so it cuts the
+/// pipe in two endless lines, one, or none; anything else and it cuts across in
+/// one ellipse that closes — [`where_a_plane_and_a_pipe_cross`]'s first sign.
+/// [`Decision::Undecidable`] only when a product of a normal component and a
+/// direction component falls into the subnormals and the enclosure straddles
+/// zero: `n·w` is three products of stored `f64`, which level 3 sums exactly
+/// otherwise.
+///
+/// **No [`Policy`], on purpose**, for the reason
+/// [`how_a_plane_leans_against_a_cone`] gives for its own pair: the door in
+/// `rcad-topo` that asks whether this crossing is straight must not be told
+/// `Zero` by a tolerant policy, because a `Zero` it has not earned orders a
+/// closed ellipse along an axis. It gets the cascade and nothing after it.
+pub fn how_a_plane_leans_against_a_pipe(flat: &Plane, pipe: &Cylinder) -> Decision {
+    decide(&how_the_plane_leans_against_the_axis(flat, pipe)).0
+}
+
+/// The sign of `n·w`, as a question rather than an answer, so that
+/// [`where_a_plane_and_a_pipe_cross`] and [`how_a_plane_leans_against_a_pipe`]
+/// ask **one** expression written **once**.
+fn how_the_plane_leans_against_the_axis(flat: &Plane, pipe: &Cylinder) -> impl Predicate {
+    let normal = flat.normal().components();
+    let along = pipe.axis().direction().components();
+    Question {
+        named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+        enclosing: move || dot_enclosing(exactly(normal), exactly(along)),
+        exactly: move || Exact::dot_of(normal, along),
     }
 }
 
@@ -2574,8 +2601,8 @@ pub fn where_a_cones_apex_stands_against_a_plane(flat: &Plane, cone: &Cone) -> D
 ///
 /// The two therefore part company only under a tolerant policy, and only into a
 /// **refusal**: the door gives up where `intersect` would have been given an
-/// answer. That is the same trade `rcad-topo`'s `a_plane_lies_along_a_pipes_axis`
-/// states one row down, for the same reason.
+/// answer. [`how_a_plane_leans_against_a_pipe`] makes the same trade for a pipe,
+/// for the same reason.
 ///
 /// # This used to be rounded, and it said a closed ellipse was an endless line
 ///

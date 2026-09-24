@@ -63,11 +63,10 @@ use core::cmp::Ordering;
 use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
-    SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, intersect, meet_of_three_surfaces,
-    where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
-    which_comes_first_round_a_crossing,
+    SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
+    intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
+    where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
 };
-use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
     ProvenanceLog, orient2d, orient3d, orient3d_of_points,
@@ -4376,30 +4375,6 @@ pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> Optio
     }
 }
 
-/// How many entries the exact dot product of two stored triples can need: one
-/// two-entry product per axis.
-const LONGEST_DOT: usize = 6;
-
-/// The exact dot product of two stored triples, written into `out`.
-///
-/// [`None`] when one of the three products would round, which is what
-/// [`product_is_exact`] is for — not that the answer is zero.
-fn exactly_the_dot_of(one: [f64; 3], other: [f64; 3], out: &mut [f64]) -> Option<usize> {
-    let mut total = [0.0; LONGEST_DOT];
-    let mut len = 0;
-    for axis in 0..3 {
-        if !product_is_exact(one[axis], other[axis]) {
-            return None;
-        }
-        let (high, low) = two_product(one[axis], other[axis]);
-        let mut grown = [0.0; LONGEST_DOT];
-        len = expansion_sum(&total[..len], &[low, high], &mut grown);
-        total[..len].copy_from_slice(&grown[..len]);
-    }
-    out[..len].copy_from_slice(&total[..len]);
-    Some(len)
-}
-
 /// Whether two pipes' axes run along one line, **proved and not rounded**.
 ///
 /// [`Decision::Zero`] when `w₁ × w₂` is nothing, [`Decision::Pos`] when it is
@@ -4481,23 +4456,14 @@ pub(super) fn two_pipes_run_along_one_line(one: &Cylinder, other: &Cylinder) -> 
 /// `how_many_planes_a_rounded_dot_calls_flush_with_an_axis_are_not` says how
 /// common they are rather than leaving it at "possible".
 ///
-/// Three products of stored numbers summed with no rounding thrown away, which
-/// is level 3 of the cascade written out. `product_is_exact` is the guard
-/// against a product that lands in the subnormals, where the exactness this
-/// rests on stops holding; there is no bound to report for one that does, so the
-/// enclosure is infinite and no policy can accept it.
+/// **The sign is `rcad-geom`'s [`how_a_plane_leans_against_a_pipe`]**, the very
+/// question `intersect` splits the plane-and-pipe row on, so this door and the
+/// intersector ask one expression of one pair of stored directions (§23.8).
+/// This used to carry its own copy in expansion arithmetic; the cascade's level
+/// 3 is that same exact sum behind the same `product_is_exact` guard, and level
+/// 2 in front of it can only settle more pairs, never fewer.
 pub(super) fn a_plane_lies_along_a_pipes_axis(flat: &Plane, pipe: &Cylinder) -> Decision {
-    let mut reach = [0.0; LONGEST_DOT];
-    let Some(len) = exactly_the_dot_of(
-        flat.normal().components(),
-        pipe.axis().direction().components(),
-        &mut reach,
-    ) else {
-        return Decision::Undecidable {
-            enclosure: f64::INFINITY,
-        };
-    };
-    expansion_sign(&reach[..len])
+    how_a_plane_leans_against_a_pipe(flat, pipe)
 }
 
 /// The name the question of whether a plane holds a direction goes by in
