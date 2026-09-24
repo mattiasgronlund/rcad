@@ -116,6 +116,40 @@ fn a_closed_run_named_the_second_way_is_refused_on_a_parabola_and_not_walked() {
     );
 }
 
+/// The one other place in `walk` that names the first variant alone and can
+/// see a second-way run at all: the guarded `[Cone, Cone]` arm that hands back
+/// the circle a closed run round one cone lies on.
+///
+/// A second-way run reaches that pair only by naming the face's own cone as its
+/// `and`, which says the second surface is the surface that already named
+/// nothing — so there is no curve for a circle to be built through, and it
+/// refuses. A refusal and not a wrong answer, so the arm is left as it is.
+#[test]
+fn a_second_way_run_whose_second_surface_is_the_cone_itself_refuses() {
+    let cone = Surface::Cone(a_right_angled_cone());
+    let run = NamedRun::new(
+        EdgeRun::RightRoundWhereItCrosses { and: cone },
+        [a_place([3.0, 0.0, 3.0]); 2],
+    )
+    .expect("one point at both ends is a closed run");
+
+    let drawn = walk(
+        &run,
+        [&cone, &cone],
+        Deflection::of(0.008).expect("a positive length"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+
+    assert!(
+        matches!(
+            drawn,
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        ),
+        "a cone named against itself names no curve to go right round, got {drawn:?}"
+    );
+}
+
 /// The same refusal the first-way run has always had at that site, so the two
 /// now agree. The faces either side name the pair themselves here, which is
 /// what that variant means.
