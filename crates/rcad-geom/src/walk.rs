@@ -1563,17 +1563,29 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// §176.2). Two planes cross in a straight line or nowhere, so a run between
 /// them that names a curved surface can only mean that surface.
 ///
-/// **A ball and another curved face that name a plane are a ball and that
-/// plane.** Where a ball meets a pipe of its own radius centred on its axis the
-/// two touch all the way round a circle and never cross, so the marcher has no
-/// crossing to follow, and as written down the ball's centre is `2.1e-16` off
-/// the pipe's axis, so no closed form certified by exact signs can place the
-/// circle either (`kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`,
-/// `docs/decisions.md` §189.3). The run's plane is the circle's own, and a plane
-/// crosses a ball in one circle, which is drawn directly. Nothing the kernel
-/// builds names a plane there — its own runs name one of the two faces — so
-/// the name is a reader's, and `rcad-step` writes it only for a circle it has
-/// checked lies on every face along it.
+/// **Two curved faces that name a plane are a face and that plane** — the ball
+/// if one of them is a ball, and otherwise the first face. Where a ball meets a
+/// pipe of its own radius centred on its axis the two touch all the way round a
+/// circle and never cross, so the marcher has no crossing to follow, and as
+/// written down the ball's centre is `2.1e-16` off the pipe's axis, so no closed
+/// form certified by exact signs can place the circle either
+/// (`kicad/LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`, `docs/decisions.md`
+/// §189.3). A pipe, a cone or a torus written twice a hair apart is the same
+/// failure one kind over: the two spellings cross nowhere near the rim the run's
+/// plane names, and the pair either side loses it (§220.4). The run's plane is
+/// the circle's own, and it crosses the face in that circle, which is drawn
+/// directly.
+///
+/// **This trusts the plane, and the trust is earned upstream, not here.** A
+/// plane crosses a torus in up to two circles and a slanted pipe in an ellipse,
+/// so a plane that is not the curve's own would hand back a curve nobody drew.
+/// Nothing the kernel builds names a plane beside two curved faces — its own
+/// runs name one of the two faces, or, on a seam, have both faces the one
+/// surface and are caught above. So the name is a reader's, and `rcad-step`
+/// writes a plane there only for a circle it has checked lies on every face
+/// along it, and one of the two faces everywhere else — every ellipse, and
+/// every arc along a cone or a torus. Moving that check moves this arm's
+/// premise.
 ///
 /// **Two curved faces that name a third curved surface are a face and that
 /// surface.** This is the paragraph above one surface up, and it is the one
@@ -1610,10 +1622,8 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
         EdgeRun::PartOfWhereItCrosses { and, .. } if both_flat && and.as_plane().is_none() => {
             [*along[0], *and]
         }
-        EdgeRun::PartOfWhereItCrosses { and, .. }
-            if both_curved && and.as_plane().is_some() && a_ball.is_some() =>
-        {
-            [*a_ball.expect("the guard found a ball"), *and]
+        EdgeRun::PartOfWhereItCrosses { and, .. } if both_curved && and.as_plane().is_some() => {
+            [*a_ball.unwrap_or(along[0]), *and]
         }
         // Two curved faces and a curved `and` that is neither of them: the
         // second surface the run carries is a third surface, which is what a

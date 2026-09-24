@@ -15,8 +15,9 @@
 //! Two runs that must agree, and they must agree **exactly**, not within a
 //! tolerance. Every arm of `the_two_surfaces_it_runs_between` that fires hands
 //! back `[along[0], and]`: the seam arm does, the two flat faces arm does, the
-//! ball-and-plane arm does (`a_ball` is `along[0]` whenever `along[0]` is the
-//! ball), and the third-surface arm does. So a pair that reaches any of them is
+//! curved-face-and-plane arm does (it takes the ball if there is one and
+//! `along[0]` otherwise, and here both faces are the same kind), and the
+//! third-surface arm does. So a pair that reaches any of them is
 //! handed to `what_a_run_between_these_two_lies_on` as the *same two surfaces*
 //! the bit-identical pair is handed, and the answer is bit for bit the same
 //! point and the same list of points. A tolerance here would be admitting a
@@ -63,24 +64,33 @@
 //! believed.
 //!
 //! Four arms are reached and agree. The fifth bucket is the **fallthrough**, and
-//! it is a defect this file reports rather than fixes: two curved faces a hair
-//! apart whose run names a **plane**, where the face is not a ball, fall through
-//! `both_curved && and.as_plane().is_some() && a_ball.is_some()` — that arm is
-//! §189.3's and it asks for a ball by name. A pipe, a cone or a torus written
-//! twice with a plane `and` therefore goes to the pair either side, which is two
-//! nearly-coincident curved surfaces, and answers something else entirely.
-//! `a_pipe_written_twice_a_hair_apart_walks_the_circle_its_plane_names` below is
-//! that defect as one case, `#[ignore]`d because the kernel gets it wrong today.
-//! The property counts the bucket and insists at least one draw in it disagrees,
-//! so closing the gap fails this file loudly instead of leaving a dead bucket.
+//! since §220.4 all that reaches it is two flat faces whose run names a third
+//! plane: a straight line, with no closed crossing to start on either way.
 //!
-//! **That bucket is also the proof this comparison is not a tautology.** A
+//! Until then the fallthrough was a defect. §189.3's arm asked for a **ball**
+//! by name — `both_curved && and.as_plane().is_some() && a_ball.is_some()` — so
+//! a pipe, a cone or a torus written twice with a plane `and` went to the pair
+//! either side, two nearly-coincident curved surfaces, and answered something
+//! else entirely. `docs/decisions.md` §220.4 measured that bucket disagreeing
+//! with its control 405 times out of 592 on the shipped corpus.
+//! `a_pipe_written_twice_a_hair_apart_walks_the_circle_its_plane_names` below is
+//! that defect as one case.
+//!
+//! **That measurement is also the proof this comparison is not a tautology.** A
 //! property that hands back `Ok(())` whatever happens is the failure this file
-//! could most easily have been, and the fallthrough answers it directly: the
-//! same comparison, run over draws no arm catches, disagreed 405 times out of
-//! 592 on the shipped corpus. Nothing about the comparison changes between the
-//! buckets — only which arm the pair reaches — so the four that never disagree
-//! are saying something rather than being unable to say anything.
+//! could most easily have been. Nothing about the comparison changes between
+//! the buckets — only which arm the pair reaches — and it did disagree where an
+//! arm was missing, so the arms that never disagree are saying something rather
+//! than being unable to say anything. Put §189.3's guard back and the property
+//! fails again, on a curved face that is not a ball with a plane `and`, and so
+//! does the case below.
+//!
+//! **The arm trusts the plane**, and that trust is earned in `rcad-step`, which
+//! writes a plane beside two curved faces only for a circle it has checked lies
+//! on every face (`the_surface_that_names_the_curve`). This file draws the plane
+//! at random rather than as the circle's own, which is fine here: the pair
+//! written once goes through the seam arm to the same `[face, plane]`, so both
+//! spellings are handed the same surfaces whether or not the plane is honest.
 
 #![forbid(unsafe_code)]
 
@@ -128,7 +138,7 @@ fn a_surface_written_twice_a_few_ulps_apart_names_the_crossing_its_run_names() {
     tally.report();
     tally.every_closed_arm_agreed();
     tally.every_closed_arm_was_reached();
-    tally.the_fallthrough_is_still_open();
+    tally.the_fallthrough_is_only_a_line();
 }
 
 /// One draw: a surface both faces sit on, the second surface the run names,
@@ -231,9 +241,9 @@ enum Arm {
     /// `both_flat && and.as_plane().is_none()`. §176.2's two planes 1.2e-15
     /// apart with a curved `and`.
     TwoFlatFacesAndACurvedSecond,
-    /// `both_curved && and.as_plane().is_some() && a_ball.is_some()`. §189.3's
-    /// ball and curved face naming a plane.
-    ABallAndAPlane,
+    /// `both_curved && and.as_plane().is_some()`. §189.3's ball and curved face
+    /// naming a plane, widened to every curved face by §220.4.
+    ACurvedFaceAndAPlane,
     /// `both_curved && and.as_plane().is_none() && and != along[0] && and !=
     /// along[1]`. §219.1's third-surface arm.
     TwoCurvedFacesAndAThirdCurvedOne,
@@ -245,7 +255,7 @@ enum Arm {
 const EVERY_ARM: [Arm; 5] = [
     Arm::AClosedRunCarriesItsSecondSurface,
     Arm::TwoFlatFacesAndACurvedSecond,
-    Arm::ABallAndAPlane,
+    Arm::ACurvedFaceAndAPlane,
     Arm::TwoCurvedFacesAndAThirdCurvedOne,
     Arm::NoArmCatchesIt,
 ];
@@ -255,7 +265,7 @@ const EVERY_ARM: [Arm; 5] = [
 const EVERY_CLOSED_ARM: [Arm; 4] = [
     Arm::AClosedRunCarriesItsSecondSurface,
     Arm::TwoFlatFacesAndACurvedSecond,
-    Arm::ABallAndAPlane,
+    Arm::ACurvedFaceAndAPlane,
     Arm::TwoCurvedFacesAndAThirdCurvedOne,
 ];
 
@@ -268,12 +278,6 @@ struct Tally {
     /// Draws where `and` is one of the two faces bit for bit, which is the fuse
     /// saying "the honest pair stays" and is not one surface written twice.
     and_repeated_the_face: RefCell<usize>,
-    /// The worst kind of fallthrough, written out: both spellings walked points,
-    /// and walked them to different places. A refusal is loud and an empty walk
-    /// is at least empty; a *different* set of points is §218.6's shape, where
-    /// the kernel answers finitely and wrongly. The report names one rather than
-    /// counting it, and says so when there is none.
-    a_fallthrough_where_both_walked_points: RefCell<Option<String>>,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -319,27 +323,12 @@ impl Tally {
             saw.agreed += 1;
         } else {
             saw.disagreed += 1;
-            if arm == Arm::NoArmCatchesIt
-                && walked_points(&control)
-                && walked_points(&respelt)
-                && self
-                    .a_fallthrough_where_both_walked_points
-                    .borrow()
-                    .is_none()
-            {
-                *self.a_fallthrough_where_both_walked_points.borrow_mut() = Some(format!(
-                    "the face: {once:?}\n  written again: {twice:?}\n  and: {and:?}\n  run: \
-                     {run:?}\n  written once: {control:?}\n  written twice: {respelt:?}"
-                ));
-            }
-            if arm != Arm::NoArmCatchesIt {
-                panic!(
-                    "{arm:?}: one surface written twice named a different crossing from the one \
-                     written once.\n  the face: {once:?}\n  written again: {twice:?}\n  and: \
-                     {and:?}\n  run: {run:?}\n  written once: {control:?}\n  written twice: \
-                     {respelt:?}"
-                );
-            }
+            panic!(
+                "{arm:?}: one surface written twice named a different crossing from the one \
+                 written once.\n  the face: {once:?}\n  written again: {twice:?}\n  and: \
+                 {and:?}\n  run: {run:?}\n  written once: {control:?}\n  written twice: \
+                 {respelt:?}"
+            );
         }
     }
 
@@ -356,17 +345,6 @@ impl Tally {
             self.the_nudge_folded.borrow(),
             self.and_repeated_the_face.borrow()
         );
-        match self
-            .a_fallthrough_where_both_walked_points
-            .borrow()
-            .as_ref()
-        {
-            Some(one) => println!("a fallthrough where both spellings walked points:\n  {one}"),
-            None => println!(
-                "no fallthrough draw walked points both ways, so every disagreement in that \
-                 bucket is a refusal or an empty walk rather than a wrong place"
-            ),
-        }
     }
 
     /// The property itself, restated over the whole run so a green line cannot
@@ -416,11 +394,14 @@ impl Tally {
         );
     }
 
-    /// The bucket that is a defect and not a pass.
+    /// What still falls through is a straight line, and nothing else.
     ///
-    /// It fails when the gap closes, which is the point: the `#[ignore]`d test
-    /// below and this bucket are lifted together.
-    fn the_fallthrough_is_still_open(&self) {
+    /// Since §220.4 the only draw no arm catches is two flat faces whose run
+    /// names a third plane. Three planes cross in a line or nowhere, so there is
+    /// no closed crossing to name a start on, whichever spelling is asked — and
+    /// the pair either side standing costs nothing there. A control that named a
+    /// start in this bucket would be a closed crossing that some arm is missing.
+    fn the_fallthrough_is_only_a_line(&self) {
         let saw = self
             .arms
             .borrow()
@@ -429,15 +410,14 @@ impl Tally {
             .unwrap_or_default();
         assert!(
             saw.reached >= A_DRAW_NO_ARM_CATCHES,
-            "only {} draws fell through every arm, so the bucket this file reports a defect from \
-             is not being drawn: {saw:?}",
+            "only {} draws fell through every arm, so the bucket that says what is left out is \
+             not being drawn: {saw:?}",
             saw.reached
         );
-        assert!(
-            saw.disagreed > 0,
-            "no draw that fell through every arm disagreed with its control, so either the gap is \
-             closed — move this bucket into EVERY_CLOSED_ARM and lift the #[ignore] below — or \
-             the family stopped drawing the shapes that reach it: {saw:?}"
+        assert_eq!(
+            saw.the_control_named_a_start, 0,
+            "a draw no arm catches named a start on a closed crossing, so an arm is missing: \
+             {saw:?}"
         );
     }
 }
@@ -454,9 +434,13 @@ impl Tally {
 /// |---|---|---|
 /// | a closed run carries its second surface | 4048 | 899 |
 /// | two flat faces and a curved second | 606 | 293 |
-/// | a ball and a plane | 131 | 41 |
+/// | a curved face and a plane | 591 | 250 |
 /// | two curved faces and a third curved one | 2706 | 128 |
-/// | no arm catches it | 592 | 209 |
+/// | no arm catches it | 132 | 0 |
+///
+/// The third row was a ball and a plane, at 131 and 41, until §220.4 widened
+/// the arm to every curved face; the 460 draws it gained are the ones the last
+/// row lost, which fell through before.
 ///
 /// Each floor is roughly three quarters of the second column, so it catches a
 /// family that stopped drawing an arm without failing on ordinary drift — the
@@ -473,20 +457,20 @@ impl Tally {
 const EVERY_ARM_AND_ITS_FLOOR: [(Arm, usize); 4] = [
     (Arm::AClosedRunCarriesItsSecondSurface, 675),
     (Arm::TwoFlatFacesAndACurvedSecond, 220),
-    (Arm::ABallAndAPlane, 30),
+    (Arm::ACurvedFaceAndAPlane, 187),
     (Arm::TwoCurvedFacesAndAThirdCurvedOne, 96),
 ];
 
 /// How many draws have to walk a crossing that has points on it, across the four
 /// arms that are closed.
 ///
-/// Measured at 790 + 323 + 41 + 128 = 1282, floored at three quarters. Without
+/// Measured at 790 + 323 + 274 + 128 = 1515, floored at three quarters. Without
 /// it the walking half of every comparison could fall to nothing behind the
 /// naming half, which answers for a conic the walk then refuses to step along.
-const A_WALK_WITH_POINTS_IN_IT: usize = 960;
+const A_WALK_WITH_POINTS_IN_IT: usize = 1136;
 
-/// How many draws have to fall through every arm. Measured at 592.
-const A_DRAW_NO_ARM_CATCHES: usize = 440;
+/// How many draws have to fall through every arm. Measured at 132.
+const A_DRAW_NO_ARM_CATCHES: usize = 99;
 
 /// What both public doors say about a run between these two surfaces.
 ///
@@ -537,11 +521,10 @@ fn which_arm_the_respelt_pair_reaches(
     };
     let both_flat = once.as_plane().is_some() && twice.as_plane().is_some();
     let both_curved = once.as_plane().is_none() && twice.as_plane().is_none();
-    let a_ball = matches!(once, Surface::Sphere(_)) || matches!(twice, Surface::Sphere(_));
     if both_flat && and.as_plane().is_none() {
         Arm::TwoFlatFacesAndACurvedSecond
-    } else if both_curved && and.as_plane().is_some() && a_ball {
-        Arm::ABallAndAPlane
+    } else if both_curved && and.as_plane().is_some() {
+        Arm::ACurvedFaceAndAPlane
     } else if both_curved && and.as_plane().is_none() {
         Arm::TwoCurvedFacesAndAThirdCurvedOne
     } else {
@@ -697,16 +680,12 @@ fn configured(cases: u32) -> Config {
 /// **The gap, as one case.** A pipe written twice a hair apart, with a run that
 /// names the plane its rim lies in.
 ///
-/// §189.3's arm asks for a ball by name — `both_curved && and.as_plane()
+/// §189.3's arm asked for a ball by name — `both_curved && and.as_plane()
 /// .is_some() && a_ball.is_some()` — so a pipe, a cone or a torus written twice
-/// falls through every arm and the pair either side stands. Two pipes 1e-15
+/// fell through every arm and the pair either side stood. Two pipes 1e-15
 /// apart are not the rim's crossing; the rim is where this pipe meets the plane.
-///
-/// Ignored because the kernel gets it wrong today. What is asserted is the
-/// **right** answer, so lifting the `#[ignore]` is the whole of the change once
-/// the arm learns about the other curved kinds.
+/// §220.4 widened the arm to every curved face.
 #[test]
-#[ignore = "open: §189.3's arm names a ball, so a pipe written twice with a plane `and` falls through"]
 fn a_pipe_written_twice_a_hair_apart_walks_the_circle_its_plane_names() {
     let pipe = Surface::Cylinder(
         Cylinder::new(

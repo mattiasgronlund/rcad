@@ -1014,18 +1014,30 @@ impl Walk {
     /// tilted cylinder would do, and which tilt is a choice this reader has no
     /// consumer to make it for (§13).
     ///
-    /// Where a curved face is along the edge the plane stays too: the walk
-    /// reads the faces there, and a cylinder would change what a sphere's seam
-    /// names from a great circle to a tangency.
+    /// Where a flat face and a curved one are along the edge the plane stays
+    /// too: the walk reads the faces there. Where every face is the one surface
+    /// bit for bit — a seam — the plane stays as well, and is the second surface
+    /// the walk reads; a cylinder would change what a sphere's seam names from
+    /// a great circle to a tangency.
     ///
-    /// **Between a ball and another curved face the walk reads the plane**, so
-    /// the plane is written only where the file's circle has been checked to
-    /// lie on every face along it — [`Walk::a_circle_every_face_holds`]. Such a
-    /// circle is on the ball and on the plane, and a plane crosses a ball in
-    /// one circle, so `rcad_geom::walk` draws it from the pair rather than
-    /// following two surfaces that only touch (`docs/decisions.md` §189.3).
-    /// Where the check fails the run names the ball instead, which is one of
-    /// its own two faces, and the walk reads the faces exactly as it did before.
+    /// **Between two curved faces the walk reads the plane**, so the plane is
+    /// written only where the file's circle has been checked to lie on every
+    /// face along it — [`Walk::a_circle_every_face_holds`]. The walk has no way
+    /// to check the plane itself, so the reader does. A ball and a pipe that only touch round the circle
+    /// leave the marcher nothing to follow (`docs/decisions.md` §189.3). A pipe
+    /// written twice a hair apart names two nearly-coincident pipes, which
+    /// cross nowhere near the rim (§220.4). In both the plane crosses a face in
+    /// the file's circle, and `rcad_geom::walk` draws it from that pair.
+    ///
+    /// **Where the check fails the run names one of its own faces instead** —
+    /// the ball if there is one, since the ball is the face the walk pairs with
+    /// the plane — so the walk reads the two faces exactly as it did before the
+    /// plane was read at all. That is every `ELLIPSE`, and every arc along a
+    /// cone or a torus, which [`a_surface_holds_the_circle`] has no bound for:
+    /// a plane crosses a torus in two circles and a slanted pipe in an ellipse,
+    /// so an unchecked plane written there would hand the walk a curve the
+    /// file never drew. A plane beside two curved faces therefore always means
+    /// a circle every face holds.
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1039,10 +1051,10 @@ impl Walk {
             why,
         };
         let faces_along_it = self.surfaces_along_each_edge.get(&edge_curve);
-        if let Some(ball) = faces_along_it.and_then(|faces| a_ball_where_curved_faces_meet(faces))
+        if let Some(face) = faces_along_it.and_then(|faces| a_face_where_curved_faces_meet(faces))
             && !self.a_circle_every_face_holds(reading, edge_curve, curve, keyword, place)?
         {
-            return Ok(Surface::Sphere(ball));
+            return Ok(face);
         }
         let only_flat_faces_along_it =
             faces_along_it.is_some_and(|faces| faces.iter().all(|face| face.as_plane().is_some()));
@@ -1693,6 +1705,20 @@ fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
         .filter(|surface| surface.as_plane().is_none())
         .copied()
         .min_by(Surface::how_it_sorts_against)
+}
+
+/// The face a run names where every face along it is curved and they are not
+/// all one surface: the ball if there is one, and otherwise the first face.
+///
+/// The ball first, because it is the face `rcad_geom::walk` pairs with a plane
+/// when there is one, so a run naming it rather than another face changes
+/// nothing a ball's run did before §220.4.
+fn a_face_where_curved_faces_meet(faces: &[Surface]) -> Option<Surface> {
+    let all_curved = faces.len() >= 2 && faces.iter().all(|face| face.as_plane().is_none());
+    if !all_curved || the_faces_along_it_name_no_crossing(faces) {
+        return None;
+    }
+    Some(a_ball_where_curved_faces_meet(faces).map_or(faces[0], Surface::Sphere))
 }
 
 /// The ball among the faces along an edge, when every face along it is curved

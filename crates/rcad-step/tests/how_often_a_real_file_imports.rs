@@ -26,7 +26,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rcad_geom::Deflection;
+use rcad_geom::{Deflection, EdgeRun, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile, Value};
 use written_by_hand::{a_block, a_quarter_disc_plate};
@@ -485,6 +485,7 @@ fn how_often_a_real_file_imports() {
 
     let mut kicad_imports: BTreeSet<String> = BTreeSet::new();
     let mut every_corner_miss: Vec<f64> = Vec::new();
+    let mut planes_between_curved_faces = PlanesBetweenCurvedFaces::default();
     for source in ["nist", "kicad"] {
         let files = files_under(&root.join(source));
         assert!(
@@ -516,6 +517,7 @@ fn how_often_a_real_file_imports() {
                     for (keyword, count) in import.shapes_this_reader_did_not_take() {
                         *tally.walked_past.entry(keyword).or_default() += count;
                     }
+                    planes_between_curved_faces.saw(&name_of(path), import.model());
                     import
                         .model()
                         .validate(&Policy::certified(), &mut log)
@@ -582,7 +584,122 @@ fn how_often_a_real_file_imports() {
     }
     assert_a_corner_off_its_surface_is_two_problems(&every_corner_miss);
     assert_pinned_kicad_imports(&kicad_imports);
+    planes_between_curved_faces.assert_every_one_was_checked();
 }
+
+/// Every arc an imported file names by a plane between two curved faces, and
+/// the ones that could not have been checked.
+///
+/// `rcad_geom::walk` pairs such a plane with one of the faces and walks where
+/// the two cross, without asking the other face (`docs/decisions.md` §189.3,
+/// widened to every curved face by §220.4). So the plane is only safe to write
+/// where the reader has checked the file's circle lies on every face, and
+/// `rcad-step` has that check for a ball and a pipe alone. The check is gone by
+/// the time the model is built, so this asks what it would have had to be true
+/// of: a circle can lie on any ball, but on a pipe only if its plane is square
+/// to the pipe's axis. A plane beside a cone or a torus, or leaning off a pipe,
+/// is one nobody checked. Until §220.4 the reader wrote one beside every arc
+/// between two curved faces, ellipses where two pipes cross among them.
+#[derive(Default)]
+struct PlanesBetweenCurvedFaces {
+    checked: usize,
+    unchecked: Vec<String>,
+    the_most_a_square_pipe_leans: f64,
+}
+
+/// The sine of the angle between a plane's normal and a pipe's axis.
+fn how_far_a_pipe_leans_off_square(normal: Vector, axis: Vector) -> f64 {
+    let normal = normal.normalized().expect("a plane's normal has a length");
+    let axis = axis.normalized().expect("an axis has a length");
+    normal.cross(axis).length()
+}
+
+/// How far a pipe's axis may lean off the normal of a plane a circle on it
+/// lies in, as a sine.
+///
+/// Not a modelling tolerance and not what the reader checks — the reader's
+/// check is `a_circle_every_face_holds`, in the reader. This only tells a circle's plane from an
+/// ellipse's, which lean by a large angle or not at all: the corpus's worst
+/// square pipe leans `2.7e-15`, printed beside the count, and the mitre named
+/// under [`A_PLANE_BETWEEN_CURVED_FACES`] leans `0.707`.
+const A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST: f64 = 1e-12;
+
+impl PlanesBetweenCurvedFaces {
+    fn saw(&mut self, file: &str, model: &rcad_topo::Model) {
+        for edge in model.edges() {
+            let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run() else {
+                continue;
+            };
+            let Some(flat) = and.as_plane() else {
+                continue;
+            };
+            let faces: Vec<Surface> = edge
+                .neighbouring_faces()
+                .map(|face| model.face(face).expect("a face this edge names").surface())
+                .collect();
+            let all_curved = faces.len() >= 2 && faces.iter().all(|f| f.as_plane().is_none());
+            if !all_curved || faces.windows(2).all(|pair| pair[0] == pair[1]) {
+                continue;
+            }
+            // A ball holds a circle in any plane, a pipe one in a plane square
+            // to its axis, and nothing else has a check in the reader at all.
+            let a_circle_on_it_could_be_on_every_face = faces.iter().all(|face| {
+                let Surface::Cylinder(pipe) = face else {
+                    return matches!(face, Surface::Sphere(_));
+                };
+                let lean = how_far_a_pipe_leans_off_square(flat.normal(), pipe.axis().direction());
+                let square = lean <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST;
+                if square {
+                    self.the_most_a_square_pipe_leans = self.the_most_a_square_pipe_leans.max(lean);
+                }
+                square
+            });
+            if a_circle_on_it_could_be_on_every_face {
+                self.checked += 1;
+            } else {
+                self.unchecked
+                    .push(format!("{file}: {faces:?} and {and:?}"));
+            }
+        }
+    }
+
+    /// Floored as well as checked, so a corpus that stopped reaching such an
+    /// arc would not leave this green over nothing.
+    fn assert_every_one_was_checked(&self) {
+        println!(
+            "planes between two curved faces: {} a check could pass, {} it could not; the most a \
+             square pipe leans is {:e}",
+            self.checked,
+            self.unchecked.len(),
+            self.the_most_a_square_pipe_leans
+        );
+        assert!(
+            self.unchecked.is_empty(),
+            "{} arcs name a plane between curved faces no circle check covers, the first: {}",
+            self.unchecked.len(),
+            self.unchecked[0]
+        );
+        assert!(
+            self.checked >= A_PLANE_BETWEEN_CURVED_FACES,
+            "only {} imported arcs name a plane between two curved faces, so this check looked at \
+             almost nothing",
+            self.checked
+        );
+    }
+}
+
+/// How many imported arcs have to name a plane between two curved faces.
+///
+/// Measured at 354 on 2026-09-24, with 0 a check could not have passed, by
+///
+/// ```text
+/// mise exec -- just t -p rcad-step --no-capture -E 'test(=how_often_a_real_file_imports)'
+/// ```
+///
+/// and floored at three quarters. Before §220.4 the same files held 848, and 494
+/// of them were planes no check could have passed — the first a mitre where two
+/// pipes of `Relay_DPDT_FCL_FTR-B4C.step` cross in an ellipse at 45°.
+const A_PLANE_BETWEEN_CURVED_FACES: usize = 265;
 
 /// A corner off the surface it is meant to be on is **two** problems, and both
 /// corpora together have to hold both or the report is describing a corpus this
