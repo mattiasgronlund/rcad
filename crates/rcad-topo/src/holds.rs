@@ -643,35 +643,32 @@ fn is_one_circle_cut_in_two(
 /// round discs, or a sphere cut by planes through its centre — with the face's
 /// boundary on its boundary, so the face is all of it.
 ///
-/// **A cone leaves a round disc on a plane square to its axis, and that is the
-/// whole of why one is admitted.** Such a plane meets the cone in a circle
-/// round the axis, on the one nappe its own side of the apex, and the part of
-/// it inside the cone is the disc that circle bounds — convex, so the plane cut
-/// by it and by half-planes is still one piece. **A leaned plane is refused and
-/// stays refused**, and that is a limit rather than a gap: leaned far enough it
-/// cuts both nappes in a hyperbola, and the part of the plane inside the cone is
-/// then *two* regions with nothing between them, which is exactly the
-/// connectedness this argument rests on. Between the two lies the ellipse,
-/// which is one convex region and would do — and since §208.6 there is an exact
-/// sign that tells it from a hyperbola,
-/// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by).
-/// This function still takes only the family square to the axis, which is the
-/// family every cap in this kernel is in, and that is a **gap** now rather than
-/// a limit: the sign exists and this argument has not been rewritten to rest on
-/// it. `fuse/select.rs`'s `in_the_bulge_of` used to refuse the same two for the
-/// same reason and no longer does — it admits a cone's closed crossing (§208.6)
-/// and a pipe's (§219).
+/// **A cone leaves one convex region on a plane it cuts in a closed curve, and
+/// that is the whole of why one is admitted.** Square to the axis the curve is
+/// a circle and the region its disc; leaned less than the cone's own half angle
+/// it is an ellipse and the region the ellipse's inside. Either is convex, so the
+/// plane cut by it and by half-planes is still one piece. The sign that tells
+/// those from the parabola and the hyperbola is §208.6's
+/// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by),
+/// and [`is_a_family_this_follows`] reads it — it has since §211, which is why
+/// the leaned lids of `tests/a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse.rs`
+/// are answered on the base that §219.8 called this a gap on. **A plane leaned
+/// past that is refused and stays refused**, and that is a limit: it cuts both
+/// nappes in a hyperbola, and the part of the plane inside the cone is then *two*
+/// regions with nothing between them, which is exactly the connectedness this
+/// argument rests on.
 ///
 /// **Only the family where each step of that is a sign is taken**: a flat face
 /// whose curved sides are arcs of a ball it lies inside or of a cone it lies
-/// inside square to, and a sphere face whose sides are arcs cut by planes
-/// through its centre. Each arc must be picked by a half-space that tells it
-/// from its sibling ([`the_way_into_an_arc`]), which asks the picker either to
-/// hold both its ends exactly or to have the arc's whole circle in front of it
-/// with that circle's centre behind — and the cone's rim arc earns that the
-/// same way a ball's does, because square to the axis its circle's centre is
-/// where the axis crosses the plane and the same exact polynomial reads it.
-/// Anything else is refused by name, as before.
+/// inside and crosses in a closed curve, a sphere face whose sides are arcs cut
+/// by planes through its centre, and a cone face cut by planes as
+/// [`is_a_family_this_follows`] sets out. Each arc must be picked by a
+/// half-space that tells it from its sibling ([`the_way_into_an_arc`]), which
+/// asks the picker either to hold both its ends exactly or to have the arc's
+/// whole curve in front of it with that curve's centre behind — and a cone's
+/// ellipse earns that the same way a ball's circle does, through
+/// [`where_a_closed_crossing_is_centred`]. Anything else is refused by name, as
+/// before.
 ///
 /// **All of that is asked of the face where it is stored, and only `point` is
 /// asked where it sits** (§168). Each step is a property a movement keeps —
@@ -1198,7 +1195,38 @@ pub(crate) fn where_a_closed_crossing_is_centred(
 /// `tests/a_plane_cut_along_a_cones_other_nappe.rs`, is those two points through
 /// the public [`SolidView::face_holds_the_point`].
 ///
-/// **An apex strictly behind a cut is refused, and that is a limit and not a
+/// # And one cut the apex is behind, when it closes, beside at most one other
+///
+/// The lens of `tests/a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse.rs` is
+/// a cone face between two lids with the apex behind the lower one, and the
+/// argument above does not reach it. What does: let the cut the apex is behind
+/// keep `g + t·a(φ) ≥ 0` along the ruling at `φ`, with `g < 0` its value at the
+/// apex and `a(φ)` how fast it grows. That the plane cuts the cone in a **closed
+/// curve** — §208.6's sign, [`Cone::is_cut_in_a_closed_curve_by`] — is exactly
+/// that no ruling runs along it, so `a(φ)` never changes sign on a nappe, and it
+/// is positive on the nappe the curve is on, which is the face's own, since a
+/// side of the face runs along that curve. So every ruling of the face's nappe
+/// crosses the cut once, at `α(φ) = −g/a(φ)`, and keeps everything past it.
+///
+/// With **no other cut**, every ruling keeps its whole half-line past `α`, and
+/// the region is a band round the cone — one piece. With **one other cut**,
+/// `h + t·b(φ) ≥ 0` with `h ≥ 0`, a ruling carries a point exactly when `α(φ)`
+/// satisfies it, which, multiplied through by `a(φ) > 0`, is
+/// `h·a(φ) − g·b(φ) ≥ 0`. Both `a` and `b` are affine in `cos φ` and `sin φ`, so
+/// that is one arc of the circle of rulings, or all of it, or none; over it the
+/// points `α(φ)` run along one unbroken curve, and each ruling's piece hangs off
+/// that curve. One piece.
+///
+/// **Two or more others is where it stops, and that is a limit even when every
+/// cut closes.** Each other cut gives its own arc and two arcs can meet in two:
+/// `one_plane_behind_the_apex_and_two_in_front_leave_a_nappe_in_two_pieces`
+/// below is a floor that cuts a circle and two roofs that each cut an ellipse,
+/// whose region is two pieces round `±90°` with nothing along `±x`. Telling that
+/// apart from a three-cut region that is one piece wants the arcs' ends compared,
+/// which is where two roofs meet on the cone — a part with no named consumer
+/// (§13); the lens, the one face that asked, has two cuts.
+///
+/// **Two cuts the apex is behind are refused, and that is a limit and not a
 /// gap.** There the region really can be two pieces. On the cone of slope one
 /// about `+z`, keep `x + z/√2 ≥ 1` and `−x + z/√2 ≥ 1`; the apex is a whole unit
 /// behind each. Along the ruling at angle `φ` the first grows at
@@ -1236,12 +1264,23 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         }
         Surface::Cone(cone) => {
             let apex = PredicatePoint::from(cone.apex().coordinates());
-            cuts.iter().all(|cut| {
-                cut.surface.as_plane().is_some_and(|flat| {
-                    let where_the_apex_sits = flat.side_of_point(apex);
-                    where_the_apex_sits == Decision::Zero || where_the_apex_sits == cut.kept
-                })
-            })
+            let mut behind = Vec::new();
+            for cut in cuts {
+                let Some(flat) = cut.surface.as_plane() else {
+                    return false;
+                };
+                match flat.side_of_point(apex) {
+                    Decision::Zero => {}
+                    sits if sits == cut.kept => {}
+                    Decision::Pos | Decision::Neg => behind.push(flat),
+                    Decision::Undecidable { .. } | _ => return false,
+                }
+            }
+            match behind.as_slice() {
+                [] => true,
+                [flat] => cuts.len() <= 2 && cone.is_cut_in_a_closed_curve_by(flat) == Some(true),
+                [_, _, ..] => false,
+            }
         }
         Surface::Cylinder(_) | Surface::Torus(_) | _ => false,
     }
@@ -2376,5 +2415,104 @@ mod tests {
             !carries_a_point(0.0) && !carries_a_point(core::f64::consts::PI),
             "the rulings along and against +x carry nothing, which is what parts them"
         );
+    }
+
+    /// Why one cut the apex is behind is followed only beside **one** other cut,
+    /// even when every cut closes.
+    ///
+    /// On the cone of slope a half about `+z`, keep `z ≥ 1`, which the apex is
+    /// behind and which cuts a circle, and `z ≤ 3/2 ± 1.9x`, which the apex is in
+    /// front of and which each cut an ellipse — `1.9` is just under the `2` past
+    /// which they would not close. Along the ruling at `φ` the first keeps
+    /// `t ≥ 1` and each of the others `t ≤ 3/2 / (1 ∓ 0.95 cos φ)`, so a ruling
+    /// carries a point exactly where both of those reach `1`, which is
+    /// `|cos φ| ≤ 0.526…`: **two** runs of rulings, round `±90°`, with the rulings
+    /// along `±x` carrying nothing. Two pieces, and no one answer.
+    ///
+    /// Drop either front cut and what is left is one run, which is the case
+    /// [`is_a_family_this_follows`] takes: with one cut behind and one other, a
+    /// ruling carries a point where a single expression affine in `cos φ` and
+    /// `sin φ` is not negative, and that is one arc of the circle of rulings.
+    #[test]
+    fn one_plane_behind_the_apex_and_two_in_front_leave_a_nappe_in_two_pieces() {
+        let cone = rcad_geom::Cone::new(Axis::z(), 0.5).expect("a positive slope");
+        let cut = |through: [f64; 3], facing: [f64; 3]| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(facing[0], facing[1], facing[2]),
+            )
+            .expect("a normal with a length");
+            assert_eq!(
+                cone.is_cut_in_a_closed_curve_by(&plane),
+                Some(true),
+                "every cut here closes: {facing:?}"
+            );
+            Cut {
+                surface: Surface::Plane(plane),
+                placed: Surface::Plane(plane),
+                kept: Decision::Pos,
+                corners_on_it: Vec::new(),
+            }
+        };
+        let floor = || cut([0.0, 0.0, 1.0], [0.0, 0.0, 1.0]);
+        let one_roof = || cut([0.0, 0.0, 1.5], [1.9, 0.0, -1.0]);
+        let other_roof = || cut([0.0, 0.0, 1.5], [-1.9, 0.0, -1.0]);
+
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        assert_eq!(side_of_surface(&floor().surface, apex), Decision::Neg);
+        assert_eq!(side_of_surface(&one_roof().surface, apex), Decision::Pos);
+        assert_eq!(side_of_surface(&other_roof().surface, apex), Decision::Pos);
+
+        let three = [floor(), one_roof(), other_roof()];
+        assert!(
+            !is_a_family_this_follows(&Surface::Cone(cone), &three),
+            "one cut behind the apex and two others are refused"
+        );
+        assert_eq!(runs_of_rulings_that_carry_a_point(&three), 2);
+
+        let two = [floor(), one_roof()];
+        assert!(
+            is_a_family_this_follows(&Surface::Cone(cone), &two),
+            "one cut behind the apex that closes, and one other, are followed"
+        );
+        assert_eq!(runs_of_rulings_that_carry_a_point(&two), 1);
+    }
+
+    /// How many runs of the rulings of the slope-one-half cone about `+z` carry a
+    /// point in front of every cut, walked a tenth of a degree at a time.
+    ///
+    /// A plane's value along a ruling is affine in how far out you have gone, so
+    /// each cut keeps a half-line of it and a ruling carries a point exactly when
+    /// the half-lines meet.
+    fn runs_of_rulings_that_carry_a_point(cuts: &[Cut]) -> usize {
+        let carries_a_point = |angle: f64| {
+            let along = [0.5 * angle.cos(), 0.5 * angle.sin(), 1.0];
+            let (mut from, mut to) = (0.0, f64::INFINITY);
+            for cut in cuts {
+                let plane = cut.surface.as_plane().expect("every cut here is a plane");
+                let normal = plane.normal().components();
+                let rate: f64 = (0..3).map(|axis| normal[axis] * along[axis]).sum();
+                let at_the_apex = -plane.offset();
+                if rate > 0.0 {
+                    from = f64::max(from, -at_the_apex / rate);
+                } else if rate < 0.0 {
+                    to = f64::min(to, -at_the_apex / rate);
+                } else if at_the_apex < 0.0 {
+                    return false;
+                }
+            }
+            from <= to
+        };
+        let how_many = 3600;
+        let round_the_rulings: Vec<bool> = (0..how_many)
+            .map(|step| {
+                carries_a_point(core::f64::consts::TAU * f64::from(step) / f64::from(how_many))
+            })
+            .collect();
+        round_the_rulings
+            .iter()
+            .zip(round_the_rulings.iter().cycle().skip(1))
+            .filter(|(now, next)| !**now && **next)
+            .count()
     }
 }
