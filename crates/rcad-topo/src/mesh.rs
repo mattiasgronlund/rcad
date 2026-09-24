@@ -735,11 +735,24 @@ impl BuildingAMesh {
                 points.reverse();
             }
         }
-        let moved = if *run.run() == EdgeRun::RightRoundWhereItsFacesCross {
-            let ends = [from, to].map(|end| back.apply_to_point(end.point()));
-            put_in_the_poles_a_closed_crossing_passes(&mut points, ends, &along)
-        } else {
-            0.0
+        // **Both kinds of closed run get their poles**, and the pair the second
+        // kind hands over is the run's own and not the two faces. A rim written
+        // [`EdgeRun::RightRoundWhereItCrosses`] has the one surface either side
+        // of it — that is why it carries `and` at all — so the faces say
+        // `[ball, ball]`, which [`put_in_the_poles_a_closed_crossing_passes`]
+        // reads as a ball crossed with itself and walks straight past. The pair
+        // below is the one `rcad_geom::walk` read off the same run to draw the
+        // circle with (`the_two_surfaces_it_runs_between`), so the poles are put
+        // in on the curve that was actually walked.
+        let ends = [from, to].map(|end| back.apply_to_point(end.point()));
+        let moved = match run.run() {
+            EdgeRun::RightRoundWhereItsFacesCross => {
+                put_in_the_poles_a_closed_crossing_passes(&mut points, ends, &along)
+            }
+            EdgeRun::RightRoundWhereItCrosses { and } => {
+                put_in_the_poles_a_closed_crossing_passes(&mut points, ends, &[along[0], *and])
+            }
+            EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } | _ => 0.0,
         };
         if self.points.len() + points.len() > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
