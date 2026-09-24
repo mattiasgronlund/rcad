@@ -51,15 +51,11 @@
 //!
 //! # Nothing else in the tree checks these
 //!
-//! `fuses_that_must_agree.rs` carries the metamorphic properties, and **it has no
-//! cone in it**: its curved family, `CurvedPair`, is a round bar against a block
-//! and a bar against a copy of itself. Grep it for `Cone` and the only hit is the
-//! surface-kind bookkeeping in `WhatItSitsOn`, which describes an answer's
-//! surfaces rather than generating one. So none of commutativity, associativity,
-//! idempotence or absorption has ever run over a cone, and these six were
-//! uncovered until this file. The meeting rows get inclusion and exclusion and
-//! the two ways round here; associativity, idempotence and absorption still
-//! have not run over a cone.
+//! `fuses_that_must_agree.rs` carries the metamorphic properties, and over a cone
+//! it runs commutativity alone, on its `FrustumAndBlock` family. These six rows
+//! were uncovered until this file. The meeting rows get inclusion and exclusion
+//! and the two ways round here; associativity, idempotence and absorption over a
+//! cone are `fuse_laws_over_a_cone.rs`'s.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
