@@ -9,8 +9,11 @@ use rcad_predicates::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::exact::{difference, square_of_expansion};
+use crate::enclosure::{dot_enclosing, exactly};
+use crate::exact::{Exact, difference, square_of_expansion};
+use crate::intersect::{Question, WHERE_A_PLANE_AND_A_PIPE_CROSS};
 use crate::isometry::Isometry;
+use crate::plane::Plane;
 use crate::point::{Axis, Point, Vector};
 use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::{Error, Result};
@@ -180,6 +183,46 @@ impl Cylinder {
             from_origin.dot(and).atan2(from_origin.dot(across)),
             from_origin.dot(self.axis.direction()),
         )
+    }
+
+    /// Whether `flat` cuts this pipe in a curve that **closes**; [`None`] when
+    /// the sign cannot be proved.
+    ///
+    /// [`Cone::is_cut_in_a_closed_curve_by`](crate::Cone::is_cut_in_a_closed_curve_by)'s
+    /// question asked of a pipe, and it is the easier of the two. A pipe has no
+    /// apex to dispose of first and no nappe on the far side, so there is one
+    /// sign and nothing else: the plane's stored normal `n` against the stored
+    /// axis direction `a`.
+    ///
+    /// ```text
+    /// n·a ≠ 0
+    /// ```
+    ///
+    /// Above or below zero the plane cuts across the pipe and leaves one closed
+    /// curve — an ellipse in general, a circle when the plane is square to the
+    /// axis, and neither is drawn so neither needs telling apart (§24.5).
+    /// Exactly zero and the plane holds the axis's direction, so what it leaves
+    /// is two endless lines, one, or nothing, and none of those closes.
+    ///
+    /// Three products of stored `f64`s summed with nothing thrown away, so no
+    /// vector is normalised and nothing is rounded on the way. `n·a` rounding
+    /// to nothing is not a proof that it is nothing, and
+    /// `arrange.rs`'s `a_plane_lies_along_a_pipes_axis` carries what a rounded
+    /// version of this same sign cost.
+    #[must_use]
+    pub fn is_cut_in_a_closed_curve_by(&self, flat: &Plane) -> Option<bool> {
+        let normal = flat.normal().components();
+        let along = self.axis.direction().components();
+        let leaning = Question {
+            named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+            enclosing: move || dot_enclosing(exactly(normal), exactly(along)),
+            exactly: move || Exact::dot_of(normal, along),
+        };
+        match decide(&leaning).0 {
+            Decision::Pos | Decision::Neg => Some(true),
+            Decision::Zero => Some(false),
+            Decision::Undecidable { .. } | _ => None,
+        }
     }
 }
 
@@ -804,5 +847,53 @@ mod tests {
                 enclosure: f64::INFINITY
             }
         );
+    }
+
+    /// A plane square to the axis, one leaned off it, and one holding it.
+    #[test]
+    fn a_plane_closes_round_a_pipe_unless_it_holds_the_axis_direction() {
+        let pipe = unit_pipe_about_z();
+        for normal in [Vector::new(0.0, 0.0, 1.0), Vector::new(0.0, 1.0, 1.0)] {
+            let flat = Plane::from_point_and_normal(Point::origin(), normal).unwrap();
+            assert_eq!(pipe.is_cut_in_a_closed_curve_by(&flat), Some(true));
+        }
+        let along_it = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+            .expect("a plane holding the z axis");
+        assert_eq!(pipe.is_cut_in_a_closed_curve_by(&along_it), Some(false));
+    }
+
+    /// A pair whose `f64` dot product is exactly nothing and whose real one is
+    /// not: the crossing closes, and a rounded spelling of this would say it
+    /// does not.
+    ///
+    /// The two directions are `arrange.rs`'s
+    /// `a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not`, where the same
+    /// sign decides whether a closed ellipse gets ordered along a straight line.
+    /// Here it decides whether the bulge of that ellipse is counted, and reading
+    /// the rounded dot would cost a refusal rather than a wrong answer — but a
+    /// refusal on a pair nothing has run out of arithmetic on.
+    #[test]
+    fn a_plane_a_rounded_dot_calls_flush_with_a_pipes_axis_still_closes_round_it() {
+        let normal = Vector::new(
+            0.082_988_092_356_092_5,
+            -0.977_481_762_337_168_9,
+            0.194_016_444_729_097_85,
+        );
+        let along = Vector::new(
+            0.292_520_127_841_236_6,
+            -0.162_218_223_338_325_75,
+            -0.942_399_714_996_085_8,
+        );
+        let flat = Plane::from_point_and_normal(Point::origin(), normal).unwrap();
+        let pipe = Cylinder::new(Axis::new(Point::origin(), along).unwrap(), 1.0).unwrap();
+        assert_eq!(flat.normal(), normal, "the plane stores what it was given");
+        assert_eq!(pipe.axis().direction(), along, "and so does the axis");
+        assert_eq!(
+            flat.normal().dot(pipe.axis().direction()),
+            0.0,
+            "the `f64` dot is exactly nothing, which is what a rounded test would read"
+        );
+
+        assert_eq!(pipe.is_cut_in_a_closed_curve_by(&flat), Some(true));
     }
 }

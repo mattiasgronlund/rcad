@@ -521,12 +521,18 @@ fn a_block_whose_wall_touches_a_bar(model: &mut Model) -> Pair {
 /// `arrange.rs`'s `how_a_crossing_runs` carries the four families of fix and why
 /// none of them is small.
 ///
-/// **The control is one coordinate moved by a tenth.** With the wall at
-/// `y = -1.9` it cuts the bar in two curves that really do cross, and the
-/// refusal changes to a different one by name — `Undecidable` over a point
-/// inside a piece of a face, which is §36.28's chord-and-arc gap and has nothing
-/// to do with tangency. Two named outcomes either side of one number is what
-/// says this row is about what it claims.
+/// **The control is one coordinate moved by a tenth, and it is answered.** With
+/// the wall at `y = -1.9` it cuts the bar in two curves that really do cross,
+/// and the fuse goes all the way through. It used to refuse by a different name
+/// — `Undecidable` over a point inside a piece of a face, §36.28's chord-and-arc
+/// gap — and counting a pipe's bulge in `select.rs` closed that, which leaves
+/// this row's control sharper than it was: a refusal on one side of one number
+/// and an answer on the other.
+///
+/// The shared piece is the slab `3 ≤ z ≤ 5` of the bar with `x ≥ 1` and
+/// `y ≤ 1.1`. `x ≥ 1` already forces `|y| ≤ √3`, so the wall at `y = -1.9` cuts
+/// nothing off it and the closed form is the one integral
+/// `∫(√(4 − y²) − 1) dy` from `−√3` to `1.1`.
 ///
 /// A tolerant policy makes no difference, which is the other half: this is a
 /// statement about the shape and not about a budget.
@@ -550,16 +556,20 @@ fn a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction() {
     let mut model = a_model();
     let bar = a_bar(&mut model);
     let crossing = block(&mut model, [2.0, 3.0, 2.0], Vector::new(1.0, -1.9, 3.0));
-    let why = refusal(
-        &mut model,
-        &Pair::of(bar, crossing),
-        Rule::Union,
-        &Policy::certified(),
-    );
+    let united = fused(&mut model, &Pair::of(bar, crossing), Rule::Union);
     assert_eq!(
-        what_it_gave_up_on(&why),
-        "a point inside a piece of a face",
-        "moving the wall off the tangent changes which refusal this is"
+        united.solids().len(),
+        1,
+        "moving the wall off the tangent gets an answer where the tangent refuses"
+    );
+    let shared = 2.0
+        * (0.55 * 2.79_f64.sqrt() + 2.0 * 0.55_f64.asin() + 2.0 * PI / 3.0
+            - 1.1
+            - 3.0_f64.sqrt() / 2.0);
+    measures(
+        volume_of(&model, united.solids()),
+        A_BAR + 12.0 - shared,
+        Side::Under,
     );
 }
 
@@ -875,9 +885,13 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 /// against a cone of slope a sixteenth: the slanted face no longer rests on the
 /// side, it leans across it and meets the cone at the apex alone, and the
 /// refusal changes to a different one by name — `Undecidable` over a point
-/// inside a piece of a face, §36.28's chord-and-arc gap, which is what the bar's
-/// control gives too and has nothing to do with tangency. Two named outcomes
-/// either side of one number is what says this row is about what it claims.
+/// inside a piece of a face, §36.28's chord-and-arc gap, which has nothing to do
+/// with tangency. Two named outcomes either side of one number is what says this
+/// row is about what it claims. The bar's control used to give this same second
+/// name and now gives an answer; this one still gives the name, and the slanted
+/// face here meets the cone at its apex, which is where
+/// `Cone::is_cut_in_a_closed_curve_by` says no closed curve and the bulge is not
+/// counted.
 ///
 /// A tolerant policy makes no difference, which is the other half: this is a
 /// statement about the shape and not about a budget.
@@ -1448,22 +1462,30 @@ fn a_bar_and_two_blocks_on_the_same_planes(model: &mut Model) -> Pair {
     }
 }
 
-/// Two tools meeting on a plane that cuts a round wall are refused, naming the
-/// two rulings where the shared plane meets the bar.
+/// Two tools meeting on a plane that cuts a round wall are answered, and they
+/// give exactly what one tool doing the same cut gives.
 ///
-/// The refusal's own record names `(0, -2, 0)` and `(0, 2, 0)`, which are
-/// exactly the two points where the shared plane `x = 0` touches the cylinder of
-/// radius two — so the entry demonstrably reaches its subject rather than
-/// stopping somewhere else on the way.
-///
-/// **A gap** (§16.10): the answer exists, and it is the one the single-block
-/// control below gives.
+/// **This was the gap §16.10 asked to be classified, and it is closed.** The
+/// refusal was `Undecidable` over *a point inside a piece of a face*, and its
+/// own record named `(0, -2, 0)` and `(0, 2, 0)` — the two points where the
+/// shared plane `x = 0` touches the cylinder of radius two, so the entry was
+/// reaching its subject and not stopping short of it. What could not be placed
+/// was a half of a cap disc: two corners on the rim, an arc between them, and no
+/// polygon for the winding count to find a point in. `select.rs`'s
+/// `in_the_bulge_of` now counts a pipe's arc the way it counts a ball's, and the
+/// two-tool answer is the single-tool answer, which is what §16.10 said the
+/// answer would be.
 #[test]
-fn two_tools_meeting_on_a_plane_that_cuts_a_round_wall_are_refused_by_name() {
+fn two_tools_meeting_on_a_plane_that_cuts_a_round_wall_are_answered() {
     let mut model = a_model();
     let pair = a_bar_and_two_blocks_on_the_same_planes(&mut model);
-    let why = refusal(&mut model, &pair, Rule::Difference, &Policy::certified());
-    assert_eq!(what_it_gave_up_on(&why), "a point inside a piece of a face");
+    let cut = fused(&mut model, &pair, Rule::Difference);
+    assert_eq!(
+        cut.solids().len(),
+        2,
+        "two tools doing one cut leave the bar in two pieces"
+    );
+    measures(volume_of(&model, cut.solids()), PI * 4.0 * 6.0, Side::Under);
 
     let mut model = a_model();
     let bar = a_bar(&mut model);
@@ -1904,20 +1926,32 @@ fn a_turned_notched_bar_is_refused_for_want_of_an_order_along_a_crossing() {
     }
 }
 
-/// A bar cut by one plane that misses its axis refuses for want of a point
-/// inside a piece of a face, which is §36.28's chord-and-arc gap.
+/// A bar cut by one plane that misses its axis is answered, and it used to be
+/// §36.28's chord-and-arc gap.
+///
+/// **This is what counting a pipe's bulge bought.** The piece the fuse could not
+/// place is the part of a cap disc left of `x = 1`: two corners on the rim, an
+/// arc between them, and no polygon at all for the winding count to find a point
+/// in. `select.rs`'s `in_the_bulge_of` counted a ball's arc and a cone's and not
+/// a pipe's, so every candidate wound 0 and the fuse gave up on *a point inside
+/// a piece of a face*. Counting the pipe's arc gives the same piece the same
+/// treatment a half disc of a ball already got.
+///
+/// What is left is the slice of the bar with `x ≤ 1`, whole height. The disc of
+/// radius two with `x ≥ 1` has area `4π/3 − √3` (the tab entry above works it
+/// out), so what stays is `8π/3 + √3` per unit of height.
 #[test]
-fn a_bar_cut_by_one_plane_off_its_axis_is_refused_for_want_of_a_point_inside_a_piece() {
+fn a_bar_cut_by_one_plane_off_its_axis_is_answered() {
     let mut model = a_model();
     let bar = a_bar(&mut model);
     let knife = block(&mut model, [8.0, 8.0, 16.0], Vector::new(1.0, -4.0, -4.0));
-    let why = refusal(
-        &mut model,
-        &Pair::of(bar, knife),
-        Rule::Difference,
-        &Policy::certified(),
+    let cut = fused(&mut model, &Pair::of(bar, knife), Rule::Difference);
+    assert_eq!(cut.solids().len(), 1, "one plane leaves one piece of a bar");
+    measures(
+        volume_of(&model, cut.solids()),
+        8.0 * (8.0 * PI / 3.0 + 3.0_f64.sqrt()),
+        Side::Under,
     );
-    assert_eq!(what_it_gave_up_on(&why), "a point inside a piece of a face");
 }
 
 /// A ball with a pipe through it refuses by name, and it is §36.20's quartic
@@ -2153,7 +2187,7 @@ fn the_rest() -> Vec<Entry> {
             case: Case::Fused {
                 build: a_bar_and_two_blocks_on_the_same_planes,
                 rule: Rule::Difference,
-                outcome: Outcome::GaveUp("a point inside a piece of a face"),
+                outcome: Outcome::Answered,
             },
         },
         Entry {

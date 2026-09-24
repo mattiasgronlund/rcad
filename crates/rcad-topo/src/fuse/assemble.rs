@@ -2826,10 +2826,23 @@ fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Opt
 /// `in_the_bulge_of` and `holds.rs`'s `is_a_family_this_follows`, so the three
 /// cannot drift apart (§23.8, §208.6).
 ///
-/// **A pipe and a plane cut an ellipse that closes too, and it is not named
-/// here.** Nothing above is wrong about it; it is `select.rs`'s bulge count that
-/// does not reach a pipe yet (`in_the_bulge_of`), so a side of one never gets
-/// this far, and a row with no consumer is a row nobody re-derives (§13).
+/// **A pipe and a plane cut an ellipse that closes too, and it is named here.**
+/// It used to be left out because `select.rs`'s bulge count did not reach a
+/// pipe, so no side of one got this far and the row had no consumer (§13).
+/// Counting the pipe there gave it one, and this row is what pays for it:
+/// without it, two arcs of one ellipse between the same corners are named as one
+/// edge and four faces meet along it. With the pipe counted in `select.rs` and
+/// not here,
+/// `two_tools_meeting_on_a_plane_that_cuts_a_round_wall_are_answered` and the
+/// catalogue's coincident-bar row both came back
+/// `ResultIsNotManifold { count: 4 }` — the cost `in_the_bulge_of`'s own doc
+/// warned of, measured rather than quoted, and it is the whole of it.
+///
+/// **A pipe's crossing never loses its direction where this is asked.** The
+/// sign rule needs `∇round × ∇plane` to vanish nowhere along the curve, and a
+/// pipe's gradient is square to its axis while a closed crossing has `n·a ≠ 0`
+/// — so the two can never point the same way. That is stronger than the cone's
+/// version, which has an apex to keep off the plane.
 fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Option<usize> {
     let closes_round = |round: &Surface, flat: &Surface| {
         let flat = flat.as_plane()?;
@@ -2838,6 +2851,9 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
         }
         if let Surface::Cone(cone) = round {
             return cone.is_cut_in_a_closed_curve_by(flat);
+        }
+        if let Surface::Cylinder(pipe) = round {
+            return pipe.is_cut_in_a_closed_curve_by(flat);
         }
         Some(false)
     };
