@@ -600,9 +600,15 @@ fn how_often_a_real_file_imports() {
 /// to the pipe's axis. A plane beside a cone or a torus, or leaning off a pipe,
 /// is one nobody checked. Until §220.4 the reader wrote one beside every arc
 /// between two curved faces, ellipses where two pipes cross among them.
+///
+/// A closed circle between two curved faces that are not one surface bit for
+/// bit is held to the same check since §219.6's closed branch was brought in
+/// line with the arc's, and `closed` counts how many of the checked ones those
+/// are.
 #[derive(Default)]
 struct PlanesBetweenCurvedFaces {
     checked: usize,
+    closed: usize,
     unchecked: Vec<String>,
     the_most_a_square_pipe_leans: f64,
 }
@@ -627,8 +633,10 @@ const A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST: f64 = 1e-12;
 impl PlanesBetweenCurvedFaces {
     fn saw(&mut self, file: &str, model: &rcad_topo::Model) {
         for edge in model.edges() {
-            let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run() else {
-                continue;
+            let (and, closed) = match edge.run() {
+                EdgeRun::PartOfWhereItCrosses { and, .. } => (and, false),
+                EdgeRun::RightRoundWhereItCrosses { and } => (and, true),
+                EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross | _ => continue,
             };
             let Some(flat) = and.as_plane() else {
                 continue;
@@ -656,6 +664,7 @@ impl PlanesBetweenCurvedFaces {
             });
             if a_circle_on_it_could_be_on_every_face {
                 self.checked += 1;
+                self.closed += usize::from(closed);
             } else {
                 self.unchecked
                     .push(format!("{file}: {faces:?} and {and:?}"));
@@ -667,9 +676,10 @@ impl PlanesBetweenCurvedFaces {
     /// arc would not leave this green over nothing.
     fn assert_every_one_was_checked(&self) {
         println!(
-            "planes between two curved faces: {} a check could pass, {} it could not; the most a \
-             square pipe leans is {:e}",
+            "planes between two curved faces: {} a check could pass ({} of them closed), {} it \
+             could not; the most a square pipe leans is {:e}",
             self.checked,
+            self.closed,
             self.unchecked.len(),
             self.the_most_a_square_pipe_leans
         );
