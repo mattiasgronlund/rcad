@@ -384,9 +384,12 @@ impl Model {
     ///
     /// # Errors
     ///
-    /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] for a closed edge, which has
-    /// that name already, and [`Invalid::AnEdgeBendsButNothingAlongItIsCurved`]
-    /// for any other.
+    /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] for either kind of closed
+    /// edge, which has that name already, and
+    /// [`Invalid::AnEdgeBendsButNothingAlongItIsCurved`] for any other. A
+    /// closed run carrying a flat `and` — a closed `ELLIPSE` drawn on a flat
+    /// face, which is §219.6's limit — used to take the second name, the one
+    /// meant for open edges.
     pub(crate) fn check_something_curved_says_where_this_edge_bends(
         &self,
         slot: EdgeSlot,
@@ -401,7 +404,9 @@ impl Model {
             return Ok(());
         }
         Err(match run {
-            EdgeRun::RightRoundWhereItsFacesCross => Invalid::ClosedEdgeBetweenTwoFlatFaces,
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
+                Invalid::ClosedEdgeBetweenTwoFlatFaces
+            }
             EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } | _ => {
                 Invalid::AnEdgeBendsButNothingAlongItIsCurved
             }
@@ -765,8 +770,12 @@ impl Model {
                 let outward = |used: FaceView<'_>| {
                     gradient_of(&used.surface(), at) * used.orientation().sign()
                 };
+                let names_it = what_says_which_way_this_closed_edge_winds(
+                    edge.stored_run(),
+                    [face.surface(), across.surface()],
+                );
                 let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
-                    [&face.surface(), &across.surface()],
+                    [&names_it[0], &names_it[1]],
                     [outward(face), outward(across)],
                     at,
                     turned_by(material, across.orientation()),
@@ -1871,6 +1880,36 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
     }
 }
 
+/// The pair [`a_closed_crossing_is_walked_the_way_it_is_stored`] reads a
+/// winding off: the two faces either side, or the face and the run's own second
+/// surface where neither face is curved.
+///
+/// Two planes cross in a straight line, which does not close, so a closed edge
+/// between two flat faces is named by nothing the pair says. A circle a file
+/// imprinted on a flat face is exactly that — the one plane written twice and a
+/// hair apart — and the run carries the circle's own cylinder, measured, which
+/// is what this hands through (`docs/decisions.md` §219.6).
+///
+/// **This asks the question `rcad-geom`'s `the_two_surfaces_it_runs_between`
+/// already answers**, and §23.8 says two spellings of one question is how two
+/// answers come to disagree. That one is private to `walk.rs` and answers for
+/// this run kind unconditionally, which is order-dependent where `and` repeats
+/// one of the two faces; this one is held to the case the callee refuses on and
+/// nothing wider. Closing it properly means one public answer in `rcad-geom`
+/// that both read.
+fn what_says_which_way_this_closed_edge_winds(run: &EdgeRun, along: [Surface; 2]) -> [Surface; 2] {
+    match run {
+        EdgeRun::RightRoundWhereItCrosses { and } if the_curved_one_of(&along).is_none() => {
+            [along[0], *and]
+        }
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::PartOfWhereItCrosses { .. }
+        | EdgeRun::RightRoundWhereItCrosses { .. }
+        | _ => along,
+    }
+}
+
 /// Whether a wire walks a closed crossing the way that edge is stored running.
 ///
 /// **The closed-edge direction rule, in one place.** A closed edge starts and
@@ -1922,7 +1961,9 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 ///
 /// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`] if neither surface is curved. Two
 /// planes cross in a straight line, which does not close, so no closed edge is
-/// named by a flat pair — this is bad caller input rather than a broken
+/// named by a flat pair. A run that carries the curved surface itself is not a
+/// flat pair at all, and [`what_says_which_way_this_closed_edge_winds`] is
+/// where the caller swaps it in — this is bad caller input rather than a broken
 /// invariant, because `Model` derives `Deserialize` and nothing upstream of
 /// this check has confirmed the edge's own claim is possible
 /// (`docs/decisions.md` §39.7 item 4, not §16.11 — that section is about the
@@ -3930,6 +3971,31 @@ mod tests {
     /// refuse instead.
     #[test]
     fn a_closed_edge_between_two_flat_faces_is_caught() {
+        let model = a_cube_with_one_closed_edge_spliced_in(EdgeRun::RightRoundWhereItsFacesCross);
+
+        assert_eq!(refusal(&model), Invalid::ClosedEdgeBetweenTwoFlatFaces);
+    }
+
+    /// The same shape with a closed run that names a **plane**, which is what a
+    /// closed `ELLIPSE` drawn on a flat face writes — §219.6 leaves that a limit
+    /// rather than a gap, because no single surface this kernel holds crosses a
+    /// plane in a given ellipse without somebody choosing a tilt.
+    ///
+    /// A plane says no more about where a closed edge goes than the two flat
+    /// faces do, so the refusal is the same one. It used to come back as
+    /// [`Invalid::AnEdgeBendsButNothingAlongItIsCurved`], the name meant for
+    /// open edges, because the match named only the older closed variant and
+    /// this one fell into the wildcard — §219.7 item 3.
+    #[test]
+    fn a_closed_edge_whose_run_names_a_plane_is_refused_under_the_closed_name() {
+        let model = a_cube_with_one_closed_edge_spliced_in(EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(the_ground()),
+        });
+
+        assert_eq!(refusal(&model), Invalid::ClosedEdgeBetweenTwoFlatFaces);
+    }
+
+    fn a_cube_with_one_closed_edge_spliced_in(run: EdgeRun) -> Model {
         let mut model = a_cube();
         let corner = model
             .data()
@@ -3938,7 +4004,7 @@ mod tests {
             .next()
             .expect("a cube has corners");
 
-        let closed_edge = model.add_closed_edge(corner);
+        let closed_edge = model.add_edge_running(corner, corner, run);
         let forward = model.add_coedge(closed_edge, Orientation::Forward);
         let backward = model.add_coedge(closed_edge, Orientation::Reversed);
 
@@ -3969,9 +4035,7 @@ mod tests {
         }
         // `data_mut` only touches the downward links; the reverse index that
         // `faces_along_edge` reads is derived and stays stale until rebuilt.
-        let model = Model::from_parts(model.data().clone());
-
-        assert_eq!(refusal(&model), Invalid::ClosedEdgeBetweenTwoFlatFaces);
+        Model::from_parts(model.data().clone())
     }
 
     /// The two faces along a closed crossing must disagree about which way it
