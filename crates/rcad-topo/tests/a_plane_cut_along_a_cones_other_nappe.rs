@@ -35,9 +35,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{Containment, Error, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
 
@@ -279,6 +279,65 @@ fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right() {
             refused: [].into()
         }
     );
+}
+
+/// The cone face round the apex answers for its own nappe and turns the other
+/// one away, which is what `holds.rs`'s `is_on_the_nappe_the_face_is_on` is doing
+/// in front of `what_a_face_cut_by_part_of_a_crossing_holds`.
+///
+/// The intersection of the pointed cone with the side-6 corner-up cube turned
+/// `0.7`: its cone face runs from the apex up to the arcs where the cube's three
+/// upper planes cut the cone, and the apex is strictly inside all three of them,
+/// which is what `is_a_family_this_follows` asks of a cone before it follows one.
+///
+/// **Two of these four points are why the guard is there.** `(0.5, 0, −1)` and
+/// `(1, 0, −2)` are on the cone's *other* nappe, and they are in front of all
+/// three cuts — a cone's surface is both its halves — so without the guard the
+/// face calls them **held**, which is a wrong answer and not a refusal. The other
+/// two fail the other way: without the cone arm of `is_a_family_this_follows` all
+/// four refuse `AFaceTrimmedByACurveThisCannotFollow` instead of answering.
+#[test]
+fn a_cone_face_round_an_apex_holds_its_own_nappe_and_not_the_other() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let case = Case {
+        cone: THE_POINTED_CONE,
+        block: a_corner_up_cube(6.0, 0.0, 0.7),
+        solids: OVERLAPPING,
+    };
+    let (cone, block) = build(&mut model, &case);
+    let answer = model
+        .fuse(
+            &[cone],
+            &[block],
+            Rule::Intersection,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the cube round the apex intersects the cone");
+    let piece = *answer
+        .solids()
+        .first()
+        .expect("an intersection with one piece");
+    let view = model.solid(piece).expect("this model made the key");
+    let skin = view
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Cone(_)))
+        .expect("the intersection keeps a piece of the cone")
+        .key();
+    let asked = |point: Point| {
+        view.face_holds_the_point(
+            skin,
+            PredicatePoint::from(point.coordinates()),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the cone face says")
+    };
+    assert_eq!(asked(Point::new(0.5, 0.0, -1.0)), OnAFace::NotHeld);
+    assert_eq!(asked(Point::new(1.0, 0.0, -2.0)), OnAFace::NotHeld);
+    assert_eq!(asked(Point::new(0.5, 0.0, 1.0)), OnAFace::Held);
+    assert_eq!(asked(Point::origin()), OnAFace::OnItsBoundary);
 }
 
 /// The shape `holds.rs`'s `is_a_family_this_follows` refuses a kept **outside**
@@ -607,6 +666,15 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     // every step here now follows an ellipse arc as it follows a circle's. The
     // count did not budge for that, so whatever leaves 9326 here is something
     // else again and nobody has named it. §211.
+    //
+    // **The cone-face arm of `is_a_family_this_follows` did not move it either.**
+    // That arm lands with
+    // [`a_cone_face_round_an_apex_holds_its_own_nappe_and_not_the_other`] and it
+    // works: the same cube's `Intersection` on the pointed cone now decides
+    // **30 101 of 30 101**, which is the figure §217.4 forecast for it from
+    // 23 094. But the four answers at 9326 are the `Union` and the
+    // block-less-cone `Difference` of that cube, and neither moved by a point. So
+    // whatever holds this floor is not the cone face either.
     //
     // It was three answers and 128 until §212 let the frustum's band be meshed
     // through a hole: the frustum's own `Difference (cone first: false)` was one

@@ -681,6 +681,17 @@ fn is_one_circle_cut_in_two(
 /// face across a side must be stored in the face's own frame for that to hold,
 /// which one shell's faces always are.
 ///
+/// **A cone face is asked which nappe it is on before any of that is read**, the
+/// same [`is_on_the_nappe_the_face_is_on`] [`what_a_curved_face_holds`] asks. It
+/// is asked in both places because neither calls the other: a face with part of a
+/// crossing among its sides comes here instead, and a cone's surface is both its
+/// halves, so without this the part in front of every cut reaches round the apex
+/// onto the far nappe and a point there would come back **held** — a wrong
+/// answer and not a refusal.
+/// [`is_a_family_this_follows`] carries the argument and
+/// `a_cone_face_round_an_apex_holds_its_own_nappe_and_not_the_other` pins the two
+/// points that used to.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] outside that family, and
@@ -713,6 +724,20 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
         return Err(cannot());
     }
 
+    let placed = face.surface();
+    let mut at_the_apex = false;
+    if let Surface::Cone(cone) = placed {
+        match is_on_the_nappe_the_face_is_on(face, &cone, point)? {
+            Decision::Pos => (),
+            Decision::Zero => at_the_apex = true,
+            Decision::Neg => return Ok(OnAFace::NotHeld),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(&placed, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+
     let mut in_front_of_all = true;
     let mut behind_all = true;
     for cut in &cuts {
@@ -726,7 +751,12 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
         }
     }
     if in_front_of_all {
-        held_in_front_of_all(&cuts, point)
+        let held = held_in_front_of_all(&cuts, point)?;
+        Ok(if at_the_apex && held == OnAFace::Held {
+            OnAFace::OnItsBoundary
+        } else {
+            held
+        })
     } else if behind_all && matches!(surface, Surface::Sphere(_)) {
         held_in_front_of_any(&cuts, point)
     } else {
@@ -1051,9 +1081,17 @@ pub(crate) fn where_a_closed_crossing_is_centred(
     }
 }
 
-/// Whether the part of `surface` in front of every cut is connected and has
-/// arcs of circles for sides — the two things
-/// [`what_a_face_cut_by_part_of_a_crossing_holds`]'s argument rests on.
+/// Whether the part of `surface` in front of every cut is **one piece** — the
+/// thing [`what_a_face_cut_by_part_of_a_crossing_holds`]'s argument rests on.
+///
+/// **It says nothing about the sides, and it used to claim to.** Until 2026-09-24
+/// this line promised "arcs of circles for sides" as a second thing checked here,
+/// which no arm of it ever read and which was false of the arms it did have: a
+/// leaned plane's crossing with a cone is an *ellipse*, admitted since §211, and
+/// a cone face's own sides are conic arcs or straight rulings and never circles.
+/// What the caller needs of a side is that [`where_a_side_lies`] can place it
+/// against every other cut, and the refusal for a side it cannot place is that
+/// function's own [`Lies::Across`], read one side at a time where the side is.
 ///
 /// On a plane, that is half-planes, the insides of balls, and the inside of a
 /// cone whose crossing with the plane **closes** — each of those three leaves a
@@ -1114,6 +1152,61 @@ pub(crate) fn where_a_closed_crossing_is_centred(
 /// halves, and any number of halves meet in one piece, where planes that miss
 /// the centre can leave two caps with nothing between them.
 ///
+/// # On a cone it is planes the apex is on or in front of, any number of them
+///
+/// Every point of one nappe but the apex sits on exactly one ray from the apex —
+/// a ruling — and the whole straight segment from the apex out to that point is
+/// on the same ray, so it never leaves the nappe. A plane's signed value along
+/// such a ray is affine in how far along it you have gone, so "in front of this
+/// cut" is a half-interval of the ray, and "in front of every cut" is the
+/// intersection of those: **one interval, however many cuts there are.** A ruling
+/// can never leave the region and come back, which is the strip
+/// `docs/decisions.md` §217.4 worried three planes could leave, and it is settled
+/// for three the same way it is for thirty.
+///
+/// Ask on top of that that the **apex** be on or in front of every cut, and every
+/// one of those intervals starts at the apex. Then the region holds, with each of
+/// its points, the whole segment back to the apex — it is star-shaped from the
+/// apex, so it is one piece. Nothing in that mentions how the cut planes sit
+/// against each other, which is why this arm counts planes and reads one sign per
+/// cut rather than looking for where two of them meet. §216.5's sketch settled a
+/// cone cut by exactly **two** planes by walking the circle of rulings; that
+/// sketch is not needed, and it was not enough, because §217.4 counted every
+/// cone-face refusal in `tests/a_plane_cut_along_a_cones_other_nappe.rs` and
+/// found three planes every time and two not once.
+///
+/// **One nappe is what the argument is about, and that is not the same claim as
+/// connectedness.** Both nappes' regions contain the apex, so their union is
+/// connected too and this test would pass on it. What fails on the union is the
+/// caller's other half — that the *face* is the whole of the part in front of
+/// every cut. A cone face lies on one nappe; with the apex strictly in front of
+/// every cut the region on the double cone is a neighbourhood of the apex on
+/// **both**, two sheets pinched at one point, and the face is one of them. So
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] puts
+/// [`is_on_the_nappe_the_face_is_on`] in front of all of this, and deleting that
+/// guard costs a wrong answer rather than a refusal: on the side-6 corner-up cube
+/// round a pointed cone's apex, `(0.5, 0, −1)` and `(1, 0, −2)` come back
+/// **held**. `a_cone_face_round_an_apex_holds_its_own_nappe_and_not_the_other`, in
+/// `tests/a_plane_cut_along_a_cones_other_nappe.rs`, is those two points through
+/// the public [`SolidView::face_holds_the_point`].
+///
+/// **An apex strictly behind a cut is refused, and that is a limit and not a
+/// gap.** There the region really can be two pieces. On the cone of slope one
+/// about `+z`, keep `x + z/√2 ≥ 1` and `−x + z/√2 ≥ 1`; the apex is a whole unit
+/// behind each. Along the ruling at angle `φ` the first grows at
+/// `cos φ + 1/√2` and the second at `−cos φ + 1/√2`, and a cut the apex is behind
+/// is reachable along a ruling only where its own rate is positive — so the first
+/// is reachable only for `|φ| < 135°` and the second only for `45° < φ < 315°`.
+/// Those two arcs of the circle of rulings overlap in **two** arcs,
+/// `45° < φ < 135°` and `225° < φ < 315°`, and every ruling between them — `φ = 0`
+/// and `φ = 180°` among them — holds no point in front of both. Two pieces with
+/// nothing between them, which is the one thing this test exists to refuse.
+/// `two_planes_the_apex_is_behind_leave_a_nappe_in_two_pieces` below walks those
+/// rulings and asks this predicate about the same two cuts, so the refusal has a
+/// shape behind it and not a paragraph (§16.10). Widening to reach it would need a
+/// predicate for whether the leftover is connected, over the meets of the cut
+/// planes on the cone — a part with no named consumer (§13).
+///
 /// [`Cone::is_cut_in_a_closed_curve_by`]: rcad_geom::Cone::is_cut_in_a_closed_curve_by
 fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
     match surface {
@@ -1133,7 +1226,16 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                     .is_some_and(|flat| flat.side_of_point(centre) == Decision::Zero)
             })
         }
-        Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => false,
+        Surface::Cone(cone) => {
+            let apex = PredicatePoint::from(cone.apex().coordinates());
+            cuts.iter().all(|cut| {
+                cut.surface.as_plane().is_some_and(|flat| {
+                    let where_the_apex_sits = flat.side_of_point(apex);
+                    where_the_apex_sits == Decision::Zero || where_the_apex_sits == cut.kept
+                })
+            })
+        }
+        Surface::Cylinder(_) | Surface::Torus(_) | _ => false,
     }
 }
 
@@ -2189,6 +2291,82 @@ mod tests {
                 Error::AFaceMissesPartOfWhereItsSurfacesCross { .. }
             ),
             "got {refusal:?}"
+        );
+    }
+
+    /// What [`is_a_family_this_follows`] refuses a cone face for when the apex is
+    /// **behind** one of its cuts, and why that refusal is a limit and not a gap.
+    ///
+    /// Two planes across the cone of slope one about `+z`, keeping
+    /// `x + z/√2 ≥ 1` and `−x + z/√2 ≥ 1`, with the apex a whole unit behind each.
+    /// Along one ruling a plane's value is affine in how far out you have gone, so
+    /// a ruling carries a point in front of both exactly when both planes *grow*
+    /// along it — there is no third case to sample for. This walks the circle of
+    /// rulings and counts the runs of rulings that carry one: **two**, with
+    /// rulings carrying nothing between them, so the region is two pieces with
+    /// nothing between them and there is no one answer to the caller's question.
+    #[test]
+    fn two_planes_the_apex_is_behind_leave_a_nappe_in_two_pieces() {
+        let cone = rcad_geom::Cone::new(Axis::z(), 1.0).expect("a positive slope");
+        let leaned = |towards_x: f64| {
+            Plane::from_point_and_normal(
+                Point::new(towards_x, 0.0, 0.0),
+                Vector::new(towards_x, 0.0, 0.5f64.sqrt()),
+            )
+            .expect("a plane leaning off the axis")
+        };
+        let planes = [leaned(1.0), leaned(-1.0)];
+        let cuts: Vec<Cut> = planes
+            .map(|plane| Cut {
+                surface: Surface::Plane(plane),
+                placed: Surface::Plane(plane),
+                kept: Decision::Pos,
+                corners_on_it: Vec::new(),
+            })
+            .into_iter()
+            .collect();
+
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        for cut in &cuts {
+            assert_eq!(
+                side_of_surface(&cut.surface, apex),
+                Decision::Neg,
+                "the apex has to be behind both cuts for this to be the shape"
+            );
+        }
+        assert!(
+            !is_a_family_this_follows(&Surface::Cone(cone), &cuts),
+            "a cone face whose apex is behind a cut is refused"
+        );
+
+        let carries_a_point = |angle: f64| {
+            let along = [angle.cos(), angle.sin(), 1.0];
+            planes.iter().all(|plane| {
+                let normal = plane.normal().components();
+                let rate: f64 = (0..3).map(|axis| normal[axis] * along[axis]).sum();
+                assert!(plane.offset() > 0.0, "the apex is behind this plane");
+                rate > 0.0
+            })
+        };
+        let how_many = 3600;
+        let round_the_rulings: Vec<bool> = (0..how_many)
+            .map(|step| {
+                carries_a_point(core::f64::consts::TAU * f64::from(step) / f64::from(how_many))
+            })
+            .collect();
+        let runs = round_the_rulings
+            .iter()
+            .zip(round_the_rulings.iter().cycle().skip(1))
+            .filter(|(now, next)| !**now && **next)
+            .count();
+        assert_eq!(runs, 2, "the rulings that carry a point come in two runs");
+        assert!(
+            carries_a_point(core::f64::consts::FRAC_PI_2),
+            "the ruling at a quarter turn is in one of them"
+        );
+        assert!(
+            !carries_a_point(0.0) && !carries_a_point(core::f64::consts::PI),
+            "the rulings along and against +x carry nothing, which is what parts them"
         );
     }
 }
