@@ -2190,7 +2190,7 @@ fn where_a_plane_cuts_a_cone(
         if reach == 0.0 {
             return Ok(WhatARunLiesOn::StraightLine);
         }
-        if run.run() == &EdgeRun::RightRoundWhereItsFacesCross {
+        if run.run().it_comes_back_to_where_it_started() {
             return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
         }
         let standing_off = reach / normal_length;
