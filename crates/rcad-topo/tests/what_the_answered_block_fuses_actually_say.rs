@@ -6,11 +6,20 @@
 //! a wrong answer below a refusal, so the count on its own was pinning the
 //! cheapest half of the claim.
 //!
-//! # Every answer is a draw where nothing touches
+//! # Two kinds of answer: rows that miss, and rows that cut
 //!
 //! The family draws 16 rows and asks six fuses of each — union, intersection and
-//! difference, both ways round. **All 24 answers come from rows where the block
-//! misses the frustum altogether.**
+//! difference, both ways round. It answers 66 of the 96: 24 from rows where the
+//! block misses the frustum altogether, and 42 — all six fuses of seven rows —
+//! where the block cuts a piece out of it.
+//!
+//! **Until e2cd175d it was only the first 24.** A hyperbola arc the fuse writes
+//! used to be named by the half-space through its chord, which also holds the
+//! whole other branch, so `rcad_geom::walk` picked the wrong branch across the
+//! cone's apex and the fuse refused. Naming the arc by the nappe it is on turned
+//! those seven rows into answers, and
+//! `every_block_and_frustum_fuse_that_answers_adds_up` checks every one of them
+//! against the inputs' closed forms. What follows is about the rows that miss.
 //!
 //! How far apart they are takes one comparison. The block is put down with its
 //! low corner at `(1, 1, near + 1)` and only ever runs further out in `x` and `y`,
@@ -36,16 +45,9 @@
 //! in as many words. They are nothing of the kind, and the count that would have
 //! been re-pinned would have recorded the opposite of what happened.
 //!
-//! So the honest sentence about that family is **not** "a block can now take a
-//! piece out of a frustum". It is:
-//!
-//! > No block in this family has ever taken a piece out of a frustum. The fuses
-//! > that answer are ways of asking about a block and a frustum that do not meet,
-//! > and every one of them hands back an input untouched.
-//!
-//! That is still worth having — a fuse that cannot even tell two disjoint solids
-//! apart would be worse — and it is worth having *pinned*, because "answered" and
-//! "answered correctly" came apart here and the count could not see it.
+//! That is why the rows that miss are told apart by a comparison rather than by
+//! whether they answered: "answered" and "answered correctly" came apart here
+//! once, and the count could not see it.
 //!
 //! # Nothing else in the tree checks these
 //!
@@ -55,7 +57,9 @@
 //! surface-kind bookkeeping in `WhatItSitsOn`, which describes an answer's
 //! surfaces rather than generating one. So none of commutativity, associativity,
 //! idempotence or absorption has ever run over a cone, and these six were
-//! uncovered until this file.
+//! uncovered until this file. The meeting rows get inclusion and exclusion and
+//! the two ways round here; associativity, idempotence and absorption still
+//! have not run over a cone.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -166,24 +170,46 @@ fn a_pair(row: Row) -> (Model, SolidKey, SolidKey) {
     (model, cone, block)
 }
 
-/// **Every fuse of this family that answers is one where the block never reaches
-/// the frustum.**
+/// **Every fuse of this family that answers adds up**: a block that misses the
+/// frustum hands back the right number of pieces, and a block that cuts it
+/// hands back pieces whose volumes account for the two inputs.
 ///
-/// The load-bearing half of the `15 answered of 96` pin. What that number counts
-/// is fuses that returned `Ok`; what this asserts is that none of them cut
-/// anything, which is a claim about the answers and not about the count.
+/// The load-bearing half of the family's answered count in
+/// `how_often_a_fuse_with_a_cone_refuses.rs`. What that number counts is fuses
+/// that returned `Ok`; what this asserts is what is in them.
+///
+/// # The rows that meet, checked against the inputs' closed forms
+///
+/// Until e2cd175d every answer came from a row whose block misses the frustum.
+/// That commit named a hyperbola arc the fuse writes by the nappe it is on,
+/// rather than by the half-space through its chord — which also held the whole
+/// other branch, so `walk` picked the wrong branch across the apex — and seven
+/// rows where the block **does** cut the frustum began to answer all six of their
+/// fuses: 42 answers. Every one of those rows is checked here, with the frustum's
+/// volume `πh(R² + Rr + r²)/3` and the block's `side² · far` as `A` and `B`, and
+/// `U`, `I`, `D(a, b)` for the fuses' measured volumes:
+///
+/// - `U + I = A + B`,
+/// - `D(frustum, block) = A − I` and `D(block, frustum) = B − I`,
+/// - union and intersection each the same volume whichever way round they were
+///   asked,
+///
+/// every one within the sum of `measure`'s own bounds on the volumes compared.
+/// The closed forms carry no bound of their own, so none is added for them.
+///
+/// Volumes and not corners are compared between the two ways round: the two
+/// orders mesh the cone from different places, so the measured volumes differ in
+/// the last digits even where the solid is the same, and the bound is what says
+/// how far that may go.
 ///
 /// # This does not go red when the kernel gets better
 ///
-/// The assertion is one-sided on purpose. A row where the two solids *do* meet
-/// starting to answer is the arrangement learning to order points along a
-/// hyperbola, which is the whole of what this family is waiting on — so such a
-/// row is **checked** here rather than forbidden: it has to hand back the same
-/// answer whichever way round it is asked, and its union and intersection have to
-/// account for the same material as its two inputs. What may not happen is a
-/// meeting pair answering *without* being checked.
+/// Both counts are floors. A meeting row that answers **some** of its fuses and
+/// refuses others fails instead of being skipped, because the check needs all
+/// six and a meeting pair answering *without* being checked is the one thing
+/// this test is here to stop.
 #[test]
-fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
+fn every_block_and_frustum_fuse_that_answers_adds_up() {
     let policy = Policy::certified();
     let rows = the_rows_this_family_draws();
     let clear: Vec<Row> = rows
@@ -205,8 +231,11 @@ fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
 
     let mut answered_missing = 0;
     let mut answered_meeting = 0;
+    let mut meeting_rows_checked = 0;
     let mut refused = 0;
+    let mut worst = Worst::default();
     for row in rows {
+        let mut volumes: Vec<(Rule, usize, Volume)> = Vec::new();
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
             for ways_round in 0..2 {
                 let (model, cone, block) = a_pair(row);
@@ -225,6 +254,7 @@ fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
                 let pieces: Vec<SolidKey> = answer.solids().to_vec();
                 copy.validate(&policy, &mut ProvenanceLog::new())
                     .expect("a fuse hands back a sound model or refuses");
+                volumes.push((rule, ways_round, volume_of(&copy, &pieces, &policy)));
                 if row.the_block_misses_the_frustum() {
                     answered_missing += 1;
                     println!(
@@ -255,11 +285,34 @@ fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
                 }
             }
         }
+        if !row.the_block_misses_the_frustum() && !volumes.is_empty() {
+            assert_eq!(
+                volumes.len(),
+                6,
+                "{row:?}: a block that cuts the frustum answered {} of its six fuses, and the \
+                 check below needs all six — so these answers would go unchecked",
+                volumes.len()
+            );
+            a_meeting_row_adds_up(row, &volumes, &mut worst);
+            meeting_rows_checked += 1;
+        }
     }
 
     println!(
-        "{answered_missing} answered where the block misses, {answered_meeting} where it meets, \
-         {refused} refused"
+        "{answered_missing} answered where the block misses, {answered_meeting} where it meets \
+         over {meeting_rows_checked} rows, {refused} refused"
+    );
+    println!("the worst of the meeting rows: {worst:?}");
+    assert_eq!(
+        answered_meeting,
+        6 * meeting_rows_checked,
+        "every answer of a meeting row has to have been through the check"
+    );
+    assert!(
+        meeting_rows_checked >= 7,
+        "seven rows whose block cuts the frustum answered, and were checked, the day e2cd175d \
+         named a hyperbola arc by its nappe; {meeting_rows_checked} did here. Fewer is a \
+         regression and not a rate: re-derive it rather than relax it (§19.1)"
     );
     assert_eq!(
         answered_missing, 24,
@@ -269,14 +322,114 @@ fn every_block_and_frustum_fuse_that_answers_is_a_way_of_missing() {
          rows that answered are printed above; re-derive from those rather than from this \
          sentence"
     );
-    assert_eq!(
-        answered_meeting, 0,
-        "a block that reaches into a frustum answered {answered_meeting} times. That may be the \
-         arrangement learning to order points along a hyperbola, which is good news — but it is \
-         not covered by anything here, so give it a check of its own before letting this pass. \
-         Check first that the pair really does meet: the last time this fired, all of them were \
-         disjoint and `the_block_misses_the_frustum` was the thing that was wrong"
-    );
+}
+
+/// A volume `measure` gave, and the bound it published on it.
+#[derive(Clone, Copy, Debug)]
+struct Volume {
+    volume: f64,
+    bound: f64,
+}
+
+/// How far the meeting rows came from adding up, at worst, beside the bound each
+/// was held to.
+#[derive(Debug, Default)]
+struct Worst {
+    union_plus_intersection_off_by: f64,
+    its_bound: f64,
+    a_difference_off_by: f64,
+    its_difference_bound: f64,
+    the_two_ways_round_apart_by: f64,
+}
+
+/// The volume of every piece of an answer together, with the bounds summed.
+fn volume_of(model: &Model, pieces: &[SolidKey], policy: &Policy) -> Volume {
+    let how_fine = Deflection::of(0.002).expect("a positive length");
+    let mut total = Volume {
+        volume: 0.0,
+        bound: 0.0,
+    };
+    for &piece in pieces {
+        let it = model
+            .solid(piece)
+            .expect("this model made the key")
+            .measure(how_fine, policy, &mut ProvenanceLog::new())
+            .expect("every piece of these answers measures");
+        assert!(
+            it.volume_error().is_finite(),
+            "a bound of {} on the volume is not a bound to check anything against",
+            it.volume_error()
+        );
+        total.volume += it.volume();
+        total.bound += it.volume_error();
+    }
+    total
+}
+
+/// Inclusion and exclusion, and the two differences, over one row whose block
+/// cuts the frustum, against the two inputs' closed forms.
+fn a_meeting_row_adds_up(row: Row, volumes: &[(Rule, usize, Volume)], worst: &mut Worst) {
+    let (small, big) = (row.slope * row.near, row.slope * row.far);
+    let frustum =
+        core::f64::consts::PI * (row.far - row.near) * (big * big + big * small + small * small)
+            / 3.0;
+    let ([side, _, tall], _) = row.block();
+    let block = side * side * tall;
+
+    let asked = |rule: Rule, ways_round: usize| -> Volume {
+        volumes
+            .iter()
+            .find(|(which, way, _)| *which == rule && *way == ways_round)
+            .map(|(_, _, it)| *it)
+            .expect("all six fuses of this row answered")
+    };
+    let within = |what: &str, off_by: f64, bound: f64| {
+        assert!(
+            bound.is_finite() && off_by.abs() <= bound,
+            "{row:?}: {what} is off by {off_by}, beyond the bound {bound}"
+        );
+    };
+
+    for ways_round in 0..2 {
+        let union = asked(Rule::Union, ways_round);
+        let intersection = asked(Rule::Intersection, ways_round);
+        let off_by = union.volume + intersection.volume - frustum - block;
+        let bound = union.bound + intersection.bound;
+        println!(
+            "{row:?} way {ways_round} round: U {} I {} against A {frustum} B {block}, U + I − A − B \
+             = {off_by:e} within {bound:e}",
+            union.volume, intersection.volume
+        );
+        within("the union and the intersection against the two inputs", off_by, bound);
+        if off_by.abs() > worst.union_plus_intersection_off_by.abs() {
+            worst.union_plus_intersection_off_by = off_by;
+            worst.its_bound = bound;
+        }
+
+        for (difference_way, input, name) in
+            [(0, frustum, "frustum \\ block"), (1, block, "block \\ frustum")]
+        {
+            let difference = asked(Rule::Difference, difference_way);
+            let off_by = difference.volume - (input - intersection.volume);
+            let bound = difference.bound + intersection.bound;
+            within(name, off_by, bound);
+            if off_by.abs() > worst.a_difference_off_by.abs() {
+                worst.a_difference_off_by = off_by;
+                worst.its_difference_bound = bound;
+            }
+        }
+    }
+
+    for rule in [Rule::Union, Rule::Intersection] {
+        let (one, other) = (asked(rule, 0), asked(rule, 1));
+        let apart = one.volume - other.volume;
+        within(
+            &format!("{rule:?} asked the two ways round"),
+            apart,
+            one.bound + other.bound,
+        );
+        worst.the_two_ways_round_apart_by = worst.the_two_ways_round_apart_by.max(apart.abs());
+    }
 }
 
 /// The six answers, sized against closed forms and against the inputs they must
