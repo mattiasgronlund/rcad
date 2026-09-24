@@ -53,7 +53,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
     DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
-    Surface, Vector, which_way_a_closed_crossing_turns,
+    Surface, SurfaceMeet, Vector, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -1753,6 +1753,12 @@ impl Edge {
                 WhichArc::TheOnlyOne => Ok(EdgeRun::Straight),
                 WhichArc::LeavingACorner { corner, towards } => {
                     let ends = self.ends.map(|end| corners[end].point);
+                    if let Some(branch) = self.the_branch_of_a_hyperbola_this_is_on(ends)? {
+                        return Ok(EdgeRun::PartOfWhereItCrosses {
+                            and: self.the_surface_that_names_it_twice(),
+                            picked_by: SmallVec::from_buf([branch]),
+                        });
+                    }
                     let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
                     let facing = towards * chord.dot(chord) - chord * chord.dot(towards);
                     let picker = the_half_space_both_ends_are_on(facing, ends)
@@ -1763,6 +1769,94 @@ impl Edge {
                     })
                 }
             },
+        }
+    }
+
+    /// The half-space holding the one nappe this edge runs on, when it runs
+    /// along a plane crossing a cone in a **hyperbola**, and `None` for every
+    /// other crossing.
+    ///
+    /// **The half-space through the chord does not name an arc of a
+    /// hyperbola.** A line meets a hyperbola in at most two points, both on the
+    /// branch the chord joins, so the whole of the *other* branch lies on one
+    /// side of the chord — and it is always the side the arc bulges to. The chord
+    /// half-space holds the arc and the whole other branch: two pieces, where
+    /// [`EdgeRun::PartOfWhereItCrosses`] promises one. And `rcad_geom::walk`
+    /// picks the branch by asking the pickers at each branch's vertex, which
+    /// holds only for a picker square to the axis; asked of a chord half-space it
+    /// picks the other branch whenever the arc does not run over its own vertex.
+    /// Measured on the lens and bar of
+    /// `tests/the_way_into_an_ellipse_arc_in_a_fuse.rs`: the union's arc along
+    /// `x = 0.5` from `(0.5, −1.68, 3.5)` to `(0.5, −2.19, 4.5)` was walked
+    /// through `(0.5, −1.92, −3.97)`, its mirror on the nappe below the apex, and
+    /// the cone face spanning both nappes came back from the mesher as a
+    /// coordinate too large to triangulate.
+    ///
+    /// **A branch is an open curve, so its two ends name one arc of it**, and
+    /// the nappe is all the picking there is to do. The picker is the one
+    /// [`rcad_geom::intersect`] mints for that branch — the half-space through
+    /// the apex square to the axis, its offset proved against the branch's own
+    /// vertex — chosen as the one that holds both ends.
+    ///
+    /// Both signs are exact polynomials in stored `f64`, so no policy changes
+    /// them; `intersect` is asked under a certified one because this has none to
+    /// hand down, the same choice `rcad_geom::where_a_closed_crossing_starts`
+    /// makes and for the same reason.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] when either sign
+    /// is undecided, when `intersect` cannot tell the branches apart, or when
+    /// the ends are not both held by exactly one branch's half-space.
+    fn the_branch_of_a_hyperbola_this_is_on(&self, ends: [Point; 2]) -> Result<Option<Picker>> {
+        let ([Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)]) = self.carried_by
+        else {
+            return Ok(None);
+        };
+        let apex = rcad_geom::where_a_cones_apex_stands_against_a_plane(&flat, &cone);
+        if apex == Decision::Zero {
+            return Ok(None);
+        }
+        if apex != Decision::Pos && apex != Decision::Neg {
+            return Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed);
+        }
+        let leaning = rcad_geom::how_a_plane_leans_against_a_cone(&flat, &cone);
+        if leaning == Decision::Pos || leaning == Decision::Zero {
+            return Ok(None);
+        }
+        if leaning != Decision::Neg {
+            return Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed);
+        }
+        let Ok(SurfaceMeet::Curves(branches)) = rcad_geom::intersect(
+            &Surface::Plane(flat),
+            &Surface::Cone(cone),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) else {
+            return Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed);
+        };
+        let asked = ends.map(|end| PredicatePoint::from(end.coordinates()));
+        let holding: Vec<Picker> = branches
+            .iter()
+            .filter_map(|branch| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = branch.run() else {
+                    return None;
+                };
+                let [one] = picked_by.as_slice() else {
+                    return None;
+                };
+                Some(*one)
+            })
+            .filter(|picker| {
+                asked
+                    .iter()
+                    .all(|end| picker.side_of_point(*end) == Decision::Pos)
+            })
+            .collect();
+        match holding.as_slice() {
+            [only] => Ok(Some(*only)),
+            _ => Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed),
         }
     }
 
