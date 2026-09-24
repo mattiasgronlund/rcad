@@ -990,15 +990,15 @@ impl Walk {
         let faces_along_it = self.surfaces_along_each_edge.get(&edge_curve);
         let they_name_no_crossing =
             faces_along_it.is_some_and(|faces| the_faces_along_it_name_no_crossing(faces));
-        let every_face_curved = faces_along_it
-            .is_some_and(|faces| a_face_where_curved_faces_meet(faces).is_some());
-        if right_round && !they_name_no_crossing && !every_face_curved {
+        let curved_faces_meet =
+            faces_along_it.is_some_and(|faces| a_face_where_curved_faces_meet(faces).is_some());
+        if right_round && !they_name_no_crossing && !curved_faces_meet {
             return Ok(EdgeRun::RightRoundWhereItsFacesCross);
         }
         let position = reading.reference_at(curve, keyword, 1)?;
         let place = reading.placement_at(curve, position)?;
         if right_round
-            && every_face_curved
+            && curved_faces_meet
             && !self.a_circle_every_face_holds(reading, edge_curve, curve, keyword, &place)?
         {
             return Ok(EdgeRun::RightRoundWhereItsFacesCross);

@@ -94,7 +94,9 @@ fn the_middle_circle_is_named_by_its_plane_and_meshed_round(upper_radius: f64) {
     );
     for &at in along {
         let [x, y, z] = mesh.points()[at as usize].coordinates();
-        let off = ((x * x + y * y).sqrt() - RADIUS).abs().max((z - MIDDLE).abs());
+        let off = ((x * x + y * y).sqrt() - RADIUS)
+            .abs()
+            .max((z - MIDDLE).abs());
         assert!(
             off <= allowed,
             "{:?} is {off} off the middle circle, past the published {allowed}",
