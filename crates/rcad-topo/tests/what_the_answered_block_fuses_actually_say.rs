@@ -400,15 +400,20 @@ fn a_meeting_row_adds_up(row: Row, volumes: &[(Rule, usize, Volume)], worst: &mu
              = {off_by:e} within {bound:e}",
             union.volume, intersection.volume
         );
-        within("the union and the intersection against the two inputs", off_by, bound);
+        within(
+            "the union and the intersection against the two inputs",
+            off_by,
+            bound,
+        );
         if off_by.abs() > worst.union_plus_intersection_off_by.abs() {
             worst.union_plus_intersection_off_by = off_by;
             worst.its_bound = bound;
         }
 
-        for (difference_way, input, name) in
-            [(0, frustum, "frustum \\ block"), (1, block, "block \\ frustum")]
-        {
+        for (difference_way, input, name) in [
+            (0, frustum, "frustum \\ block"),
+            (1, block, "block \\ frustum"),
+        ] {
             let difference = asked(Rule::Difference, difference_way);
             let off_by = difference.volume - (input - intersection.volume);
             let bound = difference.bound + intersection.bound;
