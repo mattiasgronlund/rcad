@@ -22,11 +22,12 @@
 //! - a plane **parallel to the axis**, which is four of a block's six faces when
 //!   the block stands upright, cuts a **hyperbola**. `intersect` names it and
 //!   hands back one endless run per nappe. That branch still never closes, and
-//!   `arrange`'s `HowItRuns::AlongABend` orders points along it anyway, so the
-//!   block family's 90 refusals no longer stop there — they stop in four later
-//!   places, which
-//!   `what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`
-//!   counts one by one;
+//!   `arrange`'s `HowItRuns::AlongABend` orders points along it anyway, and
+//!   since e2cd175d the fuse names each arc of it by the nappe it is on, so most
+//!   of the block family's fuses across a hyperbola answer — the rest stop at the
+//!   one wall
+//!   `what_stops_a_block_and_a_cone_now_is_one_named_thing_and_not_the_ordering`
+//!   counts;
 //! - anything curved against a cone `intersect` does still refuse outright, and
 //!   **one cone twice is not that pair**: `intersect` has always answered it as
 //!   one surface, and since §214 `walk` does too. For a cone against a *different*
@@ -49,18 +50,15 @@
 //! So **a tool solid cannot hide its awkward planes by keeping them out of the
 //! way**. A block standing upright beside a cone still has four planes parallel
 //! to the cone's axis, every one of them is put to `intersect`, and every one of
-//! them comes back a hyperbola. The consequence is worth stating plainly because
-//! it is the whole of what a cone costs a fuse today:
+//! them comes back a hyperbola.
 //!
-//! > A cone can be cut by a solid **only when every plane of that solid leans
-//! > more steeply than the cone's own half-angle** — or when the two do not
-//! > reach each other at all, and nothing has to be cut.
-//!
-//! The second half is not a hedge, it is what the block family measured. Every
-//! one of its answers comes from a draw whose block misses the frustum, and
-//! `what_the_answered_block_fuses_actually_say.rs` is that turned into
-//! assertions. Without it the sentence above reads as *"a block never fuses with
-//! a cone"*, which the rate below contradicts.
+//! That used to be the whole of what a cone cost a fuse: a cone could be cut
+//! only by a solid whose every plane leaned more steeply than the cone's side, or
+//! not at all. **It is not any more.** Since e2cd175d named each hyperbola arc
+//! the fuse writes by the nappe it is on, seven rows of the block family whose
+//! block really cuts the frustum answer all six of their fuses, and
+//! `what_the_answered_block_fuses_actually_say.rs` checks each of those answers
+//! against the inputs' closed forms.
 //!
 //! A cube stood on its corner is the tidiest solid that does: its three edge
 //! directions are then equally inclined to the vertical, so all six of its
@@ -70,7 +68,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -340,7 +338,7 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// one: `select.rs`'s *a point inside a piece of a face* 60, a corner too far out
 /// for the triangulator 14, a face whose boundary crosses itself 7, and four faces
 /// along one edge 9.
-/// [`what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`]
+/// [`what_stops_a_block_and_a_cone_now_is_one_named_thing_and_not_the_ordering`]
 /// is that breakdown pinned rather than printed, which is what §15.10 asks of a
 /// rate that stayed still while everything under it moved.
 ///
@@ -372,28 +370,30 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// whether its two solids touch rather than asserting it from this paragraph —
 /// they do not.
 ///
+/// **A sixth time, and the first where a block cuts a frustum: 66 of 96.**
+/// e2cd175d names each hyperbola arc the fuse writes by the nappe it is on. It
+/// had been named by the half-space through its chord, which holds the whole
+/// other branch too, so `walk` picked the wrong branch across the apex. The 15
+/// above and the 27 at the triangulator were all that, and all 42 answer — every
+/// fuse of the seven rows whose block reaches into the frustum. One wall is left.
+///
 /// So the assertion here stays a **floor at what has been measured**, in the
 /// shape §19.1 asks for: this family may not answer fewer than it does today.
 /// Re-derive it when it moves; do not relax it.
 ///
-/// # The answers are not cuts, and a count could not say so
+/// # A count does not say what is in the answers
 ///
-/// `answered` counts fuses that came back `Ok`. It says nothing about what is in
-/// them, and here the difference matters: **every answer comes from a draw whose
-/// block misses the frustum altogether.** The block's low corner is at `(1, 1, ·)`
-/// and it only runs further out, so no point of it is nearer the axis than `√2`;
-/// the frustum is never wider than `slope · far`. So `slope · far < √2` makes
-/// them disjoint, and five rows of this grid land there.
+/// `answered` counts fuses that came back `Ok`, and here that once hid the
+/// difference between a cut and no cut: until e2cd175d every answer came from a
+/// draw whose block misses the frustum altogether. The block's low corner is at
+/// `(1, 1, ·)` and it only runs further out, so no point of it is nearer the
+/// axis than `√2`; the frustum is never wider than `slope · far`. So
+/// `slope · far < √2` makes them disjoint, and five rows of this grid land there.
 ///
-/// No block in this family has ever taken a piece out of a frustum. What the
-/// answers are is ways of asking about two solids that do not meet, and every one
-/// of them hands an input straight back.
-///
-/// `what_the_answered_block_fuses_actually_say.rs` is that finding turned into
-/// assertions: which ones, that each is a sound model, that each is the right
-/// size against a closed form and `measure`'s own bound, that each holds the same
-/// grid of points as the input it must return, and that union and intersection
-/// give the same answer whichever way round they are asked.
+/// `what_the_answered_block_fuses_actually_say.rs` checks both kinds: the rows
+/// that miss hand an input straight back, to the bit and against a grid of
+/// points, and the rows that cut account for their inputs' closed-form volumes
+/// by inclusion and exclusion, the same whichever way round they are asked.
 ///
 /// **And the corner-up rate is not the cone's rate.** A round bar of the same
 /// size in the same place, against the same cubes, answers exactly as often —
@@ -471,11 +471,11 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                 family.named()
             ),
             Family::AFrustumAgainstABlock => assert!(
-                answered >= 24,
+                answered >= 66,
                 "{}: this family was measured at 6 answered of 96 the day the hyperbola landed, \
-                 at 15 the day §206's bulge count landed and at 24 the day `walk` learnt that \
-                 one cone twice is one surface (§214), and it answered {answered} of {fuses} \
-                 here. A cone that could be cut yesterday and cannot today is a regression, not \
+                 at 15 the day §206's bulge count landed, at 24 the day `walk` learnt that \
+                 one cone twice is one surface (§214) and at 66 the day e2cd175d named a \
+                 hyperbola arc by its nappe, and it answered {answered} of {fuses} here. A cone that could be cut yesterday and cannot today is a regression, not \
                  a rate: re-derive this number rather than relax it (§19.1)",
                 family.named()
             ),
@@ -935,18 +935,20 @@ fn uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_as
     );
 }
 
-/// The curve is still a hyperbola and it still never closes — and that has
-/// stopped being what stops the fuse.
+/// The curve is still a hyperbola and it still never closes — and the fuse
+/// across it now answers, and adds up.
 ///
 /// This test used to end by asserting that the fuse of the pair below came back
 /// *"nothing can put points in order along this curve"*, which is where the
 /// block family's 90 refusals stopped. `arrange`'s `HowItRuns::AlongABend` puts
-/// points in order along a bend now, so the last of the three steps below has
-/// been turned round: the geometry is unchanged and the arrangement walks past
-/// it.
+/// points in order along a bend, so that step was turned round to *refuses, but
+/// not for want of an order*. Then e2cd175d named each hyperbola arc the fuse
+/// writes by the nappe it is on, where it had been named by the half-space
+/// through its chord — which holds the whole other branch too, so `walk` picked
+/// the wrong branch across the apex — and the refusal went away. The step is now
+/// an answer checked for being right.
 ///
-/// Three things, in the order the fuse asks them, over the block plane that
-/// refuses:
+/// Three things, in the order the fuse asks them, over a block wall:
 ///
 /// 1. **`intersect` names the curve.** The geometry is not where this stops, and
 ///    never was after the hyperbola landed.
@@ -955,14 +957,12 @@ fn uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_as
 ///    than a closed one*. A hyperbola branch is a conic and is not closed, so
 ///    going round it is not an order anything can use. That is a fact about the
 ///    curve and no amount of arrangement work changes it.
-/// 3. **The fuse of that same pair no longer stops there.** It still refuses,
-///    and what it says now is a triangulation the mesher would not take — a
-///    place four steps further down. Asserted as *not* the ordering message
-///    rather than as one particular later one, because which later wall a given
-///    draw reaches is what
-///    [`what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering`]
-///    counts, and pinning one draw's wall in two places would be one
-///    measurement written twice.
+/// 3. **The union and the intersection of that same pair answer**, each into a
+///    sound model, and they account for the two inputs: `U + I = A + B`, with
+///    `A` and `B` measured from each input alone, within the sum of the four
+///    bounds `measure` published. The intersection is required to be more than
+///    its own bound first, so this is a draw where the block really cuts the
+///    frustum and not one where it hands an input back.
 ///
 /// So step 2 is what keeps this test honest. Without it, "the fuse got past the
 /// ordering" could mean the curve had quietly stopped being a hyperbola.
@@ -970,7 +970,7 @@ fn uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_as
 fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
     let policy = Policy::certified();
     let mut draw = Draw(0x5EED);
-    let (mut model, cone, block) =
+    let (model, cone, block) =
         a_pair(Family::AFrustumAgainstABlock, &mut draw).expect("the family's first draw");
 
     let skin = model
@@ -1016,43 +1016,85 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
         );
     }
 
-    let refused = model
-        .fuse(
-            &[cone],
-            &[block],
-            Rule::Union,
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-        .expect_err("this pair still refuses, further down");
-    println!("and the fuse of that same pair now says: {refused}");
+    let how_fine = Deflection::of(0.002).expect("a positive length");
+    let volume_of = |model: &Model, pieces: &[SolidKey]| -> (f64, f64) {
+        pieces.iter().fold((0.0, 0.0), |(volume, bound), &piece| {
+            let it = model
+                .solid(piece)
+                .expect("this model made the key")
+                .measure(how_fine, &policy, &mut ProvenanceLog::new())
+                .expect("every solid here measures");
+            assert!(
+                it.volume_error().is_finite(),
+                "a bound of {} checks nothing",
+                it.volume_error()
+            );
+            (volume + it.volume(), bound + it.volume_error())
+        })
+    };
+    let fused = |rule: Rule| -> (f64, f64) {
+        let mut copy = model.clone();
+        let answer = copy
+            .fuse(&[cone], &[block], rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| {
+                panic!("the {rule:?} of a block wall across a cone answers since e2cd175d: {why}")
+            });
+        let pieces: Vec<SolidKey> = answer.solids().to_vec();
+        copy.validate(&policy, &mut ProvenanceLog::new())
+            .expect("a fuse hands back a sound model or refuses");
+        volume_of(&copy, &pieces)
+    };
+    let (frustum, frustum_bound) = volume_of(&model, &[cone]);
+    let (the_block, block_bound) = volume_of(&model, &[block]);
+    let (union, union_bound) = fused(Rule::Union);
+    let (intersection, intersection_bound) = fused(Rule::Intersection);
     assert!(
-        !format!("{refused}").contains("put points in order"),
-        "the curve above is ordered along the bend now, so nothing here may still \
-         stop for want of an order: {refused}"
+        intersection > intersection_bound,
+        "this draw's block has to cut a piece out of the frustum, or nothing here is a cut; \
+         the intersection measured {intersection} within {intersection_bound}"
+    );
+    let off_by = union + intersection - frustum - the_block;
+    let bound = union_bound + intersection_bound + frustum_bound + block_bound;
+    println!(
+        "and the fuse of that same pair answers: U {union} + I {intersection} − A {frustum} − \
+         B {the_block} = {off_by:e}, within {bound:e}"
+    );
+    assert!(
+        off_by.abs() <= bound,
+        "the union and the intersection of a block wall across a cone hold {off_by} more than \
+         the two inputs, beyond the bound {bound}"
     );
 }
 
-/// What the block family's 72 refusals are, now that none of them is the
-/// ordering.
+/// What the block family's 30 refusals are, now that one wall is all that is
+/// left.
 ///
 /// §15.10: a rate that moves is published with the list of what moved. It has
-/// moved four times. First the bend landed and the rate stood still — 6 of 96
+/// moved five times. First the bend landed and the rate stood still — 6 of 96
 /// either side — while all 90 refusals changed their name from *"nothing can put
 /// points in order along this curve"* to four different walls. Then §206's bulge
 /// count landed and the rate moved to 15 of 96, and the four walls moved under
 /// it. Then a cone's rim circle had its two arcs named apart, and the rate stood
 /// still at 15 of 96 while one of the four walls emptied into two new ones. Then
 /// `walk` learnt the pair that is one cone twice, and the 9 that wall held became
-/// answers: **24 of 96**, and four walls again.
+/// answers: **24 of 96**, and four walls again. Then e2cd175d named each
+/// hyperbola arc the fuse writes by the nappe it is on, and three of the four
+/// walls emptied at once: **66 of 96**, and one wall.
 ///
-/// The four, measured over this family's own draws rather than taken from
-/// anywhere:
+/// **The three that vanished were all misnamed hyperbola arcs.** The fuse used
+/// to name an arc of a plane-cone hyperbola by the half-space through its
+/// chord, and that half-space also holds the whole of the other branch, so
+/// `rcad_geom::walk` picked the wrong branch across the cone's apex. Every one
+/// of the 42 fuses behind these three walls answers now, and
+/// `what_the_answered_block_fuses_actually_say.rs` checks each of them against
+/// the inputs' closed forms rather than taking the count on trust.
 ///
-/// - **a point inside a piece of a face**, 60 → 30 → **30**. `select.rs` could
-///   not say whether a piece it had cut was in or out. Halved by §206 teaching
-///   `in_the_bulge_of` to count the bulge of a cone whose crossing with the
-///   piece's plane is a circle.
+/// Measured over this family's own draws rather than taken from anywhere:
+///
+/// - **a point inside a piece of a face**, 60 → 30 → **30**, the one wall left.
+///   `select.rs` could not say whether a piece it had cut was in or out. Halved
+///   by §206 teaching `in_the_bulge_of` to count the bulge of a cone whose
+///   crossing with the piece's plane is a circle.
 /// - **four faces along one edge**, 9 → 24 → **gone**. The answer was not
 ///   something a `Model` can hold, which is §17.7's catalogued case and not an
 ///   arithmetic refusal at all. It rose under §206 because fuses that used to
@@ -1061,21 +1103,23 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 ///   `assemble`'s `which_arc_of_a_circle_this_is` read a ball-and-plane circle
 ///   only, so two arcs of a cone's rim circle between the same corners were
 ///   named as one edge. Naming them apart empties this wall.
-/// - **a corner too far out for the triangulator**, 14 → 18 → **18**. A face
-///   went to be cut into triangles and a corner of it was outside the range the
-///   triangulator takes.
-/// - **a face whose boundary crosses itself**, 7 → 9 → **9**. The same step,
-///   refusing for the other of its two reasons.
+/// - **a corner too far out for the triangulator**, 14 → 18 → 18 → **gone**
+///   (e2cd175d). A face went to be cut into triangles and a corner of it was
+///   outside the range the triangulator takes — a corner of an arc drawn on the
+///   wrong branch.
+/// - **a face whose boundary crosses itself**, 7 → 9 → 9 → **gone** (e2cd175d).
+///   The same step, refusing for the other of its two reasons.
 /// - **a cone crossing another curved surface**, 9 → **gone**. A **defect**, and
 ///   §214.4 ruled it one: the pair was one cone twice, `==` true bit for bit, and
 ///   the message named a second curved surface a frustum and a block have not got
 ///   between them. `walk` answers that pair now — the circle the run's own end
 ///   names — and all 9 became answers.
-/// - **a crossing in two pieces with no half-space to tell them apart**, **15**,
-///   and they **stay**. A gap, and their name is honest: the pair there really is
-///   the block's wall plane and the cone, a genuine hyperbola whose two branches
-///   are both held by the run's picker. §214.4 says why that is a different kind
-///   of thing from the 9.
+/// - **a crossing in two pieces with no half-space to tell them apart**, 15 →
+///   **gone** (e2cd175d). The pair there really is the block's wall plane and
+///   the cone, a genuine hyperbola whose two branches were both held by the
+///   run's picker — because the half-space it was handed was the one through
+///   the chord, which holds both. Named by its nappe, the arc's half-space holds
+///   one branch and `walk` takes it.
 ///
 ///   The 9 and the 15 together were exactly the 24 the four-faces wall emptied
 ///   into, and **that they are the same 24 was inferred, not measured**, which
@@ -1084,13 +1128,12 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 ///   all, so it cannot have pinned rows of this family. §214 got the 24 by a
 ///   census of this family instead, and they are the same 24.
 ///
-/// Matched on what each message *is about* rather than on the whole string,
-/// because two of them carry the number of the corner they stopped at and that
-/// number is a fact about one draw. Anything the four do not describe fails the
-/// test rather than being counted as an other, so a fifth wall cannot arrive
-/// unnoticed — including the cone one coming back.
+/// Matched on what each message *is about* rather than on the whole string.
+/// Anything other than the one wall fails the test rather than being counted as
+/// an other, so a second wall cannot arrive unnoticed — including any of the
+/// four that have emptied coming back.
 #[test]
-fn what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering() {
+fn what_stops_a_block_and_a_cone_now_is_one_named_thing_and_not_the_ordering() {
     let (fuses, answered, gave_up) = how_each_fuse_went(Family::AFrustumAgainstABlock);
     let mut walls: BTreeMap<&'static str, usize> = BTreeMap::new();
     for (named, how_many) in &gave_up {
@@ -1101,42 +1144,26 @@ fn what_stops_a_block_and_a_cone_now_is_four_named_things_and_not_the_ordering()
     );
 
     assert_eq!(
-        walls,
-        BTreeMap::from([
-            ("a point inside a piece of a face", 30),
-            ("a corner too far out for the triangulator", 18),
-            ("a face whose boundary crosses itself", 9),
-            (
-                "a crossing in two pieces with no half-space to tell them apart",
-                15
-            ),
-        ]),
-        "these are the four walls this family was measured against; re-derive them \
-         when they move rather than widening the test (§19.1)"
+        (answered, walls),
+        (
+            66,
+            BTreeMap::from([("a point inside a piece of a face", 30)])
+        ),
+        "this is the one wall this family was measured against, and the count that got \
+         past it; re-derive them when they move rather than widening the test (§19.1)"
     );
 }
 
-/// Which of the four walls a refusal's message is about.
+/// Which wall a refusal's message is about.
 ///
-/// Panics on anything else, so a fifth wall is a failure and not a silent
-/// bucket. *A cone crossing another curved surface* was the fifth until `walk`
-/// learnt the pair that is one cone twice, and it is left out rather than kept as
-/// an empty bucket: this family coming back to it is the regression the panic is
-/// here to name.
+/// Panics on anything but the one wall left, so a second wall is a failure and
+/// not a silent bucket. The four that have emptied — *a cone crossing another
+/// curved surface*, the triangulator's two reasons and *a crossing in two
+/// pieces* — are left out rather than kept as empty buckets: this family coming
+/// back to any of them is the regression the panic is here to name.
 fn which_wall_it_stopped_at(named: &str) -> &'static str {
     if named == "a point inside a piece of a face" {
         return "a point inside a piece of a face";
     }
-    if named.contains("could not be cut into triangles") {
-        if named.contains("TooLarge") {
-            return "a corner too far out for the triangulator";
-        }
-        if named.contains("the boundary crosses itself") {
-            return "a face whose boundary crosses itself";
-        }
-    }
-    if named.contains("this crossing comes in two pieces") {
-        return "a crossing in two pieces with no half-space to tell them apart";
-    }
-    panic!("a block against a cone stopped somewhere none of the four names: {named:?}")
+    panic!("a block against a cone stopped somewhere other than the one wall left: {named:?}")
 }
