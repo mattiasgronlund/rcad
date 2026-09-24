@@ -624,6 +624,25 @@ pub enum Error {
     #[error("these two surfaces do not cross in one closed curve lying in a plane")]
     TheseTwoSurfacesDoNotCrossInAConic,
 
+    /// Two surfaces that are the one surface written twice, asked where they
+    /// cross.
+    ///
+    /// Two balls with their centres in the same place and one radius share every
+    /// point of their skin and cross nowhere. The radius of the circle where two
+    /// balls cross is a ratio whose divisor is the gap between the two centres,
+    /// so a gap of nothing divides by nothing: `0 / 0` is `NaN`, every coordinate
+    /// of the circle's middle is `NaN`, and what a caller used to get back was
+    /// [`Error::NotFinite`] naming "point on a plane" — a refusal about the
+    /// radical plane rather than about the pair that has none.
+    ///
+    /// A **limit** and not a gap (§16.10): the circle this asks for does not
+    /// exist at any precision. A pair of faces that really are on one ball is a
+    /// seam, and a seam's run carries the second surface itself — see
+    /// [`EdgeRun::PartOfWhereItCrosses`](crate::EdgeRun::PartOfWhereItCrosses)
+    /// and [`EdgeRun::RightRoundWhereItCrosses`](crate::EdgeRun::RightRoundWhereItCrosses).
+    #[error("these two surfaces are one surface written twice, and one surface crosses nothing")]
+    TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing,
+
     /// Three surfaces of which fewer than two are flat, and no road back to two
     /// of them.
     ///

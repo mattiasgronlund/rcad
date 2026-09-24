@@ -299,8 +299,13 @@ impl PointsAlongACrossing {
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] when the run says its two
 /// surfaces cross in a conic and they do not: a plane that misses the ball it is
 /// named against, or touches it at one point, leaves a circle of no radius, and
-/// there is no angle to walk round one. A **limit** and not a gap (§16.10) —
-/// the curve the run names does not exist at any precision.
+/// there is no angle to walk round one. Two balls round one centre with two
+/// radii get it too, for the same reason and one surface up. A **limit** and not
+/// a gap (§16.10) — the curve the run names does not exist at any precision.
+///
+/// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
+/// one centre with one radius, which is the one surface written twice. Also a
+/// limit.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
@@ -418,6 +423,9 @@ pub fn walk(
 /// curve — a plane that misses or grazes the ball it is named against — exactly
 /// as [`walk`] does, and for the same reason: there is nowhere on a circle of no
 /// radius that the pair alone picks out.
+///
+/// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
+/// one centre with one radius, exactly as [`walk`] does.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
@@ -591,7 +599,12 @@ enum WhatARunLiesOn {
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] when the pair has a conic
 /// builder and what comes out of it is not a curve — a plane that misses a ball
 /// altogether, or touches it at one point, is the shape a stranger's model
-/// reached this by. See [`Conic::has_an_angle_round_it`].
+/// reached this by. See [`Conic::has_an_angle_round_it`]. Two balls round one
+/// centre with two radii are the same thing one surface up, refused by
+/// [`where_two_balls_cut`] before a conic is built at all.
+///
+/// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
+/// one centre with one radius.
 ///
 /// Whatever the conic builders refuse, for the pairs that have one.
 fn what_a_run_between_these_two_lies_on(
@@ -1561,6 +1574,24 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// builds names a plane there — its own runs name one of the two faces — so
 /// the name is a reader's, and `rcad-step` writes it only for a circle it has
 /// checked lies on every face along it.
+///
+/// **Two curved faces that name a third curved surface are a face and that
+/// surface.** This is the paragraph above one surface up, and it is the one
+/// `along[0] == along[1]` cannot reach: two balls meant to be the one ball but
+/// written down 1e-15 apart are not equal by bits, so the seam arm misses and
+/// the pair either side goes to `where_two_balls_cut` — which answers finitely
+/// and **wrongly**, with a great circle of the ball's own radius through its own
+/// centre, in the plane halfway between the two spellings. Measured at a rim
+/// 2.05 to 3.65 away from a centre it should be exactly 4 from
+/// (`two_spheres_a_hair_apart_are_one_sphere_and_a_second_surface.rs`,
+/// `docs/decisions.md` §218.6).
+///
+/// **`and` repeating one of the two faces is what keeps the honest pair.** A
+/// run whose two faces really do cross names both of them already, so
+/// `rcad-topo`'s `the_surface_that_names_it_twice` puts one of the pair in `and`
+/// — bit for bit, it is one of the two [`Surface`]s that came in. That is the
+/// writer saying "`and` adds nothing here", and it is why this arm asks whether
+/// `and` is a third surface rather than whether the two faces are one.
 fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Surface; 2] {
     let both_flat = along.iter().all(|side| side.as_plane().is_some());
     let both_curved = along.iter().all(|side| side.as_plane().is_none());
@@ -1583,6 +1614,16 @@ fn the_two_surfaces_it_runs_between(run: &NamedRun, along: [&Surface; 2]) -> [Su
             if both_curved && and.as_plane().is_some() && a_ball.is_some() =>
         {
             [*a_ball.expect("the guard found a ball"), *and]
+        }
+        // Two curved faces and a curved `and` that is neither of them: the
+        // second surface the run carries is a third surface, which is what a
+        // reader writes only when the pair either side names nothing. `and`
+        // repeating one of the two faces is the fuse saying the opposite, and
+        // that pair stays where it is.
+        EdgeRun::PartOfWhereItCrosses { and, .. }
+            if both_curved && and.as_plane().is_none() && and != along[0] && and != along[1] =>
+        {
+            [*along[0], *and]
         }
         EdgeRun::Straight
         | EdgeRun::RightRoundWhereItsFacesCross
@@ -2327,6 +2368,20 @@ fn two_directions_in(flat: &Plane, along: Vector) -> (Vector, Vector) {
 /// rather than as `R₁² − t²D²` for the same reason as the ball above: the second
 /// form cancels to noise for two balls that barely reach each other, and this one
 /// is a product of two numbers each known to full relative accuracy.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when one of those products falls out
+/// of `f64`'s range.
+///
+/// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls with
+/// one centre and one radius, and
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for two balls with one centre
+/// and two radii. Both are **limits** (§16.10): the first pair shares its whole
+/// skin and the second shares none of it, and neither has a circle to hand back
+/// at any precision. Everything the radius and the middle are worked out from
+/// divides by the gap between the two centres, so a pair with no gap is the one
+/// pair the formula above says nothing about.
 fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
     let [here, there] = [one, other].map(|ball| ball.centre().coordinates());
     let [mine, theirs] = [one, other].map(Sphere::radius);
@@ -2367,6 +2422,20 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
     let Some((room, squared_gap, along_the_centre_line)) = worked_out() else {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     };
+    // Two centres in the same place leave nothing to divide by. Of one radius
+    // that put `0 / 0` in every coordinate of `middle`, and
+    // `Plane::from_point_and_normal` refused it as a "point on a plane" that is
+    // not finite — the radical plane named for a fault in the pair it was built
+    // from. Of two radii the numerator is not zero, so `middle` runs off to
+    // infinity instead, and the two are told apart here because one pair is the
+    // same skin twice and the other is two skins that never touch.
+    if squared_gap == 0.0 {
+        return Err(if mine == theirs {
+            Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing
+        } else {
+            Error::TheseTwoSurfacesDoNotCrossInAConic
+        });
+    }
     let part = along_the_centre_line / (2.0 * squared_gap);
     let middle = one.centre() + apart * part;
     let radius_here = (-room / (4.0 * squared_gap)).max(0.0).sqrt();
