@@ -9,8 +9,11 @@ use rcad_predicates::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::exact::{difference, square_of_expansion};
+use crate::enclosure::{dot_enclosing, exactly};
+use crate::exact::{Exact, difference, square_of_expansion};
+use crate::intersect::{Question, WHERE_A_PLANE_AND_A_PIPE_CROSS};
 use crate::isometry::Isometry;
+use crate::plane::Plane;
 use crate::point::{Axis, Point, Vector};
 use crate::sphere::{largest_magnitude, squared, without_overflow};
 use crate::{Error, Result};
@@ -180,6 +183,46 @@ impl Cylinder {
             from_origin.dot(and).atan2(from_origin.dot(across)),
             from_origin.dot(self.axis.direction()),
         )
+    }
+
+    /// Whether `flat` cuts this pipe in a curve that **closes**; [`None`] when
+    /// the sign cannot be proved.
+    ///
+    /// [`Cone::is_cut_in_a_closed_curve_by`](crate::Cone::is_cut_in_a_closed_curve_by)'s
+    /// question asked of a pipe, and it is the easier of the two. A pipe has no
+    /// apex to dispose of first and no nappe on the far side, so there is one
+    /// sign and nothing else: the plane's stored normal `n` against the stored
+    /// axis direction `a`.
+    ///
+    /// ```text
+    /// n·a ≠ 0
+    /// ```
+    ///
+    /// Above or below zero the plane cuts across the pipe and leaves one closed
+    /// curve — an ellipse in general, a circle when the plane is square to the
+    /// axis, and neither is drawn so neither needs telling apart (§24.5).
+    /// Exactly zero and the plane holds the axis's direction, so what it leaves
+    /// is two endless lines, one, or nothing, and none of those closes.
+    ///
+    /// Three products of stored `f64`s summed with nothing thrown away, so no
+    /// vector is normalised and nothing is rounded on the way. `n·a` rounding
+    /// to nothing is not a proof that it is nothing, and
+    /// `arrange.rs`'s `a_plane_lies_along_a_pipes_axis` carries what a rounded
+    /// version of this same sign cost.
+    #[must_use]
+    pub fn is_cut_in_a_closed_curve_by(&self, flat: &Plane) -> Option<bool> {
+        let normal = flat.normal().components();
+        let along = self.axis.direction().components();
+        let leaning = Question {
+            named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+            enclosing: move || dot_enclosing(exactly(normal), exactly(along)),
+            exactly: move || Exact::dot_of(normal, along),
+        };
+        match decide(&leaning).0 {
+            Decision::Pos | Decision::Neg => Some(true),
+            Decision::Zero => Some(false),
+            Decision::Undecidable { .. } | _ => None,
+        }
     }
 }
 

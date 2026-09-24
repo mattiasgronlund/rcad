@@ -479,12 +479,29 @@ fn the_piece_holds(
 /// whose material is outside its ball bites into the piece instead, and that
 /// bite is what the ball's own sign already took out.
 ///
-/// **A pipe the plane crosses leaves an ellipse and the same argument holds**,
-/// but it is not counted yet. Counting it answers two pinned refusals over bars
-/// (`degenerate_curved_fuses.rs`) and turns two more into four faces along one
-/// edge, because two arcs of one ellipse between the same corners are then
-/// named as one edge (`assemble`'s `which_arc_of_a_circle_this_is` reads a
-/// ball's circle only).
+/// **A pipe is counted the same way, where the plane crosses it**, which is
+/// [`Cylinder::is_cut_in_a_closed_curve_by`](rcad_geom::Cylinder::is_cut_in_a_closed_curve_by)
+/// — the sign of `n·a`, and the only thing a pipe can leave on a plane that is
+/// not one closed curve is a pair of endless lines. What the ellipse's inside
+/// leaves is one convex region, exactly as a circle's is, so the ball's
+/// paragraph above carries over word for word.
+///
+/// **The cost this used to warn of is real, and it is one line in `assemble`.**
+/// The warning was that counting the pipe turns two faces into four along one
+/// edge, because `which_of_them_a_closed_crossing_runs_round` read a ball's
+/// circle and a cone's closed crossing and not a pipe's, so two arcs of one
+/// ellipse between the same corners were named as one edge. Measured: with the
+/// pipe counted here and not there, two rows of `degenerate_curved_fuses.rs`
+/// came back `ResultIsNotManifold { count: 4 }` and nothing else in the suite
+/// moved. Naming the pipe there as well turned those two into answers, so the
+/// warning was about a missing row and not about a shape the fuse cannot hold.
+///
+/// What the pair bought, all of it measured: three pinned refusals over bars
+/// become answers — a bar cut by one plane off its axis, the control of the
+/// tangent-wall row, and two tools meeting on a plane that cuts a round wall —
+/// and `fusing_two_bars_side_by_side.rs`'s two orders, which used to give out in
+/// different searches, now give out in the same one. Two side-by-side bars still
+/// do not fuse; they die at the next rule, which is what §218.5 predicted.
 ///
 /// **A cone is counted where the plane cuts it in a curve that closes**, which
 /// is a circle for a cap's own plane and an ellipse for every plane leaned off
@@ -528,7 +545,9 @@ fn in_the_bulge_of(
 ) -> Option<i32> {
     let one_round_region = matches!(side.carried_by[1], Surface::Sphere(_))
         || matches!(side.carried_by[1], Surface::Cone(cone)
-            if cone.is_cut_in_a_closed_curve_by(flat) == Some(true));
+            if cone.is_cut_in_a_closed_curve_by(flat) == Some(true))
+        || matches!(side.carried_by[1], Surface::Cylinder(pipe)
+            if pipe.is_cut_in_a_closed_curve_by(flat) == Some(true));
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
     }
