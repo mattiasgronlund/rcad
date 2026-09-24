@@ -951,10 +951,6 @@ impl Walk {
     /// an arc's already does, and [`EdgeRun::RightRoundWhereItCrosses`] is the
     /// kind that carries one (§216).
     ///
-    /// **Two faces that genuinely cross keep
-    /// [`EdgeRun::RightRoundWhereItsFacesCross`]**, which is exact: those two
-    /// faces name the curve between them and want nothing from this reader.
-    ///
     /// **What counts as naming nothing is
     /// [`the_faces_along_it_name_no_crossing`], and it is exact both ways.**
     /// Two flat faces never name a closed curve whatever their numbers, which is
@@ -962,6 +958,25 @@ impl Walk {
     /// surface bit for bit. A nearness would have to name a tolerance this
     /// reader has no principle for, and it would risk the mistake that costs —
     /// an `and` whose curve is not where the file's is (§216, §16.10).
+    ///
+    /// **Between curved faces that are not one surface bit for bit, the run is
+    /// named the way an arc's is**: by the circle's own plane where the file's
+    /// circle has been checked to lie on every face, and by the faces
+    /// ([`EdgeRun::RightRoundWhereItsFacesCross`]) where it has not — see
+    /// [`Walk::the_surface_that_names_the_curve`]. That covers one pipe written
+    /// twice a hair apart, whose two spellings cross nowhere near the rim, with
+    /// no tolerance on the surfaces: the check is on the file's circle, and the
+    /// plane crosses either face in exactly that circle (§220.4 for arcs). It is
+    /// also right for two genuinely different curved faces that hold one
+    /// circle — a ball and a pipe of its radius on its axis, which only touch
+    /// round it (§189.3), or two balls that cross in it: the plane crosses each
+    /// of them in the one circle, so `rcad_geom::walk`'s `[face, and]` draws
+    /// the same curve the two faces would, and draws it where they only touch.
+    ///
+    /// **Everywhere else the faces keep
+    /// [`EdgeRun::RightRoundWhereItsFacesCross`]**: a flat face and a curved
+    /// one cross in the curve and want nothing from this reader, and a closed
+    /// `ELLIPSE`, or a circle on a cone or a torus, has no check here.
     fn round_run(
         &self,
         reading: &Reading<'_>,
@@ -972,15 +987,22 @@ impl Walk {
         along_the_curve: bool,
     ) -> Result<EdgeRun, Refusal> {
         let right_round = ends[0] == ends[1];
-        let its_faces_name_it = !self
-            .surfaces_along_each_edge
-            .get(&edge_curve)
-            .is_some_and(|faces| the_faces_along_it_name_no_crossing(faces));
-        if right_round && its_faces_name_it {
+        let faces_along_it = self.surfaces_along_each_edge.get(&edge_curve);
+        let they_name_no_crossing =
+            faces_along_it.is_some_and(|faces| the_faces_along_it_name_no_crossing(faces));
+        let every_face_curved = faces_along_it
+            .is_some_and(|faces| a_face_where_curved_faces_meet(faces).is_some());
+        if right_round && !they_name_no_crossing && !every_face_curved {
             return Ok(EdgeRun::RightRoundWhereItsFacesCross);
         }
         let position = reading.reference_at(curve, keyword, 1)?;
         let place = reading.placement_at(curve, position)?;
+        if right_round
+            && every_face_curved
+            && !self.a_circle_every_face_holds(reading, edge_curve, curve, keyword, &place)?
+        {
+            return Ok(EdgeRun::RightRoundWhereItsFacesCross);
+        }
         let and =
             self.the_surface_that_names_the_curve(reading, edge_curve, curve, keyword, &place)?;
         if right_round {
@@ -1760,9 +1782,11 @@ fn a_ball_where_curved_faces_meet(faces: &[Surface]) -> Option<Sphere> {
 /// validator refuses by name should not have written it.
 ///
 /// **Or every face is the one surface, `==` and not near it.** A surface
-/// crossed with itself is not a curve. Written twice a hair apart it fails this
-/// and keeps the old run, which is §218.6's open item — the wrong answer that
-/// then comes out is `rcad-geom`'s to refuse and not this reader's to guess at.
+/// crossed with itself is not a curve. Written twice a hair apart it fails this,
+/// and [`Walk::round_run`] then names the run by the file's circle where it
+/// has checked that circle lies on every face, as an arc's is named — which is
+/// how a curved surface written twice a hair apart is answered without a
+/// nearness here.
 ///
 /// Fewer than two faces names nothing either way, and the shell that holds such
 /// an edge is about to be refused by name.
