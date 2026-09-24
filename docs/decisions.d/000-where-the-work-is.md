@@ -5,38 +5,38 @@ reviewed: 2026-09-24
 **unit:** *a crossing too nearly parallel to follow* — the corpus files hanging on
 that refusal alone. Chosen by Mattias 2026-09-15 off §107's table: roadmap §4.2 is
 not the lever, healing is refused in §42.9, §45.2 governs every count. §16.10
-governs — such a claim owes a demonstration, a gap if a scaling reaches the sign, a
-limit if not. **Since §190.2 no corpus file reaches it**: 24 of 29 import (KiCad
-114 → 140), the LEDs since §193.1 (160), §198.1 adds `LED_D5.0mm-3` (161); a new
-unit is Mattias's call.
+governs — a gap if a scaling reaches the sign, a limit if not. **Since §190.2 no
+corpus file reaches it**: 24 of 29 import (KiCad 114 → 140), the LEDs since §193.1
+(160), §198.1 adds `LED_D5.0mm-3` (161); a new unit is Mattias's call.
 
 **What is closed.** A chain from §140, each closing what the one before left;
 `just decisions-toc` is the map. Through §194 the STEP corpus — 793 refusals to 0,
-8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc, a pointed
-cone's bound, a ring of arcs round an apex; §211–§213 an ellipse arc's centre, a
-ring with a hole, a crown, §214's 9, §211.6's floor named. §216–§217 close that
-floor's run; **§218** proves the cone-face arm and shuts §217.5's two doors.
+8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc and a ring
+of arcs round an apex; §211–§214 an ellipse arc's centre, a ring with a hole and a
+crown; §216–§217 §211.6's floor; §218 the cone-face arm; **§219** all §218 left.
 
-**Next and unclaimed: two spheres a hair apart answer finitely and wrongly**
-(§218.6). 1e-15 between the same sphere written twice gives a great circle
-through the ball's centre, not the rim: the guard in
-`the_two_surfaces_it_runs_between` is bit equality. A wrong answer outranks a
-refusal and this one is measured (§176.2 is the plane case). Beside it §218.5's
-bulge that does not count a pipe — a **gap**, fix and test both named.
+**Next and unclaimed: `mesh.rs:738` meshes a closed rim wrongly and says nothing**
+(§219.7). Pole insertion is gated on the old closed variant by name, so a rim
+written the new way gets no pole and the walk jumps half a turn of longitude — a
+wrong mesh under no error name at all. Reachable through `Model::fuse`, the chain
+named end to end; §176.2 is this class one surface down. Beside it §219.7's other
+gap in two places: `meet.rs:84` accepts a new-variant run whose ends differ, and
+`walk.rs:2152` then walks it as an open parabola.
 
-Also open: `rcad-step`'s `round_run`, the same drift at the importer's door; the
-four readers of the old closed kind found by grep and not audited, `mesh.rs`'s
-pole site among them (both §218.6, §218.7). §216.3's `cut.kept` **limit**;
-§215.2's other two walls; §208.6's cone-tip bound; §212.6's gap; §124, §136.4,
-§125.6.
+Also open, §219.8: `validate.rs`'s closed-edge check reads the faces and not the run
+(demonstration committed) and `:404` names the wrong refusal; `round_run`'s `==`
+misses two curved faces a hair apart; no property covers spellings of one surface;
+`mesh.rs:5148`'s oracle carries the bit equality §219.1 fixed; `arrange.rs:4489`
+respells `n·a`; `holds.rs`'s `is_a_family_this_follows` is a **gap** since §208.6.
+§216.3's `cut.kept` **limit**; §215.2's two walls; §208.6's cone tip; §124, §125.6.
 
 **parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
-thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a
-named consumer, `docs/consumers.md` records none; Mattias parked it (§104.2).
-Before it, §53 closed by §103 having earned nothing; §55–§102 are defect fixes.
+thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a named
+consumer, `docs/consumers.md` records none; Mattias parked it (§104.2). Before it,
+§53 closed by §103 having earned nothing; §55–§102 are defect fixes.
 
-**the board is not here.** `docs/plan.md` has a line per roadmap item with its
-state and evidence; `just plan` renders it, `just plan open` lists what is left.
+**the board is not here.** `docs/plan.md` has a line per roadmap item with its state
+and evidence; `just plan` renders it, `just plan open` lists what is left.
 2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a — 11.3 moved by §171.7. §106.
 
 **deferred, with the section that defers it:**
