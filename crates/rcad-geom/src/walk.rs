@@ -31,8 +31,8 @@
 use core::cmp::Ordering;
 
 use rcad_predicates::{
-    Approximation, Cause, Decision, Interval, Level, Measures, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record, resolve_under_policy,
+    Approximation, Cause, Decision, Filtered, Interval, Level, Measures, Point as PredicatePoint,
+    Policy, Predicate, ProvenanceLog, Record, decide, resolve_under_policy,
 };
 
 use crate::exact::Exact;
@@ -550,7 +550,8 @@ enum WhatARunLiesOn {
     Parabola(Parabola),
     /// One of a hyperbola's two branches, which runs on for ever both ways and
     /// bends too. The other branch is the sibling run, and which of the two
-    /// this is was settled by the half-spaces on it.
+    /// this is was settled by the run's ends, or by its half-spaces when it
+    /// has none.
     OneBranchOfAHyperbola(HyperbolaBranch),
 }
 
@@ -2226,7 +2227,7 @@ fn where_a_plane_cuts_a_cone(
         return which_branch_of_a_hyperbola_this_run_is(
             [towards, sideways_reach, standing_off],
             [apex, centre],
-            [across, and],
+            [across, and, cone.axis().direction()],
             run,
             policy,
             log,
@@ -2273,60 +2274,189 @@ fn the_parabola_a_plane_along_a_ruling_cuts(
     }
 }
 
-/// Which of a hyperbola's two branches this run names, told by the half-spaces
-/// on it.
+/// Which of a hyperbola's two branches this run names: the one its own ends are
+/// on, and the one its half-spaces hold when it has no ends.
 ///
-/// **The same shape as [`where_a_plane_cuts_a_torus`]**, and for the same
-/// reason: the two candidates are built, each is asked whether every picker on
-/// the run holds it, and one held candidate is an answer while two or none is
-/// not. Each branch lies wholly in one nappe of the cone, so the half-space
-/// through the apex square to the axis is what tells them apart — and
-/// `intersect` mints exactly that pair.
+/// Each branch lies wholly in one nappe of the cone, so which side of the plane
+/// through the apex square to the axis a point is on says which branch it can
+/// be on — the sign of `(x − apex)·w`, which does not change anywhere on one
+/// branch.
 ///
-/// The point each is asked at is its own vertex, and one point settles the
-/// whole branch: the picker's normal is the cone's axis direction bit for bit,
-/// so the sign it reads is the sign of `(x − apex)·ŵ`, which does not change
-/// anywhere on one branch.
+/// **An end is asked before a picker, because a picker can hold the wrong
+/// branch.** A half-space through the chord of an arc holds the arc and the
+/// whole of the other branch too, and not this branch's vertex, so asking the
+/// pickers at each vertex walked an arc across the apex onto the other nappe.
+/// The fuse wrote exactly such pickers until e2cd175d, and [`walk`] is public
+/// and takes any run, so what a writer chose cannot be what this depends on.
+/// Once the branch is named, the ends are what say how much of it to walk.
+///
+/// A run with no ends is the pair [`intersect`](crate::intersect) mints, and
+/// there the pickers are the whole of what tells the branches apart: the
+/// same shape as [`where_a_plane_cuts_a_torus`], each candidate asked whether
+/// every picker holds its vertex, one held candidate an answer and two or none
+/// not. `intersect`'s picker is that same plane through the apex, with the
+/// axis as its normal bit for bit, so one point settles the whole branch.
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the pickers hold both
-/// branches or neither, which is what a run with nothing picking it gets.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when an end or a vertex
+/// cannot be put on one side of the apex, when the two ends are on different
+/// sides of it, and, for a run with no ends, when the pickers hold both
+/// branches or neither.
 fn which_branch_of_a_hyperbola_this_run_is(
     spread: [f64; 3],
     places: [Point; 2],
-    directions: [Vector; 2],
+    directions: [Vector; 3],
     run: &NamedRun,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<WhatARunLiesOn> {
     let [towards, sideways_reach, standing_off] = spread;
     let [apex, centre] = places;
-    let [across, and] = directions;
+    let [across, and, axis] = directions;
     let size = how_big_this_is(&[centre, apex], &[towards, sideways_reach, standing_off]);
-    let picked_by: &[Picker] = match run.run() {
-        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight
-        | EdgeRun::RightRoundWhereItsFacesCross
-        | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
-    };
+    let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * size;
+    let branches = [1.0, -1.0].map(|side| HyperbolaBranch {
+        centre,
+        out: and * (towards * side),
+        across: across * sideways_reach,
+        size,
+    });
 
+    let ends: Vec<PredicatePoint> = run
+        .ends()
+        .into_iter()
+        .filter(|end| *end != nowhere_in_particular())
+        .collect();
     let mut held = Vec::new();
-    for side in [1.0, -1.0] {
-        let branch = HyperbolaBranch {
-            centre,
-            out: and * (towards * side),
-            across: across * sideways_reach,
-            size,
+    if ends.is_empty() {
+        let picked_by: &[Picker] = match run.run() {
+            EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+            EdgeRun::Straight
+            | EdgeRun::RightRoundWhereItsFacesCross
+            | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
         };
-        let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * size;
-        if every_half_space_holds(picked_by, branch.at(0.0), deviation, policy, log)? {
-            held.push(branch);
+        for branch in branches {
+            if every_half_space_holds(picked_by, branch.at(0.0), deviation, policy, log)? {
+                held.push(branch);
+            }
+        }
+    } else {
+        let mut sides = Vec::new();
+        for end in ends {
+            sides.push(which_side_of_the_apex(axis, apex, end, policy, log)?);
+        }
+        if sides.iter().any(|side| *side != sides[0]) {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        for branch in branches {
+            let Some(vertex) = somewhere_within(branch.at(0.0), deviation) else {
+                return Err(Error::CannotWorkOutHowBigACrossingIs);
+            };
+            if which_side_of_the_apex(axis, apex, vertex, policy, log)? == sides[0] {
+                held.push(branch);
+            }
         }
     }
     match held.as_slice() {
         [only] => Ok(WhatARunLiesOn::OneBranchOfAHyperbola(*only)),
         _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+}
+
+/// Which side of the plane through `apex` square to `axis` the point `at` is
+/// on: the sign of `(at − apex)·axis`, and only ever [`Ordering::Greater`] or
+/// [`Ordering::Less`].
+///
+/// A point exactly on that plane is on neither branch of a hyperbola, since
+/// the plane the hyperbola lies in misses the apex, so it is refused along with
+/// a sign that could not be told.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the sign is zero or
+/// undecided, recorded first in `log` when it is undecided — a tolerant
+/// policy that reads it as zero is refused all the same, because zero names no
+/// branch either.
+fn which_side_of_the_apex(
+    axis: Vector,
+    apex: Point,
+    at: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Ordering> {
+    let question = SideOfTheApex {
+        axis: axis.components(),
+        apex: apex.coordinates(),
+        at,
+    };
+    let decision = match decide(&question).0 {
+        Decision::Undecidable { enclosure } => resolve_under_policy(
+            Record::new(
+                SIDE_OF_THE_APEX,
+                &[at],
+                Level::Interval,
+                enclosure,
+                Measures::Length,
+            ),
+            policy,
+            log,
+        ),
+        decided => decided,
+    };
+    match decision {
+        Decision::Pos => Ok(Ordering::Greater),
+        Decision::Neg => Ok(Ordering::Less),
+        Decision::Zero | Decision::Undecidable { .. } => {
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+        }
+        other => panic!("a side of the apex came back with a decision nothing knows: {other:?}"),
+    }
+}
+
+/// The name [`which_side_of_the_apex`] records an undecided sign under.
+const SIDE_OF_THE_APEX: &str = "which side of a cone's apex";
+
+/// `(at − apex)·axis`, for the cascade.
+///
+/// There is no `f64` level: the reading is only ever taken twice per run, and
+/// the interval level already settles every point that is not within rounding
+/// of the apex's plane.
+struct SideOfTheApex {
+    axis: [f64; 3],
+    apex: [f64; 3],
+    at: PredicatePoint,
+}
+
+impl Predicate for SideOfTheApex {
+    fn name(&self) -> &'static str {
+        SIDE_OF_THE_APEX
+    }
+
+    fn on_floats(&self) -> Option<Filtered> {
+        None
+    }
+
+    fn on_intervals(&self) -> Interval {
+        let at = self.at.enclosure();
+        let term = |axis: usize| {
+            Interval::exactly(self.axis[axis]) * (at[axis] - Interval::exactly(self.apex[axis]))
+        };
+        term(0) + term(1) + term(2)
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let at = self.at.exact_coordinates()?;
+        let reading = Exact::dot_of(self.axis, at)?.minus(&Exact::dot_of(self.axis, self.apex)?);
+        match reading.sign() {
+            Decision::Pos => Some(Decision::Pos),
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            // An entry that is not a real number, which takes an overflow: the
+            // exact level cannot run.
+            Decision::Undecidable { .. } => None,
+            other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+        }
     }
 }
 
