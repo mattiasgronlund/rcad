@@ -65,13 +65,13 @@
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Axis, Cone, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale, Surface,
-    Vector,
+    Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+    Surface, Vector,
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    Containment, DraftStep, Error, FaceKey, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
-    SolidView, WireStepView,
+    Containment, DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder,
+    SolidKey, SolidView, WireStepView,
 };
 
 /// Slope a half, so `slope · height` rounds to nothing at the corners.
@@ -161,17 +161,12 @@ fn a_lens_of_a_cone_between_two_leaning_lids_is_a_solid() {
 /// the cone's apex, which is the cone arm of `where_a_closed_crossing_is
 /// _centred` and not a ball's centre.
 ///
-/// **It is written as "not that refusal" rather than as an answer**, and that is
-/// a measured limit and not a hedge. This pair walks straight into a *second*
-/// wall once the arc is read, and the two tests below name it: the lens's own
-/// **cone face** cannot be asked what it holds, so nothing can be classified
-/// against the lens at all. Two other shapes were tried for this file and each
-/// found a different wall of its own — a half frustum cut down its axis folds
-/// two corners on the cone's two rulings into one node and refuses
-/// `EdgeHasNoLength`, and a block big enough to hold the lens leaves a piece of
-/// its own wall bounded by a hyperbola with two nodes and no third to wind
-/// round. None of the three is about the centre of an ellipse; what this file
-/// can say is that the arc is now read, and it says exactly that.
+/// **Every rule now answers.** This test used to pin `Undecidable` under all
+/// three: once the arc was read, the lens's own cone face could not be asked
+/// what it held, so nothing could be classified against the lens. The cone arm
+/// of `holds.rs`'s `is_a_family_this_follows` takes that face since `0552f4d1`,
+/// and what each rule's answer is worth is the business of the volume tests
+/// below; this one says only that none of the three refuses.
 #[test]
 fn the_arrangement_reads_the_way_into_a_cones_ellipse_arc() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
@@ -190,30 +185,23 @@ fn the_arrangement_reads_the_way_into_a_cones_ellipse_arc() {
             ),
             "under {rule:?} the arrangement gave up on an ellipse arc it can read: {said:?}"
         );
-        assert!(
-            matches!(said, Err(Error::Undecidable { .. })),
-            "under {rule:?} the fuse said something the wall below does not explain: {said:?}"
-        );
+        assert!(said.is_ok(), "under {rule:?} the fuse refused: {said:?}");
     }
 }
 
-/// A point plainly on the piece of cone between the two lids, and the face
-/// refuses to say whether it is on it.
+/// A point plainly on the piece of cone between the two lids is held by it.
 ///
 /// `(2, 0, 4)` is on the cone to the bit — the slope is a half and `0.5 · 4 = 2`
-/// — and it is strictly between the lids: `x + z` is `6` against the lower lid's
-/// `4`, and `z − x` is `2` against the upper lid's `4`. The answer is `Held` and
-/// there is nothing undecidable about it. What comes back is
-/// `AFaceTrimmedByACurveThisCannotFollow` naming that same face.
+/// — and it is strictly between the lids: `x + z` is `6`, at least the lower
+/// lid's `4`, and `z − x` is `2`, at most the upper lid's `4`. So the answer is
+/// `Held`, worked out from the shape alone.
 ///
-/// **The refusal never looks at the point.** `holds.rs`'s
-/// `what_a_face_cut_by_part_of_a_crossing_holds` takes this face — each of its
-/// two sides is `PartOfWhereItCrosses` with a face across it — and asks
-/// `is_a_family_this_follows` first, whose `match` on the face's own surface
-/// answers `false` for every `Surface::Cone` whatever cuts it. So no point of
-/// this face can be asked, and §167's family is the whole of the wall.
+/// This used to pin `AFaceTrimmedByACurveThisCannotFollow`: the cone arm of
+/// `is_a_family_this_follows` refused any cone face with its apex behind a cut,
+/// and the apex is behind the lower lid. Since `0552f4d1` one such cut that
+/// closes, beside one other, is followed.
 #[test]
-fn the_lenss_cone_face_will_not_say_what_it_holds() {
+fn the_lenss_cone_face_holds_a_point_between_its_lids() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let lens = a_lens_of_a_cone(&mut model);
     let view = model.solid(lens).expect("this model made the key");
@@ -225,75 +213,129 @@ fn the_lenss_cone_face_will_not_say_what_it_holds() {
         &mut ProvenanceLog::new(),
     );
     assert!(
-        matches!(said, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == skin),
+        matches!(said, Ok(OnAFace::Held)),
         "the piece of cone said something else about a point on it: {said:?}"
     );
 }
 
-/// The point the fuse could not place *is* inside its piece, and what stops it
-/// is the lens's cone face.
+/// The middle of the bar's own bottom end is outside the lens.
 ///
-/// `select.rs` refuses this pair under the name **"a point inside a piece of a
-/// face"**, which describes the wrong thing. `(0.625, −0.125, 2.75)` is the
-/// middle of the bar's own bottom end — a rectangle four corners round, with no
-/// curve anywhere near it — and the winding puts it inside. The candidate then
-/// goes to classification against the lens, which stops at the cone face and
-/// hands back `CannotFollowAFacesTrimming`; `settle_against_each` reads that as
-/// "this candidate says nothing", every candidate ends the same way, and the
-/// refusal that comes out names the search that in fact succeeded.
+/// `(0.625, −0.125, 2.75)` has `x + z = 3.375`, short of the lower lid's `4`, so
+/// it is on the far side of the lower lid from the lens — `Outside`, from the
+/// shape alone. It is the candidate the fuse used to give up on: classifying it
+/// stopped at the lens's cone face and came back `CannotFollowAFacesTrimming`,
+/// which is what this test pinned before `0552f4d1` let that face answer.
 #[test]
-fn the_candidate_the_fuse_gave_up_on_is_stopped_by_the_cone_face() {
+fn the_middle_of_the_bars_bottom_end_is_outside_the_lens() {
     let (model, lens, _bar) = a_lens_and_a_bar();
     let view = model.solid(lens).expect("this model made the key");
-    let skin = the_piece_of_cone(view);
     let said = view.classify_point(
         Point::new(0.625, -0.125, 2.75),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
     assert!(
-        matches!(said, Containment::CannotFollowAFacesTrimming { face } if face == skin),
-        "the lens placed the bar's own bottom end after all: {said:?}"
+        matches!(said, Containment::Outside),
+        "the lens placed the bar's own bottom end somewhere else: {said:?}"
     );
 }
 
-/// And the name that refusal goes by says which of the two searches gave out,
-/// which §217 fixed and this test now pins.
+/// The lens and the bar united hold the lens, and the bar less what the two
+/// share.
 ///
-/// `select.rs`'s `place_the_piece` used to write **"a point inside a piece of a
-/// face"** whichever of its two searches gave out — the one for a point inside
-/// the piece, which succeeds here, or the one for a solid that could be asked
-/// about it, which is what fails. So the fuse wrote down the search that
-/// *worked*. §217 split them, and what fires here is now **"a point in a piece
-/// that every solid could place"**.
+/// **The lens, worked out by hand.** Only `x ≥ 0` has room between the lids, and
+/// there a column at `(x, y)` runs from `max(4 − x, 2r)` up to `4 + x`, with
+/// `r = √(x² + y²)`. That height is `(4 + x − 2r)₊ − (4 − x − 2r)₊`, and
+/// mirroring the second term through `x = 0` makes the whole volume
+/// `∬ sign(x)·(4 + x − 2r)₊`. Round the axis, `x = r cos θ`, and the inner
+/// integral `∫ (4 − r(2 − cos θ)) r dr` up to `r = 4 / (2 − cos θ)` is
+/// `32 / (3(2 − cos θ)²)`. Put `t = tan(θ/2)` and
+/// `∫ dθ / (2 − cos θ)² = (4 / 3√3) atan(√3 t) + 2t / (3(1 + 3t²))`, so the
+/// quarter turns either side of `x = 0` give `4π/9√3 + 1/6` and
+/// `2π/9√3 − 1/6`, and the lens is `(64/3)(2π/9√3 + 1/3)`:
 ///
-/// Measured while the split was in the tree: `just t --test
-/// how_often_a_fuse_with_a_cone_refuses --no-capture` printed the same map, so
-/// **every one of the block family's 30 and the pointed cone's 18 really is a
-/// piece no candidate was inside.** The lens's wall only ever shared their name.
+/// ```text
+/// lens = 128π / (27√3) + 64/9 ≈ 15.709864
+/// ```
 ///
-/// **§216.4 costed this split at three pins in two files and it was ten tests in
-/// seven**, measured when it landed; §217 carries the list.
+/// A midpoint sum on an 8000 × 16000 grid agrees to `1e−7`. The bar is
+/// `½ · ½ · 11/4 = 11/16`, and what they share is `3/8`
+/// (`a_bar_through_both_lids_intersected_with_the_lens_is_three_eighths`), so
+/// the union is `lens + 5/16`.
+///
+/// **This refused `CannotMeshAFace { why: CoordinateOutOfRange }` on
+/// `0552f4d1`**, and not because of the cone face that commit taught to answer.
+/// The arrangement cuts the lens's cone along the planes of the bar's walls,
+/// which run along the axis and so cross the cone in hyperbolas, and the fuse
+/// named each arc of one by the half-space through its chord. That holds
+/// the arc and the whole other branch, and `rcad_geom::walk` asks it at each
+/// branch's vertex, so it walked the arc on the nappe below the apex — a face
+/// reaching across both nappes, whose domain the triangulator could not scale.
+/// The arc is named by the nappe it is on now (`fuse/assemble.rs`,
+/// `the_branch_of_a_hyperbola_this_is_on`).
 #[test]
-fn the_refusal_the_fuse_writes_down_names_the_search_that_gave_up() {
+fn the_lens_and_the_bar_unite_to_the_closed_form() {
+    let the_lens = 128.0 * std::f64::consts::PI / (27.0 * 3.0_f64.sqrt()) + 64.0 / 9.0;
+    what_the_fuse_measures(Rule::Union, the_lens + 5.0 / 16.0);
+}
+
+/// The bar taken out of the lens leaves the lens less the `3/8` they share —
+/// the lens's volume is worked out in the test above.
+///
+/// It went through the same hyperbola arcs on the lens's cone and refused the
+/// same way on `0552f4d1`.
+#[test]
+fn the_bar_taken_out_of_the_lens_leaves_the_closed_form() {
+    let the_lens = 128.0 * std::f64::consts::PI / (27.0 * 3.0_f64.sqrt()) + 64.0 / 9.0;
+    what_the_fuse_measures(Rule::Difference, the_lens - 3.0 / 8.0);
+}
+
+/// Fuse the lens and the bar under `rule`, check the model, and hold the one
+/// solid that comes out to `want` within what its mesh says it may miss by.
+///
+/// Every point of the mesh is also held above `z = 8/3`, the lowest the lens
+/// reaches — where `x + z = 4` meets the cone's ruling along `+x` — and the bar
+/// starts higher. A point on the nappe below the apex is what the misnamed
+/// arcs produced.
+fn what_the_fuse_measures(rule: Rule, want: f64) {
     let (mut model, lens, bar) = a_lens_and_a_bar();
-    let said = model.fuse(
-        &[lens],
-        &[bar],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    let Err(Error::Undecidable { records }) = said else {
-        panic!("the lens and the bar fused after all: {said:?}")
+    let fused = model
+        .fuse(
+            &[lens],
+            &[bar],
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("under {rule:?} the fuse refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("what the fuse made is a sound model");
+    let [piece] = fused.solids() else {
+        panic!("one piece under {rule:?}: {:?}", fused.solids())
     };
-    let named = records
-        .records()
-        .last()
-        .map(rcad_predicates::Record::predicate);
-    assert_eq!(
-        named,
-        Some("a point in a piece that every solid could place")
+    let view = model.solid(*piece).expect("a solid the fuse made");
+    let fine = Deflection::of(0.001).expect("a positive length");
+    let mesh = view
+        .mesh(fine, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the answer meshes");
+    let lowest = mesh
+        .points()
+        .iter()
+        .map(|point| point.coordinates()[2])
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        lowest > 2.6,
+        "under {rule:?} a mesh point sits at z = {lowest}"
+    );
+    let measured = view
+        .measure(fine, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the answer measures");
+    assert!(
+        (measured.volume() - want).abs() <= measured.volume_error(),
+        "under {rule:?} the volume is {} against {want}, and the mesh may miss by {}",
+        measured.volume(),
+        measured.volume_error()
     );
 }
 
