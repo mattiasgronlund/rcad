@@ -14,8 +14,9 @@
 //! the disc's plane written as the very entity the face round it sits on, and
 //! written again from its own placement so the numbers come out a hair apart —
 //! which is what the corpus does, and is why the reader cannot ask `==` alone.
-//! The second one goes as far as this reader can take it and is then stopped by
-//! a check in `rcad-topo` that reads the two faces and never the run.
+//! Both reach the mesh. The second one used to stop one crate up, at a check
+//! that read the two faces and never the run; §219.6 named that gap and
+//! `what_says_which_way_this_closed_edge_winds` closed it.
 
 mod written_by_hand;
 
@@ -36,43 +37,31 @@ fn a_closed_circle_between_two_faces_on_the_one_plane_names_its_cylinder() {
 }
 
 /// The same circle with the disc on a `PLANE` of its own, whose direction is a
-/// hair off the other's, gets the same run out of this reader — and `rcad-topo`
-/// refuses it anyway, one check further on.
+/// hair off the other's, gets the same run out of this reader and the same
+/// answer out of the sweep.
 ///
 /// This is the corpus's own shape, and the reason the reader cannot ask `==`
 /// alone: on `SW_Tactile_SPST_Angled_PTS645Vx31-2LFS.step` the planes either
 /// side of entity `#1234`'s circle differ by `5.2e-16` in one component of the
 /// normal and `1.6e-15` in the offset, which is one plane written twice.
 ///
-/// **What the refusal is now is not what it was.** It used to come from
-/// `check_something_curved_says_where_this_edge_bends`, because the run named
-/// nothing; that check passes now — the run carries the circle's own cylinder,
-/// measured, and a cylinder is not a plane. It comes from
-/// `check_closed_edges_are_walked_the_way_their_surfaces_wind` instead, whose
-/// `a_closed_crossing_is_walked_the_way_it_is_stored` reads the two **face**
-/// surfaces and never the run's `and`, so it finds no curved surface to read a
-/// winding off and refuses under the older name. The bit-identical pair above
-/// slips past it only because no corner of either face is off the other, so the
-/// check has nothing to ask about.
-///
-/// That is §218.6's gap one crate up, in `crates/rcad-topo/src/validate.rs`,
-/// and it is a **gap** and not a limit under §16.10: the answer exists — the
-/// run names the cylinder and the cylinder says which way the circle winds —
-/// and the check simply does not look there. It is outside this lane's write
-/// set; this test is the demonstration §16.10 asks for in place of a paragraph,
-/// and it turns into the one above the day that check reads the run.
+/// **This was a standing demonstration of a refusal until §219.6's gap was
+/// closed.** Two checks stopped it in turn.
+/// `check_something_curved_says_where_this_edge_bends` went first, because the
+/// run named nothing at all; §219.6 gave the run the circle's own cylinder,
+/// measured, and a cylinder is not a plane.
+/// `check_closed_edges_are_walked_the_way_their_surfaces_wind` went next, whose
+/// `a_closed_crossing_is_walked_the_way_it_is_stored` read the two **face**
+/// surfaces and never the run's `and`, found no curved surface to read a
+/// winding off, and refused as `ClosedEdgeBetweenTwoFlatFaces`. The
+/// bit-identical pair above slipped past that one only because no corner of
+/// either face is off the other, so it had nothing to ask about; a hair apart,
+/// the corners are off and it asked. `what_says_which_way_this_closed_edge_winds`
+/// now hands the run's cylinder through where neither face is curved, and this
+/// shape reaches the mesh like the bit-identical one.
 #[test]
-fn two_spellings_of_one_plane_stop_at_a_check_that_reads_the_faces_and_not_the_run() {
-    let text = a_slab_with_a_circle_drawn_round_on_top(TheDiscsPlane::ItsOwnAHairOff);
-    let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    let mut log = ProvenanceLog::new();
-    let refused = Import::read(&file, &Policy::certified(), &mut log)
-        .expect_err("the winding check still refuses a closed edge between two flat faces");
-    let named = format!("{refused:?}");
-    assert!(
-        named.contains("ClosedEdgeBetweenTwoFlatFaces"),
-        "the one refusal left on this shape is the winding check's, and this says {named}"
-    );
+fn two_spellings_of_one_plane_a_hair_apart_are_one_plane_and_the_circles_cylinder() {
+    a_closed_circle_reaches_the_mesh_round(TheDiscsPlane::ItsOwnAHairOff);
 }
 
 #[derive(Clone, Copy)]
