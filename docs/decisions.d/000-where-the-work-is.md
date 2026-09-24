@@ -13,22 +13,22 @@ corpus file reaches it**: 24 of 29 import (KiCad 114 → 140), the LEDs since §
 `just decisions-toc` is the map. Through §194 the STEP corpus — 793 refusals to 0,
 8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc and a ring
 of arcs round an apex; §211–§214 an ellipse arc's centre, a ring with a hole and a
-crown; §216–§217 §211.6's floor; §218 the cone-face arm; **§219** all §218 left.
+crown; §216–§217 §211.6's floor; §218 the cone-face arm; §219 all §218 left;
+**§220** all three of §219.7 and the property §219.8 asked for.
 
-**Next and unclaimed: `mesh.rs:738` meshes a closed rim wrongly and says nothing**
-(§219.7). Pole insertion is gated on the old closed variant by name, so a rim
-written the new way gets no pole and the walk jumps half a turn of longitude — a
-wrong mesh under no error name at all. Reachable through `Model::fuse`, the chain
-named end to end; §176.2 is this class one surface down. Beside it §219.7's other
-gap in two places: `meet.rs:84` accepts a new-variant run whose ends differ, and
-`walk.rs:2152` then walks it as an open parabola.
+**Next and unclaimed: §189.3's arm asks for a ball by name, so a pipe loses its
+rim** (§220.4). A pipe, cone or torus written twice a hair apart, whose run names
+its rim's plane, matches no arm of `the_two_surfaces_it_runs_between` — a wrong
+answer, and a **gap** since the bit-identical spelling walks that rim. Widen the
+guard to "either face": §219.1 did it one row down, §220.4 has the test side.
 
-Also open, §219.8: `validate.rs`'s closed-edge check reads the faces and not the run
-(demonstration committed) and `:404` names the wrong refusal; `round_run`'s `==`
-misses two curved faces a hair apart; no property covers spellings of one surface;
-`mesh.rs:5148`'s oracle carries the bit equality §219.1 fixed; `arrange.rs:4489`
-respells `n·a`; `holds.rs`'s `is_a_family_this_follows` is a **gap** since §208.6.
-§216.3's `cut.kept` **limit**; §215.2's two walls; §208.6's cone tip; §124, §125.6.
+Also open, §220.5: §23.8 is spelled twice across two crates, the `rcad-topo` one
+narrower on purpose — closing it wants one public answer in `rcad-geom`; and
+§219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
+demonstrated). From §219.8: `round_run`'s `==` misses two curved faces a hair
+apart; `mesh.rs:5148`'s oracle carries §219.1's bit equality; `arrange.rs:4489`
+respells `n·a`; `holds.rs`'s `is_a_family_this_follows` a **gap** since §208.6;
+§216.3's `cut.kept` **limit**; §215.2's two walls; §208.6's tip; §124, §125.6.
 
 **parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
 thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a named
