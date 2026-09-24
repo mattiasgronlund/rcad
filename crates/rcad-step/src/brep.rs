@@ -903,9 +903,10 @@ impl Walk {
     ///
     /// Three shapes and everything else refused by the name the file gave it. A
     /// straight line is [`EdgeRun::Straight`]; a circle or an ellipse the edge
-    /// goes right round is
-    /// [`EdgeRun::RightRoundWhereItsFacesCross`]; anything less than right round
-    /// is an arc, and an arc needs saying *which* arc — see
+    /// goes right round is [`EdgeRun::RightRoundWhereItsFacesCross`] where its
+    /// two faces cross and [`EdgeRun::RightRoundWhereItCrosses`] where they are
+    /// the one surface and name nothing; anything less than right round is an
+    /// arc, and an arc needs saying *which* arc — see
     /// [`Walk::the_arc_between`].
     fn run_along(
         &mut self,
@@ -938,6 +939,29 @@ impl Walk {
     }
 
     /// A closed curve the edge either goes right round or takes one arc of.
+    ///
+    /// **Right round between two faces that are the one surface names
+    /// nothing**, and that is why the closed case asks rather than answering at
+    /// once. A circle where two halves of one pipe meet, or one a file
+    /// imprinted on a flat face, has the same surface on both sides, so a
+    /// reader asked where the edge runs gets that surface crossed with itself:
+    /// no curve at all where both are flat, and — for a ball written twice a
+    /// hair apart — a great circle in the wrong place
+    /// (`docs/decisions.md` §218.6). Such a run names its second surface the way
+    /// an arc's already does, and [`EdgeRun::RightRoundWhereItCrosses`] is the
+    /// kind that carries one (§216).
+    ///
+    /// **Two faces that genuinely cross keep
+    /// [`EdgeRun::RightRoundWhereItsFacesCross`]**, which is exact: those two
+    /// faces name the curve between them and want nothing from this reader.
+    ///
+    /// **What counts as naming nothing is
+    /// [`the_faces_along_it_name_no_crossing`], and it is exact both ways.**
+    /// Two flat faces never name a closed curve whatever their numbers, which is
+    /// a fact about planes and not a tolerance; anything else has to be the one
+    /// surface bit for bit. A nearness would have to name a tolerance this
+    /// reader has no principle for, and it would risk the mistake that costs —
+    /// an `and` whose curve is not where the file's is (§216, §16.10).
     fn round_run(
         &self,
         reading: &Reading<'_>,
@@ -947,23 +971,34 @@ impl Walk {
         ends: [EntityId; 2],
         along_the_curve: bool,
     ) -> Result<EdgeRun, Refusal> {
-        if ends[0] == ends[1] {
+        let right_round = ends[0] == ends[1];
+        let its_faces_name_it = !self
+            .surfaces_along_each_edge
+            .get(&edge_curve)
+            .is_some_and(|faces| the_faces_along_it_name_no_crossing(faces));
+        if right_round && its_faces_name_it {
             return Ok(EdgeRun::RightRoundWhereItsFacesCross);
         }
         let position = reading.reference_at(curve, keyword, 1)?;
         let place = reading.placement_at(curve, position)?;
+        let and =
+            self.the_surface_that_names_the_curve(reading, edge_curve, curve, keyword, &place)?;
+        if right_round {
+            return Ok(EdgeRun::RightRoundWhereItCrosses { and });
+        }
         let corners = [
             self.point_of_vertex(reading, ends[0])?,
             self.point_of_vertex(reading, ends[1])?,
         ];
-        let and =
-            self.the_surface_that_names_the_curve(reading, edge_curve, curve, keyword, &place)?;
         self.the_arc_between(edge_curve, &place, and, corners, along_the_curve)
     }
 
-    /// The surface an arc's run names beside the faces along it: the curve's
-    /// own plane, or — for a circle every face along which is flat — the
-    /// cylinder of the circle's radius about its axis.
+    /// The surface a run names beside the faces along it: the curve's own
+    /// plane, or — for a circle every face along which is flat — the cylinder
+    /// of the circle's radius about its axis.
+    ///
+    /// An arc always needs one; a closed run needs one exactly where the faces
+    /// either side are the one surface — see [`Walk::round_run`].
     ///
     /// **The plane names nothing when the faces are flat too.** A circle
     /// imprinted on a flat face has that face's plane on both sides of it, and
@@ -1667,8 +1702,7 @@ fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
 /// second surface for the walk to read.
 fn a_ball_where_curved_faces_meet(faces: &[Surface]) -> Option<Sphere> {
     let all_curved = faces.len() >= 2 && faces.iter().all(|face| face.as_plane().is_none());
-    let one_surface = faces.windows(2).all(|pair| pair[0] == pair[1]);
-    if !all_curved || one_surface {
+    if !all_curved || the_faces_along_it_name_no_crossing(faces) {
         return None;
     }
     faces.iter().find_map(|face| {
@@ -1678,6 +1712,38 @@ fn a_ball_where_curved_faces_meet(faces: &[Surface]) -> Option<Sphere> {
             None
         }
     })
+}
+
+/// Whether the faces along an edge name no crossing at all, so that a run right
+/// round it has to carry the second surface itself.
+///
+/// Two ways, and **neither is a nearness**: both answer `true` only where the
+/// pair provably names nothing, so no run gets an `and` its curve might not lie
+/// on. That is the mistake worth being exact about — §216's measured 1.45 mm on
+/// a 100 mm solid is what a wrong second surface costs. Answering `false` where
+/// the pair in truth names nothing leaves the answer this reader already gave.
+///
+/// **Every face along it is flat.** Two planes cross in a straight line, which
+/// never closes, so whatever the two are — one plane written twice, two
+/// spellings of it a hair apart, or two that really do lean on each other — the
+/// pair does not name a closed curve. This is a fact about the kinds and needs
+/// no tolerance, and it is the one that reaches the corpus: the flat faces
+/// either side of a circle a file imprinted on one come out `1e-15` apart, so
+/// the `==` below misses every one of them. `Model::validate` says the same
+/// thing back as `ClosedEdgeBetweenTwoFlatFaces`, and a reader whose model the
+/// validator refuses by name should not have written it.
+///
+/// **Or every face is the one surface, `==` and not near it.** A surface
+/// crossed with itself is not a curve. Written twice a hair apart it fails this
+/// and keeps the old run, which is §218.6's open item — the wrong answer that
+/// then comes out is `rcad-geom`'s to refuse and not this reader's to guess at.
+///
+/// Fewer than two faces names nothing either way, and the shell that holds such
+/// an edge is about to be refused by name.
+fn the_faces_along_it_name_no_crossing(faces: &[Surface]) -> bool {
+    faces.len() >= 2
+        && (faces.iter().all(|face| face.as_plane().is_some())
+            || faces.windows(2).all(|pair| pair[0] == pair[1]))
 }
 
 /// Whether every point of the circle with centre `centre`, unit axis `axis`
