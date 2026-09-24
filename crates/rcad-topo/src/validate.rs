@@ -297,7 +297,28 @@ impl Model {
         // against the plane its face *sits* on. Asking a stored *name* more
         // strictly than the surface a face is actually carried by had it
         // backwards: it refused corners for the rounding in the name.
-        if let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &edge.run {
+        //
+        // **Both kinds of run that name a second surface are asked**, and they
+        // are asked the same thing. A closed rim carries an `and` and no
+        // pickers — it is the whole of the curve rather than a piece of one, so
+        // there is nothing that had to pick it — and this used to read only the
+        // piece kind, which left a rim's named surface stored and never looked
+        // at. Sound for every rim the fuse writes, whose two ends are the one
+        // corner of a closed curve and on both surfaces of the crossing by
+        // construction, and unsound for an imported or hand-written solid,
+        // which can name any plane there at all. `docs/decisions.md` §217.5.
+        //
+        // A kind of run this crate has never seen names nothing it can read, so
+        // there is nothing to ask; `check_closed_edges_are_walked_the_way_their
+        // _surfaces_wind` is what refuses it, under
+        // `ACrossingThisCannotBeOrderedAlong`.
+        let names_a_second_surface = match &edge.run {
+            EdgeRun::PartOfWhereItCrosses { and, picked_by } => Some((and, picked_by.as_slice())),
+            EdgeRun::RightRoundWhereItCrosses { and } => Some((and, [].as_slice())),
+            EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross => None,
+            _ => None,
+        };
+        if let Some((and, picked_by)) = names_a_second_surface {
             for corner in [start, end] {
                 let at = PredicatePoint::from(corner.point.coordinates());
                 match side_of_surface(and, at) {
@@ -3359,6 +3380,96 @@ mod tests {
         nudge_the_seam_plane(&mut model, rounding * 2.0);
 
         assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// A closed rim names its second surface too, and that name is asked about.
+    ///
+    /// [`EdgeRun::RightRoundWhereItCrosses`] carries the same `and` as
+    /// [`EdgeRun::PartOfWhereItCrosses`] does — the second surface the faces
+    /// either side of the edge do not name — so the same half of Q16's
+    /// invariant has to keep it honest: an edge's ends may not be provably off
+    /// the surface the edge's own name says it runs on. `check_edge` asked that
+    /// under `if let EdgeRun::PartOfWhereItCrosses`, which the closed kind does
+    /// not match, so its surface was stored and never looked at.
+    ///
+    /// Every rim a fuse writes is sound there — a closed rim's two ends are one
+    /// corner, on both surfaces of the crossing by construction — but nothing in
+    /// the kernel said so, and a file can name any plane at all. This is one: a
+    /// bar's cap circle saying it runs where the wall crosses a plane a hundred
+    /// millimetres above the corner it stands on. `docs/decisions.md` §217.5.
+    ///
+    /// **A hundred and not one ulp.** The check gives a plane
+    /// [`Model::what_writing_a_plane_down_costs`] of room and asks
+    /// `not_provably_off` first, so a corner merely *near* the wrong plane is
+    /// let through by design — the pair of tests above this is that allowance.
+    /// Only a corner somebody chose to put elsewhere is refused.
+    ///
+    /// **A bar's cap circle is not really this kind of run, and cannot be.** The
+    /// kind says the faces either side are the one surface and name nothing
+    /// between them; a cap circle has a plane one side and a cylinder the other,
+    /// which name it perfectly well. The kernel has no in-crate builder for a
+    /// solid whose wall is cut in two — that shape comes out of the fuse, and
+    /// `tests/a_rim_a_fuse_cut_round_one_cone.rs` sweeps one — so this hand-made
+    /// carrier is what `check_edge` can be reached with from here. It gets that
+    /// far because `check_edges` is the third check of the sweep and the mesher
+    /// runs in the sixth; the twin below says what the mesher makes of the same
+    /// model, and why it is asked a narrower question.
+    #[test]
+    fn a_closed_rim_naming_a_plane_its_corner_is_nowhere_near_is_caught() {
+        let mut model = a_round_bar();
+        let (rim, corner) = a_cap_circle_and_the_corner_it_stands_on(&model);
+        model.data_mut().edges[rim].run = EdgeRun::RightRoundWhereItCrosses {
+            and: flat_and_facing_up_through(Point::new(0.0, 0.0, corner.z() + 100.0)),
+        };
+
+        assert_eq!(refusal(&model), Invalid::VertexOffItsFaceSurface);
+    }
+
+    /// And the half that says the check refuses a wrong plane rather than the
+    /// kind.
+    ///
+    /// The same bar, the same rim, naming the plane its corner really does sit
+    /// in, and `check_edges` takes it.
+    ///
+    /// **It is asked on its own rather than through the whole sweep**, because
+    /// the whole sweep refuses this model either way and for something else: the
+    /// mesher walks a closed rim as `along[0]` crossed with `and`
+    /// (`rcad-geom`'s `walk.rs`), and `along[0]` for the cap face is the cap's
+    /// own plane, so it is asked where a plane crosses itself and gets nothing —
+    /// `AWireDoesNotFanIntoALoopToMesh { TooFewCorners { count: 1 } }`. That is
+    /// the model being a lie about its own shape, not the check being wrong, and
+    /// a rim the fuse really wrote meshes and sweeps clean.
+    #[test]
+    fn a_closed_rim_naming_the_plane_its_corner_really_sits_in_gets_past_that_check() {
+        let mut model = a_round_bar();
+        let (rim, corner) = a_cap_circle_and_the_corner_it_stands_on(&model);
+        model.data_mut().edges[rim].run = EdgeRun::RightRoundWhereItCrosses {
+            and: flat_and_facing_up_through(corner),
+        };
+
+        model
+            .check_edges()
+            .expect("the corner sits in the plane the rim names");
+    }
+
+    /// The first edge of this model that comes back to the corner it left, and
+    /// where that corner is.
+    fn a_cap_circle_and_the_corner_it_stands_on(model: &Model) -> (EdgeSlot, Point) {
+        let rim = model
+            .data()
+            .edges
+            .keys()
+            .find(|&slot| model.data().edges[slot].start == model.data().edges[slot].end)
+            .expect("a round bar's caps are closed circles");
+        let corner = model.data().vertices[model.data().edges[rim].start].point;
+        (rim, corner)
+    }
+
+    fn flat_and_facing_up_through(point: Point) -> Surface {
+        Surface::Plane(
+            Plane::from_point_and_normal(point, Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        )
     }
 
     /// The curved twin of the two above, and the reason 90 corpus files were
