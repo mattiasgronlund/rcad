@@ -1809,24 +1809,24 @@ impl Edge {
     /// is undecided, when `intersect` cannot tell the branches apart, or when
     /// the ends are not both held by exactly one branch's half-space.
     fn the_branch_of_a_hyperbola_this_is_on(&self, ends: [Point; 2]) -> Result<Option<Picker>> {
-        let (flat, cone) = match self.carried_by {
-            [Surface::Plane(flat), Surface::Cone(cone)]
-            | [Surface::Cone(cone), Surface::Plane(flat)] => (flat, cone),
-            _ => return Ok(None),
+        let ([Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)]) = self.carried_by
+        else {
+            return Ok(None);
         };
-        match rcad_geom::where_a_cones_apex_stands_against_a_plane(&flat, &cone) {
-            Decision::Zero => return Ok(None),
-            Decision::Pos | Decision::Neg => {}
-            Decision::Undecidable { .. } | _ => {
-                return Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed);
-            }
+        let apex = rcad_geom::where_a_cones_apex_stands_against_a_plane(&flat, &cone);
+        if apex == Decision::Zero {
+            return Ok(None);
         }
-        match rcad_geom::how_a_plane_leans_against_a_cone(&flat, &cone) {
-            Decision::Pos | Decision::Zero => return Ok(None),
-            Decision::Neg => {}
-            Decision::Undecidable { .. } | _ => {
-                return Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed);
-            }
+        if apex != Decision::Pos && apex != Decision::Neg {
+            return Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed);
+        }
+        let leaning = rcad_geom::how_a_plane_leans_against_a_cone(&flat, &cone);
+        if leaning == Decision::Pos || leaning == Decision::Zero {
+            return Ok(None);
+        }
+        if leaning != Decision::Neg {
+            return Err(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed);
         }
         let Ok(SurfaceMeet::Curves(branches)) = rcad_geom::intersect(
             &Surface::Plane(flat),
@@ -1839,15 +1839,14 @@ impl Edge {
         let asked = ends.map(|end| PredicatePoint::from(end.coordinates()));
         let holding: Vec<Picker> = branches
             .iter()
-            .filter_map(|branch| match branch.run() {
-                EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
-                    [one] => Some(*one),
-                    _ => None,
-                },
-                EdgeRun::Straight
-                | EdgeRun::RightRoundWhereItsFacesCross
-                | EdgeRun::RightRoundWhereItCrosses { .. }
-                | _ => None,
+            .filter_map(|branch| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = branch.run() else {
+                    return None;
+                };
+                let [one] = picked_by.as_slice() else {
+                    return None;
+                };
+                Some(*one)
             })
             .filter(|picker| {
                 asked

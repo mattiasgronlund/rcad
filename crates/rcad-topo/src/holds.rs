@@ -1269,12 +1269,14 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                 let Some(flat) = cut.surface.as_plane() else {
                     return false;
                 };
-                match flat.side_of_point(apex) {
-                    Decision::Zero => {}
-                    sits if sits == cut.kept => {}
-                    Decision::Pos | Decision::Neg => behind.push(flat),
-                    Decision::Undecidable { .. } | _ => return false,
+                let sits = flat.side_of_point(apex);
+                if sits == Decision::Zero || sits == cut.kept {
+                    continue;
                 }
+                if sits != Decision::Pos && sits != Decision::Neg {
+                    return false;
+                }
+                behind.push(flat);
             }
             match behind.as_slice() {
                 [] => true,
