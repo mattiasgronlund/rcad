@@ -79,9 +79,11 @@ impl NamedRun {
     /// [`Error::AClosedRunDoesNotComeBackToWhereItStarted`] if `run` goes
     /// right round a closed curve and the two ends are not the same point. A
     /// closed run comes back to where it started by definition, so a pair of
-    /// different ends on one names a curve that does not exist.
+    /// different ends on one names a curve that does not exist. **Both closed
+    /// variants**, which [`EdgeRun::it_comes_back_to_where_it_started`] is the
+    /// one list of.
     pub fn new(run: EdgeRun, ends: [PredicatePoint; 2]) -> Result<Self> {
-        if run == EdgeRun::RightRoundWhereItsFacesCross && ends[0] != ends[1] {
+        if run.it_comes_back_to_where_it_started() && ends[0] != ends[1] {
             return Err(Error::AClosedRunDoesNotComeBackToWhereItStarted {
                 start: Box::new(ends[0]),
                 end: Box::new(ends[1]),
@@ -272,6 +274,25 @@ pub enum EdgeRun {
 }
 
 impl EdgeRun {
+    /// Whether this run goes right round a closed curve, so that its two ends
+    /// are one point and the curve it names has to be a closed one.
+    ///
+    /// **Two variants close, and the one list of them is here.** Both
+    /// [`NamedRun::new`] and `walk`'s `where_a_plane_cuts_a_cone` tested only
+    /// [`EdgeRun::RightRoundWhereItsFacesCross`] by name, so a run written the
+    /// §216 way slipped past each of them — a closed run with two different
+    /// ends built without complaint, and an open unbounded parabola handed back
+    /// for a run the caller had already been told closes
+    /// (`docs/decisions.md` §219.7).
+    pub(crate) fn it_comes_back_to_where_it_started(&self) -> bool {
+        match self {
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
+                true
+            }
+            EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } => false,
+        }
+    }
+
     /// This run, shifted by `by`.
     ///
     /// **A run is written in the frame its face is stored in**, so anything that
