@@ -2390,19 +2390,15 @@ fn which_side_of_the_apex(
         apex: apex.coordinates(),
         at,
     };
-    let decision = match decide(&question).0 {
-        Decision::Undecidable { enclosure } => resolve_under_policy(
-            Record::new(
-                SIDE_OF_THE_APEX,
-                &[at],
-                Level::Interval,
-                enclosure,
-                Measures::Length,
-            ),
+    let (decided, level) = decide(&question);
+    let decision = if let Decision::Undecidable { enclosure } = decided {
+        resolve_under_policy(
+            Record::new(SIDE_OF_THE_APEX, &[at], level, enclosure, Measures::Length),
             policy,
             log,
-        ),
-        decided => decided,
+        )
+    } else {
+        decided
     };
     match decision {
         Decision::Pos => Ok(Ordering::Greater),
