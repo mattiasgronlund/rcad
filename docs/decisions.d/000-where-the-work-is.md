@@ -1,6 +1,6 @@
 ## 0. Where the work is
 
-reviewed: 2026-09-24
+reviewed: 2026-09-25
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files hanging on
 that refusal alone. Chosen by Mattias 2026-09-15 off §107's table: roadmap §4.2 is
@@ -13,20 +13,20 @@ corpus file reaches it**: 24 of 29 import (KiCad 114 → 140), the LEDs since §
 `just decisions-toc` is the map. Through §194 the STEP corpus — 793 refusals to 0,
 8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc and a ring
 of arcs round an apex; §211–§214 an ellipse arc's centre, a ring with a hole and a
-crown; §216–§217 §211.6's floor; §218 the cone-face arm; §219 all §218 left;
-§220 all three of §219.7 and the property §219.8 asked for; **§221** §220.4 (the
-importer now checks every plane between curved faces), a hyperbola arc the fuse
-named by its chord and walked across the apex, and two of §219.8's items.
+crown; §216–§217 §211.6's floor; §218 the cone-face arm; §219–§220 what §218
+and §219 left; §221 §220.4 and a hyperbola arc walked across the apex; **§222**
+§23.8 (one public `which_two_surfaces_a_run_is_between`), a closed circle between
+one pipe written twice, and the fuse laws run over a cone.
 
-**Next and unclaimed: §23.8 is three answers where it should be one** (§221.5).
-Which two surfaces a run lies between is `rcad-geom`'s private
-`the_two_surfaces_it_runs_between`, a narrower copy in `validate.rs`, and a third
-in `mesh.rs:5148`'s test oracle that still compares bits and has no arm for
-`RightRoundWhereItCrosses`. Make the first public and have the other two read it.
+**Next and unclaimed: associativity over a cone answers one way round and refuses
+the other** (§222.3). Five trios, each an `#[ignore]` test in
+`fuse_laws_over_a_cone.rs`; case 1 answers against `ResultIsNotManifold`. The
+lane's unshown hypothesis for 4 and 5: the fuse cannot take back its own
+hyperbola arc. A `fuse-debugging` lane per case.
 
-Also open: `round_run`'s `==` on a **closed** run between two curved faces a hair
-apart (§219.6, §221.5); no associativity, idempotence or absorption over a cone;
-§219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
+Also open: two copies of a cone always refuse, so idempotence over a cone compares
+nothing (§222.3); a closed ellipse, or a closed circle on a cone or torus, between
+one surface written twice (§222.2); §222.1's items 1 and 3; §219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
 demonstrated); §220.1's two unreproduced findings; §216.3's `cut.kept`
 **limit**; §215.2's two walls; §208.6's tip; §124, §125.6.
 
