@@ -652,10 +652,15 @@ fn is_one_circle_cut_in_two(
 /// cuts both nappes in a hyperbola, and the part of the plane inside the cone is
 /// then *two* regions with nothing between them, which is exactly the
 /// connectedness this argument rests on. Between the two lies the ellipse,
-/// which is one convex region and would do — but telling an ellipse from a
-/// hyperbola is a sign this does not take, and a plane square to the axis is
-/// the family every cap in this kernel is in. `fuse/select.rs`'s
-/// `in_the_bulge_of` refuses the same two for the same reason.
+/// which is one convex region and would do — and since §208.6 there is an exact
+/// sign that tells it from a hyperbola,
+/// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by).
+/// This function still takes only the family square to the axis, which is the
+/// family every cap in this kernel is in, and that is a **gap** now rather than
+/// a limit: the sign exists and this argument has not been rewritten to rest on
+/// it. `fuse/select.rs`'s `in_the_bulge_of` used to refuse the same two for the
+/// same reason and no longer does — it admits a cone's closed crossing (§208.6)
+/// and a pipe's (§219).
 ///
 /// **Only the family where each step of that is a sign is taken**: a flat face
 /// whose curved sides are arcs of a ball it lies inside or of a cone it lies
@@ -847,7 +852,10 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
             }
             // A whole closed crossing among parts of others, or a kind of run
             // this has not been taught.
-            EdgeRun::PartOfWhereItCrosses { .. } | EdgeRun::RightRoundWhereItsFacesCross | _ => {
+            EdgeRun::PartOfWhereItCrosses { .. }
+            | EdgeRun::RightRoundWhereItsFacesCross
+            | EdgeRun::RightRoundWhereItCrosses { .. }
+            | _ => {
                 return Err(cannot());
             }
         };

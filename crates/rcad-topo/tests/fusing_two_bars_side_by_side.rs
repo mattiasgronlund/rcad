@@ -25,15 +25,21 @@
 //! cap disc is cut into pieces by the other pipe's wall, and `select.rs` gives
 //! up on one of those pieces, undecided with an unbounded enclosure.
 //!
-//! **Which way it gives up depends on which bar is the tool, and until §217
-//! nothing could see that.** `place_the_piece` raised one name for two different
-//! searches (§216.4), so both orders read *"a point inside a piece of a face"*
-//! and the pair looked symmetric. Split, they are not: one way round the winding
-//! fan finds a point inside the piece and no solid can place it, the other way
-//! round no point is found at all. A piece bounded partly by an arc being hard
-//! to walk is still the missing capability §48 names in
-//! `ACrossingThisCannotBeOrderedAlong`'s conic half and not the quartic one —
-//! but it is only half of what stops this pair.
+//! **Which way it gave up used to depend on which bar was the tool, and that is
+//! closed.** `place_the_piece` raised one name for two different searches
+//! (§216.4), so both orders read *"a point inside a piece of a face"* and the
+//! pair looked symmetric; §217 split the names and they were not. §218.5 found
+//! the cause and it was a gap, not the draw: the same region of the same plane
+//! has three corners as one bar's cap piece and two as the other's, because a
+//! bar's own rim start vertex is a corner of its own cap pieces and the other
+//! bar's is not. Two corners is no polygon, so the winding count threw away
+//! `(4, 0, 0)` — strictly inside both circles on whole numbers. Counting a
+//! pipe's bulge closes it, and both orders now stop at the same next search.
+//!
+//! **Closing it does not make the bars fuse**, and nobody expected it to. A
+//! piece bounded partly by an arc being hard to walk is still the missing
+//! capability §48 names in `ACrossingThisCannotBeOrderedAlong`'s conic half and
+//! not the quartic one.
 //!
 //! Three refusals, in order, each one closed by a different unit: the straight
 //! gate, then the three-surface meet, then `select.rs` on a curved piece.
@@ -126,7 +132,7 @@ fn two_overlapping_parallel_bars_stop_in_select_whichever_way_round() {
     }
     assert_eq!(
         stopped_at,
-        the_walls_measured_when_217_split_them(),
+        the_wall_both_orders_stop_at(),
         "the side-by-side bars stopped somewhere else; re-derive this rather than widening it \
          to hold both names (§19.1)"
     );
@@ -139,23 +145,24 @@ fn two_overlapping_parallel_bars_stop_in_select_whichever_way_round() {
 /// Which of `select.rs`'s two searches gave out, per rule and per order.
 ///
 /// §216.4 found `place_the_piece` raising one name for both searches and §217
-/// split them. This pair of bars reaches **both** halves, which is why the pin
-/// is a map and not a string.
+/// split them. The pin is a map rather than a string because it was written
+/// while this pair reached **both** halves.
 ///
-/// **What it splits on is the order, not the rule** — and that is the thing the
-/// single name was hiding. Every rule behaves the same way round, and turning
-/// the pair round changes which search gives out: `here` on `there` finds a
-/// point inside the piece and cannot place it against both bars, `there` on
-/// `here` never finds one at all. Both still refuse `Undecidable`, so the
-/// assertion above about a closed refusal coming back is untouched, and the
-/// module's "a refusal that depended on which solid was the tool would be a
-/// different bug" still holds of the *refusal*. It is one step finer than that
-/// sentence reaches: the pieces being placed are the argument's faces one way
-/// round and the tool's the other, so the two searches are being asked about
-/// different pieces. Whether that asymmetry is worth closing is not settled
-/// here; §217 records it as found rather than diagnosed.
-fn the_walls_measured_when_217_split_them() -> BTreeMap<String, BTreeMap<String, usize>> {
-    let inside_the_piece = || BTreeMap::from([("a point inside a piece of a face".to_owned(), 1)]);
+/// **It reaches one half now, and that is what the asymmetry being closed looks
+/// like from here.** §218.5 measured why the two orders differed: the refusing
+/// cap piece is `disc@0 ∩ disc@6` on the same plane `z = 0` either way round,
+/// but a bar's own rim start vertex is a corner of its own cap pieces and the
+/// other bar's is not — three corners one way, two the other. Two corners is no
+/// polygon, so the winding was 0 for every candidate and `(4, 0, 0)` was thrown
+/// away although `16 < 25` and `4 < 25` put it strictly inside both circles.
+/// Counting a pipe's bulge gives that piece an inside, and both orders now walk
+/// on to the same next search and give out there.
+///
+/// **What is left is one wall, not the missing one.** Every rule and both orders
+/// stop at "a point in a piece that every solid could place" — a different
+/// search from the one they used to split on, and a separate piece of work. The
+/// assertion above about a closed refusal coming back is untouched.
+fn the_wall_both_orders_stop_at() -> BTreeMap<String, BTreeMap<String, usize>> {
     let every_solid_could_place = || {
         BTreeMap::from([(
             "a point in a piece that every solid could place".to_owned(),
@@ -167,7 +174,7 @@ fn the_walls_measured_when_217_split_them() -> BTreeMap<String, BTreeMap<String,
         .flat_map(|rule| {
             [
                 (format!("{rule} here on there"), every_solid_could_place()),
-                (format!("{rule} there on here"), inside_the_piece()),
+                (format!("{rule} there on here"), every_solid_could_place()),
             ]
         })
         .collect()
