@@ -1,6 +1,6 @@
 ## 0. Where the work is
 
-reviewed: 2026-09-23
+reviewed: 2026-09-24
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files hanging on
 that refusal alone. Chosen by Mattias 2026-09-15 off §107's table: roadmap §4.2 is
@@ -14,21 +14,21 @@ unit is Mattias's call.
 `just decisions-toc` is the map. Through §194 the STEP corpus — 793 refusals to 0,
 8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc, a pointed
 cone's bound, a ring of arcs round an apex; §211–§213 an ellipse arc's centre, a
-ring with a hole, a crown, §214's 9, §211.6's floor named. §216–**§217** close
-that floor's run at both halves, split one refusal name in two, measure the gate.
+ring with a hole, a crown, §214's 9, §211.6's floor named. §216–§217 close that
+floor's run; **§218** proves the cone-face arm and shuts §217.5's two doors.
 
-**Next and unclaimed: the cone-face arm of `is_a_family_this_follows` — the proof
-is the cost, not the arithmetic.** §217.4 widened it: **all 37 108 refusals become
-answers, nothing relocates**, so §216.5's feared second blocker is not there. But
-its sketch proves a cone cut by **two** planes and all 37 108 are **three**, so
-the proved family alone moves 0. Argue connectedness in front of three or more
-first; the far-nappe guard is demonstrated necessary (two wrong answers) and free.
+**Next and unclaimed: two spheres a hair apart answer finitely and wrongly**
+(§218.6). 1e-15 between the same sphere written twice gives a great circle
+through the ball's centre, not the rim: the guard in
+`the_two_surfaces_it_runs_between` is bit equality. A wrong answer outranks a
+refusal and this one is measured (§176.2 is the plane case). Beside it §218.5's
+bulge that does not count a pipe — a **gap**, fix and test both named.
 
-Also open: §217.5's two doors that never heard of the new run —
-`SolidBuilder::closes_on_one_edge` drifted from `model.rs`'s (§44.11), `validate.rs`
-leaves its `and` unchecked; one lane, a test each. §216.3's `cut.kept` **limit**.
-§217.3's order-not-rule asymmetry, recorded not diagnosed. §215.2's other two
-walls; §208.6's cone-tip bound; §212.6's gap; §124, §136.4, §125.6.
+Also open: `rcad-step`'s `round_run`, the same drift at the importer's door; the
+four readers of the old closed kind found by grep and not audited, `mesh.rs`'s
+pole site among them (both §218.6, §218.7). §216.3's `cut.kept` **limit**;
+§215.2's other two walls; §208.6's cone-tip bound; §212.6's gap; §124, §136.4,
+§125.6.
 
 **parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
 thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a
