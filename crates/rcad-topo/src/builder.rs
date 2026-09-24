@@ -377,12 +377,42 @@ impl SolidBuilder {
     }
 
     /// Whether these steps are one coedge on an edge that already comes back to
-    /// where it started — a round cap's boundary, which is one whole circle.
+    /// where it started — a round cap's boundary, which is one whole circle, or
+    /// the rim where a fuse cut a curved wall in two.
+    ///
+    /// **Two kinds of run say a curve comes back to the corner it left**, and
+    /// this is the same rule [`Model::wire_closes_on_one_edge`](crate::Model)
+    /// asks at the model's door, which §44.11 says must not drift from it.
+    /// [`EdgeRun::RightRoundWhereItsFacesCross`] is the closed curve the two
+    /// faces either side name between them;
+    /// [`EdgeRun::RightRoundWhereItCrosses`] is the closed curve where those two
+    /// faces are the one surface and name nothing, so the run carries the
+    /// surface that cut it instead. This was a bare `==` against the first of
+    /// them, which read the second as *not closed* — and a fuse's curved wall
+    /// comes back with no seam, so such a rim bounds a wire of exactly one
+    /// coedge. A solid the fuse can write could not be described again through
+    /// [`SolidBuilder::add_wire`]: [`Error::ADraftWireIsTooShort`] with one
+    /// step, on a sound solid. `docs/decisions.md` §217.5.
+    ///
+    /// A kind of run this crate has never seen answers `false` and so is
+    /// refused, which is the same direction [`the_ends_are_the_whole_of_it`]
+    /// takes an unknown: a wire nothing says is closed is not taken for one.
+    ///
+    /// Written as a match with every kind named rather than as a `matches!`, for
+    /// the reason [`the_ends_are_the_whole_of_it`] gives in full — clippy's
+    /// `wildcard_enum_match_arm` names this line the day the enum grows, and
+    /// never looks inside a `matches!`.
     fn closes_on_one_edge(&self, steps: &[Step]) -> bool {
         let [Step::Along(only)] = steps[..] else {
             return false;
         };
-        self.edges[self.coedges[only].edge].run == EdgeRun::RightRoundWhereItsFacesCross
+        match &self.edges[self.coedges[only].edge].run {
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
+                true
+            }
+            EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } => false,
+            _ => false,
+        }
     }
 
     /// Whether these steps are two that go somewhere and come back a different

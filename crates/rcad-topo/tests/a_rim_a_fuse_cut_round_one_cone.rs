@@ -33,9 +33,9 @@
 //! answer. The assertions below all run the whole sweep over the fused model
 //! for that reason.
 
-use rcad_geom::{EdgeRun, Isometry, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{EdgeView, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{DraftStep, EdgeView, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 mod cones;
 
@@ -158,6 +158,48 @@ fn the_rim_the_fuse_cut_is_closed() {
     assert!(
         asked > 0,
         "no edge of the answer carried the new run at all"
+    );
+}
+
+/// The rim the fuse wrote can be described again through [`SolidBuilder`].
+///
+/// A solid the kernel can produce has to be sayable at the kernel's other door,
+/// and the rule that decides it is one rule at two doors — §44.11.
+/// `Model::wire_closes_on_one_edge` names both closing kinds, and
+/// `SolidBuilder::closes_on_one_edge` is the same question asked of a
+/// description. A rim like this bounds a wire of **one** coedge, so a builder
+/// that reads only the older closing kind refuses the wire outright with
+/// [`Error::ADraftWireIsTooShort`](rcad_topo::Error::ADraftWireIsTooShort) — a
+/// solid the fuse writes and nobody can write down.
+///
+/// The run comes out of the fuse rather than being typed here, so this is that
+/// rim and not a hand-made one that looks like it.
+#[test]
+fn the_rim_the_fuse_cut_can_be_described_again_at_the_builders_door() {
+    let (mut model, cone, block) = a_solid_and_a_block_clear_of_it(a_frustum_of_the_draw);
+    let runs = what_the_fuse_wrote(&mut model, cone, block);
+    let rim = runs
+        .iter()
+        .find(|run| matches!(run, EdgeRun::RightRoundWhereItCrosses { .. }))
+        .expect("no edge of the answer carried the new run at all")
+        .clone();
+
+    let mut builder = SolidBuilder::new();
+    let corner = builder
+        .add_vertex(Point::new(0.0, 0.0, CUT))
+        .expect("a finite point");
+    let edge = builder
+        .add_edge(corner, corner, rim)
+        .expect("a rim is a whole closed curve, so one corner twice is an edge");
+    let coedge = builder
+        .add_coedge(edge, Orientation::Forward)
+        .expect("an edge of this build");
+    let wire = builder.add_wire(&[DraftStep::Along(coedge)]);
+
+    assert!(
+        wire.is_ok(),
+        "one coedge on a rim that runs right round a curve is a closed wire, and \
+         the model's door already says so; the builder's door answered {wire:?}"
     );
 }
 
