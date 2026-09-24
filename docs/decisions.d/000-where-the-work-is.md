@@ -14,21 +14,21 @@ corpus file reaches it**: 24 of 29 import (KiCad 114 → 140), the LEDs since §
 8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc and a ring
 of arcs round an apex; §211–§214 an ellipse arc's centre, a ring with a hole and a
 crown; §216–§217 §211.6's floor; §218 the cone-face arm; §219 all §218 left;
-**§220** all three of §219.7 and the property §219.8 asked for.
+§220 all three of §219.7 and the property §219.8 asked for; **§221** §220.4 (the
+importer now checks every plane between curved faces), a hyperbola arc the fuse
+named by its chord and walked across the apex, and two of §219.8's items.
 
-**Next and unclaimed: §189.3's arm asks for a ball by name, so a pipe loses its
-rim** (§220.4). A pipe, cone or torus written twice a hair apart, whose run names
-its rim's plane, matches no arm of `the_two_surfaces_it_runs_between` — a wrong
-answer, and a **gap** since the bit-identical spelling walks that rim. Widen the
-guard to "either face": §219.1 did it one row down, §220.4 has the test side.
+**Next and unclaimed: §23.8 is three answers where it should be one** (§221.5).
+Which two surfaces a run lies between is `rcad-geom`'s private
+`the_two_surfaces_it_runs_between`, a narrower copy in `validate.rs`, and a third
+in `mesh.rs:5148`'s test oracle that still compares bits and has no arm for
+`RightRoundWhereItCrosses`. Make the first public and have the other two read it.
 
-Also open, §220.5: §23.8 is spelled twice across two crates, the `rcad-topo` one
-narrower on purpose — closing it wants one public answer in `rcad-geom`; and
+Also open: `round_run`'s `==` on a **closed** run between two curved faces a hair
+apart (§219.6, §221.5); no associativity, idempotence or absorption over a cone;
 §219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
-demonstrated). From §219.8: `round_run`'s `==` misses two curved faces a hair
-apart; `mesh.rs:5148`'s oracle carries §219.1's bit equality; `arrange.rs:4489`
-respells `n·a`; `holds.rs`'s `is_a_family_this_follows` a **gap** since §208.6;
-§216.3's `cut.kept` **limit**; §215.2's two walls; §208.6's tip; §124, §125.6.
+demonstrated); §220.1's two unreproduced findings; §216.3's `cut.kept`
+**limit**; §215.2's two walls; §208.6's tip; §124, §125.6.
 
 **parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
 thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a named

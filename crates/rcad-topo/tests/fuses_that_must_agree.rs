@@ -2513,9 +2513,11 @@ fn every_frustum_of_the_family_has_skin_inside_the_block_and_skin_outside_it() {
 /// §47.7's second row closed: *"cones are absent from
 /// `fuses_that_must_agree.rs`"*. This is the first law of any kind to run over
 /// the third curved family, and it was written expecting to pin a refusal — the
-/// brief said so, `how_often_a_fuse_with_a_cone_refuses.rs` measures its own
-/// frustum family at 6 answers out of 96, and §47.2 says all six of those are
-/// the row where the block misses the frustum altogether.
+/// brief said so, `how_often_a_fuse_with_a_cone_refuses.rs` then measured its
+/// own frustum family at 6 answers out of 96, and §47.2 says all six of those
+/// were the row where the block misses the frustum altogether. It answers 66
+/// now, 42 of them where the block cuts the frustum, since the fuse stopped
+/// naming a hyperbola arc by its chord (`docs/decisions.md` §221).
 ///
 /// **Three fifths of this family answers, and every answer commutes.** Two
 /// fifths when this was written, and the third came from `arrange` learning to
