@@ -69,11 +69,18 @@ fn a_plane_a_rounded_dot_calls_flush_with_the_axis_is_not() {
     );
     let flat = plane_square_to(normal);
     let pipe = pipe_along(along);
-    assert_eq!(flat.normal(), normal, "the plane stores the normal it was given");
+    assert_eq!(
+        flat.normal(),
+        normal,
+        "the plane stores the normal it was given"
+    );
     assert_eq!(pipe.axis().direction(), along, "and the axis its direction");
     assert_eq!(flat.normal().dot(pipe.axis().direction()), 0.0);
 
-    assert_eq!(how_a_plane_leans_against_a_pipe(&flat, &pipe), Decision::Pos);
+    assert_eq!(
+        how_a_plane_leans_against_a_pipe(&flat, &pipe),
+        Decision::Pos
+    );
     assert_eq!(
         sum_of_exact_products(normal.components(), along.components()),
         Some(Decision::Pos),
@@ -163,8 +170,14 @@ fn the_cascade_decides_every_pair_the_exact_sum_did_and_agrees_on_the_sign() {
         "{compared} pairs both decided and agreed on ({near_flush} of them within 1e-15 of \
          flush); {only_the_cascade} only the cascade decided; {neither} neither did"
     );
-    assert!(compared > 30_000, "the draws reach the comparison: {compared}");
-    assert!(near_flush > 1_000, "and a good share of them sit at the knife edge: {near_flush}");
+    assert!(
+        compared > 30_000,
+        "the draws reach the comparison: {compared}"
+    );
+    assert!(
+        near_flush > 1_000,
+        "and a good share of them sit at the knife edge: {near_flush}"
+    );
     assert!(
         only_the_cascade > 0,
         "and some reach the subnormals, where the sum gives up: {only_the_cascade}"
