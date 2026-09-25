@@ -57,17 +57,45 @@ fn a_bends_cap_holds_its_own_disk_and_not_the_other() {
     let mut wrong = Vec::new();
     for (point, expected, why) in [
         (at(4.0, 0.0), OnAFace::Held, "its own circle's centre"),
-        (at(4.0, 0.5), OnAFace::Held, "half a tube above its own centre"),
+        (
+            at(4.0, 0.5),
+            OnAFace::Held,
+            "half a tube above its own centre",
+        ),
         (at(3.0, 0.0), OnAFace::OnItsBoundary, "its own corner"),
-        (at(5.0, 0.0), OnAFace::OnItsBoundary, "its own circle, across from the corner"),
-        (at(4.0, 1.0), OnAFace::OnItsBoundary, "the top of its own circle"),
-        (at(4.0, 2.0), OnAFace::NotHeld, "a tube above its own circle"),
-        (at(0.0, 0.0), OnAFace::NotHeld, "the ring's centre, four from each circle's centre"),
+        (
+            at(5.0, 0.0),
+            OnAFace::OnItsBoundary,
+            "its own circle, across from the corner",
+        ),
+        (
+            at(4.0, 1.0),
+            OnAFace::OnItsBoundary,
+            "the top of its own circle",
+        ),
+        (
+            at(4.0, 2.0),
+            OnAFace::NotHeld,
+            "a tube above its own circle",
+        ),
+        (
+            at(0.0, 0.0),
+            OnAFace::NotHeld,
+            "the ring's centre, four from each circle's centre",
+        ),
         (at(-4.0, 0.0), OnAFace::NotHeld, "the other circle's centre"),
-        (at(-4.0, 0.5), OnAFace::NotHeld, "half a tube above the other centre"),
+        (
+            at(-4.0, 0.5),
+            OnAFace::NotHeld,
+            "half a tube above the other centre",
+        ),
         (at(-3.0, 0.0), OnAFace::NotHeld, "the other circle"),
         (at(-5.0, 0.0), OnAFace::NotHeld, "the other circle"),
-        (at(-4.0, 1.0), OnAFace::NotHeld, "the top of the other circle"),
+        (
+            at(-4.0, 1.0),
+            OnAFace::NotHeld,
+            "the top of the other circle",
+        ),
     ] {
         let answer = holds(point);
         if !matches!(answer, Ok(found) if found == expected) {

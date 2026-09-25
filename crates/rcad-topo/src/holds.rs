@@ -3140,7 +3140,11 @@ mod tests {
             .expect("this model made the key");
         let lid = puck
             .faces()
-            .find(|face| face.surface().as_plane().is_some_and(|flat| flat.offset() > 0.0))
+            .find(|face| {
+                face.surface()
+                    .as_plane()
+                    .is_some_and(|flat| flat.offset() > 0.0)
+            })
             .expect("a puck has a lid")
             .key();
 
