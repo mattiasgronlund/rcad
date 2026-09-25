@@ -24,6 +24,8 @@ refusals are that (§224.3); §224.2 has the design. Re-run
 `lane-cone-and-its-copy` (`13d5abaa`) and `lane-swallowed-pointed-cone`
 (`184962b9`) after.
 
+**Beside the unit, always one lane:** the top `todo` of `docs/test-plan.md` (§226).
+
 Also open: §224.4's two asymmetries a cone-and-copy fix exposes (a flush cap,
 two spellings of one pipe); a closed ellipse, or a closed circle on a cone or torus, between
 one surface written twice (§222.2); §222.1's items 1 and 3; §219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
@@ -35,9 +37,8 @@ thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a 
 consumer, `docs/consumers.md` records none; Mattias parked it (§104.2). Before it,
 §53 closed by §103 having earned nothing; §55–§102 are defect fixes.
 
-**the board is not here.** `docs/plan.md` has a line per roadmap item with its state
-and evidence; `just plan` renders it, `just plan open` lists what is left.
-2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a — 11.3 moved by §171.7. §106.
+**the board is not here.** `docs/plan.md`, a line per roadmap item: `just plan`,
+`just plan open`. 2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a (§106, §171.7).
 
 **deferred, with the section that defers it:**
 
