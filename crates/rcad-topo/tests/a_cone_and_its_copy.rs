@@ -73,7 +73,11 @@ fn fused(model: &Model, one: SolidKey, copy: SolidKey, rule: Rule) -> (Model, Ve
     let answer = model
         .fuse(&[one], &[copy], rule, &Policy::certified(), &mut log)
         .unwrap_or_else(|why| panic!("{rule:?} of a cone and its copy refused: {why:?}"));
-    assert!(log.is_empty(), "a certified {rule:?} logged {} records", log.len());
+    assert!(
+        log.is_empty(),
+        "a certified {rule:?} logged {} records",
+        log.len()
+    );
     let solids = answer.solids().to_vec();
     (model, solids)
 }
@@ -119,6 +123,9 @@ fn volume_of(model: &Model, solid: SolidKey) -> (f64, f64) {
             &mut ProvenanceLog::new(),
         )
         .expect("a cone measures");
-    assert!(measured.volume_error().is_finite(), "an endless bound checks nothing");
+    assert!(
+        measured.volume_error().is_finite(),
+        "an endless bound checks nothing"
+    );
     (measured.volume(), measured.volume_error())
 }
