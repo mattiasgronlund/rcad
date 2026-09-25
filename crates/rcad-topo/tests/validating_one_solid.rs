@@ -42,7 +42,10 @@ const SHAPES: [(&str, Builds); 7] = [
     ("a frustum", a_frustum),
     ("a pointed cone", a_pointed_cone),
     ("a quarter of a torus", a_quarter_bend),
-    ("the union of two overlapping blocks", the_union_of_two_overlapping_blocks),
+    (
+        "the union of two overlapping blocks",
+        the_union_of_two_overlapping_blocks,
+    ),
 ];
 
 #[test]
@@ -78,14 +81,15 @@ fn what_validate_says_of_it_alone(model: &Model, solid: SolidKey) -> String {
 }
 
 /// Every shape built alone, then every shape built beside every other one —
-/// each pair in one model, the second a long way along `x` — and the answer
-/// for a solid is the one it got alone.
+/// each pair in one model with a block stored far out along `x`, the second of
+/// the pair placed far out along `y` — and the answer for a solid is the one it
+/// got alone.
 ///
-/// Every pair's whole model is sound too, so this is also the other half of
-/// what the brief asked: over these shapes, a model `validate` passes is one
-/// whose every solid `validate_solid` passes. That is a fact about these
-/// shapes and not a law — `a_corner_the_far_solid_makes_room_for_is_refused_on_its_own`
-/// is a model where it fails.
+/// Every pair's whole model is sound too, so over these shapes a model
+/// `validate` passes is one whose every solid `validate_solid` passes. That is
+/// a fact about these shapes and not a law —
+/// `a_corner_the_far_solid_makes_room_for_is_refused_on_its_own` is a model
+/// where it fails.
 #[test]
 fn a_solid_gets_the_same_answer_beside_any_other_as_it_gets_alone() {
     let alone: Vec<String> = SHAPES
@@ -100,12 +104,13 @@ fn a_solid_gets_the_same_answer_beside_any_other_as_it_gets_alone() {
     for (first, (first_name, builds_first)) in SHAPES.iter().enumerate() {
         for (second, (second_name, builds_second)) in SHAPES.iter().enumerate() {
             let mut model = a_model();
+            a_block_at(&mut model, A_LONG_WAY_OUT, 2.0);
             let one = builds_first(&mut model);
             let other = builds_second(&mut model);
             model
                 .place_solid(
                     other,
-                    &Isometry::translation(Vector::new(A_LONG_WAY_OUT, 0.0, 0.0))
+                    &Isometry::translation(Vector::new(0.0, A_LONG_WAY_OUT, 0.0))
                         .expect("a plain translation"),
                 )
                 .expect("this model made the key");
@@ -115,7 +120,10 @@ fn a_solid_gets_the_same_answer_beside_any_other_as_it_gets_alone() {
                 .unwrap_or_else(|why| {
                     panic!("{first_name} beside {second_name} is a sound model: {why:?}")
                 });
-            for (solid, position, name) in [(one, first, first_name), (other, second, second_name)] {
+            for (solid, position, name, beside) in [
+                (one, first, first_name, second_name),
+                (other, second, second_name, first_name),
+            ] {
                 assert_eq!(
                     said(&model.validate_solid(
                         solid,
@@ -123,8 +131,7 @@ fn a_solid_gets_the_same_answer_beside_any_other_as_it_gets_alone() {
                         &mut ProvenanceLog::new()
                     )),
                     alone[position],
-                    "{name}, beside {}",
-                    if solid == one { second_name } else { first_name }
+                    "{name}, beside {beside} and a block far out"
                 );
             }
         }
@@ -270,7 +277,10 @@ fn a_broken_solid_does_not_change_the_answer_for_the_one_beside_it() {
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect_err("one of its solids has a corner well off its plane");
     assert!(
-        matches!(refused, Error::Invalid(Invalid::VertexOffItsFacePlane { .. })),
+        matches!(
+            refused,
+            Error::Invalid(Invalid::VertexOffItsFacePlane { .. })
+        ),
         "{refused:?}"
     );
     model

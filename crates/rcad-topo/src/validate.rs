@@ -744,7 +744,10 @@ impl Model {
     ///
     /// [`Invalid::AFaceStraddlesSomethingTrimmingIt`], and
     /// [`Error::Undecidable`] when a corner's side could not be settled.
-    fn check_which_side_of_its_trimming_each_curved_face_lies_on(&self, scope: &Scope) -> Result<()> {
+    fn check_which_side_of_its_trimming_each_curved_face_lies_on(
+        &self,
+        scope: &Scope,
+    ) -> Result<()> {
         for slot in scope.solids.keys() {
             self.check_which_side_of_its_trimming_each_curved_face_of_this_solid_lies_on(slot)?;
         }
@@ -830,7 +833,10 @@ impl Model {
     /// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`],
     /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a run kind this does not
     /// know, and whatever reading a corner's side refuses.
-    fn check_closed_edges_are_walked_the_way_their_surfaces_wind(&self, scope: &Scope) -> Result<()> {
+    fn check_closed_edges_are_walked_the_way_their_surfaces_wind(
+        &self,
+        scope: &Scope,
+    ) -> Result<()> {
         for slot in scope.solids.keys() {
             self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(slot)?;
         }
@@ -1216,9 +1222,10 @@ impl Model {
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         let solids = || {
-            scope.solids.keys().map(|slot| {
-                SolidView::new(self, slot, Isometry::identity(), Orientation::Forward)
-            })
+            scope
+                .solids
+                .keys()
+                .map(|slot| SolidView::new(self, slot, Isometry::identity(), Orientation::Forward))
         };
         let largest = solids()
             .flat_map(|solid| solid.faces())
@@ -1226,7 +1233,8 @@ impl Model {
             .flat_map(|wire| wire.points())
             .map(|corner| corner.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
-        let writing_it_down = self.what_writing_a_point_down_costs(self.largest_coordinate_in(scope));
+        let writing_it_down =
+            self.what_writing_a_point_down_costs(self.largest_coordinate_in(scope));
         // A closed edge is skipped rather than measured, because the distance
         // between its two ends is zero and that is not how small it is — it is
         // a whole circle. What stands in for it is the radius of the curved
@@ -1442,7 +1450,11 @@ impl Model {
         scope
             .vertices
             .keys()
-            .map(|slot| self.data().vertices[slot].point.largest_coordinate_magnitude())
+            .map(|slot| {
+                self.data().vertices[slot]
+                    .point
+                    .largest_coordinate_magnitude()
+            })
             .fold(0.0, f64::max)
     }
 }
