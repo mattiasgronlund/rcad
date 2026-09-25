@@ -83,16 +83,41 @@ pub fn a_frustum_under(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> rcad_topo::Result<SolidKey> {
+    a_frustum_seamed_towards(model, slope, near, far, [1.0, 0.0], policy, log)
+}
+
+/// The same frustum with its seam up the ruling that leaves the axis towards
+/// `seam`, which has to be `±x` or `±y` so that the corners stay on the cone
+/// exactly.
+///
+/// # Errors
+///
+/// Whatever [`SolidBuilder::build`] makes of the description.
+///
+/// # Panics
+///
+/// As [`a_frustum_under`], and if `seam` is not one of the four whole
+/// directions.
+pub fn a_frustum_seamed_towards(
+    model: &mut Model,
+    slope: f64,
+    near: f64,
+    far: f64,
+    seam: [f64; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> rcad_topo::Result<SolidKey> {
     assert!(0.0 < near && near < far, "a frustum has two different ends");
+    assert!(
+        seam[0].abs() + seam[1].abs() == 1.0 && seam[0] * seam[1] == 0.0,
+        "a seam off the four whole directions puts its corners off the cone"
+    );
     let skin = Cone::new(Axis::z(), slope).expect("a positive slope");
     let mut builder = SolidBuilder::new();
 
-    let bottom_corner = builder
-        .add_vertex(Point::new(slope * near, 0.0, near))
-        .expect("a finite point");
-    let top_corner = builder
-        .add_vertex(Point::new(slope * far, 0.0, far))
-        .expect("a finite point");
+    let at = |height: f64| Point::new(slope * height * seam[0], slope * height * seam[1], height);
+    let bottom_corner = builder.add_vertex(at(near)).expect("a finite point");
+    let top_corner = builder.add_vertex(at(far)).expect("a finite point");
     let seam = builder
         .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
         .expect("a ruling of a cone is straight, which is the whole of what a seam here is");

@@ -17,12 +17,12 @@ crown; §216–§217 §211.6's floor; §218 the cone-face arm; §219–§220 wha
 and §219 left; §221 §220.4 and a hyperbola arc across the apex; §222 §23.8, a
 closed circle between one pipe twice, fuse laws over a cone; §223 §222.3's
 item 1, a missing cut in `cuts.rs`; §224 §223.2's picker margin; **§229** the
-joiner (§224.2) and §222.2's closed curves in the reader.
+joiner (§224.2) and §222.2's closed curves in the reader; §231 the cone and its
+copy on the joiner — absorption's corner and two spellings of one pipe.
 
-**Next: finish `lane-land-cone-and-copy`** (§229.6) — the cone and its copy on
-the joiner, two steps of three done, not green: rustfmt, two spellings of one
-pipe, absorption's extra corner, two bars side by side. Then re-run
-`lane-swallowed-pointed-cone` (`184962b9`).
+**Next:** re-run `lane-swallowed-pointed-cone` (`184962b9`) on §231; §231.4's
+two bars side by side refuse, pinned and undiagnosed. §230 is replacing this
+line and the two below with one queue, `docs/queue.md`, being built now.
 
 **Beside the unit, always one lane:** the top `todo` of `docs/test-plan.md` (§226).
 
