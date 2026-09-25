@@ -4708,7 +4708,7 @@ check-fuzz-watermark-selftest:
     first=$(at "$repo" one)
     second=$(at "$repo" two)
     third=$(at "$repo" three)
-    git init -q --bare "$dir/origin.git"
+    git init -q --bare -b main "$dir/origin.git"
     git -C "$repo" remote add origin "$dir/origin.git"
     git -C "$repo" push -q origin main
 
