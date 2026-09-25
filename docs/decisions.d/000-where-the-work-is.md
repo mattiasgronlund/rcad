@@ -16,19 +16,19 @@ of arcs round an apex; §211–§214 an ellipse arc's centre, a ring with a hole
 crown; §216–§217 §211.6's floor; §218 the cone-face arm; §219–§220 what §218
 and §219 left; §221 §220.4 and a hyperbola arc across the apex; §222 §23.8, a
 closed circle between one pipe twice, fuse laws over a cone; §223 §222.3's
-item 1, a missing cut in `cuts.rs`; **§224** §223.2's picker margin.
+item 1, a missing cut in `cuts.rs`; §224 §223.2's picker margin; **§229** the
+joiner (§224.2) and §222.2's closed curves in the reader.
 
-**Next and unclaimed: the joiner** (§224.2): the fuse cannot take back an answer
-that carries one curved surface as several faces, and all 20 of §222.3's `U∪U'`
-refusals are that (§224.3); §224.2 has the design. Re-run
-`lane-cone-and-its-copy` (`13d5abaa`) and `lane-swallowed-pointed-cone`
-(`184962b9`) after.
+**Next: finish `lane-land-cone-and-copy`** (§229.6) — the cone and its copy on
+the joiner, two steps of three done, not green: rustfmt, two spellings of one
+pipe, absorption's extra corner, two bars side by side. Then re-run
+`lane-swallowed-pointed-cone` (`184962b9`).
 
 **Beside the unit, always one lane:** the top `todo` of `docs/test-plan.md` (§226).
 
-Also open: §224.4's two asymmetries a cone-and-copy fix exposes (a flush cap,
-two spellings of one pipe); a closed ellipse, or a closed circle on a cone or torus, between
-one surface written twice (§222.2); §222.1's items 1 and 3; §219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
+Also open: §229.3's two torus gaps; §229.4's cone written twice (the closed-edge
+check's partner) and a torus band right round the ring; §229.5's three relay
+defects; §222.1's items 1 and 3; §219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
 demonstrated); §220.1's two unreproduced findings; §216.3's `cut.kept`
 **limit**; §215.2's two walls; §208.6's tip; §124, §125.6.
 

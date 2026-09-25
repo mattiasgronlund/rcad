@@ -18,9 +18,9 @@ tests search adds a row here in the same commit.
 ## Open
 
 ```
-T1  todo   The cone-or-torus target fell from 160 M runs a night to 2.3 M between the nights of 2026-09-20 and 09-21, same flags; and the fuse gets 2.0 M runs on 20 cores where it got 3.0 M on one. Say why, for each. §226.3
-T2  todo   The fuse target asks each pair both ways round and compares the two answers, the way fuses_that_must_agree.rs's commutativity does. §129.5 item 3
-T3  todo   Decode the first timeouts the fuse ever wrote (three, 2026-09-24/25) and the cone-or-torus one (2026-09-25): what each input is, how long it takes on main, a hang or only slow. §226.3
+T1  lane   lane-t1-fuzz-runs — The cone-or-torus target fell from 160 M runs a night to 2.3 M between the nights of 2026-09-20 and 09-21, same flags; and the fuse gets 2.0 M runs on 20 cores where it got 3.0 M on one. Say why, for each. §226.3
+T2  lane   lane-t2-fuse-both-orders — The fuse target asks each pair both ways round and compares the two answers, the way fuses_that_must_agree.rs's commutativity does. §129.5 item 3
+T3  lane   lane-t3-fuzz-timeouts — Decode the first timeouts the fuse ever wrote (three, 2026-09-24/25) and the cone-or-torus one (2026-09-25): what each input is, how long it takes on main, a hang or only slow. §226.3
 T4  todo   The morning line says what is new tonight, by kind and target, off the per-night counters, instead of "nothing found" beside a pile that grows by ~700 a night. §226.3
 T5  todo   The writer target reads back what it wrote and compares it with the model that went in. §129.5 item 3
 T6  todo   A dictionary of the STEP entity names Import::read handles, given to the reader target with -dict=. §226.1
