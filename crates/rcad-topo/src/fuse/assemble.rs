@@ -858,6 +858,9 @@ impl Assembly {
         let axis = match surface {
             Surface::Cone(cone) => cone.axis(),
             Surface::Cylinder(pipe) => pipe.axis(),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => return None,
+            // A surface kind added to `rcad-geom` after this has no ring count
+            // here, so its pieces are left apart as a ball's are.
             _ => return None,
         };
         let round = |at: Point| axis.direction().cross(at - axis.origin());
