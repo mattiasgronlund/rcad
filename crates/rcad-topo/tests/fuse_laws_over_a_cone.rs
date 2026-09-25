@@ -48,8 +48,8 @@
 //! asserts a floor on what it compared, measured on the day it was written, and
 //! a drop in it is a regression rather than a draw (§19.1).
 //!
-//! The five `#[ignore]`d tests at the bottom are the asymmetries this found, one
-//! per shape, each still standing.
+//! The four `#[ignore]`d tests at the bottom are the asymmetries this found that
+//! still stand; the far cube's went when pieces of one cone were joined (§224.2).
 
 mod cones;
 mod pairs;
@@ -294,9 +294,11 @@ fn a_swallowed_pointed_cone_and_a_cube_grazing_it_unite_one_way_and_not_the_othe
 /// surface back into one face the way flat ones are folded, so the fuse hands
 /// back an answer it cannot read. Also a gap: the one face those pieces make up
 /// exists.
+///
+/// Both groupings answer and agree since the fuse joins pieces of one cone
+/// (§224.2) and a wall's corner on the cone stopped counting both branches of
+/// the hyperbola its plane cuts the cone in.
 #[test]
-#[ignore = "associativity: frustum cut by a block, cube far away — (block ∪ frustum) ∪ cube is \
-            AFaceMeetsItsNeighbourOnItsOwnSurface (cone pieces left unjoined)"]
 fn a_frustum_cut_by_a_block_and_a_far_cube_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: Pair::BesideABlock {

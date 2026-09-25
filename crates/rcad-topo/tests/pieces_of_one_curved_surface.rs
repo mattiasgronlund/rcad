@@ -26,47 +26,140 @@
 
 mod cones;
 
-use rcad_geom::{EdgeRun, Isometry, Picker, Scale, Vector};
+use rcad_geom::{Deflection, EdgeRun, Isometry, Picker, Scale, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 use cones::a_frustum;
 
-/// `(block ∪ frustum) ∪ cube`, with a cube that touches nothing, gets past the
-/// block floor's arc and reaches the unjoined cone pieces.
-///
-/// §222.3 items 4 and 5's first refusal. Before the picker cleared the
-/// re-solved corners this refused with
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`].
-///
-/// The day the cone pieces are joined this refusal goes, and
-/// [`a_block_and_frustum_united_can_be_united_again`] is what replaces it.
-#[test]
-fn a_block_and_frustum_united_and_taken_back_in_reach_the_unjoined_cone_pieces() {
-    let (model, united) = a_block_and_frustum_united();
-    let refusal = the_union_again_with_a_far_cube(&model, &united)
-        .expect_err("the cone pieces are not joined yet");
-    assert!(
-        matches!(refusal, Error::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }),
-        "the second union refused before reaching the cone pieces: {refusal:?}"
-    );
-}
-
 /// `(block ∪ frustum) ∪ cube`, with a cube that touches nothing, is the first
 /// union and the cube.
 ///
-/// Refused with [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`]: the first
-/// union keeps the frustum's cone as several faces, cut apart by the block's
-/// walls `x = 1` and `y = 1` where they run on below the block, and nothing
-/// folds pieces of one curved surface into one face the way
-/// `fuse/assemble.rs`'s `join_up_what_is_one_face` folds pieces of one plane.
-/// A gap: the one face those pieces make up exists (§223.4).
+/// It refused with [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`] while the
+/// first union kept the frustum's cone as seven faces, cut apart by the block's
+/// walls `x = 1` and `y = 1` where they run on below the block (§223.4). The
+/// fuse now joins pieces of one cone the way it joins pieces of one plane
+/// (§224.2), and behind that a wall's corner on the cone was taken to be on
+/// both branches of the hyperbola the wall's plane cuts the cone in.
 #[test]
-#[ignore = "AFaceMeetsItsNeighbourOnItsOwnSurface: pieces of one cone are never joined into one face"]
 fn a_block_and_frustum_united_can_be_united_again() {
     let (model, united) = a_block_and_frustum_united();
     the_union_again_with_a_far_cube(&model, &united)
         .expect("the answer of a fuse can be fused again");
+}
+
+/// `block ∪ frustum` carries the frustum's cone as one face, and it is sound.
+///
+/// The fuse cuts the cone apart where the block's walls `x = 1` and `y = 1` run
+/// on below the block, and kept it as seven faces before pieces of one cone
+/// were joined (§223.4, §224.2). Joined, the wall with its notch is a band
+/// right round the axis, which needs a seam: one of the cut edges from the
+/// floor circle up to the notch stays, as the seam.
+///
+/// The volume is the frustum's and the block's less what they share, worked out
+/// by hand: the region `x > 1, y > 1` inside the circle of radius `z / 2`,
+/// summed from `z = 5` to `z = 9`.
+#[test]
+fn a_block_and_frustum_united_keep_the_cone_as_one_face() {
+    let (model, united) = a_block_and_frustum_united();
+    let shared = simpson(5.0, 9.0, |z| a_quarter_disk_past_one(z / 2.0));
+    let frustum = core::f64::consts::PI / 3.0 * 0.25 * (9.0_f64.powi(3) - 4.0_f64.powi(3));
+    let block = 4.5 * 4.5 * 9.0;
+    one_curved_face_sound_and_measured(&model, &united, frustum + block - shared);
+}
+
+/// `block ∪ bar`, the frustum's pair with a round bar of radius 2.5 in its
+/// place, carries the bar's wall as one face, and it is sound.
+///
+/// The block's walls cross a pipe along its own lines, so the pieces of the
+/// wall meet along straight edges rather than arcs of a hyperbola, and the seam
+/// the joined band keeps is one of those.
+#[test]
+fn a_block_and_bar_united_keep_the_wall_as_one_face() {
+    let (model, united) = a_block_and_bar_united();
+    let bar = core::f64::consts::PI * 2.5 * 2.5 * 9.0;
+    let block = 4.5 * 4.5 * 9.0;
+    let shared = 4.0 * a_quarter_disk_past_one(2.5);
+    one_curved_face_sound_and_measured(&model, &united, bar + block - shared);
+}
+
+/// `(block ∪ bar) ∪ cube`, with a cube that touches nothing, answers.
+///
+/// Refused with [`Error::AFaceTrimmedByACurveThisCannotFollow`] once the wall
+/// is one face. Nobody has traced which arc it is yet; a gap until shown
+/// otherwise, since the union it is asked about is sound and measures right
+/// (`a_block_and_bar_united_keep_the_wall_as_one_face`).
+#[test]
+#[ignore = "AFaceTrimmedByACurveThisCannotFollow on the joined bar wall, not traced yet"]
+fn a_block_and_bar_united_can_be_united_again() {
+    let (model, united) = a_block_and_bar_united();
+    the_union_again_with_a_far_cube(&model, &united)
+        .expect("the answer of a fuse can be fused again");
+}
+
+/// One solid, one face on something other than a plane, `Model::validate`
+/// passes, and the measured volume is within its own published error of
+/// `exactly`.
+fn one_curved_face_sound_and_measured(model: &Model, united: &[SolidKey], exactly: f64) {
+    let [solid] = united else {
+        panic!("the union is one solid, not {}", united.len());
+    };
+    let view = model.solid(*solid).expect("this model made the key");
+    let curved = view
+        .faces()
+        .filter(|face| face.surface().as_plane().is_none())
+        .count();
+    assert_eq!(curved, 1, "the curved surface is one face");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    model
+        .validate(&policy, &mut log)
+        .expect("the union is sound");
+    let measured = view
+        .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
+        .expect("the union measures");
+    assert!(
+        (measured.volume() - exactly).abs() <= measured.volume_error(),
+        "measured {} against {exactly}, allowed {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+/// The area of `x > 1, y > 1` inside a circle of radius `r` about the origin,
+/// for `r > √2`.
+fn a_quarter_disk_past_one(r: f64) -> f64 {
+    let far = (r * r - 1.0).sqrt();
+    let under = |x: f64| x / 2.0 * (r * r - x * x).sqrt() + r * r / 2.0 * (x / r).asin();
+    under(far) - under(1.0) - (far - 1.0)
+}
+
+/// Simpson's rule over 2000 steps, for a smooth `f` on `[from, to]`.
+fn simpson(from: f64, to: f64, f: impl Fn(f64) -> f64) -> f64 {
+    let steps = 2000;
+    let width = (to - from) / f64::from(steps);
+    let inner: f64 = (1..steps)
+        .map(|step| {
+            let weight = if step % 2 == 1 { 4.0 } else { 2.0 };
+            weight * f(from + width * f64::from(step))
+        })
+        .sum();
+    width / 3.0 * (f(from) + inner + f(to))
+}
+
+/// The frustum's pair with a round bar of radius 2.5 from `z = 0` to `z = 9`.
+fn a_block_and_bar_united() -> (Model, Vec<SolidKey>) {
+    let mut model = a_model();
+    let bar = model
+        .add_round_bar(2.5, 9.0, &Isometry::identity())
+        .expect("a round bar");
+    let block = a_box(
+        &mut model,
+        [[0.0, 0.0], [4.5, 0.0], [4.5, 4.5], [0.0, 4.5]],
+        9.0,
+        [1.0, 1.0, 5.0],
+    );
+    fused(&model, &[block], &[bar], Rule::Union).expect("a block and a bar through its floor unite")
 }
 
 /// §222.3 items 4 and 5's pair: a frustum about `z` and a block over its
