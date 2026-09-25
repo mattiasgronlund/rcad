@@ -2554,25 +2554,25 @@ mod tests {
     /// `|ρ·cos α − |z|·sin α|` from a cone and `|√((ρ − R)² + z²) − ρ_t|` from
     /// a torus, and `|ρ − R|` from a pipe.
     fn distance_from(surface: &Surface, point: Point) -> f64 {
-        let (line, apart) = match surface {
-            Surface::Cone(cone) => (cone.axis(), point - cone.apex()),
-            Surface::Torus(ring) => (ring.axis(), point - ring.centre()),
-            Surface::Cylinder(pipe) => (pipe.axis(), point - pipe.axis().origin()),
-            other => unreachable!("no curve is drawn on {other:?} here"),
-        };
-        let along = apart.dot(line.direction());
-        let across = (apart - line.direction() * along).length();
-        match surface {
-            Surface::Cone(cone) => {
-                let hypotenuse = cone.slope().hypot(1.0);
-                (across - along.abs() * cone.slope()).abs() / hypotenuse
-            }
-            Surface::Torus(ring) => {
-                ((across - ring.ring_radius()).hypot(along) - ring.tube_radius()).abs()
-            }
-            Surface::Cylinder(pipe) => (across - pipe.radius()).abs(),
-            other => unreachable!("no curve is drawn on {other:?} here"),
+        if let Surface::Cone(cone) = surface {
+            let (along, across) = along_and_across(cone.axis(), point - cone.apex());
+            return (across - along.abs() * cone.slope()).abs() / cone.slope().hypot(1.0);
         }
+        if let Surface::Torus(ring) = surface {
+            let (along, across) = along_and_across(ring.axis(), point - ring.centre());
+            return ((across - ring.ring_radius()).hypot(along) - ring.tube_radius()).abs();
+        }
+        if let Surface::Cylinder(pipe) = surface {
+            let (_, across) = along_and_across(pipe.axis(), point - pipe.axis().origin());
+            return (across - pipe.radius()).abs();
+        }
+        unreachable!("no curve is drawn on {surface:?} here")
+    }
+
+    /// How far `apart` runs along `line` and how far it is from it.
+    fn along_and_across(line: Axis, apart: Vector) -> (f64, f64) {
+        let along = apart.dot(line.direction());
+        (along, (apart - line.direction() * along).length())
     }
 
     /// A circle on each nappe of a cone, a circle square to a torus's axis and

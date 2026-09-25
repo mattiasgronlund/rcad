@@ -669,9 +669,8 @@ impl PlanesBetweenCurvedFaces {
                     <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST
             };
             let mut kind = None;
-            let a_circle_on_it_could_be_on_every_face = faces.iter().all(|face| match face {
-                Surface::Sphere(_) => true,
-                Surface::Cylinder(pipe) => {
+            let a_circle_on_it_could_be_on_every_face = faces.iter().all(|face| {
+                if let Surface::Cylinder(pipe) = face {
                     let lean = how_far_a_pipe_leans_off_square(normal, pipe.axis().direction());
                     if square(pipe.axis().direction()) {
                         self.the_most_a_square_pipe_leans =
@@ -679,20 +678,20 @@ impl PlanesBetweenCurvedFaces {
                         return true;
                     }
                     kind = Some("an ellipse on a pipe");
-                    one_ellipse_on_every_pipe(flat, &faces)
+                    return one_ellipse_on_every_pipe(flat, &faces);
                 }
-                Surface::Cone(cone) => {
+                if let Surface::Cone(cone) = face {
                     kind = kind.or(Some("a circle on a cone"));
-                    square(cone.axis().direction())
+                    return square(cone.axis().direction());
                 }
-                Surface::Torus(ring) => {
+                if let Surface::Torus(ring) = face {
                     kind = kind.or(Some("a circle on a torus"));
                     let up = ring.axis().direction();
-                    normal.cross(up) == Vector::zero()
+                    return normal.cross(up) == Vector::zero()
                         || normal.normalized().expect("a normal").dot(up).abs()
-                            <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST
+                            <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST;
                 }
-                _ => false,
+                matches!(face, Surface::Sphere(_))
             });
             if a_circle_on_it_could_be_on_every_face {
                 self.checked += 1;
