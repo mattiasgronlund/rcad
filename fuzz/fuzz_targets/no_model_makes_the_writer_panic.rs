@@ -16,8 +16,9 @@
 //! of those were empty. So [`still_a_model`] replaces libFuzzer's mutator. It
 //! decodes the input and makes one change a model can take — a byte changed
 //! where the result still decodes, one more solid, one solid moved or turned,
-//! or a fresh model — and encodes the result, so every input the target runs
-//! decodes.
+//! or a fresh model — and encodes the result. In two 60-second runs on
+//! 2026-09-25, 11 145 of 11 179 and 12 272 of 12 309 mutated inputs decoded
+//! (`docs/decisions.md` §241).
 //!
 //! The shapes are the ones the writer has to spell differently: a cube, a round
 //! bar, a ball, a frustum, a pointed cone and a quarter bend of pipe, which is
@@ -63,8 +64,9 @@ fuzz_mutator!(|data: &mut [u8], size: usize, max_size: usize, seed: u32| {
 /// never reached the writer each start a model rather than staying bytes.
 ///
 /// The one input this leaves as it came is one where even a fresh one-solid
-/// model does not fit in `max_size`. libFuzzer starts `max_size` at the
-/// longest input in the corpus, which is longer than any one solid this draws.
+/// model does not fit in `max_size`. With no `-max_len`, libFuzzer's limit is
+/// 4096 bytes — its own floor, since the corpus's longest seed is 4064 — and
+/// the longest one-solid model drawn here, the quarter bend, is 681.
 fn still_a_model(data: &mut [u8], size: usize, max_size: usize, seed: u32) -> usize {
     let mut draw = Draw::new(seed);
     let mut model = match postcard::from_bytes::<Model>(&data[..size]) {
