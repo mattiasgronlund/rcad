@@ -3765,13 +3765,43 @@ fn both_ways_round_of(
     coordinates: Coordinates,
     build: &dyn Fn() -> (Model, Vec<SolidKey>),
 ) -> Result<(), TestCaseError> {
+    both_ways_round_of_noting_which_way_the_second_call_went(
+        tally,
+        coordinates,
+        build,
+        &mut |_, _| {},
+    )
+}
+
+/// The same, and telling `note` the two groups of solids each of the two
+/// calls actually hands to [`fused`] — the forward one, then the one that is
+/// supposed to be swapped — so a test can catch a caller that quietly stopped
+/// swapping them, without needing the two answers to come out different
+/// (§129.5).
+///
+/// A union or an intersection that really commutes gives the same answer
+/// whether it is asked once or twice, so nothing that reads the *answer* can
+/// tell "asked the other way round" from "asked the same way twice". This
+/// reads what is actually handed to [`fused`] instead.
+fn both_ways_round_of_noting_which_way_the_second_call_went(
+    tally: &Tally,
+    coordinates: Coordinates,
+    build: &dyn Fn() -> (Model, Vec<SolidKey>),
+    note: &mut dyn FnMut(&[SolidKey], &[SolidKey]),
+) -> Result<(), TestCaseError> {
     for rule in [Rule::Union, Rule::Intersection] {
         tally.meaning_to_compare();
         let (model, keys) = build();
         let (one, other) = (keys[0], keys[1]);
 
-        let forwards = fused(tally, coordinates, &model, &[one], &[other], rule)?;
-        let backwards = fused(tally, coordinates, &model, &[other], &[one], rule)?;
+        // Both calls go through `ask`, so what `note` hears is what `fused`
+        // is handed; two spellings of the pair could drift apart unseen.
+        let mut ask = |arguments: &[SolidKey], tools: &[SolidKey]| {
+            note(arguments, tools);
+            fused(tally, coordinates, &model, arguments, tools, rule)
+        };
+        let forwards = ask(&[one], &[other])?;
+        let backwards = ask(&[other], &[one])?;
         both_agree_about_whether_there_is_an_answer(
             tally,
             coordinates,
@@ -3793,6 +3823,71 @@ fn both_ways_round_of(
         )?;
     }
     Ok(())
+}
+
+/// **The both-ways-round check must ask [`fused`] with the two sides truly
+/// swapped, not the same pair twice.**
+///
+/// A union of two overlapping cubes gives the same answer whichever cube is
+/// named first, so a test that only compares the two *answers* cannot tell a
+/// real swap from asking the same way round twice — that sameness is exactly
+/// what the commutativity check is for (§129.5). This instead reads the two
+/// groups of solids [`both_ways_round_of_noting_which_way_the_second_call_went`]
+/// actually hands to [`fused`].
+#[test]
+fn the_second_call_asks_the_pair_the_other_way_round() {
+    let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
+    let one = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    let other = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    model
+        .place_solid(
+            other,
+            &Isometry::translation(Vector::new(1.0, 1.0, 1.0)).expect("a finite placement"),
+        )
+        .expect("this model made the key");
+
+    let tally = Tally::default();
+    let mut asked: Vec<(Vec<SolidKey>, Vec<SolidKey>)> = Vec::new();
+    both_ways_round_of_noting_which_way_the_second_call_went(
+        &tally,
+        Coordinates::AreExactlyRepresentable,
+        &|| (model.clone(), vec![one, other]),
+        &mut |arguments, tools| asked.push((arguments.to_vec(), tools.to_vec())),
+    )
+    .expect("two overlapping cubes on the integer grid fuse cleanly under a certified policy");
+
+    assert_eq!(
+        asked.len(),
+        4,
+        "two rules, each asking forward and then backward, is four notes: {asked:?}"
+    );
+    for pair in asked.chunks(2) {
+        let [forward, backward] = pair else {
+            panic!("expected a forward call and a swapped call together: {asked:?}");
+        };
+        let (forward_arguments, forward_tools) = forward;
+        let (backward_arguments, backward_tools) = backward;
+        assert_ne!(
+            forward_arguments, forward_tools,
+            "the two sides of a two-sided fuse must be different solids, or this test \
+             proves nothing"
+        );
+        assert_eq!(
+            (forward_arguments, forward_tools),
+            (backward_tools, backward_arguments),
+            "the second call did not swap the two sides: asked {asked:?}"
+        );
+        assert_ne!(
+            (forward_arguments, forward_tools),
+            (backward_arguments, backward_tools),
+            "the second call asked the very same pair as the first, so it was never \
+             asked the other way round: {asked:?}"
+        );
+    }
 }
 
 /// Ask all three rules of one configuration and keep nothing but the tally.
