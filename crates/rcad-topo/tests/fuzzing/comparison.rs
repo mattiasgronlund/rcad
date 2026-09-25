@@ -19,6 +19,11 @@
 //! `same_answer`'s error is a plain [`String`]. Neither side needs to wrap
 //! it the same way: `fuses_that_must_agree.rs` turns it into a
 //! `TestCaseError` and the fuzz side leaves it as `String` and panics on it.
+//!
+//! **The test that `same_answer` can say no lives here too**, at the bottom,
+//! because every binary that pulls this file in runs it. Before, only the
+//! fuzz side had one, so a `same_answer` that agreed with everything still
+//! passed every law in `fuses_that_must_agree.rs`.
 
 use rcad_geom::{EdgeRun, Orientation, Picker, Surface};
 use rcad_topo::{EdgeView, Model, Rule, SolidKey};
@@ -412,4 +417,62 @@ pub fn same_answer(
         }
     }
     Err(why)
+}
+
+/// A triangle used the other way round, or with one corner a single ulp over,
+/// is a different answer. The same triangle walked from another corner is not.
+///
+/// The last half is there so this cannot pass on a `same_answer` that refuses
+/// everything.
+#[test]
+fn two_different_answers_are_refused() {
+    let triangle = |reversed, far_corner: f64, first: usize| {
+        let corners = [[0.0, 0.0, 0.0], [far_corner, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        Answer {
+            solids: vec![vec![Face {
+                sits: WhatItSitsOn::Flat([0.0, 0.0, 1.0, 0.0]),
+                reversed,
+                wires: vec![
+                    (0..3)
+                        .map(|step| Step {
+                            at: corners[(first + step) % 3],
+                            run: Run::Straight,
+                        })
+                        .collect(),
+                ],
+            }]],
+        }
+    };
+    let answer = triangle(false, 1.0, 0);
+
+    assert!(
+        same_answer(
+            &answer,
+            &triangle(true, 1.0, 0),
+            Rule::Union,
+            "turning the face over"
+        )
+        .is_err(),
+        "a face used the other way round passed for the same answer"
+    );
+    assert!(
+        same_answer(
+            &answer,
+            &triangle(false, 1.0f64.next_up(), 0),
+            Rule::Union,
+            "one ulp"
+        )
+        .is_err(),
+        "a corner one ulp away passed for the same answer"
+    );
+    assert_eq!(
+        same_answer(
+            &answer,
+            &triangle(false, 1.0, 2),
+            Rule::Union,
+            "starting elsewhere"
+        ),
+        Ok(()),
+        "the same triangle walked from another corner"
+    );
 }
