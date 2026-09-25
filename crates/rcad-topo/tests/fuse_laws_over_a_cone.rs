@@ -266,10 +266,13 @@ fn a_swallowed_pointed_cone_and_a_cube_grazing_it_unite_one_way_and_not_the_othe
 /// both.
 ///
 /// `block ∪ (frustum ∪ cube)` answers. `(block ∪ frustum) ∪ cube` refuses at
-/// the second union with [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`],
-/// even with a cube that touches nothing.
+/// the second union with
+/// [`rcad_topo::Error::AFaceMeetsItsNeighbourOnItsOwnSurface`], even with a cube
+/// that touches nothing.
 ///
-/// **The curve is a circle, not a hyperbola.** The refusal is `fuse/arrange.rs`'s
+/// **It used to refuse one step earlier, on a circle.** Until §223.4's lane the
+/// refusal was [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`],
+/// `fuse/arrange.rs`'s
 /// `which_way_an_edge_runs_round`, reached from `cuts::gather` checking that the
 /// answer does not cross itself, on the answer's block floor at `z = 5` and its
 /// arc of the cone's radius-2.5 circle between `(√5.25, 1, 5)` and
@@ -277,13 +280,13 @@ fn a_swallowed_pointed_cone_and_a_cube_grazing_it_unite_one_way_and_not_the_othe
 /// *as it stored them* read on or in front of it; the second union re-solves
 /// each corner from the wall, the floor and the cone into a box one ulp wide,
 /// and the picker's plane runs through both boxes, so neither end is on or in
-/// front and nothing says which arc it is. A gap: lowering the picker in
-/// `fuse/assemble.rs`'s `the_half_space_both_ends_are_on` against each corner
-/// grown by the room `fuse/bake.rs` grants a re-solved corner gets past it.
+/// front and nothing says which arc it is. `fuse/assemble.rs`'s
+/// `the_half_space_both_ends_are_on` now lowers the picker against each corner
+/// grown by the room `fuse/bake.rs` grants a re-solved corner, while the
+/// circle's centre stays behind it (`pieces_of_one_curved_surface.rs`).
 ///
-/// **A second refusal stands behind it**, and that one is about the hyperbola.
-/// With the picker lowered, the second union refuses with
-/// [`rcad_topo::Error::AFaceMeetsItsNeighbourOnItsOwnSurface`] instead: the
+/// **What stands now is about the hyperbola**, and it is
+/// [`rcad_topo::Error::AFaceMeetsItsNeighbourOnItsOwnSurface`]: the
 /// answer keeps the frustum's cone as several faces, cut apart by the block's
 /// walls where they run on below the block, so a cone face with corners
 /// `(−√3, 1, 4)`, `(1, −√3, 4)`, `(1, −√5.25, 5)` and `(−√5.25, 1, 5)` has the
@@ -293,8 +296,7 @@ fn a_swallowed_pointed_cone_and_a_cube_grazing_it_unite_one_way_and_not_the_othe
 /// exists.
 #[test]
 #[ignore = "associativity: frustum cut by a block, cube far away — (block ∪ frustum) ∪ cube is \
-            AFaceTrimmedByACurveThisCannotFollow (a picker its own re-solved corners straddle), \
-            and behind it AFaceMeetsItsNeighbourOnItsOwnSurface (cone pieces left unjoined)"]
+            AFaceMeetsItsNeighbourOnItsOwnSurface (cone pieces left unjoined)"]
 fn a_frustum_cut_by_a_block_and_a_far_cube_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: Pair::BesideABlock {
@@ -310,15 +312,12 @@ fn a_frustum_cut_by_a_block_and_a_far_cube_unite_one_way_and_not_the_other() {
 
 /// The same frustum and block, and a small cube standing in the frustum.
 ///
-/// Refuses the same way as the far cube does, at the same arc of the same
-/// floor and then, with that picker lowered, on the same unjoined cone pieces,
+/// Refuses the same way as the far cube does, on the same unjoined cone pieces,
 /// so a cube that does touch the answer changes nothing about which grouping
 /// refuses.
 #[test]
 #[ignore = "associativity: frustum cut by a block, cube inside the frustum — (block ∪ frustum) ∪ \
-            cube is AFaceTrimmedByACurveThisCannotFollow (a picker its own re-solved corners \
-            straddle), and behind it AFaceMeetsItsNeighbourOnItsOwnSurface (cone pieces left \
-            unjoined)"]
+            cube is AFaceMeetsItsNeighbourOnItsOwnSurface (cone pieces left unjoined)"]
 fn a_frustum_cut_by_a_block_and_a_cube_in_the_frustum_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: Pair::BesideABlock {

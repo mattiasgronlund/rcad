@@ -788,7 +788,7 @@ fn the_place_the_model_points_at(
 /// Floored at one for the same reason [`select`](super::select) floors its own
 /// round-trip room: a corner at the origin still had a plane written down
 /// against it.
-fn what_writing_the_corner_down_cost(stored: [Interval; 3]) -> f64 {
+pub(super) fn what_writing_the_corner_down_cost(stored: [Interval; 3]) -> f64 {
     let size = stored
         .iter()
         .map(|side| side.lo().abs().max(side.hi().abs()))
@@ -804,7 +804,7 @@ fn what_writing_the_corner_down_cost(stored: [Interval; 3]) -> f64 {
 /// allowance has to be spent on the point before the question rather than on
 /// the answer after it. That is the same move `not_provably_off` in
 /// [`validate`](crate::validate) makes for the same reason.
-fn grown_by(point: PredicatePoint, room: f64) -> PredicatePoint {
+pub(super) fn grown_by(point: PredicatePoint, room: f64) -> PredicatePoint {
     assert!(
         room.is_finite() && room >= 0.0,
         "an allowance read off a finite corner is finite and not negative, and this one is {room}"
