@@ -126,9 +126,13 @@
 mod cones;
 mod pairs;
 
+// Shared with `tests/fuzzing/fuse.rs`, which reaches the same file by
+// `#[path]` from its own directory (§129.5 item 3).
+#[path = "fuzzing/comparison.rs"]
+mod comparison;
+
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
 use std::ops::RangeInclusive;
 
 use proptest::prelude::*;
@@ -140,8 +144,11 @@ use rcad_geom::{
     Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, EdgeView, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
 
+use comparison::{
+    Answer, Face, Picking, Run, Step, WhatItSitsOn, answer_of, bits, turned_to_its_smallest,
+};
 use pairs::{
     BallAndBlock, Configuration, CurvedPair, Elsewhere, Fixture, FrustumAndBlock, LeaningBar,
     Movement, Placed, Rigid, Shape, Skew, Turn, Turned, a_ball_a_bar_and_a_block,
@@ -4596,133 +4603,23 @@ impl Measured {
     }
 }
 
-/// Insist two answers are the same one, bit for bit.
+/// `comparison::same_answer`, with proptest's error where the shared version
+/// returns a plain `String`.
 fn same_answer(
     expected: &Answer,
     found: &Answer,
     rule: Rule,
     what_changed: &str,
 ) -> Result<(), TestCaseError> {
-    if expected.canonical() == found.canonical() {
-        return Ok(());
-    }
-
-    let mut why = format!("{what_changed} changed the answer to a {rule:?}:\n");
-    let _ = writeln!(
-        why,
-        "  {} solids and {} faces one way, {} solids and {} faces the other",
-        expected.solids.len(),
-        expected.face_count(),
-        found.solids.len(),
-        found.face_count()
-    );
-    for (position, (one, other)) in expected
-        .canonical()
-        .iter()
-        .zip(found.canonical().iter())
-        .enumerate()
-    {
-        for (face, (mine, theirs)) in one.iter().zip(other.iter()).enumerate() {
-            if mine != theirs {
-                let _ = writeln!(why, "  solid {position} face {face} differs");
-                return Err(TestCaseError::fail(why));
-            }
-        }
-    }
-    Err(TestCaseError::fail(why))
+    comparison::same_answer(expected, found, rule, what_changed).map_err(TestCaseError::fail)
 }
 
-/// The geometry of an answer, and nothing about which slot anything landed in.
-#[derive(Clone, Debug)]
-struct Answer {
-    solids: Vec<Vec<Face>>,
-}
-
-/// One face: the surface it sits on, which way round its solid uses it, and its
-/// rings of steps — each a corner and what the edge from it runs along.
-///
-/// **Which way round rather than which way it faces**, because a curved face has
-/// no one normal to read. For a flat face the two say the same thing: the
-/// outward normal is the stored plane's normal times the orientation's sign, so
-/// two faces with the same plane bits agree about the normal exactly when they
-/// agree about the orientation. That stays true under a [`Movement`] as well,
-/// since a quarter turn is a swap and a negation and multiplying by `±1`
-/// commutes with both.
-#[derive(Clone, Debug)]
-struct Face {
-    sits: WhatItSitsOn,
-    reversed: bool,
-    wires: Vec<Vec<Step>>,
-}
-
-/// One step round a wire: the corner it leaves from and what it runs along to
-/// the next.
-///
-/// **The run is here because the corners are not enough** (§165). A ring of two
-/// corners reads the same walked either way, a round wire has one corner and
-/// no order at all, and a quarter of a ball and three quarters of it have the
-/// same faces with the same corners — only which half-meridian each edge
-/// follows tells them apart.
-#[derive(Clone, Debug)]
-struct Step {
-    at: [f64; 3],
-    run: Run,
-}
-
-/// What an edge runs along, as numbers.
-#[derive(Clone, Debug)]
-enum Run {
-    /// Straight to the next corner, which is all there is to say about it.
-    Straight,
-    /// Right round a closed crossing and back to the corner it left, and
-    /// whether the wire walks it the way the edge is stored running.
-    ///
-    /// **Which way a closed edge is stored running is not arbitrary**: it is
-    /// the way the curved surface's own longitude takes it, the fuse writes it
-    /// that way and `Model::validate` reads it back
-    /// (`check_closed_edges_are_walked_the_way_their_surfaces_wind`). So which
-    /// way round the wire goes is part of the answer, and a round wire has no
-    /// second corner to say it.
-    RightRound { forward: bool },
-    /// One piece of where the face crosses `and`, picked out by `picked_by`.
-    PartOf {
-        and: WhatItSitsOn,
-        picked_by: Vec<Picking>,
-    },
-}
-
-/// A picker, as numbers: `a·x + b·y + c·z ≥ d` for a flat one, the surface
-/// itself for a curved one.
-#[derive(Clone, Debug)]
-enum Picking {
-    InFrontOf([f64; 4]),
-    Outside(WhatItSitsOn),
-    InsideAPipe(WhatItSitsOn),
-}
-
+/// `Run::moved_by`, `Picking::moved_by`, `WhatItSitsOn::moved_by` and
+/// `Answer::moved_by` below are this file's own extensions of the types
+/// `comparison` declares — added as their own `impl` blocks rather than beside
+/// `of` and `written_out` there, because a [`Movement`] is this file's own type
+/// and the shared module cannot depend on it (see that module's doc comment).
 impl Run {
-    fn of(edge: EdgeView<'_>) -> Run {
-        match edge.run() {
-            EdgeRun::Straight => Run::Straight,
-            EdgeRun::RightRoundWhereItsFacesCross => Run::RightRound {
-                forward: edge.orientation() == Orientation::Forward,
-            },
-            EdgeRun::PartOfWhereItCrosses { and, picked_by } => Run::PartOf {
-                and: WhatItSitsOn::of(&and),
-                picked_by: picked_by.iter().map(Picking::of).collect(),
-            },
-            // Named rather than left to the wildcard, because it exists (§40).
-            // It gets no `Run` shape: the fuse never writes it — `assemble`
-            // still names a closed rim `RightRoundWhereItsFacesCross`, and only
-            // `SolidBuilder` can say which surface cut one (§216) — so a shape
-            // here would be one nothing reaches (§13).
-            EdgeRun::RightRoundWhereItCrosses { .. } => {
-                panic!("the fuse does not write a rim that names its cutting surface; §216")
-            }
-            other => panic!("this file does not know how to write {other:?} down"),
-        }
-    }
-
     fn moved_by(&self, movement: &Movement) -> Run {
         match self {
             Run::Straight => Run::Straight,
@@ -4736,44 +4633,9 @@ impl Run {
             },
         }
     }
-
-    /// The numbers, tagged. The pickers are sorted: they are a set, and the
-    /// order they were listed in is the arena's business.
-    fn written_out(&self) -> Vec<u64> {
-        match self {
-            Run::Straight => vec![0],
-            Run::RightRound { forward } => vec![1, u64::from(*forward)],
-            Run::PartOf { and, picked_by } => {
-                let mut pickers: Vec<Vec<u64>> =
-                    picked_by.iter().map(Picking::written_out).collect();
-                pickers.sort_unstable();
-                let mut written = vec![2];
-                written.extend(and.written_out());
-                written.push(pickers.len() as u64);
-                written.extend(pickers.into_iter().flatten());
-                written
-            }
-        }
-    }
 }
 
 impl Picking {
-    fn of(picker: &Picker) -> Picking {
-        match picker {
-            Picker::InFrontOf(flat) => Picking::InFrontOf(flat.coefficients()),
-            Picker::OutsideABall(ball) => {
-                Picking::Outside(WhatItSitsOn::of(&Surface::Sphere(*ball)))
-            }
-            Picker::OutsideAPipe(pipe) => {
-                Picking::Outside(WhatItSitsOn::of(&Surface::Cylinder(*pipe)))
-            }
-            Picker::InsideAPipe(pipe) => {
-                Picking::InsideAPipe(WhatItSitsOn::of(&Surface::Cylinder(*pipe)))
-            }
-            other => panic!("this file does not know how to write {other:?} down"),
-        }
-    }
-
     /// `n · p ≥ d` moved is `n' · p ≥ d + n' · t`, and the rest move as the
     /// surfaces they are.
     fn moved_by(&self, movement: &Movement) -> Picking {
@@ -4787,95 +4649,9 @@ impl Picking {
             Picking::InsideAPipe(surface) => Picking::InsideAPipe(surface.moved_by(movement)),
         }
     }
-
-    fn written_out(&self) -> Vec<u64> {
-        match self {
-            Picking::InFrontOf(coefficients) => {
-                core::iter::once(0).chain(coefficients.map(bits)).collect()
-            }
-            Picking::Outside(surface) => core::iter::once(1).chain(surface.written_out()).collect(),
-            Picking::InsideAPipe(surface) => {
-                core::iter::once(2).chain(surface.written_out()).collect()
-            }
-        }
-    }
-}
-
-/// What a face sits on, kept as the numbers that name it.
-///
-/// Numbers rather than a [`Surface`] because [`Answer::moved_by`] has to move a
-/// plane's four coefficients, and because the whole point of the comparison is
-/// that nothing about those numbers changed.
-#[derive(Clone, Debug)]
-enum WhatItSitsOn {
-    /// A plane, as its four coefficients.
-    Flat([f64; 4]),
-    /// A ball's skin: where its middle is and how big it is.
-    Ball([f64; 3], f64),
-    /// A pipe's skin: a point on its axis, the way that axis points, and how
-    /// big it is.
-    Pipe([f64; 3], [f64; 3], f64),
-    /// A cone's skin: its apex, the way its axis points, and how fast it
-    /// widens.
-    Cone([f64; 3], [f64; 3], f64),
-    /// A ring's skin: its centre, the way its axis points, and its two radii.
-    Ring([f64; 3], [f64; 3], f64, f64),
 }
 
 impl WhatItSitsOn {
-    fn of(surface: &Surface) -> WhatItSitsOn {
-        match surface {
-            Surface::Plane(flat) => WhatItSitsOn::Flat(flat.coefficients()),
-            Surface::Sphere(ball) => WhatItSitsOn::Ball(ball.centre().coordinates(), ball.radius()),
-            Surface::Cylinder(pipe) => WhatItSitsOn::Pipe(
-                pipe.axis().origin().coordinates(),
-                pipe.axis().direction().components(),
-                pipe.radius(),
-            ),
-            Surface::Cone(cone) => WhatItSitsOn::Cone(
-                cone.apex().coordinates(),
-                cone.axis().direction().components(),
-                cone.slope(),
-            ),
-            Surface::Torus(ring) => WhatItSitsOn::Ring(
-                ring.centre().coordinates(),
-                ring.axis().direction().components(),
-                ring.ring_radius(),
-                ring.tube_radius(),
-            ),
-            other => panic!("this file does not know how to write {other:?} down"),
-        }
-    }
-
-    /// The numbers, with a tag so two different kinds of surface can never
-    /// write themselves out the same way.
-    fn written_out(&self) -> Vec<u64> {
-        match self {
-            WhatItSitsOn::Flat(coefficients) => {
-                core::iter::once(0).chain(coefficients.map(bits)).collect()
-            }
-            WhatItSitsOn::Ball(centre, radius) => core::iter::once(1)
-                .chain(centre.map(bits))
-                .chain([bits(*radius)])
-                .collect(),
-            WhatItSitsOn::Pipe(origin, direction, radius) => core::iter::once(2)
-                .chain(origin.map(bits))
-                .chain(direction.map(bits))
-                .chain([bits(*radius)])
-                .collect(),
-            WhatItSitsOn::Cone(apex, direction, slope) => core::iter::once(3)
-                .chain(apex.map(bits))
-                .chain(direction.map(bits))
-                .chain([bits(*slope)])
-                .collect(),
-            WhatItSitsOn::Ring(centre, direction, big, small) => core::iter::once(4)
-                .chain(centre.map(bits))
-                .chain(direction.map(bits))
-                .chain([bits(*big), bits(*small)])
-                .collect(),
-        }
-    }
-
     /// Where the surface ends up after an exactly representable movement: the
     /// points that name it move, the directions turn, and every scalar — a
     /// radius, a slope, a tube's thickness — is carried over, because a rigid
@@ -4896,36 +4672,6 @@ impl WhatItSitsOn {
                 WhatItSitsOn::Ring(movement.point(centre), movement.direction(way), big, small)
             }
         }
-    }
-}
-
-fn answer_of(model: &Model, solids: &[SolidKey]) -> Answer {
-    Answer {
-        solids: solids
-            .iter()
-            .map(|&solid| {
-                model
-                    .solid(solid)
-                    .expect("this model made the key")
-                    .faces()
-                    .map(|face| Face {
-                        sits: WhatItSitsOn::of(&face.surface()),
-                        reversed: face.orientation() == Orientation::Reversed,
-                        wires: face
-                            .wires()
-                            .map(|wire| {
-                                wire.coedges()
-                                    .map(|coedge| Step {
-                                        at: coedge.start().point().coordinates(),
-                                        run: Run::of(coedge.edge()),
-                                    })
-                                    .collect()
-                            })
-                            .collect(),
-                    })
-                    .collect()
-            })
-            .collect(),
     }
 }
 
@@ -4968,52 +4714,6 @@ impl Answer {
                 .collect(),
         }
     }
-
-    /// The answer written out in one fixed order, so that two answers agree
-    /// exactly when the arena order is the only thing between them.
-    ///
-    /// A ring of steps is turned to its own smallest rotation rather than
-    /// sorted: which step comes first is arbitrary, but which step follows
-    /// which is the winding, and the winding is part of the answer.
-    fn canonical(&self) -> Vec<Vec<Vec<u64>>> {
-        let mut solids: Vec<Vec<Vec<u64>>> = self
-            .solids
-            .iter()
-            .map(|faces| {
-                let mut faces: Vec<Vec<u64>> = faces.iter().map(written_out).collect();
-                faces.sort_unstable();
-                faces
-            })
-            .collect();
-        solids.sort_unstable();
-        solids
-    }
-
-    fn face_count(&self) -> usize {
-        self.solids.iter().map(Vec::len).sum()
-    }
-}
-
-/// One face as numbers: its surface, which way round it is used, its outline,
-/// and then its holes in sorted order.
-///
-/// **The outline stays first and only the holes are sorted.** Which wire is
-/// first is part of the face in this kernel, and a round wire has no winding
-/// to carry it instead (§163).
-fn written_out(face: &Face) -> Vec<u64> {
-    let mut written = face.sits.written_out();
-    written.push(u64::from(face.reversed));
-
-    let mut wires = face.wires.iter().map(|wire| turned_to_its_smallest(wire));
-    let outline = wires.next().expect("a face has at least one wire");
-    let mut holes: Vec<Vec<u64>> = wires.collect();
-    holes.sort_unstable();
-    written.push(face.wires.len() as u64);
-    for wire in core::iter::once(outline).chain(holes) {
-        written.push(wire.len() as u64);
-        written.extend(wire);
-    }
-    written
 }
 
 /// §151.5's second question: a face whose hole is handed over as its outline is
@@ -5546,52 +5246,6 @@ fn a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side() {
         "two walks that reach the repeated corner from different sides wrote \
          the same ring down as two different lists"
     );
-}
-
-/// A ring written down from whichever of its corners makes the smallest list.
-///
-/// **The smallest rotation, not the first smallest corner.** Starting at the
-/// first corner equal to the smallest one is a canonical form only while no
-/// ring visits a corner twice. A face ring that does — and a turned pair makes
-/// one, through the point the turn holds still — is written down as its two
-/// halves by the two orders, and the comparison above then reports a face that
-/// differs when the two answers are the same solid. `docs/decisions.md` §149
-/// is the counterexample that cost a session, §151 is this.
-///
-/// Each step is its corner followed by its run (§165), and a step is turned as
-/// one piece, so a corner never lands beside another corner's run.
-fn turned_to_its_smallest(wire: &[Step]) -> Vec<u64> {
-    let steps: Vec<Vec<u64>> = wire
-        .iter()
-        .map(|step| {
-            step.at
-                .map(bits)
-                .into_iter()
-                .chain(step.run.written_out())
-                .collect()
-        })
-        .collect();
-    (0..steps.len())
-        .map(|start| -> Vec<u64> {
-            (0..steps.len())
-                .flat_map(|step| steps[(start + step) % steps.len()].iter().copied())
-                .collect()
-        })
-        .min()
-        .unwrap_or_default()
-}
-
-/// A number's bits, with the two zeroes counted as one.
-///
-/// `-0.0` and `0.0` name the same point and the same plane, and which one an
-/// arithmetic path lands on is not part of the answer. Everything else is
-/// compared bit for bit.
-fn bits(number: f64) -> u64 {
-    if number == 0.0 {
-        0u64
-    } else {
-        number.to_bits()
-    }
 }
 
 /// The deflection the measurements here are asked for.
