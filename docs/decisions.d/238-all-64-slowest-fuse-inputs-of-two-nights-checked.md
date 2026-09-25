@@ -68,6 +68,13 @@ despite being one of 09-23's own 64 slowest inputs by execution time that
 night. Its content was measured as slow during 09-23's run either way; only
 its corpus copy's timestamp says it was not saved until a night later.
 
+*Later, §240: that timestamp is a rewrite. libFuzzer's fork-mode merge writes
+a kept input over any file of the same name without looking, so a later night
+can re-date a file it did not find. 09-23's own log grows the corpus by one
+within 90 seconds of this input being timed, so it very likely belongs in
+"added during 09-23". §240.7 says which way every mtime-split count here can
+move.*
+
 09-22's own list, checked the same way, kept only 1 of 64 (1.6%) as a
 persistent corpus member, and that one was already in the corpus since
 2026-09-13 — far short of both neighbours' kept fractions (18.8% and 10.9%).

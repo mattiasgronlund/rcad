@@ -195,6 +195,10 @@ What the table says, leg by leg:
   09-18 fuse as well — slower, at 295 ms — so they are slow because of what they
   are, not because the kernel changed under them.
 
+  *Later, §240: a corpus file's mtime can be a later night's rewrite rather
+  than the night it arrived, so the "added" sets here may hold older inputs
+  too. §240.7 argues that can only make (b)'s gap a floor, never a ceiling.*
+
 The fuse's 36 times per input on this machine and the 27 times per run between
 the two nights' timing records (1.87 ms to 50.8 ms, §227.3) are the same size.
 They need not match: a night runs mutants of its corpus, not the corpus itself.
