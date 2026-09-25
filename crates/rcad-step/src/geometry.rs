@@ -11,6 +11,10 @@ use core::cell::Cell;
 use rcad_geom::{Axis, Cone, Cylinder, Plane, Point, Sphere, Surface, Torus, Vector};
 
 use crate::graph::{EntityId, Record, StepFile, Value};
+use crate::names::{
+    AXIS2_PLACEMENT_3D, CARTESIAN_POINT, CONICAL_SURFACE, CYLINDRICAL_SURFACE, DIRECTION,
+    EnumerationName, FALSE, Keyword, PLANE, SPHERICAL_SURFACE, TOROIDAL_SURFACE, TRUE,
+};
 use crate::refusal::Refusal;
 
 /// One walk over one file, and what it had to read loosely to get through.
@@ -58,36 +62,36 @@ impl<'a> Reading<'a> {
     pub(crate) fn surface_at(&self, face: EntityId, id: EntityId) -> Result<Surface, Refusal> {
         let instance = self.instance(face, id)?;
         let keyword = instance.parts()[0].keyword();
-        match keyword {
-            "PLANE" => {
-                let position = self.reference_at(id, "PLANE", 1)?;
+        match Keyword::of(keyword) {
+            Some(PLANE) => {
+                let position = self.reference_at(id, PLANE, 1)?;
                 let place = self.placement_at(id, position)?;
                 let plane = Plane::from_point_and_normal(place.origin, place.axis)
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Plane(plane))
             }
-            "CYLINDRICAL_SURFACE" => {
-                let position = self.reference_at(id, "CYLINDRICAL_SURFACE", 1)?;
+            Some(CYLINDRICAL_SURFACE) => {
+                let position = self.reference_at(id, CYLINDRICAL_SURFACE, 1)?;
                 let place = self.placement_at(id, position)?;
-                let radius = self.real_at(id, "CYLINDRICAL_SURFACE", 2)?;
+                let radius = self.real_at(id, CYLINDRICAL_SURFACE, 2)?;
                 let pipe = Axis::new(place.origin, place.axis)
                     .and_then(|axis| Cylinder::new(axis, radius))
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Cylinder(pipe))
             }
-            "SPHERICAL_SURFACE" => {
-                let position = self.reference_at(id, "SPHERICAL_SURFACE", 1)?;
+            Some(SPHERICAL_SURFACE) => {
+                let position = self.reference_at(id, SPHERICAL_SURFACE, 1)?;
                 let place = self.placement_at(id, position)?;
-                let radius = self.real_at(id, "SPHERICAL_SURFACE", 2)?;
+                let radius = self.real_at(id, SPHERICAL_SURFACE, 2)?;
                 let ball = Sphere::new(place.origin, radius)
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Sphere(ball))
             }
-            "CONICAL_SURFACE" => {
-                let position = self.reference_at(id, "CONICAL_SURFACE", 1)?;
+            Some(CONICAL_SURFACE) => {
+                let position = self.reference_at(id, CONICAL_SURFACE, 1)?;
                 let place = self.placement_at(id, position)?;
-                let radius = self.real_at(id, "CONICAL_SURFACE", 2)?;
-                let written = self.real_at(id, "CONICAL_SURFACE", 3)?;
+                let radius = self.real_at(id, CONICAL_SURFACE, 2)?;
+                let written = self.real_at(id, CONICAL_SURFACE, 3)?;
                 let radians = self.radians_per_angle_unit.get().ok_or_else(|| {
                     Refusal::ALengthUnitThisKernelDoesNotHave {
                         id,
@@ -102,20 +106,20 @@ impl<'a> Reading<'a> {
                     written * radians,
                 )?))
             }
-            "TOROIDAL_SURFACE" => {
-                let position = self.reference_at(id, "TOROIDAL_SURFACE", 1)?;
+            Some(TOROIDAL_SURFACE) => {
+                let position = self.reference_at(id, TOROIDAL_SURFACE, 1)?;
                 let place = self.placement_at(id, position)?;
-                let ring_radius = self.real_at(id, "TOROIDAL_SURFACE", 2)?;
-                let tube_radius = self.real_at(id, "TOROIDAL_SURFACE", 3)?;
+                let ring_radius = self.real_at(id, TOROIDAL_SURFACE, 2)?;
+                let tube_radius = self.real_at(id, TOROIDAL_SURFACE, 3)?;
                 let ring = Axis::new(place.origin, place.axis)
                     .and_then(|axis| Torus::new(axis, ring_radius, tube_radius))
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Torus(ring))
             }
-            other => Err(Refusal::ASurfaceThisKernelDoesNotHold {
+            _ => Err(Refusal::ASurfaceThisKernelDoesNotHold {
                 face,
                 surface: id,
-                keyword: other.to_owned(),
+                keyword: keyword.to_owned(),
             }),
         }
     }
@@ -130,21 +134,20 @@ impl<'a> Reading<'a> {
     /// a default.
     pub(crate) fn placement_at(&self, from: EntityId, id: EntityId) -> Result<Placement, Refusal> {
         let instance = self.instance(from, id)?;
-        if instance.part("AXIS2_PLACEMENT_3D").is_none() {
+        if instance.part(AXIS2_PLACEMENT_3D.name()).is_none() {
             return Err(Refusal::AnEntityIsNotTheKindTheSchemaWants {
                 id,
-                wanted: "AXIS2_PLACEMENT_3D",
+                wanted: AXIS2_PLACEMENT_3D.name(),
                 found: instance.parts()[0].keyword().to_owned(),
             });
         }
-        let keyword = "AXIS2_PLACEMENT_3D";
-        let at = self.reference_at(id, keyword, 1)?;
+        let at = self.reference_at(id, AXIS2_PLACEMENT_3D, 1)?;
         let origin = self.point_at(id, at)?;
-        let axis = match self.optional_reference_at(id, keyword, 2)? {
+        let axis = match self.optional_reference_at(id, AXIS2_PLACEMENT_3D, 2)? {
             Some(direction) => self.direction_at(id, direction)?,
             None => Vector::new(0.0, 0.0, 1.0),
         };
-        let reference = match self.optional_reference_at(id, keyword, 3)? {
+        let reference = match self.optional_reference_at(id, AXIS2_PLACEMENT_3D, 3)? {
             Some(direction) => Some(self.direction_at(id, direction)?),
             None => None,
         };
@@ -157,7 +160,7 @@ impl<'a> Reading<'a> {
 
     /// A `CARTESIAN_POINT`, in the file's own numbers and its own units.
     pub(crate) fn point_at(&self, from: EntityId, id: EntityId) -> Result<Point, Refusal> {
-        let coordinates = self.three_numbers(from, id, "CARTESIAN_POINT")?;
+        let coordinates = self.three_numbers(from, id, CARTESIAN_POINT)?;
         Ok(Point::new(coordinates[0], coordinates[1], coordinates[2]))
     }
 
@@ -166,7 +169,7 @@ impl<'a> Reading<'a> {
     /// Whatever needs a unit direction scales it itself, and says what that
     /// costs where it does it.
     pub(crate) fn direction_at(&self, from: EntityId, id: EntityId) -> Result<Vector, Refusal> {
-        let ratios = self.three_numbers(from, id, "DIRECTION")?;
+        let ratios = self.three_numbers(from, id, DIRECTION)?;
         Ok(Vector::new(ratios[0], ratios[1], ratios[2]))
     }
 
@@ -174,19 +177,19 @@ impl<'a> Reading<'a> {
         &self,
         from: EntityId,
         id: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
     ) -> Result<[f64; 3], Refusal> {
         let instance = self.instance(from, id)?;
-        let Some(record) = instance.part(keyword) else {
+        let Some(record) = instance.part(keyword.name()) else {
             return Err(Refusal::AnEntityIsNotTheKindTheSchemaWants {
                 id,
-                wanted: keyword,
+                wanted: keyword.name(),
                 found: instance.parts()[0].keyword().to_owned(),
             });
         };
         let wrong = || Refusal::AnAttributeIsNotWhatTheSchemaWants {
             id,
-            keyword,
+            keyword: keyword.name(),
             position: 1,
             wanted: "list of three numbers",
         };
@@ -212,16 +215,16 @@ impl<'a> Reading<'a> {
         &self,
         from: EntityId,
         id: EntityId,
-        either: &[&'static str],
-    ) -> Result<&'static str, Refusal> {
+        either: &[Keyword],
+    ) -> Result<Keyword, Refusal> {
         let held = self.instance(from, id)?;
         either
             .iter()
-            .find(|keyword| held.part(keyword).is_some())
+            .find(|keyword| held.part(keyword.name()).is_some())
             .copied()
             .ok_or_else(|| Refusal::AnEntityIsNotTheKindTheSchemaWants {
                 id,
-                wanted: either[0],
+                wanted: either[0].name(),
                 found: held.parts()[0].keyword().to_owned(),
             })
     }
@@ -230,7 +233,7 @@ impl<'a> Reading<'a> {
     pub(crate) fn real_at(
         &self,
         id: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         position: usize,
     ) -> Result<f64, Refusal> {
         let value = self
@@ -238,7 +241,7 @@ impl<'a> Reading<'a> {
             .attribute(position)
             .ok_or(Refusal::AnAttributeIsNotWhatTheSchemaWants {
                 id,
-                keyword,
+                keyword: keyword.name(),
                 position,
                 wanted: "real",
             })?
@@ -306,19 +309,20 @@ impl<'a> Reading<'a> {
     pub(crate) fn flag_at(
         &self,
         id: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         position: usize,
     ) -> Result<bool, Refusal> {
         match self
             .record(id, keyword)?
             .attribute(position)
             .and_then(Value::as_enumeration)
+            .and_then(EnumerationName::of)
         {
-            Some("T") => Ok(true),
-            Some("F") => Ok(false),
+            Some(TRUE) => Ok(true),
+            Some(FALSE) => Ok(false),
             _ => Err(Refusal::AnAttributeIsNotWhatTheSchemaWants {
                 id,
-                keyword,
+                keyword: keyword.name(),
                 position,
                 wanted: "boolean",
             }),
@@ -329,13 +333,13 @@ impl<'a> Reading<'a> {
     pub(crate) fn reference_at(
         &self,
         id: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         position: usize,
     ) -> Result<EntityId, Refusal> {
         self.optional_reference_at(id, keyword, position)?.ok_or(
             Refusal::AnAttributeIsNotWhatTheSchemaWants {
                 id,
-                keyword,
+                keyword: keyword.name(),
                 position,
                 wanted: "reference",
             },
@@ -346,7 +350,7 @@ impl<'a> Reading<'a> {
     pub(crate) fn optional_reference_at(
         &self,
         id: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         position: usize,
     ) -> Result<Option<EntityId>, Refusal> {
         match self.record(id, keyword)?.attribute(position) {
@@ -354,7 +358,7 @@ impl<'a> Reading<'a> {
             Some(Value::Nothing) => Ok(None),
             _ => Err(Refusal::AnAttributeIsNotWhatTheSchemaWants {
                 id,
-                keyword,
+                keyword: keyword.name(),
                 position,
                 wanted: "reference",
             }),
@@ -365,12 +369,12 @@ impl<'a> Reading<'a> {
     pub(crate) fn references_at(
         &self,
         id: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         position: usize,
     ) -> Result<Vec<EntityId>, Refusal> {
         let wrong = || Refusal::AnAttributeIsNotWhatTheSchemaWants {
             id,
-            keyword,
+            keyword: keyword.name(),
             position,
             wanted: "list of references",
         };
@@ -384,20 +388,16 @@ impl<'a> Reading<'a> {
             .collect()
     }
 
-    pub(crate) fn record(
-        &self,
-        id: EntityId,
-        keyword: &'static str,
-    ) -> Result<&'a Record, Refusal> {
+    pub(crate) fn record(&self, id: EntityId, keyword: Keyword) -> Result<&'a Record, Refusal> {
         let instance = self
             .file
             .instance(id)
             .ok_or(Refusal::AReferencePointsNowhere { from: id, to: id })?;
         instance
-            .part(keyword)
+            .part(keyword.name())
             .ok_or_else(|| Refusal::AnEntityIsNotTheKindTheSchemaWants {
                 id,
-                wanted: keyword,
+                wanted: keyword.name(),
                 found: instance.parts()[0].keyword().to_owned(),
             })
     }

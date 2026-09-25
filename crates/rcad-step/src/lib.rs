@@ -152,6 +152,8 @@ mod error;
 
 mod geometry;
 
+mod names;
+
 mod units;
 
 mod brep;

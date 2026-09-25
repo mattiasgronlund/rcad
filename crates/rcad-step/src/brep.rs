@@ -22,6 +22,11 @@ use smallvec::smallvec;
 
 use crate::geometry::Reading;
 use crate::graph::EntityId;
+use crate::names::{
+    ADVANCED_FACE, CIRCLE, CLOSED_SHELL, EDGE_CURVE, EDGE_LOOP, ELLIPSE, FACE_BOUND,
+    FACE_OUTER_BOUND, FACE_SURFACE, Keyword, LINE, MANIFOLD_SOLID_BREP, ORIENTED_EDGE,
+    VERTEX_POINT,
+};
 use crate::refusal::Refusal;
 
 /// Turn one `MANIFOLD_SOLID_BREP` into one solid in `model`.
@@ -32,7 +37,7 @@ pub(crate) fn solid_from(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SolidKey, Refusal> {
-    let shell = reading.reference_at(brep, "MANIFOLD_SOLID_BREP", 1)?;
+    let shell = reading.reference_at(brep, MANIFOLD_SOLID_BREP, 1)?;
     let mut walk = Walk::new(brep);
     walk.describe_the_shell(reading, shell)?;
     walk.build(reading, model, policy, log)
@@ -77,7 +82,7 @@ pub(crate) fn probe_solid(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> ProbeOutcome {
-    let shell = match reading.reference_at(brep, "MANIFOLD_SOLID_BREP", 1) {
+    let shell = match reading.reference_at(brep, MANIFOLD_SOLID_BREP, 1) {
         Ok(shell) => shell,
         Err(why) => {
             return ProbeOutcome {
@@ -169,7 +174,7 @@ impl Walk {
         reading: &Reading<'_>,
         shell: EntityId,
     ) -> Result<(), Refusal> {
-        let faces = reading.references_at(shell, "CLOSED_SHELL", 1)?;
+        let faces = reading.references_at(shell, CLOSED_SHELL, 1)?;
         self.find_the_closed_edges(reading, &faces);
         let mut skin: Vec<(DraftFace, Orientation)> = Vec::with_capacity(faces.len());
         for face in &faces {
@@ -197,8 +202,7 @@ impl Walk {
     /// come to disagree with the first.
     fn find_the_closed_edges(&mut self, reading: &Reading<'_>, faces: &[EntityId]) {
         for face in faces {
-            let Ok(keyword) =
-                reading.keyword_of(self.brep, *face, &["ADVANCED_FACE", "FACE_SURFACE"])
+            let Ok(keyword) = reading.keyword_of(self.brep, *face, &[ADVANCED_FACE, FACE_SURFACE])
             else {
                 continue;
             };
@@ -212,11 +216,11 @@ impl Walk {
                 let Ok((loop_id, _)) = self.loop_of_bound(reading, *face, bound) else {
                     continue;
                 };
-                let Ok(uses) = reading.references_at(loop_id, "EDGE_LOOP", 1) else {
+                let Ok(uses) = reading.references_at(loop_id, EDGE_LOOP, 1) else {
                     continue;
                 };
                 for use_of_an_edge in uses {
-                    let Ok(edge_curve) = reading.reference_at(use_of_an_edge, "ORIENTED_EDGE", 3)
+                    let Ok(edge_curve) = reading.reference_at(use_of_an_edge, ORIENTED_EDGE, 3)
                     else {
                         continue;
                     };
@@ -258,7 +262,7 @@ impl Walk {
         reading: &Reading<'_>,
         face: EntityId,
     ) -> Result<(DraftFace, Orientation), Refusal> {
-        let keyword = reading.keyword_of(self.brep, face, &["ADVANCED_FACE", "FACE_SURFACE"])?;
+        let keyword = reading.keyword_of(self.brep, face, &[ADVANCED_FACE, FACE_SURFACE])?;
         let (surface, used) = self.surface_of_the_face(reading, face, keyword)?;
 
         let bounds = reading.references_at(face, keyword, 1)?;
@@ -285,7 +289,7 @@ impl Walk {
         &self,
         reading: &Reading<'_>,
         face: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
     ) -> Result<(Surface, Orientation), Refusal> {
         let sits_on = reading.reference_at(face, keyword, 2)?;
         let written = reading.surface_at(face, sits_on)?;
@@ -335,7 +339,7 @@ impl Walk {
             reading
                 .file()
                 .instance(*bound)
-                .is_some_and(|held| held.part("FACE_OUTER_BOUND").is_some())
+                .is_some_and(|held| held.part(FACE_OUTER_BOUND.name()).is_some())
         });
         let outer = match (named, surface.as_plane()) {
             (Some(outer), _) => outer,
@@ -387,19 +391,18 @@ impl Walk {
         flat: &Plane,
     ) -> Result<f64, Refusal> {
         let (loop_id, walk_it_backwards) = self.loop_of_bound(reading, face, bound)?;
-        let mut oriented = reading.references_at(loop_id, "EDGE_LOOP", 1)?;
+        let mut oriented = reading.references_at(loop_id, EDGE_LOOP, 1)?;
         if walk_it_backwards {
             oriented.reverse();
         }
         let mut corners = Vec::with_capacity(oriented.len());
         let mut bulge = 0.0;
         for use_of_an_edge in oriented {
-            let edge_curve = reading.reference_at(use_of_an_edge, "ORIENTED_EDGE", 3)?;
-            let forwards =
-                reading.flag_at(use_of_an_edge, "ORIENTED_EDGE", 4)? != walk_it_backwards;
+            let edge_curve = reading.reference_at(use_of_an_edge, ORIENTED_EDGE, 3)?;
+            let forwards = reading.flag_at(use_of_an_edge, ORIENTED_EDGE, 4)? != walk_it_backwards;
             let ends = [
-                reading.reference_at(edge_curve, "EDGE_CURVE", 1)?,
-                reading.reference_at(edge_curve, "EDGE_CURVE", 2)?,
+                reading.reference_at(edge_curve, EDGE_CURVE, 1)?,
+                reading.reference_at(edge_curve, EDGE_CURVE, 2)?,
             ];
             corners.push(self.point_of_vertex(reading, ends[usize::from(!forwards)])?);
             bulge += self.area_an_arc_bulges_past_its_chord(reading, edge_curve, forwards, flat)?;
@@ -440,19 +443,19 @@ impl Walk {
         forwards: bool,
         flat: &Plane,
     ) -> Result<f64, Refusal> {
-        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
+        let curve = reading.reference_at(edge_curve, EDGE_CURVE, 3)?;
         let Some(held) = reading.file().instance(curve) else {
             return Ok(0.0);
         };
-        let (keyword, half_the_whole) = match held.parts()[0].keyword() {
-            "CIRCLE" => {
-                let radius = reading.real_at(curve, "CIRCLE", 2)?;
-                ("CIRCLE", radius * radius / 2.0)
+        let (keyword, half_the_whole) = match Keyword::of(held.parts()[0].keyword()) {
+            Some(CIRCLE) => {
+                let radius = reading.real_at(curve, CIRCLE, 2)?;
+                (CIRCLE, radius * radius / 2.0)
             }
-            "ELLIPSE" => {
-                let across = reading.real_at(curve, "ELLIPSE", 2)?;
-                let along = reading.real_at(curve, "ELLIPSE", 3)?;
-                ("ELLIPSE", across * along / 2.0)
+            Some(ELLIPSE) => {
+                let across = reading.real_at(curve, ELLIPSE, 2)?;
+                let along = reading.real_at(curve, ELLIPSE, 3)?;
+                (ELLIPSE, across * along / 2.0)
             }
             _ => return Ok(0.0),
         };
@@ -463,10 +466,10 @@ impl Walk {
             return Ok(0.0);
         }
         let ends = [
-            reading.reference_at(edge_curve, "EDGE_CURVE", 1)?,
-            reading.reference_at(edge_curve, "EDGE_CURVE", 2)?,
+            reading.reference_at(edge_curve, EDGE_CURVE, 1)?,
+            reading.reference_at(edge_curve, EDGE_CURVE, 2)?,
         ];
-        let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
+        let along_the_curve = reading.flag_at(edge_curve, EDGE_CURVE, 4)?;
         let span = self.how_far_round_the_arc_goes(reading, &ends, &place, along_the_curve)?;
         let bulge = half_the_whole * (span - span.sin());
         Ok(if (along_the_curve == forwards) == (facing > 0.0) {
@@ -512,7 +515,7 @@ impl Walk {
         face: EntityId,
         bound: EntityId,
     ) -> Result<(EntityId, bool), Refusal> {
-        let keyword = reading.keyword_of(face, bound, &["FACE_OUTER_BOUND", "FACE_BOUND"])?;
+        let keyword = reading.keyword_of(face, bound, &[FACE_OUTER_BOUND, FACE_BOUND])?;
         let loop_id = reading.reference_at(bound, keyword, 1)?;
         let held = reading
             .file()
@@ -521,7 +524,7 @@ impl Walk {
                 from: bound,
                 to: loop_id,
             })?;
-        if held.part("EDGE_LOOP").is_none() {
+        if held.part(EDGE_LOOP.name()).is_none() {
             return Err(Refusal::ALoopThisReaderDoesNotWalk {
                 face,
                 id: loop_id,
@@ -539,7 +542,7 @@ impl Walk {
         bound: EntityId,
     ) -> Result<rcad_topo::DraftWire, Refusal> {
         let (loop_id, walk_it_backwards) = self.loop_of_bound(reading, face, bound)?;
-        let mut oriented = reading.references_at(loop_id, "EDGE_LOOP", 1)?;
+        let mut oriented = reading.references_at(loop_id, EDGE_LOOP, 1)?;
         if walk_it_backwards {
             oriented.reverse();
         }
@@ -578,8 +581,8 @@ impl Walk {
         oriented: EntityId,
         walk_it_backwards: bool,
     ) -> Result<Vec<DraftCoedge>, Refusal> {
-        let edge_curve = reading.reference_at(oriented, "ORIENTED_EDGE", 3)?;
-        let along_the_loop = reading.flag_at(oriented, "ORIENTED_EDGE", 4)? != walk_it_backwards;
+        let edge_curve = reading.reference_at(oriented, ORIENTED_EDGE, 3)?;
+        let along_the_loop = reading.flag_at(oriented, ORIENTED_EDGE, 4)? != walk_it_backwards;
         if let Some([there, back]) = self.describe_the_halves_of_a_circle(reading, edge_curve)? {
             let uses = if along_the_loop {
                 [(there, Orientation::Forward), (back, Orientation::Forward)]
@@ -685,7 +688,7 @@ impl Walk {
         if !an_edge_with_one_corner(reading, edge_curve) {
             return Ok(None);
         }
-        let corner = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
+        let corner = reading.reference_at(edge_curve, EDGE_CURVE, 1)?;
         let near = self.point_of_vertex(reading, corner)?;
         let a_ball_and_a_curved_face = self
             .surfaces_along_each_edge
@@ -699,21 +702,21 @@ impl Walk {
         if !a_ball_and_a_curved_face && !no_way_round_at_its_corner {
             return Ok(None);
         }
-        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
+        let curve = reading.reference_at(edge_curve, EDGE_CURVE, 3)?;
         let Some(held) = reading.file().instance(curve) else {
             return Ok(None);
         };
-        if held.parts()[0].keyword() != "CIRCLE" {
+        if held.parts()[0].keyword() != CIRCLE.name() {
             return Ok(None);
         }
-        let position = reading.reference_at(curve, "CIRCLE", 1)?;
+        let position = reading.reference_at(curve, CIRCLE, 1)?;
         let place = reading.placement_at(curve, position)?;
         if a_ball_and_a_curved_face
-            && !self.every_face_holds_the_curve(reading, edge_curve, curve, "CIRCLE", &place)?
+            && !self.every_face_holds_the_curve(reading, edge_curve, curve, CIRCLE, &place)?
         {
             return Ok(None);
         }
-        let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
+        let along_the_curve = reading.flag_at(edge_curve, EDGE_CURVE, 4)?;
         if place.axis.normalized().is_err() {
             return Ok(None);
         }
@@ -802,7 +805,7 @@ impl Walk {
         let Some(carried_by) = self.closed_edges.get(&edge_curve) else {
             return Ok(None);
         };
-        let at = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
+        let at = reading.reference_at(edge_curve, EDGE_CURVE, 1)?;
         let corner = self.point_of_vertex(reading, at)?;
         let Some(winding) = the_curved_one_of(carried_by)
             .and_then(|curved| curved.the_way_its_first_coordinate_runs_at(corner))
@@ -847,19 +850,18 @@ impl Walk {
         corner: Point,
         along_the_loop: bool,
     ) -> Result<Option<Vector>, Refusal> {
-        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
+        let curve = reading.reference_at(edge_curve, EDGE_CURVE, 3)?;
         let Some(held) = reading.file().instance(curve) else {
             return Ok(None);
         };
-        let keyword = match held.parts()[0].keyword() {
-            "CIRCLE" => "CIRCLE",
-            "ELLIPSE" => "ELLIPSE",
+        let keyword = match Keyword::of(held.parts()[0].keyword()) {
+            Some(round @ (CIRCLE | ELLIPSE)) => round,
             _ => return Ok(None),
         };
         let position = reading.reference_at(curve, keyword, 1)?;
         let place = reading.placement_at(curve, position)?;
         let round = place.axis.cross(corner - place.origin);
-        let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
+        let along_the_curve = reading.flag_at(edge_curve, EDGE_CURVE, 4)?;
         Ok(Some(if along_the_loop == along_the_curve {
             round
         } else {
@@ -876,10 +878,10 @@ impl Walk {
         if let Some(&already) = self.edges.get(&edge_curve) {
             return Ok(already);
         }
-        let starts_at = reading.reference_at(edge_curve, "EDGE_CURVE", 1)?;
-        let ends_at = reading.reference_at(edge_curve, "EDGE_CURVE", 2)?;
-        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3)?;
-        let along_the_curve = reading.flag_at(edge_curve, "EDGE_CURVE", 4)?;
+        let starts_at = reading.reference_at(edge_curve, EDGE_CURVE, 1)?;
+        let ends_at = reading.reference_at(edge_curve, EDGE_CURVE, 2)?;
+        let curve = reading.reference_at(edge_curve, EDGE_CURVE, 3)?;
+        let along_the_curve = reading.flag_at(edge_curve, EDGE_CURVE, 4)?;
 
         let start = self.describe_the_vertex(reading, starts_at)?;
         let end = self.describe_the_vertex(reading, ends_at)?;
@@ -924,16 +926,18 @@ impl Walk {
                 to: curve,
             })?;
         let keyword = held.parts()[0].keyword();
-        match keyword {
-            "LINE" => Ok(EdgeRun::Straight),
-            "CIRCLE" => self.round_run(reading, edge_curve, curve, "CIRCLE", ends, along_the_curve),
-            "ELLIPSE" => {
-                self.round_run(reading, edge_curve, curve, "ELLIPSE", ends, along_the_curve)
+        match Keyword::of(keyword) {
+            Some(LINE) => Ok(EdgeRun::Straight),
+            Some(CIRCLE) => {
+                self.round_run(reading, edge_curve, curve, CIRCLE, ends, along_the_curve)
             }
-            other => Err(Refusal::ACurveThisKernelDoesNotHold {
+            Some(ELLIPSE) => {
+                self.round_run(reading, edge_curve, curve, ELLIPSE, ends, along_the_curve)
+            }
+            _ => Err(Refusal::ACurveThisKernelDoesNotHold {
                 edge: edge_curve,
                 curve,
-                keyword: other.to_owned(),
+                keyword: keyword.to_owned(),
             }),
         }
     }
@@ -983,7 +987,7 @@ impl Walk {
         reading: &Reading<'_>,
         edge_curve: EntityId,
         curve: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         ends: [EntityId; 2],
         along_the_curve: bool,
     ) -> Result<EdgeRun, Refusal> {
@@ -1067,7 +1071,7 @@ impl Walk {
         reading: &Reading<'_>,
         edge_curve: EntityId,
         curve: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         place: &crate::geometry::Placement,
     ) -> Result<Surface, Refusal> {
         let not_a_working_shape = |why| Refusal::TheGeometryIsNotAWorkingShape {
@@ -1082,8 +1086,8 @@ impl Walk {
         }
         let only_flat_faces_along_it =
             faces_along_it.is_some_and(|faces| faces.iter().all(|face| face.as_plane().is_some()));
-        if keyword == "CIRCLE" && only_flat_faces_along_it {
-            let radius = reading.real_at(curve, "CIRCLE", 2)?;
+        if keyword == CIRCLE && only_flat_faces_along_it {
+            let radius = reading.real_at(curve, CIRCLE, 2)?;
             let round = Axis::new(place.origin, place.axis)
                 .and_then(|axis| Cylinder::new(axis, radius))
                 .map_err(not_a_working_shape)?;
@@ -1126,7 +1130,7 @@ impl Walk {
         reading: &Reading<'_>,
         edge_curve: EntityId,
         curve: EntityId,
-        keyword: &'static str,
+        keyword: Keyword,
         place: &crate::geometry::Placement,
     ) -> Result<bool, Refusal> {
         let Some(faces) = self.surfaces_along_each_edge.get(&edge_curve) else {
@@ -1137,13 +1141,13 @@ impl Walk {
         };
         let normal = its_plane.normal();
         match keyword {
-            "CIRCLE" => {
-                let radius = reading.real_at(curve, "CIRCLE", 2)?;
+            CIRCLE => {
+                let radius = reading.real_at(curve, CIRCLE, 2)?;
                 Ok(faces
                     .iter()
                     .all(|face| a_surface_holds_the_circle(face, place.origin, normal, radius)))
             }
-            "ELLIPSE" => {
+            ELLIPSE => {
                 let Some(reference) = place.reference else {
                     return Ok(false);
                 };
@@ -1156,15 +1160,18 @@ impl Walk {
                     first_way,
                     second_way: normal.cross(first_way),
                     semi_axes: [
-                        reading.real_at(curve, "ELLIPSE", 2)?,
-                        reading.real_at(curve, "ELLIPSE", 3)?,
+                        reading.real_at(curve, ELLIPSE, 2)?,
+                        reading.real_at(curve, ELLIPSE, 3)?,
                     ],
                 };
                 Ok(faces
                     .iter()
                     .all(|face| a_surface_holds_the_ellipse(face, &ellipse)))
             }
-            other => unreachable!("round_run is only handed a CIRCLE or an ELLIPSE, not {other}"),
+            other => unreachable!(
+                "round_run is only handed a CIRCLE or an ELLIPSE, not {}",
+                other.name()
+            ),
         }
     }
 
@@ -1242,7 +1249,7 @@ impl Walk {
         reading: &Reading<'_>,
         vertex_point: EntityId,
     ) -> Result<Point, Refusal> {
-        let at = reading.reference_at(vertex_point, "VERTEX_POINT", 1)?;
+        let at = reading.reference_at(vertex_point, VERTEX_POINT, 1)?;
         reading.point_at(vertex_point, at)
     }
 
@@ -1421,16 +1428,15 @@ impl Walk {
         edge_curve: EntityId,
     ) -> Option<(Plane, [(EntityId, Point); 2])> {
         let ends = [
-            reading.reference_at(edge_curve, "EDGE_CURVE", 1).ok()?,
-            reading.reference_at(edge_curve, "EDGE_CURVE", 2).ok()?,
+            reading.reference_at(edge_curve, EDGE_CURVE, 1).ok()?,
+            reading.reference_at(edge_curve, EDGE_CURVE, 2).ok()?,
         ];
         if ends[0] == ends[1] {
             return None;
         }
-        let curve = reading.reference_at(edge_curve, "EDGE_CURVE", 3).ok()?;
-        let keyword = match reading.file().instance(curve)?.parts()[0].keyword() {
-            "CIRCLE" => "CIRCLE",
-            "ELLIPSE" => "ELLIPSE",
+        let curve = reading.reference_at(edge_curve, EDGE_CURVE, 3).ok()?;
+        let keyword = match Keyword::of(reading.file().instance(curve)?.parts()[0].keyword()) {
+            Some(round @ (CIRCLE | ELLIPSE)) => round,
             _ => return None,
         };
         let position = reading.reference_at(curve, keyword, 1).ok()?;
@@ -1451,14 +1457,14 @@ impl Walk {
         reading: &Reading<'_>,
         face: EntityId,
     ) -> Result<Vec<(EntityId, Point)>, Refusal> {
-        let keyword = reading.keyword_of(self.brep, face, &["ADVANCED_FACE", "FACE_SURFACE"])?;
+        let keyword = reading.keyword_of(self.brep, face, &[ADVANCED_FACE, FACE_SURFACE])?;
         let mut corners = Vec::new();
         for bound in reading.references_at(face, keyword, 1)? {
             let (loop_id, _) = self.loop_of_bound(reading, face, bound)?;
-            for use_of_an_edge in reading.references_at(loop_id, "EDGE_LOOP", 1)? {
-                let edge_curve = reading.reference_at(use_of_an_edge, "ORIENTED_EDGE", 3)?;
+            for use_of_an_edge in reading.references_at(loop_id, EDGE_LOOP, 1)? {
+                let edge_curve = reading.reference_at(use_of_an_edge, ORIENTED_EDGE, 3)?;
                 for position in 1..=2 {
-                    let at = reading.reference_at(edge_curve, "EDGE_CURVE", position)?;
+                    let at = reading.reference_at(edge_curve, EDGE_CURVE, position)?;
                     corners.push((at, self.point_of_vertex(reading, at)?));
                 }
             }
@@ -1567,7 +1573,7 @@ impl ProbeWalk {
     /// applies it at two is a walk whose numbers depend on which level a future
     /// check lands at.
     fn probe_the_shell(&mut self, reading: &Reading<'_>, shell: EntityId) -> Result<(), Refusal> {
-        let faces = reading.references_at(shell, "CLOSED_SHELL", 1)?;
+        let faces = reading.references_at(shell, CLOSED_SHELL, 1)?;
         let face_count = faces.len();
         self.walk.find_the_closed_edges(reading, &faces);
         let mut skin: Vec<(DraftFace, Orientation)> = Vec::with_capacity(face_count);
@@ -1603,11 +1609,8 @@ impl ProbeWalk {
         reading: &Reading<'_>,
         face: EntityId,
     ) -> Option<(DraftFace, Orientation)> {
-        let keyword = self.record(reading.keyword_of(
-            self.walk.brep,
-            face,
-            &["ADVANCED_FACE", "FACE_SURFACE"],
-        ))?;
+        let keyword =
+            self.record(reading.keyword_of(self.walk.brep, face, &[ADVANCED_FACE, FACE_SURFACE]))?;
         let sits_on = self.record(reading.reference_at(face, keyword, 2))?;
         let written = self.record(reading.surface_at(face, sits_on))?;
         let same_sense = self.record(reading.flag_at(face, keyword, 3))?;
@@ -1663,7 +1666,7 @@ impl ProbeWalk {
     ) -> Option<rcad_topo::DraftWire> {
         let (loop_id, walk_it_backwards) =
             self.record(self.walk.loop_of_bound(reading, face, bound))?;
-        let mut oriented = self.record(reading.references_at(loop_id, "EDGE_LOOP", 1))?;
+        let mut oriented = self.record(reading.references_at(loop_id, EDGE_LOOP, 1))?;
         if walk_it_backwards {
             oriented.reverse();
         }
@@ -1743,8 +1746,8 @@ impl ProbeWalk {
 fn an_edge_with_one_corner(reading: &Reading<'_>, edge_curve: EntityId) -> bool {
     matches!(
         (
-            reading.reference_at(edge_curve, "EDGE_CURVE", 1),
-            reading.reference_at(edge_curve, "EDGE_CURVE", 2),
+            reading.reference_at(edge_curve, EDGE_CURVE, 1),
+            reading.reference_at(edge_curve, EDGE_CURVE, 2),
         ),
         (Ok(start), Ok(end)) if start == end
     )

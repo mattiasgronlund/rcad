@@ -7,8 +7,8 @@
 # nothing here: it would teach libFuzzer to spend its splices on vocabulary
 # that changes no code path.
 #
-# crates/rcad-step/tests/the_reader_fuzz_dictionary_names_what_the_reader_reads.rs
-# holds this list a second time and fails if the two drift apart.
+# crates/rcad-step/src/names.rs is the list of names the reader reads, and a
+# test there fails if this file and that list drift apart.
 
 # Part 21 framing (crates/rcad-step/src/read.rs)
 "ISO-10303-21"

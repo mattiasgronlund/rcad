@@ -165,8 +165,20 @@ impl Watch {
 /// Add what this process has seen to the shared accumulation, and rewrite the
 /// report from the result.
 ///
-/// Every failure here is swallowed. A fuzz target that stopped fuzzing because
-/// its measurements could not be filed would be measuring the disk.
+/// Two failures are recovered rather than swallowed: if the directory cannot
+/// be made or the shared lock cannot be taken, the run count just collected
+/// goes back to the live watch so the next tick tries again, and no slow
+/// input is marked as written — nothing was written, so the next tick offers
+/// every one of them again. The same recovery covers a slow input's own write
+/// failing on its own, past that point: only the inputs whose `fs::write`
+/// actually landed go into `written`, in one call to
+/// [`mark_slow_inputs_written`], so one that did not is retried out of
+/// `slowest` on the next tick rather than refused forever. What is still
+/// swallowed is the totals file and the report text themselves — a write that
+/// fails there loses just that one merge's counts and its report, not a
+/// night's worth of runs, since `slowest` is untouched by either. A fuzz
+/// target that stopped fuzzing because its measurements could not be filed
+/// would be measuring the disk.
 fn merge_out(watch: &Mutex<Watch>) {
     let (into, keep, mine, to_write) = {
         let mut watch = watch
@@ -184,9 +196,6 @@ fn merge_out(watch: &Mutex<Watch>) {
             .filter(|(took, bytes)| !watch.written.contains(&named_for(*took, bytes)))
             .map(|(took, bytes)| (took, bytes.to_vec()))
             .collect();
-        for (took, bytes) in &to_write {
-            watch.written.insert(named_for(*took, bytes));
-        }
         (watch.into.clone(), watch.keep, mine, to_write)
     };
 
@@ -196,9 +205,11 @@ fn merge_out(watch: &Mutex<Watch>) {
 
     let slowest = into.join("slowest");
     if std::fs::create_dir_all(&slowest).is_err() {
+        hand_back_what_could_not_be_written(watch, mine);
         return;
     }
     let Some(lock) = the_shared_report_locked(&into) else {
+        hand_back_what_could_not_be_written(watch, mine);
         return;
     };
 
@@ -206,13 +217,68 @@ fn merge_out(watch: &Mutex<Watch>) {
     everyones.add(&mine);
     let _ = std::fs::write(into.join("totals"), everyones.written_out());
 
-    for (took, bytes) in &to_write {
-        let _ = std::fs::write(slowest.join(named_for(*took, bytes)), bytes);
+    let written_now: Vec<String> = to_write
+        .iter()
+        .filter(|(took, bytes)| {
+            std::fs::write(slowest.join(named_for(*took, bytes)), bytes).is_ok()
+        })
+        .map(|(took, bytes)| named_for(*took, bytes))
+        .collect();
+    if !written_now.is_empty() {
+        mark_slow_inputs_written(watch, written_now);
     }
+
     let kept = prune_to_the_slowest_kept(&slowest, keep);
     let _ = std::fs::write(into.join("report"), report_text(&everyones, &kept));
 
     let _ = lock.unlock();
+}
+
+/// Put a run count that a merge could not write back into the live watch, so
+/// the next tick tries again instead of the runs vanishing with this one.
+///
+/// Every run in `mine` just failed to write, whether or not some of them had
+/// already failed on an earlier tick — `mine.lost` is *set* to `mine.runs`
+/// rather than added to, so a run stuck across three failed ticks in a row is
+/// counted as one run lost, not three. The lock is taken fresh here rather
+/// than reusing the caller's guard, because another thread's [`Watch::record`]
+/// may have added new runs to the watch in the meantime; a fresh lock merges
+/// onto whatever is there now instead of overwriting it.
+fn hand_back_what_could_not_be_written(watch: &Mutex<Watch>, mut mine: HowLongRunsTook) {
+    mine.lost = mine.runs;
+    watch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .took
+        .add(&mine);
+}
+
+/// Mark slow inputs as written now that their bytes are actually on disk.
+///
+/// `written` used to gain an entry the moment a write was *attempted*, not
+/// once it had *landed* — so an input whose write failed, for any reason,
+/// was refused a retry forever after, even once whatever blocked it cleared.
+/// Marking only what [`merge_out`] just confirmed on disk is the fix: a
+/// write that fails leaves its input out of `written`, and the next tick
+/// finds it still sitting in `slowest` — which nothing here ever clears on a
+/// failed write — and offers it again.
+///
+/// The lock is taken fresh, for the same reason as
+/// [`hand_back_what_could_not_be_written`]: a thread calling
+/// [`Watch::record`] for this same input while the write above was in flight
+/// may have offered it a slower time, replacing the `slowest` entry this
+/// merge just wrote bytes for with one under a different name. That
+/// replacement is not lost — the newer entry is still in `slowest`, not yet
+/// in `written`, so the next tick writes *it* out too — and the older file
+/// on disk is harmless leftover that [`prune_to_the_slowest_kept`] clears on
+/// the next successful merge, the same way it already dedupes one input kept
+/// under two names from two processes.
+fn mark_slow_inputs_written(watch: &Mutex<Watch>, written: Vec<String>) {
+    watch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .written
+        .extend(written);
 }
 
 /// The lock every process takes before touching the shared accumulation.
@@ -275,10 +341,17 @@ fn prune_to_the_slowest_kept(from: &Path, keep: usize) -> Vec<(Duration, String)
 /// The report, as it is written to disk.
 fn report_text(everyones: &HowLongRunsTook, kept: &[(Duration, String)]) -> String {
     let mut text = format!(
-        "{} runs, {:.1} s in all\n\nhow long one run took, as the low end of its bucket\n",
+        "{} runs, {:.1} s in all\n",
         everyones.runs,
         everyones.total.as_secs_f64()
     );
+    if everyones.lost > 0 {
+        text.push_str(&format!(
+            "{} of those runs were lost to a write failure and picked up again on a later merge\n",
+            everyones.lost
+        ));
+    }
+    text.push_str("\nhow long one run took, as the low end of its bucket\n");
     for share in [50.0, 90.0, 95.0, 98.0, 99.0, 100.0] {
         text.push_str(&format!(
             "  p{share:<5} {:>14.3} ms\n",
@@ -330,6 +403,11 @@ struct HowLongRunsTook {
     runs: u64,
     total: Duration,
     buckets: Box<[u64; HOW_MANY_BUCKETS]>,
+    /// Of `runs`, how many needed more than one merge because an earlier one
+    /// failed to write. Not a count of runs still missing — every run counted
+    /// here is also counted in `runs`, since [`hand_back_what_could_not_be_written`]
+    /// is what sets this before the retry that eventually succeeds.
+    lost: u64,
 }
 
 impl HowLongRunsTook {
@@ -338,6 +416,7 @@ impl HowLongRunsTook {
             runs: 0,
             total: Duration::ZERO,
             buckets: Box::new([0; HOW_MANY_BUCKETS]),
+            lost: 0,
         }
     }
 
@@ -355,6 +434,7 @@ impl HowLongRunsTook {
         for (mine, theirs) in self.buckets.iter_mut().zip(other.buckets.iter()) {
             *mine += theirs;
         }
+        self.lost += other.lost;
     }
 
     /// The accumulation as it is stored, which only this module reads.
@@ -363,7 +443,12 @@ impl HowLongRunsTook {
     /// hundred of the 976, so the file stays a few kilobytes however long the
     /// night runs, which is what makes a merge every second cheap.
     fn written_out(&self) -> String {
-        let mut text = format!("runs {}\nnanos {}\n", self.runs, self.total.as_nanos());
+        let mut text = format!(
+            "runs {}\nnanos {}\nlost {}\n",
+            self.runs,
+            self.total.as_nanos(),
+            self.lost
+        );
         for (bucket, count) in self.buckets.iter().enumerate() {
             if *count > 0 {
                 text.push_str(&format!("b {bucket} {count}\n"));
@@ -392,6 +477,7 @@ impl HowLongRunsTook {
                         u64::try_from(nanos.parse::<u128>().unwrap_or(0)).unwrap_or(u64::MAX),
                     );
                 }
+                (Some("lost"), Some(lost), None) => took.lost = lost.parse().unwrap_or(0),
                 (Some("b"), Some(bucket), Some(count)) => {
                     if let Ok(bucket) = bucket.parse::<usize>()
                         && bucket < HOW_MANY_BUCKETS
@@ -607,6 +693,145 @@ mod tests {
             report.starts_with("2 runs"),
             "two runs were recorded over three merges; the report says {:?}",
             report.lines().next()
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn runs_a_failed_merge_could_not_write_survive_and_are_counted() {
+        // §236.6: `merge_out` used to drop a process's run count on the floor
+        // when it could not create the shared directory or take the lock. A
+        // regular file where a directory needs to go can never be turned into
+        // one, so `create_dir_all` fails on every tick until it is removed.
+        let root = somewhere_to_write("blocked-by-a-file");
+        std::fs::create_dir_all(&root).expect("somewhere to write");
+        let in_the_way = root.join("in-the-way");
+        std::fs::write(&in_the_way, b"not a directory").expect("a blocking file");
+        let into = in_the_way.join("timing");
+        let watch = a_process_writing_into(&into, 4);
+
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(3), b"first");
+        merge_out(&watch);
+
+        assert!(
+            !into.join("report").exists(),
+            "a merge that could not even make its directory wrote a report anyway"
+        );
+        {
+            let watch = watch.lock().unwrap();
+            assert_eq!(
+                watch.took.runs, 1,
+                "the run was dropped instead of handed back"
+            );
+            assert_eq!(
+                watch.took.lost, 1,
+                "a run just handed back was not counted as lost"
+            );
+        }
+
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(4), b"second");
+        merge_out(&watch);
+        assert_eq!(
+            watch.lock().unwrap().took.lost,
+            2,
+            "a second failed merge should count both runs now stuck, not add to the first count"
+        );
+
+        std::fs::remove_file(&in_the_way).expect("clear the way for the directory");
+        merge_out(&watch);
+
+        let report = std::fs::read_to_string(into.join("report")).expect("a report");
+        assert!(
+            report.starts_with("2 runs"),
+            "two runs were recorded across two failed merges; the report says {:?}",
+            report.lines().next()
+        );
+        assert!(
+            report.contains("2 of those runs were lost to a write failure"),
+            "the report does not say what the failed merges cost: {report}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_slow_input_a_blocked_merge_could_not_write_is_retried_once_unblocked() {
+        // Q64, following Q49 (§236.6): `merge_out` marked a slow input as
+        // written the moment it *decided* to write it, not once the write had
+        // actually landed. So a merge that failed before ever touching
+        // `slowest/` — here, because the directory could not be made — still
+        // burned the input's one shot at a retry, and its bytes were never
+        // written even after the block cleared.
+        let root = somewhere_to_write("blocked-slow-bytes");
+        std::fs::create_dir_all(&root).expect("somewhere to write");
+        let in_the_way = root.join("in-the-way");
+        std::fs::write(&in_the_way, b"not a directory").expect("a blocking file");
+        let into = in_the_way.join("timing");
+        let watch = a_process_writing_into(&into, 4);
+
+        let bytes = b"a slow input";
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(50), bytes);
+        merge_out(&watch);
+
+        assert!(
+            !into.join("slowest").exists(),
+            "a merge that could not make its directory wrote to it anyway"
+        );
+
+        std::fs::remove_file(&in_the_way).expect("clear the way for the directory");
+        merge_out(&watch);
+
+        let name = named_for(Duration::from_millis(50), bytes);
+        assert!(
+            into.join("slowest").join(&name).is_file(),
+            "the slow input's bytes were never written, even once the block cleared"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_single_slow_file_write_that_fails_is_retried_too() {
+        // Q64: the directory and the lock are not the only writes that can
+        // fail. One slow input's own `fs::write` can fail on its own, with
+        // `slowest/` already there and every other write this merge makes
+        // going through — here, because a directory sits where the file
+        // needs to go. The same fix has to cover this path too, or a
+        // `written` that grew on attempt rather than success would still
+        // refuse this input its retry.
+        let into = somewhere_to_write("blocked-one-file");
+        std::fs::create_dir_all(into.join("slowest")).expect("somewhere to write");
+
+        let bytes = b"blocked by a directory of its own name";
+        let name = named_for(Duration::from_millis(40), bytes);
+        std::fs::create_dir_all(into.join("slowest").join(&name))
+            .expect("a directory where the slow input's file needs to go");
+
+        let watch = a_process_writing_into(&into, 4);
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(40), bytes);
+        merge_out(&watch);
+
+        assert!(
+            into.join("slowest").join(&name).is_dir(),
+            "the write should have failed, leaving the blocking directory in place"
+        );
+
+        std::fs::remove_dir_all(into.join("slowest").join(&name)).expect("clear the way");
+        merge_out(&watch);
+
+        assert!(
+            into.join("slowest").join(&name).is_file(),
+            "a slow input whose one file write failed was never retried"
         );
         let _ = std::fs::remove_dir_all(&into);
     }
