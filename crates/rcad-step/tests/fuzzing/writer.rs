@@ -26,6 +26,24 @@
 //! `TheModelHasNoSolid` or `ASolidWithNoShell`. `two_cubes_that_write` and
 //! `a_ball_whose_pole_the_writer_refuses` are the two seeds that fix that, one
 //! either side.
+//!
+//! **A file that was written is read back and compared with the model that went
+//! in** (`docs/decisions.md` §129.5 item 3). Not panicking was all this target
+//! asked before, and the writer is the highest-throughput target there is. The
+//! comparison is `round_trip_one`'s in
+//! `a_real_file_written_out_and_read_back_is_the_same_solid.rs`, at the level
+//! that test compares: the written text parses, every reference in it points
+//! somewhere, `Import::read` turns it back into a model that validates, the
+//! same number of solids comes back, and each solid's volume, surface area and
+//! centroid are the same bit for bit. That test's last leg, a `Rule::Difference`
+//! against a third solid, is left out: it is a fuse, and a fuse that panics on
+//! a sound model here would be a fuse defect reported by the writer's target.
+//!
+//! What the source explains is counted and not failed. A model that does not
+//! pass `Model::validate` was never a solid, so a file of it owes nothing on
+//! the way back; a solid that does not measure has no answer to compare.
+//! Everything else that differs panics, because it is a sound model this
+//! writer and this reader disagree about.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -36,7 +54,10 @@
 #[path = "../../../rcad-topo/tests/fuzzing/the_door.rs"]
 mod the_door;
 
-use rcad_topo::Model;
+use rcad_geom::Deflection;
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_step::{Import, StepFile};
+use rcad_topo::{Model, SolidKey};
 
 use the_door::every_number_the_door_promised_is_real;
 
@@ -53,6 +74,19 @@ pub struct Reached {
     pub written: usize,
     /// Models this writer refused by name.
     pub refused: usize,
+    /// Written models that do not pass `Model::validate`, so there is no solid
+    /// to compare the file against.
+    pub written_but_unsound: usize,
+    /// Written files the reader turned back into a model.
+    pub read_back: usize,
+    /// Read-back models not compared because a solid of the model that went in
+    /// does not measure.
+    pub did_not_measure: usize,
+    /// Solids whose volume, surface area and centroid were compared bit for bit
+    /// with the solid that went in, and matched.
+    pub solids_the_same: usize,
+    /// Models written, read back, and the same in every solid.
+    pub came_back_the_same: usize,
 }
 
 impl Reached {
@@ -65,19 +99,25 @@ impl Reached {
             faces: self.faces + other.faces,
             written: self.written + other.written,
             refused: self.refused + other.refused,
+            written_but_unsound: self.written_but_unsound + other.written_but_unsound,
+            read_back: self.read_back + other.read_back,
+            did_not_measure: self.did_not_measure + other.did_not_measure,
+            solids_the_same: self.solids_the_same + other.solids_the_same,
+            came_back_the_same: self.came_back_the_same + other.came_back_the_same,
         }
     }
 }
 
-/// **One draw of bytes, decoded the way a stranger's saved file is and written
-/// out.**
+/// **One draw of bytes, decoded the way a stranger's saved file is, written out,
+/// and read back.**
 ///
 /// The fuzz target and the suite's replay both call this and nothing narrower.
 ///
 /// # Panics
 ///
 /// If a model came through `Deserialize` carrying a number the door promised it
-/// would refuse.
+/// would refuse, or if a sound model was written as a file that does not come
+/// back as the same model.
 #[must_use]
 pub fn one_model_decoded_and_written(bytes: &[u8]) -> Reached {
     let mut reached = Reached {
@@ -91,8 +131,86 @@ pub fn one_model_decoded_and_written(bytes: &[u8]) -> Reached {
     reached.faces = model.faces().count();
     every_number_the_door_promised_is_real(&model);
     match rcad_step::write(&model, "fuzz") {
-        Ok(_) => reached.written = 1,
+        Ok(text) => {
+            reached.written = 1;
+            reached = reached.and(read_back_and_compared(&model, &text));
+        }
         Err(_) => reached.refused = 1,
     }
+    reached
+}
+
+/// Read `text` back and compare it with `source`, the model it was written
+/// from — `round_trip_one`'s checks, in
+/// `a_real_file_written_out_and_read_back_is_the_same_solid.rs`.
+fn read_back_and_compared(source: &Model, text: &str) -> Reached {
+    let mut reached = Reached::default();
+    let file = StepFile::read(text.as_bytes()).unwrap_or_else(|why| {
+        panic!("this writer wrote a file its own reader cannot parse: {why}")
+    });
+    let broken = file.references_that_point_nowhere();
+    assert!(
+        broken.is_empty(),
+        "this writer wrote {} reference(s) to an entity it never wrote",
+        broken.len()
+    );
+
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    if source.validate(&policy, &mut log).is_err() {
+        reached.written_but_unsound = 1;
+        return reached;
+    }
+    let import = Import::read(&file, &policy, &mut log).unwrap_or_else(|why| {
+        panic!("a sound model was written as a file the reader refuses: {why}")
+    });
+    let there = import.model();
+    reached.read_back = 1;
+    if let Err(why) = there.validate(&policy, &mut log) {
+        panic!("a sound model came back from its own file as one that is not: {why}");
+    }
+
+    let source_solids: Vec<SolidKey> = source.solids().map(|solid| solid.key()).collect();
+    let there_solids: Vec<SolidKey> = there.solids().map(|solid| solid.key()).collect();
+    assert_eq!(
+        source_solids.len(),
+        there_solids.len(),
+        "a sound model's solids changed in number on the way through its own file"
+    );
+
+    // The model that went in carries whatever scale its bytes named, and the one
+    // read back carries the scale of its own vertices (`Import`). The mesh is
+    // taken from the second so that a drawn scale of 1e-300 cannot ask for a
+    // mesh finer than the solid, and it is the same mesh on both sides.
+    let deflection = Deflection::for_scale(there.scale());
+    for (&here_key, &back_key) in source_solids.iter().zip(&there_solids) {
+        let Ok(here) = source
+            .solid(here_key)
+            .expect("this model made the key")
+            .measure(deflection, &policy, &mut log)
+        else {
+            reached.did_not_measure = 1;
+            return reached;
+        };
+        let back = there
+            .solid(back_key)
+            .expect("this model made the key")
+            .measure(deflection, &policy, &mut log)
+            .unwrap_or_else(|why| {
+                panic!("a solid that measured does not measure after its own file: {why}")
+            });
+        assert!(
+            here.volume() == back.volume() && here.surface_area() == back.surface_area(),
+            "a sound solid came back from its own file with a different volume or area: \
+             {here:?} went in, {back:?} came back"
+        );
+        assert!(
+            here.centroid() == back.centroid(),
+            "a sound solid came back from its own file with a different centroid: \
+             {here:?} went in, {back:?} came back"
+        );
+        reached.solids_the_same += 1;
+    }
+    reached.came_back_the_same = 1;
     reached
 }

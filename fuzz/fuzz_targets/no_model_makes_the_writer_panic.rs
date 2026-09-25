@@ -1,4 +1,5 @@
-//! Arbitrary bytes into `rcad_step::write`, which must never panic.
+//! Arbitrary bytes into `rcad_step::write`, which must never panic, and every
+//! sound model it writes must read back as the same model.
 //!
 //! Everything this does is in `crates/rcad-step/tests/fuzzing/writer.rs`, and
 //! this target **reaches across to that file** rather than copying it — so the
