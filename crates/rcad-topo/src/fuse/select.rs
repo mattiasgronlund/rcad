@@ -810,11 +810,22 @@ fn do_they_face_the_same_way(
 /// Whether the material of one face of an input holds a point already known to
 /// be on that face's surface.
 ///
-/// A flat face is wound, the way it always was. A **curved** one is
-/// [`SolidView::face_holds_the_point`], which is the one authority on that
+/// A flat face with straight sides is wound, the way it always was. A **curved**
+/// one is [`SolidView::face_holds_the_point`], which is the one authority on that
 /// question (§35) and which the fuse can call here because what it is asked
 /// about is a face of an *input* — a face the model holds, with corners it holds
 /// — rather than a piece the arrangement solved for.
+///
+/// **So is a flat face with a curved side.** A cone's cap is a disk bounded by
+/// one circle with one corner on it, and the polygon of its corners is that one
+/// point, which winds round nothing: every point of the cap read as off it. So a
+/// cap piece lying on a copy of the same cap was never on anything, and a cone
+/// united or shared with a copy of itself refused on
+/// [`PLACED_AGAINST_EVERY_SOLID`] (`docs/decisions.md` §222.3,
+/// `tests/a_cone_and_its_copy.rs`). A ball has no flat face, which is why a ball
+/// and its copy answered. Only [`OnAFace::Held`](crate::OnAFace::Held) counts
+/// here, as a zero winding does not count above: a point on the face's rim says
+/// nothing about the piece around it.
 fn a_face_of_the_input_holds(
     model: &Model,
     solid: &BakedSolid,
@@ -824,7 +835,21 @@ fn a_face_of_the_input_holds(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<bool> {
+    let view = model.solid_at(solid.key.slot_in(model.id()));
     if let Some(flat) = piece.surface.as_plane() {
+        if face
+            .wires
+            .iter()
+            .flatten()
+            .any(|side| side.across.as_plane().is_none())
+        {
+            for &key in &face.keys {
+                if view.face_holds_the_point(key, point, policy, log)? == crate::OnAFace::Held {
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
         let Some(in_plane) = InPlane::of(flat) else {
             return Ok(false);
         };
@@ -842,7 +867,6 @@ fn a_face_of_the_input_holds(
             .winding_around(&corners, point)
             .is_some_and(|winding| winding != 0));
     }
-    let view = model.solid_at(solid.key.slot_in(model.id()));
     Ok(view.face_holds_the_point(face.keys[0], point, policy, log)? != crate::OnAFace::NotHeld)
 }
 

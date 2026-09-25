@@ -5,6 +5,15 @@
 //! a piece that every solid could place", in `fuse_laws_over_a_cone.rs`. These
 //! are the two smallest shapes it refused: one frustum from §49.6's grid and the
 //! pointed cone.
+//!
+//! **The refusal was about the flat cap, not the cone.** A cap piece's candidate
+//! lies on the copy's cap, and the fuse asked whether that cap held it by
+//! winding the polygon of the cap's corners. A cap is a disk bounded by one
+//! circle with one corner on it, and one corner winds round nothing, so no face
+//! of the copy held the point and no solid could place the piece. A ball has no
+//! flat face, which is why a ball and its copy answered. A flat face with a
+//! curved side is now asked through `SolidView::face_holds_the_point`, as a
+//! curved face already was.
 
 mod cones;
 
@@ -15,14 +24,7 @@ use rcad_topo::{Model, Rule, SolidKey};
 use cones::{a_frustum, a_pointed_cone};
 
 /// The frustum of §49.6's grid with slope one half, caps at two and four up.
-///
-/// Refused `Undecidable` on "a point in a piece that every solid could place":
-/// the cap piece's candidate is on the copy's cap, and the copy's cap is read
-/// by winding the polygon of its corners — one corner, which winds round
-/// nothing — so no face of the copy holds it.
 #[test]
-#[ignore = "a cone's cap is wound by its one corner and holds nothing: Undecidable on a point in \
-            a piece that every solid could place"]
 fn a_frustum_united_with_its_copy_is_the_frustum() {
     let mut model = a_model();
     let one = a_frustum(&mut model, 0.5, 2.0, 4.0);
@@ -31,8 +33,6 @@ fn a_frustum_united_with_its_copy_is_the_frustum() {
 }
 
 #[test]
-#[ignore = "a cone's cap is wound by its one corner and holds nothing: Undecidable on a point in \
-            a piece that every solid could place"]
 fn a_frustum_shared_with_its_copy_is_the_frustum() {
     let mut model = a_model();
     let one = a_frustum(&mut model, 0.5, 2.0, 4.0);
@@ -42,8 +42,6 @@ fn a_frustum_shared_with_its_copy_is_the_frustum() {
 
 /// A pointed cone has no seam, and was refused just the same.
 #[test]
-#[ignore = "a cone's cap is wound by its one corner and holds nothing: Undecidable on a point in \
-            a piece that every solid could place"]
 fn a_pointed_cone_united_with_its_copy_is_the_cone() {
     let mut model = a_model();
     let one = a_pointed_cone(&mut model, 0.5, 4.0);
@@ -52,8 +50,6 @@ fn a_pointed_cone_united_with_its_copy_is_the_cone() {
 }
 
 #[test]
-#[ignore = "a cone's cap is wound by its one corner and holds nothing: Undecidable on a point in \
-            a piece that every solid could place"]
 fn a_pointed_cone_shared_with_its_copy_is_the_cone() {
     let mut model = a_model();
     let one = a_pointed_cone(&mut model, 0.5, 4.0);
