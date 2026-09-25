@@ -568,14 +568,12 @@ impl Assembly {
     /// than a crash (§4.1).
     fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
-        let dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
-
-        let mut same = Sameness::of(self.faces.len());
-        for (edge, [one, other]) in along.iter().enumerate() {
-            if dissolved[edge] {
-                same.join(one.face, other.face);
-            }
+        let mut dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
+        let staying = self.edges_a_curved_face_keeps(&along, &dissolved);
+        for edge in staying {
+            dissolved[edge] = false;
         }
+        let same = joined_across(&along, &dissolved, self.faces.len());
         let joined = self.rings_of_each_joined_face(&same, &along, &dissolved)?;
         let renumbered = self.what_is_left(&joined, &along, &dissolved);
         // **A closed curve cut where nothing meets it** is joined back up even
@@ -638,23 +636,15 @@ impl Assembly {
                 if one.face == other.face {
                     return Ok(false);
                 }
-                // **Only two flat faces are ever joined**, and what that leaves
-                // undone is worth naming. Two pieces of one *cylinder* facing
-                // the same way with an edge between them really are one face,
-                // and the answer keeps them as two — a sound solid, cut into
-                // more faces than it has. Joining them would need the rings walk
-                // below, which winds corners about a plane's normal and has no
-                // curved twin. What used to make this urgent no longer does:
-                // §17.1 could not re-derive a corner with two surfaces round it,
-                // and §31.3's second route reads one out of the model.
-                let (Some(mine), Some(theirs)) = (
-                    self.faces[one.face].surface.as_plane(),
-                    self.faces[other.face].surface.as_plane(),
-                ) else {
-                    return Ok(false);
-                };
-                let agreement = agreement_of_two_planes(mine, theirs, log)?;
-                Ok(agreement == PlaneAgreement::SameWay)
+                let (mine, theirs) = (&self.faces[one.face], &self.faces[other.face]);
+                match (mine.surface.as_plane(), theirs.surface.as_plane()) {
+                    (Some(mine), Some(theirs)) => {
+                        let agreement = agreement_of_two_planes(mine, theirs, log)?;
+                        Ok(agreement == PlaneAgreement::SameWay)
+                    }
+                    (None, None) => Ok(one_cone_or_pipe_the_same_way_round(mine, theirs)),
+                    (Some(_), None) | (None, Some(_)) => Ok(false),
+                }
             })
             .collect()
     }
@@ -693,20 +683,229 @@ impl Assembly {
                 });
                 continue;
             }
-            // Only flat faces are ever joined — the walk below winds corners
-            // about a plane's normal and has no curved twin — so a group with
-            // more than one member is flat throughout.
-            let plane = plane_of_the_joined_face(&members, &self.faces);
-            let rings = self.rings_round(&members, along, dissolved, plane)?;
+            let (surface, used, rings) = match self.faces[members[0]].surface.as_plane() {
+                Some(_) => {
+                    let plane = plane_of_the_joined_face(&members, &self.faces);
+                    let rings = self.rings_round(&members, along, dissolved, plane)?;
+                    (Surface::Plane(plane), Orientation::Forward, rings)
+                }
+                None => {
+                    let first = &self.faces[members[0]];
+                    (
+                        first.surface,
+                        first.used,
+                        self.rings_of_a_curved_face(&members, along, dissolved),
+                    )
+                }
+            };
             joined.push(JoinedFace {
                 members,
-                surface: Surface::Plane(plane),
-                used: Orientation::Forward,
+                surface,
+                used,
                 is_a_whole_closed_surface: false,
                 rings,
             });
         }
         Ok(joined)
+    }
+
+    /// The edges between pieces of one cone or pipe that stay edges after all:
+    /// one seam across each band the joining makes, and every edge of a group
+    /// that cannot be joined.
+    ///
+    /// **A ring that goes right round needs a seam**, and the pieces a fuse
+    /// leaves carry none — the arrangement cuts a cone's wall into pieces that
+    /// each lie flat, and the input's own seam is not among their sides. Joined,
+    /// a wall the block took a notch out of is a band with two rings right
+    /// round it and nothing across, which is not a face the writer can lay out
+    /// flat (`AWireWillNotLieFlatOnItsFace`). So one of the dissolved edges
+    /// that runs from one ring to the other stays, as the seam (§224.2 item 2).
+    /// Which one is read off its corners, lowest first, and never off its index
+    /// here, which depends on the order the solids were handed over — the same
+    /// rule [`Assembly::which_to_keep_first`] keeps a corner by.
+    ///
+    /// Anything else that goes right round — a group with other than two such
+    /// rings, no edge across, or a seam that still leaves a ring going round —
+    /// and a group whose rings cannot be counted, stays apart. The answer is
+    /// then the one the fuse gave before it joined curved faces at all.
+    fn edges_a_curved_face_keeps(&self, along: &[[Dart; 2]], dissolved: &[bool]) -> Vec<usize> {
+        let same = joined_across(along, dissolved, self.faces.len());
+        let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for face in 0..self.faces.len() {
+            groups.entry(same.leader(face)).or_default().push(face);
+        }
+        let mut staying = Vec::new();
+        for members in groups.into_values() {
+            if members.len() == 1 || self.faces[members[0]].surface.as_plane().is_some() {
+                continue;
+            }
+            let inside: Vec<usize> = (0..self.edges.len())
+                .filter(|&edge| dissolved[edge] && members.contains(&along[edge][0].face))
+                .collect();
+            if self.lies_flat(&members, along, dissolved) {
+                continue;
+            }
+            let seam = self.a_seam_across_the_band(&members, along, dissolved, &inside);
+            match seam {
+                Some(seam) => staying.push(seam),
+                None => staying.extend(inside),
+            }
+        }
+        staying
+    }
+
+    /// Whether no ring of the face `members` join into goes right round.
+    fn lies_flat(&self, members: &[usize], along: &[[Dart; 2]], dissolved: &[bool]) -> bool {
+        let surface = self.faces[members[0]].surface;
+        self.rings_of_a_curved_face(members, along, dissolved)
+            .iter()
+            .all(|ring| self.a_ring_goes_right_round(ring, &surface) == Some(false))
+    }
+
+    /// The dissolved edge that runs from one ring of a band to the other with
+    /// the lowest corners, where keeping it leaves a face that lies flat.
+    fn a_seam_across_the_band(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+        inside: &[usize],
+    ) -> Option<usize> {
+        let surface = self.faces[members[0]].surface;
+        let rings = self.rings_of_a_curved_face(members, along, dissolved);
+        let [one, other] = rings.as_slice() else {
+            return None;
+        };
+        let corners_of = |ring: &[Dart]| -> BTreeSet<usize> {
+            ring.iter().map(|&dart| self.starts_at(dart)).collect()
+        };
+        let (one, other) = (corners_of(one), corners_of(other));
+        let lowest_first = |edge: usize| {
+            let mut ends = self.edges[edge].ends;
+            ends.sort_by(|&a, &b| self.which_to_keep_first(a, b));
+            ends
+        };
+        let seam = inside
+            .iter()
+            .copied()
+            .filter(|&edge| {
+                let [a, b] = self.edges[edge].ends;
+                (one.contains(&a) && other.contains(&b)) || (one.contains(&b) && other.contains(&a))
+            })
+            .min_by(|&a, &b| {
+                let (a, b) = (lowest_first(a), lowest_first(b));
+                self.which_to_keep_first(a[0], b[0])
+                    .then_with(|| self.which_to_keep_first(a[1], b[1]))
+            })?;
+        let mut with_the_seam = dissolved.to_vec();
+        with_the_seam[seam] = false;
+        let rings = self.rings_of_a_curved_face(members, along, &with_the_seam);
+        rings
+            .iter()
+            .all(|ring| self.a_ring_goes_right_round(ring, &surface) == Some(false))
+            .then_some(seam)
+    }
+
+    /// The rings round a joined face on a cone or a pipe, in the order they are
+    /// first come to.
+    ///
+    /// **No ring is the outline**, and that is §31.3's rule and not a shortcut:
+    /// a curved face's invariant is that every wire keeps the material on its
+    /// left, not that the first winds one way and the rest the other. Every dart
+    /// walked here came out of a piece that kept its material on its left, so
+    /// the rings do too, and there is no winding to ask about.
+    fn rings_of_a_curved_face(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> Vec<Vec<Dart>> {
+        let mut walked: BTreeSet<Dart> = BTreeSet::new();
+        let mut rings = Vec::new();
+        for &face in members {
+            for wire in 0..self.faces[face].wires.len() {
+                for start in self.whole_ring(face, wire) {
+                    if dissolved[self.edge_of(start)] || !walked.insert(start) {
+                        continue;
+                    }
+                    rings.push(self.ring_from(start, along, dissolved, &mut walked));
+                }
+            }
+        }
+        rings
+    }
+
+    /// Whether a ring on a cone or a pipe goes right round its axis — once,
+    /// either way — or `None` where the arithmetic here cannot count it.
+    ///
+    /// The count is the angle about the axis, unwrapped along each side
+    /// (§224.2 item 2). A ruling keeps its angle. An arc of a plane's crossing
+    /// changes it monotonically — a plane off the apex meets each ruling once
+    /// — so its turn is the angle between its ends, taken the way the arc
+    /// leaves its named corner. A closed side goes right round, one way or the
+    /// other.
+    ///
+    /// **Which way a closed side goes is never asked**, because the answer does
+    /// not need it: a simple ring on a cone or a pipe goes round zero times or
+    /// once, so it goes round once exactly when the open sides' turns and the
+    /// closed sides between them add up to an odd number of whole turns.
+    ///
+    /// `None` for a side whose other surface is not a plane, which may cross the
+    /// skin in a curve that turns back on itself; for an end on the axis, which
+    /// has no angle; and for an arc whose two ends read the same angle to within
+    /// what `atan2` rounds, where a sliver and a whole turn look alike.
+    fn a_ring_goes_right_round(&self, ring: &[Dart], surface: &Surface) -> Option<bool> {
+        let axis = match surface {
+            Surface::Cone(cone) => cone.axis(),
+            Surface::Cylinder(pipe) => pipe.axis(),
+            _ => return None,
+        };
+        let round = |at: Point| axis.direction().cross(at - axis.origin());
+        let mut closed = 0u32;
+        let mut turned = 0.0f64;
+        for &dart in ring {
+            let side = self.side_of(dart);
+            let edge = &self.edges[side.edge];
+            let partner = edge.carried_by.iter().find(|other| *other != surface)?;
+            partner.as_plane()?;
+            let [from, to] = [self.starts_at(dart), self.stops_at(side)];
+            if from == to {
+                closed += 1;
+                continue;
+            }
+            let WhichArc::LeavingACorner { corner, towards } = edge.arc else {
+                continue;
+            };
+            let [start, end] = [from, to].map(|at| round(self.corners[at].point));
+            if start == Vector::zero() || end == Vector::zero() {
+                return None;
+            }
+            let apart = axis.direction().dot(start.cross(end)).atan2(start.dot(end));
+            if apart.abs() < f64::EPSILON.sqrt() {
+                return None;
+            }
+            let leaving = towards.dot(round(self.corners[corner].point));
+            if leaving == 0.0 {
+                return None;
+            }
+            let upwards = (leaving > 0.0) == (corner == from);
+            turned += match (upwards, apart > 0.0) {
+                (true, true) | (false, false) => apart,
+                (true, false) => apart + core::f64::consts::TAU,
+                (false, true) => apart - core::f64::consts::TAU,
+            };
+        }
+        let turns = turned / core::f64::consts::TAU;
+        let whole = turns.round();
+        if (turns - whole).abs() > 0.25 {
+            return None;
+        }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a ring of a face turns a handful of times at most"
+        )]
+        let whole = whole as i64;
+        Some((whole + i64::from(closed)) % 2 != 0)
     }
 
     fn whole_ring(&self, face: usize, wire: usize) -> Vec<Dart> {
@@ -943,6 +1142,22 @@ impl Assembly {
             }
         }
 
+        // **A corner where pieces of one cone or pipe met stays a corner**, and
+        // that departs from §224.2 item 3 on purpose. It has only two surfaces
+        // round it, which §31.3 reads out of the model rather than re-deriving,
+        // so nothing needs it gone. And folding the arcs either side into one
+        // can make an arc longer than half its circle — a frustum's rim with a
+        // notch taken out of it — whose centre is then in front of any picker
+        // that holds the whole arc, and the next fuse cannot follow it (§224.1).
+        let mut where_curved_pieces_met = vec![false; self.corners.len()];
+        for (edge, [one, _]) in along.iter().enumerate() {
+            if dissolved[edge] && self.faces[one.face].surface.as_plane().is_none() {
+                for end in self.edges[edge].ends {
+                    where_curved_pieces_met[end] = true;
+                }
+            }
+        }
+
         let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut still_a_corner = vec![false; self.corners.len()];
         for (&(lump, corner), by) in &leaving {
@@ -953,7 +1168,7 @@ impl Assembly {
             // the only corner a closed curve has. Dissolving it leaves the
             // joined edge with no ends at all.
             match by[..] {
-                [one, other] if one != other => {
+                [one, other] if one != other && !where_curved_pieces_met[corner] => {
                     straight_through.insert((lump, corner));
                 }
                 _ => still_a_corner[corner] = true,
@@ -2011,10 +2226,11 @@ struct JoinedFace {
     members: Vec<usize>,
     surface: Surface,
     used: Orientation,
-    /// Carried through the joining untouched: only flat faces are ever joined,
-    /// and a whole closed surface is a face on its own.
+    /// Carried through the joining untouched: only flat faces and pieces of a
+    /// cone or a pipe are ever joined, and a whole closed surface is a ball.
     is_a_whole_closed_surface: bool,
-    /// The outline first, then one ring per hole.
+    /// On a plane, the outline first and then one ring per hole. On a cone or a
+    /// pipe, in the order they were first come to (§31.3).
     rings: Vec<Vec<Dart>>,
 }
 
@@ -2049,6 +2265,38 @@ fn how_much_space_it_encloses(
         return Ok(solid.signed_volume());
     }
     how_much_space_a_curved_solid_encloses(solid, policy, log)
+}
+
+/// Whether two curved faces are pieces of one cone or one pipe, used the same
+/// way round, so that an edge between them is not boundary at all.
+///
+/// **The surface's own bits decide it, and nothing else does** (§224.2 item 1).
+/// A piece inherits its surface from its ancestor bit for bit (§31.3), so two
+/// pieces of one input face carry the same bits, and those are the pieces a
+/// fuse leaves cut apart. The same surface used the other way round is a sheet
+/// of no thickness with material either side, which is two faces and not one.
+/// A surface that is only the same up to how it is written — its axis turned
+/// round, say — is left apart: nothing here proves the two are one surface,
+/// and the answer with them apart is the sound one the fuse always gave.
+///
+/// **Only a cone or a pipe.** Their rings are asked how often they go round the
+/// axis ([`Assembly::a_ring_goes_right_round`]), and a ball or a ring has no
+/// one axis to ask about, so pieces of those stay apart.
+fn one_cone_or_pipe_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
+    matches!(mine.surface, Surface::Cone(_) | Surface::Cylinder(_))
+        && name_of_surface_bits(&mine.surface) == name_of_surface_bits(&theirs.surface)
+        && mine.used == theirs.used
+}
+
+/// Which faces are one once every dissolved edge is gone.
+fn joined_across(along: &[[Dart; 2]], dissolved: &[bool], faces: usize) -> Sameness {
+    let mut same = Sameness::of(faces);
+    for (edge, [one, other]) in along.iter().enumerate() {
+        if dissolved[edge] {
+            same.join(one.face, other.face);
+        }
+    }
+    same
 }
 
 /// The other dart along the same edge.
