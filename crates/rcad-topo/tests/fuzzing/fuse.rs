@@ -301,6 +301,28 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
     header: u8,
     log: &mut ProvenanceLog,
 ) -> Reached {
+    how_one_model_is_fused_noting_which_way_the_second_call_went(bytes, header, log, &mut |_, _| {})
+}
+
+/// The same draw, and telling `note` the two groups of solids the "both ways
+/// round" check hands to [`Model::fuse`] — the first call, then the swapped
+/// one — so a test can catch a caller that quietly stopped swapping them,
+/// without needing the two answers to come out different (§129.5).
+///
+/// A union or an intersection that really commutes gives the same answer
+/// whether it is asked once or twice, so nothing that reads the *answer* can
+/// tell "asked the other way round" from "asked the same way twice". This
+/// reads what the caller actually hands to `fuse` instead.
+///
+/// # Panics
+///
+/// As [`how_one_model_is_fused_keeping_the_provenance`] does.
+fn how_one_model_is_fused_noting_which_way_the_second_call_went(
+    bytes: &[u8],
+    header: u8,
+    log: &mut ProvenanceLog,
+    note: &mut dyn FnMut(&[SolidKey], &[SolidKey]),
+) -> Reached {
     let mut reached = Reached {
         halves: 1,
         ..Reached::default()
@@ -389,7 +411,10 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
             .iter()
             .chain(tools)
             .all(|&solid| every_face_of_it_is_flat(&unfused, solid));
-        let backwards = match unfused.fuse(tools, arguments, rule, &policy, log) {
+        note(arguments, tools);
+        let (swapped_arguments, swapped_tools) = (tools, arguments);
+        note(swapped_arguments, swapped_tools);
+        let backwards = match unfused.fuse(swapped_arguments, swapped_tools, rule, &policy, log) {
             Ok(fused) => WhatCameBack::Answered(the_answer_written_out(&unfused, fused.solids())),
             Err(why) => WhatCameBack::from_refusal(&why),
         };
@@ -491,4 +516,75 @@ fn every_face_of_it_is_flat(model: &Model, solid: SolidKey) -> bool {
         .expect("the draw's own solid resolves")
         .faces()
         .all(|face| face.surface().as_plane().is_some())
+}
+
+/// **The both-ways-round check must ask `Model::fuse` with the two sides
+/// truly swapped, not the same pair twice.**
+///
+/// A union of two overlapping cubes gives the same answer whichever cube is
+/// named first, so a test that only compares the two *answers* cannot tell a
+/// real swap from asking the same way round twice — that sameness is exactly
+/// what the commutativity check is for. This instead reads the two groups of
+/// solids the caller actually hands to `fuse`.
+///
+/// Built without a `use rcad_geom` import: this file is also compiled into a
+/// bench that pulls in `#[cfg(test)]` code without `--test`, where `#[test]`
+/// functions are dropped but the imports they alone would need are not, and
+/// `cargo clippy` then calls those imports unused.
+#[test]
+fn the_second_call_asks_the_pair_the_other_way_round() {
+    let mut model =
+        Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+    model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    let other = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    model
+        .place_solid(
+            other,
+            &rcad_geom::Isometry::translation(rcad_geom::Vector::new(1.0, 1.0, 1.0))
+                .expect("a finite placement"),
+        )
+        .expect("this model made the key");
+    let bytes = postcard::to_allocvec(&model).expect("two overlapping cubes serialize");
+
+    // Header 0x01: low nibble 1 puts one solid on each side of the split
+    // (two-sided), high nibble 0 asks `Rule::Union`.
+    let mut asked: Vec<(Vec<SolidKey>, Vec<SolidKey>)> = Vec::new();
+    let reached = how_one_model_is_fused_noting_which_way_the_second_call_went(
+        &bytes,
+        0x01,
+        &mut ProvenanceLog::new(),
+        &mut |arguments, tools| asked.push((arguments.to_vec(), tools.to_vec())),
+    );
+
+    assert_eq!(
+        reached.asked_both_ways_round, 1,
+        "two overlapping cubes under a two-sided union should reach the \
+         both-ways-round check at all: {reached:?}"
+    );
+    let [
+        (forward_arguments, forward_tools),
+        (backward_arguments, backward_tools),
+    ] = asked.as_slice()
+    else {
+        panic!("expected exactly one forward call and one swapped call, got {asked:?}");
+    };
+    assert_ne!(
+        forward_arguments, forward_tools,
+        "the two sides of a two-sided fuse must be different solids, or this test proves nothing"
+    );
+    assert_eq!(
+        (forward_arguments, forward_tools),
+        (backward_tools, backward_arguments),
+        "the second call did not swap the two sides: asked {asked:?}"
+    );
+    assert_ne!(
+        (forward_arguments, forward_tools),
+        (backward_arguments, backward_tools),
+        "the second call asked the very same pair as the first, so it was \
+         never asked the other way round: {asked:?}"
+    );
 }
