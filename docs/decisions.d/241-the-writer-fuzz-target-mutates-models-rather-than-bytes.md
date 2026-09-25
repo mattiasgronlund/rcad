@@ -157,8 +157,9 @@ the writer's or the reader's, not the target's.
    bar of radius 3 and 5 tall, **turned an eighth of a turn about `z`**, is
    written and read back, and the comparison panics: the volume matches but the
    area is `150.76324910914616` going in and `150.7632491091462` coming back, and
-   the centroid differs at the 1e-15 level. The same bar also moved by
-   (3, −5, 7) fails the same way. A move by whole units passes for that bar, but
+   the centroid differs at the 1e-15 level. The same bar, turned and also
+   moved by (3, −5, 7), fails the same way; moved by (3, −5, 7) with no turn it
+   passes (§249.4). A move by whole units passes for that bar, but
    not for every solid: the new target's first-round crash is a cube and a round
    bar of radius 6, 4 tall, placed so the bar's middle is at the whole-number
    point (9, −7, −13), whose volume is `452.10882097631367` going in and

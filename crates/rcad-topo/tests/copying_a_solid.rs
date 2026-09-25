@@ -21,7 +21,7 @@ use std::collections::HashSet;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey, WireStepView};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey, WireStepView};
 
 /// The radius of the ring the other tests bend a tube round.
 const THE_RING: f64 = 4.0;
@@ -317,9 +317,9 @@ fn a_copy_of_a_copy_is_the_original_again() {
 /// that closing the gap moves a test rather than a sentence.
 ///
 /// **The refusal is the fuse's and not the copy's**: a second bend built from
-/// the same numbers is refused in the same words — "a point in a piece that
-/// every solid could place", asked at `(3, 0, 0)`, where the tube's inside
-/// meets the `+x` cap.
+/// the same numbers is refused in the same words. The union keeps the right
+/// pieces and writes them back with both coedges of one edge running the same
+/// way round, and the difference is answered with nothing left (§243.5).
 #[test]
 fn a_quarter_bend_and_its_copy_are_refused_as_two_bends_built_alike_are() {
     let mut model = a_model();
@@ -328,18 +328,25 @@ fn a_quarter_bend_and_its_copy_are_refused_as_two_bends_built_alike_are() {
     let built_again = build(&mut model);
     let copy = model.copy_solid(bend).expect("this model made the key");
 
-    for rule in [Rule::Union, Rule::Difference] {
-        let with_the_copy = refused(&model, bend, copy, rule, what);
-        let with_one_built_again = refused(&model, bend, built_again, rule, what);
-        assert!(
-            matches!(with_the_copy, Error::Undecidable { .. }),
-            "{rule:?}: expected the arithmetic to give up, got {with_the_copy}"
-        );
-        assert_eq!(
-            format!("{with_the_copy:?}"),
-            format!("{with_one_built_again:?}"),
-            "{rule:?}: the copy is refused differently from a bend built again"
-        );
+    let with_the_copy = refused(&model, bend, copy, Rule::Union, what);
+    let with_one_built_again = refused(&model, bend, built_again, Rule::Union, what);
+    assert!(
+        matches!(
+            with_the_copy,
+            Error::TheFuseWroteABrokenAnswer {
+                broken: Invalid::CoedgesRunTheSameWay
+            }
+        ),
+        "Union: expected the answer written back broken, got {with_the_copy}"
+    );
+    assert_eq!(
+        format!("{with_the_copy:?}"),
+        format!("{with_one_built_again:?}"),
+        "Union: the copy is refused differently from a bend built again"
+    );
+    for other in [copy, built_again] {
+        let (_, solids) = fused(&model, bend, other, Rule::Difference, what);
+        assert!(solids.is_empty(), "{what} less itself left {solids:?}");
     }
 }
 
@@ -352,7 +359,7 @@ fn every_kind_of_solid() -> impl Iterator<Item = (&'static str, Build)> {
         .chain([A_QUARTER_BEND])
 }
 
-/// A torus face, which a fuse with its copy refuses (see
+/// A torus face, which a union with its copy refuses (see
 /// `a_quarter_bend_and_its_copy_are_refused_as_two_bends_built_alike_are`).
 const A_QUARTER_BEND: (&str, Build) = ("a quarter bend", |model| {
     rings::a_quarter_bend(model, THE_RING, 1.0)
