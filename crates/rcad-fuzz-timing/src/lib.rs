@@ -167,11 +167,18 @@ impl Watch {
 ///
 /// Two failures are recovered rather than swallowed: if the directory cannot
 /// be made or the shared lock cannot be taken, the run count just collected
-/// goes back to the live watch so the next tick tries again. Everything past
-/// that point is still swallowed — a write that fails after the lock is held
-/// loses just that one merge's slow-run bytes and report text, not a night's
-/// worth of runs. A fuzz target that stopped fuzzing because its measurements
-/// could not be filed would be measuring the disk.
+/// goes back to the live watch so the next tick tries again, and no slow
+/// input is marked as written — nothing was written, so the next tick offers
+/// every one of them again. The same recovery covers a slow input's own write
+/// failing on its own, past that point: only the inputs whose `fs::write`
+/// actually landed go into `written`, in one call to
+/// [`mark_slow_inputs_written`], so one that did not is retried out of
+/// `slowest` on the next tick rather than refused forever. What is still
+/// swallowed is the totals file and the report text themselves — a write that
+/// fails there loses just that one merge's counts and its report, not a
+/// night's worth of runs, since `slowest` is untouched by either. A fuzz
+/// target that stopped fuzzing because its measurements could not be filed
+/// would be measuring the disk.
 fn merge_out(watch: &Mutex<Watch>) {
     let (into, keep, mine, to_write) = {
         let mut watch = watch
@@ -189,9 +196,6 @@ fn merge_out(watch: &Mutex<Watch>) {
             .filter(|(took, bytes)| !watch.written.contains(&named_for(*took, bytes)))
             .map(|(took, bytes)| (took, bytes.to_vec()))
             .collect();
-        for (took, bytes) in &to_write {
-            watch.written.insert(named_for(*took, bytes));
-        }
         (watch.into.clone(), watch.keep, mine, to_write)
     };
 
@@ -213,9 +217,17 @@ fn merge_out(watch: &Mutex<Watch>) {
     everyones.add(&mine);
     let _ = std::fs::write(into.join("totals"), everyones.written_out());
 
-    for (took, bytes) in &to_write {
-        let _ = std::fs::write(slowest.join(named_for(*took, bytes)), bytes);
+    let written_now: Vec<String> = to_write
+        .iter()
+        .filter(|(took, bytes)| {
+            std::fs::write(slowest.join(named_for(*took, bytes)), bytes).is_ok()
+        })
+        .map(|(took, bytes)| named_for(*took, bytes))
+        .collect();
+    if !written_now.is_empty() {
+        mark_slow_inputs_written(watch, written_now);
     }
+
     let kept = prune_to_the_slowest_kept(&slowest, keep);
     let _ = std::fs::write(into.join("report"), report_text(&everyones, &kept));
 
@@ -239,6 +251,34 @@ fn hand_back_what_could_not_be_written(watch: &Mutex<Watch>, mut mine: HowLongRu
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .took
         .add(&mine);
+}
+
+/// Mark slow inputs as written now that their bytes are actually on disk.
+///
+/// `written` used to gain an entry the moment a write was *attempted*, not
+/// once it had *landed* — so an input whose write failed, for any reason,
+/// was refused a retry forever after, even once whatever blocked it cleared.
+/// Marking only what [`merge_out`] just confirmed on disk is the fix: a
+/// write that fails leaves its input out of `written`, and the next tick
+/// finds it still sitting in `slowest` — which nothing here ever clears on a
+/// failed write — and offers it again.
+///
+/// The lock is taken fresh, for the same reason as
+/// [`hand_back_what_could_not_be_written`]: a thread calling
+/// [`Watch::record`] for this same input while the write above was in flight
+/// may have offered it a slower time, replacing the `slowest` entry this
+/// merge just wrote bytes for with one under a different name. That
+/// replacement is not lost — the newer entry is still in `slowest`, not yet
+/// in `written`, so the next tick writes *it* out too — and the older file
+/// on disk is harmless leftover that [`prune_to_the_slowest_kept`] clears on
+/// the next successful merge, the same way it already dedupes one input kept
+/// under two names from two processes.
+fn mark_slow_inputs_written(watch: &Mutex<Watch>, written: Vec<String>) {
+    watch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .written
+        .extend(written);
 }
 
 /// The lock every process takes before touching the shared accumulation.
