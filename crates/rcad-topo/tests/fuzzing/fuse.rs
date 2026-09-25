@@ -137,10 +137,10 @@
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
 
-#[path = "the_door.rs"]
-mod the_door;
 #[path = "comparison.rs"]
 mod comparison;
+#[path = "the_door.rs"]
+mod the_door;
 
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};

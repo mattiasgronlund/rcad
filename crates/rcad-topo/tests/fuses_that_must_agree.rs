@@ -146,7 +146,9 @@ use rcad_geom::{
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
 
-use comparison::{Answer, Face, Picking, Run, Step, WhatItSitsOn, answer_of, bits, turned_to_its_smallest};
+use comparison::{
+    Answer, Face, Picking, Run, Step, WhatItSitsOn, answer_of, bits, turned_to_its_smallest,
+};
 use pairs::{
     BallAndBlock, Configuration, CurvedPair, Elsewhere, Fixture, FrustumAndBlock, LeaningBar,
     Movement, Placed, Rigid, Shape, Skew, Turn, Turned, a_ball_a_bar_and_a_block,
