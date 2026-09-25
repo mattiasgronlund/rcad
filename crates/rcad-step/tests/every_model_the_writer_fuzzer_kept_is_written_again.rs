@@ -35,6 +35,20 @@
 //! change to the door that silently reinterprets a stranger's saved file is
 //! precisely what §44.5 is about, and the floors here go red for it.
 //!
+//! # The curved control seed
+//!
+//! Q42 (§129.5) added `1bf987c187b377606ff669042712474c52227800`: a round bar
+//! of radius two, eight tall, `add_round_bar`'s own shape from
+//! `a_solid_written_out_and_read_back_is_the_same_solid.rs`. Before it, no
+//! seed here had ever decoded into a model with a curved face — the sixteen
+//! empty decodes above have no faces at all, and of the two control seeds,
+//! `two_cubes_that_write` is planar and `a_ball_whose_pole_the_writer_refuses`
+//! is refused before it is ever measured. Mutating `postcard` bytes almost
+//! never lands on a shape whose internal keys are even self-consistent (16 of
+//! 1180), let alone one whose curved corners also certify onto their surface
+//! the way `Model::validate` asks — every curved shape in this corpus, cube or
+//! cylinder alike, was built and checked in by hand, none found by mutation.
+//!
 //! # Where the floors below come from
 //!
 //! Measured on this tree, 2026-09-13, by
@@ -77,6 +91,9 @@
 mod fuzzing;
 
 use std::path::PathBuf;
+
+use rcad_geom::Surface;
+use rcad_topo::Model;
 
 use fuzzing::writer::{Reached, one_model_decoded_and_written};
 
@@ -168,4 +185,54 @@ fn the_two_named_control_seeds_still_land_either_side_of_the_writer() {
         "a ball's pole is a wire step that stands still, which this writer \
          refuses by name: {reached:?}"
     );
+}
+
+/// A seed with a curved face — a cylinder, a cone, a sphere or a torus — is
+/// checked in and reaches the volume/area/centroid comparison.
+///
+/// `Reached` has no counter of its own for this (it counts faces, not their
+/// kind), so this test decodes each seed itself and asks its faces directly.
+/// Without a curved seed checked in, this fails rather than silently shrinking
+/// back to the two planar cubes `two_cubes_that_write` brings.
+#[test]
+fn a_curved_solid_in_the_corpus_reaches_the_comparison() {
+    let listing = std::fs::read_dir(corpus()).expect("the corpus is checked in beside the target");
+    let mut curved_seeds = 0;
+    let mut curved_seeds_that_came_back_the_same = 0;
+    for entry in listing {
+        let path = entry.expect("a readable directory entry").path();
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(&path).expect("a readable seed");
+        let Ok(model) = postcard::from_bytes::<Model>(&bytes) else {
+            continue;
+        };
+        if !model.faces().any(|face| surface_is_curved(face.surface())) {
+            continue;
+        }
+        curved_seeds += 1;
+        if one_model_decoded_and_written(&bytes).came_back_the_same >= 1 {
+            curved_seeds_that_came_back_the_same += 1;
+        }
+    }
+
+    assert!(
+        curved_seeds >= 1,
+        "no seed in the corpus decodes into a model with a curved face at all"
+    );
+    assert!(
+        curved_seeds_that_came_back_the_same >= 1,
+        "{curved_seeds} seed(s) decode into a model with a curved face, but none of them \
+         reached the volume/area/centroid comparison — a curved solid stops short of it again"
+    );
+}
+
+/// A cylinder, a cone, a sphere or a torus — anything that is not a plane.
+fn surface_is_curved(surface: Surface) -> bool {
+    match surface {
+        Surface::Plane(_) => false,
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) => true,
+        _ => true,
+    }
 }
