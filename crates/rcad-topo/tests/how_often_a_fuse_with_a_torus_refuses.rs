@@ -91,7 +91,7 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Isometry, Point, Scale, Surface, Vector};
+use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
