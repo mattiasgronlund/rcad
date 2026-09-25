@@ -68,7 +68,8 @@ use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot}
 use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::validate::{
     a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
-    how_much_space_a_curved_solid_encloses, the_curved_one_of, winding_round,
+    how_much_space_a_curved_solid_encloses, the_curved_one_of, the_way_it_is_parametrised_about,
+    winding_round,
 };
 use crate::view::how_far_apart;
 use crate::{
@@ -409,6 +410,7 @@ impl Assembly {
                 is_a_whole_closed_surface: piece.is_the_whole_surface,
             });
         }
+        every_closed_edge_read_off_one_spelling(&edges.made, &corners.made, &mut faces);
         Ok(Self {
             corners: corners.made,
             edges: edges.made,
@@ -1722,6 +1724,14 @@ impl Assembly {
     /// [`EdgeRun::RightRoundWhereItCrosses`] is that rim naming the surface that
     /// cut it instead (`docs/decisions.md` §216).
     ///
+    /// **One surface is asked of the spelling folded away**
+    /// ([`name_of_the_surface_either_way_round`]), never of the bits: two bars
+    /// stacked on one pipe, one written with its axis pointing down, have two
+    /// spellings of one wall either side of the circle between them, and read
+    /// bit for bit that is two pipes crossing — which `rcad_geom::walk` then
+    /// walks as a straight line with no points on it
+    /// (`two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written`).
+    ///
     /// `None` everywhere else, which is where [`EdgeRun::RightRoundWhereItsFacesCross`]
     /// stays. Three shapes come back `None` for a reason worth naming: an edge
     /// that is not closed, which is not this kind of run at all; an edge other
@@ -1745,12 +1755,22 @@ impl Assembly {
                 }
                 let [one, other] = <[usize; 2]>::try_from(by.as_slice()).ok()?;
                 let either_side = self.faces[one].surface;
-                if self.faces[other].surface != either_side {
+                if !one_surface(&self.faces[other].surface, &either_side) {
                     return None;
                 }
                 match edge.carried_by {
-                    [met, across] if met == either_side && across != either_side => Some(across),
-                    [across, met] if met == either_side && across != either_side => Some(across),
+                    [met, across]
+                        if one_surface(&met, &either_side)
+                            && !one_surface(&across, &either_side) =>
+                    {
+                        Some(across)
+                    }
+                    [across, met]
+                        if one_surface(&met, &either_side)
+                            && !one_surface(&across, &either_side) =>
+                    {
+                        Some(across)
+                    }
                     _ => None,
                 }
             })
@@ -2310,6 +2330,72 @@ fn one_cone_or_pipe_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
     matches!(mine.surface, Surface::Cone(_) | Surface::Cylinder(_))
         && name_of_surface_bits(&mine.surface) == name_of_surface_bits(&theirs.surface)
         && mine.used == theirs.used
+}
+
+/// Whether two surfaces are one point set, however each is written.
+fn one_surface(one: &Surface, other: &Surface) -> bool {
+    name_of_the_surface_either_way_round(one) == name_of_the_surface_either_way_round(other)
+}
+
+/// Turn round each side of a closed edge that was read off the other spelling
+/// of the surface the mesher reads it off.
+///
+/// [`Edges::of`] reads which way a side walks a closed edge off that side's own
+/// pair of surfaces, and a pipe, a cone or a bend written with its axis the
+/// other way round is wound about the other way. Where the two faces either
+/// side are two spellings of one surface, the two sides are then each read
+/// against their own winding, and a union of two bars stacked on one pipe came
+/// back with both walls walking the circle between them "backwards" —
+/// `CoedgesRunTheSameWay`.
+///
+/// **The spelling that counts is the one the mesher reads**, which is the lower
+/// of the two faces' surfaces by their bits
+/// (`the_way_a_closed_edge_where_its_faces_touch_runs` in `mesh.rs`: the two
+/// gradients are parallel, so the crossing gives no direction and the winding
+/// of that one surface is all there is). That is a property of the two faces
+/// and not of which was handed over first, so the answer does not depend on
+/// argument order.
+///
+/// **Whether a spelling winds the other way is exact**: turning an axis round
+/// negates every product [`the_way_it_is_parametrised_about`] is made of, so
+/// the two windings are exact negatives of each other and their dot product is
+/// never a rounding away from zero.
+fn every_closed_edge_read_off_one_spelling(edges: &[Edge], corners: &[Corner], faces: &mut [Face]) {
+    let mut claimants: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); edges.len()];
+    for (face, walked) in faces.iter().enumerate() {
+        for (wire, ring) in walked.wires.iter().enumerate() {
+            for (position, side) in ring.iter().enumerate() {
+                claimants[side.edge].push((face, wire, position));
+            }
+        }
+    }
+    for (edge, by) in edges.iter().zip(&claimants) {
+        let &[one, other] = by.as_slice() else {
+            continue;
+        };
+        if edge.ends[0] != edge.ends[1] {
+            continue;
+        }
+        let surfaces = [one, other].map(|(face, _, _)| faces[face].surface);
+        if surfaces.iter().any(|surface| surface.as_plane().is_some())
+            || surfaces[0] == surfaces[1]
+            || !one_surface(&surfaces[0], &surfaces[1])
+        {
+            continue;
+        }
+        let at = corners[edge.ends[0]].point;
+        let reference = *surfaces
+            .iter()
+            .min_by_key(|surface| name_of_surface_bits(surface))
+            .expect("two surfaces");
+        let wound = the_way_it_is_parametrised_about(&reference, at);
+        for ((face, wire, position), surface) in [one, other].into_iter().zip(surfaces) {
+            if the_way_it_is_parametrised_about(&surface, at).dot(wound) < 0.0 {
+                let side = &mut faces[face].wires[wire][position];
+                side.forward = !side.forward;
+            }
+        }
+    }
 }
 
 /// Which faces are one once every dissolved edge is gone.
@@ -4109,24 +4195,20 @@ mod tests {
         );
     }
 
-    /// Two bars end to end on one pipe are refused before the spelling of that
-    /// pipe can matter, and this pin is what says so.
+    /// Two bars end to end on one pipe unite into one bar however the pipe is
+    /// written and whichever goes first.
     ///
-    /// The defect wants two solids flush on a shared curved face and one of them
-    /// holding its axis the other way round. Two bars on one line is that pair,
-    /// and the fuse does not reach it: it stops at *a point in a piece that
-    /// every solid could place*, undecidable, and stops there **just the same
-    /// when both bars spell the pipe the same way**. A point *was* found inside
-    /// the piece here; what could not be done was classifying it against both
-    /// bars, and §216.4 split the two so this pin says which. So the fold above
-    /// is demonstrated on the names
-    /// it fixes and not on an answer, and nothing here should be read as saying
-    /// the fuse handles two solids on one pipe.
+    /// The upper bar writes its wall with the axis pointing down. The circle
+    /// between the two walls then has two spellings of one pipe either side of
+    /// it, and two things went wrong there (§231): it was read as two pipes
+    /// crossing, which `rcad_geom::walk` walks as a straight line with no
+    /// points, and each wall read which way it walks the circle against its own
+    /// spelling, so both came out walking it the same way.
     ///
-    /// The pin fails the day that wall moves, which is the only thing that makes
-    /// a refusal worth keeping (§51.1).
+    /// `Model::validate` skips a closed edge between two faces on one pipe, so
+    /// the volume is what shows the circle was walked right.
     #[test]
-    fn two_bars_on_one_pipe_are_refused_the_same_however_the_pipe_is_written() {
+    fn two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written() {
         let up = Cylinder::new(Axis::z(), 1.0).expect("a radius");
         let down = Cylinder::new(Axis::z().reversed(), 1.0).expect("a radius");
         assert_ne!(
@@ -4135,36 +4217,55 @@ mod tests {
             "the same pipe written two ways is different numbers, which is the difficulty"
         );
 
-        let how_far_it_gets = |wall| {
+        let by_hand = 4.0 * core::f64::consts::PI;
+        let how_far_it_gets = |wall, lower_first: bool| {
             let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
             let policy = Policy::certified();
             let mut log = ProvenanceLog::new();
             let lower = a_bar_between(&mut model, 0.0, 2.0, up, &policy, &mut log);
             let upper = a_bar_between(&mut model, 2.0, 4.0, wall, &policy, &mut log);
-            format!(
-                "{:?}",
-                model
-                    .fuse(
-                        &[lower],
-                        &[upper],
-                        Rule::Union,
-                        &policy,
-                        &mut ProvenanceLog::new(),
-                    )
-                    .map(|fused| fused.solids().len())
-            )
+            let [arguments, tools] = if lower_first {
+                [lower, upper]
+            } else {
+                [upper, lower]
+            };
+            let fused = model
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    Rule::Union,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("two bars end to end unite");
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .expect("the answer validates");
+            let [solid] = fused.solids() else {
+                panic!("two bars end to end are one bar: {:?}", fused.solids());
+            };
+            let measured = model
+                .solid(*solid)
+                .expect("this model made the key")
+                .measure(
+                    rcad_geom::Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a bar measures");
+            assert!(
+                (measured.volume() - by_hand).abs() <= measured.volume_error(),
+                "{} ± {} against {by_hand}, lower first {lower_first}",
+                measured.volume(),
+                measured.volume_error()
+            );
         };
 
-        let both_ways_round = how_far_it_gets(down);
-        assert_eq!(
-            both_ways_round,
-            how_far_it_gets(up),
-            "the spelling of the pipe changed how far the fuse got"
-        );
-        assert!(
-            both_ways_round.contains("a point in a piece that every solid could place"),
-            "the wall moved, so the fold can be demonstrated on an answer now: {both_ways_round}"
-        );
+        for wall in [up, down] {
+            for lower_first in [true, false] {
+                how_far_it_gets(wall, lower_first);
+            }
+        }
     }
 
     /// A bar of radius one standing between two heights, on the pipe it is
