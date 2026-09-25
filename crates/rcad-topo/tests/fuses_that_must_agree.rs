@@ -350,9 +350,18 @@ const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 /// and four of them become comparisons. Every comparison that ran still agreed,
 /// either side of both moves.
 ///
+/// **It is 118 since §224.4**, and the four new comparisons are the flush pair —
+/// `side: 7, up_per_unit_wider: 8` at `[3, 3]` and at `[4, 4]` — under Union and
+/// Intersection. All four refused "a point in a piece that every solid could
+/// place" both ways round until a flat cap was asked what it holds; then one way
+/// round of each was refused `ResultIsNotManifold` until a closed curve's corner
+/// was chosen once for all the pieces that bring it.
+/// [`a_frustum_whose_cap_lies_in_the_blocks_roof_answers_the_same_either_way_round`]
+/// checks their volumes.
+///
 /// A drop here is a fuse that stopped answering, which is a regression and not a
 /// draw. Re-derive it when it moves; do not relax it to a floor (§19.1).
-const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 114;
+const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 118;
 
 /// How many of the comparisons a law over a bar leaning through a block has to
 /// have made (§191).
@@ -1630,23 +1639,13 @@ fn uniting_a_block_and_a_bar_the_other_way_round_gives_the_same_solid() {
     }
 }
 
-/// §31.7 criterion 15's second name, and **it cannot be met today**.
+/// §31.7 criterion 15's second name, over a bar: a bar with a bit-identical
+/// copy of itself taken away leaves nothing at all.
 ///
-/// A bar with a bit-identical copy of itself taken away should leave nothing at
-/// all, which is what the same question gives for every flat family in this
-/// file. What happens instead is a refusal: `Undecidable`, naming a point inside
-/// a piece of a face, at the bar's own seam corner. Two coincident curved faces
-/// are §36.16's row, and two copies of one bar is the plainest shape that
-/// reaches it.
-///
-/// So this test asserts the refusal **by name** rather than reporting a green
-/// run over a property that compared nothing — which is the shape §14.7 asks for
-/// when a family stops reaching its subject. The control is the same question
-/// with the bar replaced by a block, which answers and leaves nothing, so the
-/// difference between the two rows is the curve and nothing else.
-///
-/// The day the refusal is closed this test fails, and what replaces it is the
-/// assertion the criterion actually asks for.
+/// This was pinned as a refusal on "a point in a piece that every solid could
+/// place" until §224.4, which found it was the bar's flat caps and not its
+/// wall: a cap's one corner winds round nothing. The control is the same
+/// question with the bar replaced by a block.
 #[test]
 fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
     let pair = CurvedPair {
@@ -1670,29 +1669,12 @@ fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
         "the control: a block with a copy of itself taken away leaves nothing"
     );
 
-    let (mut model, keys) = pair.built_as_a_bar_and_a_copy_of_it();
-    match model.fuse(
-        &[keys[0]],
-        &[keys[1]],
-        Rule::Difference,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    ) {
-        Err(Error::Undecidable { records }) => assert_eq!(
-            records
-                .records()
-                .last()
-                .expect("a refusal names a decision")
-                .predicate(),
-            "a point in a piece that every solid could place",
-            "pinning what happens today: `A \\ A` over a bar is refused, not answered"
-        ),
-        Ok(fused) => panic!(
-            "the refusal is closed — assert the criterion instead, got {} solids",
-            fused.solids().len()
-        ),
-        Err(why) => panic!("`A \\ A` over a bar refused with {why}"),
-    }
+    let (model, keys) = pair.built_as_a_bar_and_a_copy_of_it();
+    let nothing = plainly_fused(&model, &[keys[0]], &[keys[1]], Rule::Difference);
+    assert!(
+        nothing.1.is_empty(),
+        "a bar with a copy of itself taken away leaves nothing"
+    );
 }
 
 /// The same three questions of a **ball**, and the ball answers all three where
@@ -1705,13 +1687,11 @@ fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
 /// [`a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all`] assert over
 /// the flat families, asserted here for real rather than pinned.
 ///
-/// **This is what makes the row above a statement about a pipe.** The bar
-/// refuses `A \ A` on [`A_POINT_EVERY_SOLID_COULD_PLACE`] and the ball does
-/// not, so §36.16's row is not *"two coincident curved faces"* — it is two
-/// coincident faces on a surface that closes round a seam, and a ball's skin has
-/// no seam a difference has to walk along. Which of those two the fix is aimed
-/// at is the difference between one surface's problem and every surface's, and
-/// nothing in the tree had asked.
+/// The bar refused `A \ A` on [`A_POINT_EVERY_SOLID_COULD_PLACE`] until
+/// §224.4 and the ball never did. That read as a statement about a surface that
+/// closes round a seam, and it was not: the ball has no flat face, and the
+/// bar's refusal was its flat caps, each a disk with one corner that winding
+/// counted as holding nothing.
 #[test]
 fn a_ball_and_a_copy_of_it_unite_share_and_cancel_the_way_a_solid_should() {
     let pair = BallAndBlock {
@@ -2593,7 +2573,7 @@ fn swapping_the_two_sides_of_a_block_and_a_frustum_changes_not_one_bit() {
 /// puts points in order along a hyperbola now, so nineteen of the forty-four the
 /// rule turned down answer instead.
 /// `tests/ordering_points_along_an_endless_bend.rs` is where that death is
-/// measured — none refused for want of an order, fifty-seven answering, and the
+/// measured — none refused for want of an order, fifty-nine answering, and the
 /// nineteen the rule was wrong about — and re-asserting any of it here would be a
 /// second copy of one measurement.
 ///
@@ -2675,6 +2655,69 @@ fn every_frustum_on_the_wider_grid_answers_the_same_whichever_side_comes_first()
         tally.meant_to_compare.get(),
         tally.compared.get()
     );
+}
+
+/// The flush pair of the wider grid, whose top cap lies in the block's roof,
+/// answers the same whichever side comes first, with the volume worked out by
+/// hand.
+///
+/// The frustum's cap circle starts at its seam vertex, and the block roof has
+/// the circle the cone cuts it in, started where the two surfaces alone put it.
+/// Selection keeps one of the two coincident disks, whichever came first, so a
+/// union kept the roof's disk one way round and the cap the other, and an
+/// intersection the same the other way. The side whose disk and ring disagreed
+/// about the circle's corner named two edges with one face each and was refused
+/// `ResultIsNotManifold`. A closed curve's corner is now chosen once, before
+/// any is named, by what it is.
+///
+/// The frustum runs from radius one at a unit below the floor to radius two at
+/// the roof, eight up; so the part below the floor is `π/3 · (1 + 9/8 + 81/64)`
+/// and the rest is `56π/3` less that.
+#[test]
+fn a_frustum_whose_cap_lies_in_the_blocks_roof_answers_the_same_either_way_round() {
+    let below_the_floor = std::f64::consts::PI / 3.0 * (1.0 + 1.125 + 1.125 * 1.125);
+    let the_frustum = 56.0 * std::f64::consts::PI / 3.0;
+    for at in [3, 4] {
+        let pair = FrustumAndBlock {
+            side: 7,
+            narrow: 1,
+            wide: 2,
+            up_per_unit_wider: 8,
+            at: [at, at],
+        };
+        for (rule, closed_form) in [
+            (Rule::Union, 343.0 + below_the_floor),
+            (Rule::Intersection, the_frustum - below_the_floor),
+        ] {
+            let (model, keys) = pair.build();
+            let forwards = plainly_fused(&model, &keys[..1], &keys[1..], rule);
+            let backwards = plainly_fused(&model, &keys[1..], &keys[..1], rule);
+            same_answer(
+                &answer_of(&forwards.0, &forwards.1),
+                &answer_of(&backwards.0, &backwards.1),
+                rule,
+                "swapping a block and a frustum flush in its roof",
+            )
+            .unwrap_or_else(|why| panic!("{pair:?}: {why}"));
+            assert_eq!(forwards.1.len(), 1, "{rule:?} of {pair:?} is one solid");
+            let measured = forwards
+                .0
+                .solid(forwards.1[0])
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid this size measures");
+            assert!(
+                (measured.volume() - closed_form).abs() <= measured.volume_error(),
+                "{rule:?} of {pair:?}: {} ± {} against {closed_form}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
 }
 
 /// Roadmap §11.2's first instruction, over a round solid, four milestones late.

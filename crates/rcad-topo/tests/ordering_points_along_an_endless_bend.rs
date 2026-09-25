@@ -148,8 +148,14 @@ fn not_one_block_on_the_grid_is_refused_for_want_of_an_order_along_its_curve() {
 /// ball-and-plane circle only and so called two arcs of a cone's rim circle one
 /// edge. Naming the two arcs apart answers all four, which is why the second
 /// wall is gone rather than smaller. §206.4.
+///
+/// **It is 59 now, and the second wall is gone.** The two that found a point and
+/// could not place it were the flush pair, whose top cap lies in the block's
+/// roof: the cap piece's point lay on the frustum's cap, and that cap, a disk
+/// with one corner, was wound by its corners and held nothing. §224.4 asks a
+/// flat face with a curved side through the solid's own point test instead.
 #[test]
-fn fifty_seven_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
+fn fifty_nine_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
     let mut answered = 0;
     let mut elsewhere: Vec<String> = Vec::new();
     for pair in the_grid() {
@@ -173,17 +179,14 @@ fn fifty_seven_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
     println!("and the walls they gave up at are {walls:?}");
     assert_eq!(
         walls,
-        BTreeMap::from([
-            ("a point in a piece that every solid could place", 2),
-            ("a point inside a piece of a face", 25),
-        ]),
+        BTreeMap::from([("a point inside a piece of a face", 25)]),
         "these are the walls the grid's refusals were measured against; re-derive them when they \
          move rather than widening the test (§19.1)"
     );
     assert_eq!(
-        answered, 57,
-        "the grid answered 38 of 84 before the bend could be ordered, 53 after, and 57 once a \
-         cone's rim circle had its two arcs named apart"
+        answered, 59,
+        "the grid answered 38 of 84 before the bend could be ordered, 53 after, 57 once a cone's \
+         rim circle had its two arcs named apart, and 59 once a flat cap was asked what it holds"
     );
 }
 
@@ -194,10 +197,10 @@ fn fifty_seven_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
 /// line. The rule allows forty of the eighty-four and turns down forty-four.
 /// **Nineteen of the forty-four answer now** — fifteen until a cone's rim circle
 /// had its two arcs named apart, and four more since; the other twenty-five stop
-/// in `select.rs`. Of the forty it allows, thirty-eight answer — the same
-/// thirty-eight as before, and the two that do not are the pair whose top cap
-/// lands exactly in the block's roof, which §49.6 counted separately as a flush
-/// cap and which still refuses.
+/// in `select.rs`. Of the forty it allows, all forty answer. The last two were
+/// the pair whose top cap lands exactly in the block's roof, which §49.6
+/// counted separately as a flush cap, and they answer since §224.4 asks the
+/// frustum's one-cornered cap what it holds rather than winding its corners.
 #[test]
 fn the_rule_that_said_which_frustums_a_block_could_cut_has_nineteen_exceptions() {
     let mut the_rule_said_yes_and_it_answered = 0;
@@ -213,8 +216,8 @@ fn the_rule_that_said_which_frustums_a_block_could_cut_has_nineteen_exceptions()
         }
     }
     assert_eq!(
-        the_rule_said_yes_and_it_answered, 38,
-        "the rule allowed 40, and the two it allows that still refuse are the flush pair"
+        the_rule_said_yes_and_it_answered, 40,
+        "the rule allowed 40, and the flush pair among them answers since §224.4"
     );
     assert_eq!(
         the_rule_said_no_and_it_answered, 19,
