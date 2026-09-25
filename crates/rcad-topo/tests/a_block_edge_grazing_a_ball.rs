@@ -30,9 +30,7 @@
 //! `[16, 16.000000000000004]`, and they share the point `16`.
 
 use rcad_geom::{Isometry, Scale, Vector};
-use rcad_predicates::{
-    Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record,
-};
+use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule};
 
 /// The name `order_along` records a refusal under.
@@ -56,7 +54,11 @@ fn two_meets_whose_boxes_touch_are_what_a_certified_fuse_refuses_on() {
              and this carried {records:#?}"
         );
         let refused = &records[0];
-        assert_eq!(refused.predicate(), ALONG_A_CROSSING, "{rule:?}: {refused:#?}");
+        assert_eq!(
+            refused.predicate(),
+            ALONG_A_CROSSING,
+            "{rule:?}: {refused:#?}"
+        );
         assert_eq!(refused.level(), Level::Interval, "{rule:?}");
         assert!(
             is_the_two_meets(refused),
