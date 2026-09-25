@@ -3415,7 +3415,8 @@ mod tests {
     /// an arena with it and panic.
     #[test]
     fn one_solid_naming_something_that_is_gone_is_refused_rather_than_crashing_the_walk() {
-        let take_one_out: [(&str, fn(&mut ModelData)); 6] = [
+        type TakesOneOut = fn(&mut ModelData);
+        let take_one_out: [(&str, TakesOneOut); 6] = [
             ("vertex", |data| {
                 let slot = data.vertices.keys().next().expect("a corner");
                 data.vertices.remove(slot);
