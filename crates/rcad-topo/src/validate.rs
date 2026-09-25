@@ -19,12 +19,12 @@ use crate::builder::the_ends_are_the_whole_of_it;
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
-use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot};
+use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
-use crate::model::{WireData, WireStep};
+use crate::model::{ModelData, WireData, WireStep};
 use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView};
-use crate::{EdgeView, Error, Invalid, Model, Result};
+use crate::{EdgeView, Error, Invalid, Model, Result, SolidKey};
 
 impl Model {
     /// Check every invariant in the model, from top to bottom.
@@ -41,7 +41,7 @@ impl Model {
     /// - every stored key names something that is still there — asked first,
     ///   for all seven arenas at once, because every check after it walks the
     ///   model through views and a view over a missing slot panics rather than
-    ///   refusing (`ModelData::check_keys_resolve`),
+    ///   refusing ([`check_keys_resolve_in`]),
     /// - no coordinate is infinite and no edge has zero length,
     /// - every edge is used by exactly two coedges running opposite ways,
     /// - every wire closes back on itself and has enough steps to bound
@@ -89,9 +89,87 @@ impl Model {
     /// solid — a refusal about the *sweep* rather than about the model, which is
     /// why [`how_far_the_sweeps_mesh_may_stray`] asks for the coarsest mesh
     /// there is.
+    ///
+    /// [`Model::validate_solid`] asks all of this of one solid instead, and runs
+    /// the same code to do it.
     pub fn validate(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
-        self.check_everything_but_the_coordinate_range(policy, log)?;
-        self.check_dynamic_range(policy, log)
+        let everything = Scope::everything(self.data());
+        self.check_everything_but_the_coordinate_range_in(&everything, policy, log)?;
+        self.check_dynamic_range(&everything, policy, log)
+    }
+
+    /// Check every invariant [`Model::validate`] checks, over one solid and what
+    /// it is built from — its shells, faces, wires, coedges and poles, edges and
+    /// corners — and over nothing else in the model.
+    ///
+    /// **It answers what [`Model::validate`] answers for a model holding this
+    /// solid alone.** That is how this kernel already judges a solid when it is
+    /// made: [`SolidBuilder::build`](crate::SolidBuilder::build) sweeps a scratch
+    /// model holding only the new solid, and a fuse sweeps a throwaway model
+    /// holding only its answer. So a solid is asked here the question it was
+    /// asked when it came into being, and a broken solid somewhere else in the
+    /// model does not change the answer.
+    ///
+    /// **It is not a second validator.** Every check takes the set of entities
+    /// it is to look at, and `validate` hands over every entity in the model
+    /// where this hands over what the solid reaches. Nothing is checked here
+    /// that `validate` does not check, and nothing is checked differently.
+    ///
+    /// # What "alone" means for the checks that read the whole model
+    ///
+    /// - **The rounding room is this solid's own.** How far a corner may sit off
+    ///   the plane of its face, or off its curved surface, grows with the
+    ///   largest coordinate in the model. Here that is the largest coordinate
+    ///   among this solid's own corners. Keeping the whole model's would let a
+    ///   solid a long way off widen the room a small cube's corners get, and
+    ///   accept a corner off its plane because of a neighbour. Accepting a
+    ///   broken solid is the worse of the two ways to be wrong.
+    /// - **The coordinate range is this solid's own**, largest coordinate
+    ///   against smallest feature, both read off this solid.
+    /// - **Sharing is still counted over the whole model.** A coedge, wire, face
+    ///   or shell this solid reaches that some other owner names too is refused
+    ///   as [`Invalid::UsedMoreThanOnce`], and an edge walked by a coedge of
+    ///   another solid is counted with it. Ignoring the other owner would pass a
+    ///   solid that a change to its neighbour silently changes.
+    /// - **Orphans are not asked about.** Everything this looks at is reached
+    ///   through what owns it, so none of it can be an orphan. A coedge, wire,
+    ///   face or shell that nothing owns belongs to no solid, and whether a model
+    ///   holds one is a question about the whole model, which `validate` asks.
+    ///
+    /// # Neither answer says what the other one will be
+    ///
+    /// - **`validate` can pass a model this refuses one of its solids in.** A
+    ///   solid far out makes the rounding room `validate` gives every corner
+    ///   wider, so a small cube's corner a little off its plane passes there and
+    ///   is refused here
+    ///   (`a_corner_the_far_solid_makes_room_for_is_refused_on_its_own`).
+    /// - **`validate` can refuse a model whose every solid this passes.** The
+    ///   coordinate range across two solids is wider than either one's own: a
+    ///   solid with a tiny step near the origin beside a block far out is too
+    ///   wide to compute in as a model, and each is fine
+    ///   (`two_solids_each_fine_on_its_own_can_be_too_far_apart_together`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`] if `solid` was made by a different model,
+    /// and otherwise whatever [`Model::validate`] does, asked of this solid
+    /// alone — less [`Invalid::Orphan`] for a coedge, wire, face or shell.
+    ///
+    /// # Panics
+    ///
+    /// If the key is this model's own and names nothing, the same way and for
+    /// the same reason as [`Model::solid`].
+    pub fn validate_solid(
+        &self,
+        solid: SolidKey,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let slot = solid.try_slot_in(self.id())?;
+        assert!(self.data().solids.contains_key(slot), "no such solid");
+        let reached = Scope::what_this_solid_reaches(self.data(), slot);
+        self.check_everything_but_the_coordinate_range_in(&reached, policy, log)?;
+        self.check_dynamic_range(&reached, policy, log)
     }
 
     /// Twelve of the sweep's thirteen checks: every one that is about an entity,
@@ -122,18 +200,37 @@ impl Model {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        self.data().check_keys_resolve()?;
-        self.check_vertices()?;
-        self.check_edges()?;
-        self.check_coedges()?;
-        self.check_wires()?;
-        self.check_faces(policy, log)?;
-        self.check_which_side_of_its_trimming_each_curved_face_lies_on()?;
-        self.check_closed_edges_are_walked_the_way_their_surfaces_wind()?;
-        self.check_no_flat_face_is_used_reversed()?;
-        self.check_no_face_use_carries_a_placement()?;
-        self.check_shells_and_solids(policy, log)?;
-        self.check_approximation_ordering()
+        self.check_everything_but_the_coordinate_range_in(
+            &Scope::everything(self.data()),
+            policy,
+            log,
+        )
+    }
+
+    /// The twelve checks, asked of what `scope` holds.
+    ///
+    /// Each check walks the scope's arenas in slot order, the order `validate`
+    /// has always walked the model's, so when the one solid a scope holds is the
+    /// only broken thing in a model, the first refusal it meets is the one
+    /// `validate` meets.
+    fn check_everything_but_the_coordinate_range_in(
+        &self,
+        scope: &Scope,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        check_keys_resolve_in(self.data(), scope)?;
+        self.check_vertices(scope)?;
+        self.check_edges(scope)?;
+        self.check_coedges(scope)?;
+        self.check_wires(scope)?;
+        self.check_faces(scope, policy, log)?;
+        self.check_which_side_of_its_trimming_each_curved_face_lies_on(scope)?;
+        self.check_closed_edges_are_walked_the_way_their_surfaces_wind(scope)?;
+        self.check_no_flat_face_is_used_reversed(scope)?;
+        self.check_no_face_use_carries_a_placement(scope)?;
+        self.check_shells_and_solids(scope, policy, log)?;
+        self.check_approximation_ordering(scope)
     }
 
     /// The shape checks a public method is allowed to take for granted, asked
@@ -222,12 +319,13 @@ impl Model {
         for slot in self.data().edges.keys() {
             self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
         }
-        self.check_no_flat_face_is_used_reversed()?;
-        self.check_no_face_use_carries_a_placement()
+        let everything = Scope::everything(self.data());
+        self.check_no_flat_face_is_used_reversed(&everything)?;
+        self.check_no_face_use_carries_a_placement(&everything)
     }
 
-    fn check_vertices(&self) -> Result<()> {
-        for slot in self.data().vertices.keys() {
+    fn check_vertices(&self, scope: &Scope) -> Result<()> {
+        for slot in scope.vertices.keys() {
             self.check_vertex(slot)?;
         }
         Ok(())
@@ -243,11 +341,11 @@ impl Model {
         Ok(())
     }
 
-    fn check_edges(&self) -> Result<()> {
-        let largest_coordinate = self.largest_coordinate();
+    fn check_edges(&self, scope: &Scope) -> Result<()> {
+        let largest_coordinate = self.largest_coordinate_in(scope);
         let rounding = self.what_writing_a_plane_down_costs(largest_coordinate);
         let writing_a_point_down = self.what_writing_a_point_down_costs(largest_coordinate);
-        for slot in self.data().edges.keys() {
+        for slot in scope.edges.keys() {
             self.check_edge(slot, rounding, writing_a_point_down)?;
         }
         Ok(())
@@ -258,7 +356,7 @@ impl Model {
     ///
     /// `rounding` is [`Model::what_writing_a_plane_down_costs`] and
     /// `writing_a_point_down` is [`Model::what_writing_a_point_down_costs`],
-    /// handed in because both fold over every vertex in the model and neither
+    /// handed in because both fold over every vertex in the scope and neither
     /// changes between edges.
     fn check_edge(&self, slot: EdgeSlot, rounding: f64, writing_a_point_down: f64) -> Result<()> {
         let edge = &self.data().edges[slot];
@@ -427,21 +525,21 @@ impl Model {
         })
     }
 
-    fn check_coedges(&self) -> Result<()> {
+    fn check_coedges(&self, scope: &Scope) -> Result<()> {
         used_exactly_once(
             "coedge",
-            self.data().coedges.keys(),
+            scope.coedges.keys(),
             self.data().wires.values().flat_map(WireData::coedges),
         )
     }
 
-    fn check_wires(&self) -> Result<()> {
-        for wire in self.data().wires.values() {
-            self.check_wire_closes(wire)?;
+    fn check_wires(&self, scope: &Scope) -> Result<()> {
+        for slot in scope.wires.keys() {
+            self.check_wire_closes(&self.data().wires[slot])?;
         }
         used_exactly_once(
             "wire",
-            self.data().wires.keys(),
+            scope.wires.keys(),
             self.data()
                 .faces
                 .values()
@@ -532,16 +630,16 @@ impl Model {
     /// it can be wound ([`check_flat_face`]), and walking a crossing is the one
     /// thing in this sweep that asks how hard to try. Nothing else here has
     /// grown an opinion about strictness.
-    fn check_faces(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
-        let largest_coordinate = self.largest_coordinate();
+    fn check_faces(&self, scope: &Scope, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        let largest_coordinate = self.largest_coordinate_in(scope);
         let allowed_wobble = self.allowed_wobble(largest_coordinate);
         let writing_a_point_down = self.what_writing_a_point_down_costs(largest_coordinate);
-        for slot in self.data().faces.keys() {
+        for slot in scope.faces.keys() {
             self.check_face(slot, allowed_wobble, writing_a_point_down, policy, log)?;
         }
         used_exactly_once(
             "face",
-            self.data().faces.keys(),
+            scope.faces.keys(),
             self.data()
                 .shells
                 .values()
@@ -553,7 +651,7 @@ impl Model {
     /// with its wires wound the way that surface points.
     ///
     /// `allowed_wobble` and `writing_a_point_down` both fold over every vertex
-    /// in the model and neither changes between faces, so both are worked out
+    /// in the scope and neither changes between faces, so both are worked out
     /// once by the caller and handed in.
     fn check_face(
         &self,
@@ -646,8 +744,8 @@ impl Model {
     ///
     /// [`Invalid::AFaceStraddlesSomethingTrimmingIt`], and
     /// [`Error::Undecidable`] when a corner's side could not be settled.
-    fn check_which_side_of_its_trimming_each_curved_face_lies_on(&self) -> Result<()> {
-        for slot in self.data().solids.keys() {
+    fn check_which_side_of_its_trimming_each_curved_face_lies_on(&self, scope: &Scope) -> Result<()> {
+        for slot in scope.solids.keys() {
             self.check_which_side_of_its_trimming_each_curved_face_of_this_solid_lies_on(slot)?;
         }
         Ok(())
@@ -732,8 +830,8 @@ impl Model {
     /// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`],
     /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a run kind this does not
     /// know, and whatever reading a corner's side refuses.
-    fn check_closed_edges_are_walked_the_way_their_surfaces_wind(&self) -> Result<()> {
-        for slot in self.data().solids.keys() {
+    fn check_closed_edges_are_walked_the_way_their_surfaces_wind(&self, scope: &Scope) -> Result<()> {
+        for slot in scope.solids.keys() {
             self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(slot)?;
         }
         Ok(())
@@ -893,8 +991,8 @@ impl Model {
     /// # Errors
     ///
     /// [`Invalid::AFlatFaceIsUsedReversed`].
-    fn check_no_flat_face_is_used_reversed(&self) -> Result<()> {
-        for slot in self.data().solids.keys() {
+    fn check_no_flat_face_is_used_reversed(&self, scope: &Scope) -> Result<()> {
+        for slot in scope.solids.keys() {
             self.check_no_flat_face_of_this_solid_is_used_reversed(slot)?;
         }
         Ok(())
@@ -953,8 +1051,8 @@ impl Model {
     /// # Errors
     ///
     /// [`Invalid::AFaceUseCarriesAPlacement`].
-    fn check_no_face_use_carries_a_placement(&self) -> Result<()> {
-        for slot in self.data().shells.keys() {
+    fn check_no_face_use_carries_a_placement(&self, scope: &Scope) -> Result<()> {
+        for slot in scope.shells.keys() {
             self.check_no_face_of_this_shell_carries_a_placement(slot)?;
         }
         Ok(())
@@ -969,17 +1067,22 @@ impl Model {
         Ok(())
     }
 
-    fn check_shells_and_solids(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+    fn check_shells_and_solids(
+        &self,
+        scope: &Scope,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
         used_exactly_once(
             "shell",
-            self.data().shells.keys(),
+            scope.shells.keys(),
             self.data()
                 .solids
                 .values()
                 .flat_map(|solid| solid.shells.iter().map(|used| used.shell)),
         )?;
 
-        for slot in self.data().solids.keys() {
+        for slot in scope.solids.keys() {
             self.check_this_solid_encloses_space(slot, policy, log)?;
         }
         Ok(())
@@ -1029,20 +1132,20 @@ impl Model {
     /// `check_keys_resolve` is at the head of [`Model::validate`] when
     /// `Deserialize` has already run it: the sweep says what it depends on out
     /// loud rather than depending on it silently.
-    fn check_approximation_ordering(&self) -> Result<()> {
-        for vertex in self.data().vertices.values() {
-            slop_is_a_length("vertex", vertex.approximation)?;
+    fn check_approximation_ordering(&self, scope: &Scope) -> Result<()> {
+        for slot in scope.vertices.keys() {
+            slop_is_a_length("vertex", self.data().vertices[slot].approximation)?;
         }
-        for edge in self.data().edges.values() {
-            slop_is_a_length("edge", edge.approximation)?;
+        for slot in scope.edges.keys() {
+            slop_is_a_length("edge", self.data().edges[slot].approximation)?;
         }
-        for face in self.data().faces.values() {
-            slop_is_a_length("face", face.approximation)?;
+        for slot in scope.faces.keys() {
+            slop_is_a_length("face", self.data().faces[slot].approximation)?;
         }
-        for slot in self.data().edges.keys() {
+        for slot in scope.edges.keys() {
             self.check_this_edge_claims_no_less_slop_than_its_corners(slot)?;
         }
-        for slot in self.data().faces.keys() {
+        for slot in scope.faces.keys() {
             self.check_this_face_claims_no_less_slop_than_its_edges(slot)?;
         }
         Ok(())
@@ -1101,15 +1204,29 @@ impl Model {
     ///
     /// Lengths are not affected by placement, so the smallest feature is read
     /// straight off the edges.
-    fn check_dynamic_range(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
-        let largest = self
-            .solids()
+    ///
+    /// Both ends of the range are read off `scope` alone. Over the whole model
+    /// that is a fold across every solid, so two solids each narrow enough on
+    /// their own can be too far apart together — see
+    /// [`Model::validate_solid`].
+    fn check_dynamic_range(
+        &self,
+        scope: &Scope,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let solids = || {
+            scope.solids.keys().map(|slot| {
+                SolidView::new(self, slot, Isometry::identity(), Orientation::Forward)
+            })
+        };
+        let largest = solids()
             .flat_map(|solid| solid.faces())
             .flat_map(|face| face.wires())
             .flat_map(|wire| wire.points())
             .map(|corner| corner.largest_coordinate_magnitude())
             .fold(0.0, f64::max);
-        let writing_it_down = self.what_writing_a_point_down_costs(self.largest_coordinate());
+        let writing_it_down = self.what_writing_a_point_down_costs(self.largest_coordinate_in(scope));
         // A closed edge is skipped rather than measured, because the distance
         // between its two ends is zero and that is not how small it is — it is
         // a whole circle. What stands in for it is the radius of the curved
@@ -1124,13 +1241,13 @@ impl Model {
         // `check_closed_edges_are_walked_the_way_their_surfaces_wind` already
         // gives the same arrival, ten checks up this file.
         let mut smallest_chord = f64::INFINITY;
-        for edge in self.edges() {
+        for slot in scope.edges.keys() {
+            let edge = EdgeView::new(self, slot, Isometry::identity(), Orientation::Forward);
             if !edge.is_closed()? {
                 smallest_chord = smallest_chord.min(edge.distance_between_its_ends());
             }
         }
-        let smallest_radius = self
-            .solids()
+        let smallest_radius = solids()
             .flat_map(|solid| solid.faces())
             .filter_map(|face| match face.surface() {
                 Surface::Plane(_) => None,
@@ -1255,14 +1372,14 @@ impl Model {
     /// twenty and ten millimetres off their own planes straight through here.
     /// `docs/decisions.md` §70.
     ///
-    /// [`Model::largest_coordinate`] is measured rather than declared, and a
+    /// [`Model::largest_coordinate_in`] is measured rather than declared, and a
     /// part that really is that big has corners to match, so taking the smaller
     /// of the two costs a legitimate large model nothing and leaves a model that
     /// overstates itself with the tolerance its own corners earn.
     ///
     /// The largest coordinate is handed in rather than folded for, because
     /// every caller wants two or three of these numbers and the fold is
-    /// [`Model::largest_coordinate`]'s pass over every vertex in the model.
+    /// [`Model::largest_coordinate_in`]'s pass over every vertex in the scope.
     fn allowed_wobble(&self, largest_coordinate: f64) -> f64 {
         let what_the_model_says = self.scale().default_linear_tolerance();
         let what_its_corners_show = Scale::RELATIVE_LINEAR_TOLERANCE * largest_coordinate;
@@ -1316,14 +1433,176 @@ impl Model {
         MEASURING_SLACK * NEAREST_F64_POINT_ROUNDOFF * largest_coordinate
     }
 
-    /// The largest coordinate magnitude any corner of the model holds.
-    fn largest_coordinate(&self) -> f64 {
-        self.data()
+    /// The largest coordinate magnitude any corner in `scope` holds.
+    ///
+    /// Read where the corners are stored, not where a placement puts them,
+    /// because every check that sizes its room from this reads its faces at
+    /// [`Isometry::identity`] too.
+    fn largest_coordinate_in(&self, scope: &Scope) -> f64 {
+        scope
             .vertices
-            .values()
-            .map(|vertex| vertex.point.largest_coordinate_magnitude())
+            .keys()
+            .map(|slot| self.data().vertices[slot].point.largest_coordinate_magnitude())
             .fold(0.0, f64::max)
     }
+}
+
+/// The entities one sweep asks about: every one in the model, for
+/// [`Model::validate`], or what one solid reaches, for
+/// [`Model::validate_solid`].
+///
+/// One map per arena, and every check walks its arena's map in place of the
+/// arena. A `SecondaryMap` walks in slot order, the order a `SlotMap` walks
+/// in, so a scope holding every slot walks exactly as `validate` always did.
+struct Scope {
+    vertices: SecondaryMap<VertexSlot, ()>,
+    edges: SecondaryMap<EdgeSlot, ()>,
+    coedges: SecondaryMap<CoedgeSlot, ()>,
+    wires: SecondaryMap<WireSlot, ()>,
+    faces: SecondaryMap<FaceSlot, ()>,
+    shells: SecondaryMap<ShellSlot, ()>,
+    solids: SecondaryMap<SolidSlot, ()>,
+}
+
+impl Scope {
+    fn everything(data: &ModelData) -> Self {
+        Self {
+            vertices: data.vertices.keys().map(|slot| (slot, ())).collect(),
+            edges: data.edges.keys().map(|slot| (slot, ())).collect(),
+            coedges: data.coedges.keys().map(|slot| (slot, ())).collect(),
+            wires: data.wires.keys().map(|slot| (slot, ())).collect(),
+            faces: data.faces.keys().map(|slot| (slot, ())).collect(),
+            shells: data.shells.keys().map(|slot| (slot, ())).collect(),
+            solids: data.solids.keys().map(|slot| (slot, ())).collect(),
+        }
+    }
+
+    /// The solid, and everything reached walking down from it.
+    ///
+    /// **A key that names nothing is stepped over rather than followed**, so
+    /// that the walk cannot panic on a model `validate` would refuse by name.
+    /// What stepped over it is still in the scope, and [`check_keys_resolve_in`]
+    /// refuses it first thing.
+    fn what_this_solid_reaches(data: &ModelData, solid: SolidSlot) -> Self {
+        let mut reached = Self {
+            vertices: SecondaryMap::new(),
+            edges: SecondaryMap::new(),
+            coedges: SecondaryMap::new(),
+            wires: SecondaryMap::new(),
+            faces: SecondaryMap::new(),
+            shells: SecondaryMap::new(),
+            solids: SecondaryMap::new(),
+        };
+        reached.solids.insert(solid, ());
+        for used in &data.solids[solid].shells {
+            let Some(shell) = data.shells.get(used.shell) else {
+                continue;
+            };
+            reached.shells.insert(used.shell, ());
+            for used in &shell.faces {
+                let Some(face) = data.faces.get(used.face) else {
+                    continue;
+                };
+                reached.faces.insert(used.face, ());
+                for &slot in &face.wires {
+                    let Some(wire) = data.wires.get(slot) else {
+                        continue;
+                    };
+                    reached.wires.insert(slot, ());
+                    for &step in &wire.steps {
+                        reached.add_what_a_step_reaches(data, step);
+                    }
+                }
+            }
+        }
+        reached
+    }
+
+    fn add_what_a_step_reaches(&mut self, data: &ModelData, step: WireStep) {
+        let corners = match step {
+            WireStep::Along(slot) => {
+                let Some(coedge) = data.coedges.get(slot) else {
+                    return;
+                };
+                self.coedges.insert(slot, ());
+                let Some(edge) = data.edges.get(coedge.edge) else {
+                    return;
+                };
+                self.edges.insert(coedge.edge, ());
+                [edge.start, edge.end]
+            }
+            WireStep::Pole(corner) => [corner, corner],
+        };
+        for corner in corners {
+            if data.vertices.contains_key(corner) {
+                self.vertices.insert(corner, ());
+            }
+        }
+    }
+}
+
+/// Every slot stored in an entity of `scope` names an entity the arenas hold.
+///
+/// `ModelData::check_keys_resolve`'s question and its order — edges, coedges,
+/// wires, faces, shells, solids — asked of the scope rather than of every
+/// arena, so that the first dangling key `validate` names is the first one
+/// [`Model::validate_solid`] names when it is in that solid.
+///
+/// # Errors
+///
+/// [`Invalid::DanglingKey`] naming the kind of entity the first slot that
+/// resolves to nothing was reaching for.
+fn check_keys_resolve_in(data: &ModelData, scope: &Scope) -> Result<()> {
+    for slot in scope.edges.keys() {
+        let edge = &data.edges[slot];
+        for end in [edge.start, edge.end] {
+            if !data.vertices.contains_key(end) {
+                return Err(Invalid::DanglingKey { entity: "vertex" }.into());
+            }
+        }
+    }
+    for slot in scope.coedges.keys() {
+        if !data.edges.contains_key(data.coedges[slot].edge) {
+            return Err(Invalid::DanglingKey { entity: "edge" }.into());
+        }
+    }
+    for slot in scope.wires.keys() {
+        let wire = &data.wires[slot];
+        for coedge in wire.coedges() {
+            if !data.coedges.contains_key(coedge) {
+                return Err(Invalid::DanglingKey { entity: "coedge" }.into());
+            }
+        }
+        for &step in &wire.steps {
+            if let WireStep::Pole(vertex) = step
+                && !data.vertices.contains_key(vertex)
+            {
+                return Err(Invalid::DanglingKey { entity: "vertex" }.into());
+            }
+        }
+    }
+    for slot in scope.faces.keys() {
+        for &wire in &data.faces[slot].wires {
+            if !data.wires.contains_key(wire) {
+                return Err(Invalid::DanglingKey { entity: "wire" }.into());
+            }
+        }
+    }
+    for slot in scope.shells.keys() {
+        for used in &data.shells[slot].faces {
+            if !data.faces.contains_key(used.face) {
+                return Err(Invalid::DanglingKey { entity: "face" }.into());
+            }
+        }
+    }
+    for slot in scope.solids.keys() {
+        for used in &data.solids[slot].shells {
+            if !data.shells.contains_key(used.shell) {
+                return Err(Invalid::DanglingKey { entity: "shell" }.into());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether an edge bends, every face along it sits on a plane, and its run names
@@ -2912,8 +3191,8 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        Decision, a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets,
-        gradient_of, winding_of, winding_round,
+        Decision, Scope, a_closed_crossing_is_walked_the_way_it_is_stored,
+        as_coarse_as_a_mesh_gets, gradient_of, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -2971,6 +3250,11 @@ mod tests {
         model
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .expect("this model is sound");
+    }
+
+    /// The largest coordinate `validate` sizes its room from.
+    fn largest_coordinate(model: &Model) -> f64 {
+        model.largest_coordinate_in(&Scope::everything(model.data()))
     }
 
     /// The one invariant the sweep refused this model for.
@@ -3373,7 +3657,7 @@ mod tests {
         model
             .add_ball(2.0, &Isometry::identity())
             .expect("a ball of radius two");
-        let rounding = model.what_writing_a_plane_down_costs(model.largest_coordinate());
+        let rounding = model.what_writing_a_plane_down_costs(largest_coordinate(&model));
 
         nudge_the_seam_plane(&mut model, rounding / 2.0);
 
@@ -3386,7 +3670,7 @@ mod tests {
         model
             .add_ball(2.0, &Isometry::identity())
             .expect("a ball of radius two");
-        let rounding = model.what_writing_a_plane_down_costs(model.largest_coordinate());
+        let rounding = model.what_writing_a_plane_down_costs(largest_coordinate(&model));
 
         nudge_the_seam_plane(&mut model, rounding * 2.0);
 
@@ -3459,7 +3743,7 @@ mod tests {
         };
 
         model
-            .check_edges()
+            .check_edges(&Scope::everything(model.data()))
             .expect("the corner sits in the plane the rim names");
     }
 
@@ -3498,7 +3782,7 @@ mod tests {
         model
             .add_ball(2.0, &Isometry::identity())
             .expect("a ball of radius two");
-        let rounding = model.what_writing_a_point_down_costs(model.largest_coordinate());
+        let rounding = model.what_writing_a_point_down_costs(largest_coordinate(&model));
 
         nudge_a_pole_off_the_ball(&mut model, rounding / 2.0);
 
@@ -3515,7 +3799,7 @@ mod tests {
         model
             .add_ball(2.0, &Isometry::identity())
             .expect("a ball of radius two");
-        let rounding = model.what_writing_a_point_down_costs(model.largest_coordinate());
+        let rounding = model.what_writing_a_point_down_costs(largest_coordinate(&model));
 
         nudge_a_pole_off_the_ball(&mut model, rounding * 2.0);
 
@@ -4243,7 +4527,7 @@ mod tests {
     #[test]
     fn a_corner_within_the_allowed_wobble_of_its_face_plane_is_let_through() {
         let mut model = a_cube();
-        let allowed = model.allowed_wobble(model.largest_coordinate());
+        let allowed = model.allowed_wobble(largest_coordinate(&model));
         lift_the_first_corner(&mut model, allowed / 2.0);
 
         a_clean_sweep(&model);
@@ -4252,7 +4536,7 @@ mod tests {
     #[test]
     fn a_corner_further_off_its_face_plane_than_that_is_caught() {
         let mut model = a_cube();
-        let allowed = model.allowed_wobble(model.largest_coordinate());
+        let allowed = model.allowed_wobble(largest_coordinate(&model));
         lift_the_first_corner(&mut model, allowed * 2.0);
 
         match refusal(&model) {
