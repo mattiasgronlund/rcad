@@ -747,7 +747,7 @@ impl Assembly {
             let inside: Vec<usize> = (0..self.edges.len())
                 .filter(|&edge| dissolved[edge] && members.contains(&along[edge][0].face))
                 .collect();
-            if self.lies_flat(&members, along, dissolved) {
+            if self.needs_no_seam(&members, along, dissolved) {
                 continue;
             }
             let seam = self.a_seam_across_the_band(&members, along, dissolved, &inside);
@@ -759,12 +759,28 @@ impl Assembly {
         staying
     }
 
-    /// Whether no ring of the face `members` join into goes right round.
-    fn lies_flat(&self, members: &[usize], along: &[[Dart; 2]], dissolved: &[bool]) -> bool {
+    /// Whether every ring of the face `members` join into either goes right
+    /// round as one closed side on its own, or does not go right round at all.
+    ///
+    /// **A whole circle on its own is the band the arrangement already makes**: a frustum cut by a
+    /// block's floor comes out as two bands, each between two whole circles
+    /// and with no seam, and both are written and fused again as they are. So
+    /// the two joined back across the circle between them need no seam either,
+    /// and there is none to keep — a closed edge runs round a ring, never from
+    /// one ring to the other. Leaving them apart kept that circle's one corner
+    /// in the answer, and `A ∪ (A ∩ B)` came back with a corner `A` never had
+    /// (`fuse_laws_over_a_cone.rs`,
+    /// `a_cone_united_with_what_it_shares_with_a_block_is_the_cone`).
+    ///
+    /// A ring of several arcs that goes right round is not covered: that one
+    /// does need a seam, and [`Assembly::a_seam_across_the_band`] finds it.
+    fn needs_no_seam(&self, members: &[usize], along: &[[Dart; 2]], dissolved: &[bool]) -> bool {
         let surface = self.faces[members[0]].surface;
         self.rings_of_a_curved_face(members, along, dissolved)
             .iter()
-            .all(|ring| self.a_ring_goes_right_round(ring, &surface) == Some(false))
+            .all(|ring| {
+                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
+            })
     }
 
     /// The dissolved edge that runs from one ring of a band to the other with
