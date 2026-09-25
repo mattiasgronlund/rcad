@@ -86,7 +86,12 @@ of a fill's rows in one message. Flip each row to `lane:<branch>` in
 every brief carries:
 
 - the base sha, and as its first two commands `git log --oneline -1` and
-  `git checkout -B <branch> <base sha>`, with both outputs reported back;
+  `git switch -c <branch> <base sha>`, with both outputs reported back — and
+  "if the switch says the branch already exists, stop and report it as
+  blocked". A reset (`checkout -B`, `switch -C`) rewinds a branch an older
+  worktree may still hold, and that tree's next commit reverts everything
+  after it (§237). **The branch must not exist yet**: this repo keeps its
+  finished `lane-*` branches, so check `git branch --list 'lane-*'` first;
 - the write set, as "you own these files and no others; stop and report a
   change outside them";
 - nothing about the context hook, unless you expect the lane to run long. A
@@ -110,7 +115,11 @@ ready at once, with a dispatcher who means to wait for all of them. `Workflow`
 with `name: "lanes"` (or `scriptPath: ".claude/workflows/lanes.js"` if the
 registry answers *not found*); its `args` are `{ base, lanes: [ { label, brief,
 writeSet, model, sourcePaths, report, verify } ] }`, and it appends the shared
-rules above to each brief itself.
+rules above to each brief itself, the `switch -c` and its refusal included. A
+lane's `branch` defaults to `lane-<label>`, so a label reused from an earlier
+batch stops that lane at its second command. An empty `writeSet` makes a
+read-only lane. `sourcePaths` defaults to the `crates/<c>/src` directories in the
+write set; set it by hand when that is not what the verifier should revert.
 
 ## 6. When a lane reports: verify it, then refill the slot
 
