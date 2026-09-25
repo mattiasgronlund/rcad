@@ -32,7 +32,7 @@ use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
     Scale, Surface, Vector,
 };
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
     Containment, DraftEdge, DraftStep, DraftVertex, EdgeKey, EdgeView, Error, Invalid, Measurement,
     Model, ProfileBuilder, Result, Rule, SolidBuilder, SolidKey, VertexKey, VertexView,
@@ -146,13 +146,13 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// The measurement half of the oracle is exactly the cube's, the bar's and
 /// the ball's: volume, area and centroid, read through views only, compared
 /// bit for bit. The fuse half cannot copy `the_same_numbers`'s shape, because
-/// **no solid this kernel holds fuses successfully with a torus-faced solid
+/// **no solid this kernel holds fuses with a torus-faced solid into a solid
 /// today** — not a plane-bounded block, not a second bend on the bend's own
 /// axis, not even a bit-for-bit copy of the bend itself
-/// (`a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule` in
-/// `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: two bends
-/// sharing a torus get further than anything else does — the whole
-/// arrangement runs — and stop at choosing which pieces to keep).
+/// (`a_bend_fused_with_a_copy_of_itself_is_nothing_less_it_and_refused_otherwise`
+/// in `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: a bend
+/// less its copy is answered, and is nothing, and the union and the
+/// intersection are refused writing the bend back out).
 ///
 /// So the fuse half of the oracle here compares the **refusal**: the same
 /// rule against the same third solid must refuse the same way for both.
@@ -192,13 +192,19 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// rather than asking, and moves on to the next node as it does for any point
 /// on the plane.
 ///
-/// **Past it, both descriptions stop where a bend fused with its copy stops.**
-/// The arrangement runs to the end and selection finds `(4, 0, 0)` inside the
-/// first bend's end cap on `y = 0`, but the ray fired from it at the turned
-/// bend answers `CannotFollowAFacesTrimming` on the turned bend's torus face,
-/// so the cap cannot be placed: "a point in a piece that every solid could
-/// place". Both descriptions refuse it word for word alike, which is what this
-/// half of the oracle compares.
+/// **Past it, the ray from `(4, 0, 0)` in the end cap on `y = 0` could not
+/// follow the turned bend's torus face.** `holds.rs` follows a bend's wall now
+/// (§243): that cap is placed outside the turned bend, which starts an eighth
+/// of a turn further round, and the cap on `x = 0` inside it.
+///
+/// **Both descriptions now stop on the first bend's wall**, at the piece of it
+/// between `y = 0` and the turned bend's cap: corners `(3, 0, 0)` and where
+/// that cap's circle crosses the outer equator, `(5/√2, 5/√2, 0)`. Every point
+/// selection tries in a curved piece is built from its corners, so it is a
+/// box and not a point, and a ray from a box cannot be put to a torus —
+/// `CannotFireARayAtAFacesSurface` on the turned bend's torus face. Both
+/// descriptions refuse it word for word alike, which is what this half of the
+/// oracle compares.
 #[test]
 fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let policy = Policy::certified();
@@ -250,10 +256,7 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let refusal_of_rebuilt =
         refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
     let Error::Undecidable { records } = &refusal_of_built else {
-        panic!(
-            "expected the point inside the end cap on y = 0 not to be placed, got \
-             {refusal_of_built:?}"
-        );
+        panic!("expected the piece of the wall not to be placed, got {refusal_of_built:?}");
     };
     let record = records.records().last().expect("a refusal names why");
     assert_eq!(
@@ -261,16 +264,22 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
         "a point in a piece that every solid could place",
         "{refusal_of_built:?}"
     );
-    let corners: Vec<_> = record
-        .inputs()
-        .iter()
-        .map(|corner| corner.enclosure().map(|axis| [axis.lo(), axis.hi()]))
-        .collect();
+    let [near, far] = record.inputs() else {
+        panic!("the piece of the wall has two corners: {refusal_of_built:?}");
+    };
     assert_eq!(
-        corners,
-        [[[3.0, 3.0], [0.0, 0.0], [0.0, 0.0]]],
-        "the piece is the first bend's end cap on y = 0: {refusal_of_built:?}"
+        near.enclosure().map(|axis| [axis.lo(), axis.hi()]),
+        [[3.0, 3.0], [0.0, 0.0], [0.0, 0.0]],
+        "the near corner of the first bend's wall: {refusal_of_built:?}"
     );
+    let on_the_outer_equator = 5.0 * core::f64::consts::FRAC_1_SQRT_2;
+    let where_it_should_be = [on_the_outer_equator, on_the_outer_equator, 0.0];
+    for (axis, should) in far.enclosure().iter().zip(where_it_should_be) {
+        assert!(
+            axis.lo() <= should && should <= axis.hi(),
+            "the turned cap's circle crosses the outer equator at (5/√2, 5/√2, 0): {far:?}"
+        );
+    }
     assert_eq!(
         format!("{refusal_of_built}"),
         format!("{refusal_of_rebuilt}"),
@@ -280,13 +289,23 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let mut scratch = model.clone();
     let turned = a_turned_bend_of_the_same_ring_and_tube(&mut scratch);
     let turned = scratch.solid(turned).expect("this model made the key");
-    let placed = turned.classify_uncertain_point(
+    let from_the_cap = turned.classify_uncertain_point(
         PredicatePoint::from([4.0, 0.0, 0.0]),
         &policy,
         &mut ProvenanceLog::new(),
     );
-    let Containment::CannotFollowAFacesTrimming { face } = placed else {
-        panic!("the ray from the middle of the cap: {placed:?}");
+    assert_eq!(
+        from_the_cap,
+        Containment::Outside,
+        "the middle of the end cap on y = 0 is an eighth of a turn short of the turned bend"
+    );
+    let between_the_corners = PredicatePoint::Constructed(core::array::from_fn(|axis| {
+        (near.enclosure()[axis] + far.enclosure()[axis]) * Interval::exactly(0.5)
+    }));
+    let placed =
+        turned.classify_uncertain_point(between_the_corners, &policy, &mut ProvenanceLog::new());
+    let Containment::CannotFireARayAtAFacesSurface { face } = placed else {
+        panic!("a ray from a blend of the wall piece's corners: {placed:?}");
     };
     let surface = turned
         .faces()
@@ -295,7 +314,7 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
         .surface();
     assert!(
         matches!(surface, Surface::Torus(_)),
-        "the face the ray cannot follow: {surface:?}"
+        "the face the ray cannot be fired at: {surface:?}"
     );
 }
 
