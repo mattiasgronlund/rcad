@@ -430,10 +430,10 @@ pub use rcad_predicates::{
 };
 pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex,
-    DraftWire, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef, FaceView, Fused, Invalid,
-    Length, Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile, ProfileBuilder,
-    ROOM_FOR_ATAN2, Rule, ShellKey, ShellView, SolidBuilder, SolidKey, SolidView, VertexKey,
-    VertexView, WhichModelThisIs, WireKey, WireStepView, WireView,
+    DraftWire, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceMeasurement, FaceRef, FaceView,
+    Fused, Invalid, Length, Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile,
+    ProfileBuilder, ROOM_FOR_ATAN2, Rule, ShellKey, ShellView, SolidBuilder, SolidKey, SolidView,
+    VertexKey, VertexView, WhichModelThisIs, WireKey, WireStepView, WireView,
 };
 
 /// Reading and writing an ISO 10303-21 ("STEP", "Part 21") file.

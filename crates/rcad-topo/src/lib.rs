@@ -113,7 +113,7 @@ pub use fuse::{Fused, Rule};
 pub use holds::OnAFace;
 pub use key::{CoedgeKey, EdgeKey, FaceKey, ShellKey, SolidKey, VertexKey, WireKey};
 pub use length::{Length, ROOM_FOR_ATAN2};
-pub use measure::Measurement;
+pub use measure::{FaceMeasurement, Measurement};
 pub use mesh::{Mesh, MeshTriangle};
 pub use model::{Model, WhichModelThisIs};
 pub use overlap::SharedSpace;
