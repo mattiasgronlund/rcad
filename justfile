@@ -95,6 +95,8 @@ gate_steps := "check-plugins \
     check-status-selftest \
     check-plan \
     check-plan-selftest \
+    check-queue \
+    check-queue-selftest \
     check-hub \
     check-hub-selftest \
     check-hub-align-selftest \
@@ -748,7 +750,8 @@ check-gate-docs-selftest:
     # What a prose commit can actually break. Named one by one rather than
     # counted, because the count would survive the swap that matters.
     for needed in check-decisions check-decisions-selftest check-claim-section-selftest \
-                  check-plan check-plan-selftest check-where-the-work-is; do
+                  check-plan check-plan-selftest check-queue check-queue-selftest \
+                  check-where-the-work-is; do
         grep -qx "$needed" <<<"$docs_arm" \
             || fail "$needed is not in the docs arm, so a docs commit would be checked by nothing that reads docs"
     done
@@ -1502,8 +1505,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "44" ]; then \
-        echo "found $n check-* recipes, expected 44"; \
+    if [ "$n" != "46" ]; then \
+        echo "found $n check-* recipes, expected 46"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -4062,8 +4065,8 @@ check-fuzz-overnight-selftest:
     done
     #
     # **`slow-unit-` by default, and `crash-` only when an arm asks.** A clean
-    # night writes slow units — the night of 2026-09-13 wrote three and correctly
-    # said "nothing found" — so that is what an unremarkable target leaves behind.
+    # night writes slow units — the night of 2026-09-13 wrote three — so that is
+    # what an unremarkable target leaves behind.
     # Since §134 a crash file is what fails a night, and a stub that wrote one
     # every time would leave no fixture able to express a good night at all.
     kind="${STUB_ARTIFACT_KIND:-slow-unit-}"
@@ -6243,6 +6246,11 @@ check-prune-worktrees-selftest:
 # `docs/decisions.md` §0 and this prints it; §102 argues why there and not in a
 # file of its own. The other four are facts, and they are read fresh every time.
 #
+# **The queue's ready rows follow §0**, because since §230 they are what §0's
+# "Next" line used to be: what the free slots take. `queue ready` prints them in
+# the order a fill does; its stderr is left to show, so a queue it cannot read
+# says why here rather than looking empty.
+#
 # **It never fails.** A row that cannot be answered says so in place of its
 # answer — the shape `fuzz-watermark` already has, and for the same reason: a
 # survey that exits non-zero because `gh` was not on PATH is a survey nobody
@@ -6259,6 +6267,11 @@ status dir=".":
     if [ -n "$reviewed" ] && stamp=$(date -d "$reviewed" +%s 2>/dev/null); then
         echo "(last reviewed $(( ( $(date +%s) - stamp ) / 86400 )) days ago)"
     fi
+
+    echo
+    echo "=== ready in the queue (docs/queue.md, §230) ==="
+    {{ just_executable() }} queue ready
+    echo "(\`just queue\` for what is running and waiting too, \`just queue next\` for what the free slots take)"
 
     echo
     echo "=== the board ==="
@@ -6533,6 +6546,564 @@ check-plan-selftest:
 
     # As in check-status-selftest: every assertion above is `command && fail`,
     # so the last one leaves its own non-zero status behind when it passes.
+    exit 0
+
+# The queue of `docs/decisions.md` §230: one file holding a row per open item,
+# and a fill that gives every free slot the highest ready row that fits. Six
+# slots is §230.8's number. It lives here so that `queue next` and the line
+# `check-queue` prints on a pass count against the same one.
+queue_file := "docs/queue.md"
+queue_slots := "6"
+
+# **One parse, and both readers use it.** `queue` decides what to dispatch and
+# `check-queue` decides whether the file is sound. If each split a row its own
+# way, a row could pass the check and still be read differently by the fill. So
+# this is the one place that knows what a row is: a line inside a fence, five
+# fields and then the description (§230.2).
+#
+# It prints a record per `##` heading, per fence line and per row, and one more
+# when a fence is left open at the end. Fields are split by the unit separator
+# `\037`, because no row can hold one and a tab or a space can.
+[doc("Split docs/queue.md into its headings, fences and rows, once, for queue and check-queue to share.")]
+_queue-rows file:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -f '{{ file }}' ] || { echo "{{ file }}: no such file" >&2; exit 1; }
+    LC_ALL=C awk '
+        BEGIN { S = "\037"; head = ""; inside = 0 }
+        /^```/ {
+            print "F" S NR S (inside ? "close" : "open") S head
+            if (!inside) opened = NR
+            inside = !inside
+            next
+        }
+        inside && /[^ \t]/ {
+            rest = $0
+            for (i = 1; i <= 5; i++) sub(/^[ \t]*[^ \t]+/, "", rest)
+            sub(/^[ \t]+/, "", rest)
+            print "R" S NR S head S NF S $1 S $2 S $3 S $4 S $5 S rest S $0
+            next
+        }
+        inside { next }
+        /^## / { head = substr($0, 4); print "H" S NR S head }
+        END { if (inside) print "U" S opened S head }
+    ' '{{ file }}'
+
+# What to dispatch next, read from `docs/queue.md` (§230).
+#
+# With no mode it prints the ready rows, highest tier first, then what is
+# running, then what is waiting and on which rows, then how many are parked.
+# `ready` prints the ready rows and nothing else, for `status` to show. `next
+# [N]` is §230.3's fill: each slot takes the first ready row of the highest tier
+# that meets no running lane and no row taken above it, and every row it passes
+# over says which of its entries met which. N defaults to the free slots.
+#
+# **The order comes from the tier field, not from where a row sits.**
+# `check-queue` makes the two agree, but the fill does not lean on that having
+# run, and its fixtures put a Tier 3 block above Tier 2.5 to show it.
+#
+# **Two write sets meet** on the same path, unless both name items in it and the
+# items differ (§230.6); on a directory ending in `/` that holds the other path;
+# and `-` meets nothing. The directory test is a prefix test on a name that ends
+# in `/`, so `crates/rcad-fuse/` does not hold `crates/rcad-fuse-extra/x.rs`.
+#
+# What it cannot read — an open fence, a short row, a state it does not know —
+# it refuses rather than guesses at, and points at `check-queue` for the why.
+[doc("What to dispatch from docs/queue.md: the ready rows by tier, `ready` for those alone, or `next [N]` for §230.3's fill.")]
+queue mode="" n="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mode='{{ mode }}'
+    n='{{ n }}'
+    case "$mode" in
+        ""|ready|next) ;;
+        *) echo "queue: '$mode' is not a mode; give nothing, ready, or next [N]" >&2; exit 1 ;;
+    esac
+    if [ -n "$n" ]; then
+        [ "$mode" = next ] || { echo "queue: a count goes with next, and only with next" >&2; exit 1; }
+        case "$n" in *[!0-9]*) echo "queue: '$n' is not a number of slots" >&2; exit 1 ;; esac
+    fi
+    rows=$({{ just_executable() }} _queue-rows '{{ queue_file }}') || exit 1
+    printf '%s\n' "$rows" | LC_ALL=C awk -v mode="$mode" -v n="$n" \
+        -v slots='{{ queue_slots }}' -v file='{{ queue_file }}' '
+        BEGIN { FS = "\037"; nt = split("1 2 2.5 3 4", tiers, " ") }
+        $1 == "U" { refuse($2, "a fence is never closed"); next }
+        $1 != "R" { next }
+        $4 < 6 { refuse($2, "a row of " $4 " fields"); next }
+        {
+            r++
+            ln[r] = $2; id[r] = $5; tier[r] = $6; st[r] = $7; ws[r] = $9; raw[r] = $11
+            at[$5] = r
+        }
+        END {
+            if (bad) exit 1
+            for (i = 1; i <= r; i++) {
+                s = st[i]
+                if (s == "todo") kind[i] = "ready"
+                else if (s ~ /^lane:/) { kind[i] = "running"; running++ }
+                else if (s ~ /^after:/) {
+                    kind[i] = "ready"
+                    m = split(substr(s, 7), a, ",")
+                    for (j = 1; j <= m; j++)
+                        if (!(a[j] in at) || st[at[a[j]]] !~ /^done:/) kind[i] = "waiting"
+                }
+                else if (s ~ /^parked:/) { kind[i] = "parked"; parkedin[tier[i]]++ }
+                else if (s ~ /^(done|dropped):/) kind[i] = "closed"
+                else refuse(ln[i], "the state \"" s "\"")
+            }
+            if (bad) exit 1
+            w = 0
+            for (t = 1; t <= nt; t++)
+                for (i = 1; i <= r; i++)
+                    if (kind[i] == "ready" && tier[i] == tiers[t]) walk[++w] = i
+
+            if (mode == "ready") {
+                for (x = 1; x <= w; x++) print raw[walk[x]]
+                exit 0
+            }
+
+            if (mode == "next") {
+                if (n == "") { n = slots - running; if (n < 0) n = 0 }
+                n += 0
+                if (running + n > slots)
+                    printf "note: %d running and %d more is past the %d slots of §230.8\n", running, n, slots
+                taken_n = 0; skipped = 0
+                for (x = 1; x <= w && taken_n < n; x++) {
+                    i = walk[x]; hit = 0
+                    for (j = 1; j <= r && !hit; j++)
+                        if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
+                            printf "skip %s (tier %s): its %s meets %s\047s %s, held by %s\n", id[i], tier[i], mine, id[j], theirs, st[j]
+                            hit = 1
+                        }
+                    for (j = 1; j <= taken_n && !hit; j++)
+                        if (sets_meet(ws[i], ws[taken[j]])) {
+                            printf "skip %s (tier %s): its %s meets %s\047s %s, taken above\n", id[i], tier[i], mine, id[taken[j]], theirs
+                            hit = 1
+                        }
+                    if (hit) { skipped++; continue }
+                    taken[++taken_n] = i
+                    print "take " raw[i]
+                }
+                if (n == 0) printf "took 0 of 0: every one of the %d slots is held\n", slots
+                else if (taken_n == n) printf "took %d of %d\n", taken_n, n
+                else if (skipped) printf "took %d of %d: every other ready row meets a running lane or a row taken above\n", taken_n, n
+                else if (w == 0) printf "took 0 of %d: no row is ready\n", n
+                else printf "took %d of %d: no other row is ready\n", taken_n, n
+                exit 0
+            }
+
+            print "ready, in the order a fill takes them:"
+            if (w == 0) print "    none"
+            cur = ""
+            for (x = 1; x <= w; x++) {
+                i = walk[x]
+                if (tier[i] != cur) { print "  tier " tier[i]; cur = tier[i] }
+                print "    " raw[i]
+            }
+            printf "running, %d of %d slots:\n", running, slots
+            if (!running) print "    none"
+            for (i = 1; i <= r; i++) if (kind[i] == "running") print "    " raw[i]
+            print "waiting:"
+            none = 1
+            for (t = 1; t <= nt; t++)
+                for (i = 1; i <= r; i++)
+                    if (kind[i] == "waiting" && tier[i] == tiers[t]) {
+                        print "    " raw[i]
+                        none = 0
+                        m = split(substr(st[i], 7), a, ",")
+                        line = ""
+                        for (j = 1; j <= m; j++)
+                            line = line (j > 1 ? ", " : "") a[j] " (" ((a[j] in at) ? st[at[a[j]]] : "not a row") ")"
+                        print "      waits on " line
+                    }
+            if (none) print "    none"
+            line = ""
+            for (t = 1; t <= nt; t++)
+                if (parkedin[tiers[t]]) line = line (line == "" ? "" : ", ") parkedin[tiers[t]] " in tier " tiers[t]
+            print "parked: " (line == "" ? "none" : line)
+        }
+        function refuse(line, msg) {
+            printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
+            bad = 1
+        }
+        function sets_meet(x, y,    ex, ey, nx, ny, i, j) {
+            nx = split(x, ex, ","); ny = split(y, ey, ",")
+            for (i = 1; i <= nx; i++)
+                for (j = 1; j <= ny; j++)
+                    if (entries_meet(ex[i], ey[j])) { mine = ex[i]; theirs = ey[j]; return 1 }
+            return 0
+        }
+        function entries_meet(x, y,    px, py, ix, iy, h) {
+            if (x == "-" || y == "-") return 0
+            px = x; ix = ""; h = index(x, "#")
+            if (h) { px = substr(x, 1, h - 1); ix = substr(x, h + 1) }
+            py = y; iy = ""; h = index(y, "#")
+            if (h) { py = substr(y, 1, h - 1); iy = substr(y, h + 1) }
+            if (px == py) return !(ix != "" && iy != "" && ix != iy)
+            if (px ~ /\/$/ && index(py, px) == 1) return 1
+            if (py ~ /\/$/ && index(px, py) == 1) return 1
+            return 0
+        }
+    '
+
+# Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
+# dispatches from it and a row it misreads is a lane sent to the wrong place.
+#
+# **Headings**: the five tiers and `## Closed`, once each and in that order, and
+# no fenced block under anything else, since rows there would be rows nobody
+# ranked. **Rows**: a unique id, a real tier, a state from the grammar, a model,
+# a write set, and a description whose last word is the section that argues for
+# it. An `after:` names rows that are in the file and can still finish. An open
+# row sits under its own tier, and a closed one under Closed.
+#
+# **Write sets are held against what git tracks, not against the disk.**
+# `fuzz/artifacts/` is here and not on a fresh clone, so `[ -e ]` would pass
+# here and fail on the runner, which is §173's kind of check. A path passes when
+# git tracks it or the directory it would go in, because a lane may create the
+# file. A tracked directory written without its `/` is refused: it would meet
+# nothing under it. Closed rows are held to the grammar only, since a file a
+# merged row wrote may have moved since.
+#
+# **A `done:` sha and a `lane:` branch are held to their shape only.** CI's
+# checkout is shallow and `gate-fresh` clones one branch, so neither the commit
+# nor the lane branch has to exist where this runs (§77.6).
+#
+# Citations are checked against the concatenation of `docs/decisions.d`, the way
+# `check-where-the-work-is` reads it (§179). A file with no rows fails, because
+# it would pass having checked nothing.
+[doc("docs/queue.md is shaped as §230.2 says, and every section its rows cite exists.")]
+check-queue file=queue_file:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    all=$(mktemp)
+    trap 'rm -f "$all"' EXIT
+    {{ just_executable() }} decisions-all > "$all" || exit 1
+    {{ just_executable() }} _queue-check '{{ file }}' "$all"
+
+[doc("Check a queue file against §230.2, citing sections from the given decisions file.")]
+_queue-check file decisions:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rows=$({{ just_executable() }} _queue-rows '{{ file }}') || exit 1
+    tracked=$(git ls-files) || exit 1
+    [ -f '{{ decisions }}' ] || { echo "_queue-check: {{ decisions }} is not a file" >&2; exit 1; }
+    {
+        printf '%s\n' "$tracked" | awk '{ print "P\037" $0 }'
+        awk '/^## [0-9]+\. / || /^### [0-9]+\.[0-9]+ / { print "S\037" $2 }' '{{ decisions }}'
+        printf '%s\n' "$rows"
+    } | LC_ALL=C awk -v file='{{ file }}' -v slots='{{ queue_slots }}' '
+        BEGIN {
+            FS = "\037"
+            split("1 2 2.5 3 4 closed", order, " ")
+            for (i = 1; i <= 6; i++) { rank[order[i]] = i; name[order[i]] = "## Tier " order[i] }
+            name["closed"] = "## Closed"
+            istier["1"] = istier["2"] = istier["2.5"] = istier["3"] = istier["4"] = 1
+        }
+        $1 == "P" {
+            tracked[$2] = 1
+            p = $2
+            while (match(p, /\/[^\/]*$/)) { p = substr(p, 1, RSTART); tracked[p] = 1; p = substr(p, 1, RSTART - 1) }
+            next
+        }
+        $1 == "S" { s = $2; sub(/\.$/, "", s); sec[s] = 1; next }
+        $1 == "H" {
+            k = key($3)
+            if (k == "") next
+            if (k in seen) err($2, "heading \"## " $3 "\" appears twice; the first is on line " seen[k])
+            else {
+                if (rank[k] < last) err($2, "heading \"## " $3 "\" is out of order; the six go Tier 1, Tier 2, Tier 2.5, Tier 3, Tier 4, Closed")
+                seen[k] = $2
+            }
+            if (rank[k] > last) last = rank[k]
+            next
+        }
+        $1 == "F" && $3 == "open" && key($4) == "" {
+            err($2, "a fenced block under " ($4 == "" ? "no heading" : "\"## " $4 "\"") ", and only the five tiers and Closed may hold one")
+            next
+        }
+        $1 == "U" { err($2, "this fence is never closed, so every line after it reads as a row"); next }
+        $1 == "R" {
+            line = $2; head = $3; id = $5; tier = $6; state = $7; model = $8; ws = $9; what = $10
+            rows++
+            if ($4 < 6) { err(line, id ": a row is five fields and a description, and this one has " $4 " fields"); next }
+            if (id !~ /^[TDQ][0-9]+$/) err(line, id ": an id is T, D or Q and then a number")
+            if (id in at) err(line, id ": the id is used on line " at[id] " too")
+            else at[id] = line
+            if (!(tier in istier)) err(line, id ": tier \"" tier "\" is not 1, 2, 2.5, 3 or 4")
+            kind = ""
+            if (state == "todo") kind = "todo"
+            else if (state ~ /^lane:[A-Za-z0-9._\/-]+$/) kind = "lane"
+            else if (state ~ /^after:[TDQ][0-9]+(,[TDQ][0-9]+)*$/) kind = "after"
+            else if (state ~ /^done:[0-9a-f]+$/ && length(state) >= 12 && length(state) <= 45) kind = "done"
+            else if (state ~ /^dropped:§[0-9]+(\.[0-9]+)?$/) kind = "dropped"
+            else if (state ~ /^parked:§[0-9]+(\.[0-9]+)?$/) kind = "parked"
+            else err(line, id ": state \"" state "\" is not todo, lane:<branch>, after:<id>[,<id>], done:<sha>, dropped:§N or parked:§N")
+            kindof[id] = kind
+            closed = (kind == "done" || kind == "dropped")
+            if (kind == "dropped" || kind == "parked") cite(line, id, substr(state, index(state, ":") + 1))
+            if (kind == "after") { wid[++nw] = id; waits[id] = substr(state, 7); wline[id] = line }
+            if (kind == "todo") ready++
+            if (kind == "lane") running++
+            if (kind == "parked") parked++
+            if (closed) closedrows++
+            if (model == "-") {
+                if (!closed) err(line, id ": model \"-\" is for a closed row that never recorded one, and this row is open")
+            } else if (model != "opus" && model != "sonnet") err(line, id ": model \"" model "\" is not opus or sonnet")
+            if (ws != "-") {
+                m = split(ws, e, ",")
+                for (i = 1; i <= m; i++) entry(line, id, e[i], closed)
+            }
+            n = split(what, w, " ")
+            if (n == 0 || w[n] !~ /^§[0-9]+(\.[0-9]+)?$/) err(line, id ": the description does not end in a §N or §N.M")
+            s = what
+            while (match(s, /§[0-9]+(\.[0-9]+)?/)) { cite(line, id, substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH) }
+            hk = key(head)
+            if (hk != "" && kind != "") {
+                if (closed && hk != "closed") err(line, id ": a " kind " row sits under \"## " head "\", and closed rows go under ## Closed")
+                else if (!closed && hk != tier && (tier in istier)) err(line, id ": a tier " tier " row sits under \"## " head "\"")
+            }
+            next
+        }
+        END {
+            for (i = 1; i <= nw; i++) {
+                id = wid[i]; ok = 1
+                m = split(waits[id], a, ",")
+                for (j = 1; j <= m; j++) {
+                    if (a[j] == id) err(wline[id], id ": waits on itself")
+                    else if (!(a[j] in kindof)) err(wline[id], id ": waits on " a[j] ", which is not a row in this file")
+                    else if (kindof[a[j]] == "dropped") err(wline[id], id ": waits on " a[j] ", which was dropped and will never be done")
+                    if (kindof[a[j]] != "done") ok = 0
+                }
+                if (ok) ready++
+                else waiting++
+            }
+            for (i = 1; i <= 6; i++) if (!(order[i] in seen)) err("", "heading \"" name[order[i]] "\" is missing")
+            if (rows == 0) err("", "has no rows, so there was nothing to check")
+            if (bad) { printf "%s: %d problem%s\n", file, bad, (bad == 1 ? "" : "s"); exit 1 }
+            printf "%s: %d rows; %d ready, %d waiting, %d running in %d slots, %d parked, %d closed\n", file, rows, ready, waiting, running, slots, parked, closedrows
+        }
+        function err(line, msg) {
+            if (line == "") printf "%s: %s\n", file, msg
+            else printf "%s:%s: %s\n", file, line, msg
+            bad++
+        }
+        function key(h,    w) {
+            if (h ~ /^Tier (1|2|2\.5|3|4)( |$)/) { split(h, w, " "); return w[2] }
+            if (h ~ /^Closed( |$)/) return "closed"
+            return ""
+        }
+        function cite(line, id, c) {
+            if (!(substr(c, 3) in sec)) err(line, id ": cites " c ", and docs/decisions.d has no such section")
+        }
+        function entry(line, id, x, closed,    p, h) {
+            if (x == "-") { err(line, id ": \"-\" stands alone in a write set, and here it has company"); return }
+            if (x !~ /^[A-Za-z0-9._\/-]+(#[A-Za-z0-9_-]+)?$/ || x ~ /^\// || x ~ /\/\//) {
+                err(line, id ": \"" x "\" is not a path, a directory ending in /, or path#item")
+                return
+            }
+            p = x; h = index(x, "#")
+            if (h) {
+                p = substr(x, 1, h - 1)
+                if (p !~ /\.rs$/ && p != "justfile") err(line, id ": \"" x "\" names an item, and only a .rs file or the justfile has items")
+            }
+            if (closed) return
+            if (p !~ /\/$/ && ((p "/") in tracked)) err(line, id ": \"" p "\" is a directory; write it as " p "/ so it meets the files under it")
+            else if (!(p in tracked) && parent(p) != "" && !(parent(p) in tracked)) err(line, id ": \"" p "\" is not tracked, and neither is the directory it would go in")
+        }
+        function parent(p) {
+            sub(/\/$/, "", p)
+            return match(p, /\/[^\/]*$/) ? substr(p, 1, RSTART) : ""
+        }
+    '
+
+# Pins `check-queue` and `queue` against fixtures, because the live file is
+# sound by construction and would pass a check that had stopped checking.
+#
+# The shape half is one good file, then one copy of it per defect `check-queue`
+# names. The fill half is §230.3 case by case: tier order against the order in
+# the file, a row a running lane blocks, two items of one fuse file taken
+# together while the same item twice is not, a directory blocking a file in both
+# directions, `-` fitting beside anything, and `after:` on a running row and on
+# a done one.
+[private]
+[doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
+check-queue-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    j='{{ just_executable() }}'
+    got=""
+    fail() {
+        echo "the queue drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+
+    printf '%s\n' '## 13. How work is decomposed' '## 226. The test plan' \
+        '### 226.3 The nights' '## 230. One queue' '### 230.3 The fill' > "$dir/decisions.md"
+
+    cat > "$dir/good.md" <<'MD'
+    # A queue
+
+    ## Tier 1 — what a fuse gets wrong
+
+    ```
+    T1  1  todo  opus  justfile#queue  make the queue fill from the top §230.3
+    Q2  1  lane:lane-q2  opus  .github/workflows/ci.yml  a row a lane holds §230
+    ```
+
+    ## Tier 2
+
+    ```
+    Q3  2  after:T9  sonnet  docs/new.md  waits on a done row, so it is ready §226.3
+    ```
+
+    ## Tier 2.5
+
+    ```
+    Q4  2.5  parked:§13  opus  docs/  parked for want of a consumer §13
+    ```
+
+    ## Tier 3
+
+    ```
+    Q5  3  after:Q2  sonnet  -  waits on a running lane §230
+    ```
+
+    ## Tier 4
+
+    ```
+    ```
+
+    ## Closed
+
+    ```
+    T9  1  done:42df376e  -  justfile  the first row of the test plan §226
+    D1  2  dropped:§226  opus  -  dropped for the queue §226
+    ```
+    MD
+
+    got=$("$j" _queue-check "$dir/good.md" "$dir/decisions.md" 2>&1) \
+        || fail "a queue with nothing wrong in it was rejected"
+    grep -qF '7 rows; 2 ready, 1 waiting, 1 running in 6 slots, 1 parked, 2 closed' <<<"$got" \
+        || fail "the line a pass prints does not count the good queue's rows"
+    got=$("$j" check-queue "$dir/good.md" 2>&1) \
+        || fail "check-queue rejected the good queue against the real decisions"
+
+    refused() {
+        sed "$2" "$dir/good.md" > "$dir/$1.md"
+        got=$("$j" _queue-check "$dir/$1.md" "$dir/decisions.md" 2>&1) \
+            && fail "$1: a queue with this defect was accepted"
+        grep -qF -- "$3" <<<"$got" || fail "$1: the refusal does not say '$3'"
+    }
+    refused twice       's/^## Tier 3$/## Tier 2/'                  'appears twice'
+    refused order       's/^## Tier 1 .*/## Tier 2.5/'              'out of order'
+    refused missing     '/^## Closed$/d'                            '"## Closed" is missing'
+    refused stray       's/^## Tier 4$/## Notes/'                   'under "## Notes"'
+    refused unclosed    '$d'                                        'never closed'
+    refused id          's/^Q4 /X4 /'                               'X4: an id is'
+    grep -qE "^$dir/id.md:[0-9]+: X4: " <<<"$got" || fail "id: the refusal does not name the line and the id"
+    refused same-id     's/^Q5 /Q4 /'                               'the id is used on line'
+    refused tier        's/^T1  1 /T1  5 /'                         'tier "5"'
+    refused state       's/lane:lane-q2/running/'                   'state "running"'
+    refused sha         's/done:42df376e/done:42DF/'                'state "done:42DF"'
+    refused after-none  's/after:Q2/after:Q99/'                     'Q99, which is not a row'
+    refused after-self  's/after:Q2/after:Q5/'                      'waits on itself'
+    refused after-drop  's/after:Q2/after:D1/'                      'which was dropped'
+    refused model       's/^T1  1  todo  opus/T1  1  todo  haiku/'  'model "haiku"'
+    refused open-dash   's/^T1  1  todo  opus/T1  1  todo  -/'      'model "-"'
+    refused dash-beside 's/  -  waits/  -,docs\/  waits/'           'stands alone'
+    refused untracked   's/docs\/new.md/nowhere\/new.md/'           '"nowhere/new.md" is not tracked'
+    refused bare-dir    's/  docs\/  parked/  docs  parked/'        'write it as docs/'
+    refused item        's/workflows\/ci.yml/workflows\/ci.yml#job/' 'only a .rs file or the justfile'
+    refused last-token  's/ §230.3$/ §230.3 later/'                 'does not end in'
+    refused no-section  's/ §226.3$/ §226.9/'                       'cites §226.9'
+    refused no-parked   's/parked:§13/parked:§14/'                  'cites §14'
+    refused placed      's/^Q3  2 /Q3  3 /'                         'a tier 3 row sits under'
+    refused closed-open 's/^Q4  2.5  parked:§13/Q4  2.5  done:abcdef0/' 'a done row sits under'
+    refused fields      's/^Q4 .*/Q4  2.5  parked:§13  opus  docs\//' 'five fields and a description'
+    refused empty       '/^[TDQ][0-9]/d'                            'has no rows'
+
+    fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
+    drive() {
+        got=$("$j" --set queue_file "$dir/$1.md" queue "${@:2}" 2>&1) \
+            || fail "queue ${*:2} failed on the $1 fixture"
+    }
+    takes() { grep '^take ' <<<"$got" | cut -d' ' -f2 | tr '\n' ' '; }
+
+    fence order <<'MD'
+    Q30  3  todo  opus  docs/a.md  tier three, written first §230
+    Q25  2.5  todo  opus  docs/b.md  tier two and a half §230
+    Q20  2  todo  opus  docs/c.md  tier two §230
+    T11  1  todo  opus  docs/d.md  tier one §230
+    T12  1  todo  opus  docs/e.md  tier one again §230
+    MD
+    drive order next 2
+    [ "$(takes)" = "T11 T12 " ] || fail "two slots did not go to the two tier 1 rows"
+    grep -qx 'took 2 of 2' <<<"$got" || fail "a full fill did not say it took all it was asked for"
+    drive order next 4
+    [ "$(takes)" = "T11 T12 Q20 Q25 " ] \
+        || fail "tier 2.5 was not taken before tier 3, which is written above it in the file"
+
+    fence lane <<'MD'
+    Q1  1  lane:lane-q1  opus  justfile#queue  running §230
+    Q2  1  todo  opus  justfile#queue  meets the running lane §230
+    Q3  2  todo  opus  docs/  fits beside it §230
+    MD
+    drive lane next 1
+    grep -qxF "skip Q2 (tier 1): its justfile#queue meets Q1's justfile#queue, held by lane:lane-q1" <<<"$got" \
+        || fail "a row meeting a running lane was not skipped with the lane named"
+    [ "$(takes)" = "Q3 " ] || fail "the slot a blocked tier 1 row left did not go to tier 2"
+    drive lane next 6
+    grep -q '^note: 1 running and 6 more is past the 6 slots' <<<"$got" \
+        || fail "a fill past the slots did not say so"
+
+    fence items <<'MD'
+    Q1  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#a  one function §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#b  another function §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#a  the first function again §230
+    MD
+    drive items next 3
+    [ "$(takes)" = "Q1 Q2 " ] || fail "two different items of one file were not both taken"
+    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/assemble.rs#a meets Q1's crates/rcad-topo/src/fuse/assemble.rs#a, taken above" <<<"$got" \
+        || fail "the same item twice was not skipped against the row taken above"
+    grep -q '^took 2 of 3: every other ready row meets' <<<"$got" \
+        || fail "a short fill did not say why it was short"
+
+    fence dirs <<'MD'
+    Q1  1  lane:lane-dir  opus  crates/rcad-topo/src/fuse/  holds a directory §230
+    Q2  1  lane:lane-file  opus  docs/plan.md  holds a file §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs  a file in the held directory §230
+    Q4  1  todo  opus  docs/  the directory of a held file §230
+    Q5  1  todo  opus  crates/rcad-topo/src/fuse-extra/x.rs  a name that only starts the same §230
+    MD
+    drive dirs next 3
+    grep -q '^skip Q3 .* held by lane:lane-dir$' <<<"$got" || fail "a held directory did not block a file in it"
+    grep -q '^skip Q4 .* held by lane:lane-file$' <<<"$got" || fail "a held file did not block its directory"
+    [ "$(takes)" = "Q5 " ] || fail "a directory blocked a path that only shares the start of its name"
+
+    fence dash <<'MD'
+    Q1  1  lane:lane-docs  opus  docs/  holds a directory §230
+    Q2  1  todo  opus  -  writes only a section of its own §230
+    Q3  1  todo  opus  -  and so does this one §230
+    MD
+    drive dash next 2
+    [ "$(takes)" = "Q2 Q3 " ] || fail "a row writing nothing tracked did not fit beside everything"
+
+    fence after <<'MD'
+    Q1  1  lane:lane-y  opus  docs/a.md  running §230
+    Q9  1  done:abcdef0  -  -  finished §230
+    Q2  1  after:Q1  opus  docs/b.md  waits on the running one §230
+    Q3  2  after:Q9  opus  docs/c.md  waits on the finished one §230
+    MD
+    drive after ready
+    [ "$got" = "Q3  2  after:Q9  opus  docs/c.md  waits on the finished one §230" ] \
+        || fail "ready is not exactly the row waiting on a done one"
+    drive after
+    grep -qxF '      waits on Q1 (lane:lane-y)' <<<"$got" \
+        || fail "a waiting row does not say what it waits on and that row's state"
+
     exit 0
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it

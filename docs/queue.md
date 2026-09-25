@@ -5,9 +5,10 @@ is the argument for the shape and the grammar below. The dispatcher edits this
 file — to `lane:` when it dispatches a row, to `done:` when it merges one — and
 a lane never writes it, so no two lanes conflict over it.
 
-```
-<id>  <tier>  <state>  <model>  <write set>  <what, one line, ending in one or more §N or §N.M>
-```
+A row is one line inside a fenced block under its tier's heading, as `<id>
+<tier> <state> <model> <write set> <what>`, the fields split by spaces. The
+shape is only described here, never fenced: `just check-queue` reads every
+fenced line as a row, so a fenced template would be a row nobody ranked.
 
 - **id** — `T<n>`, `D<n>` or `Q<n>`, unique in the file. `T` and `D` numbers are
   carried over from the retired `docs/test-plan.md`.
@@ -26,12 +27,11 @@ A row is **ready** when its state is `todo`, or `after:` names only `done` rows.
 ## Tier 1
 
 ```
-Q2a  1    lane:lane-q2a-queue-check     opus    justfile#queue,justfile#_queue-rows,justfile#check-queue,justfile#_queue-check,justfile#check-queue-selftest,justfile#gate_steps   just queue, just queue next N, and check-queue in the gate; replaces Q2, which stopped on the context hook with no commits. §230.9
 Q9   1    lane:lane-q9-fast-inputs-timed  sonnet  -   Time the two fast §228 inputs (fuse bb8aa34…, cone-or-torus 694123d…) in the fuzz build, to find why the night stopped each at ten seconds when a debug build takes 9s and 7s. §228
 Q6   1    lane:lane-q6-shared-comparison  sonnet  crates/rcad-topo/tests/fuses_that_must_agree.rs,crates/rcad-topo/tests/fuzzing/fuse.rs,crates/rcad-topo/tests/fuzzing/   Move both_ways_round_of and same_answer into one module both files share by #[path], instead of the copy lane T2 made. §129.5
 Q11  1    lane:lane-q11-seed-count  sonnet  -   Find why 09-22 fuzzed 36.7M fuse runs starting from 3107 seeds, against neighbouring nights' 3297-3687, under the same flags. §227.5
 Q13  1    lane:lane-q13-timing-record  sonnet  -   Find why the cone-or-torus target's fork-mode timing record undercounts: 1 009 847 runs recorded against libFuzzer's own 2 298 296 on 09-21. §227.5
-T6   1    todo    sonnet  fuzz/fuzz_targets/no_step_file_makes_the_reader_panic.rs   A dictionary of the STEP entity names Import::read handles, given to the reader target with -dict=. §226.1
+T6   1    lane:lane-t6-reader-dictionary  sonnet  fuzz/step.dict,justfile#fuzz-reader,justfile#fuzz-target,justfile#check-fuzz-overnight-selftest   A dictionary of the STEP entity names Import::read handles, given to the reader target with -dict=. §226.1
 T7   1    todo    sonnet  fuzz/fuzz_targets/no_step_file_makes_the_reader_panic.rs   Seed the reader target from the real STEP files under RCAD_STEP_CORPUS; its corpus is all fuzzer-grown. §226.1
 Q24  1    todo    sonnet  crates/rcad-step/tools/composite_wildcards.awk   composite_wildcards.awk counts sites hit, not variants covered, so a check can pass without every variant firing (item 8). §43.8
 Q42  1    todo    sonnet  fuzz/corpus/no_model_makes_the_writer_panic/,crates/rcad-step/tests/every_model_the_writer_fuzzer_kept_is_written_again.rs   Check in a seed for a curved solid the writer writes, so the read-back is tested where volume, area and centroid come from a mesh; today only two cubes reach it. §129.5
@@ -98,7 +98,8 @@ Q34  4    parked:§104.2   opus    -   The hollow — shelling a plane-faced sol
 T1   1    done:e14b14ab   opus    -   The cone-or-torus target fell from 160 M runs a night to 2.3 M between the nights of 2026-09-20 and 09-21, same flags; and the fuse gets 2.0 M runs on 20 cores where it got 3.0 M on one — both because the corpus reached slow inputs, not the kernel or fork mode. §226.3 §227
 T2   1    done:7e9d1b2c   opus    -   The fuse target asks each pair both ways round and compares the two answers, the way fuses_that_must_agree.rs's commutativity does (item 3); no disagreement on the replay. §129.5
 Q1   1    done:b35ab4ce   sonnet  -   Seed docs/queue.md with every open item and retire docs/test-plan.md. §230.9
-Q2   1    dropped:§230    opus    -   The queue recipes, first attempt: stopped on the context hook at call 5 with no commits; replaced by Q2a. §230.9
+Q2   1    dropped:§230    opus    -   The queue recipes, first attempt: stopped on the context hook at call 5 with no commits; replaced by Q45. §230.9
+Q45  1    done:40bd4b30   opus    -   just queue, queue ready and queue next N read this file and fill the free slots by §230.3; check-queue holds it to §230.2 in the gate; status prints the ready rows and dispatch-lanes takes its lanes from here. §230.9
 T4   1    done:157b3b77   sonnet  -   The morning line says what is new tonight, by target and kind, counted against the night's start, instead of "nothing found" beside the pile of every night since the directory was made; on 2026-09-25 it would have named the fuse's three timeouts. §226.3
 T5   1    done:8541b2b7   opus    -   The writer target reads back what it wrote and compares it with the model that went in (item 3): parse, references, Import::read, validate, solid count, then volume, area and centroid bit for bit. Nothing found; only two cubes reach it. §129.5
 Q3   2    done:39b278cc   opus    -   Finish lane-land-cone-and-copy: rustfmt, the two spellings of one pipe, the absorption corner, the two bars pinned. §229.6 §231

@@ -20,42 +20,16 @@ item 1, a missing cut in `cuts.rs`; §224 §223.2's picker margin; **§229** the
 joiner (§224.2) and §222.2's closed curves in the reader; §231 the cone and its
 copy on the joiner — absorption's corner and two spellings of one pipe.
 
-**Next:** re-run `lane-swallowed-pointed-cone` (`184962b9`) on §231; §231.4's
-two bars side by side refuse, pinned and undiagnosed. §230 is replacing this
-line and the two below with one queue, `docs/queue.md`, being built now.
-
-**Beside the unit, always one lane:** the top `todo` of `docs/test-plan.md` (§226).
-
-Also open: §229.3's two torus gaps; §229.4's cone written twice (the closed-edge
-check's partner) and a torus band right round the ring; §229.5's three relay
-defects; §222.1's items 1 and 3; §219.7's `Model::fuse` chain is **wrong as written** (§220.1 corrects it, no route
-demonstrated); §220.1's two unreproduced findings; §216.3's `cut.kept`
-**limit**; §215.2's two walls; §208.6's tip; §124, §125.6.
-
-**parked:** *the hollow*, §104 — shelling a plane-faced solid to a wall of one
-thickness (§44.1 is why it has a name, not M6). **No lane runs:** §13 wants a named
-consumer, `docs/consumers.md` records none; Mattias parked it (§104.2). Before it,
-§53 closed by §103 having earned nothing; §55–§102 are defect fixes.
+**What is next is `just queue`.** Every open item is a row of `docs/queue.md`,
+in §230.1's five tiers — finding defects better, defects, slow runs, corpus
+files, new functionality under §13 — and every free slot takes the highest
+ready row that fits: `just queue next`. Parked and deferred items are rows
+there too, each on the section that parks it; *the hollow* is Q34, parked on
+§104.2. The "Next" line, the lane beside the unit, "Also open" and the deferred
+list that stood here moved there whole (§230.9).
 
 **the board is not here.** `docs/plan.md`, a line per roadmap item: `just plan`,
 `just plan open`. 2026-09-20: 12 done, 8 partly, 5 todo, 1 n/a (§106, §171.7).
-
-**deferred, with the section that defers it:**
-
-- §43.8 items 8 and 12 — `composite_wildcards.awk` counts sites, not uncovered
-  variants; healing option C, imported-corner slop, is not built.
-- §89.7 — the cheap detector for a walk that does not close, deferred under §13's
-  no-named-consumer rule. Fine deflection still costs ~2.9s.
-- §52.13 — unscored. The gate that was to score it, §53.7 charge 3, never ran;
-  §104.6 carries it.
-- §124's gap — Mattias deferred it on §128.3's finding: a whole family by
-  construction, no transversal control. Wants a witness, not an argument.
-- §136.4 — the fuse corner re-check is tighter than `Model::validate`, §75.6's
-  forbidden direction. Parked under §13; its repro fires at 100 m parts.
-- §191.6 — four wrong answers behind `#[ignore]`, each a `src/` lane; §191.3 meets
-  §136.4's direction at ordinary sizes, and §191.4 turns up §124's refusal.
-- §207 — per-face colour out of STEP import: rscene's demand, reinstated over the
-  withdrawal by its owner, so §13 no longer closes it. Shape settled, unscheduled.
 
 This section is §0 so it sorts above §1 and `just decision 0` reaches it; `just
 status` prints it, `check-where-the-work-is` holds its shape, §102 says why here.

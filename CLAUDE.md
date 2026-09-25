@@ -143,6 +143,17 @@ the item list from the roadmap on both sides and fails when they differ, and
 holds every path a `done` names against the disk. Edit `docs/plan.md` when a
 state moves; never add a checkbox to the roadmap. `docs/decisions.md` §106.
 
+**`just queue` is what to dispatch next, and `just queue next` is what the free
+slots take.** Every open item is a row of `docs/queue.md` — id, tier, state,
+model, write set, and a line ending in the section behind it — in five tiers:
+finding defects better, defects, slow runs, corpus files, new functionality.
+A free slot takes the highest ready row whose write set meets no running lane,
+and the cap is six slots. The dispatcher writes the file and a lane never does:
+a row goes to `lane:` when it is dispatched and to `done:` in the commit that
+merges it, and whatever the lane or its section leaves becomes rows in that
+same commit. `check-queue` holds every row to its shape in the gate. §0 no
+longer lists what is open; `docs/decisions.md` §230.
+
 ## Nobody works in the hub
 
 `/home/mattias/git/mattiasgronlund/rcad` is the **hub**. It owns `.git` and
