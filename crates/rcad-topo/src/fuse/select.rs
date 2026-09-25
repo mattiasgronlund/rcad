@@ -673,7 +673,11 @@ fn the_pickers_of_the_meridian_circle_through(
         {
             Some(picked_by.to_vec())
         }
-        _ => None,
+        EdgeRun::PartOfWhereItCrosses { .. }
+        | EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. }
+        | _ => None,
     });
     Ok(match (keeping.next(), keeping.next()) {
         (Some(only), None) => Some(only),
@@ -1452,7 +1456,7 @@ fn where_the_ring_crosses_the_plane(normal: Vector, offset: f64, ring: &Torus) -
     };
     let reach =
         (offset - normal.dot(ring.centre() - Point::origin())) / (ring.ring_radius() * how_much);
-    if !(reach.abs() <= 1.0) {
+    if reach.is_nan() || reach.abs() > 1.0 {
         return Vec::new();
     }
     let aside = (1.0 - reach * reach).sqrt();
