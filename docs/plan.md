@@ -45,5 +45,5 @@ Audited 2026-09-15 against `main` at `6939147`. `docs/decisions.md` §106.
 10.1     todo       fuse::Scratch holds plain Vecs on the global allocator, no bump arena; the parallel read benchmark does exist at crates/rcad/benches
 11.1     partly     corpus/fetch.sh corpus/manifest.sha256 — 367 STEP files pinned from NIST and KiCad; none of the roadmap's other named assets
 11.2     done       crates/rcad-topo/tests/fuses_that_must_agree.rs — volume identity, associativity, commutativity, idempotence, absorption, rigid-transform invariance
-11.3     partly     fuzz/fuzz_targets — five targets, mutating models rather than generating them, with the nightly apparatus in the justfile; what they search is still being improved and nothing records those changes, decisions §171.7
+11.3     partly     fuzz/fuzz_targets — five targets, mutating models rather than generating them, with the nightly apparatus in the justfile; what they search is still being improved, one row per change in docs/test-plan.md, decisions §171.7 and §226
 11.4     n/a        prose, not a thing that gets built

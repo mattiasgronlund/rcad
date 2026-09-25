@@ -231,8 +231,8 @@ gate-docs mode="loud":
 # as a pass. That happened on this recipe's own first run.
 #
 # **A pass here is written to the green record**, the same one a plain `just
-# gate` writes and the one `fuzz-watermark` reads to choose what the overnight
-# run fuzzes (§173.9). This is the strongest green this machine can produce —
+# gate` writes and the one `just status` reads to say how far the tip is past
+# the last green (§173.9). This is the strongest green this machine can produce —
 # the whole gate, on a tree nothing of this environment has touched — so it is
 # the last one that should have gone unrecorded, and it did.
 [doc("The gate in a container on a fresh clone, with this machine's environment taken away.")]
@@ -369,9 +369,9 @@ gate-fresh image="rust:1-bookworm":
     # `/rcad/.git` — the clone the `trap` deletes. Without this line the
     # strongest gate this machine can run would be the only one leaving no
     # trace, while a plain `just gate` in a warm tree counts.
-    # `fuzz-watermark` reads that record to choose what the night fuzzes, and
-    # since §172 spent the Actions allowance it is the only source that can
-    # still answer. §173.9.
+    # `just status` reads that record to say how far the tip is past the last
+    # green, and since §172 spent the Actions allowance it is the only source
+    # that can still answer. §173.9.
     #
     # The sha is taken here and not carried out of the clone, and it is the same
     # sha: this recipe refuses a dirty tree and the clone is of HEAD.
@@ -525,13 +525,12 @@ _gate-summary log status failed="":
 # Writes down that this commit has been read end to end, so that something other
 # than GitHub can say so.
 #
-# `fuzz-watermark` moves the overnight run onto a commit CI went green on, and
-# §172's spent Actions allowance means no commit can be green in that sense any
-# more. Left alone the night keeps fuzzing the last one that was — silently,
-# because staying put is how that recipe is built to fail, and it was 18 commits
-# behind within a day. **The condition §81.4 asked for is that nothing fuzzes a
-# tree nobody has read end to end, and a passing `just gate` is exactly such a
-# reading.** CI supplied that fact; it was never the only thing that could.
+# Written for `fuzz-watermark`, which until §186 moved the overnight run only
+# onto a green commit, when §172's spent Actions allowance meant no commit could
+# be CI-green any more. The night follows the tip now and reads none of this;
+# what still reads it is `just status`'s green row. **A passing `just gate` is a
+# reading of the tree end to end**, and CI was never the only thing that could
+# supply that fact.
 #
 # Three conditions, and each is a way the record could otherwise lie:
 #
@@ -3530,7 +3529,7 @@ fuzz-overnight window="28800":
     # passes the environment through untouched.
     export RCAD_FUZZ_TIMINGS="$night/timings"
 
-    # The night follows the last commit CI went green on (docs/decisions.md §90).
+    # The night follows the tip of `main` (docs/decisions.md §186).
     #
     # §81.4 refused to advance this tree at all and priced the cost as a timer
     # that can sit on one commit for a month. That cost came due on the third
@@ -3538,22 +3537,21 @@ fuzz-overnight window="28800":
     # earlier, twelve hours after the fix for it went green. What the refusal was
     # buying is a revert, and `main` has had one in 1003 commits.
     #
-    # Green is the part that matters, not newness. CI runs the whole gate on
-    # every push and answers in nine to twelve minutes, so "the last green" is a
-    # tree something has already read end to end — which is what §81.4 wanted and
-    # what an offset like `main~5` cannot give: lanes merge in bursts, so five
-    # commits back was under fifteen minutes old in 21 of the last 115 positions.
+    # §90 then made it follow the last *green* commit, and that bought the same
+    # staleness back in a smaller size: the night of 2026-09-21 fuzzed a commit
+    # from before §182's fix and re-found that fix's family. Every morning's
+    # finding is replayed against `main` by `fuzz-triage` anyway, so a tip that
+    # nothing has read yet costs at most a finding that triage calls stale.
     #
-    # Deciding is separate from doing, in `fuzz-watermark` below, because this
-    # recipe's selftest runs it in a real worktree and a checkout here would move
-    # whichever tree the gate was run from.
+    # Deciding is separate from doing, in `fuzz-watermark` below, so that what
+    # the night would move to can be asked without moving anything.
     if [ -n "${RCAD_FUZZ_ALREADY_ADVANCED:-}" ]; then
         echo "standing where the night that started this one put us"
     else
         target=$({{just_executable()}} fuzz-watermark 2>"$night/watermark.log") || true
         cat "$night/watermark.log"
         if [ -n "$target" ]; then
-            echo "advancing to $target, the last commit CI went green on"
+            echo "advancing to $target, the tip of main"
             git checkout --quiet --detach "$target"
 
             # **Start again, from the justfile that was just checked out.** `just`
@@ -3564,14 +3562,12 @@ fuzz-overnight window="28800":
             # body it was running had been read from a commit of 2026-09-11 and
             # §91's copy-out landed on 2026-09-13.
             #
-            # **A night advances once.** The commit just checked out is the
-            # newest green there was a moment ago, so the recipe taking over
-            # would almost always find nothing to move to and stop of its own
-            # accord — but "almost always" is a bound on CI's timing and not on
-            # this loop, and a night that spent itself chasing a branch that
-            # kept going green would say nothing about why. Once is also the
-            # honest reading of §90: the night follows the last green commit as
-            # of when it started.
+            # **A night advances once.** The commit just checked out was the
+            # tip a moment ago, so the recipe taking over would almost always
+            # find nothing to move to and stop of its own accord — but "almost
+            # always" is a bound on how often `main` moves and not on this loop,
+            # and a night that spent itself chasing a busy branch would say
+            # nothing about why. The night fuzzes the tip as of when it started.
             export RCAD_FUZZ_ALREADY_ADVANCED=1
             exec {{just_executable()}} fuzz-overnight "$(( deadline - $(date +%s) ))"
         fi
@@ -3812,29 +3808,30 @@ fuzz-overnight window="28800":
     cat "{{fuzz_log_root}}/latest"
     exit 1
 
-# Which commit the night should fuzz: the newest on `main` that CI went green on.
+# Which commit the night should fuzz: the tip of `origin/main`, fetched fresh.
 #
 # Prints that sha, or prints nothing and says on stderr why it is staying put.
 # **It never exits non-zero.** A night that cannot work out where to stand is a
 # night that runs where it already is; failing here would trade a stale run for
 # no run at all, which is the worse of the two.
 #
-# Three conditions, each of them a way the night could otherwise go wrong:
+# **Not the last green commit**, which is what it chose from §90 to §186. The
+# fuzzer finds what the gate cannot, so whether the gate has read the tip yet is
+# not a question the night needs answered — and waiting for it cost the night of
+# 2026-09-21 its freshness: it fuzzed a commit from before §182's fix. A finding
+# on a tip that turns out broken is replayed against `main` by `fuzz-triage`,
+# which is the check that was always doing the work.
 #
-#   - **green**, so it never fuzzes a tree nothing has read end to end. This is
-#     §81.4's objection kept rather than overturned — what changed is that a
-#     green gate answers it, where in §81.4 nothing did. **Green now means a
-#     green CI run or a recorded local `just gate`**, because since §172 the
-#     first of those can no longer happen and asking only GitHub froze the night
-#     on a commit that kept getting older. §173.9.
-#   - **on `main`**, so a green run for some other branch cannot move it.
-#   - **forward only**, so a tree somebody advanced by hand is never dragged
-#     back, and neither is one already past the last green.
+# Two conditions, each of them a way the night could otherwise go wrong:
 #
-# Separate from `fuzz-overnight` because that recipe's selftest runs it for real
-# in whatever worktree the gate was run from, and a checkout in there would move
-# somebody's tree out from under them.
-[doc("Which commit the overnight run should fuzz: the newest green commit on main, CI's or a local gate's.")]
+#   - **a clean tree**, because the night is unattended and whatever is
+#     uncommitted there is somebody's.
+#   - **forward only**, so a tree somebody advanced by hand past the tip, or off
+#     `main` altogether, is never dragged back.
+#
+# Separate from `fuzz-overnight` so that what the night would move to can be
+# asked without moving anything.
+[doc("Which commit the overnight run should fuzz: the tip of origin/main, forward only.")]
 fuzz-watermark:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -3843,62 +3840,15 @@ fuzz-watermark:
 
     git diff --quiet && git diff --cached --quiet \
         || staying "the tree has uncommitted changes"
-    # No longer fatal: a missing `gh` costs the CI half of the list, and since
-    # §173.9 that is not the only half there is.
-    command -v gh >/dev/null 2>&1 \
-        || echo "gh is not on PATH, so only the local gate record can answer" >&2
-
-    # Two sources, because since §172 one of them can no longer answer: the
-    # Actions allowance is spent, so no push to `main` can go green and asking
-    # only GitHub freezes the night on whatever was last green before the
-    # billing ran out — 18 commits back inside a day, and silently, since
-    # staying put is how this recipe is built to fail. A local `just gate` reads
-    # the tree end to end, which is the thing §81.4 wanted; `_record-green`
-    # writes each one down. §173.9.
-    #
-    # A `gh` that cannot answer is not a failure here and never was — it leaves
-    # the list shorter, and the local half can still carry the night.
-    green=$(gh run list --workflow ci.yml --branch main --status success \
-        --limit 20 --json headSha --jq '.[].headSha' 2>/dev/null) || green=""
-    recorded=$(cut -d' ' -f1 \
-        "$(git rev-parse --path-format=absolute --git-common-dir)/rcad-greens" 2>/dev/null) || recorded=""
-    # `|| green=""` and not a bare pipeline: `grep -v` exits 1 when it filters
-    # every line away, which under `pipefail` is both sources being silent
-    # reported as a failed recipe — the one thing this must never do, because a
-    # night that cannot decide still has to run. Arm five caught it.
-    green=$(printf '%s\n%s\n' "$green" "$recorded" | grep -v '^$' | sort -u) || green=""
-    [ -n "$green" ] || staying "neither gh nor the local gate record names a green commit"
-
-    # Fetched only once there is something to weigh against it, so that a gate
-    # running this recipe does not need the network to pass — §77.6's shape, a
-    # check that would be answering a question about its machine.
     git fetch --quiet origin 2>/dev/null \
         || staying "origin could not be reached"
 
-    # The furthest forward of the candidates, not the first one seen. Two
-    # sources merged and de-duplicated arrive in no useful order, where `gh`
-    # alone arrived newest-first, so the walk has to establish that itself —
-    # `--is-ancestor` between two candidates is which of them is further along.
-    best=""
-    on_head=""
-    for sha in $green; do
-        git cat-file -e "${sha}^{commit}" 2>/dev/null || continue
-        git merge-base --is-ancestor "$sha" origin/main || continue
-        git merge-base --is-ancestor HEAD "$sha" || continue
-        if [ "$(git rev-parse "$sha")" = "$(git rev-parse HEAD)" ]; then
-            on_head=yes
-            continue
-        fi
-        if [ -z "$best" ] || git merge-base --is-ancestor "$best" "$sha"; then
-            best=$sha
-        fi
-    done
-    if [ -n "$best" ]; then
-        echo "$best"
-        exit 0
-    fi
-    [ -z "$on_head" ] || staying "already on the last green"
-    staying "no green commit on main is ahead of it"
+    tip=$(git rev-parse origin/main)
+    [ "$tip" != "$(git rev-parse HEAD)" ] \
+        || staying "already on the tip of main"
+    git merge-base --is-ancestor HEAD "$tip" \
+        || staying "the tip of main is not ahead of it"
+    echo "$tip"
 
 # The property fuzzer, over a pair of surfaces (docs/decisions.md §24.14).
 #
@@ -4175,18 +4125,12 @@ check-fuzz-overnight-selftest:
     STUB
     chmod +x "$dir/bin/cargo"
 
-    # The night asks `fuzz-watermark` where to stand, and this arm runs it for
-    # real in whatever worktree the gate was run from. Answering nothing unless
-    # an arm asks for an answer keeps that hermetic — no network, no account —
-    # and the HEAD assertion at the end is what says a gate cannot move
-    # somebody's tree. The arm that does want the night to move sets `GH_GREEN`,
-    # and does it in a fixture repository of its own.
-    cat >"$dir/bin/gh" <<'STUB'
-    #!/usr/bin/env bash
-    [ -n "${GH_GREEN:-}" ] || exit 1
-    cat "$GH_GREEN"
-    STUB
-    chmod +x "$dir/bin/gh"
+    # These arms run the night in whatever worktree the gate was run from, and
+    # `fuzz-watermark` would move that tree onto the tip of `origin/main` — a
+    # lane's tree, checked out from under it by its own gate. So `run` tells the
+    # night it has already advanced, and the watermark is never asked here; the
+    # HEAD assertion after arm three is what says so. The arm that does want the
+    # night to move does it in a fixture repository with an origin of its own.
     head_before=$(git rev-parse HEAD)
 
     fail() {
@@ -4198,6 +4142,7 @@ check-fuzz-overnight-selftest:
     run() {
         STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" STUB_ARTIFACT_TAG="$tag" \
             RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+            RCAD_FUZZ_ALREADY_ADVANCED=1 \
             {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
     }
 
@@ -4349,9 +4294,9 @@ check-fuzz-overnight-selftest:
         || fail "the summary line does not say which commit was fuzzed and how far behind main it is, so a timer left on a stale one reads as a good night"
 
     # The tree the gate ran in is where it was. `fuzz-watermark` is the only
-    # thing here that can move a worktree, and a night that cannot reach `gh`
-    # must stay put rather than guess — otherwise `just gate` would check out
-    # somebody else's commit under them.
+    # thing here that can move a worktree, and it follows the tip — so a `run`
+    # that stopped saying the night had already advanced would have `just gate`
+    # check out somebody else's commit under them.
     [ "$(git rev-parse HEAD)" = "$head_before" ] \
         || fail "the night moved the tree it ran in, from $head_before to $(git rev-parse HEAD)"
 
@@ -4447,12 +4392,11 @@ check-fuzz-overnight-selftest:
     STUB
     git -C "$night_repo" add justfile
     git -C "$night_repo" -c user.email=t@t -c user.name=t commit -q -m "a recipe that names itself"
-    green=$(git -C "$night_repo" rev-parse HEAD)
+    tip=$(git -C "$night_repo" rev-parse HEAD)
     git init -q --bare "$dir/night-origin.git"
     git -C "$night_repo" remote add origin "$dir/night-origin.git"
     git -C "$night_repo" push -q origin main
     git -C "$night_repo" checkout -q --detach "$woke_on"
-    echo "$green" >"$dir/night-green"
 
     # The status is read last, and not with `||`. A night that carried on with
     # the wrong body goes on to build and fuzz, and then fails or passes for
@@ -4461,16 +4405,15 @@ check-fuzz-overnight-selftest:
     : >"$dir/log"
     status=0
     (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
-        GH_GREEN="$dir/night-green" \
         RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
         {{just_executable()}} fuzz-overnight 20) >"$dir/out" 2>&1 || status=$?
-    grep -q "advancing to $green" "$dir/out" \
-        || fail "the night did not advance onto the green commit: $(cat "$dir/out")"
+    grep -q "advancing to $tip" "$dir/out" \
+        || fail "the night did not advance onto the tip of main: $(cat "$dir/out")"
     grep -q 'the checked-out justfile ran' "$dir/out" \
         || fail "the night carried on with the recipe it woke up on: $(cat "$dir/out")"
     [ ! -s "$dir/log" ] \
         || fail "the recipe that woke up on the old commit built and fuzzed before handing over"
-    [ "$(git -C "$night_repo" rev-parse HEAD)" = "$green" ] \
+    [ "$(git -C "$night_repo" rev-parse HEAD)" = "$tip" ] \
         || fail "the night ended on $(git -C "$night_repo" rev-parse HEAD) rather than the commit it advanced to"
     [ "$status" -eq 0 ] || fail "a night that advanced exited $status: $(cat "$dir/out")"
 
@@ -4482,15 +4425,15 @@ check-fuzz-overnight-selftest:
     [ "$left" -le 20 ] \
         || fail "the recipe taking over was given $left s of a twenty-second window"
 
-    # Seven: a night advances once. The commit it lands on is the newest green
-    # there was a moment ago, so the recipe taking over almost always finds
-    # nothing to move to — but "almost always" is a bound on CI's timing and not
-    # on this loop, and a night that spent itself chasing a branch that kept
-    # going green would say nothing about why.
+    # Seven: a night advances once. The commit it lands on was the tip a moment
+    # ago, so the recipe taking over almost always finds nothing to move to —
+    # but "almost always" is a bound on how often `main` moves and not on this
+    # loop, and a night that spent itself chasing a busy branch would say
+    # nothing about why.
     git -C "$night_repo" checkout -q --detach "$woke_on"
     : >"$dir/log"
     (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
-        GH_GREEN="$dir/night-green" RCAD_FUZZ_ALREADY_ADVANCED=1 \
+        RCAD_FUZZ_ALREADY_ADVANCED=1 \
         RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
         {{just_executable()}} fuzz-overnight 8) >"$dir/out" 2>&1 \
         || fail "a night told it had already advanced exited non-zero: $(cat "$dir/out")"
@@ -4699,48 +4642,39 @@ check-fuzz-overnight-selftest:
         || fail "a hand run was given -fork, so a crash no longer stops it and prints"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
-# costs a night: too far back and the fuzzer re-finds what is already fixed,
-# too far forward and it fuzzes what nothing has read.
+# costs a night: too far back and the fuzzer re-finds what is already fixed, and
+# the wrong way at all and it undoes somebody's hand.
 #
-# Run against a fixture repository with a stub `gh`, so no arm here needs the
-# network, an account, or the state of this tree.
-[doc("`fuzz-watermark` moves onto green, forward only, and stays put when it cannot tell.")]
+# Run against a fixture repository with a local bare origin, so no arm here
+# needs the network, an account, or the state of this tree.
+[doc("`fuzz-watermark` moves onto the tip of main, forward only, and stays put when it cannot tell.")]
 check-fuzz-watermark-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
-    mkdir -p "$dir/bin"
 
     repo="$dir/repo"
     git init -q -b main "$repo"
     echo "a file to dirty later" >"$repo/README"
     git -C "$repo" add README
     at() {
-        git -C "$repo" -c user.email=t@t -c user.name=t \
-            commit -q --allow-empty -m "$1"
-        git -C "$repo" rev-parse HEAD
+        git -C "$1" -c user.email=t@t -c user.name=t \
+            commit -q --allow-empty -m "$2"
+        git -C "$1" rev-parse HEAD
     }
-    first=$(at one)
-    second=$(at two)
-    third=$(at three)
+    first=$(at "$repo" one)
+    second=$(at "$repo" two)
+    third=$(at "$repo" three)
     git init -q --bare "$dir/origin.git"
     git -C "$repo" remote add origin "$dir/origin.git"
     git -C "$repo" push -q origin main
 
-    # Green, and not on `main`. A run for some other branch must not move the
-    # night, and `--branch main` is a filter on the *name* a run was made under.
     git -C "$repo" checkout -q -b elsewhere "$first"
-    aside=$(at aside)
+    aside=$(at "$repo" aside)
     git -C "$repo" checkout -q main
 
-    # Answers with whatever the fixture put in the file, newest first, which is
-    # the order the real `gh run list` returns.
-    cat >"$dir/bin/gh" <<'STUB'
-    #!/usr/bin/env bash
-    cat "$GH_GREEN"
-    STUB
-    chmod +x "$dir/bin/gh"
+    greens="$repo/.git/rcad-greens"
 
     fail() {
         echo "fuzz-watermark drifted from its own fixtures: $1"
@@ -4751,55 +4685,62 @@ check-fuzz-watermark-selftest:
     # Stdout is the answer and stderr is the reason for a blank one, so the
     # night can print the reason and still test the answer for emptiness.
     picked() {
-        GH_GREEN="$dir/green" PATH="$dir/bin:$PATH" \
-            {{just_executable()}} --justfile "{{justfile()}}" \
+        {{just_executable()}} --justfile "{{justfile()}}" \
             --working-directory "$repo" fuzz-watermark 2>"$dir/why"
     }
 
-    # One: the newest green on `main`, and not merely the first one that
-    # qualifies. A loop that took the last match would pass every other arm here.
+    # One: the tip, and not the last green. A local gate recorded green on the
+    # commit behind the tip, which is exactly what the night stood on from §90
+    # to §186; the tip must win over it.
     git -C "$repo" checkout -q --detach "$first"
-    printf '%s\n%s\n' "$third" "$second" >"$dir/green"
+    printf '%s 2026-09-20T00:00:00Z here\n' "$second" >"$greens"
     got=$(picked) || fail "deciding exited non-zero, so a night would not have run"
     [ "$got" = "$third" ] \
-        || fail "with two green commits ahead it chose ${got:-nothing}, not the newest"
+        || fail "with $second recorded green and $third the tip it chose ${got:-nothing}"
+    rm -f "$greens"
 
-    # Two: a green commit that is not on `main` is not a candidate, and the one
-    # behind it on `main` is.
-    printf '%s\n%s\n' "$aside" "$second" >"$dir/green"
+    # Two: the tip as origin has it now, not as this clone last heard. Somebody
+    # else pushed after this tree's last fetch, and the night must see it.
+    git clone -q "$dir/origin.git" "$dir/other"
+    fourth=$(at "$dir/other" four)
+    git -C "$dir/other" push -q origin main
     got=$(picked) || fail "deciding exited non-zero"
-    [ "$got" = "$second" ] \
-        || fail "it chose ${got:-nothing} over the green commit that is actually on main"
+    [ "$got" = "$fourth" ] \
+        || fail "origin's tip is $fourth and it chose ${got:-nothing}, so it never fetched"
 
-    # Three: forward only. A tree already standing on the last green stays, and
-    # says so rather than checking out what it is already on.
-    git -C "$repo" checkout -q --detach "$third"
-    printf '%s\n' "$third" >"$dir/green"
+    # Three: a tree already on the tip stays, and says so rather than checking
+    # out what it is already on.
+    git -C "$repo" checkout -q --detach "$fourth"
     got=$(picked) || fail "deciding exited non-zero"
     [ -z "$got" ] || fail "it offered to advance to $got from the commit it is on"
-    grep -q 'already on the last green' "$dir/why" \
-        || fail "standing on the last green was not said out loud"
+    grep -q 'already on the tip of main' "$dir/why" \
+        || fail "standing on the tip was not said out loud"
 
-    # Four: never backwards. Somebody advanced this tree by hand — which is what
-    # §81.4 asked for and still works — and the night must not undo it.
-    printf '%s\n' "$second" >"$dir/green"
+    # Four: never backwards and never sideways. Somebody advanced this tree by
+    # hand past the tip, or onto a branch, and the night must not undo it.
+    ahead=$(at "$repo" ahead)
     got=$(picked) || fail "deciding exited non-zero"
     [ -z "$got" ] \
-        || fail "it offered to move back to $got from a commit further along"
+        || fail "it offered to move back to $got from $ahead, a commit further along"
+    git -C "$repo" checkout -q --detach "$aside"
+    got=$(picked) || fail "deciding exited non-zero"
+    [ -z "$got" ] \
+        || fail "it offered to move to $got from $aside, a commit off main"
+    grep -q 'not ahead of it' "$dir/why" \
+        || fail "a tip that is not ahead was passed over without saying why"
 
-    # Five: a `gh` that cannot answer leaves the night where it is, and exits 0
-    # so that the night still runs. A stale run beats no run.
+    # Five: an origin that cannot be reached leaves the night where it is, and
+    # exits 0 so that the night still runs. A stale run beats no run.
     git -C "$repo" checkout -q --detach "$first"
-    GH_GREEN="$dir/absent" PATH="$dir/bin:$PATH" \
-        {{just_executable()}} --justfile "{{justfile()}}" \
-        --working-directory "$repo" fuzz-watermark >"$dir/out" 2>"$dir/why" \
-        || fail "a gh that cannot answer made the whole night fail"
-    [ ! -s "$dir/out" ] || fail "it named a commit on an answer it never got"
-    grep -q 'staying on' "$dir/why" || fail "it stayed put without saying so"
+    git -C "$repo" remote set-url origin "$dir/nowhere.git"
+    got=$(picked) || fail "an origin that cannot be reached made the whole night fail"
+    [ -z "$got" ] || fail "it named $got on a fetch that never happened"
+    grep -q 'origin could not be reached' "$dir/why" \
+        || fail "it stayed put without saying why"
+    git -C "$repo" remote set-url origin "$dir/origin.git"
 
     # Six: a dirty tree is never checked out from under. The night is unattended
     # and whatever is uncommitted there is somebody's, however it got there.
-    printf '%s\n' "$third" >"$dir/green"
     echo "something uncommitted" >>"$repo/README"
     got=$(picked) || fail "deciding exited non-zero"
     [ -z "$got" ] || fail "it offered to check out $got over uncommitted work"
@@ -4807,46 +4748,9 @@ check-fuzz-watermark-selftest:
         || fail "uncommitted work was passed over without saying why"
     git -C "$repo" checkout -q -- README
 
-    # The arms below are §173.9's: a green recorded by a local `just gate`
-    # counts, because since §172 no push can be CI-green and a night that waits
-    # for one fuzzes a tree that only gets older.
-    greens="$repo/.git/rcad-greens"
-
-    # Seven: gh names nothing at all and the local record carries the night.
-    # This is the arm that fails without §173.9 — before it, an empty `gh`
-    # answer was the end of the question.
-    git -C "$repo" checkout -q --detach "$first"
-    : >"$dir/green"
-    printf '%s 2026-09-20T00:00:00Z here\n' "$third" >"$greens"
-    got=$(picked) || fail "deciding exited non-zero with a local green to go on"
-    [ "$got" = "$third" ] \
-        || fail "with gh silent and $third recorded green locally it chose ${got:-nothing}"
-
-    # Eight: the local record is not a way around the other two conditions. A
-    # gate that went green on a branch is still not a green commit on `main`.
-    printf '%s 2026-09-20T00:00:00Z here\n' "$aside" >"$greens"
-    got=$(picked) || fail "deciding exited non-zero"
-    [ -z "$got" ] \
-        || fail "a locally recorded green off main moved the night to $got"
-
-    # Nine: the furthest forward of the two sources wins, whichever source it
-    # came from and whichever order they merge in. Merging two lists and
-    # de-duplicating them destroys gh's newest-first order, so the walk has to
-    # work this out rather than take the first thing that qualifies.
-    printf '%s\n' "$second" >"$dir/green"
-    printf '%s 2026-09-20T00:00:00Z here\n' "$third" >"$greens"
-    got=$(picked) || fail "deciding exited non-zero"
-    [ "$got" = "$third" ] \
-        || fail "gh said $second and the record said $third; it chose ${got:-nothing}"
-    printf '%s\n' "$third" >"$dir/green"
-    printf '%s 2026-09-20T00:00:00Z here\n' "$second" >"$greens"
-    got=$(picked) || fail "deciding exited non-zero"
-    [ "$got" = "$third" ] \
-        || fail "with the sources swapped it chose ${got:-nothing}, so it took a side not a commit"
-
-    rm -f "$greens"
-
-    # Ten: what may be written down in the first place. `gate-docs` re-enters
+    # Seven, which is `_record-green`'s and not the watermark's: the night no
+    # longer reads the record, but `just status` does. What may be written down
+    # in the first place. `gate-docs` re-enters
     # `gate` with a trimmed step list and reaches the recorder as a pass, having
     # compiled nothing — and a green that skipped `test` is not a reading of the
     # code. This is the mistake that would leave no trace afterwards: the file
@@ -6906,7 +6810,7 @@ check-status-selftest:
         || fail "a missing base branch did not say so"
 
     # The green row, against a stub `gh` so no arm needs the network or an
-    # account — `check-fuzz-watermark-selftest`'s fixture, for the same reason.
+    # account.
     # What is pinned here is that the local record can answer *alone*: with the
     # Actions allowance spent that is the only source there is, and the version
     # of this row that asked GitHub and stopped reported a tip 22 commits from a

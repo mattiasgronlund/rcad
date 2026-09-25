@@ -12,6 +12,9 @@ sixty-eight commits behind `main`, twelve hours after the fix for it went green.
 So the night now advances itself, to **the newest commit on `main` that CI has
 gone green on**, and only ever forward.
 
+***The green half is superseded by §186***: the night follows the tip of `main`,
+because a lagging green cost it a night on 2026-09-21. Forward only stands.
+
 ### 90.1 What the refusal cost, and what it was buying
 
 The 00:10 run of 2026-09-11 wrote

@@ -150,17 +150,48 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// axis, not even a bit-for-bit copy of the bend itself
 /// (`a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule` in
 /// `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: two bends
-/// sharing a torus get further than anything else does — the corners are found
-/// and put in order round the circles they sit on — and stop at two coincident
-/// curves touching on one face without crossing).
+/// sharing a torus get further than anything else does — the whole
+/// arrangement runs — and stop at choosing which pieces to keep).
 ///
 /// So the fuse half of the oracle here compares the **refusal**: the same
 /// rule against the same third solid must refuse the same way for both.
 /// That still reads topology the measurement never touches — the refusal is
-/// raised while the arrangement is walking the corners the rebuild itself
-/// produced, so a coedge walked backwards or a picker handed the wrong sign
-/// would have to be caught before that walk gets as far as the question both
-/// descriptions are shown to answer alike.
+/// raised on the bend's torus face once the arrangement has placed and ordered
+/// the corners the rebuild itself produced and walked round them, so a coedge
+/// walked backwards or a picker handed the wrong sign would have to be caught
+/// before that walk gets as far as the question both descriptions are shown to
+/// answer alike.
+///
+/// **The question is which side of a plane a point exactly on it is.** The
+/// turned bend's end cap at three eighths of a turn is on the plane
+/// `x + y = 0`, which crosses the torus in two circles: the cap's own, and a
+/// far one through `(5/√2, −5/√2, 0)`. Both are drawn on the first bend's torus
+/// face. Grouping the walks into cells asks which side of the cap circle's
+/// plane the far circle's one node is on — and that node is on the far circle,
+/// so on the same plane, bit for bit the same coefficients. The true answer is
+/// nothing at all, and a constructed point's box, `5.7e-13` wide here, can
+/// never certify nothing (§35.2).
+///
+/// **This used to stop earlier, at `TwoCurvesTouchWithoutCrossing`, and that
+/// was the wrong name.** The first bend's end cap on `y = 0` has its corner at
+/// `(3, 0, 0)`, on the circle the plane cuts round `(4, 0, 0)`. The same plane
+/// cuts a second circle round `(−4, 0, 0)`, whose picker certainly rules the
+/// corner out; but the model lists the torus round the corner, and the corner
+/// was put on both circles for it. Two ways out along one torus are ones no
+/// turn and no bend can tell apart, and the sort refused there. Measured with
+/// the old rule put back: the refusal was at `(3, 0, 0)` on that cap, between
+/// the cap edge's own circle and the far one, for both descriptions. A corner
+/// is on a curve of a surface it lists only where that curve's picker allows
+/// now (§224.2's joined cone needed the same), and the walk gets past it.
+///
+/// **The new refusal is a gap in §16.10's sense**: the answer exists and is
+/// nothing at all, and the drawing already knows it — the node is on a
+/// crossing whose partner *is* the plane asked about. The fix that reaches it
+/// is for `arrange.rs`'s `which_side_of_everything` to read that off the
+/// node's own crossings rather than ask, and move on to the next node as it
+/// does for any point on the plane; a walk with no other node then leaves the
+/// side unsaid, which that function already allows. It is not built, and what
+/// the fuse does past it is not measured.
 #[test]
 fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let policy = Policy::certified();
@@ -194,7 +225,7 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     assert_eq!(one.centroid(), other.centroid(), "centroid");
 
     // A second bend, sharing the ring, tube and axis exactly and so sharing
-    // the torus surface itself, turned a quarter of the way round the ring so
+    // the torus surface itself, turned an eighth of a turn round the ring so
     // it overlaps the first without being a plain duplicate of it.
     let a_turned_bend_of_the_same_ring_and_tube = |model: &mut Model| -> SolidKey {
         let second = a_quarter_bend(model, 4.0, 1.0);
@@ -211,13 +242,26 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
         refused_fusing_a_third_solid(&model, built, &a_turned_bend_of_the_same_ring_and_tube);
     let refusal_of_rebuilt =
         refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
+    let Error::Undecidable { records } = &refusal_of_built else {
+        panic!(
+            "expected the side of the plane x + y = 0 to be refused at a node on it, got \
+             {refusal_of_built:?}"
+        );
+    };
+    let record = records.records().last().expect("a refusal names why");
+    assert_eq!(record.predicate(), "side of plane", "{refusal_of_built:?}");
+    let [node] = record.inputs() else {
+        panic!("one node was asked about: {refusal_of_built:?}");
+    };
+    let [x, y, z] = node.enclosure();
+    let far = 5.0 * core::f64::consts::FRAC_1_SQRT_2;
     assert!(
-        matches!(
-            refusal_of_built,
-            Error::TwoCurvesTouchWithoutCrossing { .. }
-        ),
-        "expected the arrangement to reach the two coincident curves and refuse there, got \
-         {refusal_of_built:?}"
+        x.lo() <= far && far <= x.hi() && y.lo() <= -far && -far <= y.hi(),
+        "the node is on the far circle, at the tube's outer rim: {refusal_of_built:?}"
+    );
+    assert!(
+        z.lo() < 0.0 && 0.0 < z.hi(),
+        "and it is a constructed box, straddling z = 0: {refusal_of_built:?}"
     );
     assert_eq!(
         format!("{refusal_of_built}"),
