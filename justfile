@@ -3773,38 +3773,61 @@ fuzz-overnight window="28800":
     # certainty rather than news: its tracked corpus holds inputs of 17 to 19
     # seconds, so the replay writes one before any fuzzing starts. A standing
     # population cannot be what fails a night — that is §91's failure reached by
-    # crying wolf instead of by staying quiet. Both are still copied out and still
-    # counted in the summary, which is how a new one gets noticed.
+    # crying wolf instead of by staying quiet.
     #
     # Read out of the worktree rather than out of `$night/artifacts`, and against
     # `$since`, because the copy is made with `cp -Rn` and carries no useful mtime
     # while the original has libFuzzer's own.
     #
+    # **Per target and per kind, not one cumulative pile.** The count used to be
+    # everything `fuzz/artifacts/` had ever held, across every night since the
+    # directory was created, and the line said "nothing found" beside it — so the
+    # fuse's first timeouts ever, three written 2026-09-24/25, sat unseen under a
+    # pile that was already in the thousands (§226.3). What is new tonight, and
+    # where, is the only thing worth a line; the running total stays in
+    # `$artifacts` below for whoever wants it.
+    #
     # Guarded rather than left to `find` to report: a night where no target wrote
     # anything has no `fuzz/artifacts` at all, `find` exits 1, and `pipefail`
     # takes the recipe down before the summary is written — the same trap arm Ten
     # of the selftest records falling into.
-    found=0
+    kinds=(crash oom leak timeout slow-unit)
+    crash_new=0
+    new_summary=""
     if [ -d fuzz/artifacts ]; then
-        found=$(find fuzz/artifacts -type f -newer "$since" \
-            \( -name 'crash-*' -o -name 'oom-*' -o -name 'leak-*' \) \
-            | wc -l)
+        for target_dir in fuzz/artifacts/*/; do
+            [ -d "$target_dir" ] || continue
+            target=$(basename "${target_dir%/}")
+            target_new=""
+            for kind in "${kinds[@]}"; do
+                n=$(find "$target_dir" -maxdepth 1 -type f -name "$kind-*" -newer "$since" | wc -l)
+                [ "$n" -gt 0 ] || continue
+                case "$kind" in
+                    crash|oom|leak) crash_new=$(( crash_new + n )) ;;
+                esac
+                target_new="${target_new:+$target_new, }$n $kind"
+            done
+            [ -n "$target_new" ] || continue
+            new_summary="${new_summary:+$new_summary; }$target: $target_new"
+        done
     fi
-    if [ "$found" -gt 0 ]; then
-        echo "$found crash-class artifacts written tonight — see $night/artifacts"
-        to_look_at+=("crashed:$found")
+    if [ "$crash_new" -gt 0 ]; then
+        echo "$crash_new crash-class artifacts written tonight — see $night/artifacts"
+        to_look_at+=("crashed:$crash_new")
     fi
+    summary_word="nothing found"
+    [ -z "$new_summary" ] || summary_word="new tonight: $new_summary"
 
     if [ "${#to_look_at[@]}" -eq 0 ]; then
-        printf '%s  %s (%d days old, %s behind main)  %d targets, nothing found%s  %s\n' \
+        printf '%s  %s (%d days old, %s behind main)  %d targets, %s%s  %s\n' \
             "$(date '+%Y-%m-%d %H:%M')" "$commit" "$age" "$behind" "${#recipes[@]}" \
-            "$artifacts" "$night" >"{{fuzz_log_root}}/latest"
+            "$summary_word" "$artifacts" "$night" >"{{fuzz_log_root}}/latest"
         cat "{{fuzz_log_root}}/latest"
         exit 0
     fi
-    printf '%s  %s (%d days old, %s behind main)  %d targets, %d TO LOOK AT (%s)%s  %s\n' \
+    printf '%s  %s (%d days old, %s behind main)  %d targets, %d TO LOOK AT (%s), %s%s  %s\n' \
         "$(date '+%Y-%m-%d %H:%M')" "$commit" "$age" "$behind" "${#recipes[@]}" \
-        "${#to_look_at[@]}" "${to_look_at[*]}" "$artifacts" "$night" >"{{fuzz_log_root}}/latest"
+        "${#to_look_at[@]}" "${to_look_at[*]}" "$summary_word" "$artifacts" "$night" >"{{fuzz_log_root}}/latest"
     cat "{{fuzz_log_root}}/latest"
     exit 1
 
@@ -4282,14 +4305,17 @@ check-fuzz-overnight-selftest:
     [ "$(grep -c 'max_len=71' "$dir/log")" -eq 1 ] \
         || fail "-max_len=71 belongs to where_two_surfaces_cross and to nothing else"
 
-    # Three: a clean night says so and exits 0. Without this, a recipe that
-    # always failed would satisfy every assertion above. No clock assertions
-    # here, so the window only has to be wide enough that every target gets a
-    # slice worth having.
+    # Three: a night with no crash-class artifacts exits 0, and the routine slow
+    # unit every target leaves behind is named rather than folded into "nothing
+    # found" — that wording is §226.3's bug, which hid three new timeouts behind
+    # a pile it never said was old. No clock assertions here, so the window only
+    # has to be wide enough that every target gets a slice worth having.
     : >"$dir/log"
-    run 8 || fail "a night that found nothing exited non-zero"
-    grep -q 'nothing found' "$dir/logs/latest" \
-        || fail "a clean night did not say so in the summary line"
+    run 8 || fail "a night with no crash-class artifacts exited non-zero"
+    grep -q 'new tonight:.*where_two_surfaces_cross: 1 slow-unit' "$dir/logs/latest" \
+        || fail "a night that wrote a slow unit per target did not name where: $(cat "$dir/logs/latest")"
+    ! grep -q 'nothing found' "$dir/logs/latest" \
+        || fail "a night that wrote five new slow units still said nothing found"
     grep -q "$(git rev-parse --short HEAD) ([0-9]* days old, [0-9?]* behind main)" "$dir/logs/latest" \
         || fail "the summary line does not say which commit was fuzzed and how far behind main it is, so a timer left on a stale one reads as a good night"
 
@@ -4560,8 +4586,8 @@ check-fuzz-overnight-selftest:
     STUB_CRASH=run run 8 || status=$?
     [ "$status" -eq 0 ] \
         || fail "every target exited 70 after fuzzing its whole window and the night reported $status: $(cat "$dir/logs/latest")"
-    grep -q 'nothing found' "$dir/logs/latest" \
-        || fail "a night whose targets exited 70 did not say it found nothing: $(cat "$dir/logs/latest")"
+    ! grep -q 'TO LOOK AT' "$dir/logs/latest" \
+        || fail "a night whose targets exited 70 was reported as needing a look: $(cat "$dir/logs/latest")"
 
     # Twelve: a crash is found by what it wrote, not by what anything exited.
     # **The night exits 0 everywhere here** — which is fork mode's other half and
@@ -4597,23 +4623,36 @@ check-fuzz-overnight-selftest:
     rm -f "$stale"
     [ "$status" -eq 0 ] \
         || fail "a crash left over from an earlier night failed this one: $(cat "$dir/logs/latest")"
-    grep -q 'nothing found' "$dir/logs/latest" \
-        || fail "a carried-over crash artifact was reported as tonight's find: $(cat "$dir/logs/latest")"
+    ! grep -q 'crashed:' "$dir/logs/latest" \
+        || fail "a carried-over crash artifact triggered a look tonight: $(cat "$dir/logs/latest")"
+    ! grep -q 'where_two_surfaces_cross:.*crash' "$dir/logs/latest" \
+        || fail "a carried-over crash artifact was named as tonight's find: $(cat "$dir/logs/latest")"
 
-    # Fourteen: a `timeout-` artifact is a measurement and not a fault (§135).
-    # `-timeout=10` makes one of these a nightly certainty on
+    # Fourteen: a `timeout-` artifact is a measurement and not a fault (§135),
+    # but it still has to be named, against a pile of old ones and not added to
+    # it. This is §226.3 reproduced directly: a stale timeout from a night ago
+    # sits in the same directory as tonight's first new one, and the two must
+    # not be summed. `-timeout=10` makes a timeout a nightly certainty on
     # `where_two_surfaces_cross`, whose tracked corpus holds inputs of 17 to 19
     # seconds — the replay writes one before any fuzzing starts. A night that
     # failed on it would fail every night, and a night that always fails is a
-    # night nobody reads. It is still carried out and still counted.
+    # night nobody reads.
     : >"$dir/log"
+    mkdir -p fuzz/artifacts/where_two_surfaces_cross
+    old_timeout="fuzz/artifacts/where_two_surfaces_cross/timeout-old-$tag"
+    echo "last night's pile" >"$old_timeout"
+    touch -d "1 day ago" "$old_timeout"
     status=0
     STUB_ARTIFACT_KIND=timeout- STUB_ARTIFACT_KIND_TARGET=where_two_surfaces_cross \
         run 8 || status=$?
+    rm -f "$old_timeout"
     [ "$status" -eq 0 ] \
         || fail "a timed-out input failed the night, so every night fails from here on: $(cat "$dir/logs/latest")"
-    grep -q 'nothing found' "$dir/logs/latest" \
-        || fail "a timed-out input was reported as a find: $(cat "$dir/logs/latest")"
+    line=$(grep -o 'where_two_surfaces_cross: [0-9]* timeout' "$dir/logs/latest" || true)
+    [ "$line" = "where_two_surfaces_cross: 1 timeout" ] \
+        || fail "tonight's one new timeout was miscounted against last night's pile: $(cat "$dir/logs/latest")"
+    ! grep -q 'nothing found' "$dir/logs/latest" \
+        || fail "a timed-out input written tonight was reported as nothing found — this is §226.3's bug"
     night="$dir/logs/$(date +%Y-%m-%d)"
     [ -f "$night/artifacts/where_two_surfaces_cross/timeout-$tag" ] \
         || fail "a timed-out input was not carried out of the worktree, so nobody can see a new one appear"
