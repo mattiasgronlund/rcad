@@ -233,23 +233,25 @@ fn a_round_bar(model: &mut Model, placement: &Isometry) -> (SolidKey, Vec<Truth>
         .add_round_bar(radius, height, placement)
         .expect("a bar three across and five tall");
     let at = |z: f64| placement.apply_to_point(Point::new(0.0, 0.0, z));
-    let truths = faces_of(model, bar)
-        .into_iter()
+    let truths = model
+        .solid(bar)
+        .expect("this model made the key")
+        .faces()
         .map(|face| {
-            let view = model
-                .solid(bar)
-                .expect("this model made the key")
-                .faces()
-                .find(|used| used.key() == face)
-                .expect("a face of the bar");
-            match view.surface() {
-                Surface::Plane(plane) if plane.signed_distance_to(at(0.0)).abs() < 1e-6 => {
-                    (face, PI * radius * radius, at(0.0))
-                }
-                Surface::Plane(_) => (face, PI * radius * radius, at(height)),
-                Surface::Cylinder(_) => (face, 2.0 * PI * radius * height, at(height / 2.0)),
-                other => panic!("a round bar has no {other:?} face"),
+            let surface = face.surface();
+            if let Some(plane) = surface.as_plane() {
+                let bottom = plane.signed_distance_to(at(0.0)).abs() < 1e-6;
+                return (
+                    face.key(),
+                    PI * radius * radius,
+                    at(if bottom { 0.0 } else { height }),
+                );
             }
+            assert!(
+                matches!(surface, Surface::Cylinder(_)),
+                "a round bar's one curved face is its wall"
+            );
+            (face.key(), 2.0 * PI * radius * height, at(height / 2.0))
         })
         .collect();
     (bar, truths)
@@ -326,13 +328,17 @@ fn cone_faces(
     let view = model.solid(solid).expect("this model made the key");
     view.faces()
         .map(|face| {
-            let kind = match face.surface() {
-                Surface::Plane(plane) if plane.signed_distance_to(near).abs() < 1e-6 => {
-                    Kind::NearCap
+            let surface = face.surface();
+            let kind = match surface.as_plane() {
+                Some(plane) if plane.signed_distance_to(near).abs() < 1e-6 => Kind::NearCap,
+                Some(_) => Kind::FarCap,
+                None => {
+                    assert!(
+                        matches!(surface, Surface::Cone(_)),
+                        "a cone-faced solid's one curved face is on the cone"
+                    );
+                    Kind::Side
                 }
-                Surface::Plane(_) => Kind::FarCap,
-                Surface::Cone(_) => Kind::Side,
-                other => panic!("a cone-faced solid has no {other:?} face"),
             };
             let (area, middle) = truth(kind);
             (face.key(), area, middle)
@@ -354,13 +360,21 @@ fn a_bend(model: &mut Model, placement: &Isometry) -> (SolidKey, Vec<Truth>) {
     let view = model.solid(bend).expect("this model made the key");
     let truths = view
         .faces()
-        .map(|face| match face.surface() {
-            Surface::Torus(_) => (face.key(), PI * PI * ring * tube, at(across, across)),
-            Surface::Plane(plane) if plane.signed_distance_to(at(ring, 0.0)).abs() < 1e-6 => {
-                (face.key(), PI * tube * tube, at(ring, 0.0))
+        .map(|face| {
+            let surface = face.surface();
+            match surface.as_plane() {
+                Some(plane) if plane.signed_distance_to(at(ring, 0.0)).abs() < 1e-6 => {
+                    (face.key(), PI * tube * tube, at(ring, 0.0))
+                }
+                Some(_) => (face.key(), PI * tube * tube, at(0.0, ring)),
+                None => {
+                    assert!(
+                        matches!(surface, Surface::Torus(_)),
+                        "a bend's one curved face is its tube"
+                    );
+                    (face.key(), PI * PI * ring * tube, at(across, across))
+                }
             }
-            Surface::Plane(_) => (face.key(), PI * tube * tube, at(0.0, ring)),
-            other => panic!("a bend has no {other:?} face"),
         })
         .collect();
     (bend, truths)
