@@ -2812,12 +2812,12 @@ mod tests {
             (at(3.0, -4.0, 0.0), OnAFace::NotHeld),
             (at(-5.0, 0.0, 0.0), OnAFace::NotHeld),
         ];
+        let bend = model.solid(solid).expect("this model made the key");
         for (point, answer) in expected {
-            assert_eq!(
-                what_it_holds(&model, solid, wall, point),
-                answer,
-                "{point:?}"
-            );
+            let held = bend
+                .face_holds_the_point(wall, point, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a quarter bend's wall is a face this can follow");
+            assert_eq!(held, answer, "{point:?}");
         }
     }
 
