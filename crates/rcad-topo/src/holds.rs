@@ -2821,6 +2821,99 @@ mod tests {
         }
     }
 
+    /// The rounded rim of a puck is refused, and no longer holds the inside of
+    /// its ring.
+    ///
+    /// A disk of radius four on `z = 1`, one on `z = −1`, and between them the
+    /// outer half of the ring of radius four and tube one: each disk's plane
+    /// rests on the ring along one circle, and the rim has that circle as an
+    /// edge. Two planes with one edge along each, like a bend's wall — but
+    /// neither holds the ring's axis. The general rule read the rim as the part
+    /// of the ring between the two planes, which is the inner half too, and
+    /// `(3, 0, 0)` down in the hole came back held (§243). The rim's wire runs
+    /// the way the bend's wall's does; nothing asked here reads it.
+    #[test]
+    fn a_pucks_rounded_rim_is_refused_rather_than_holding_the_inside_of_its_ring() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let top = model.add_vertex(rcad_geom::Point::new(4.0, 0.0, 1.0));
+        let bottom = model.add_vertex(rcad_geom::Point::new(4.0, 0.0, -1.0));
+        let upright = Plane::from_point_and_normal(
+            rcad_geom::Point::origin(),
+            Vector::new(0.0, 1.0, 0.0),
+        )
+        .expect("the y axis is a unit normal");
+        let seam = model.add_edge_running(
+            bottom,
+            top,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(upright),
+                picked_by: smallvec::smallvec![Picker::from(
+                    HalfSpace::new(Vector::new(1.0, 0.0, 0.0), 4.0).expect("a normal with a length")
+                )],
+            },
+        );
+        let round_the_top = model.add_closed_edge(top);
+        let round_the_bottom = model.add_closed_edge(bottom);
+        let disk = |model: &mut Model, up: f64, circle, turn| {
+            let plane = Plane::from_point_and_normal(
+                rcad_geom::Point::new(0.0, 0.0, up),
+                Vector::new(0.0, 0.0, up),
+            )
+            .expect("the z axis is a unit normal");
+            let round_it = model.add_coedge(circle, turn);
+            let wire = model.add_wire(smallvec::smallvec![round_it]);
+            model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
+        };
+        let lid = disk(&mut model, 1.0, round_the_top, Orientation::Forward);
+        let base = disk(&mut model, -1.0, round_the_bottom, Orientation::Reversed);
+        let round_the_rim: SmallVec<[_; 4]> = [
+            (round_the_bottom, Orientation::Forward),
+            (seam, Orientation::Forward),
+            (round_the_top, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ]
+        .map(|(edge, turn)| model.add_coedge(edge, turn))
+        .into_iter()
+        .collect();
+        let wire = model.add_wire(round_the_rim);
+        let ring = rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+        let rim = model.add_face(Surface::Torus(ring), smallvec::smallvec![wire]);
+        let shell = model.add_shell(
+            [
+                (lid, Orientation::Forward),
+                (base, Orientation::Forward),
+                (rim, Orientation::Reversed),
+            ]
+            .into_iter()
+            .map(|(face, orient)| FaceUse {
+                face,
+                loc: Isometry::identity(),
+                orient,
+            })
+            .collect(),
+        );
+        let solid = model.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]));
+        let puck = model.solid(model.key_for_solid(solid)).expect("this model made the key");
+        let rim = puck
+            .faces()
+            .find(|face| matches!(face.surface(), Surface::Torus(_)))
+            .expect("a puck has a rim")
+            .key();
+
+        for point in [at(3.0, 0.0, 0.0), at(5.0, 0.0, 0.0)] {
+            let answer =
+                puck.face_holds_the_point(rim, point, &Policy::certified(), &mut ProvenanceLog::new());
+            assert!(
+                matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == rim),
+                "{point:?}: {answer:?}"
+            );
+        }
+    }
+
     /// A three-quarter bend's wall is refused, and not read as a quarter.
     ///
     /// It is the part of the ring in front of *either* cap's plane, not of
@@ -2829,9 +2922,21 @@ mod tests {
     /// plane. Read off a corner instead of the wire, both kept sides come out
     /// turned round, both circles look in front, and every point of the one
     /// quarter the wall does *not* cover comes back held (§243).
+    ///
+    /// `Model::validate` refuses this bend, which is the quarter bend with its
+    /// far end turned half a turn: `AClosedEdgeIsWalkedAgainstItsSurface`. It
+    /// hands the closed-edge rule the side its corners read, and both of the
+    /// wall's circles have the far corner on the other side of their plane.
     #[test]
     fn a_three_quarter_bends_wall_is_refused_rather_than_read_as_a_quarter() {
         let (model, solid, wall) = a_bend(Bend::ThreeQuarters);
+        assert!(
+            matches!(
+                model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
+                Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface))
+            ),
+            "the sweep has learned a three-quarter bend, and §243 says what that changes"
+        );
         for point in [at(3.0, -4.0, 0.0), at(-3.0, 4.0, 0.0), at(3.0, 4.0, 0.0)] {
             let answer = model
                 .solid(solid)
