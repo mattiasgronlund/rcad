@@ -27,11 +27,10 @@ A row is **ready** when its state is `todo`, or `after:` names only `done` rows.
 
 ```
 Q2a  1    lane:lane-q2a-queue-check     opus    justfile#queue,justfile#_queue-rows,justfile#check-queue,justfile#_queue-check,justfile#check-queue-selftest,justfile#gate_steps   just queue, just queue next N, and check-queue in the gate; replaces Q2, which stopped on the context hook with no commits. §230.9
-T4   1    lane:lane-t4-morning-line     sonnet  justfile#fuzz-overnight,justfile#check-fuzz-overnight-selftest   The morning line says what is new tonight, by kind and target, off the per-night counters, instead of "nothing found" beside a pile that grows by ~700 a night. §226.3
 Q9   1    lane:lane-q9-fast-inputs-timed  sonnet  -   Time the two fast §228 inputs (fuse bb8aa34…, cone-or-torus 694123d…) in the fuzz build, to find why the night stopped each at ten seconds when a debug build takes 9s and 7s. §228
 Q6   1    lane:lane-q6-shared-comparison  sonnet  crates/rcad-topo/tests/fuses_that_must_agree.rs,crates/rcad-topo/tests/fuzzing/fuse.rs,crates/rcad-topo/tests/fuzzing/   Move both_ways_round_of and same_answer into one module both files share by #[path], instead of the copy lane T2 made. §129.5
 Q11  1    lane:lane-q11-seed-count  sonnet  -   Find why 09-22 fuzzed 36.7M fuse runs starting from 3107 seeds, against neighbouring nights' 3297-3687, under the same flags. §227.5
-Q13  1    todo    sonnet  -   Find why the cone-or-torus target's fork-mode timing record undercounts: 1 009 847 runs recorded against libFuzzer's own 2 298 296 on 09-21. §227.5
+Q13  1    lane:lane-q13-timing-record  sonnet  -   Find why the cone-or-torus target's fork-mode timing record undercounts: 1 009 847 runs recorded against libFuzzer's own 2 298 296 on 09-21. §227.5
 T6   1    todo    sonnet  fuzz/fuzz_targets/no_step_file_makes_the_reader_panic.rs   A dictionary of the STEP entity names Import::read handles, given to the reader target with -dict=. §226.1
 T7   1    todo    sonnet  fuzz/fuzz_targets/no_step_file_makes_the_reader_panic.rs   Seed the reader target from the real STEP files under RCAD_STEP_CORPUS; its corpus is all fuzzer-grown. §226.1
 Q24  1    todo    sonnet  crates/rcad-step/tools/composite_wildcards.awk   composite_wildcards.awk counts sites hit, not variants covered, so a check can pass without every variant firing (item 8). §43.8
@@ -100,6 +99,7 @@ T1   1    done:e14b14ab   opus    -   The cone-or-torus target fell from 160 M r
 T2   1    done:7e9d1b2c   opus    -   The fuse target asks each pair both ways round and compares the two answers, the way fuses_that_must_agree.rs's commutativity does (item 3); no disagreement on the replay. §129.5
 Q1   1    done:b35ab4ce   sonnet  -   Seed docs/queue.md with every open item and retire docs/test-plan.md. §230.9
 Q2   1    dropped:§230    opus    -   The queue recipes, first attempt: stopped on the context hook at call 5 with no commits; replaced by Q2a. §230.9
+T4   1    done:157b3b77   sonnet  -   The morning line says what is new tonight, by target and kind, counted against the night's start, instead of "nothing found" beside the pile of every night since the directory was made; on 2026-09-25 it would have named the fuse's three timeouts. §226.3
 T5   1    done:8541b2b7   opus    -   The writer target reads back what it wrote and compares it with the model that went in (item 3): parse, references, Import::read, validate, solid count, then volume, area and centroid bit for bit. Nothing found; only two cubes reach it. §129.5
 Q3   2    done:39b278cc   opus    -   Finish lane-land-cone-and-copy: rustfmt, the two spellings of one pipe, the absorption corner, the two bars pinned. §229.6 §231
 T3   1    done:42df376e   sonnet  -   Decode the first timeouts the fuse ever wrote (three, 2026-09-24/25) and the cone-or-torus one (2026-09-25): what each input is, how long it takes on main, a hang or only slow. Two are one correct refusal that takes eight minutes; two finish in seconds here, why the night stopped them is open. §226.3 §228
