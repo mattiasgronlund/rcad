@@ -54,6 +54,23 @@
 //! that. `written` and `faces` come from one seed, so their floor is what that
 //! seed brings — and if the corpus ever grows a second model with faces in it,
 //! the floor stays honest by being too low rather than by being re-cut.
+//!
+//! # The read-back floors
+//!
+//! Measured 2026-09-25, once the harness read each written file back
+//! (`docs/decisions.md` §129.5 item 3), by the same command:
+//!
+//! ```text
+//! Reached { draws: 1182, decoded: 18, faces: 13, written: 1, refused: 17,
+//!           written_but_unsound: 0, read_back: 1, did_not_measure: 0,
+//!           solids_the_same: 2, came_back_the_same: 1 }
+//! ```
+//!
+//! **`came_back_the_same` and `solids_the_same` are the only thing that sees
+//! the comparison go.** Every other counter is untouched if the read-back is
+//! deleted, and a comparison that is deleted passes every seed. Both come from
+//! `two_cubes_that_write` alone, so their floor is what that one seed brings,
+//! for the same reason as `written`'s.
 
 #![forbid(unsafe_code)]
 
@@ -112,6 +129,17 @@ fn every_seed_in_the_checked_in_corpus_is_written_without_panicking() {
          to holding nothing but empty models",
         reached.faces
     );
+    assert!(
+        reached.came_back_the_same >= 1,
+        "no written model was read back and found the same, so nothing in this \
+         corpus reaches the comparison: {reached:?}"
+    );
+    assert!(
+        reached.solids_the_same >= 2,
+        "only {} solids were compared with the solid that went in, where \
+         `two_cubes_that_write` alone brings two: {reached:?}",
+        reached.solids_the_same
+    );
 }
 
 /// The two named seeds, each asserted to be the thing it was checked in as.
@@ -124,6 +152,11 @@ fn the_two_named_control_seeds_still_land_either_side_of_the_writer() {
     assert_eq!(
         reached.faces, 12,
         "two cubes have twelve faces: {reached:?}"
+    );
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 2),
+        "two cubes written out come back as the same two cubes: {reached:?}"
     );
 
     let pole = std::fs::read(corpus().join("a_ball_whose_pole_the_writer_refuses"))
