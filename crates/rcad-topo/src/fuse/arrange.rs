@@ -1115,8 +1115,19 @@ impl<'f> Arrangement<'f> {
                     if through.contains(&index) {
                         continue;
                     }
-                    let known_from_the_model = around.contains(&self.crossings[index].partner);
-                    if known_from_the_model || self.passes_through(index, at, policy, log)? {
+                    // **The model knows the surface, not the curve.** A plane
+                    // along a cone's axis crosses it in two branches, one per
+                    // nappe, and the corner is on one of them: both branches
+                    // taken as passing through put two ways out along one
+                    // cone at a node, and the turn between them is undecided
+                    // (§224.2's joined cone, taken back in).
+                    let crossing = &self.crossings[index];
+                    let on_it = if around.contains(&crossing.partner) {
+                        nothing_rules_the_point_out(crossing.picked_by(), at)
+                    } else {
+                        self.passes_through(index, at, policy, log)?
+                    };
+                    if on_it {
                         through.push(index);
                     }
                 }
