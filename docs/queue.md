@@ -28,7 +28,6 @@ A row is **ready** when its state is `todo`, or `after:` names only `done` rows.
 
 ```
 Q6   1    lane:lane-q6-shared-comparison  sonnet  crates/rcad-topo/tests/fuses_that_must_agree.rs,crates/rcad-topo/tests/fuzzing/fuse.rs,crates/rcad-topo/tests/fuzzing/   Move both_ways_round_of and same_answer into one module both files share by #[path], instead of the copy lane T2 made. §129.5
-Q13  1    lane:lane-q13-timing-record  sonnet  -   Find why the cone-or-torus target's fork-mode timing record undercounts: 1 009 847 runs recorded against libFuzzer's own 2 298 296 on 09-21. §227.5
 T6   1    todo    sonnet  fuzz/step.dict,justfile#fuzz-reader,justfile#fuzz-target,justfile#check-fuzz-overnight-selftest   A dictionary of the STEP entity names Import::read handles, given to the reader target with -dict=. §226.1
 T7   1    todo    sonnet  fuzz/fuzz_targets/no_step_file_makes_the_reader_panic.rs   Seed the reader target from the real STEP files under RCAD_STEP_CORPUS; its corpus is all fuzzer-grown. §226.1
 Q24  1    todo    sonnet  crates/rcad-step/tools/composite_wildcards.awk   composite_wildcards.awk counts sites hit, not variants covered, so a check can pass without every variant firing (item 8). §43.8
@@ -36,6 +35,8 @@ Q42  1    todo    sonnet  fuzz/corpus/no_model_makes_the_writer_panic/,crates/rc
 Q46  1    todo    sonnet  -   Replay one fixed set of fuse inputs on binaries built at ae124a29, 79eedce7 and 055aa4a9 (the nights of 09-21, 09-22, 09-23), order swapped to cancel load as §227.4 did, to say whether the fuse/*.rs rewrite going into 09-23 made the same inputs slower. §234.5
 Q47  1    todo    sonnet  -   Hash all 64 slowest fuse inputs of 09-21 and of 09-23 and check each against the corpus and 09-22's 00:10 checkout, to say whether "in the corpus but not reached early" is the rule or §234.3's one example of three was a lucky pick. §234.5
 Q48  1    todo    sonnet  -   Show directly whether the libFuzzer seed decides when a night reaches its slow fuse inputs: first whether -seed= pins a -fork=4 job schedule at all, then 09-22's corpus under 09-21's seed; each rerun costs a night's window, so off 22:00-06:00Z. §234.5
+Q49  1    todo    sonnet  crates/rcad-fuzz-timing/src/lib.rs   merge_out takes a process's runs out of the live record before writing them and drops them when create_dir_all or the shared lock fails; hand them back for the next tick and count what could not be written, so a night's report says how much it lost, with a test that makes the directory uncreatable. §236.6
+Q50  1    after:Q49   sonnet  -   Read the first night after Q49 lands: set its count of runs that could not be written against libFuzzer's own run count, to say whether merge_out's failures are the §236 undercount, and why a slow night would fail more often. §236.6
 ```
 
 ## Tier 2
@@ -106,6 +107,7 @@ T5   1    done:8541b2b7   opus    -   The writer target reads back what it wrote
 Q3   2    done:39b278cc   opus    -   Finish lane-land-cone-and-copy: rustfmt, the two spellings of one pipe, the absorption corner, the two bars pinned. §229.6 §231
 Q9   1    done:7968c2e1   sonnet  -   The two fast §228 timeouts take 1.6 s and 3.3–4.1 s alone in the fuzz build, already at the night's own commit 6664fef8: no later commit sped them up and the sanitizer build is faster than debug, so the night's load is the one cause left, by elimination. §228 §233
 Q11  1    done:202ea584   sonnet  -   09-22's fuse night was fast not because it lacked the slow inputs: one of 09-21's slowest was in 09-22's corpus too, so "not reached early" is what is left, not shown; the fuse's own files were untouched going into 09-22 and rewritten going into 09-23, seen and not confirmed as a cause. §227.5 §234
+Q13  1    done:bf9d4846   sonnet  -   The timing record loses runs on a slow night, not through timeouts, OOMs or crashes (0/0/0 all night) and fifty times past the per-job teardown bound; the fuse target lost a third of 09-21 too, so it is the shared timing crate, and merge_out dropping what it failed to write fits the shape, unproven. §227.5 §236
 T3   1    done:42df376e   sonnet  -   Decode the first timeouts the fuse ever wrote (three, 2026-09-24/25) and the cone-or-torus one (2026-09-25): what each input is, how long it takes on main, a hang or only slow. Two are one correct refusal that takes eight minutes; two finish in seconds here, why the night stopped them is open. §226.3 §228
 T8   1    dropped:§230    -       -   A gate check that holds this file's rows to their shape, the way check-plan holds docs/plan.md's; widened into check-queue instead. §226.4 §230
 D1   1    done:0ac02509   -       -   The five fuzz targets run at once, each for the whole night. §129
