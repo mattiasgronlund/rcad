@@ -145,8 +145,9 @@ pub fn one_model_decoded_and_written(bytes: &[u8]) -> Reached {
 /// `a_real_file_written_out_and_read_back_is_the_same_solid.rs`.
 fn read_back_and_compared(source: &Model, text: &str) -> Reached {
     let mut reached = Reached::default();
-    let file = StepFile::read(text.as_bytes())
-        .unwrap_or_else(|why| panic!("this writer wrote a file its own reader cannot parse: {why}"));
+    let file = StepFile::read(text.as_bytes()).unwrap_or_else(|why| {
+        panic!("this writer wrote a file its own reader cannot parse: {why}")
+    });
     let broken = file.references_that_point_nowhere();
     assert!(
         broken.is_empty(),
