@@ -354,6 +354,173 @@ impl Model {
         Ok(())
     }
 
+    /// A second solid in this model, the same shape as the one `key` names and
+    /// sharing nothing with it, so that moving, fusing or tagging either one
+    /// leaves the other as it was.
+    ///
+    /// **The copy goes all the way down to the corners, and has to.** A shell
+    /// belongs to one solid and a face to one shell — `Deserialize` and
+    /// [`Model::validate`] both refuse a model where one is used twice. An edge
+    /// is walked by exactly two coedges running opposite ways, so a copied face
+    /// walking the original's edges would give each of them a third and a
+    /// fourth. And a corner the two solids shared would be tagged in both by one
+    /// [`Model::set_vertex_approximation`]. So every vertex, edge, coedge, wire,
+    /// face and shell under the solid is written again, carrying its point, run,
+    /// surface, placement, orientation and approximation over bit for bit. The
+    /// shells are used at the placements the original uses them at, so the copy
+    /// sits exactly where the original does until one of them is moved.
+    ///
+    /// **Each level is written in the order of the original's slots.** With no
+    /// empty slot in an arena, a new entity lands after every entity already
+    /// there, so the copy's entities sort the way the originals they came from
+    /// sort, and the lists the model keeps of the edges at a corner and the
+    /// coedges along an edge come out as the original's with the names changed.
+    /// A walk down from the copy then visits everything in the order the same
+    /// walk down from the original does, which is what makes the copy measure
+    /// the same as the original bit for bit. Nothing in this crate removes an
+    /// entity, so every model it builds has no empty slot. A model read from a
+    /// file can: the file lists each arena's slots, empty ones included, and
+    /// the next entities written go into those first. The copy is then still
+    /// the same shape and still shares nothing, but its entities need not sort
+    /// the way the originals do (`a_copy_written_into_empty_slots_...` below
+    /// shows one that does not), and a bit-for-bit measure is not promised.
+    ///
+    /// The old-to-new lookup is a binary search over what was copied rather
+    /// than a map as long as the arena, so a copy costs what the solid holds
+    /// and not what the model holds (decisions.md §4.3).
+    /// [`Model::which_model_this_is`] does not change: this is the same model
+    /// with one more solid in it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
+    /// [`Invalid::EdgeCoedgeCount`] if an edge of this solid is also walked by
+    /// something outside it — a solid whose skin only closes together with
+    /// another solid's, which a file can hold and which would copy into an
+    /// edge walked once. Both are answered before anything is written, so the
+    /// model is left as it was (`docs/decisions.md` §86).
+    ///
+    /// # Panics
+    ///
+    /// If the copy breaks a check run on a touched solid, or leaves more slop
+    /// in the model than there was. Every tag it writes is one the model
+    /// already held, so either is a bug here.
+    pub fn copy_solid(&mut self, key: SolidKey) -> Result<SolidKey> {
+        let slot = key.try_slot_in(self.id)?;
+        let approximation_before = self.worst_approximation;
+
+        let solid = self.data.solids.get(slot).expect("no such solid to copy");
+        let shells: Vec<ShellSlot> = solid.shells.iter().map(|used| used.shell).collect();
+        let faces: Vec<FaceSlot> = shells
+            .iter()
+            .flat_map(|&shell| self.data.shells[shell].faces.iter().map(|used| used.face))
+            .collect();
+        let wires: Vec<WireSlot> = faces
+            .iter()
+            .flat_map(|&face| self.data.faces[face].wires.iter().copied())
+            .collect();
+        let mut coedges: Vec<CoedgeSlot> = Vec::new();
+        let mut vertices: Vec<VertexSlot> = Vec::new();
+        for &wire in &wires {
+            for &step in &self.data.wires[wire].steps {
+                match step {
+                    WireStep::Along(coedge) => coedges.push(coedge),
+                    WireStep::Pole(vertex) => vertices.push(vertex),
+                }
+            }
+        }
+        coedges.sort_unstable();
+        coedges.dedup();
+        let edges: Vec<EdgeSlot> = coedges
+            .iter()
+            .map(|&coedge| self.data.coedges[coedge].edge)
+            .collect();
+        for &edge in &edges {
+            let walked_by = self.index.coedges_of_edge(edge);
+            let walked_from_inside = walked_by
+                .iter()
+                .filter(|coedge| coedges.binary_search(coedge).is_ok())
+                .count();
+            if walked_from_inside != walked_by.len() {
+                return Err(Invalid::EdgeCoedgeCount {
+                    count: walked_from_inside,
+                }
+                .into());
+            }
+            let edge = &self.data.edges[edge];
+            vertices.extend([edge.start, edge.end]);
+        }
+
+        let vertices = Renaming::copying(vertices, |vertex| {
+            let VertexData {
+                point,
+                approximation,
+            } = self.data.vertices[vertex];
+            let copy = self.add_vertex(point);
+            self.data.vertices[copy].approximation = approximation;
+            copy
+        });
+        let edges = Renaming::copying(edges, |edge| {
+            let EdgeData {
+                start,
+                end,
+                ref run,
+                approximation,
+            } = self.data.edges[edge];
+            let run = run.clone();
+            let copy = self.add_edge_running(vertices.of(start), vertices.of(end), run);
+            self.data.edges[copy].approximation = approximation;
+            copy
+        });
+        let coedges = Renaming::copying(coedges, |coedge| {
+            let CoedgeData { edge, orientation } = self.data.coedges[coedge];
+            self.add_coedge(edges.of(edge), orientation)
+        });
+        let wires = Renaming::copying(wires, |wire| {
+            let steps = self.data.wires[wire]
+                .steps
+                .iter()
+                .map(|&step| match step {
+                    WireStep::Along(coedge) => WireStep::Along(coedges.of(coedge)),
+                    WireStep::Pole(vertex) => WireStep::Pole(vertices.of(vertex)),
+                })
+                .collect();
+            self.add_wire_of_steps(steps)
+        });
+        let faces = Renaming::copying(faces, |face| {
+            let face = &self.data.faces[face];
+            let (surface, approximation) = (face.surface, face.approximation);
+            let bounded_by = face.wires.iter().map(|&wire| wires.of(wire)).collect();
+            let copy = self.add_face(surface, bounded_by);
+            self.data.faces[copy].approximation = approximation;
+            copy
+        });
+        let shells = Renaming::copying(shells, |shell| {
+            let used = self.data.shells[shell]
+                .faces
+                .iter()
+                .map(|used| FaceUse {
+                    face: faces.of(used.face),
+                    ..*used
+                })
+                .collect();
+            self.add_shell(used)
+        });
+        let used = self.data.solids[slot]
+            .shells
+            .iter()
+            .map(|used| ShellUse {
+                shell: shells.of(used.shell),
+                ..*used
+            })
+            .collect();
+        let copy = self.add_solid(used);
+
+        self.check_touched_solid(copy);
+        self.assert_approximation_did_not_grow(approximation_before);
+        Ok(self.key_for_solid(copy))
+    }
+
     /// Tag a vertex with the slop a decision put into it.
     ///
     /// # Errors
@@ -886,6 +1053,40 @@ fn ordering_broken(
         inner,
         inner_magnitude,
     })
+}
+
+/// Which entity of a copy each entity of the original became, for one level
+/// of [`Model::copy_solid`].
+///
+/// Two lists side by side and a binary search, rather than a `SecondaryMap`:
+/// a `SecondaryMap` grows to the length of the arena, and a copy has to cost
+/// what the solid holds.
+struct Renaming<K> {
+    originals: Vec<K>,
+    copies: Vec<K>,
+}
+
+impl<K: Ord + Copy + core::fmt::Debug> Renaming<K> {
+    /// Copy each of `originals` once, in slot order, with `copy`.
+    fn copying(mut originals: Vec<K>, mut copy: impl FnMut(K) -> K) -> Self {
+        originals.sort_unstable();
+        originals.dedup();
+        let copies = originals.iter().map(|&original| copy(original)).collect();
+        Self { originals, copies }
+    }
+
+    /// # Panics
+    ///
+    /// If `original` was not copied. Every level is gathered from the one
+    /// above it before anything is written, so that is a bug in
+    /// [`Model::copy_solid`].
+    fn of(&self, original: K) -> K {
+        let at = self
+            .originals
+            .binary_search(&original)
+            .unwrap_or_else(|_| panic!("{original:?} is under the solid and was not copied"));
+        self.copies[at]
+    }
 }
 
 /// Everything a model owns that survives being written to disk.
