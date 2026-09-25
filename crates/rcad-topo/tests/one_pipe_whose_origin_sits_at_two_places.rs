@@ -15,24 +15,25 @@
 //! kernel stores what it was handed. §16.10's test for an unreachability claim
 //! is the public door, not today's callers.
 //!
-//! **What this file measures is that the fuse never sees the difference
-//! today.** Two bars stacked end to end on one axis share their wall pipe, and
-//! the union stops at `"a point in a piece that every solid could place"` — the standing
-//! curved-piece refusal `fusing_two_bars_side_by_side.rs` names — *before* any
-//! corner is named. It stops there identically whether the wall is spelled once
-//! or twice, and identically either way round. So the second spelling costs
-//! nothing that can be seen from outside, and the row stays booked rather than
-//! urgent.
+//! **What this file measures is that the second spelling costs one face and
+//! nothing else.** Two bars stacked end to end on one axis share their wall
+//! pipe. The union used to stop at `"a point in a piece that every solid could
+//! place"` before any corner was named, which masked the spelling; once that
+//! lifted, the circle between two spellings of one wall was read as two pipes
+//! crossing, and nothing could walk it (§231). Now all four unions — one
+//! spelling and two, each either way round — answer one bar with the volume
+//! worked out by hand, and each spelling answers the same either way round.
+//! What stays is that two spellings leave the wall as two faces.
 //!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
-//! surface. If the curved-piece refusal is ever lifted and the two spellings
-//! then diverge, this file fails and the row has to be reopened.
+//! surface.
 
 use rcad_geom::SurfaceMeet;
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector, intersect,
+    Axis, Cylinder, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector,
+    intersect,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
@@ -198,7 +199,7 @@ fn a_bar_whose_wall_names_its_axis_at(
 /// down to the point it names and the box it names it in, and an answer would
 /// be compared as the faces it is made of. Two spellings that started to differ
 /// anywhere in either would show up here.
-fn what_the_union_says(upper_axis_origin: f64) -> [String; 2] {
+fn what_the_union_says(upper_axis_origin: f64) -> [Said; 2] {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 2.0, LOWER_ORIGIN);
@@ -207,73 +208,105 @@ fn what_the_union_says(upper_axis_origin: f64) -> [String; 2] {
     [[lower, upper], [upper, lower]].map(|[arguments, tools]| {
         let mut model = model.clone();
         let mut log = ProvenanceLog::new();
-        match model.fuse(&[arguments], &[tools], Rule::Union, &policy, &mut log) {
-            Ok(fused) => fused
-                .solids()
-                .iter()
-                .map(|solid| {
-                    let mut faces: Vec<String> = model
-                        .solid(*solid)
-                        .expect("this model made the key")
-                        .faces()
-                        .map(|face| format!("{:?}", face.surface()))
-                        .collect();
-                    faces.sort();
-                    faces.join("; ")
-                })
-                .collect::<Vec<_>>()
-                .join(" | "),
-            Err(refused) => format!("{refused:?}"),
+        let fused = model
+            .fuse(&[arguments], &[tools], Rule::Union, &policy, &mut log)
+            .unwrap_or_else(|refused| {
+                panic!("the stacked bars, wall at {upper_axis_origin}: {refused:?}")
+            });
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| {
+                panic!(
+                    "the stacked bars, wall at {upper_axis_origin}, came back broken: {broken:?}"
+                )
+            });
+        let [solid] = fused.solids() else {
+            panic!("two bars end to end are one bar: {:?}", fused.solids());
+        };
+        let solid = model.solid(*solid).expect("this model made the key");
+        let mut faces: Vec<String> = solid
+            .faces()
+            .map(|face| format!("{:?}", face.surface()))
+            .collect();
+        faces.sort();
+        let measured = solid
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar measures");
+        Said {
+            faces: faces.join("; "),
+            volume: measured.volume(),
+            bound: measured.volume_error(),
         }
     })
 }
 
-/// **The measurement.** Spelling the wall twice changes nothing the fuse says.
+/// What one union of the stacked bars came back as.
+#[derive(Debug, PartialEq)]
+struct Said {
+    faces: String,
+    volume: f64,
+    bound: f64,
+}
+
+/// **The measurement.** Spelling the wall twice changes nothing but how many
+/// faces the wall is.
 ///
-/// Four runs: one spelling and two, each fused both ways round. All four must
-/// say the same thing. Today all four are the standing curved-piece refusal, and
-/// [`the_stacked_bars_stop_where_no_solid_could_place_the_curved_pieces_point`] names it —
-/// so this test is about agreement and that one is about where the agreement
-/// sits.
+/// Four runs: one spelling and two, each fused both ways round. Each spelling
+/// gives the same faces either way round, and all four are the one bar four
+/// tall ([`the_stacked_bars_unite_into_one_bar_however_the_wall_is_written`]).
+/// The two spellings are one surface to the fuse (§231), but the joiner joins
+/// pieces of a curved face only when their surfaces are the same bits
+/// (§229.2), so with two spellings the wall stays two faces meeting on the
+/// circle at `z = 2`.
+///
+/// The faces and not the volumes are compared across the order: with one
+/// spelling the two orders measure 50.20344246266881 and 50.20344246266873,
+/// both within their bound of 16π, so bit-identical volumes are not something
+/// the fuse gives either way round even with nothing spelled twice.
 #[test]
-fn spelling_the_wall_of_a_stacked_bar_twice_changes_nothing_the_fuse_says() {
+fn spelling_the_wall_of_a_stacked_bar_twice_changes_only_how_many_faces_the_wall_is() {
     let [one_spelling_forwards, one_spelling_backwards] = what_the_union_says(LOWER_ORIGIN);
     let [two_spellings_forwards, two_spellings_backwards] = what_the_union_says(UPPER_ORIGIN);
 
     assert_eq!(
-        one_spelling_forwards, one_spelling_backwards,
+        one_spelling_forwards.faces, one_spelling_backwards.faces,
         "with one spelling of the wall the two orders of the union disagreed"
     );
     assert_eq!(
-        two_spellings_forwards, two_spellings_backwards,
+        two_spellings_forwards.faces, two_spellings_backwards.faces,
         "with two spellings of the wall the two orders of the union disagreed"
     );
     assert_eq!(
-        one_spelling_forwards, two_spellings_forwards,
-        "writing the wall's axis origin at the other end of the same axis changed the answer"
+        one_spelling_forwards.faces.matches("Cylinder(").count(),
+        1,
+        "{one_spelling_forwards:?}"
+    );
+    assert_eq!(
+        two_spellings_forwards.faces.matches("Cylinder(").count(),
+        2,
+        "{two_spellings_forwards:?}"
     );
 }
 
-/// Where the stacked pair stops today, by name.
+/// The stacked bars unite into one bar of radius two and four tall, however the
+/// wall is written and whichever goes first.
 ///
-/// Not `is_err()`: the worth of this is *which* refusal, because it is the one
-/// that keeps the spelling from ever being asked about. The union of two bars
-/// on one axis cuts each wall by the other's cap plane, which leaves a piece of
-/// a cylinder bounded by arcs. The winding fan **does** find a point inside one
-/// of those; what nothing can do is place that point against both bars (§48,
-/// `fusing_two_bars_side_by_side.rs`). §217 split the one refusal name that used
-/// to cover both searches, and this is the half that actually fires here — the
-/// sentence above said the fan could not wind a point, and it was never the fan.
-///
-/// **This is the masking, and it is why §51.7's row stays booked.** Lift this
-/// refusal and the spelling question is live again.
+/// This used to stop at `"a point in a piece that every solid could place"`,
+/// which masked the spelling (§51.7). Once that lifted, two spellings of one
+/// wall read the circle between them as two pipes crossing, and nothing could
+/// walk it (§231).
 #[test]
-fn the_stacked_bars_stop_where_no_solid_could_place_the_curved_pieces_point() {
+fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
+    let by_hand = std::f64::consts::PI * RADIUS * RADIUS * 4.0;
     for spelling in [LOWER_ORIGIN, UPPER_ORIGIN] {
         for said in what_the_union_says(spelling) {
             assert!(
-                said.contains("a point in a piece that every solid could place"),
-                "the stacked bars stopped somewhere else with the wall named at {spelling}: {said}"
+                (said.volume - by_hand).abs() <= said.bound,
+                "the wall at {spelling}: {said:?} against {by_hand}"
             );
         }
     }
