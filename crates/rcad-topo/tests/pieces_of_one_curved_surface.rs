@@ -38,8 +38,40 @@ use cones::a_frustum;
 /// §222.3 items 4 and 5's first refusal. Before the picker cleared the
 /// re-solved corners this refused with
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`].
+///
+/// The day the cone pieces are joined this refusal goes, and
+/// [`a_block_and_frustum_united_can_be_united_again`] is what replaces it.
 #[test]
 fn a_block_and_frustum_united_and_taken_back_in_reach_the_unjoined_cone_pieces() {
+    let (model, united) = a_block_and_frustum_united();
+    let refusal = the_union_again_with_a_far_cube(&model, &united)
+        .expect_err("the cone pieces are not joined yet");
+    assert!(
+        matches!(refusal, Error::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }),
+        "the second union refused before reaching the cone pieces: {refusal:?}"
+    );
+}
+
+/// `(block ∪ frustum) ∪ cube`, with a cube that touches nothing, is the first
+/// union and the cube.
+///
+/// Refused with [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`]: the first
+/// union keeps the frustum's cone as several faces, cut apart by the block's
+/// walls `x = 1` and `y = 1` where they run on below the block, and nothing
+/// folds pieces of one curved surface into one face the way
+/// `fuse/assemble.rs`'s `join_up_what_is_one_face` folds pieces of one plane.
+/// A gap: the one face those pieces make up exists (§223.4).
+#[test]
+#[ignore = "AFaceMeetsItsNeighbourOnItsOwnSurface: pieces of one cone are never joined into one face"]
+fn a_block_and_frustum_united_can_be_united_again() {
+    let (model, united) = a_block_and_frustum_united();
+    the_union_again_with_a_far_cube(&model, &united)
+        .expect("the answer of a fuse can be fused again");
+}
+
+/// §222.3 items 4 and 5's pair: a frustum about `z` and a block over its
+/// narrow end, its low corner at `(1, 1, 5)`.
+fn a_block_and_frustum_united() -> (Model, Vec<SolidKey>) {
     let mut model = a_model();
     let frustum = a_frustum(&mut model, 0.5, 4.0, 9.0);
     let block = a_box(
@@ -48,15 +80,8 @@ fn a_block_and_frustum_united_and_taken_back_in_reach_the_unjoined_cone_pieces()
         9.0,
         [1.0, 1.0, 5.0],
     );
-    let (model, united) = fused(&model, &[block], &[frustum], Rule::Union)
-        .expect("a block and a frustum through its floor unite");
-
-    let refusal = the_union_again_with_a_far_cube(&model, &united)
-        .expect_err("the cone pieces are not joined yet");
-    assert!(
-        matches!(refusal, Error::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }),
-        "the second union refused before reaching the cone pieces: {refusal:?}"
-    );
+    fused(&model, &[block], &[frustum], Rule::Union)
+        .expect("a block and a frustum through its floor unite")
 }
 
 /// An arc of the block's floor that is nearly a semicircle keeps the circle's
