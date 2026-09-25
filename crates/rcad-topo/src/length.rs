@@ -32,15 +32,22 @@ use crate::{Error, Result};
 /// `tests/how_long_an_edge_is.rs`:
 ///
 /// - **A straight edge** — the distance between its two ends. Exactly `0.0`
-///   where that distance is a square root that comes out exact, which every
-///   edge of a cube is; otherwise at most `f64::EPSILON` of the length.
-/// - **A whole circle** — `2π` times the radius. On a pipe the radius is
-///   stored and the error is the one step `2π` has to be taken either way,
-///   at most `f64::EPSILON` of the length.
-/// - **Half a circle** — a ball's seam — at most `4 · f64::EPSILON` of the
-///   length, and almost all of that is [`ROOM_FOR_ATAN2`].
-/// - **A wire** — the sum of its edges, whose errors add, with the rounding of
-///   the sum on top.
+///   along an axis where the two ends' one difference is itself an `f64`,
+///   which every edge of a cube is. Off an axis, at most `4 · f64::EPSILON` of
+///   the length: each square carries three steps of an `f64` at most, the two
+///   sums two more, and the root halves that and adds one. Measured at
+///   `1.24 · f64::EPSILON` over right triangles.
+/// - **A whole circle on a pipe** — `2π` times the radius, which is stored.
+///   `2π` is held between its two neighbouring `f64`s, which is `0.64` of an
+///   `f64::EPSILON` either way, relatively, and the product steps out once
+///   more: at most `2 · f64::EPSILON` of the length, measured at `1.59`.
+/// - **Half a circle round a ball** — its seam, radius times angle. The angle
+///   is [`ROOM_FOR_ATAN2`] either way, plus `π`'s own neighbours and a step
+///   for each of two sums, which is `4.5 · f64::EPSILON` of it at most, and
+///   the product steps out once more: at most `6 · f64::EPSILON` of the
+///   length, measured at `3.98` over radii from `1e-3` to `1e100`.
+/// - **A wire** — the sum of its edges, whose errors add, with a step of the
+///   running total for each edge on top.
 ///
 /// # Why the closed form, and what the other way costs
 ///
@@ -199,6 +206,17 @@ impl WireView<'_> {
 fn straight_between(start: Point, end: Point) -> Interval {
     let [from, to] = [start, end].map(|point| point.coordinates().map(Interval::exactly));
     let apart = [0, 1, 2].map(|axis| to[axis] - from[axis]);
+    let standing_still = |difference: &Interval| difference.lo() == 0.0 && difference.hi() == 0.0;
+    if apart
+        .iter()
+        .filter(|difference| standing_still(difference))
+        .count()
+        >= 2
+    {
+        // Along one axis the length is that one difference, and squaring it to
+        // take the root back would round twice for nothing.
+        return magnitude(apart[0]) + magnitude(apart[1]) + magnitude(apart[2]);
+    }
     let widest = apart
         .iter()
         .map(|difference| difference.lo().abs().max(difference.hi().abs()))
@@ -230,33 +248,57 @@ fn two_to_the(power: i32) -> f64 {
 /// The square root of every number in `of` that is not below zero.
 ///
 /// `sqrt` is correctly rounded, so one step outwards holds the true root — and
-/// no step at all where the root squares back to exactly what went in.
+/// no step at all where the root squares back to exactly what went in. That
+/// test is a fused multiply-add coming out zero, which proves it only where
+/// what is left over could not have fallen below the subnormals, so it is only
+/// trusted from [`SMALLEST_EXACT_PRODUCT`] up.
 fn square_root(of: Interval) -> Interval {
     let root = |value: f64, outwards: fn(f64) -> f64| {
         let root = value.sqrt();
-        if root.mul_add(root, -value) == 0.0 {
-            root
-        } else {
-            outwards(root)
-        }
+        let squares_back =
+            value == 0.0 || (value >= SMALLEST_EXACT_PRODUCT && root.mul_add(root, -value) == 0.0);
+        if squares_back { root } else { outwards(root) }
     };
     let lo = root(of.lo().max(0.0), f64::next_down).max(0.0);
     let hi = root(of.hi().max(0.0), f64::next_up);
     Interval::new(lo, hi).expect("a root is no smaller than the root of a smaller number")
 }
 
+/// The smallest value whose product residual [`square_root`] trusts: below
+/// `2^-969` what a fused multiply-add leaves over can fall into the subnormals
+/// and round to zero without being zero — the threshold
+/// [`product_is_exact`](rcad_predicates::expansion::product_is_exact) draws for
+/// the same reason.
+const SMALLEST_EXACT_PRODUCT: f64 = f64::MIN_POSITIVE * 9_007_199_254_740_992.0;
+
 /// `numerator / denominator` for every pair of numbers the two hold, or `None`
 /// when the denominator holds zero.
+///
+/// Each quotient is stepped outwards, except a numerator of exactly zero, whose
+/// quotient is exactly zero.
 fn divided(numerator: Interval, denominator: Interval) -> Option<Interval> {
     if denominator.contains_zero() {
         return None;
     }
-    let quotients = [numerator.lo(), numerator.hi()]
-        .map(|top| [denominator.lo(), denominator.hi()].map(|bottom| top / bottom));
-    let quotients = quotients.as_flattened();
-    let lo = quotients.iter().copied().fold(f64::INFINITY, f64::min);
-    let hi = quotients.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    Interval::new(lo.next_down(), hi.next_up()).ok()
+    let quotient = |top: f64, bottom: f64, outwards: fn(f64) -> f64| {
+        if top == 0.0 {
+            0.0
+        } else {
+            outwards(top / bottom)
+        }
+    };
+    let ends = [numerator.lo(), numerator.hi()]
+        .map(|top| [denominator.lo(), denominator.hi()].map(|bottom| (top, bottom)));
+    let ends = ends.as_flattened();
+    let lo = ends
+        .iter()
+        .map(|&(top, bottom)| quotient(top, bottom, f64::next_down))
+        .fold(f64::INFINITY, f64::min);
+    let hi = ends
+        .iter()
+        .map(|&(top, bottom)| quotient(top, bottom, f64::next_up))
+        .fold(f64::NEG_INFINITY, f64::max);
+    Interval::new(lo, hi).ok()
 }
 
 /// How far from zero every number in `of` is.
@@ -370,6 +412,12 @@ impl Circle {
                     square_root(dot(normal, normal)),
                 )?);
                 let radius = Interval::exactly(ball.radius());
+                if apart.hi() == 0.0 {
+                    // Through the centre: a great circle, of the ball's own
+                    // radius, where squaring it to take the root back would
+                    // round for nothing.
+                    return Some(radius);
+                }
                 Some(square_root((radius - apart) * (radius + apart)))
             }
         }
@@ -414,7 +462,10 @@ impl Circle {
             [0, 1, 2].map(|axis| at[axis] - centre[axis])
         });
         let across = normal.components().map(Interval::exactly);
-        let sine = divided(dot(across, cross(from, to)), square_root(dot(across, across)))?;
+        let sine = divided(
+            dot(across, cross(from, to)),
+            square_root(dot(across, across)),
+        )?;
         let forwards = angle_round(dot(from, to), sine)?;
         let backwards = a_whole_turn() - forwards;
 
@@ -434,7 +485,8 @@ impl Circle {
             return None;
         }
         let turn = middle(forwards) / 2.0;
-        match [turn, turn + PI].map(|angle| halfway.at(angle).map(|point| verdict(pickers, point))) {
+        match [turn, turn + PI].map(|angle| halfway.at(angle).map(|point| verdict(pickers, point)))
+        {
             [Some(Verdict::Holds), Some(Verdict::RuledOut)] => Some(radius * forwards),
             [Some(Verdict::RuledOut), Some(Verdict::Holds)] => Some(radius * backwards),
             _ => None,

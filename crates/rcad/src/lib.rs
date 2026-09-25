@@ -238,7 +238,10 @@
 //! over a [`Mesh`], where [`Measurement::volume_error`],
 //! [`Measurement::area_error`] and [`Measurement::centroid_wobble`] say what the
 //! triangles could be hiding. Three quantities in three units, deliberately
-//! (`docs/decisions.md` §25.4).
+//! (`docs/decisions.md` §25.4). [`EdgeView::length`] and [`WireView::length`]
+//! give how long an edge or a wire is as a [`Length`], with the same bound on
+//! how far out it could be: straight edges and circles, and a refusal by name
+//! for every other curve rather than a guess.
 //!
 //! **Mesh.** [`SolidView::mesh`] cuts a whole solid into [`MeshTriangle`]s that
 //! stay within a [`Deflection`] of its surfaces, through one point table for the
@@ -428,9 +431,9 @@ pub use rcad_predicates::{
 pub use rcad_topo::{
     CoedgeKey, CoedgeView, Containment, DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex,
     DraftWire, EdgeKey, EdgeView, FORMAT_VERSION, FaceKey, FaceRef, FaceView, Fused, Invalid,
-    Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile, ProfileBuilder, Rule, ShellKey,
-    ShellView, SolidBuilder, SolidKey, SolidView, VertexKey, VertexView, WhichModelThisIs, WireKey,
-    WireStepView, WireView,
+    Length, Measurement, Mesh, MeshTriangle, Model, OnAFace, Profile, ProfileBuilder,
+    ROOM_FOR_ATAN2, Rule, ShellKey, ShellView, SolidBuilder, SolidKey, SolidView, VertexKey,
+    VertexView, WhichModelThisIs, WireKey, WireStepView, WireView,
 };
 
 /// Reading and writing an ISO 10303-21 ("STEP", "Part 21") file.
