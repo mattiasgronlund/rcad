@@ -1262,34 +1262,30 @@ fn a_bar_and_a_copy_of_it(model: &mut Model) -> Pair {
     Pair::of(one, other)
 }
 
-/// Two coincident curved faces are refused, and since §217 the name says which
-/// of the two searches gave up: a point inside a piece **was** found, and what
-/// could not be done was placing it against both solids.
+/// Two coincident bars answer: the union and the common part are the bar, and
+/// the difference is nothing.
 ///
-/// The point it names is `(2, 0, 0)`, the bar's own seam corner, and the
-/// enclosure is infinite rather than merely wide — nothing was nearly decided.
-/// §36.16 lists this refusal and §36.28 says arcs make it reachable from a plain
-/// shape; two copies of one bar is plainer still, and it is the same refusal
-/// under a tolerant policy, so it is not a budget question.
-///
-/// **This test was called `..._for_want_of_a_point_inside_a_piece` until §217,
-/// and that name said the opposite of what happens.** §37's and §39's tables
-/// cite it under the old name and under the old refusal *a point inside a piece
-/// of a face*; they record what was measured when they were written, and this
-/// is the forwarding address.
-///
-/// **A gap and not a limit** (§16.10): the answer exists and is the bar.
+/// **This test was called `..._are_refused_though_a_point_inside_was_found`
+/// until §224.4, and `..._for_want_of_a_point_inside_a_piece` until §217.**
+/// §37's and §39's tables cite it under those names and under the refusals
+/// *a point inside a piece of a face* and *a point in a piece that every solid
+/// could place*; they record what was measured when they were written, and this
+/// is the forwarding address. The refusal was about the flat caps, not the
+/// wall: a cap is a disk with one corner, and `select.rs` asked whether the
+/// copy's cap held a point by winding that one corner, which winds round
+/// nothing. A flat face with a curved side is now asked through the solid's own
+/// point test, and the gap §16.10 named is closed.
 #[test]
-fn a_bar_and_a_copy_of_it_in_the_same_place_are_refused_though_a_point_inside_was_found() {
-    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-            let mut model = a_model();
-            let pair = a_bar_and_a_copy_of_it(&mut model);
-            let why = refusal(&mut model, &pair, rule, &policy);
-            assert_eq!(
-                what_it_gave_up_on(&why),
-                "a point in a piece that every solid could place"
-            );
+fn a_bar_and_a_copy_of_it_in_the_same_place_answer_with_the_bar() {
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        let mut model = a_model();
+        let pair = a_bar_and_a_copy_of_it(&mut model);
+        let answer = fused(&mut model, &pair, rule);
+        if rule == Rule::Difference {
+            assert!(answer.solids().is_empty(), "a bar less itself is nothing");
+        } else {
+            assert_eq!(answer.solids().len(), 1, "{rule:?} of a bar and its copy");
+            measures(volume_of(&model, answer.solids()), A_BAR, Side::Under);
         }
     }
 }
@@ -2155,13 +2151,15 @@ fn criterion_fourteens_four() -> Vec<Entry> {
 
 fn the_rest() -> Vec<Entry> {
     vec![
+        // Refused on "a point in a piece that every solid could place" until
+        // §224.4: the caps' one corner wound round nothing.
         Entry {
             degeneracy: "coincident curved faces",
             pair: "one bar built twice, in the same place",
             case: Case::Fused {
                 build: a_bar_and_a_copy_of_it,
                 rule: Rule::Union,
-                outcome: Outcome::GaveUp("a point in a piece that every solid could place"),
+                outcome: Outcome::Answered,
             },
         },
         Entry {
