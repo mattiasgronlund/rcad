@@ -14,15 +14,15 @@ corpus file reaches it**: 24 of 29 import (KiCad 114 → 140), the LEDs since §
 8000 of 8000; §195–§202 the curved solids; §204–§209 the cone's rim arc and a ring
 of arcs round an apex; §211–§214 an ellipse arc's centre, a ring with a hole and a
 crown; §216–§217 §211.6's floor; §218 the cone-face arm; §219–§220 what §218
-and §219 left; §221 §220.4 and a hyperbola arc walked across the apex; **§222**
-§23.8 (one public `which_two_surfaces_a_run_is_between`), a closed circle between
-one pipe written twice, and the fuse laws run over a cone.
+and §219 left; §221 §220.4 and a hyperbola arc across the apex; §222 §23.8, a
+closed circle between one pipe twice, fuse laws over a cone; **§223** §222.3's
+item 1, a missing cut in `cuts.rs`.
 
-**Next and unclaimed: associativity over a cone answers one way round and refuses
-the other** (§222.3). Five trios, each an `#[ignore]` test in
-`fuse_laws_over_a_cone.rs`; case 1 answers against `ResultIsNotManifold`. The
-lane's unshown hypothesis for 4 and 5: the fuse cannot take back its own
-hyperbola arc. A `fuse-debugging` lane per case.
+**Next and unclaimed: the fuse cannot take back an answer that carries one
+curved surface as several faces** (§223.4), which blocks §222.3 items 2–5.
+Pieces on one plane are merged into one face, pieces on one curved surface are
+not. §223.2's picker margin is the smaller gap in front; re-run
+`lane-swallowed-pointed-cone` (`184962b9`) after.
 
 Also open: two copies of a cone always refuse, so idempotence over a cone compares
 nothing (§222.3); a closed ellipse, or a closed circle on a cone or torus, between
