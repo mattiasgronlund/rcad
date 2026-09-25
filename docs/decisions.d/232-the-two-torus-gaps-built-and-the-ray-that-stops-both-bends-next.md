@@ -45,6 +45,14 @@ by it stays unplaced. That is a refusal where a wrong answer was possible.
 `a_plane_square_to_a_bends_axis_names_no_meridian_circle` holds it; whether any
 fuse reaches it is not measured.
 
+Until three tests in `select.rs` were added, switching the check off left
+every test passing. They are on a cap of the torus `(4, 1)` on `y = 0` with
+its corner at `(3, 0, 0)`: `a_bends_end_cap_holds_the_disk_its_own_corner_is_in_and_not_the_other`,
+`the_first_point_a_bends_end_cap_offers_and_holds_is_in_its_own_disk` and
+`a_piece_on_a_plane_square_to_a_bends_axis_cannot_say_what_it_holds`. The first
+two fail however the check is switched off, and the third when the whole check
+is a no-op (`7f921572`).
+
 `holds.rs`'s `what_a_round_wire_encloses` has the same rule — the partner's
 sign alone — and so the same defect for a flat face bounded by a meridian
 circle. It is outside this lane's files and is not fixed or measured here.
@@ -57,9 +65,34 @@ plane, bit for bit. The answer is exactly zero, and a box `5.7e-13` wide cannot
 certify zero. It now passes over a node that lists a crossing whose partner
 equals the asked one, as it passes over any node on the surface.
 
-This is exact, not a tolerance. A crossing runs through a node only where the
-node is on it, and every point of a crossing is on its partner. So a node
-listing a crossing with partner `P` is on `P` by construction.
+This is not a tolerance, and it is exactly as exact as the node's list of
+crossings. Every point of a crossing is on its partner, so a node listing a
+crossing with partner `P` is taken to be on `P`; the skip reads the list and
+never the node's box. Under `Policy::certified` a crossing is on a node's list
+because the model says so (a corner's own faces and the edge it starts,
+`place_the_corners`), because the node was made for it (a meet, a pole, where a
+closed crossing starts), or because a sign was proved zero — with two
+exceptions. `round_a_closed_crossing` answers `Zero` for two nodes whose boxes
+are equal bit for bit (`if one == other`) without proving they are one point,
+and `merge_points_that_are_one_point` folds on that `Zero`. `fold_the_nodes`
+then gives the node two nodes fold into every crossing either had, so a wrong
+fold lists a crossing only one of them was on. Under `Policy::tolerant`,
+`passes_through` and `order_along` send a narrow undecided sign through
+`must_decide`, and `resolve_under_policy` reads it as `Zero`: a corner can list
+a crossing it is only near, and two nodes only near each other fold. The box
+`where_the_crossing_starts` gives a closed crossing's start is a guess at its
+width, but it decides no list: that node gets its own crossing by construction,
+and `round_a_closed_crossing` tells it from the others by name, not by box.
+
+None of that is a new way to be wrong. Skipping a node says no side; the loop
+goes on to the walk's next node, and a walk with no node left to answer leaves
+the side unsaid. `group_the_cycles_into_cells` ignores an unsaid side, so a
+wrong skip can hide a disagreement — but only at a node whose list is wrong,
+and a crossing on a node's list is already drawn through it, its arcs ending
+there. A wrong list is a wrong drawing before it is a wrong skip, and the skip
+only takes the call the arrangement made when it put the crossing on the list.
+The old question was no check on the list either: it refused at a right one,
+which is the case this section fixes.
 
 §229.3 passed on a worry: grouping assumes a closed curve cuts the surface in
 two, and one circle round the tube does not cut a torus in two. Here it does
