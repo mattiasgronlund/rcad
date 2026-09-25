@@ -17,7 +17,8 @@
 // Per lane: `label` (required, names the branch and the progress row), `brief`
 // (required, what the lane is for -- the shared block below is appended),
 // `writeSet` (the files it owns; absent or empty means read-only, which also
-// means no verifier and no commit), `branch` (default `lane-<label>`), `model`,
+// means no verifier and no commit), `branch` (default `lane-<label>`, and it
+// must not exist yet: the lane creates it and refuses to reset one), `model`,
 // `sourcePaths` (what the verifier reverts to base to prove the tests fail
 // without the change; defaults to the `crates/<c>/src` dirs in `writeSet`),
 // `report` ({properties, required} merged into the lane's schema for findings
@@ -62,8 +63,9 @@ const sourcePathsOf = (lane) => {
 const COMMON = (lane) => `
 Base: main at ${BASE}. Your first two commands, in this order, and report both shas back:
   git log --oneline -1
-  git checkout -B ${branchOf(lane)} ${BASE}
-A worktree-isolated lane branches from the session's HEAD, not from origin/main, so the checkout above is what puts you on the base -- do not skip it and do not assume you are already there.
+  git switch -c ${branchOf(lane)} ${BASE}
+A worktree-isolated lane branches from the session's HEAD, not from origin/main, so the switch above is what puts you on the base -- do not skip it and do not assume you are already there.
+If the switch refuses because ${branchOf(lane)} already exists, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`: they reset a branch that another worktree may still have checked out, and that tree then shows a staged revert of everything since its commit.
 Every cargo and just call needs a \`mise exec --\` prefix (the compile cache is wired through mise's env). Run single tests with \`mise exec -- just t <args>\`, never bare cargo nextest.
 Read then Edit; never patch a tracked file through a shell heredoc.
 The Bash guard in a worktree-isolated session refuses any command with a path or argument it cannot resolve before the run -- no variables, no \`$( )\`, no loop over a runtime value, and no \`mise exec\` inside a loop or compound. Write out paths literally, one plain command per call; when you genuinely need a loop, write a script to \`target/\` (gitignored) and run it as \`./target/<name>.sh\`.
@@ -95,8 +97,8 @@ const NUMBER = {
 
 const reportSchema = (lane) => {
   const core = {
-    start_sha: { type: 'string', description: 'what git log -1 said BEFORE your checkout' },
-    base_sha: { type: 'string', description: 'what you checked out' },
+    start_sha: { type: 'string', description: 'what git log -1 said BEFORE your switch' },
+    base_sha: { type: 'string', description: 'what you switched to' },
     branch: { type: 'string' },
     worktree_path: { type: 'string' },
     summary: { type: 'string', description: 'plain words, at most 10 lines' },

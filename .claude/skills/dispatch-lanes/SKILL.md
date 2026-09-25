@@ -88,14 +88,20 @@ args: { base: "<full sha from step 3>",
 
 `label` and `brief` are required. `writeSet` absent or empty makes a read-only
 lane: no verifier, no commit, and it is told to write no tracked file.
-`branch` defaults to `lane-<label>`. `sourcePaths` is what the verifier reverts
+`branch` defaults to `lane-<label>`, and **it must name a branch that does not
+exist yet.** The lane creates it with `git switch -c`, which refuses a name
+already taken, and the lane then stops as blocked — rather than resetting a
+branch that an older worktree may still have checked out, which is what `git
+checkout -B` did to two of rscene's lanes (§237). This repo keeps its finished
+lane branches, so a label reused from an earlier batch is taken; check with
+`git branch --list 'lane-*'` before dispatching. `sourcePaths` is what the verifier reverts
 to base to prove the tests fail without the change, defaulting to the
 `crates/<c>/src` directories in the write set — set it by hand when that default
 is wrong. `report` merges extra properties into that lane's schema for findings
 that are its own. `verify: false` skips the check.
 
 **Do not repeat the shared rules in a brief.** The script already appends the
-base checkout with both shas reported back, the `mise exec --` prefix, the Bash
+switch onto the base with both shas reported back, the `mise exec --` prefix, the Bash
 guard's no-variables rule, the 45-minute budget, every number carrying the
 command that produced it, and no merge and no push. A brief carries only what is
 that lane's alone — including verbatim API signatures and the exact-arithmetic

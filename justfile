@@ -85,6 +85,7 @@ gate_steps := "check-plugins \
     check-hooks \
     check-skills-selftest \
     check-skills \
+    check-lanes-workflow \
     check-kache-off-on-ci \
     check-gate-runs-every-check \
     check-gate-summary-selftest \
@@ -1421,6 +1422,76 @@ check-skills-selftest:
         echo "a missing skills directory is not the same as a broken scan"; exit 1
     fi
 
+# Every lane the `lanes` workflow sends out creates its own branch, and nothing
+# in the workflow resets one.
+#
+# `.claude/workflows/lanes.js` hands each lane its first commands, and until
+# §237 one of them was `git checkout -B <branch> <base>`. That resets a branch
+# which already exists, and rscene's `235ccaf` is what it costs when an older
+# worktree still has that branch checked out: the old tree shows a staged revert
+# of everything since, and a commit there would undo it. `git switch -c` refuses
+# a name already taken, and the lane is told to stop as blocked.
+#
+# **It reads the source, not the prompt a lane is sent.** rscene holds its
+# workflow with a node harness that renders every prompt; this repo pins no node,
+# and the line is literal text in a template string. Three arms, each of which
+# alone would let the reset back in: the `switch -c` line is there exactly once;
+# every line naming `checkout -B` or `switch -C` is the one warning against them;
+# and the lane is told what to do when the switch refuses — without that, the
+# nearest fix a lane knows is the reset.
+#
+# **It proves each arm by cutting the real file**, not against fixtures kept
+# beside it, because this file is the only one it will ever scan. Each cut must
+# change the file and must be caught by the arm it was made for, so a rewrite of
+# `lanes.js` that moves the line cannot leave an arm passing having compared
+# nothing.
+[doc("The lanes workflow makes each lane's branch with switch -c and resets none.")]
+check-lanes-workflow:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file=.claude/workflows/lanes.js
+    create='  git switch -c ${branchOf(lane)} ${BASE}'
+    reset='  git checkout -B ${branchOf(lane)} ${BASE}'
+    refusal='already exists, stop and report it as blocked'
+    scan() {
+        local n
+        n=$(grep -cxF -- "$create" "$1" || true)
+        if [ "$n" != 1 ]; then
+            echo "$1 has the line '$create' $n times, expected once"
+            return 1
+        fi
+        if grep -nE 'checkout -B|switch -C' "$1" | grep -vF 'Never reach for'; then
+            echo "$1 resets a branch on the lines above; a lane must create its own (§237)"
+            return 2
+        fi
+        if ! grep -qF -- "$refusal" "$1"; then
+            echo "$1 does not tell a lane what to do when the switch refuses,"
+            echo "and without that the nearest fix a lane knows is the reset"
+            return 3
+        fi
+    }
+    scan "$file" || exit 1
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead"
+    awk -v l="$create" '{ print } $0 == l { print "  git switch -C lane-x base" }' "$file" > "$dir/reset-as-well"
+    grep -vF -- "$refusal" "$file" > "$dir/no-refusal"
+    for cut in reset-instead:1 reset-as-well:2 no-refusal:3; do
+        name=${cut%:*}
+        want=${cut#*:}
+        if cmp -s "$file" "$dir/$name"; then
+            echo "the cut '$name' found nothing to cut in $file, so it proves nothing"
+            exit 1
+        fi
+        got=0
+        scan "$dir/$name" > /dev/null || got=$?
+        if [ "$got" != "$want" ]; then
+            echo "the cut '$name' of $file was caught by arm $got, expected arm $want"
+            exit 1
+        fi
+    done
+    echo "lanes.js makes each lane's branch with switch -c and resets none; 3 cuts, each caught"
+
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
 # Both halves are asserted, because each one alone passes for the wrong reason.
@@ -1502,8 +1573,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "44" ]; then \
-        echo "found $n check-* recipes, expected 44"; \
+    if [ "$n" != "45" ]; then \
+        echo "found $n check-* recipes, expected 45"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
