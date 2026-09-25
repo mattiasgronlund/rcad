@@ -9,6 +9,12 @@ use rcad_topo::{Model, SolidKey};
 use crate::brep::{probe_solid, solid_from};
 use crate::geometry::Reading;
 use crate::graph::{EntityId, StepFile, Value};
+use crate::names::{
+    AXIS2_PLACEMENT_3D, BREP_WITH_VOIDS, CARTESIAN_POINT, COMPLEX_TRIANGULATED_SURFACE_SET,
+    GEOMETRIC_CURVE_SET, GEOMETRIC_SET, ITEM_DEFINED_TRANSFORMATION, Keyword, MANIFOLD_SOLID_BREP,
+    MAPPED_ITEM, NEXT_ASSEMBLY_USAGE_OCCURRENCE, REPRESENTATION_MAP, SHELL_BASED_SURFACE_MODEL,
+    TESSELLATED_CURVE_SET, TESSELLATED_GEOMETRIC_SET, TRIANGULATED_SURFACE_SET, VERTEX_POINT,
+};
 use crate::refusal::Refusal;
 use crate::units::what_the_file_declared;
 
@@ -82,10 +88,10 @@ impl Import {
 
         let breps: Vec<EntityId> = file
             .instances()
-            .filter(|held| held.part("MANIFOLD_SOLID_BREP").is_some())
+            .filter(|held| held.part(MANIFOLD_SOLID_BREP.name()).is_some())
             .map(crate::Instance::id)
             .collect();
-        if let Some(voided) = file.instances_named("BREP_WITH_VOIDS").next() {
+        if let Some(voided) = file.instances_named(BREP_WITH_VOIDS.name()).next() {
             return Err(Refusal::ASolidWithAVoidInIt { id: voided.id() });
         }
         if breps.is_empty() {
@@ -264,7 +270,7 @@ pub fn probe(file: &StepFile, policy: &Policy, log: &mut ProvenanceLog) -> Probe
         return report;
     };
 
-    if let Some(voided) = file.instances_named("BREP_WITH_VOIDS").next() {
+    if let Some(voided) = file.instances_named(BREP_WITH_VOIDS.name()).next() {
         report
             .fatal
             .insert(kind_of(&Refusal::ASolidWithAVoidInIt { id: voided.id() }));
@@ -273,7 +279,7 @@ pub fn probe(file: &StepFile, policy: &Policy, log: &mut ProvenanceLog) -> Probe
 
     let breps: Vec<EntityId> = file
         .instances()
-        .filter(|held| held.part("MANIFOLD_SOLID_BREP").is_some())
+        .filter(|held| held.part(MANIFOLD_SOLID_BREP.name()).is_some())
         .map(crate::Instance::id)
         .collect();
     if breps.is_empty() {
@@ -424,9 +430,9 @@ fn without_numbers(text: &str) -> String {
 /// is the test.
 fn biggest_coordinate_in(file: &StepFile) -> f64 {
     let mut biggest = 0.0_f64;
-    for vertex in file.instances_named("VERTEX_POINT") {
+    for vertex in file.instances_named(VERTEX_POINT.name()) {
         let Some(point) = vertex
-            .part("VERTEX_POINT")
+            .part(VERTEX_POINT.name())
             .and_then(|record| record.attribute(1))
             .and_then(Value::as_reference)
             .and_then(|id| file.instance(id))
@@ -434,7 +440,7 @@ fn biggest_coordinate_in(file: &StepFile) -> f64 {
             continue;
         };
         let Some(coordinates) = point
-            .part("CARTESIAN_POINT")
+            .part(CARTESIAN_POINT.name())
             .and_then(|record| record.attribute(1))
             .and_then(Value::as_list)
         else {
@@ -454,21 +460,25 @@ fn biggest_coordinate_in(file: &StepFile) -> f64 {
 /// Named here rather than discovered by a caller wondering where its geometry
 /// went. `BREP_WITH_VOIDS` is deliberately absent: it is a solid and it is
 /// refused by name.
-const SHAPES_THIS_READER_DOES_NOT_TAKE: [&str; 7] = [
-    "SHELL_BASED_SURFACE_MODEL",
-    "GEOMETRIC_CURVE_SET",
-    "GEOMETRIC_SET",
-    "TESSELLATED_GEOMETRIC_SET",
-    "TESSELLATED_CURVE_SET",
-    "COMPLEX_TRIANGULATED_SURFACE_SET",
-    "TRIANGULATED_SURFACE_SET",
+const SHAPES_THIS_READER_DOES_NOT_TAKE: [Keyword; 7] = [
+    SHELL_BASED_SURFACE_MODEL,
+    GEOMETRIC_CURVE_SET,
+    GEOMETRIC_SET,
+    TESSELLATED_GEOMETRIC_SET,
+    TESSELLATED_CURVE_SET,
+    COMPLEX_TRIANGULATED_SURFACE_SET,
+    TRIANGULATED_SURFACE_SET,
 ];
 
 fn what_this_reader_walked_past(file: &StepFile) -> BTreeMap<&'static str, usize> {
     let census = file.how_many_of_each_type();
     SHAPES_THIS_READER_DOES_NOT_TAKE
         .into_iter()
-        .filter_map(|keyword| census.get(keyword).map(|&count| (keyword, count)))
+        .filter_map(|keyword| {
+            census
+                .get(keyword.name())
+                .map(|&count| (keyword.name(), count))
+        })
         .collect()
 }
 
@@ -486,31 +496,31 @@ fn nothing_is_placed_somewhere_this_reader_cannot_move_it(
 ) -> Result<(), Refusal> {
     if let Some(occurrence) = reading
         .file()
-        .instances_named("NEXT_ASSEMBLY_USAGE_OCCURRENCE")
+        .instances_named(NEXT_ASSEMBLY_USAGE_OCCURRENCE.name())
         .next()
     {
         return Err(Refusal::APlacementThisReaderCannotApply {
             id: occurrence.id(),
-            keyword: "NEXT_ASSEMBLY_USAGE_OCCURRENCE",
+            keyword: NEXT_ASSEMBLY_USAGE_OCCURRENCE.name(),
         });
     }
     for moved in reading
         .file()
-        .instances_named("ITEM_DEFINED_TRANSFORMATION")
+        .instances_named(ITEM_DEFINED_TRANSFORMATION.name())
     {
-        let from = reading.reference_at(moved.id(), "ITEM_DEFINED_TRANSFORMATION", 2)?;
-        let to = reading.reference_at(moved.id(), "ITEM_DEFINED_TRANSFORMATION", 3)?;
+        let from = reading.reference_at(moved.id(), ITEM_DEFINED_TRANSFORMATION, 2)?;
+        let to = reading.reference_at(moved.id(), ITEM_DEFINED_TRANSFORMATION, 3)?;
         if from != to && !(is_the_identity(reading, from)? && is_the_identity(reading, to)?) {
             return Err(Refusal::APlacementThisReaderCannotApply {
                 id: moved.id(),
-                keyword: "ITEM_DEFINED_TRANSFORMATION",
+                keyword: ITEM_DEFINED_TRANSFORMATION.name(),
             });
         }
     }
-    for mapped in reading.file().instances_named("MAPPED_ITEM") {
-        let source = reading.reference_at(mapped.id(), "MAPPED_ITEM", 1)?;
-        let target = reading.reference_at(mapped.id(), "MAPPED_ITEM", 2)?;
-        let origin = reading.reference_at(source, "REPRESENTATION_MAP", 0)?;
+    for mapped in reading.file().instances_named(MAPPED_ITEM.name()) {
+        let source = reading.reference_at(mapped.id(), MAPPED_ITEM, 1)?;
+        let target = reading.reference_at(mapped.id(), MAPPED_ITEM, 2)?;
+        let origin = reading.reference_at(source, REPRESENTATION_MAP, 0)?;
         // A mapped item both of whose ends are placements is placing a shape.
         // One whose ends are not is placing a **view**: NIST's files map a
         // shape representation from a `CAMERA_MODEL_D3`, which is where a
@@ -522,14 +532,14 @@ fn nothing_is_placed_somewhere_this_reader_cannot_move_it(
             reading
                 .file()
                 .instance(end)
-                .is_some_and(|held| held.part("AXIS2_PLACEMENT_3D").is_some())
+                .is_some_and(|held| held.part(AXIS2_PLACEMENT_3D.name()).is_some())
         });
         if places_a_shape
             && !(is_the_identity(reading, origin)? && is_the_identity(reading, target)?)
         {
             return Err(Refusal::APlacementThisReaderCannotApply {
                 id: mapped.id(),
-                keyword: "MAPPED_ITEM",
+                keyword: MAPPED_ITEM.name(),
             });
         }
     }

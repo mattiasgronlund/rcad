@@ -3,13 +3,17 @@ use std::collections::HashMap;
 use crate::DEEPEST_NESTING;
 use crate::error::{Error, Problem};
 use crate::graph::{BrokenReference, EntityId, Header, Instance, Record, StepFile, Value};
+use crate::names::{
+    DATA, END_ISO_10303_21, ENDSEC, FILE_DESCRIPTION, FILE_NAME, FILE_SCHEMA, HEADER, ISO_10303_21,
+    Keyword,
+};
 use crate::token::{Token, Tokens, error_at};
 
-const OPENING: &[u8] = b"ISO-10303-21";
-const CLOSING: &[u8] = b"END-ISO-10303-21";
+const OPENING: &[u8] = ISO_10303_21.name().as_bytes();
+const CLOSING: &[u8] = END_ISO_10303_21.name().as_bytes();
 
 /// The three header entities ISO 10303-21 requires of every file.
-const REQUIRED_HEADER_ENTITIES: [&str; 3] = ["FILE_DESCRIPTION", "FILE_NAME", "FILE_SCHEMA"];
+const REQUIRED_HEADER_ENTITIES: [Keyword; 3] = [FILE_DESCRIPTION, FILE_NAME, FILE_SCHEMA];
 
 /// Which section a value is being read in.
 ///
@@ -45,20 +49,20 @@ pub(crate) fn read(bytes: &[u8]) -> Result<StepFile, Error> {
                 },
             ));
         };
-        match section {
-            "HEADER" => {
+        match Keyword::of(section) {
+            Some(HEADER) => {
                 tokens.take_exactly(Token::Semicolon, "; after HEADER")?;
                 header = Some(header_section(&mut tokens, at)?);
             }
-            "DATA" => {
+            Some(DATA) => {
                 tokens.take_exactly(Token::Semicolon, "; after DATA")?;
                 data_section(&mut tokens, &mut instances)?;
             }
-            other => {
+            _ => {
                 return Err(tokens.fault(
                     at,
                     Problem::SectionThisReaderDoesNotRead {
-                        keyword: other.into(),
+                        keyword: section.into(),
                     },
                 ));
             }
@@ -110,8 +114,16 @@ fn header_section(tokens: &mut Tokens<'_>, at: usize) -> Result<Header, Error> {
         tokens.take_exactly(Token::Semicolon, "; after a header entity")?;
     }
     for keyword in REQUIRED_HEADER_ENTITIES {
-        if !records.iter().any(|record| record.keyword == keyword) {
-            return Err(tokens.fault(at, Problem::HeaderEntityMissing { keyword }));
+        if !records
+            .iter()
+            .any(|record| record.keyword == keyword.name())
+        {
+            return Err(tokens.fault(
+                at,
+                Problem::HeaderEntityMissing {
+                    keyword: keyword.name(),
+                },
+            ));
         }
     }
     let schemas = schema_names(tokens, at, &records)?;
@@ -121,7 +133,7 @@ fn header_section(tokens: &mut Tokens<'_>, at: usize) -> Result<Header, Error> {
 fn schema_names(tokens: &Tokens<'_>, at: usize, records: &[Record]) -> Result<Vec<String>, Error> {
     let file_schema = records
         .iter()
-        .find(|record| record.keyword == "FILE_SCHEMA")
+        .find(|record| record.keyword == FILE_SCHEMA.name())
         .expect("FILE_SCHEMA was just checked to be there");
     let wrong = || tokens.fault(at, Problem::SchemaNamesAreNotAListOfStrings);
     let [Value::List(names)] = file_schema.attributes.as_slice() else {
@@ -148,7 +160,7 @@ fn data_section(tokens: &mut Tokens<'_>, instances: &mut Vec<Instance>) -> Resul
 fn section_ends(tokens: &mut Tokens<'_>) -> Result<bool, Error> {
     let (at, next) = tokens.peek()?;
     let at = *at;
-    let ends = matches!(next, Token::Keyword(word) if *word == "ENDSEC");
+    let ends = matches!(next, Token::Keyword(word) if *word == ENDSEC.name());
     let ran_out = matches!(next, Token::End);
     if ran_out {
         return Err(tokens.fault(
