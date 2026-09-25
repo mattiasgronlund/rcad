@@ -34,8 +34,13 @@ kernel's cube, round bar and ball, and three it has no builder for — a frustum
 a pointed cone and a quarter bend of pipe — described face by face through
 `SolidBuilder` with every corner exactly on its curved surface. Moves are by
 whole units, and half of them also turn, by a multiple of an eighth of a turn
-or by any angle, about `x`, `y`, `z` or a slanted axis. All draws come from the
-seed libFuzzer hands the mutator, so a mutation repeats with its seed.
+or by any angle, about `x`, `y`, `z` or a slanted axis. The mutator's own draws
+come from the seed libFuzzer hands it, so a mutation repeats with its seed — all
+but the three in eight that are libFuzzer's own byte mutation. That seed is one
+draw of libFuzzer's generator (`Mutate_Custom` in `FuzzerMutate.cpp`), and
+`LLVMFuzzerMutate` goes on drawing from the same generator, which the whole run
+has moved. Nothing leans on it: a crash is replayed from its saved bytes, and
+that never runs the mutator. Found by the lane's verifier.
 
 ### 241.2 Why a mutator over the old input, and not a new input format
 

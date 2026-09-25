@@ -451,7 +451,8 @@ fn a_wall(
 }
 
 /// Numbers drawn from the seed libFuzzer hands the mutator, so a mutation is
-/// the same every time its seed is.
+/// the same every time its seed is — except libFuzzer's own byte mutation,
+/// which draws from libFuzzer's generator and not from this seed.
 struct Draw(u64);
 
 impl Draw {
