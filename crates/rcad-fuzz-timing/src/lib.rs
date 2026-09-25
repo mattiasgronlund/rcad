@@ -720,6 +720,83 @@ mod tests {
     }
 
     #[test]
+    fn a_slow_input_a_blocked_merge_could_not_write_is_retried_once_unblocked() {
+        // Q64, following Q49 (§236.6): `merge_out` marked a slow input as
+        // written the moment it *decided* to write it, not once the write had
+        // actually landed. So a merge that failed before ever touching
+        // `slowest/` — here, because the directory could not be made — still
+        // burned the input's one shot at a retry, and its bytes were never
+        // written even after the block cleared.
+        let root = somewhere_to_write("blocked-slow-bytes");
+        std::fs::create_dir_all(&root).expect("somewhere to write");
+        let in_the_way = root.join("in-the-way");
+        std::fs::write(&in_the_way, b"not a directory").expect("a blocking file");
+        let into = in_the_way.join("timing");
+        let watch = a_process_writing_into(&into, 4);
+
+        let bytes = b"a slow input";
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(50), bytes);
+        merge_out(&watch);
+
+        assert!(
+            !into.join("slowest").exists(),
+            "a merge that could not make its directory wrote to it anyway"
+        );
+
+        std::fs::remove_file(&in_the_way).expect("clear the way for the directory");
+        merge_out(&watch);
+
+        let name = named_for(Duration::from_millis(50), bytes);
+        assert!(
+            into.join("slowest").join(&name).is_file(),
+            "the slow input's bytes were never written, even once the block cleared"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_single_slow_file_write_that_fails_is_retried_too() {
+        // Q64: the directory and the lock are not the only writes that can
+        // fail. One slow input's own `fs::write` can fail on its own, with
+        // `slowest/` already there and every other write this merge makes
+        // going through — here, because a directory sits where the file
+        // needs to go. The same fix has to cover this path too, or a
+        // `written` that grew on attempt rather than success would still
+        // refuse this input its retry.
+        let into = somewhere_to_write("blocked-one-file");
+        std::fs::create_dir_all(into.join("slowest")).expect("somewhere to write");
+
+        let bytes = b"blocked by a directory of its own name";
+        let name = named_for(Duration::from_millis(40), bytes);
+        std::fs::create_dir_all(into.join("slowest").join(&name))
+            .expect("a directory where the slow input's file needs to go");
+
+        let watch = a_process_writing_into(&into, 4);
+        watch
+            .lock()
+            .unwrap()
+            .record(Duration::from_millis(40), bytes);
+        merge_out(&watch);
+
+        assert!(
+            into.join("slowest").join(&name).is_dir(),
+            "the write should have failed, leaving the blocking directory in place"
+        );
+
+        std::fs::remove_dir_all(into.join("slowest").join(&name)).expect("clear the way");
+        merge_out(&watch);
+
+        assert!(
+            into.join("slowest").join(&name).is_file(),
+            "a slow input whose one file write failed was never retried"
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
     fn the_slow_runs_kept_are_the_slowest_across_every_process() {
         // Each process only ever sees its own draws, so the top has to be taken
         // across the directory rather than within a process. The old rewrite did
