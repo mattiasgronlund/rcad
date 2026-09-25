@@ -38,7 +38,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect};
+use rcad_geom::{
+    Cone, EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect,
+};
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     orient3d_of_points,
@@ -511,18 +513,22 @@ fn the_piece_holds(
 /// (`docs/decisions.md` §200.3's pair refused there), and a block's own face cut
 /// by a leaning cone is the same piece bounded by an arc of an ellipse.
 ///
-/// A shallower plane is still not counted, and that is the limit rather than the
-/// gap: it cuts the cone in two branches, so "inside the cone" on it is two
-/// regions and not one. A cone face is on one nappe, but the fuse cuts a plane
-/// along the whole double cone and the cone's sign is inside in both nappes.
-/// Where the cone's axis crosses such a plane — the point
-/// [`half_way_into_either_arc`] builds round — can be in the other nappe's
-/// region: inside by the sign, on the bulge side of every chord of the near
-/// branch, and outside the solid. `tests/a_plane_across_a_cone.rs` shows each
-/// step on a frustum and a leaning block. A plane whose crossing closes has
-/// neither half of that: the other nappe does not reach it, and what it leaves
-/// is one convex region, exactly as a ball leaves one disc. The parabola on the
-/// boundary is refused with the hyperbola, because it does not close either.
+/// **A shallower plane is counted too, on the side's own half of the cone.** It
+/// cuts the double cone in two branches, so "inside the cone" by the sign is two
+/// regions on it and not one, and the point where the cone's axis crosses such a
+/// plane — the one [`half_way_into_either_arc`] builds round — can be in the
+/// other nappe's region: inside by the sign, on the bulge side of every chord of
+/// the near branch, and outside the solid. `tests/a_plane_across_a_cone.rs`
+/// shows each step on a frustum and a leaning block. That used to be read as
+/// the limit, and it is not one: the two regions are told apart by the sign of
+/// `(x − apex)·w`, which is one per nappe, and
+/// [`is_on_the_nappe_the_side_is_on`] asks it of the point and of both ends of
+/// the side. On one nappe the inside is a solid convex cone, so what it leaves
+/// on any plane is one convex region — bounded by a hyperbola branch, a
+/// parabola or an ellipse — and the chord between two points of its edge is
+/// inside it. Everything the ball's paragraph says then carries over. A point
+/// on the other half, or one whose half cannot be settled, counts nothing,
+/// which can only lose a candidate.
 ///
 /// **The test this asks is one-sided, and it is
 /// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by).**
@@ -543,11 +549,16 @@ fn in_the_bulge_of(
     in_plane: &InPlane,
     point: PredicatePoint,
 ) -> Option<i32> {
-    let one_round_region = matches!(side.carried_by[1], Surface::Sphere(_))
-        || matches!(side.carried_by[1], Surface::Cone(cone)
-            if cone.is_cut_in_a_closed_curve_by(flat) == Some(true))
-        || matches!(side.carried_by[1], Surface::Cylinder(pipe)
-            if pipe.is_cut_in_a_closed_curve_by(flat) == Some(true));
+    let one_round_region = match side.carried_by[1] {
+        Surface::Sphere(_) => true,
+        Surface::Cylinder(pipe) => pipe.is_cut_in_a_closed_curve_by(flat) == Some(true),
+        Surface::Cone(cone) => match cone.is_cut_in_a_closed_curve_by(flat) {
+            Some(true) => true,
+            Some(false) => is_on_the_nappe_the_side_is_on(&cone, side, point),
+            None => false,
+        },
+        Surface::Plane(_) | _ => false,
+    };
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
     }
@@ -561,6 +572,33 @@ fn in_the_bulge_of(
     } else {
         None
     }
+}
+
+/// Whether `point` is, provably, on the same half of the double cone as both
+/// ends of `side`: the sign of `(x − apex) · w` agreeing for all three.
+///
+/// `false` whenever that is not proved — the ends straddle the apex, one of the
+/// three is on the plane through the apex square to the axis, or a sign could
+/// not be settled. `false` only stops a bulge being counted, which can drop a
+/// candidate and can never keep a point the piece does not hold.
+fn is_on_the_nappe_the_side_is_on(cone: &Cone, side: &FaceMeet, point: PredicatePoint) -> bool {
+    let apex = cone.apex().coordinates().map(Interval::exactly);
+    let up = cone.axis().direction().components().map(Interval::exactly);
+    let how_far_up = |at: PredicatePoint| {
+        let at = at.enclosure();
+        [0, 1, 2]
+            .map(|axis| (at[axis] - apex[axis]) * up[axis])
+            .into_iter()
+            .fold(Interval::exactly(0.0), |sum, term| sum + term)
+            .sign()
+    };
+    let decided = |sign: &Decision| matches!(sign, Decision::Pos | Decision::Neg);
+    let signs = [
+        how_far_up(side.ends[0].point()),
+        how_far_up(side.ends[1].point()),
+        how_far_up(point),
+    ];
+    signs.iter().all(decided) && signs[0] == signs[1] && signs[1] == signs[2]
 }
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire
@@ -1115,6 +1153,9 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         for side in piece.wires.iter().flatten() {
             candidates.extend(half_way_into_either_arc(flat, side).into_iter().flatten());
         }
+        for side in piece.wires.iter().flatten() {
+            candidates.extend(half_way_across_the_chord_to_a_cone(flat, side));
+        }
         return candidates;
     }
     // **A piece bounded by one closed curve has one corner**, and every blend of
@@ -1208,6 +1249,62 @@ fn half_way_into_either_arc(flat: &Plane, side: &FaceMeet) -> Option<[PredicateP
         .iter()
         .all(Point::is_finite)
         .then(|| points.map(|point| PredicatePoint::from(point.coordinates())))
+}
+
+/// Points half way from the middle of a cone side's chord to where the line
+/// square to that chord, in the plane, crosses the cone.
+///
+/// **A hyperbola has no middle to build round.** [`half_way_into_either_arc`]
+/// aims at where the cone's axis crosses the plane, and a plane parallel to the
+/// axis has no such point, while for one leaning less than that the point can be
+/// in the other nappe's region. So a flat piece bounded by a chord and an arc of
+/// a hyperbola — a cube's wall cutting through a cone the way `x = 3.5` cuts a
+/// cone about `x = 3` — had no candidate off its chord at all.
+///
+/// The line through the chord's middle square to it meets the cone where
+/// `(1 + s²)(v·w)² − |w|²|v|² = 0` for `v = middle + t·across − apex`, which is a
+/// quadratic in `t`. Half way to each root is a candidate, and one of them is
+/// between the arc and its chord whenever the arc is part of the boundary of a
+/// convex region that holds the chord. Nothing is trusted: the caller proves
+/// each candidate is inside or drops it.
+fn half_way_across_the_chord_to_a_cone(flat: &Plane, side: &FaceMeet) -> Vec<PredicatePoint> {
+    let Surface::Cone(cone) = side.carried_by[1] else {
+        return Vec::new();
+    };
+    let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
+    let chord = end - start;
+    let Ok(across) = flat.normal().cross(chord).normalized() else {
+        return Vec::new();
+    };
+    let middle = start + chord * 0.5;
+    let up = cone.axis().direction();
+    let widening = 1.0 + cone.slope() * cone.slope();
+    let from_apex = middle - cone.apex();
+    let (along_now, along_per_step) = (from_apex.dot(up), across.dot(up));
+    let square = widening * along_per_step * along_per_step - up.length_squared();
+    let linear =
+        2.0 * (widening * along_now * along_per_step - up.length_squared() * from_apex.dot(across));
+    let constant =
+        widening * along_now * along_now - up.length_squared() * from_apex.length_squared();
+    let steps: Vec<f64> = if square == 0.0 {
+        vec![-constant / linear]
+    } else {
+        let discriminant = linear * linear - 4.0 * square * constant;
+        if discriminant < 0.0 {
+            return Vec::new();
+        }
+        let root = discriminant.sqrt();
+        vec![
+            (-linear + root) / (2.0 * square),
+            (-linear - root) / (2.0 * square),
+        ]
+    };
+    steps
+        .into_iter()
+        .map(|step| middle + across * (step / 2.0))
+        .filter(Point::is_finite)
+        .map(|point| PredicatePoint::from(point.coordinates()))
+        .collect()
 }
 
 /// The middle of a piece's corners, which is somewhere near it and nowhere in
