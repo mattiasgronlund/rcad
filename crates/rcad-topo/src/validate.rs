@@ -3208,7 +3208,7 @@ mod tests {
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
-    use crate::model::{FaceUse, ShellData, ShellUse, SolidData, VertexData, WireStep};
+    use crate::model::{FaceUse, ModelData, ShellData, ShellUse, SolidData, VertexData, WireStep};
     use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
 
     fn an_empty_model() -> Model {
@@ -3401,6 +3401,68 @@ mod tests {
         assert!(poles > 0, "a ball's boundary stands on its poles");
 
         assert_eq!(refusal(&model), Invalid::DanglingKey { entity: "vertex" });
+        assert_eq!(
+            refusal_of_the_only_solid(&model),
+            Invalid::DanglingKey { entity: "vertex" }
+        );
+    }
+
+    /// **The walk down from one solid steps over a key that names nothing**,
+    /// and the key check refuses it by the name `validate` gives — at every
+    /// level, the way
+    /// `every_level_of_the_model_is_refused_for_naming_something_that_is_gone`
+    /// asks it of the whole model. A walk that followed the key would index
+    /// an arena with it and panic.
+    #[test]
+    fn one_solid_naming_something_that_is_gone_is_refused_rather_than_crashing_the_walk() {
+        let take_one_out: [(&str, fn(&mut ModelData)); 6] = [
+            ("vertex", |data| {
+                let slot = data.vertices.keys().next().expect("a corner");
+                data.vertices.remove(slot);
+            }),
+            ("edge", |data| {
+                let slot = data.edges.keys().next().expect("an edge");
+                data.edges.remove(slot);
+            }),
+            ("coedge", |data| {
+                let slot = data.coedges.keys().next().expect("a coedge");
+                data.coedges.remove(slot);
+            }),
+            ("wire", |data| {
+                let slot = data.wires.keys().next().expect("a wire");
+                data.wires.remove(slot);
+            }),
+            ("face", |data| {
+                let slot = data.faces.keys().next().expect("a face");
+                data.faces.remove(slot);
+            }),
+            ("shell", |data| {
+                let slot = data.shells.keys().next().expect("a shell");
+                data.shells.remove(slot);
+            }),
+        ];
+
+        for (entity, take_out) in take_one_out {
+            let mut model = a_cube();
+            take_out(model.data_mut());
+
+            assert_eq!(
+                refusal_of_the_only_solid(&model),
+                Invalid::DanglingKey { entity },
+                "a {entity} taken out"
+            );
+            assert_eq!(refusal_of_the_only_solid(&model), refusal(&model));
+        }
+    }
+
+    /// The one invariant [`Model::validate_solid`] refused the model's only
+    /// solid for.
+    fn refusal_of_the_only_solid(model: &Model) -> Invalid {
+        let solid = model.solids().next().expect("one solid").key();
+        match model.validate_solid(solid, &Policy::certified(), &mut ProvenanceLog::new()) {
+            Err(Error::Invalid(broken)) => broken,
+            other => panic!("the solid should have been refused, and gave {other:?}"),
+        }
     }
 
     #[test]
