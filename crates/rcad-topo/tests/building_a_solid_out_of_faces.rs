@@ -200,7 +200,7 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// **Both descriptions now stop on the first bend's wall**, at the piece of it
 /// between `y = 0` and the turned bend's cap: corners `(3, 0, 0)` and where
 /// that cap's circle crosses the outer equator, `(5/√2, 5/√2, 0)`. Every point
-/// selection tries in a curved piece is a blend of its corners, so it is a
+/// selection tries in a curved piece is built from its corners, so it is a
 /// box and not a point, and a ray from a box cannot be put to a torus —
 /// `CannotFireARayAtAFacesSurface` on the turned bend's torus face. Both
 /// descriptions refuse it word for word alike, which is what this half of the
