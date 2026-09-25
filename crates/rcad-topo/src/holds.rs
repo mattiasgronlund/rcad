@@ -60,8 +60,7 @@ use rcad_predicates::{
 
 use crate::classify::decide;
 use crate::validate::{
-    a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of, name_of_surface,
-    side_of_surface,
+    a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of, name_of_surface, side_of_surface,
 };
 use crate::view::{CoedgeView, EdgeView, FaceView, WireView};
 use crate::{Error, FaceKey, Invalid, Result, SolidView};
@@ -565,7 +564,8 @@ fn what_a_ring_face_between_two_planes_holds(
         );
     };
     for (circle, plane) in [(one, other), (other, one)] {
-        let at = PredicatePoint::from(where_it_is_stored(solid, circle.corners_on_it[0]).coordinates());
+        let at =
+            PredicatePoint::from(where_it_is_stored(solid, circle.corners_on_it[0]).coordinates());
         match side_of_surface(&plane.surface, at) {
             settled if settled == plane.kept => (),
             Decision::Zero | Decision::Pos | Decision::Neg => return Err(refuse()),
@@ -2712,11 +2712,9 @@ mod tests {
         };
         let near = model.add_vertex(rcad_geom::Point::new(3.0, 0.0, 0.0));
         let far = model.add_vertex(far_corner);
-        let flat_through_the_middle = Plane::from_point_and_normal(
-            rcad_geom::Point::origin(),
-            Vector::new(0.0, 0.0, 1.0),
-        )
-        .expect("the z axis is a unit normal");
+        let flat_through_the_middle =
+            Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
         let seam = model.add_edge_running(
             near,
             far,
@@ -2756,7 +2754,8 @@ mod tests {
         .into_iter()
         .collect();
         let wire = model.add_wire(round_the_wall);
-        let ring = rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+        let ring =
+            rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
         let wall = model.add_face(Surface::Torus(ring), smallvec::smallvec![wire]);
 
         let shell = model.add_shell(
@@ -2837,18 +2836,17 @@ mod tests {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let top = model.add_vertex(rcad_geom::Point::new(4.0, 0.0, 1.0));
         let bottom = model.add_vertex(rcad_geom::Point::new(4.0, 0.0, -1.0));
-        let upright = Plane::from_point_and_normal(
-            rcad_geom::Point::origin(),
-            Vector::new(0.0, 1.0, 0.0),
-        )
-        .expect("the y axis is a unit normal");
+        let upright =
+            Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal");
         let seam = model.add_edge_running(
             bottom,
             top,
             EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Plane(upright),
                 picked_by: smallvec::smallvec![Picker::from(
-                    HalfSpace::new(Vector::new(1.0, 0.0, 0.0), 4.0).expect("a normal with a length")
+                    HalfSpace::new(Vector::new(1.0, 0.0, 0.0), 4.0)
+                        .expect("a normal with a length")
                 )],
             },
         );
@@ -2876,7 +2874,8 @@ mod tests {
         .into_iter()
         .collect();
         let wire = model.add_wire(round_the_rim);
-        let ring = rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+        let ring =
+            rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
         let rim = model.add_face(Surface::Torus(ring), smallvec::smallvec![wire]);
         let shell = model.add_shell(
             [
@@ -2897,7 +2896,9 @@ mod tests {
             loc: Isometry::identity(),
             orient: Orientation::Forward,
         }]));
-        let puck = model.solid(model.key_for_solid(solid)).expect("this model made the key");
+        let puck = model
+            .solid(model.key_for_solid(solid))
+            .expect("this model made the key");
         let rim = puck
             .faces()
             .find(|face| matches!(face.surface(), Surface::Torus(_)))
@@ -2905,8 +2906,12 @@ mod tests {
             .key();
 
         for point in [at(3.0, 0.0, 0.0), at(5.0, 0.0, 0.0)] {
-            let answer =
-                puck.face_holds_the_point(rim, point, &Policy::certified(), &mut ProvenanceLog::new());
+            let answer = puck.face_holds_the_point(
+                rim,
+                point,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
             assert!(
                 matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == rim),
                 "{point:?}: {answer:?}"
@@ -2933,7 +2938,9 @@ mod tests {
         assert!(
             matches!(
                 model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
-                Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface))
+                Err(Error::Invalid(
+                    Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                ))
             ),
             "the sweep has learned a three-quarter bend, and §243 says what that changes"
         );

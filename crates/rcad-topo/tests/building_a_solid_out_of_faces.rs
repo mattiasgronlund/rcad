@@ -302,11 +302,8 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let between_the_corners = PredicatePoint::Constructed(core::array::from_fn(|axis| {
         (near.enclosure()[axis] + far.enclosure()[axis]) * Interval::exactly(0.5)
     }));
-    let placed = turned.classify_uncertain_point(
-        between_the_corners,
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
+    let placed =
+        turned.classify_uncertain_point(between_the_corners, &policy, &mut ProvenanceLog::new());
     let Containment::CannotFireARayAtAFacesSurface { face } = placed else {
         panic!("a ray from a blend of the wall piece's corners: {placed:?}");
     };
