@@ -59,9 +59,13 @@ separate decision not taken here.
 
 - §124, §126, §127, §128, §130, §131 and §132 quote `git checkout -B` in the
   commands they record having run. They say what was run, and are left alone.
-- The shared `delegating` skill in the `practices` plugin still tells a brief to
-  open with `git checkout -B <lane-branch> <base sha>`. It lives in the
-  marketplace repo rather than here, so this section does not change it; it
-  wants the same fix there.
+- The shared `delegating` skill in the `practices` plugin told a brief to open
+  with `git checkout -B <lane-branch> <base sha>`. It lives in the marketplace
+  repo, and got the same fix there in `82e46e3`. A probe for that commit, on
+  this machine's git 2.43.0, is the mechanism measured rather than read off a
+  report: `checkout -B lane-B main` exited 0 while another worktree held
+  `lane-B`, that tree's `git status` then showed the newer round's file as a
+  staged deletion, and `switch -c` on the same name answered *"fatal: a branch
+  named 'lane-B' already exists"*.
 
 ---
