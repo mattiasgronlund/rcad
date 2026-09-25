@@ -27,7 +27,6 @@ A row is **ready** when its state is `todo`, or `after:` names only `done` rows.
 ## Tier 1
 
 ```
-Q9   1    lane:lane-q9-fast-inputs-timed  sonnet  -   Time the two fast §228 inputs (fuse bb8aa34…, cone-or-torus 694123d…) in the fuzz build, to find why the night stopped each at ten seconds when a debug build takes 9s and 7s. §228
 Q6   1    lane:lane-q6-shared-comparison  sonnet  crates/rcad-topo/tests/fuses_that_must_agree.rs,crates/rcad-topo/tests/fuzzing/fuse.rs,crates/rcad-topo/tests/fuzzing/   Move both_ways_round_of and same_answer into one module both files share by #[path], instead of the copy lane T2 made. §129.5
 Q11  1    lane:lane-q11-seed-count  sonnet  -   Find why 09-22 fuzzed 36.7M fuse runs starting from 3107 seeds, against neighbouring nights' 3297-3687, under the same flags. §227.5
 Q13  1    lane:lane-q13-timing-record  sonnet  -   Find why the cone-or-torus target's fork-mode timing record undercounts: 1 009 847 runs recorded against libFuzzer's own 2 298 296 on 09-21. §227.5
@@ -40,7 +39,7 @@ Q42  1    todo    sonnet  fuzz/corpus/no_model_makes_the_writer_panic/,crates/rc
 ## Tier 2
 
 ```
-Q4   2    lane:lane-torus-gaps   opus    crates/rcad-topo/src/fuse/select.rs,crates/rcad-topo/src/fuse/arrange.rs   A torus arm for the_middle_of_a_round_wire, and reading a point's own crossings instead of assuming a closed curve cuts the surface in two, in which_side_of_everything. §229.3
+Q4   2    lane:lane-f2-half-space-test   opus    crates/rcad-topo/src/fuse/select.rs,crates/rcad-topo/src/fuse/arrange.rs   A torus arm for the_middle_of_a_round_wire, and reading a point's own crossings instead of assuming a closed curve cuts the surface in two, in which_side_of_everything. §229.3
 Q5   2    after:Q3   sonnet  -   Re-run lane-swallowed-pointed-cone (184962b9) once lane-cone-and-copy-finish lands. §229.7
 Q43  2    todo    opus    -   Diagnose two_overlapping_parallel_bars_stop_in_select_whichever_way_round, ignored: the first union refuses ResultIsNotManifold{count:1}; the untested guess is a rim corner at (5, 0, 0) inside the lens splitting one side's arc and not its neighbour's. §231.4
 Q44  2    todo    opus    -   Find whether any fuse refuses because the joiner leaves two spellings of one curved surface unjoined; if one does, join them by picking one spelling by bits and turning round every closed side read off the other, §231.3's second pass once more. §231.5
@@ -71,7 +70,7 @@ Q27  2    parked:§136.4   opus    -   The fuse corner re-check is tighter than 
 ```
 Q8   2.5  todo    opus    -   Find why two fuse inputs (c0c1f6b…, 0d5a11d…) take about 500s in a debug build to refuse CannotMeshAFace{BoundaryCrossesItself}; lead: its_sides_cross in validate.rs re-meshes at half the deflection down to a floor. §228.3
 Q10  2.5  todo    sonnet  -   Profile the cone-or-torus target's slow inputs, such as slow-000003289151us-55ef55b72ea716d8, about 3 seconds each. §227.5
-Q12  2.5  todo    sonnet  -   Measure how much of the night's slowdown five targets at four forks (20 processes on 24 threads) costs by itself, apart from the input-driven slowdown. §227.5
+Q12  2.5  todo    sonnet  -   Measure how much of the night's slowdown five targets at four forks (20 processes on 24 threads) costs by itself, apart from the input-driven slowdown; §233 left load as the only cause standing for the two fast timeouts, by elimination, so a run that watches fuse bb8aa34… or cone-or-torus 694123d… cross ten seconds under that load closes it, and one that does not reopens it. §227.5 §233.4
 Q23  2.5  todo    opus    crates/rcad-geom/src/march.rs   The marcher's step ceiling, MOST_A_STEP_MAY_GROW_TO in march.rs, needs a bound that does not come from the caller's ask. §125.6
 Q35  2.5  parked:§89.7    opus    -   A cheap detector for a walk orbiting without closing, so reaching the point cap need not cost a million steps; no consumer, since the backstop already covers every corpus case. §89.7
 ```
@@ -103,6 +102,7 @@ Q45  1    done:40bd4b30   opus    -   just queue, queue ready and queue next N r
 T4   1    done:157b3b77   sonnet  -   The morning line says what is new tonight, by target and kind, counted against the night's start, instead of "nothing found" beside the pile of every night since the directory was made; on 2026-09-25 it would have named the fuse's three timeouts. §226.3
 T5   1    done:8541b2b7   opus    -   The writer target reads back what it wrote and compares it with the model that went in (item 3): parse, references, Import::read, validate, solid count, then volume, area and centroid bit for bit. Nothing found; only two cubes reach it. §129.5
 Q3   2    done:39b278cc   opus    -   Finish lane-land-cone-and-copy: rustfmt, the two spellings of one pipe, the absorption corner, the two bars pinned. §229.6 §231
+Q9   1    done:7968c2e1   sonnet  -   The two fast §228 timeouts take 1.6 s and 3.3–4.1 s alone in the fuzz build, already at the night's own commit 6664fef8: no later commit sped them up and the sanitizer build is faster than debug, so the night's load is the one cause left, by elimination. §228 §233
 T3   1    done:42df376e   sonnet  -   Decode the first timeouts the fuse ever wrote (three, 2026-09-24/25) and the cone-or-torus one (2026-09-25): what each input is, how long it takes on main, a hang or only slow. Two are one correct refusal that takes eight minutes; two finish in seconds here, why the night stopped them is open. §226.3 §228
 T8   1    dropped:§230    -       -   A gate check that holds this file's rows to their shape, the way check-plan holds docs/plan.md's; widened into check-queue instead. §226.4 §230
 D1   1    done:0ac02509   -       -   The five fuzz targets run at once, each for the whole night. §129
