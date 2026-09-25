@@ -414,10 +414,13 @@ pub enum WhatCameBack {
 }
 
 impl WhatCameBack {
+    /// A yes-or-no question and not a match over every error: whatever
+    /// variant `Error` grows next, it is a refusal (§40).
     fn from_refusal(why: &Error) -> Self {
-        match why {
-            Error::ResultIsNotManifold { .. } => WhatCameBack::NotASolid,
-            _ => WhatCameBack::Refused,
+        if matches!(why, Error::ResultIsNotManifold { .. }) {
+            WhatCameBack::NotASolid
+        } else {
+            WhatCameBack::Refused
         }
     }
 }
