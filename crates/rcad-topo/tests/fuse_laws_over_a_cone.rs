@@ -166,11 +166,14 @@ fn uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first() {
 ///
 /// `(block ∪ frustum) ∪ cube` answers. `block ∪ (frustum ∪ cube)` unites the
 /// frustum and the cube, which never touch, into two pieces, and then that with
-/// the block comes back [`rcad_topo::Error::ResultIsNotManifold`] — an answer no
-/// model can hold, on one grouping of a union whose other grouping is a solid.
+/// the block came back [`rcad_topo::Error::ResultIsNotManifold`] (§222.3, item
+/// 1).
+///
+/// The cone had nothing to do with it. The next test is the same refusal with a
+/// box where the frustum was, and says where it came from: two tools whose
+/// boxes miss each other were never cut against each other, though the block
+/// reaches both.
 #[test]
-#[ignore = "associativity: frustum through a block, cube inside the block — one grouping answers, \
-            the other is ResultIsNotManifold"]
 fn a_frustum_a_block_and_a_cube_inside_the_block_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: on_the_grid(9, 2, [3, 5]),
@@ -178,6 +181,52 @@ fn a_frustum_a_block_and_a_cube_inside_the_block_unite_one_way_and_not_the_other
         third_at: [0.5, 0.5, 4.5],
     }])
     .print_and_check("associativity, a cube inside the block", 1);
+}
+
+/// A block of nine, a box of two up through its floor, and a box of three
+/// inside the block that touches neither: `block ∪ [poke, inside]`, with the two
+/// boxes handed over together as the tools, is `block ∪ poke`.
+///
+/// Every one of the three rules came back
+/// [`rcad_topo::Error::ResultIsNotManifold`] here. The two boxes' own boxes miss
+/// each other, so they were never cut against each other; but the inside box's
+/// wall `x = 3.5` cuts the block's floor, and that floor meets the poking box's
+/// walls `y = 4` and `y = 6` along its footprint. The floor side of those two
+/// edges was split at `x = 3.5` and the wall side was not, so each half had one
+/// face along it.
+#[test]
+fn a_block_with_one_box_through_its_floor_and_one_inside_it_unites_to_the_block_and_the_first() {
+    let mut model = a_model();
+    let block = a_cube_at(&mut model, 9.0, [0.0, 0.0, 0.0]);
+    let poke = a_cube_at(&mut model, 2.0, [2.0, 4.0, -1.0]);
+    let inside = a_cube_at(&mut model, 3.0, [0.5, 0.5, 4.5]);
+
+    let mut report = Report::default();
+    let want = fused(&model, &[block], &[poke], Rule::Union).expect("a block and a box answer");
+    match fused(&model, &[block], &[poke, inside], Rule::Union) {
+        Ok(found) => report.compare(
+            "block ∪ [poke, inside] against block ∪ poke",
+            (&found.0, &found.1),
+            (&want.0, &want.1),
+        ),
+        Err(name) => report.refused(&name),
+    }
+    for (rule, solids) in [(Rule::Intersection, 2), (Rule::Difference, 1)] {
+        match fused(&model, &[block], &[poke, inside], rule) {
+            Ok((_, pieces)) => assert_eq!(
+                pieces.len(),
+                solids,
+                "{rule:?}: the poking box's part inside the block, and the inside box as \
+                 itself or as a hollow"
+            ),
+            Err(name) => report.refused(&format!("{rule:?}: {name}")),
+        }
+    }
+    assert!(report.refused.is_empty(), "refused: {:?}", report.refused);
+    report.print_and_check(
+        "a block with one box through its floor and one inside it",
+        1,
+    );
 }
 
 /// A pointed cone the block swallows whole, and a cube cutting through both.
@@ -256,6 +305,29 @@ fn a_frustum_cut_by_a_block_and_a_cube_in_the_frustum_unite_one_way_and_not_the_
     .print_and_check("associativity, a cube in a cut frustum", 1);
 }
 
+/// A frustum up through a block's floor, and a cube as big as the block beside
+/// it, overlapping it and clear of the frustum.
+///
+/// `block ∪ (frustum ∪ cube)` answers. `(block ∪ frustum) ∪ cube` refuses at
+/// the first union, undecided on a point inside a piece of a face — the same
+/// refusal as the swallowed pointed cone's `cone ∪ cube`, this time on a block
+/// and a frustum alone.
+///
+/// Until §222.3's first case was fixed both groupings refused, so this sat
+/// among the trios that agree: the grouping that answers now was the
+/// frustum and the cube handed to the block as two tools, which is that case.
+#[test]
+#[ignore = "associativity: frustum through a block, cube overlapping the block — (block ∪ frustum) \
+            is Undecidable on a point inside a piece of a face, the other grouping answers"]
+fn a_frustum_a_block_and_a_cube_beside_the_frustum_unite_one_way_and_not_the_other() {
+    associativity(&[Trio {
+        pair: on_the_grid(8, 2, [4, 4]),
+        third_side: 8.0,
+        third_at: [5.0, 0.5, 2.5],
+    }])
+    .print_and_check("associativity, a cube beside the frustum", 1);
+}
+
 /// A cube and a cone-faced solid.
 #[derive(Clone, Copy, Debug)]
 enum Pair {
@@ -306,7 +378,7 @@ const POINTED: [Pair; 3] = [
 /// Three answer both ways: a far cube with a frustum, a cube on the block's roof
 /// with a frustum, and a far cube with a swallowed pointed cone. The rest refuse
 /// both ways and are here so a change that makes one grouping answer is seen.
-const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 7] = [
+const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 6] = [
     Trio {
         pair: on_the_grid(6, 2, [3, 3]),
         third_side: 2.0,
@@ -321,11 +393,6 @@ const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 7] = [
         pair: a_pointed_cone_in_a_block_six_across(1.0),
         third_side: 2.0,
         third_at: [20.0, 20.0, 20.0],
-    },
-    Trio {
-        pair: on_the_grid(8, 2, [4, 4]),
-        third_side: 8.0,
-        third_at: [5.0, 0.5, 2.5],
     },
     Trio {
         pair: on_the_grid(8, 2, [4, 4]),
@@ -759,6 +826,19 @@ impl Pair {
 
 fn a_model() -> Model {
     Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"))
+}
+
+fn a_cube_at(model: &mut Model, side: f64, at: [f64; 3]) -> SolidKey {
+    let cube = model
+        .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a whole-number cube");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(at[0], at[1], at[2])).expect("a finite shift"),
+        )
+        .expect("this model made the key");
+    cube
 }
 
 /// The model an answer is in and the answer's solids, or the name of why there
