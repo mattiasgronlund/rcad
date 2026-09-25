@@ -85,6 +85,25 @@
 //! deleted, and a comparison that is deleted passes every seed. Both come from
 //! `two_cubes_that_write` alone, so their floor is what that one seed brings,
 //! for the same reason as `written`'s.
+//!
+//! # The seven shape seeds
+//!
+//! Q58 (`docs/decisions.md` §241) gave the target a mutator that keeps every
+//! input a model, and checked in seven models beside it: a round bar, the same
+//! bar moved by whole units, the same bar turned a quarter about `x`, a ball, a
+//! frustum, a pointed cone and a quarter bend of pipe. The same command then
+//! reported
+//!
+//! ```text
+//! Reached { draws: 1190, decoded: 26, faces: 34, written: 4, refused: 22,
+//!           written_but_unsound: 0, read_back: 4, did_not_measure: 0,
+//!           solids_the_same: 5, came_back_the_same: 4 }
+//! ```
+//!
+//! Only the bar and the moved bar are written. The other five are refused by
+//! name — the ball at its pole, and the frustum, the cone, the bend and the
+//! turned bar at a curve between two faces the writer cannot name yet — and
+//! §241 lists what that costs the fuzzer.
 
 #![forbid(unsafe_code)]
 
@@ -93,9 +112,17 @@ mod fuzzing;
 use std::path::PathBuf;
 
 use rcad_geom::Surface;
+use rcad_geom::Deflection;
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::Model;
 
 use fuzzing::writer::{Reached, one_model_decoded_and_written};
+
+/// Where the middle of a quarter of a torus of ring 6 and tube 2 lies, along
+/// each of the two axes it runs between: the whole torus's middle circle,
+/// `6 + 2² / (4 · 6)`, pulled in by a quarter arc's `sin(π/4) / (π/4)`, then
+/// split along the diagonal.
+const QUARTER_BEND_MIDDLE: f64 = 3.925_7;
 
 /// Where the checked-in corpus lives.
 fn corpus() -> PathBuf {
@@ -226,6 +253,154 @@ fn a_curved_solid_in_the_corpus_reaches_the_comparison() {
         "{curved_seeds} seed(s) decode into a model with a curved face, but none of them \
          reached the volume/area/centroid comparison — a curved solid stops short of it again"
     );
+}
+
+/// At least ten seeds decode into a model with a face in it.
+///
+/// Before Q58 three did — `two_cubes_that_write`, the ball and the round bar
+/// — and the other sixteen that decoded were empty. The fuzz target no longer
+/// needs a seed to decode, because its mutator turns bytes that do not into a
+/// fresh model; this file does, because it replays the corpus and nothing else.
+/// So the corpus is all of the writer `just gate` ever sees, and this is its
+/// floor: the three there were, and the seven shapes Q58 checked in beside
+/// them.
+#[test]
+fn at_least_ten_seeds_decode_into_a_model_with_a_face() {
+    let with_a_face: Vec<String> = every_seed()
+        .into_iter()
+        .filter(|(_, bytes)| one_model_decoded_and_written(bytes).faces > 0)
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        with_a_face.len() >= 10,
+        "only {} seeds decode into a model with a face — {with_a_face:?} — so the \
+         corpus is back to reaching the writer with almost nothing to write",
+        with_a_face.len()
+    );
+}
+
+/// The seven shapes Q58 checked in, each the shape its name says, and each
+/// either written and read back the same or refused by name.
+///
+/// They were drawn by the target's own `a_frustum`, `a_pointed_cone` and
+/// `a_quarter_bend` and by `add_round_bar` and `add_ball`, and none of them is
+/// one the comparison panics on: the turned bar that does is kept out of the
+/// corpus and reported in `docs/decisions.md` §241 instead.
+#[test]
+fn every_shape_seed_is_the_shape_it_is_named_for() {
+    struct Shape {
+        seed: &'static str,
+        faces: &'static [&'static str],
+        centroid: [f64; 3],
+        comes_back: bool,
+    }
+    let shapes = [
+        Shape {
+            seed: "a_round_bar_of_radius_three",
+            faces: &["cylinder", "plane", "plane"],
+            centroid: [0.0, 0.0, 2.5],
+            comes_back: true,
+        },
+        Shape {
+            seed: "a_round_bar_moved_by_whole_units",
+            faces: &["cylinder", "plane", "plane"],
+            centroid: [3.0, -5.0, 9.5],
+            comes_back: true,
+        },
+        Shape {
+            seed: "a_round_bar_turned_a_quarter_about_x",
+            faces: &["cylinder", "plane", "plane"],
+            centroid: [0.0, -2.5, 0.0],
+            comes_back: false,
+        },
+        Shape {
+            seed: "a_ball_of_radius_three",
+            faces: &["sphere"],
+            centroid: [0.0, 0.0, 0.0],
+            comes_back: false,
+        },
+        Shape {
+            seed: "a_frustum_of_a_half_slope_cone",
+            faces: &["cone", "plane", "plane"],
+            centroid: [0.0, 0.0, 60.0 / 13.0],
+            comes_back: false,
+        },
+        Shape {
+            seed: "a_pointed_cone",
+            faces: &["cone", "plane"],
+            centroid: [0.0, 0.0, 4.5],
+            comes_back: false,
+        },
+        Shape {
+            seed: "a_quarter_bend_of_pipe",
+            faces: &["plane", "plane", "torus"],
+            centroid: [QUARTER_BEND_MIDDLE, QUARTER_BEND_MIDDLE, 0.0],
+            comes_back: false,
+        },
+    ];
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    for shape in shapes {
+        let bytes = std::fs::read(corpus().join(shape.seed)).expect("the shape seed is checked in");
+        let model = postcard::from_bytes::<Model>(&bytes).expect("a shape seed decodes");
+        let solid = model.solids().next().expect("a shape seed holds a solid");
+        assert_eq!(model.solid_count(), 1, "{}", shape.seed);
+        let mut faces: Vec<&str> = solid.faces().map(|face| surface_kind(face.surface())).collect();
+        faces.sort_unstable();
+        assert_eq!(faces, shape.faces, "{}", shape.seed);
+
+        let centroid = solid
+            .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
+            .expect("every shape seed measures")
+            .centroid();
+        let off = [
+            centroid.x() - shape.centroid[0],
+            centroid.y() - shape.centroid[1],
+            centroid.z() - shape.centroid[2],
+        ];
+        assert!(
+            off.iter().all(|coordinate| coordinate.abs() < 0.05),
+            "{} has its middle at {centroid:?}, not near {:?}",
+            shape.seed,
+            shape.centroid
+        );
+
+        let reached = one_model_decoded_and_written(&bytes);
+        let outcome = (reached.came_back_the_same, reached.refused);
+        let expected = if shape.comes_back { (1, 0) } else { (0, 1) };
+        assert_eq!(outcome, expected, "{}: {reached:?}", shape.seed);
+    }
+}
+
+/// Every file in the checked-in corpus, by name.
+fn every_seed() -> Vec<(String, Vec<u8>)> {
+    let listing = std::fs::read_dir(corpus()).expect("the corpus is checked in beside the target");
+    let mut seeds = Vec::new();
+    for entry in listing {
+        let path = entry.expect("a readable directory entry").path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .expect("a file has a name")
+            .to_string_lossy()
+            .into_owned();
+        seeds.push((name, std::fs::read(&path).expect("a readable seed")));
+    }
+    seeds
+}
+
+/// What kind of surface a face lies on, in a word.
+fn surface_kind(surface: Surface) -> &'static str {
+    match surface {
+        Surface::Plane(_) => "plane",
+        Surface::Cylinder(_) => "cylinder",
+        Surface::Cone(_) => "cone",
+        Surface::Sphere(_) => "sphere",
+        Surface::Torus(_) => "torus",
+        _ => "a kind this test does not know",
+    }
 }
 
 /// A cylinder, a cone, a sphere or a torus — anything that is not a plane.
