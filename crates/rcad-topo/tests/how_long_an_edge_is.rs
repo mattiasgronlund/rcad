@@ -365,6 +365,32 @@ fn a_bar_cut_off_at_a_lean_measures_its_square_cap_and_refuses_its_ellipse_by_na
     }
 }
 
+/// A cube of side `1e308` has edges an `f64` holds and faces whose way round
+/// it does not: four sides come to `4e308`, past `f64::MAX`, and that is a
+/// limit refused by name rather than an infinity handed back as a length.
+#[test]
+fn a_wire_longer_than_an_f64_holds_is_refused_as_too_long() {
+    let side = 1e308;
+    let mut model = Model::new(Scale::millimetres(1.0).expect("a scale"));
+    let cube = model
+        .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    for edge in every_edge_of(&model, cube) {
+        let length = edge.length().expect("one side fits");
+        assert_eq!((length.length(), length.error()), (side, 0.0));
+    }
+    for face in model.solid(cube).expect("the cube").faces() {
+        let refusal = face
+            .outer_wire()
+            .length()
+            .expect_err("four sides do not fit");
+        assert!(
+            matches!(refusal, Error::LengthTooLargeToMeasure),
+            "{refusal:?}"
+        );
+    }
+}
+
 /// Every edge of `solid`, once for each time a wire walks it, in the order its
 /// faces, their wires and those wires' coedges come.
 fn every_edge_of(model: &Model, solid: SolidKey) -> Vec<EdgeView<'_>> {
