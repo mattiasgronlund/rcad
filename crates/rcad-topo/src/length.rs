@@ -45,7 +45,10 @@ use crate::{Error, Result};
 ///   is [`ROOM_FOR_ATAN2`] either way, plus `π`'s own neighbours and a step
 ///   for each of two sums, which is `4.5 · f64::EPSILON` of it at most, and
 ///   the product steps out once more: at most `6 · f64::EPSILON` of the
-///   length, measured at `3.98` over radii from `1e-3` to `1e100`.
+///   length, measured at `3.98` over radii from `1e-3` to `1e100`. The
+///   angle's error is a fixed number of radians rather than a share of the
+///   angle, so a shorter arc carries about the same error in length — some
+///   `14 · f64::EPSILON` of the radius — and a larger one as a share.
 /// - **A wire** — the sum of its edges, whose errors add, with a step of the
 ///   running total for each edge on top.
 ///
@@ -385,6 +388,14 @@ impl Circle {
             | [Surface::Sphere(ball), Surface::Plane(plane)] => {
                 Some(Circle::OnABall { plane, ball })
             }
+            // A plane square to a cone's axis cuts a circle too, and a plane
+            // square to a torus's two; neither is reached here yet.
+            [Surface::Cone(_) | Surface::Torus(_), _]
+            | [_, Surface::Cone(_) | Surface::Torus(_)] => None,
+            [
+                Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
+                Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_),
+            ] => None,
             _ => None,
         }
     }

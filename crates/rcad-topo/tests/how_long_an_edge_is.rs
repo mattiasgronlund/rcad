@@ -7,7 +7,7 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, EdgeRun, Isometry, Plane, Point, Scale, Vector};
+use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{EdgeView, Error, Length, Model, ProfileBuilder, Rule, SolidKey};
 
