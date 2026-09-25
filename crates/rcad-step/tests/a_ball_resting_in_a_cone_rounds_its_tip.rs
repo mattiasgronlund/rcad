@@ -32,8 +32,7 @@ fn the_circle_a_ball_touches_a_cone_round_is_two_halves_named_by_its_plane() {
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    let import =
-        Import::read(&file, &policy, &mut log).expect("a cone with a rounded tip reads");
+    let import = Import::read(&file, &policy, &mut log).expect("a cone with a rounded tip reads");
     let [(_, tip)] = import.solids() else {
         panic!("one MANIFOLD_SOLID_BREP is one solid");
     };
@@ -176,10 +175,7 @@ fn a_cone_with_a_rounded_tip() -> String {
     text += "#235=FACE_OUTER_BOUND('',#230,.T.);\n";
     text += "#240=ADVANCED_FACE('',(#235),#210,.T.);\n";
 
-    text += &format!(
-        "#200=CARTESIAN_POINT('',(0.,0.,{}));\n",
-        real(BALL_CENTRE)
-    );
+    text += &format!("#200=CARTESIAN_POINT('',(0.,0.,{}));\n", real(BALL_CENTRE));
     text += "#201=AXIS2_PLACEMENT_3D('',#200,#20,#21);\n";
     text += &format!("#211=SPHERICAL_SURFACE('',#201,{});\n", real(BALL_RADIUS));
     text += &format!(
