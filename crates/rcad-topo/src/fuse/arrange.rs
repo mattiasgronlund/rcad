@@ -991,9 +991,12 @@ impl<'f> Arrangement<'f> {
     ///
     /// [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`] when the two are one
     /// surface. Two faces on one surface with an edge between them carry no
-    /// curve for that edge to run along; the joiner in
-    /// [`bake`](super::bake) takes such a pair apart before it gets here, and a
-    /// pair it does not reach is refused rather than arranged wrongly.
+    /// curve for that edge to run along, and are one face. The joiner,
+    /// `join_up_what_is_one_face` in [`assemble`](super::assemble), removes
+    /// such an edge from every answer a fuse gives and from a wholly flat input
+    /// before it is baked; a pair it leaves apart — pieces of a cone or pipe it
+    /// does not join, or of a ball or a ring, which it never joins — is refused
+    /// here rather than arranged wrongly.
     fn crossing_for(
         &mut self,
         partner: Surface,

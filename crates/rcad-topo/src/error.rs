@@ -617,10 +617,15 @@ pub enum Error {
     /// surface.
     ///
     /// Two faces on one surface with an edge between them carry no curve for
-    /// that edge to run along. The joiner in the fuse's baking step takes such a
-    /// pair apart before the arrangement sees it, and a pair it does not reach —
-    /// two faces on one *cylinder*, which nothing joins yet — is refused rather
-    /// than arranged wrongly.
+    /// that edge to run along, so they are one face and the edge should not be
+    /// there. The fuse's joiner removes such edges: over every answer a fuse
+    /// gives, and over a wholly flat input before it is cut. It joins pieces of
+    /// one plane, cone or pipe (§224.2) and never pieces of a ball or a ring.
+    /// So this is raised for pieces of a cone or pipe the joiner leaves apart —
+    /// in a curved input, which it is never asked about, or where it could not
+    /// prove the two are one surface used the same way round — and for pieces
+    /// of a ball or a ring, which it never joins. Refused rather than arranged
+    /// wrongly.
     #[error("a face and the face across one of its edges are on the same surface")]
     AFaceMeetsItsNeighbourOnItsOwnSurface {
         /// Which face.

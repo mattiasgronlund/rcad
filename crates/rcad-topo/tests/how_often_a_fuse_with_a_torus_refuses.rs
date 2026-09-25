@@ -438,13 +438,34 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
 /// drawn tool does. The two bends share every surface, so `intersect` answers
 /// `SameSurface` where it would otherwise refuse a torus against a torus, and
 /// every plane-and-torus crossing either bend has is one of the two circle
-/// families. So the arrangement runs: it finds the corners, puts them in order
-/// round the circles they sit on, and stops at
-/// `TwoCurvesTouchWithoutCrossing` — two curves on one face meeting without
-/// crossing, which is exactly what two coincident solids give you and is a
-/// **gap** §38.2 already names and §39.4 already files.
+/// families. So the arrangement runs to the end — it finds the corners, puts
+/// them in order round the circles they sit on and cuts every face into
+/// pieces — and what refuses is choosing the pieces: no point it tries is
+/// inside the end cap on `y = 0`, the disk the tube leaves on that plane.
 ///
-/// That makes this the one place in the file where the arrangement is reached
+/// **This used to stop earlier, at `TwoCurvesTouchWithoutCrossing`, and that
+/// was the wrong name.** The plane `y = 0` crosses the torus in two circles,
+/// one round `(4, 0, 0)` and one round `(−4, 0, 0)`. The cap's corner
+/// `(3, 0, 0)` is on the first; the second's picker certainly rules the corner
+/// out. But the model lists the torus round that corner, and the corner was
+/// put on *both* circles for it — so two ways out of it ran along the one
+/// torus, which no turn and no bend can tell apart, and the sort called that
+/// two curves touching. Measured with the old rule put back: the refusal
+/// was at the cap's corner `(3, 0, 0)`, between the cap edge's own circle and
+/// the far one. Since a corner is on a curve of a surface it lists only where
+/// that curve's picker allows (§224.2's joined cone needed the same), the
+/// arrangement gets past it, and this is what the arithmetic really says.
+///
+/// **A gap in §16.10's sense.** The one point tried is the cap's one corner,
+/// which is on the rim, and a disk has no other corner to blend with. A point
+/// inside exists and is exact: `(4, 0, 0)`, where the plane crosses the ring,
+/// which the piece's own test holds, certified. The fix that reaches it is a
+/// torus arm in `select.rs`'s `the_middle_of_a_round_wire` — where the ring
+/// crosses the plane, as the ball's centre and the pipe's and cone's axis
+/// points are now. It is not built, and whether the copy then fuses is not
+/// measured.
+///
+/// This is still the one place in the file where the arrangement is reached
 /// at all, and so the one that says the ordering added for a bend is real code
 /// and not a gate nothing walks through.
 #[test]
@@ -457,10 +478,27 @@ fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         let mut log = ProvenanceLog::new();
         let refused = model.fuse(&[first], &[second], rule, &policy, &mut log);
-        assert!(
-            matches!(refused, Err(Error::TwoCurvesTouchWithoutCrossing { .. })),
-            "{rule:?} of a bend and a bit-for-bit copy of itself: expected the arrangement to \
-             reach the two coincident curves and refuse there, got {refused:?}"
+        let Err(Error::Undecidable { records }) = &refused else {
+            panic!(
+                "{rule:?} of a bend and a bit-for-bit copy of itself: expected no point inside \
+                 the end cap to be found, got {refused:?}"
+            );
+        };
+        let record = records.records().last().expect("a refusal names why");
+        assert_eq!(
+            record.predicate(),
+            "a point inside a piece of a face",
+            "{rule:?}: {refused:?}"
+        );
+        let corners: Vec<_> = record
+            .inputs()
+            .iter()
+            .map(|corner| corner.enclosure().map(|axis| [axis.lo(), axis.hi()]))
+            .collect();
+        assert_eq!(
+            corners,
+            [[[3.0, 3.0], [0.0, 0.0], [0.0, 0.0]]],
+            "{rule:?}: the piece is the end cap on y = 0, whose one corner is (3, 0, 0)"
         );
     }
 }
