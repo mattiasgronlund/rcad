@@ -111,8 +111,8 @@ mod fuzzing;
 
 use std::path::PathBuf;
 
-use rcad_geom::Surface;
 use rcad_geom::Deflection;
+use rcad_geom::Surface;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::Model;
 
@@ -345,7 +345,10 @@ fn every_shape_seed_is_the_shape_it_is_named_for() {
         let model = postcard::from_bytes::<Model>(&bytes).expect("a shape seed decodes");
         let solid = model.solids().next().expect("a shape seed holds a solid");
         assert_eq!(model.solid_count(), 1, "{}", shape.seed);
-        let mut faces: Vec<&str> = solid.faces().map(|face| surface_kind(face.surface())).collect();
+        let mut faces: Vec<&str> = solid
+            .faces()
+            .map(|face| surface_kind(face.surface()))
+            .collect();
         faces.sort_unstable();
         assert_eq!(faces, shape.faces, "{}", shape.seed);
 
