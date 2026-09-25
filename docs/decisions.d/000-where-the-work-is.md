@@ -20,7 +20,8 @@ item 1, a missing cut in `cuts.rs`; §224 §223.2's picker margin; **§229** the
 joiner (§224.2) and §222.2's closed curves in the reader; §231 the cone and its
 copy on the joiner — absorption's corner and two spellings of one pipe; §232
 §229.3's two torus gaps — a meridian circle's two disks, and a node on its own
-partner.
+partner; §242 `rcad_testing`'s first asks — one solid validated, a solid copied,
+an edge's length, a face measured.
 
 **What is next is `just queue`.** Every open item is a row of `docs/queue.md`,
 in §230.1's five tiers — finding defects better, defects, slow runs, corpus

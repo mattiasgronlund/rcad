@@ -852,3 +852,74 @@ the same sentence in its own record.
   climbed rung is distinguishable from a low deflection asked for deliberately,
   and exhaustion announces itself in a colour. Any further fallback of that kind
   amends the exception list rather than joining it silently.
+
+## rcad_testing
+
+A harness that runs OpenCASCADE's DRAW test corpus against the `rcad` facade and
+counts what comes back. It is anonymous and does not live on this machine. It
+counts "the kernel said it could not" apart from "the kernel got it wrong",
+reports counts per functional area, names no failing case in its default report,
+and holds a rotating share of the corpus out of every report. `docs/decisions.md`
+§242 is where it arrived and how its asks were triaged.
+
+**Its demand text is an artifact Mattias owns**, *Seven things rcad cannot be
+asked* (<https://claude.ai/code/artifact/57a3cdca-8131-4889-a7f4-df24f52512d0>).
+Read that rather than a summary here. The case counts it gives are its own, and
+rcad has not measured them.
+
+It asks for **capabilities, not signatures**, so the names below are rcad's.
+**A refusal is an acceptable answer to every one of its asks**: what it cannot
+count is a question that has no way to be asked. So an ask is met when there is
+a way to ask it and the answer that comes back is honest.
+
+### What rcad built for it
+
+Each item has `rcad_testing` as its named consumer under §13. If it stops
+needing one, rcad wants to hear.
+
+- **`Model::validate_solid(solid, policy, log)`** — the checks `validate` makes,
+  over one solid and what it is built from. It answers what `validate` answers
+  for a model holding that solid alone. A DRAW session keeps every shape in one
+  model, so under `validate` one broken shape failed every later `checkshape` in
+  the same script. Neither answer implies the other. §242.6 says why and names
+  the two tests that show it.
+- **`Model::copy_solid(solid)`** — a second solid that shares no key with the
+  first, so moving, fusing or tagging one leaves the other as it was. DRAW's
+  `copy` and `tcopy` are nearly always copy-then-move. Before this the harness
+  gave a second name to the same key, and `place_solid` then moved both.
+- **`EdgeView::length` and `WireView::length`, returning `Length`** — a length
+  and a bound on how far it can be from the true length, in the model's unit.
+  Straight edges and circles are measured. Every other curve refuses with
+  `Error::CannotYetMeasureHowLongThisCurveIs`, which is a gap rather than a
+  limit and names what would close it. §242.6 gives the error-to-length ratios.
+- **`SolidView::measure_one_face(face, deflection, policy, log)`, returning
+  `FaceMeasurement`** — a face's area and centroid, each with its own bound: an
+  `area_error` in the unit squared and a `centroid_wobble` as a length. It is on
+  the solid because a curved face is meshed with its neighbours. The faces'
+  areas add up to the solid's `surface_area` bit for bit. The wobble is sound
+  but loose, about 460 times wider than the worst miss §242.6 measured.
+
+### What is agreed and not yet built
+
+These are rows of `docs/queue.md`, each citing §242:
+
+- lengths for every curve that lies in a plane;
+- a general fuse that keeps every piece and says where each came from. It is
+  designed as `Model::cut_into_cells` (§242.7), and its first lane fixes two
+  wrong answers today's `fuse` gives, which the general fuse would inherit;
+- the crossing of two solids as a shape, and a face or shell as an operand, both
+  waiting on those lengths.
+
+**Faces on B-spline surfaces are not next**, by Mattias's answer (§242.7). They
+are not refused, but a new surface kind is a milestone, and which kind comes
+next is chosen by counting what blocks the most STEP corpus files. B-spline is
+one of three candidates in that count.
+
+### What rcad asks in return
+
+- **The per-area counts, refusals apart from wrong answers.** A wrong answer is
+  a bug report, and rcad wants the DRAW script that produced it. A refusal rate
+  that moves between two rcad revisions is worth hearing about in either
+  direction.
+- **Never work around a refusal**, for the reason given under rscene above.
+  Counting a refusal as a refusal is exactly what this consumer already does.
