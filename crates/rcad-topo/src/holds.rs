@@ -519,7 +519,7 @@ fn what_a_ring_face_between_two_planes_holds(
         let Some(flat) = cap.as_plane() else {
             panic!("a face this was sent is trimmed by planes only, and this one by {cap:?}");
         };
-        if !holds_the_axis_of(&flat, &torus) {
+        if !holds_the_axis_of(flat, &torus) {
             return Err(refuse());
         }
         let corner = edge.start().key();
