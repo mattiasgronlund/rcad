@@ -171,8 +171,16 @@ impl FaceMeasurement {
     /// a polygon inscribed in a curve. So the faces' errors add up to the
     /// solid's, to within the rounding of adding them in a different order.
     ///
-    /// **How big it is against the area, measured**: XXX-MEASURE-THESE;
-    /// `what_a_faces_area_error_is_against_its_area` pins each.
+    /// **How big it is against the area, measured** at a deflection of `0.01`:
+    /// `3.32e-3` of a round bar's cap and `3.33e-3` of its wall at radius
+    /// three, `6.70e-3` of a ball of radius three, `1.97e-2` and `6.56e-3` of a
+    /// frustum's caps of radius one and three and `1.78e-2` of its side,
+    /// `6.63e-3` of a pointed cone's cap of radius two and `1.81e-2` of its
+    /// side, and `2.00e-2` of a bend's caps and `2.03e-2` of its tube of radius
+    /// one. A curved face costs about twice the deviation over its radius and a
+    /// flat cap about the deviation times its rim over its area;
+    /// `what_a_faces_area_error_is_against_its_area` pins each to half a
+    /// percent.
     ///
     /// Exactly `0.0` for a face of a wholly flat solid, and never negative.
     #[must_use]
@@ -234,8 +242,16 @@ impl FaceMeasurement {
     /// the pairing misses a sliver at the face's edge, the area bound misses
     /// it too; `the_middle_of_each_face_is_within_its_wobble` holds this number
     /// against the textbook centroid of balls, bars, a frustum, a pointed cone
-    /// and a bend, at the origin and turned a million units out, and the
-    /// closest any came is recorded there.
+    /// and a bend, at four deflections, at the origin and turned a million
+    /// units out.
+    ///
+    /// **It is loose, and by how much is measured**: over those 96 faces the
+    /// closest a centroid came was `0.0022` of its wobble, so about five
+    /// hundred times what the mesh really got wrong. The meshes of these
+    /// symmetric faces are symmetric too and put the middle almost exactly
+    /// where it belongs; the `reach · 3E` term cannot know that, and it is
+    /// what dominates. A bound on how lopsided a face's triangles can be would
+    /// tighten it; nothing here has one.
     ///
     /// Exactly `0.0` for a face of a wholly flat solid.
     #[must_use]
