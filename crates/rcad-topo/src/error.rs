@@ -128,6 +128,52 @@ pub enum Error {
     #[error("this solid has more surface area than an f64 can hold")]
     SurfaceAreaTooLargeToMeasure,
 
+    /// An edge or a wire is longer than an `f64` can hold.
+    ///
+    /// A *limit* for [`Error::VolumeTooLargeToMeasure`]'s reason: two corners at
+    /// `-1e308` and `1e308` are `2e308` apart, and no ordering or rescaling of
+    /// the arithmetic hands back a number `f64` cannot represent.
+    /// [`EdgeView::length`](crate::EdgeView::length) already rescales by a power
+    /// of two so that nothing short of that overflows on the way.
+    #[error("this edge or wire is longer than an f64 can hold")]
+    LengthTooLargeToMeasure,
+
+    /// How long this edge is has an answer, and nothing here works it out yet.
+    ///
+    /// **A gap and not a limit** (§16.10). An ellipse, every other curve a plane
+    /// leaves on a quadric, and a degree-four crossing of two quadrics all have
+    /// a length that is an ordinary `f64`;
+    /// [`EdgeView::length`](crate::EdgeView::length) reaches circles only — a
+    /// plane square to a pipe, and a plane through a ball — by the closed form,
+    /// radius times angle. A circle whose squareness cannot be proved exactly,
+    /// and an arc whose two candidate pieces its pickers cannot tell apart at
+    /// their midpoints, land here too: both lengths exist and this code did not
+    /// reach them.
+    ///
+    /// What would reach the rest, family by family:
+    ///
+    /// - **Every crossing that lies in a plane.** A plane crosses a quadric in a
+    ///   conic, and a conic is convex, so a polygon inscribed in it is shorter
+    ///   than it and the polygon of tangents at the same points is longer
+    ///   (Archimedes). [`walk`](rcad_geom::walk) already gives the points, the
+    ///   gap between the two polygons shrinks as the square of the step — about
+    ///   the deflection over the radius, relatively — and it stops at the walk's
+    ///   [`MOST_POINTS_ALONG_ONE_CROSSING`](rcad_geom::MOST_POINTS_ALONG_ONE_CROSSING).
+    /// - **A whole ellipse** has a closed form besides: the complete elliptic
+    ///   integral of the second kind, which the arithmetic-geometric mean gives
+    ///   to full precision in a handful of steps. An arc of one wants the
+    ///   incomplete integral, which is the walk again.
+    /// - **A degree-four crossing** is not flat, so the tangent polygon bounds
+    ///   nothing. The inscribed polygon is still a lower bound — it is for any
+    ///   curve — and the upper bound wants how far the curve can bend between
+    ///   two walked points, which is the same bound the walk's deflection check
+    ///   already has to make.
+    #[error("nothing here works out yet how long this edge is along its curve")]
+    CannotYetMeasureHowLongThisCurveIs {
+        /// Which edge.
+        edge: EdgeKey,
+    },
+
     /// The model breaks one of the invariants [`validate`] checks.
     ///
     /// [`validate`]: crate::Model::validate
