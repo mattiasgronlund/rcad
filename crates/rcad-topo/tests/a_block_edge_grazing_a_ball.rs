@@ -19,9 +19,9 @@
 //!
 //! The edge runs along `z` rather than §244.2's `x` for the ball's sake. A ball
 //! here is one face whose seam is the half of `y = 0` with `x ≥ 0`, and an edge
-//! along `x` grazes it at `x = 0`, on the plane that seam is picked out by: a
-//! picker asked about a box touching that plane refuses before the fold is ever
-//! reached, with the fix or without it. An edge along `z` at `x = −1` grazes it
+//! along `x` grazes it at `x = 0`, on the plane that seam is picked out by, and
+//! an `orient3d` against that plane refuses on the kept meet whether or not the
+//! other one is folded into it (§248.3). An edge along `z` at `x = −1` grazes it
 //! at the equator, a whole unit from the seam.
 //!
 //! At `h = 0` both places are exact, `z = ±2⁻⁵¹`, and their boxes do not
