@@ -123,6 +123,127 @@ impl Measurement {
     }
 }
 
+/// How much area one face of a solid has, where that area balances, and how
+/// far each of those could be out.
+///
+/// **Two answers in two units, and each error is in its own answer's unit** —
+/// a squared one and a length, as [`Measurement`] keeps them (`docs/decisions.md`
+/// §25.4).
+///
+/// It is [`SolidView::measure`] cut down to one face, not a second measurer:
+/// the same triangles, the same arithmetic and the same charges, so the faces
+/// of a solid add up to its [`Measurement::surface_area`] **bit for bit** when
+/// they are added in the order [`SolidView::faces`] hands them out, starting
+/// from `0.0`. `the_faces_of_a_solid_add_up_to_its_skin_bit_for_bit` is that
+/// law over cubes, bars, balls, cones, a bend and a fuse.
+///
+/// All errors are exactly `0.0` for a face of a solid whose faces are all
+/// flat, for the reason [`Measurement`] gives — and with the same fine print:
+/// what is exact is the sum over the corners the solid *holds*. A cube turned
+/// and put a million units out holds corners the turn rounded, and its faces
+/// measure within a few roundings of `side²` rather than on it;
+/// `a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_squared`
+/// pins how many.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceMeasurement {
+    area: f64,
+    area_error: f64,
+    centroid: Point,
+    centroid_wobble: f64,
+}
+
+impl FaceMeasurement {
+    /// The face's area.
+    #[must_use]
+    pub fn area(self) -> f64 {
+        self.area
+    }
+
+    /// How far [`FaceMeasurement::area`] can be from the area the face really
+    /// has — a **distance**, and a **squared** quantity in the model's own
+    /// unit.
+    ///
+    /// The one charge [`Measurement::area_error`] makes for this face and no
+    /// other: [`how_much_more_surface_there_can_be`] on a curved face, what a
+    /// cone face reaching its own apex costs on one of those, and the
+    /// deviation times [`rim_of_the_flat_faces`] on a flat face of a curved
+    /// solid — the sides where this face meets another, whose meshed outline is
+    /// a polygon inscribed in a curve. So the faces' errors add up to the
+    /// solid's, to within the rounding of adding them in a different order.
+    ///
+    /// **How big it is against the area, measured**: XXX-MEASURE-THESE;
+    /// `what_a_faces_area_error_is_against_its_area` pins each.
+    ///
+    /// Exactly `0.0` for a face of a wholly flat solid, and never negative.
+    #[must_use]
+    pub fn area_error(self) -> f64 {
+        self.area_error
+    }
+
+    /// The point the face's surface would balance on, if it were a skin of
+    /// even thickness.
+    #[must_use]
+    pub fn centroid(self) -> Point {
+        self.centroid
+    }
+
+    /// How far [`FaceMeasurement::centroid`] could be from where the face
+    /// really balances — a **length**, in the model's own unit.
+    ///
+    /// # The derivation
+    ///
+    /// Write `A` for the area of the face's triangles, `E` for
+    /// [`FaceMeasurement::area_error`], `d` for the mesh's
+    /// [`Mesh::deviation`] and `reach` for how far the triangles reach from the
+    /// centroid they give, plus `d`. Pair each point of the triangles with the
+    /// point of the surface the area bound already pairs it with — radially
+    /// out on to a ball, straight out from a pipe's axis, along the normal of
+    /// a cone or a tube — and let `J` be how much that pairing stretches area.
+    /// Then the true face's first moment about the measured centroid differs
+    /// from the triangles' by two things: every paired point moved by at most
+    /// `d`, which is at most `d · A_true`; and wherever `J` is not one, area
+    /// that has nothing to pair with, none of it further than `reach` out,
+    /// which is at most `reach · ∫|J − 1|`. Dividing by the true area, which is
+    /// at least `A − E`:
+    ///
+    /// ```text
+    ///     wobble = moved + reach · unpaired / (A − E)
+    /// ```
+    ///
+    /// - **A curved face**: `moved = d`, and `unpaired = 3E`. The area bound's
+    ///   own derivation is that `J` never exceeds the factor it charges, so
+    ///   the part of `J` over one adds up to at most `E`; the part under one is
+    ///   that minus the net difference in area, which is at most `E` again; so
+    ///   `∫|J − 1| ≤ 2E + E`.
+    /// - **A cone face that reaches its apex** has no pairing below the split
+    ///   [`what_a_cone_tip_costs`] draws, so everything down there is charged
+    ///   as unpaired on both sides: the cone's whole tip below the split and
+    ///   the triangles' share of it, twice over — once as area that pairs with
+    ///   nothing and once in the net difference above the split.
+    /// - **A flat face of a curved solid**: nothing moves, because a flat face
+    ///   is meshed in its own plane, so `moved = 0`; and what is unpaired is the
+    ///   slivers between the inscribed outline and the curve, at most `E` of
+    ///   them and within `d` of a side of the mesh.
+    ///
+    /// Infinite whenever `E` is — a mesh cut a whole radius out — or is not
+    /// smaller than `A`, because then nothing bounds the true area away from
+    /// zero and the division has nothing under it. A deflection that coarse is
+    /// a legitimate request (§23.5) and this is what it costs.
+    ///
+    /// **The pairing is the area bound's, so this rests on that bound.** Where
+    /// the pairing misses a sliver at the face's edge, the area bound misses
+    /// it too; `the_middle_of_each_face_is_within_its_wobble` holds this number
+    /// against the textbook centroid of balls, bars, a frustum, a pointed cone
+    /// and a bend, at the origin and turned a million units out, and the
+    /// closest any came is recorded there.
+    ///
+    /// Exactly `0.0` for a face of a wholly flat solid.
+    #[must_use]
+    pub fn centroid_wobble(self) -> f64 {
+        self.centroid_wobble
+    }
+}
+
 impl SolidView<'_> {
     /// Measure the solid: volume, surface area and centroid in one pass, each
     /// with how far out it could be.
@@ -315,7 +436,8 @@ impl SolidView<'_> {
             skin.volume_error +=
                 how_much_space_hides_under_a_flat_stand_in(area, radius, deviation);
         }
-        skin.area_error += deviation * rim_of_the_flat_faces(mesh, &bends);
+        skin.area_error +=
+            deviation * rim_of_the_flat_faces(mesh, |face| bends[&face].radius.is_none());
         skin
     }
 
@@ -442,13 +564,7 @@ impl SolidView<'_> {
         let mut total = 0.0;
         for face in self.faces() {
             let across = shift_for(largest_edge_component(&face));
-            let mut vector_area = Vector::zero();
-            face.for_each_triangle(|[a, b, c]| {
-                let along = shrink(b - a, across);
-                let down = shrink(c - a, across);
-                vector_area = vector_area + along.cross(down) * 0.5;
-            });
-            total += shift(vector_area.length(), 2 * across);
+            total += shift(which_way_its_own_fan_faces(face, across).length(), 2 * across);
         }
         total
     }
@@ -511,6 +627,192 @@ impl SolidView<'_> {
         }
         Point::from(smallest.unwrap_or([0.0; 3]))
     }
+
+    /// Measure one face of this solid: its area and where it balances, each
+    /// with how far out it could be.
+    ///
+    /// # Why it hangs off the solid and not off the face
+    ///
+    /// **A curved face cannot be meshed on its own.** A round bar's cap is
+    /// bounded by a circle, and a plane has nothing to say about where a circle
+    /// drawn on it goes: the circle is walked by the wall on the other side of
+    /// it, and the cap reads the points the wall put there
+    /// ([`SolidView::mesh`], `docs/decisions.md` §25.7). So what the cap's
+    /// triangles are depends on its neighbours, and those are only reachable,
+    /// already moved into place, through the solid the face sits in — the
+    /// reason §3.2 gives for every neighbour question, and why
+    /// [`SolidView::face_holds_the_point`] and
+    /// [`SolidView::box_around_one_face`] hang here too. A [`FaceView`] does
+    /// not know which solid it came from.
+    ///
+    /// # Two paths, the solid's own
+    ///
+    /// Whichever path [`SolidView::measure`] takes for this solid, this takes
+    /// for the face: the face's own fan when every face of the solid is flat,
+    /// exactly and with no mesh built, and otherwise the triangles of the
+    /// solid's mesh that [`MeshTriangle::face`] says are this face's. Taking the
+    /// solid's path rather than one of the face's own is what makes the faces
+    /// add up to the solid bit for bit; a flat face with straight sides in a
+    /// curved solid is therefore measured over the mesh and charged its rim,
+    /// which is a bound it keeps rather than an exact zero it could have had.
+    ///
+    /// `deflection` and `policy` mean what they mean to [`SolidView::measure`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoSuchFaceInThisSolid`] when `face` names a face this solid
+    /// does not use.
+    ///
+    /// [`Error::SurfaceAreaTooLargeToMeasure`] when the face's area is a real
+    /// number `f64` has no room for — a face of a cube of side `1e200`. **A
+    /// limit and not a gap** (§16.10): the answer exists and the type cannot
+    /// hold it, the refusal [`SolidView::measure`] gives for the same reason.
+    ///
+    /// For a face of a curved solid, whatever [`SolidView::mesh`] refuses —
+    /// [`Error::DeflectionBelowWhatAMeshCanReach`] among them — because the
+    /// face is measured over the solid's mesh.
+    ///
+    /// Whatever [`Model::validate`](crate::Model::validate) refuses, when the
+    /// face comes out with no area at all. A face with no area has no centroid
+    /// — the answer does not exist, so that is a limit — and every face of a
+    /// solid `validate` accepts has area: a flat one winds its outer wire
+    /// certified positive round its normal, and a curved one's sides are each
+    /// used by two triangles of the solid's mesh. So a face with none is a
+    /// model `validate` refuses, and its refusal is the one handed back.
+    ///
+    /// # Panics
+    ///
+    /// For a face of a curved solid, everything [`SolidView::mesh`] panics on.
+    /// And on a face with no area in a model
+    /// [`Model::validate`](crate::Model::validate) accepts, which the paragraph
+    /// above says cannot happen.
+    pub fn measure_one_face(
+        self,
+        face: FaceKey,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<FaceMeasurement> {
+        let view = self
+            .faces()
+            .find(|used| used.key() == face)
+            .ok_or(Error::NoSuchFaceInThisSolid { face })?;
+        let measured = if self.is_wholly_flat() {
+            one_face_measured_over_its_own_fan(view)
+        } else {
+            let mesh = self.mesh(deflection, policy, log)?;
+            self.one_face_measured_over(&mesh, face)
+        };
+        match measured {
+            OneFace::Measured(measurement) => Ok(measurement),
+            OneFace::TooLargeToMeasure => Err(Error::SurfaceAreaTooLargeToMeasure),
+            OneFace::HasNoArea => {
+                self.model().validate(policy, log)?;
+                panic!(
+                    "face {face:?} has no area in a model validate accepts, and every face \
+                     of a sound solid has some"
+                )
+            }
+        }
+    }
+
+    /// One face's share of [`SolidView::measured_over`]: the area
+    /// [`SolidView::skin_of`] adds for it, the charge it adds for it, and the
+    /// centroid of the same triangles.
+    fn one_face_measured_over(self, mesh: &Mesh, face: FaceKey) -> OneFace {
+        let triangles = the_triangles_of(mesh, face);
+        let area = area_of(mesh, triangles);
+        if !area.is_finite() {
+            return OneFace::TooLargeToMeasure;
+        }
+        if area <= 0.0 {
+            return OneFace::HasNoArea;
+        }
+
+        let bend = bend_of_each_face(self, mesh)[&face];
+        let deviation = mesh.deviation().magnitude();
+        let (area_error, moved, unpaired) = match (bend.tip_charge, bend.radius) {
+            (Some(charge), _) => (
+                charge.more_surface,
+                deviation,
+                3.0 * charge.more_surface + 2.0 * charge.below_the_split,
+            ),
+            (None, Some(radius)) => {
+                let error = how_much_more_surface_there_can_be(area, radius, deviation);
+                (error, deviation, 3.0 * error)
+            }
+            (None, None) => {
+                let error = deviation * rim_of_the_flat_faces(mesh, |other| other == face);
+                (error, 0.0, error)
+            }
+        };
+
+        let centroid = middle_of(mesh, triangles);
+        let reach = triangles
+            .iter()
+            .flat_map(|triangle| corners_of(mesh, triangle))
+            .map(|corner| corner.distance_to(centroid))
+            .fold(0.0, f64::max)
+            + deviation;
+        let centroid_wobble = if area_error < area {
+            moved + reach * unpaired / (area - area_error)
+        } else {
+            f64::INFINITY
+        };
+        OneFace::Measured(FaceMeasurement {
+            area,
+            area_error,
+            centroid,
+            centroid_wobble,
+        })
+    }
+}
+
+/// What measuring one face came to, before it is told apart into an answer and
+/// the refusals.
+enum OneFace {
+    Measured(FaceMeasurement),
+    TooLargeToMeasure,
+    HasNoArea,
+}
+
+/// One face of a wholly flat solid, over its own fan: the area
+/// [`SolidView::surface_area`] adds for it, bit for bit, and the centroid of the
+/// same triangles, both exact in the sense [`Measurement`] means.
+///
+/// **The fan's triangles are weighed with their sign**, which is what makes a
+/// fan right for a face that is not convex or has a hole: the triangles over a
+/// notch or a hole come back wound the other way, face against the face's own
+/// direction, and take back the area and the moment they wrongly added.
+fn one_face_measured_over_its_own_fan(face: FaceView<'_>) -> OneFace {
+    let across = shift_for(largest_edge_component(&face));
+    let facing = which_way_its_own_fan_faces(face, across);
+    let area = shift(facing.length(), 2 * across);
+    if !area.is_finite() {
+        return OneFace::TooLargeToMeasure;
+    }
+    if area <= 0.0 {
+        return OneFace::HasNoArea;
+    }
+
+    let mut apex = None;
+    let mut moment = Vector::zero();
+    let mut weight = 0.0;
+    face.for_each_triangle(|[a, b, c]| {
+        let along = shrink(b - a, across);
+        let down = shrink(c - a, across);
+        let share = along.cross(down).dot(facing);
+        apex.get_or_insert(a);
+        moment = moment + (along + down) * share;
+        weight += share;
+    });
+    let apex = apex.expect("a face with area has a triangle");
+    OneFace::Measured(FaceMeasurement {
+        area,
+        area_error: 0.0,
+        centroid: apex + shrink(divided(moment, 3.0 * weight), -across),
+        centroid_wobble: 0.0,
+    })
 }
 
 /// How far `corner` is from `hub` along each axis, exactly, in the units
@@ -628,6 +930,22 @@ fn largest_edge_component(face: &FaceView<'_>) -> f64 {
         }
     });
     widest
+}
+
+/// Half the sum of the cross products of `face`'s fan, with every side shrunk by
+/// `2^across`: a vector as long as the face's area in those units, pointing the
+/// way the face faces.
+///
+/// The one copy of the arithmetic, so a face measured alone and the same face
+/// summed into [`SolidView::surface_area`] are the same number bit for bit.
+fn which_way_its_own_fan_faces(face: FaceView<'_>, across: i32) -> Vector {
+    let mut vector_area = Vector::zero();
+    face.for_each_triangle(|[a, b, c]| {
+        let along = shrink(b - a, across);
+        let down = shrink(c - a, across);
+        vector_area = vector_area + along.cross(down) * 0.5;
+    });
+    vector_area
 }
 
 /// How much skin a mesh has, and how much of its solid's own it leaves out.
@@ -760,6 +1078,74 @@ fn area_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> f64 {
     shift(total, 2 * across)
 }
 
+/// The triangles of `mesh` that stand in for `face`, which the mesh keeps
+/// together; empty when the face has none.
+///
+/// # Panics
+///
+/// If the face's triangles are not all in one run. The mesher cuts up one face
+/// at a time, and [`areas_of_each_face`] — what the solid's area is summed from
+/// — reads a face twice over if they are not, so the two would disagree.
+fn the_triangles_of(mesh: &Mesh, face: FaceKey) -> &[MeshTriangle] {
+    let triangles = mesh.triangles();
+    let start = triangles
+        .iter()
+        .position(|triangle| triangle.face() == face)
+        .unwrap_or(triangles.len());
+    let end = start
+        + triangles[start..]
+            .iter()
+            .take_while(|triangle| triangle.face() == face)
+            .count();
+    assert!(
+        triangles[end..].iter().all(|triangle| triangle.face() != face),
+        "the triangles of face {face:?} are not in one run"
+    );
+    &triangles[start..end]
+}
+
+/// Where the triangles balance, each weighed by its area.
+///
+/// Hung from the first corner and measured in one power of two, for the
+/// reasons [`SolidView::volume_and_moment`] and [`area_of`] give: offsets the
+/// size of the face rather than of its distance from the origin, and no
+/// product that can overflow on the way.
+///
+/// **Unsigned areas**, as [`area_of`] adds them: a mesh's triangles do not
+/// overlap and all face out of the material, so there is nothing to cancel.
+fn middle_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> Point {
+    let hub = corners_of(mesh, &triangles[0])[0];
+    let mut widest = 0.0f64;
+    for triangle in triangles {
+        for corner in corners_of(mesh, triangle) {
+            for component in (corner - hub).components() {
+                widest = widest.max(component.abs());
+            }
+        }
+    }
+    let across = shift_for(widest);
+
+    let mut moment = Vector::zero();
+    let mut weight = 0.0;
+    for triangle in triangles {
+        let [a, b, c] = corners_of(mesh, triangle).map(|corner| shrink(corner - hub, across));
+        let share = (b - a).cross(c - a).length();
+        moment = moment + (a + b + c) * share;
+        weight += share;
+    }
+    hub + shrink(divided(moment, 3.0 * weight), -across)
+}
+
+/// `moment` with every component divided by `weight`, each rounding once.
+///
+/// **The third of a triangle's corners is taken here, once, and not per
+/// triangle**, so a face whose corners sit on whole numbers — a cube's — has
+/// every product and sum before this exact, and its middle comes out the
+/// nearest `f64` to the true one rather than a few roundings off it.
+fn divided(moment: Vector, weight: f64) -> Vector {
+    Vector::from(moment.components().map(|component| component / weight))
+}
+
 /// How much more surface a curved face can have than the `area` of the flat
 /// triangles standing in for it.
 ///
@@ -822,7 +1208,9 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
     area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner)
 }
 
-/// The total length of the mesh sides where a flat face meets another face.
+/// The total length of the mesh sides where a face `counted` picks meets another
+/// face: every flat face, for the solid, and the one face being measured, for
+/// [`FaceMeasurement`].
 ///
 /// **A flat face of a curved solid is not exact either, and this is why.** A
 /// round bar's cap is a disc, and what the mesh draws is a polygon inscribed in
@@ -833,7 +1221,7 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
 /// Counted once for each flat face along a side, which is what makes a bar's two
 /// caps cost twice one rim. A side used twice by the *same* face is a seam and
 /// is not a rim at all, so it is skipped by construction.
-fn rim_of_the_flat_faces(mesh: &Mesh, bends: &HashMap<FaceKey, Bend>) -> f64 {
+fn rim_of_the_flat_faces(mesh: &Mesh, counted: impl Fn(FaceKey) -> bool) -> f64 {
     let mut first_seen: HashMap<(u32, u32), FaceKey> = HashMap::new();
     let mut rim = 0.0;
     for triangle in mesh.triangles() {
@@ -849,7 +1237,7 @@ fn rim_of_the_flat_faces(mesh: &Mesh, bends: &HashMap<FaceKey, Bend>) -> f64 {
             }
             let length = mesh.points()[from as usize].distance_to(mesh.points()[to as usize]);
             for face in [already, triangle.face()] {
-                if bends[&face].radius.is_none() {
+                if counted(face) {
                     rim += length;
                 }
             }
@@ -1003,6 +1391,11 @@ struct Bend {
 struct Charge {
     more_surface: f64,
     hidden_space: f64,
+    /// All the cone's side below the split plus the triangles' share of it:
+    /// the area near the apex that [`FaceMeasurement::centroid_wobble`] cannot
+    /// pair with anything, because no inner surface exists down there to pair
+    /// it through.
+    below_the_split: f64,
 }
 
 /// What a cone face that reaches near its own apex costs, summed over its own
@@ -1086,6 +1479,7 @@ fn what_a_cone_tip_costs(mesh: &Mesh, face: FaceKey, cone: &Cone, deviation: f64
     let split = 2.0 * deviation * steepness * steepness;
     let mut charge = the_whole_tip_below(cone, deviation);
     let under_the_split = area_below(split);
+    charge.below_the_split += under_the_split;
     charge.more_surface = charge.more_surface.min(how_much_more_surface_there_can_be(
         under_the_split,
         smallest,
@@ -1119,9 +1513,11 @@ fn the_whole_tip_below(cone: &Cone, deviation: f64) -> Charge {
     let pi = core::f64::consts::PI;
     let steepness = cone.slope().hypot(1.0);
     let spread = steepness * steepness * steepness / cone.slope().abs();
+    let side = 4.0 * pi * deviation * deviation * spread;
     Charge {
-        more_surface: 4.0 * pi * deviation * deviation * spread,
+        more_surface: side,
         hidden_space: 8.0 * pi * deviation * deviation * deviation * spread / 3.0,
+        below_the_split: side,
     }
 }
 
