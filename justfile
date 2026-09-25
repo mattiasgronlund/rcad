@@ -3895,8 +3895,13 @@ fuzz duration="60" corpus_root="" fork="0": (fuzz-target "where_two_surfaces_cro
 #
 # No `-max_len`, unlike `fuzz`: the reader's promise is about any length of
 # anything, and the truncation cases live at every length there is.
+#
+# `fuzz/step.dict` is the one dictionary any target here gets, because it is
+# the one target whose input is text with keywords in it — the other four
+# decode bytes into numbers and enum tags, where a STEP keyword splices in
+# nothing a Part 21 file would ever hold.
 [doc("Fuzz the Part 21 reader over arbitrary bytes.")]
-fuzz-reader duration="60" corpus_root="" fork="0": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root "" fork)
+fuzz-reader duration="60" corpus_root="" fork="0": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root "" fork "step.dict")
 
 # The Part 21 writer, over an arbitrary `Model` (docs/decisions.md §42.12).
 #
@@ -3928,7 +3933,8 @@ fuzz-fuse duration="60" corpus_root="" fork="0": (fuzz-target "two_solids_fused_
 fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a_cone_or_a_torus_crosses" duration corpus_root "81" fork)
 
 # The one place that knows how to start a fuzz target. The five recipes above
-# are its five call sites and differ only in the name and `-max_len`.
+# are its five call sites and differ only in the name, `-max_len`, and — for
+# the reader alone — a dictionary.
 #
 # RUSTFLAGS has to be repeated: cargo-fuzz sets it as an environment variable,
 # and that shadows the `.cargo/config.toml` entry `inari` needs to build at all.
@@ -3942,8 +3948,13 @@ fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a
 # all**, which is what a hand-run `just fuzz 60` wants: one crash, one report, and
 # the run stops so you can read it. Only the night asks for a number, because only
 # the night would rather lose the report than lose the other eight hours (§134).
+#
+# `dict`, when given, is a path relative to this `fuzz/` directory: this recipe
+# has already `cd`'d there by the time it is used, and `fuzz-reader` passes
+# `step.dict` for exactly that reason. Empty, as the other four call sites leave
+# it, means no `-dict` flag at all rather than one pointed at nothing.
 [private]
-fuzz-target target duration corpus_root="" max_len="" fork="0":
+fuzz-target target duration corpus_root="" max_len="" fork="0" dict="":
     #!/usr/bin/env bash
     set -euo pipefail
     cd fuzz
@@ -3977,10 +3988,15 @@ fuzz-target target duration corpus_root="" max_len="" fork="0":
     if [ "{{fork}}" -gt 0 ]; then
         fork_flags=(-fork={{fork}} -timeout=10 -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1)
     fi
+    dict_flag=()
+    if [ -n "{{dict}}" ]; then
+        dict_flag=(-dict={{dict}})
+    fi
     RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run {{target}} ${corpus[@]+"${corpus[@]}"} -- \
         -max_total_time={{duration}} {{ if max_len == "" { "" } else { "-max_len=" + max_len } }} \
-        ${fork_flags[@]+"${fork_flags[@]}"}
+        ${fork_flags[@]+"${fork_flags[@]}"} \
+        ${dict_flag[@]+"${dict_flag[@]}"}
 
 # Pins `fuzz-overnight` against a `cargo` it brings with it, because the real one
 # wants a sanitizer build and eight hours before it says anything at all. The

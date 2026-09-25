@@ -1,0 +1,93 @@
+# libFuzzer dictionary for `no_step_file_makes_the_reader_panic`.
+#
+# Every entry is a keyword or token `Import::read` (or the `StepFile::read`
+# parse it walks first) actually checks by name — found by reading
+# crates/rcad-step/src/{read,token,graph,geometry,units,brep,import}.rs, not
+# guessed from the Part 21 standard. A name the reader does not read earns
+# nothing here: it would teach libFuzzer to spend its splices on vocabulary
+# that changes no code path.
+#
+# crates/rcad-step/tests/the_reader_fuzz_dictionary_names_what_the_reader_reads.rs
+# holds this list a second time and fails if the two drift apart.
+
+# Part 21 framing (crates/rcad-step/src/read.rs)
+"ISO-10303-21"
+"END-ISO-10303-21"
+"HEADER"
+"DATA"
+"ENDSEC"
+"FILE_DESCRIPTION"
+"FILE_NAME"
+"FILE_SCHEMA"
+
+# Placement and raw geometry (crates/rcad-step/src/geometry.rs)
+"AXIS2_PLACEMENT_3D"
+"CARTESIAN_POINT"
+"DIRECTION"
+"PLANE"
+"CYLINDRICAL_SURFACE"
+"SPHERICAL_SURFACE"
+"CONICAL_SURFACE"
+"TOROIDAL_SURFACE"
+
+# Curves and topology (crates/rcad-step/src/brep.rs)
+"CIRCLE"
+"ELLIPSE"
+"LINE"
+"MANIFOLD_SOLID_BREP"
+"CLOSED_SHELL"
+"ADVANCED_FACE"
+"FACE_SURFACE"
+"FACE_BOUND"
+"FACE_OUTER_BOUND"
+"EDGE_LOOP"
+"ORIENTED_EDGE"
+"EDGE_CURVE"
+"VERTEX_POINT"
+
+# A solid the reader refuses by name, and shapes it recognizes and skips
+# rather than builds (crates/rcad-step/src/import.rs)
+"BREP_WITH_VOIDS"
+"SHELL_BASED_SURFACE_MODEL"
+"GEOMETRIC_CURVE_SET"
+"GEOMETRIC_SET"
+"TESSELLATED_GEOMETRIC_SET"
+"TESSELLATED_CURVE_SET"
+"COMPLEX_TRIANGULATED_SURFACE_SET"
+"TRIANGULATED_SURFACE_SET"
+
+# Assembly structure (crates/rcad-step/src/import.rs)
+"NEXT_ASSEMBLY_USAGE_OCCURRENCE"
+"ITEM_DEFINED_TRANSFORMATION"
+"MAPPED_ITEM"
+"REPRESENTATION_MAP"
+
+# Units and uncertainty (crates/rcad-step/src/units.rs)
+"LENGTH_UNIT"
+"SI_UNIT"
+"CONVERSION_BASED_UNIT"
+"LENGTH_MEASURE_WITH_UNIT"
+"MEASURE_WITH_UNIT"
+"PLANE_ANGLE_UNIT"
+"PLANE_ANGLE_MEASURE_WITH_UNIT"
+"GLOBAL_UNIT_ASSIGNED_CONTEXT"
+"GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT"
+"UNCERTAINTY_MEASURE_WITH_UNIT"
+
+# The few tokens every entity line uses, each with its own token kind in
+# crates/rcad-step/src/token.rs's lexer rather than falling out of a generic
+# rule: "#" opens a reference, "=" separates an id from its record, "(" and
+# ")" bound a record's attribute list, "$" is Token::Nothing and "*" is
+# Token::Derived. `.T.` and `.F.` are not special in the lexer — they are one
+# more `Token::Enumeration` there — but they are the only two enumeration
+# spellings `flag_at` (geometry.rs) reads as a boolean, so they are the two
+# worth splicing in; `.UNSPECIFIED.` is left out because nothing downstream
+# treats it differently from any other enumeration name the reader refuses.
+"#"
+"="
+"("
+")"
+"$"
+"*"
+".T."
+".F."
