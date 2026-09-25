@@ -71,7 +71,10 @@ fn a_frustum_flush_in_a_turned_taller_one_answers_either_way_round() {
     ] {
         let (answer_model, pieces) = fused(&model, first, second, rule);
         let Some(want) = want else {
-            assert!(pieces.is_empty(), "{rule:?}: the short one less the tall one is nothing");
+            assert!(
+                pieces.is_empty(),
+                "{rule:?}: the short one less the tall one is nothing"
+            );
             continue;
         };
         assert_eq!(pieces.len(), 1, "{rule:?}: one solid out");

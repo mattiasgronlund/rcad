@@ -2475,8 +2475,7 @@ impl Corners {
         kept_sides: impl Iterator<Item = &'a FaceMeet>,
     ) -> Self {
         let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<[[u64; 9]; 2]>>> = BTreeMap::new();
-        let mut on_curve: BTreeMap<[[u64; 9]; 2], Vec<(VertexSlot, &MeetPoint)>> =
-            BTreeMap::new();
+        let mut on_curve: BTreeMap<[[u64; 9]; 2], Vec<(VertexSlot, &MeetPoint)>> = BTreeMap::new();
         for meet in kept_sides {
             let curve = closes_on_itself(meet).then(|| names_of_the_two_surfaces(&meet.carried_by));
             for end in &meet.ends {
@@ -2492,7 +2491,8 @@ impl Corners {
         }
         let mut corners = Self::default();
         for (curve, mut candidates) in on_curve {
-            let only_closes_this = |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
+            let only_closes_this =
+                |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
             candidates.sort_by(|(one, at_one), (other, at_other)| {
                 only_closes_this(one)
                     .cmp(&only_closes_this(other))
@@ -2502,7 +2502,9 @@ impl Corners {
             candidates.dedup_by_key(|(slot, _)| *slot);
             let (_, first) = candidates[0];
             let start = corners.of(model, first);
-            corners.taken_over.insert(CornerName::RoundACurve(curve), start);
+            corners
+                .taken_over
+                .insert(CornerName::RoundACurve(curve), start);
             for (slot, _) in &candidates[1..] {
                 if only_closes_this(slot) {
                     corners.taken_over.insert(CornerName::Vertex(*slot), start);
