@@ -89,11 +89,12 @@ every brief carries:
   `git checkout -B <branch> <base sha>`, with both outputs reported back;
 - the write set, as "you own these files and no others; stop and report a
   change outside them";
-- **"The context-budget hook will say the budget is passed, likely on your
-  first call. That signal carries no information for you. Carry on past it; do
-  not hand off, do not stop."** A lane's injected prompt is larger than the
-  hook's lane budget, and a lane not told this obeys it and stops with nothing
-  done;
+- nothing about the context hook, unless you expect the lane to run long. A
+  lane that sees "Lane budget passed" is past 150k of its own context and is
+  told to commit and report; say "carry on past it" only in a brief whose work
+  needs that much. (Until guardrails v0.3.7 the hook read the dispatcher's
+  transcript, so it fired on a lane's first call and every brief had to
+  countermand it. It no longer does.);
 - for a row that writes a section, `mise exec -- just claim-section '<what>'`
   before writing;
 - `mise exec --` on every `cargo` and `just`, `Read` then `Edit`, explicit
@@ -117,7 +118,7 @@ A lane reporting its own result is reporting what it believes, and a lane's
 `landed_sha` can be invented — `git rev-parse` its branch.
 
 **Each writing lane gets its own verifier** when it reports, not at the end of
-a batch: Sonnet, in its own worktree, told to carry on past the hook, reverting
+a batch: Sonnet, in its own worktree, reverting
 the lane's source directories to the base to show its tests fail without the
 change, and reading any exactness claim the lane makes. A read-only row that
 wrote only a section needs no verifier; read the section.
