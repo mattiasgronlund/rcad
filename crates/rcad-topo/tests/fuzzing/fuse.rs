@@ -125,24 +125,27 @@
 //! Difference is not asked, because `A − B` is not `B − A`. Nor is a one-sided
 //! draw: the source only ever swaps one solid for one solid.
 //!
-//! **This is a copy of that comparison, not the comparison itself.** It lives
-//! in `fuses_that_must_agree.rs`, a test binary of its own, as private items
-//! returning proptest's `TestCaseError`, and the fuzz crate has no proptest.
-//! Sharing one copy needs `Answer`, `Face`, `Step`, `Run`, `Picking`,
-//! `WhatItSitsOn`, `answer_of`, `written_out`, `turned_to_its_smallest`, `bits`
-//! and `same_answer` moved into a module both reach by `#[path]`, with
-//! `same_answer`'s error made a `String` the proptest side wraps.
+//! **This used to be a copy of that comparison; now it is the comparison.**
+//! `Answer`, `Face`, `Step`, `Run`, `Picking`, `WhatItSitsOn`, `answer_of`,
+//! `turned_to_its_smallest`, `bits` and `same_answer` live in
+//! `tests/fuzzing/comparison.rs`, reached from here and from
+//! `fuses_that_must_agree.rs` by `#[path]`, so there is one copy of the
+//! comparison rather than two that can drift apart. `same_answer`'s error is a
+//! plain `String`, which that file wraps into proptest's `TestCaseError` and
+//! this one leaves alone.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
 
 #[path = "the_door.rs"]
 mod the_door;
+#[path = "comparison.rs"]
+mod comparison;
 
-use rcad_geom::{EdgeRun, Orientation, Picker, Surface};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{EdgeView, Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Model, Rule, SolidKey};
 
+use comparison::Answer;
 use the_door::every_number_the_door_promised_is_real;
 
 /// How far one draw of bytes got.
@@ -404,8 +407,8 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
 /// `fuses_that_must_agree.rs`'s `Fused` tells apart.
 #[derive(Debug)]
 pub enum WhatCameBack {
-    /// An answer, written out by [`the_answer_written_out`].
-    Answered(AnAnswer),
+    /// An answer, read by [`the_answer_written_out`].
+    Answered(Answer),
     /// A refusal of any kind but the one below.
     Refused,
     /// [`Error::ResultIsNotManifold`]: the answer is not something a `Model`
@@ -455,7 +458,8 @@ pub fn both_ways_round(
 ) -> Result<Agreed, String> {
     match (forwards, backwards) {
         (WhatCameBack::Answered(one), WhatCameBack::Answered(other)) => {
-            the_same_answer(one, other, rule).map(|()| Agreed::TheSameAnswer)
+            comparison::same_answer(one, other, rule, "swapping the two sides")
+                .map(|()| Agreed::TheSameAnswer)
         }
         (WhatCameBack::NotASolid, WhatCameBack::Answered(_))
         | (WhatCameBack::Answered(_), WhatCameBack::NotASolid) => {
@@ -473,85 +477,12 @@ pub fn both_ways_round(
     }
 }
 
-/// `same_answer` in `tests/fuses_that_must_agree.rs`, with a `String` where
-/// that one has proptest's error.
-///
-/// # Errors
-///
-/// How the two differ, when they do.
-pub fn the_same_answer(one: &AnAnswer, other: &AnAnswer, rule: Rule) -> Result<(), String> {
-    if one.solids == other.solids {
-        return Ok(());
-    }
-    let faces = |answer: &AnAnswer| answer.solids.iter().map(Vec::len).sum::<usize>();
-    let mut why = format!(
-        "swapping the two sides changed the answer to a {rule:?}:\n  {} solids and {} faces one \
-         way, {} solids and {} faces the other",
-        one.solids.len(),
-        faces(one),
-        other.solids.len(),
-        faces(other)
-    );
-    for (position, (mine, theirs)) in one.solids.iter().zip(&other.solids).enumerate() {
-        if let Some(face) = mine.iter().zip(theirs).position(|(a, b)| a != b) {
-            why.push_str(&format!("\n  solid {position} face {face} differs"));
-            break;
-        }
-    }
-    Err(why)
-}
-
-/// An answer written out in one fixed order, so that two answers are equal
-/// exactly when the arena order is the only thing between them.
-#[derive(Debug, PartialEq, Eq)]
-pub struct AnAnswer {
-    solids: Vec<Vec<Vec<u64>>>,
-}
-
-/// `answer_of(model, solids).canonical()` in `tests/fuses_that_must_agree.rs`,
-/// straight to the numbers: every face its surface, which way round its solid
-/// uses it, its outline and then its holes sorted; every wire turned to its
-/// smallest rotation; the faces of a solid sorted, and the solids sorted.
+/// `comparison::answer_of`, named for what this fuzzer's callers already call
+/// it: `every_model_the_fuse_fuzzer_kept_is_fused_again.rs` reaches this name
+/// directly, so it stays even though the body is now one line.
 #[must_use]
-pub fn the_answer_written_out(model: &Model, solids: &[SolidKey]) -> AnAnswer {
-    let mut solids: Vec<Vec<Vec<u64>>> = solids
-        .iter()
-        .map(|&solid| {
-            let mut faces: Vec<Vec<u64>> = model
-                .solid(solid)
-                .expect("a solid the fuse handed back resolves in the model that made it")
-                .faces()
-                .map(|face| {
-                    let wires: Vec<Vec<Vec<u64>>> = face
-                        .wires()
-                        .map(|wire| {
-                            wire.coedges()
-                                .map(|coedge| {
-                                    coedge
-                                        .start()
-                                        .point()
-                                        .coordinates()
-                                        .map(bits)
-                                        .into_iter()
-                                        .chain(run_written_out(coedge.edge()))
-                                        .collect()
-                                })
-                                .collect()
-                        })
-                        .collect();
-                    face_written_out(
-                        &face.surface(),
-                        face.orientation() == Orientation::Reversed,
-                        &wires,
-                    )
-                })
-                .collect();
-            faces.sort_unstable();
-            faces
-        })
-        .collect();
-    solids.sort_unstable();
-    AnAnswer { solids }
+pub fn the_answer_written_out(model: &Model, solids: &[SolidKey]) -> Answer {
+    comparison::answer_of(model, solids)
 }
 
 fn every_face_of_it_is_flat(model: &Model, solid: SolidKey) -> bool {
@@ -560,115 +491,4 @@ fn every_face_of_it_is_flat(model: &Model, solid: SolidKey) -> bool {
         .expect("the draw's own solid resolves")
         .faces()
         .all(|face| face.surface().as_plane().is_some())
-}
-
-/// `written_out(face)` there: **the outline stays first and only the holes are
-/// sorted**, because which wire is first is part of a face in this kernel
-/// (§163).
-fn face_written_out(surface: &Surface, reversed: bool, wires: &[Vec<Vec<u64>>]) -> Vec<u64> {
-    let mut written = surface_written_out(surface);
-    written.push(u64::from(reversed));
-
-    let mut rings = wires.iter().map(|wire| turned_to_its_smallest(wire));
-    let outline = rings.next().expect("a face has at least one wire");
-    let mut holes: Vec<Vec<u64>> = rings.collect();
-    holes.sort_unstable();
-    written.push(wires.len() as u64);
-    for ring in core::iter::once(outline).chain(holes) {
-        written.push(ring.len() as u64);
-        written.extend(ring);
-    }
-    written
-}
-
-/// `turned_to_its_smallest` there: which step comes first is arbitrary, but
-/// which follows which is the winding, and the winding is part of the answer.
-fn turned_to_its_smallest(steps: &[Vec<u64>]) -> Vec<u64> {
-    (0..steps.len())
-        .map(|start| -> Vec<u64> {
-            (0..steps.len())
-                .flat_map(|step| steps[(start + step) % steps.len()].iter().copied())
-                .collect()
-        })
-        .min()
-        .unwrap_or_default()
-}
-
-/// `Run::of(edge).written_out()` there, with the same tags.
-///
-/// **One arm more than the source.** That file panics on
-/// `RightRoundWhereItCrosses`, because the fuse never writes one (§216) and its
-/// inputs never carry one. A stranger's model can, so it is written down here —
-/// tag 3 and the surface it names — rather than turned into a crash that says
-/// nothing about the fuse.
-fn run_written_out(edge: EdgeView<'_>) -> Vec<u64> {
-    match edge.run() {
-        EdgeRun::Straight => vec![0],
-        EdgeRun::RightRoundWhereItsFacesCross => {
-            vec![1, u64::from(edge.orientation() == Orientation::Forward)]
-        }
-        EdgeRun::PartOfWhereItCrosses { and, picked_by } => {
-            let mut pickers: Vec<Vec<u64>> = picked_by.iter().map(picker_written_out).collect();
-            pickers.sort_unstable();
-            let mut written = vec![2];
-            written.extend(surface_written_out(&and));
-            written.push(pickers.len() as u64);
-            written.extend(pickers.into_iter().flatten());
-            written
-        }
-        EdgeRun::RightRoundWhereItCrosses { and } => {
-            let mut written = vec![3];
-            written.extend(surface_written_out(&and));
-            written
-        }
-        other => panic!("the fuse fuzzer does not know how to write {other:?} down"),
-    }
-}
-
-/// `Picking::of(picker).written_out()` there.
-fn picker_written_out(picker: &Picker) -> Vec<u64> {
-    let (tag, numbers) = match picker {
-        Picker::InFrontOf(flat) => (0, flat.coefficients().map(bits).to_vec()),
-        Picker::OutsideABall(ball) => (1, surface_written_out(&Surface::Sphere(*ball))),
-        Picker::OutsideAPipe(pipe) => (1, surface_written_out(&Surface::Cylinder(*pipe))),
-        Picker::InsideAPipe(pipe) => (2, surface_written_out(&Surface::Cylinder(*pipe))),
-        other => panic!("the fuse fuzzer does not know how to write {other:?} down"),
-    };
-    core::iter::once(tag).chain(numbers).collect()
-}
-
-/// `WhatItSitsOn::of(surface).written_out()` there: the numbers that name the
-/// surface, behind a tag so two kinds can never write themselves out the same.
-fn surface_written_out(surface: &Surface) -> Vec<u64> {
-    match surface {
-        Surface::Plane(flat) => core::iter::once(0)
-            .chain(flat.coefficients().map(bits))
-            .collect(),
-        Surface::Sphere(ball) => core::iter::once(1)
-            .chain(ball.centre().coordinates().map(bits))
-            .chain([bits(ball.radius())])
-            .collect(),
-        Surface::Cylinder(pipe) => core::iter::once(2)
-            .chain(pipe.axis().origin().coordinates().map(bits))
-            .chain(pipe.axis().direction().components().map(bits))
-            .chain([bits(pipe.radius())])
-            .collect(),
-        Surface::Cone(cone) => core::iter::once(3)
-            .chain(cone.apex().coordinates().map(bits))
-            .chain(cone.axis().direction().components().map(bits))
-            .chain([bits(cone.slope())])
-            .collect(),
-        Surface::Torus(ring) => core::iter::once(4)
-            .chain(ring.centre().coordinates().map(bits))
-            .chain(ring.axis().direction().components().map(bits))
-            .chain([bits(ring.ring_radius()), bits(ring.tube_radius())])
-            .collect(),
-        other => panic!("the fuse fuzzer does not know how to write {other:?} down"),
-    }
-}
-
-/// `bits` there: a number's bits, with `-0.0` and `0.0` counted as one, because
-/// which zero an arithmetic path lands on is not part of the answer.
-fn bits(number: f64) -> u64 {
-    if number == 0.0 { 0 } else { number.to_bits() }
 }
