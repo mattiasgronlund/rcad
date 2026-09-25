@@ -350,9 +350,18 @@ const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 /// and four of them become comparisons. Every comparison that ran still agreed,
 /// either side of both moves.
 ///
+/// **It is 118 since §224.4**, and the four new comparisons are the flush pair —
+/// `side: 7, up_per_unit_wider: 8` at `[3, 3]` and at `[4, 4]` — under Union and
+/// Intersection. All four refused "a point in a piece that every solid could
+/// place" both ways round until a flat cap was asked what it holds; then one way
+/// round of each was refused `ResultIsNotManifold` until a closed curve's corner
+/// was chosen once for all the pieces that bring it.
+/// [`a_frustum_whose_cap_lies_in_the_blocks_roof_answers_the_same_either_way_round`]
+/// checks their volumes.
+///
 /// A drop here is a fuse that stopped answering, which is a regression and not a
 /// draw. Re-derive it when it moves; do not relax it to a floor (§19.1).
-const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 114;
+const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 118;
 
 /// How many of the comparisons a law over a bar leaning through a block has to
 /// have made (§191).
@@ -2646,6 +2655,69 @@ fn every_frustum_on_the_wider_grid_answers_the_same_whichever_side_comes_first()
         tally.meant_to_compare.get(),
         tally.compared.get()
     );
+}
+
+/// The flush pair of the wider grid, whose top cap lies in the block's roof,
+/// answers the same whichever side comes first, with the volume worked out by
+/// hand.
+///
+/// The frustum's cap circle starts at its seam vertex, and the block roof has
+/// the circle the cone cuts it in, started where the two surfaces alone put it.
+/// Selection keeps one of the two coincident disks, whichever came first, so a
+/// union kept the roof's disk one way round and the cap the other, and an
+/// intersection the same the other way. The side whose disk and ring disagreed
+/// about the circle's corner named two edges with one face each and was refused
+/// `ResultIsNotManifold`. A closed curve's corner is now chosen once, before
+/// any is named, by what it is.
+///
+/// The frustum runs from radius one at a unit below the floor to radius two at
+/// the roof, eight up; so the part below the floor is `π/3 · (1 + 9/8 + 81/64)`
+/// and the rest is `56π/3` less that.
+#[test]
+fn a_frustum_whose_cap_lies_in_the_blocks_roof_answers_the_same_either_way_round() {
+    let below_the_floor = std::f64::consts::PI / 3.0 * (1.0 + 1.125 + 1.125 * 1.125);
+    let the_frustum = 56.0 * std::f64::consts::PI / 3.0;
+    for at in [3, 4] {
+        let pair = FrustumAndBlock {
+            side: 7,
+            narrow: 1,
+            wide: 2,
+            up_per_unit_wider: 8,
+            at: [at, at],
+        };
+        for (rule, closed_form) in [
+            (Rule::Union, 343.0 + below_the_floor),
+            (Rule::Intersection, the_frustum - below_the_floor),
+        ] {
+            let (model, keys) = pair.build();
+            let forwards = plainly_fused(&model, &keys[..1], &keys[1..], rule);
+            let backwards = plainly_fused(&model, &keys[1..], &keys[..1], rule);
+            same_answer(
+                &answer_of(&forwards.0, &forwards.1),
+                &answer_of(&backwards.0, &backwards.1),
+                rule,
+                "swapping a block and a frustum flush in its roof",
+            )
+            .unwrap_or_else(|why| panic!("{pair:?}: {why}"));
+            assert_eq!(forwards.1.len(), 1, "{rule:?} of {pair:?} is one solid");
+            let measured = forwards
+                .0
+                .solid(forwards.1[0])
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid this size measures");
+            assert!(
+                (measured.volume() - closed_form).abs() <= measured.volume_error(),
+                "{rule:?} of {pair:?}: {} ± {} against {closed_form}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
 }
 
 /// Roadmap §11.2's first instruction, over a round solid, four milestones late.

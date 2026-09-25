@@ -21,7 +21,7 @@ use rcad_geom::{Deflection, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, Rule, SolidKey};
 
-use cones::{a_frustum, a_pointed_cone};
+use cones::{a_frustum, a_frustum_seamed_towards, a_pointed_cone};
 
 /// The frustum of §49.6's grid with slope one half, caps at two and four up.
 #[test]
@@ -30,6 +30,59 @@ fn a_frustum_united_with_its_copy_is_the_frustum() {
     let one = a_frustum(&mut model, 0.5, 2.0, 4.0);
     let copy = a_frustum(&mut model, 0.5, 2.0, 4.0);
     is_the_same_solid(&model, one, &fused(&model, one, copy, Rule::Union));
+}
+
+/// A frustum standing in a taller one on the same cone, their top caps flush,
+/// the taller one's seam a quarter turn round: the top circle carries two input
+/// vertices, one from each.
+///
+/// Selection keeps one of the two coincident top caps, whichever frustum comes
+/// first, and the wall beside it can come from the other, so the kept cap's
+/// circle started at its own vertex and the kept wall's at the other. The two
+/// named two edges with one face each, and one argument order of every rule was
+/// refused `ResultIsNotManifold`. The circle now starts at one vertex chosen by
+/// what it is — the one another kept side also ends at — and every rule answers
+/// either way round, with the volume of the frustum it should be.
+#[test]
+fn a_frustum_flush_in_a_turned_taller_one_answers_either_way_round() {
+    let mut model = a_model();
+    let short = a_frustum(&mut model, 0.5, 2.0, 4.0);
+    let turned = |model: &mut Model, near, far| {
+        a_frustum_seamed_towards(
+            model,
+            0.5,
+            near,
+            far,
+            [0.0, 1.0],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a frustum seamed along y is a solid")
+    };
+    let tall = turned(&mut model, 1.0, 4.0);
+    let below = turned(&mut model, 1.0, 2.0);
+    for (rule, first, second, want) in [
+        (Rule::Union, short, tall, Some(tall)),
+        (Rule::Union, tall, short, Some(tall)),
+        (Rule::Intersection, short, tall, Some(short)),
+        (Rule::Intersection, tall, short, Some(short)),
+        (Rule::Difference, short, tall, None),
+        (Rule::Difference, tall, short, Some(below)),
+    ] {
+        let (answer_model, pieces) = fused(&model, first, second, rule);
+        let Some(want) = want else {
+            assert!(pieces.is_empty(), "{rule:?}: the short one less the tall one is nothing");
+            continue;
+        };
+        assert_eq!(pieces.len(), 1, "{rule:?}: one solid out");
+        let (found, found_bound) = volume_of(&answer_model, pieces[0]);
+        let (want, want_bound) = volume_of(&model, want);
+        assert!(
+            (found - want).abs() <= found_bound + want_bound,
+            "{rule:?}: volume {found} against {want}, beyond the bound {}",
+            found_bound + want_bound
+        );
+    }
 }
 
 #[test]

@@ -371,7 +371,12 @@ impl Assembly {
     /// one corner is a pole of the surface it is drawn on, where nothing says
     /// which way it runs.
     fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Result<Self> {
-        let mut corners = Corners::default();
+        let mut corners = Corners::with_each_closed_curve_started_once(
+            model,
+            chosen
+                .iter()
+                .flat_map(|kept| scratch.pieces[kept.piece].wires.iter().flatten()),
+        );
         let mut edges = Edges::default();
         let mut faces = Vec::new();
         for kept in chosen {
@@ -2399,12 +2404,16 @@ fn runs_through(
     runs
 }
 
-/// The corners built so far, and the two ways to find one again.
+/// The corners built so far, and the ways to find one again.
 #[derive(Default)]
 struct Corners {
     made: Vec<Corner>,
     named: BTreeMap<CornerName, usize>,
     at: BTreeMap<[u64; 3], usize>,
+    /// Names that are another corner's, settled before any piece was walked:
+    /// the one corner of a closed curve, wherever a piece started it. See
+    /// [`Corners::with_each_closed_curve_started_once`].
+    taken_over: BTreeMap<CornerName, usize>,
 }
 
 /// What two faces agree to call the same corner.
@@ -2436,6 +2445,73 @@ enum CornerName {
 }
 
 impl Corners {
+    /// No corners yet, but every closed curve of the answer already has the
+    /// one corner it will start at, whichever kept piece brings it.
+    ///
+    /// A closed side's one corner is where its own face's wire happened to
+    /// start: an input vertex where the input had one on the curve, and
+    /// otherwise where the two surfaces alone put it
+    /// ([`MeetPoint::WhereAClosedCurveStarts`]). Two coincident faces can bring
+    /// one curve with two different corners. A frustum's cap has its seam vertex
+    /// on its circle, and the block roof that cap lies flush in has the circle
+    /// the cone cuts it in, started somewhere else. Selection keeps one of the
+    /// two coincident disks, whichever input came first, so one argument order
+    /// named one edge from both sides and the other named two edges with one
+    /// face each, and was refused as not a manifold.
+    ///
+    /// So the corner is chosen before any is named, by what each candidate is
+    /// and never by the order the pieces arrive: an input vertex that some
+    /// other kept side also ends at, then any input vertex, then the lowest
+    /// point, as [`Assembly::which_to_keep_first`] orders corners. Every other
+    /// corner that does nothing but close that curve takes the chosen one. The
+    /// start the two surfaces pick is never moved to an input vertex instead,
+    /// because the pieces would then depend on more than the face and the set
+    /// of surfaces cutting it (§17.4).
+    ///
+    /// A curve with two input vertices on it that other kept sides end at is
+    /// left with both: it is cut there, and nothing here joins the halves.
+    fn with_each_closed_curve_started_once<'a>(
+        model: &Model,
+        kept_sides: impl Iterator<Item = &'a FaceMeet>,
+    ) -> Self {
+        let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<[[u64; 9]; 2]>>> = BTreeMap::new();
+        let mut on_curve: BTreeMap<[[u64; 9]; 2], Vec<(VertexSlot, &MeetPoint)>> =
+            BTreeMap::new();
+        for meet in kept_sides {
+            let curve = closes_on_itself(meet).then(|| names_of_the_two_surfaces(&meet.carried_by));
+            for end in &meet.ends {
+                let MeetPoint::Existing { vertex, .. } = end else {
+                    continue;
+                };
+                let slot = vertex.slot_in(model.id());
+                closes.entry(slot).or_default().insert(curve);
+                if let Some(curve) = curve {
+                    on_curve.entry(curve).or_default().push((slot, end));
+                }
+            }
+        }
+        let mut corners = Self::default();
+        for (curve, mut candidates) in on_curve {
+            let only_closes_this = |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
+            candidates.sort_by(|(one, at_one), (other, at_other)| {
+                only_closes_this(one)
+                    .cmp(&only_closes_this(other))
+                    .then_with(|| lowest_first(at_one.point(), at_other.point()))
+                    .then_with(|| one.cmp(other))
+            });
+            candidates.dedup_by_key(|(slot, _)| *slot);
+            let (_, first) = candidates[0];
+            let start = corners.of(model, first);
+            corners.taken_over.insert(CornerName::RoundACurve(curve), start);
+            for (slot, _) in &candidates[1..] {
+                if only_closes_this(slot) {
+                    corners.taken_over.insert(CornerName::Vertex(*slot), start);
+                }
+            }
+        }
+        corners
+    }
+
     fn of(&mut self, model: &Model, end: &MeetPoint) -> usize {
         let name = match end {
             MeetPoint::Existing { vertex, .. } => CornerName::Vertex(vertex.slot_in(model.id())),
@@ -2454,6 +2530,9 @@ impl Corners {
                 ..
             } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
         };
+        if let Some(&chosen) = self.taken_over.get(&name) {
+            return chosen;
+        }
         let point = end.point();
         let at = middle_of(point);
         if let Some(&already) = self.named.get(&name) {
@@ -2527,6 +2606,38 @@ impl Corners {
             self.at.insert(exactly_at(at), corner);
         }
     }
+}
+
+/// Whether a side starts and ends at one corner, which only a closed curve does.
+fn closes_on_itself(meet: &FaceMeet) -> bool {
+    match &meet.ends {
+        [
+            MeetPoint::Existing { vertex: one, .. },
+            MeetPoint::Existing { vertex: other, .. },
+        ] => one == other,
+        [
+            MeetPoint::WhereAClosedCurveStarts { .. },
+            MeetPoint::WhereAClosedCurveStarts { .. },
+        ] => true,
+        [
+            MeetPoint::Existing { .. }
+            | MeetPoint::OfThreeSurfaces { .. }
+            | MeetPoint::WhereAClosedCurveStarts { .. }
+            | MeetPoint::HalfWayRoundAClosedCurve { .. }
+            | MeetPoint::APoleOfAClosedSurface { .. },
+            _,
+        ] => false,
+    }
+}
+
+/// The lower of two points, `x` first and then `y` and `z`, the order
+/// [`Assembly::which_to_keep_first`] breaks a tie between two corners by.
+fn lowest_first(one: PredicatePoint, other: PredicatePoint) -> Ordering {
+    let (one, other) = (middle_of(one).coordinates(), middle_of(other).coordinates());
+    (0..3)
+        .map(|axis| one[axis].total_cmp(&other[axis]))
+        .find(|order| order.is_ne())
+        .unwrap_or(Ordering::Equal)
 }
 
 /// The three names in a [`CornerName::Meet`], sorted so the three arrive the
