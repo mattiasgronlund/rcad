@@ -170,15 +170,21 @@ impl Watch {
 /// goes back to the live watch so the next tick tries again, and no slow
 /// input is marked as written — nothing was written, so the next tick offers
 /// every one of them again. The same recovery covers a slow input's own write
-/// failing on its own, past that point: only the inputs whose `fs::write`
-/// actually landed go into `written`, in one call to
+/// failing on its own, past that point: only the inputs [`write_slow_input`]
+/// actually lands under their real name go into `written`, in one call to
 /// [`mark_slow_inputs_written`], so one that did not is retried out of
-/// `slowest` on the next tick rather than refused forever. What is still
-/// swallowed is the totals file and the report text themselves — a write that
-/// fails there loses just that one merge's counts and its report, not a
-/// night's worth of runs, since `slowest` is untouched by either. A fuzz
-/// target that stopped fuzzing because its measurements could not be filed
-/// would be measuring the disk.
+/// `slowest` on the next tick rather than refused forever. §236.6: landing
+/// under the real name is itself a write to a temporary name and then a
+/// rename, so a write cut short by a full disk or a process killed
+/// mid-write — libFuzzer kills forked jobs from outside, with no chance to
+/// finish — never leaves a truncated input under a name `cargo fuzz run`
+/// would be asked to replay. What is still swallowed is the totals file and
+/// the report text themselves — a write that fails there loses just that one
+/// merge's counts and its report, not a night's worth of runs, since
+/// `slowest` is untouched by either; a torn `totals` file is read back a
+/// line at a time, so it drops what got cut instead of lying about it. A
+/// fuzz target that stopped fuzzing because its measurements could not be
+/// filed would be measuring the disk.
 fn merge_out(watch: &Mutex<Watch>) {
     let (into, keep, mine, to_write) = {
         let mut watch = watch
@@ -219,9 +225,7 @@ fn merge_out(watch: &Mutex<Watch>) {
 
     let written_now: Vec<String> = to_write
         .iter()
-        .filter(|(took, bytes)| {
-            std::fs::write(slowest.join(named_for(*took, bytes)), bytes).is_ok()
-        })
+        .filter(|(took, bytes)| write_slow_input(&slowest, *took, bytes))
         .map(|(took, bytes)| named_for(*took, bytes))
         .collect();
     if !written_now.is_empty() {
@@ -251,6 +255,71 @@ fn hand_back_what_could_not_be_written(watch: &Mutex<Watch>, mut mine: HowLongRu
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .took
         .add(&mine);
+}
+
+/// Write one slow input's bytes under its real name, so a reader never sees
+/// fewer bytes than the input actually had.
+///
+/// `std::fs::write` alone cannot do this: it creates the file and then
+/// writes, so a write cut short by a full disk or a process killed
+/// mid-write — libFuzzer kills forked jobs from outside, with no chance to
+/// finish — leaves a truncated input sitting under a real name, and
+/// `cargo fuzz run` on it replays something other than what was slow.
+/// §236.6.
+///
+/// The fix is the usual one: write the bytes to a temporary name in the same
+/// directory, then [`std::fs::rename`] them onto the real one. A rename
+/// within one directory either lands whole or does not happen; there is no
+/// state in between for a reader to catch.
+///
+/// The temporary name is fixed, not one per call, because the caller only
+/// ever reaches this while holding the one lock every process for this
+/// target shares — so there is never more than one writer at a time, and a
+/// leftover from a process killed mid-write is silently overwritten by the
+/// next successful write rather than piling up one file per crash. If
+/// nothing ever writes again — the last run of the night dies mid-write and
+/// nobody restarts that target — the leftover just sits there, harmlessly:
+/// it can never be mistaken for a slow run, because it does not start with
+/// `slow-`, so `how_slow_the_name_says` does not parse it and
+/// [`prune_to_the_slowest_kept`] leaves it alone the same way it leaves any
+/// file this module did not write.
+fn write_slow_input(slowest: &Path, took: Duration, bytes: &[u8]) -> bool {
+    let temp = slowest.join(SLOW_INPUT_BEING_WRITTEN);
+    write_that_might_be_cut_short(&temp, bytes)
+        && std::fs::rename(&temp, slowest.join(named_for(took, bytes))).is_ok()
+}
+
+/// The temporary name [`write_slow_input`] writes under before renaming.
+///
+/// Never `slow-...`, the shape every real name has, so a leftover is never
+/// read as one.
+const SLOW_INPUT_BEING_WRITTEN: &str = "being-written";
+
+/// Write `bytes` to `path` in one call, the way `std::fs::write` does.
+#[cfg(not(test))]
+fn write_that_might_be_cut_short(path: &Path, bytes: &[u8]) -> bool {
+    std::fs::write(path, bytes).is_ok()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Set by a test to make the next `write_that_might_be_cut_short` act
+    /// like a `write(2)` that only got this many bytes out before the
+    /// process died or the disk filled — a fault no unit test can cause
+    /// for real.
+    static FAULT_INJECTED_SHORT_WRITE: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// `write_that_might_be_cut_short`, but cut short when a test has set
+/// `FAULT_INJECTED_SHORT_WRITE`.
+#[cfg(test)]
+fn write_that_might_be_cut_short(path: &Path, bytes: &[u8]) -> bool {
+    if let Some(budget) = FAULT_INJECTED_SHORT_WRITE.with(std::cell::Cell::take) {
+        let _ = std::fs::write(path, &bytes[..budget.min(bytes.len())]);
+        return false;
+    }
+    std::fs::write(path, bytes).is_ok()
 }
 
 /// Mark slow inputs as written now that their bytes are actually on disk.
@@ -310,6 +379,12 @@ fn the_shared_report_locked(into: &Path) -> Option<std::fs::File> {
 ///
 /// Only files this module writes are touched, so pointing `RCAD_FUZZ_TIMINGS` at
 /// a directory with something else in it cannot lose that something else.
+///
+/// That "something else" includes the temporary name [`write_slow_input`]
+/// writes under before it renames: `how_slow_the_name_says` never parses it,
+/// since it does not start with `slow-`, so it is never counted, never
+/// kept, and never named in [`report_text`] — the same as any file this
+/// module did not write.
 fn prune_to_the_slowest_kept(from: &Path, keep: usize) -> Vec<(Duration, String)> {
     let Ok(listing) = std::fs::read_dir(from) else {
         return Vec::new();
@@ -832,6 +907,59 @@ mod tests {
         assert!(
             into.join("slowest").join(&name).is_file(),
             "a slow input whose one file write failed was never retried"
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn a_write_cut_short_never_leaves_a_short_file_under_the_real_name() {
+        // Q67, §236.6: `fs::write` creates the file and then writes, so a
+        // write cut short by a full disk or a process killed mid-write used
+        // to leave the truncated bytes sitting under the real name — and
+        // `cargo fuzz run` on that file would replay a different input from
+        // the one that was actually slow.
+        let into = somewhere_to_write("cut-short");
+        std::fs::create_dir_all(into.join("slowest")).expect("somewhere to write");
+
+        let bytes = b"a slow input long enough that four bytes is visibly short";
+        let name = named_for(Duration::from_millis(20), bytes);
+
+        FAULT_INJECTED_SHORT_WRITE.with(|budget| budget.set(Some(4)));
+        let wrote = write_slow_input(&into.join("slowest"), Duration::from_millis(20), bytes);
+
+        assert!(!wrote, "a write cut short should be reported as failed");
+        assert!(
+            !into.join("slowest").join(&name).exists(),
+            "a write cut short left a short file under the input's real name"
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn a_totals_file_cut_short_drops_the_torn_line_rather_than_lying() {
+        // Q67 asked whether the same short-write problem reaches `totals`.
+        // It does not need the same fix: `read_back` already treats a line
+        // it cannot parse as absent rather than guessing at it, so a torn
+        // tail loses what got cut and nothing more — it never reads back as
+        // *more* than was written, which is what would mislead a reader.
+        let into = somewhere_to_write("totals-cut-short");
+        std::fs::create_dir_all(&into).expect("somewhere to write");
+        let mut took = HowLongRunsTook::new();
+        for run in [1u64, 500, 12_000] {
+            took.record(Duration::from_micros(run));
+        }
+        let whole = took.written_out();
+        let cut = &whole[..whole.len().saturating_sub(5)];
+        std::fs::write(into.join("totals"), cut).expect("a torn totals file");
+
+        let back = HowLongRunsTook::read_back(&into.join("totals"));
+        assert_eq!(
+            back.runs, took.runs,
+            "the run count sits on an earlier line; a torn tail should not touch it"
+        );
+        assert!(
+            back.buckets.iter().sum::<u64>() <= took.buckets.iter().sum(),
+            "a torn bucket line must be dropped, never counted as more runs than were written"
         );
         let _ = std::fs::remove_dir_all(&into);
     }
