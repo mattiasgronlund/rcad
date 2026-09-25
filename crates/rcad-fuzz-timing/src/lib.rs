@@ -682,8 +682,14 @@ mod tests {
         );
         {
             let watch = watch.lock().unwrap();
-            assert_eq!(watch.took.runs, 1, "the run was dropped instead of handed back");
-            assert_eq!(watch.took.lost, 1, "a run just handed back was not counted as lost");
+            assert_eq!(
+                watch.took.runs, 1,
+                "the run was dropped instead of handed back"
+            );
+            assert_eq!(
+                watch.took.lost, 1,
+                "a run just handed back was not counted as lost"
+            );
         }
 
         watch
