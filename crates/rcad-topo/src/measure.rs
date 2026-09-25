@@ -580,7 +580,10 @@ impl SolidView<'_> {
         let mut total = 0.0;
         for face in self.faces() {
             let across = shift_for(largest_edge_component(&face));
-            total += shift(which_way_its_own_fan_faces(face, across).length(), 2 * across);
+            total += shift(
+                which_way_its_own_fan_faces(face, across).length(),
+                2 * across,
+            );
         }
         total
     }
@@ -1114,7 +1117,9 @@ fn the_triangles_of(mesh: &Mesh, face: FaceKey) -> &[MeshTriangle] {
             .take_while(|triangle| triangle.face() == face)
             .count();
     assert!(
-        triangles[end..].iter().all(|triangle| triangle.face() != face),
+        triangles[end..]
+            .iter()
+            .all(|triangle| triangle.face() != face),
         "the triangles of face {face:?} are not in one run"
     );
     &triangles[start..end]

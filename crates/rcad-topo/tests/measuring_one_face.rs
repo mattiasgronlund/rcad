@@ -380,7 +380,10 @@ fn a_bend(model: &mut Model, placement: &Isometry) -> (SolidKey, Vec<Truth>) {
     (bend, truths)
 }
 
-type CurvedShape = (&'static str, fn(&mut Model, &Isometry) -> (SolidKey, Vec<Truth>));
+type CurvedShape = (
+    &'static str,
+    fn(&mut Model, &Isometry) -> (SolidKey, Vec<Truth>),
+);
 
 const CURVED_SHAPES: [CurvedShape; 5] = [
     ("a round bar", a_round_bar),
@@ -454,8 +457,8 @@ fn the_middle_of_each_face_is_within_its_wobble() {
 /// different order.
 ///
 /// A cube, every curved shape above at the origin and far out, and a fuse of a
-/// block with a bar through it. The errors came out at most `3.6e-16` of the
-/// solid's apart.
+/// block with a bar through it. The errors are held to within eight roundings
+/// of the solid's.
 ///
 /// **Bit for bit for a curved solid as well as a flat one**, because a face is
 /// measured over exactly the triangles the solid's area is summed over, in a
@@ -603,7 +606,10 @@ fn what_cannot_be_measured_is_refused_by_name() {
     );
     for face in faces_of(&model, huge) {
         assert!(
-            matches!(asked(huge, face, 0.1), Err(Error::SurfaceAreaTooLargeToMeasure)),
+            matches!(
+                asked(huge, face, 0.1),
+                Err(Error::SurfaceAreaTooLargeToMeasure)
+            ),
             "a face of 1e400 does not fit in an f64"
         );
     }
