@@ -740,7 +740,10 @@ impl PlanesBetweenCurvedFaces {
 /// way, which gives every pipe the same centre, the same two semi-axes and the
 /// same long direction.
 fn one_ellipse_on_every_pipe(flat: &Plane, faces: &[Surface]) -> bool {
-    let normal = flat.normal().normalized().expect("a plane's normal has a length");
+    let normal = flat
+        .normal()
+        .normalized()
+        .expect("a plane's normal has a length");
     let Some(ellipses) = faces
         .iter()
         .map(|face| {
@@ -767,8 +770,11 @@ fn one_ellipse_on_every_pipe(flat: &Plane, faces: &[Surface]) -> bool {
         (one - other).abs() <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST * size.max(1.0)
     };
     ellipses.iter().all(|(there, way, how_square, how_wide)| {
-        near(centre.distance_to(*there), 0.0, centre.largest_coordinate_magnitude())
-            && near(long_way.cross(*way).length(), 0.0, 1.0)
+        near(
+            centre.distance_to(*there),
+            0.0,
+            centre.largest_coordinate_magnitude(),
+        ) && near(long_way.cross(*way).length(), 0.0, 1.0)
             && near(square, *how_square, 1.0)
             && near(radius, *how_wide, radius)
     })
