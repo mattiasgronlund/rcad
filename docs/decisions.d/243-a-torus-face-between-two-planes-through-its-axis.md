@@ -11,6 +11,7 @@ pins move on to places §232.5 did not predict.*
   243.4   A puck's rounded rim was answered wrongly and is refused now
   243.5   Where both bends stop now
   243.6   What this leaves
+  243.7   A bend whose axis is off the coordinate axes is refused
 
 ### 243.1 What refused
 
@@ -178,3 +179,39 @@ guards against is the corner read, which 243.3 shows it catching.
 - A puck's rounded rim is refused, a gap with no consumer yet (243.4).
 - §232.5's last item, `what_a_round_wire_encloses` asking the meridian circle's
   half-space, is untouched.
+- A bend whose axis is off the coordinate axes is refused at the check that
+  its planes hold the axis (243.7).
+
+### 243.7 A bend whose axis is off the coordinate axes is refused
+
+*Found by the row's verifier (`lane-q54-verify`, `6d28b7c0`) after the lane had
+reported. The probe was a test the verifier deleted without committing, so the
+numbers below are its own and were not run again here.*
+
+The verifier built rings of radius 4 and tube 1 round four slanted axes —
+`(0.6, 0.8, 0)`, `(1, 1, 0)`, `(0, 1, 1)` and `(1, 2, 3)` — and cut each with
+planes through the origin whose normals were worked out square to the axis.
+
+- `holds_the_axis_of` said `true` only where `dot(normal, axis)` came out
+  exactly zero: `n = (0, 0, −1)` with the axis in the `xy` plane, and
+  `n = (1, 0, 0)` with the axis `(0, 1, 1)`.
+- On all five planes whose normal did not come out exactly square, the dot's
+  enclosure held zero, its sign was `Undecidable`, and the function said
+  `false`. The face is then refused by the `refuse()` after the call, not
+  answered wrongly.
+- `intersect(Torus, Plane)` named the two circles for four of those five. The
+  fifth — axis `(1, 2, 3)`, `n = (w₂, 0, −w₀)`, dot in `[−1.1e-16, 0]` — it
+  refused as `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`.
+
+So on four planes the two functions this section calls "the same two
+questions" disagree, and the `true` side pinned in `6d28b7c0` has only been
+reached by shapes lined up with the axes.
+
+Which reading is right decides gap or limit (§16.10), and it has not been
+looked at. If the stored normal, rounded from one square to the axis, is not
+square to it exactly, the plane cuts the ring in a quartic, `false` is the
+true answer, and `intersect`'s two circles are the looser reading. If the dot
+of the stored numbers is exactly zero and only the enclosure could not say so,
+this is a gap: the exact sign of three products of `f64`s is always within
+reach. Either way `holds_the_axis_of` returns a `bool`, so "no" and "cannot
+tell" come out as the same refusal, and nothing records which it was.
