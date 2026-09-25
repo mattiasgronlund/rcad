@@ -325,10 +325,8 @@ fn what_a_round_wire_encloses(
     else {
         return Err(cannot());
     };
-    match side {
-        Decision::Pos => return Ok(side),
-        Decision::Neg | Decision::Zero => (),
-        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    if side == Decision::Pos {
+        return Ok(side);
     }
     // The tube holds the point, so it is in one of the two disks or on one of
     // the two circles; the half-space says which. A point on the half-space's
