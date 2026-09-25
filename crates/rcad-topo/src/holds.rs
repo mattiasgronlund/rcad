@@ -226,7 +226,7 @@ fn what_a_flat_face_holds(
     for ((position, wire), is_round) in face.wires().enumerate().zip(round) {
         let inwards = if position == 0 { 1 } else { -1 };
         if is_round {
-            match what_a_round_wire_encloses(solid, face, wire, point)? {
+            match what_a_round_wire_encloses(solid, face, wire, point, policy, log)? {
                 Decision::Neg => winding += inwards,
                 Decision::Pos => (),
                 Decision::Zero => return Ok(OnAFace::OnItsBoundary),
@@ -265,15 +265,32 @@ fn what_a_flat_face_holds(
 /// is not closed, so a round wire whose neighbour is flat is a face this cannot
 /// follow rather than a case with an answer.
 ///
+/// **A ring leaves two regions on a plane through its axis**, the disks of the
+/// two meridian circles, so the ring's sign alone holds the other circle's disk
+/// as surely as this one's (§232.2). What tells them apart is the flat
+/// half-space [`intersect`] names each circle by, having proved it clears both:
+/// each disk is exactly the part of the tube on its own circle's side, and the
+/// wire's corner says which side that is. A plane square to the axis cuts
+/// circles round it, and neither circle's disk is the tube's inside there, so
+/// a round wire on such a plane is refused rather than read off the sign.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the wire is not one
-/// whole closed crossing of two surfaces.
+/// whole closed crossing of two surfaces, or when its neighbour is a ring and
+/// the face's plane does not hold the ring's axis.
+///
+/// [`Error::Undecidable`] when the half-space naming a meridian circle cannot
+/// say which side of it `point` is on.
+///
+/// Whatever [`intersect`] makes of the face's plane and a ring beside it.
 fn what_a_round_wire_encloses(
     solid: SolidView<'_>,
     face: FaceView<'_>,
     wire: WireView<'_>,
     point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let coedge = wire.coedges().next().ok_or_else(cannot)?;
@@ -299,7 +316,74 @@ fn what_a_round_wire_encloses(
     if let Decision::Undecidable { enclosure } = side {
         return Err(gave_up_on_a_side(&surface, point, enclosure));
     }
-    Ok(side)
+    if !matches!(surface, Surface::Torus(_)) {
+        return Ok(side);
+    }
+    let corner = wire.points().next().ok_or_else(cannot)?;
+    let Some(this_circle) =
+        the_half_space_naming_the_meridian_circle_through(face, &surface, corner, policy, log)?
+    else {
+        return Err(cannot());
+    };
+    match side {
+        Decision::Pos => return Ok(side),
+        Decision::Neg | Decision::Zero => (),
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+    // The tube holds the point, so it is in one of the two disks or on one of
+    // the two circles; the half-space says which. A point on the half-space's
+    // own boundary is kept, as a picker keeps what is on it.
+    match this_circle.side_of_point(point) {
+        Decision::Pos | Decision::Zero => Ok(side),
+        Decision::Neg => Ok(Decision::Pos),
+        Decision::Undecidable { enclosure } => Err(gave_up(
+            this_circle.predicate_name(),
+            point,
+            Level::Exact,
+            enclosure,
+            Measures::Length,
+        )),
+        other => panic!("a half-space came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// The flat half-space that names the one meridian circle `face`'s plane cuts
+/// `ring` in through `corner`, or `None` when the plane does not cut the ring
+/// in meridian circles or no one of them certainly keeps the corner.
+///
+/// The same question `fuse/select.rs` asks of a flat piece, asked here of a
+/// face of a solid.
+///
+/// # Errors
+///
+/// Whatever [`intersect`] gives for the two.
+fn the_half_space_naming_the_meridian_circle_through(
+    face: FaceView<'_>,
+    ring: &Surface,
+    corner: Point,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Picker>> {
+    let SurfaceMeet::Curves(runs) = intersect(&face.surface(), ring, policy, log)? else {
+        return Ok(None);
+    };
+    let corner = PredicatePoint::from(corner.coordinates());
+    let mut keeping = runs.iter().filter_map(|run| match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
+            [flat @ Picker::InFrontOf(_)] if flat.side_of_point(corner) == Decision::Pos => {
+                Some(*flat)
+            }
+            _ => None,
+        },
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. }
+        | _ => None,
+    });
+    Ok(match (keeping.next(), keeping.next()) {
+        (Some(only), None) => Some(only),
+        _ => None,
+    })
 }
 
 /// One polygonal wire's contribution to the crossing count, or `None` when
@@ -2989,6 +3073,88 @@ mod tests {
             );
             assert!(
                 matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == rim),
+                "{point:?}: {answer:?}"
+            );
+        }
+    }
+
+    /// A puck's lid is refused rather than holding nothing but its rim.
+    ///
+    /// The lid is the disk of radius four on `z = 1`, and that plane rests on
+    /// the ring of radius four and tube one along the lid's own circle. The
+    /// ring's inside on that plane is empty, so the ring's sign put every point
+    /// of the lid but its circle outside it: `(0, 0, 1)` and `(2, 0, 1)` came
+    /// back not held. A plane square to a ring's axis names no meridian circle,
+    /// so there is no half-space to ask, and the lid is refused (§250).
+    #[test]
+    fn a_pucks_lid_is_refused_rather_than_holding_nothing_but_its_rim() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let top = model.add_vertex(rcad_geom::Point::new(4.0, 0.0, 1.0));
+        let bottom = model.add_vertex(rcad_geom::Point::new(4.0, 0.0, -1.0));
+        let round_the_top = model.add_closed_edge(top);
+        let round_the_bottom = model.add_closed_edge(bottom);
+        let disk = |model: &mut Model, up: f64, circle, turn| {
+            let plane = Plane::from_point_and_normal(
+                rcad_geom::Point::new(0.0, 0.0, up),
+                Vector::new(0.0, 0.0, up),
+            )
+            .expect("the z axis is a unit normal");
+            let round_it = model.add_coedge(circle, turn);
+            let wire = model.add_wire(smallvec::smallvec![round_it]);
+            model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
+        };
+        let lid = disk(&mut model, 1.0, round_the_top, Orientation::Forward);
+        let base = disk(&mut model, -1.0, round_the_bottom, Orientation::Reversed);
+        let rim_wires: SmallVec<[_; 1]> = [
+            (round_the_bottom, Orientation::Forward),
+            (round_the_top, Orientation::Reversed),
+        ]
+        .map(|(edge, turn)| {
+            let round_it = model.add_coedge(edge, turn);
+            model.add_wire(smallvec::smallvec![round_it])
+        })
+        .into_iter()
+        .collect();
+        let ring =
+            rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+        let rim = model.add_face(Surface::Torus(ring), rim_wires);
+        let shell = model.add_shell(
+            [
+                (lid, Orientation::Forward),
+                (base, Orientation::Forward),
+                (rim, Orientation::Reversed),
+            ]
+            .into_iter()
+            .map(|(face, orient)| FaceUse {
+                face,
+                loc: Isometry::identity(),
+                orient,
+            })
+            .collect(),
+        );
+        let solid = model.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]));
+        let puck = model
+            .solid(model.key_for_solid(solid))
+            .expect("this model made the key");
+        let lid = puck
+            .faces()
+            .find(|face| face.surface().as_plane().is_some_and(|flat| flat.offset() > 0.0))
+            .expect("a puck has a lid")
+            .key();
+
+        for point in [at(0.0, 0.0, 1.0), at(2.0, 0.0, 1.0), at(5.0, 0.0, 1.0)] {
+            let answer = puck.face_holds_the_point(
+                lid,
+                point,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            assert!(
+                matches!(answer, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == lid),
                 "{point:?}: {answer:?}"
             );
         }
