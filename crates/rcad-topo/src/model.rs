@@ -382,8 +382,9 @@ impl Model {
     /// file can: the file lists each arena's slots, empty ones included, and
     /// the next entities written go into those first. The copy is then still
     /// the same shape and still shares nothing, but its entities need not sort
-    /// the way the originals do (`a_copy_written_into_empty_slots_...` below
-    /// shows one that does not), and a bit-for-bit measure is not promised.
+    /// the way the originals do —
+    /// `a_copy_written_into_empty_slots_does_not_sort_the_way_its_original_does`
+    /// is one that does not — and a bit-for-bit measure is not promised.
     ///
     /// The old-to-new lookup is a binary search over what was copied rather
     /// than a map as long as the arena, so a copy costs what the solid holds
@@ -2187,5 +2188,109 @@ mod tests {
             .expect("and may be tagged again with less");
 
         assert_eq!(model.worst_approximation(), 1e-6);
+    }
+
+    /// A cube's six faces split three and three between two solids: each
+    /// skin is open, and the edges round the cut are walked once from each
+    /// side. The door lets that in, because every edge in the file still has
+    /// two coedges running opposite ways — so a copy of one half has to refuse
+    /// rather than write an edge walked once and trip its own check.
+    #[test]
+    fn a_solid_whose_skin_only_closes_with_another_is_refused_a_copy() {
+        let (mut model, cube) = a_cube();
+        let shell = model.data().solids[cube.slot_in(model.id())].shells[0].shell;
+        let other_half = model.data_mut().shells[shell].faces.split_off(3);
+        let other_shell = model.add_shell(other_half);
+        model.add_solid(smallvec::smallvec![super::ShellUse {
+            shell: other_shell,
+            loc: rcad_geom::Isometry::identity(),
+            orient: Orientation::Forward,
+        }]);
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let mut read_back: Model = postcard::from_bytes(&bytes).expect("the door lets it in");
+        let half = read_back
+            .solids()
+            .next()
+            .expect("two halves were written")
+            .key();
+        let counts = counts_of(&read_back);
+
+        let refused = read_back.copy_solid(half);
+
+        assert!(
+            matches!(
+                refused,
+                Err(Error::Invalid(Invalid::EdgeCoedgeCount { count: 1 }))
+            ),
+            "expected the copy's edges round the cut to be walked once, got {refused:?}"
+        );
+        assert_eq!(counts_of(&read_back), counts, "a refused copy wrote something");
+    }
+
+    /// Two corners added and taken out again leave two empty slots, and a file
+    /// keeps them: it lists every slot of an arena, empty ones included. The
+    /// model read back fills those first, the later of the two first of all, so
+    /// the copy's first two corners land in the reverse of their originals'
+    /// order. The copy is still whole and shares nothing; what it gives up is
+    /// sorting the way its original sorts, which is what
+    /// [`Model::copy_solid`] says it does not promise.
+    #[test]
+    fn a_copy_written_into_empty_slots_does_not_sort_the_way_its_original_does() {
+        let (mut model, _) = a_cube();
+        let stray = [
+            model.add_vertex(Point::new(9.0, 9.0, 9.0)),
+            model.add_vertex(Point::new(9.0, 9.0, 8.0)),
+        ];
+        for vertex in stray {
+            model.data_mut().vertices.remove(vertex);
+        }
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let mut read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+        let original = read_back.solids().next().expect("the cube").key();
+
+        let copy = read_back
+            .copy_solid(original)
+            .expect("this model made the key");
+
+        assert_ne!(
+            corners_in_slot_order(&read_back, copy),
+            corners_in_slot_order(&read_back, original)
+        );
+        read_back
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the copy is whole and shares nothing");
+    }
+
+    fn counts_of(model: &Model) -> [usize; 7] {
+        [
+            model.vertex_count(),
+            model.edge_count(),
+            model.coedge_count(),
+            model.wire_count(),
+            model.face_count(),
+            model.shell_count(),
+            model.solid_count(),
+        ]
+    }
+
+    /// Every corner of the solid, as bits, in the order of the slots they sit
+    /// in.
+    fn corners_in_slot_order(model: &Model, solid: SolidKey) -> Vec<[u64; 3]> {
+        let mut corners: Vec<_> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .flat_map(|face| face.wires().flat_map(|wire| wire.coedges()))
+            .map(|coedge| {
+                let corner = coedge.start();
+                (
+                    corner.key().slot_in(model.id()),
+                    corner.point().coordinates().map(f64::to_bits),
+                )
+            })
+            .collect();
+        corners.sort_unstable();
+        corners.dedup();
+        corners.into_iter().map(|(_, at)| at).collect()
     }
 }
