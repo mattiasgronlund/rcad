@@ -1528,12 +1528,16 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Plane, Surface, Torus};
-    use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+    use rcad_geom::{Axis, Orientation, Plane, Surface, Torus};
+    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+    use smallvec::SmallVec;
 
     use super::{
-        every_picker_keeps, the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through,
+        InPlane, Piece, candidate_points, corners_of, every_picker_keeps,
+        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        what_else_each_round_wire_asks,
     };
+    use crate::fuse::{FaceMeet, MeetPoint};
 
     /// The torus `a_quarter_bend(4, 1)` is drawn on, and the plane `y = 0` its
     /// end cap lies on.
@@ -1592,5 +1596,106 @@ mod tests {
         )
         .expect("a plane square to a torus's axis crosses it");
         assert_eq!(pickers, None);
+    }
+
+    /// The torus's sign is inside at both disks on `y = 0`, so without the
+    /// half-space the circle through the cap's corner is named by, the cap
+    /// holds the other disk too.
+    #[test]
+    fn a_bends_end_cap_holds_the_disk_its_own_corner_is_in_and_not_the_other() {
+        let (ring, flat) = a_bend_and_its_end_cap_plane();
+        let cap = a_flat_piece_inside_the_ring(ring, flat, &[[3.0, 0.0, 0.0]]);
+        let holds = |x: f64| {
+            the_piece_holds_asked_as_selection_asks(&cap, PredicatePoint::from([x, 0.0, 0.0]))
+        };
+        assert_eq!(
+            holds(4.0),
+            Some(true),
+            "the disk round (4, 0, 0) is the cap"
+        );
+        assert_eq!(holds(-4.0), Some(false), "the disk round (-4, 0, 0) is not");
+    }
+
+    /// Of the points offered for a bend's end cap, the first one it holds is in
+    /// its own disk. The ring's crossing at `(−4, 0, 0)` is offered before the
+    /// one at `(4, 0, 0)`, so a cap that held both would be placed from the
+    /// other disk.
+    #[test]
+    fn the_first_point_a_bends_end_cap_offers_and_holds_is_in_its_own_disk() {
+        let (ring, flat) = a_bend_and_its_end_cap_plane();
+        let cap = a_flat_piece_inside_the_ring(ring, flat, &[[3.0, 0.0, 0.0]]);
+        let first_held = candidate_points(&cap, &corners_of(&cap))
+            .into_iter()
+            .find(|&candidate| {
+                the_piece_holds_asked_as_selection_asks(&cap, candidate) == Some(true)
+            })
+            .expect("the cap holds one of the points offered for it");
+        assert_eq!(first_held, PredicatePoint::from([4.0, 0.0, 0.0]));
+    }
+
+    /// A plane square to the axis cuts the tube in a ring-shaped piece, and
+    /// what the torus's sign holds on it is not the piece on either side of a
+    /// pipe, so nothing here can say.
+    #[test]
+    fn a_piece_on_a_plane_square_to_a_bends_axis_cannot_say_what_it_holds() {
+        let (ring, _) = a_bend_and_its_end_cap_plane();
+        let across = Plane::from_coefficients([0.0, 0.0, 1.0, 0.5]).expect("a normal");
+        let reach = 0.75_f64.sqrt();
+        let piece = a_flat_piece_inside_the_ring(
+            ring,
+            across,
+            &[[4.0 + reach, 0.0, 0.5], [4.0 - reach, 0.0, 0.5]],
+        );
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from([4.0, 0.0, 0.5])),
+            None
+        );
+    }
+
+    /// [`the_piece_holds`] with the pickers worked out the way
+    /// `place_the_piece` works them out.
+    fn the_piece_holds_asked_as_selection_asks(
+        piece: &Piece,
+        point: PredicatePoint,
+    ) -> Option<bool> {
+        let flat = piece.surface.as_plane().expect("a flat piece");
+        let in_plane = InPlane::of(flat).expect("a plane with a point off it");
+        let also_picked_by =
+            what_else_each_round_wire_asks(piece, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a plane crosses a torus in circles");
+        the_piece_holds(piece, Some(&in_plane), &also_picked_by, point)
+    }
+
+    /// A piece of `flat` bounded by whole circles it cuts `ring` in, one wire
+    /// through each corner, the first the outer one, with its material inside
+    /// the tube.
+    ///
+    /// It names no ancestor: the two functions it is handed to read the
+    /// surface and the wires and nothing else.
+    fn a_flat_piece_inside_the_ring(ring: Surface, flat: Plane, corners: &[[f64; 3]]) -> Piece {
+        let carried_by = [Surface::Plane(flat), ring];
+        let wires = corners
+            .iter()
+            .map(|&corner| {
+                let starts = MeetPoint::WhereAClosedCurveStarts {
+                    carried_by,
+                    point: PredicatePoint::from(corner),
+                };
+                vec![FaceMeet {
+                    carried_by,
+                    ends: [starts.clone(), starts],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                }]
+            })
+            .collect();
+        Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires,
+            is_the_whole_surface: false,
+        }
     }
 }
