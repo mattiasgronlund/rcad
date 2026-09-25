@@ -868,14 +868,12 @@ fn associativity(trios: &[Trio]) -> Report {
     report
 }
 
+/// Two unions in turn: the model and solids they left, or where they stopped.
+type United = Result<(Model, Vec<SolidKey>), String>;
+
 /// `(block ∪ cone) ∪ third` and `(cone ∪ third) ∪ block`, in that order, each
 /// built into a fresh model.
-fn both_groupings(
-    trio: Trio,
-) -> (
-    Result<(Model, Vec<SolidKey>), String>,
-    Result<(Model, Vec<SolidKey>), String>,
-) {
+fn both_groupings(trio: Trio) -> (United, United) {
     let mut model = a_model();
     let (block, cone) = trio.pair.build_into(&mut model);
     let third = model
@@ -905,7 +903,7 @@ fn united_in_turn(
     first: &[SolidKey],
     second: &[SolidKey],
     third: &[SolidKey],
-) -> Result<(Model, Vec<SolidKey>), String> {
+) -> United {
     let (model, two) = match fused(model, first, second, Rule::Union) {
         Ok(answer) => answer,
         Err(name) => return Err(format!("the first union: {name}")),
