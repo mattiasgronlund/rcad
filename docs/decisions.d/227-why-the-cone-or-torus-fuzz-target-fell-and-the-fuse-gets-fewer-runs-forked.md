@@ -52,7 +52,7 @@ ones.
 finds into `~/rcad-fuzz-corpus/where_a_cone_or_a_torus_crosses`, and the next
 night reads that directory back as its seed. 09-21's log opens at coverage
 3 006 — where 09-20 ended, not where it began — and its very first job lines
-run at 2 to 6 inputs a second. Its timing record has p98 at 1 141 ms and p99 at
+run at 1 to 6 inputs a second. Its timing record has p98 at 1 141 ms and p99 at
 2 282 ms, where 09-20's p98 was 1.1 ms: on 09-21 one input in fifty took over a
 second.
 
@@ -75,8 +75,10 @@ So of the four candidates: (a) the kernel got slower — ruled out, the target's
 code is byte for byte the same; (c) the recipe changed — ruled out, the command
 line is the same; (d) is about the fuse only. What is left is (b), and it
 happened inside one night rather than between two: **09-20 found a slow region
-three hours in, and every night since starts inside it.** The measurement in
-§227.4 checks this leg directly.
+three hours in, and every night since starts inside it.** §227.4 checks both
+legs with runs: the two nights' binaries take the same time over the same
+inputs, and the inputs 09-20 added take about 5 000 times as long as the ones
+it started from.
 
 ### 227.3 The fuse: each run got dearer, and fork mode is not why
 
@@ -125,12 +127,100 @@ and the same shape §91.3 found in `where_two_surfaces_cross` on 2026-09-11.
 What the logs cannot say is whether that tail is slow because the fuse got
 slower on the same inputs (a) or because the corpus moved toward inputs that
 were always slow (b). Between `74bd5573` and `6664fef8` the fuse's code grew
-from 86 179 to 104 953 coverage counters, so (a) is open. §227.4 measures it.
+from 86 179 to 104 953 coverage counters, so (a) was open. §227.4 closes it:
+**the 09-25 fuse is 17% faster than the 09-18 fuse on 09-18's inputs, and the
+inputs the corpus gained in that week are 36 times slower than the ones it
+had.** It is (b), the same cause as the cone target's.
+
+(c) did land in the window — `0ac02509` runs the five targets at once,
+`22684dad` forks, `52ea7984` cuts one input to ten seconds — but none of it
+sets the run count. Fork mode costs four points (the table above); the ten
+seconds cut 2 inputs on 09-25 (`oom/timeout/crash: 0/2/0`, last line of
+`fuzz-fuse.log`); and 09-19, with the five at once but no fork, already ran
+6.3 ms a run against 09-18's 1.87. No night was run with fork mode turned back
+off, so "toggling it back reproduces the drop" was not tried; 09-22's 36.7 M
+under the same flags is the evidence in its place.
 
 ### 227.4 What was run, and how to run it again
 
-*Pending the runs.*
+**Four binaries**, built in this lane's worktree at each night's commit the way
+`fuzz-target` builds them: `cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3"
+cargo +nightly fuzz build <target>`, then the binary copied out of
+`fuzz/target/x86_64-unknown-linux-gnu/release/`. The cone target at `146d0d62`
+and `ae124a29`; the fuse at `74bd5573` and `6664fef8`.
+
+**Fixed input sets**, copied out of the two corpus directories each night reads
+(`~/rcad-fuzz-corpus/<target>` and the nightly tree's `fuzz/corpus/<target>`)
+and split by when each file arrived — `find … -newermt <from> ! -newermt <to>`,
+with the night's 00:10 start as the edge:
+
+- cone target, **before 09-20**: 1 525 files, all run.
+- cone target, **added during 09-20**: 163 files, every fourth run (40).
+- fuse, **before 09-18**: 8 951 files — the log's seed count that night is
+  8 978 — every fifth run (1 790).
+- fuse, **added from 09-18 to 09-25**: 2 675 files, every third run (891).
+
+**How each was timed.** Each binary is handed the files by name, which makes
+libFuzzer run each one once and print `Executed <file> in N ms`; those lines are
+summed. Batches of 10 (the slow cone set) to 500, and inside each batch every
+binary ran the same files, **with the order swapped every batch** — A then B,
+then B then A — so that a change in machine load falls on both alike. Other
+sessions were building on the machine throughout: the one-minute load average
+read 3.0 to 15.5 across the runs, logged beside each batch. So only the ratios
+below mean anything; the absolute times are not comparable with a night's.
+
+| target | inputs | 09-20 / 09-18 binary | 09-21 / 09-25 binary | ratio |
+|--------|--------|---------------------:|---------------------:|------:|
+| cone or torus | 1 525 from before 09-20 | 0.14 ms each | 0.20 ms each | — |
+| cone or torus | 40 added during 09-20 | 1 083 ms each | 962 ms each | 0.89 |
+| fuse | 1 790 from before 09-18 | 5.42 ms each | 4.49 ms each | 0.83 |
+| fuse | 891 added 09-18 to 09-25 | 295 ms each | 160 ms each | 0.54 |
+
+Load average during the cone rows 9.7 to 15.5, during the fuse rows 3.0 to 8.6.
+The cone target's fast set is too fast for libFuzzer's whole-millisecond
+`Executed` line: most inputs print 0 ms, so its two figures are 214 ms and
+311 ms spread over 1 525 inputs, and the only claim made from them is that they
+are thousands of times below the slow set.
+
+What the table says, leg by leg:
+
+- **(a) is broken for both targets.** The later binary is no slower on the same
+  inputs — the cone target's two binaries are the same code and time the same
+  within noise, and the 09-25 fuse is 17% *faster* than the 09-18 fuse on
+  09-18's own inputs.
+- **(b) holds for both.** On one binary, the inputs a night added are far
+  slower than the inputs it started from: the cone target's about 5 000 times
+  (962 ms against 0.20 ms, both on `ae124a29`), the fuse's 36 times (160 ms
+  against 4.49 ms, both on `6664fef8`). The fuse's new inputs are slow on the
+  09-18 fuse as well — slower, at 295 ms — so they are slow because of what they
+  are, not because the kernel changed under them.
+
+The fuse's 36 times per input on this machine and the 27 times per run between
+the two nights' timing records (1.87 ms to 50.8 ms, §227.3) are the same size.
+They need not match: a night runs mutants of its corpus, not the corpus itself.
 
 ### 227.5 What is left
 
-*Pending the runs.*
+- **What the slow inputs are doing.** Neither target was profiled. The cone
+  target's 3-second inputs are kept by name in each night's
+  `timings/where_a_cone_or_a_torus_crosses/slowest/` —
+  `slow-000003289151us-55ef55b72ea716d8` from 09-21 is one that was slow on both
+  nights — and `cargo fuzz run where_a_cone_or_a_torus_crosses <file>` under a
+  profiler would name the routine. Whether 3 seconds for one pair of surfaces
+  is a gap to fix or a price to pay is the kernel's question, not this lane's.
+  Until it is answered, every night on that target spends almost all its time
+  in that one region.
+- **09-22's 36.7 M fuse runs** under the same flags as its neighbours are
+  unexplained. It started from 3 107 seeds against 3 297 to 3 687 on the
+  nights round it, which would fit a night that happened not to start among
+  the slow inputs, but that was not checked.
+- **Contention was not measured on its own.** Five targets at four forks is 20
+  processes on this machine's 24 threads. Nothing here separates what that
+  costs from the input-driven slowdown, except that (b) alone is big enough to
+  account for all of it.
+- **The cone target's timing record undercounts under fork mode.** 09-21's
+  record reads 1 009 847 runs and 48 527.8 s inside the target, where libFuzzer's
+  own count is 2 298 296 and four forks had about 115 000 process-seconds; 09-20's
+  record, by contrast, agrees with libFuzzer to half a percent. Seen, not
+  looked into. The fuse's records agree with libFuzzer within 2% on both nights
+  used here, which is why §227.3 leans on them.
