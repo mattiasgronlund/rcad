@@ -161,6 +161,27 @@ fn uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first() {
         .print_and_check("associativity, a block, a cone and a cube", 3);
 }
 
+/// Three trios that refused both ways round until `select.rs` counted the
+/// bulge of a hyperbola arc on the arc's own half of the cone, and answer one
+/// way round now.
+///
+/// Neither grouping of any of them gives a second answer to compare, so no law
+/// is broken; one grouping gets further than it did. Where each of the other
+/// groupings stops is pinned by name, so that when it answers too the trio goes
+/// back to [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`] and is compared.
+#[test]
+fn three_trios_that_refused_both_ways_now_answer_one_way_round() {
+    for (trio, want) in TRIOS_THAT_ANSWER_ONE_WAY_ROUND {
+        let (left, right) = both_groupings(trio);
+        let found = [left.err(), right.err()];
+        assert_eq!(
+            found.each_ref().map(Option::as_deref),
+            want,
+            "{trio:?}: where (block ∪ cone) ∪ third and (cone ∪ third) ∪ block stop"
+        );
+    }
+}
+
 /// A frustum up through a block's floor, and a small cube wholly inside the
 /// block, above the frustum.
 ///
@@ -493,12 +514,14 @@ const POINTED: [Pair; 3] = [
     a_pointed_cone_in_a_block_six_across(1.0),
 ];
 
-/// Trios on which the two groupings either both answer or both refuse.
+/// Trios on which the two groupings both answer: a far cube with a frustum, a
+/// cube on the block's roof with a frustum, and a far cube with a swallowed
+/// pointed cone.
 ///
-/// Three answer both ways: a far cube with a frustum, a cube on the block's roof
-/// with a frustum, and a far cube with a swallowed pointed cone. The rest refuse
-/// both ways and are here so a change that makes one grouping answer is seen.
-const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 6] = [
+/// Three more used to be here refusing both ways, so that a change making one
+/// grouping answer would be seen. Counting the bulge of a hyperbola arc was
+/// that change, and they are [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`] now.
+const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 3] = [
     Trio {
         pair: on_the_grid(6, 2, [3, 3]),
         third_side: 2.0,
@@ -514,21 +537,42 @@ const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 6] = [
         third_side: 2.0,
         third_at: [20.0, 20.0, 20.0],
     },
-    Trio {
-        pair: on_the_grid(8, 2, [4, 4]),
-        third_side: 8.0,
-        third_at: [5.0, 0.5, -2.5],
-    },
-    Trio {
-        pair: on_the_grid(6, 2, [3, 3]),
-        third_side: 4.0,
-        third_at: [3.5, 0.5, -3.5],
-    },
-    Trio {
-        pair: a_pointed_cone_in_a_block_six_across(-1.0),
-        third_side: 2.0,
-        third_at: [20.0, 20.0, 20.0],
-    },
+];
+
+/// Trios on which one grouping answers and the other refuses, with where each
+/// grouping stops: `(block ∪ cone) ∪ third` first, then `(cone ∪ third) ∪
+/// block`, and `None` for the one that answers.
+const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 3] = [
+    (
+        Trio {
+            pair: on_the_grid(8, 2, [4, 4]),
+            third_side: 8.0,
+            third_at: [5.0, 0.5, -2.5],
+        },
+        [None, Some("the first union: Undecidable on side of plane")],
+    ),
+    (
+        Trio {
+            pair: on_the_grid(6, 2, [3, 3]),
+            third_side: 4.0,
+            third_at: [3.5, 0.5, -3.5],
+        },
+        [
+            None,
+            Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
+        ],
+    ),
+    (
+        Trio {
+            pair: a_pointed_cone_in_a_block_six_across(-1.0),
+            third_side: 2.0,
+            third_at: [20.0, 20.0, 20.0],
+        },
+        [
+            Some("the second union: ACurvedFaceGoesRightRoundWithNoSeam"),
+            None,
+        ],
+    ),
 ];
 
 /// A frustum of slope `1 / up_per_unit_wider` from a cap of radius one a unit
@@ -801,26 +845,7 @@ fn absorption(pairs: &[Pair], which: Which, inner: Rule, outer: Rule) -> Report 
 fn associativity(trios: &[Trio]) -> Report {
     let mut report = Report::default();
     for &trio in trios {
-        let mut model = a_model();
-        let (block, cone) = trio.pair.build_into(&mut model);
-        let third = model
-            .add_cube(
-                trio.third_side,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a whole-number cube");
-        let [x, y, z] = trio.third_at;
-        model
-            .place_solid(
-                third,
-                &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
-            )
-            .expect("this model made the key");
-
-        let left = united_in_turn(&model, &[block], &[cone], &[third]);
-        let right = united_in_turn(&model, &[cone], &[third], &[block]);
-        match (left, right) {
+        match both_groupings(trio) {
             (Ok((left_model, left_pieces)), Ok((right_model, right_pieces))) => report.compare(
                 &format!("{trio:?}: block ∪ (cone ∪ third) against (block ∪ cone) ∪ third"),
                 (&right_model, &right_pieces),
@@ -841,6 +866,36 @@ fn associativity(trios: &[Trio]) -> Report {
         }
     }
     report
+}
+
+/// `(block ∪ cone) ∪ third` and `(cone ∪ third) ∪ block`, in that order, each
+/// built into a fresh model.
+fn both_groupings(
+    trio: Trio,
+) -> (
+    Result<(Model, Vec<SolidKey>), String>,
+    Result<(Model, Vec<SolidKey>), String>,
+) {
+    let mut model = a_model();
+    let (block, cone) = trio.pair.build_into(&mut model);
+    let third = model
+        .add_cube(
+            trio.third_side,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a whole-number cube");
+    let [x, y, z] = trio.third_at;
+    model
+        .place_solid(
+            third,
+            &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
+        )
+        .expect("this model made the key");
+    (
+        united_in_turn(&model, &[block], &[cone], &[third]),
+        united_in_turn(&model, &[cone], &[third], &[block]),
+    )
 }
 
 /// Unite the first two, then unite that with the third; a refusal at either
