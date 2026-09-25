@@ -118,6 +118,19 @@
 //! it fails when the number *drops*, because a drop means the split's modulus
 //! has been changed and §95.4 is out of date. It survived the rule moving off
 //! the split untouched, which is the evidence that the two are separate defects.
+//!
+//! # Both ways round
+//!
+//! Every two-sided union and intersection is fused again with the sides
+//! swapped and held to the first answer the way `fuses_that_must_agree.rs`'s
+//! commutativity is (`tests/fuzzing/fuse.rs` says how, and why it is a copy).
+//! Measured 2026-09-25 on `0c1346f9` plus this change: `asked_both_ways_round:
+//! 106, the_same_both_ways_round: 19, a_solid_one_way_round_only: 3`, and no
+//! disagreement. The floors are three quarters of the first two. The three are
+//! counted and not failed, as that file counts them on flat solids: seeds
+//! `2e9c4138…`, `65452b22…` and `1422656e…`, header `0x94`, whose second half
+//! is a certified intersection of two six-faced solids that answers one way
+//! round and is `ResultIsNotManifold` the other — §48.2 item 5's class.
 
 #![forbid(unsafe_code)]
 
@@ -125,7 +138,12 @@ mod fuzzing;
 
 use std::path::PathBuf;
 
-use fuzzing::fuse::{Reached, two_models_split_and_fused};
+use fuzzing::fuse::{
+    Agreed, Reached, WhatCameBack, both_ways_round, the_answer_written_out,
+    two_models_split_and_fused,
+};
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{Model, Rule};
 
 /// Where the checked-in corpus lives.
 fn corpus() -> PathBuf {
@@ -216,11 +234,76 @@ fn every_seed_in_the_checked_in_corpus_is_fused_without_panicking() {
         reached.two_sided_differences
     );
     assert!(
+        reached.asked_both_ways_round >= 80,
+        "only {} unions and intersections were asked the other way round too, so \
+         the commutativity check is reaching almost nothing (§129.5 item 3)",
+        reached.asked_both_ways_round
+    );
+    assert!(
+        reached.the_same_both_ways_round >= 14,
+        "only {} fuses answered both ways round and were compared, so the \
+         comparison is passing for free",
+        reached.the_same_both_ways_round
+    );
+    assert!(
         reached.one_sided * 2 > reached.fused,
         "fewer than half of {} fuses had a side with nothing in it, which \
          would mean the split's own modulus has been changed — move this \
          assertion and §95.4 rather than deleting them",
         reached.fused
+    );
+}
+
+/// **The both-ways-round check tells two different answers apart**, and holds
+/// "not a solid" against an answer the way `fuses_that_must_agree.rs` does.
+///
+/// The union and the intersection of the two overlapping cubes are two real
+/// answers of the same model, so handing them over as the two orders of one
+/// fuse is a disagreement the check has to refuse. Without it the replay above
+/// would pass whatever the two orders answered.
+#[test]
+fn the_check_both_ways_round_refuses_two_different_answers() {
+    let bytes = std::fs::read(corpus().join("two_cubes_that_fuse")).expect("a control seed");
+    let rest = &bytes[1..];
+    let model: Model = postcard::from_bytes(&rest[..rest.len() / 2]).expect("two cubes decode");
+    let cubes: Vec<_> = model.solids().map(|solid| solid.key()).collect();
+    let answered = |rule| {
+        let mut model = model.clone();
+        let fused = model
+            .fuse(
+                &cubes[..1],
+                &cubes[1..],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("two overlapping cubes fuse");
+        WhatCameBack::Answered(the_answer_written_out(&model, fused.solids()))
+    };
+    let (united, shared) = (answered(Rule::Union), answered(Rule::Intersection));
+
+    assert_eq!(
+        both_ways_round(&united, &answered(Rule::Union), true, Rule::Union),
+        Ok(Agreed::TheSameAnswer),
+        "the same fuse asked twice"
+    );
+    assert!(
+        both_ways_round(&united, &shared, true, Rule::Union).is_err(),
+        "a union and an intersection of two overlapping cubes passed for the same answer"
+    );
+    assert_eq!(
+        both_ways_round(&WhatCameBack::NotASolid, &shared, true, Rule::Intersection),
+        Ok(Agreed::ASolidOneWayRoundOnly),
+        "flat solids: counted, as §48.2 item 5 is on the flat families"
+    );
+    assert!(
+        both_ways_round(&shared, &WhatCameBack::NotASolid, false, Rule::Intersection).is_err(),
+        "a curved solid that is a solid one way round and not the other passed"
+    );
+    assert_eq!(
+        both_ways_round(&WhatCameBack::Refused, &shared, false, Rule::Intersection),
+        Ok(Agreed::NothingToCompare),
+        "a refusal on one side is held to nothing"
     );
 }
 
@@ -254,6 +337,12 @@ fn the_named_control_seeds_still_land_either_side_of_the_fuse() {
         reached.two_sided_unions, 1,
         "the first half unions the two cubes, which nothing could draw before \
          the rule moved off the split: {reached:?}"
+    );
+
+    assert_eq!(
+        reached.the_same_both_ways_round, 2,
+        "a union and an intersection of two overlapping cubes, each the same \
+         solid bit for bit whichever cube goes first: {reached:?}"
     );
 
     let reached = control_seed("two_cubes_touching_along_one_edge");
