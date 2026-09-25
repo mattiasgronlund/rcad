@@ -26,7 +26,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rcad_geom::{Deflection, EdgeRun, Surface, Vector};
+use rcad_geom::{Deflection, EdgeRun, Plane, Point, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile, Value};
 use written_by_hand::{a_block, a_quarter_disc_plate};
@@ -593,22 +593,34 @@ fn how_often_a_real_file_imports() {
 /// `rcad_geom::walk` pairs such a plane with one of the faces and walks where
 /// the two cross, without asking the other face (`docs/decisions.md` §189.3,
 /// widened to every curved face by §220.4). So the plane is only safe to write
-/// where the reader has checked the file's circle lies on every face, and
-/// `rcad-step` has that check for a ball and a pipe alone. The check is gone by
-/// the time the model is built, so this asks what it would have had to be true
-/// of: a circle can lie on any ball, but on a pipe only if its plane is square
-/// to the pipe's axis. A plane beside a cone or a torus, or leaning off a pipe,
-/// is one nobody checked. Until §220.4 the reader wrote one beside every arc
-/// between two curved faces, ellipses where two pipes cross among them.
+/// where the reader has checked the file's curve lies on every face. The check
+/// is gone by the time the model is built, so this asks what it would have had
+/// to be true of:
 ///
-/// A closed circle between two curved faces that are not one surface bit for
+/// - a circle can lie on any ball;
+/// - on a pipe, a circle's plane is square to the axis, and an ellipse's plane
+///   leans and cuts **every** face along the edge in the one ellipse: every
+///   face a pipe of one radius, each axis crossing the plane at one point and
+///   leaning off it the same way;
+/// - on a cone, the plane is square to the axis;
+/// - on a torus, the plane is square to the axis bit for bit, or holds the
+///   axis — the two families the walk tells apart.
+///
+/// Anything else is a plane nobody checked. Until §220.4 the reader wrote one
+/// beside every arc between two curved faces, ellipses where two pipes cross
+/// among them, and from then until §222.2's two gaps were closed it wrote one
+/// only for a circle on a ball or a pipe.
+///
+/// A closed curve between two curved faces that are not one surface bit for
 /// bit is held to the same check since §219.6's closed branch was brought in
 /// line with the arc's, and `closed` counts how many of the checked ones those
-/// are.
+/// are. `kinds` counts the checked ones that only the §222.2 bounds pass, as
+/// `[arcs, closed]`.
 #[derive(Default)]
 struct PlanesBetweenCurvedFaces {
     checked: usize,
     closed: usize,
+    kinds: BTreeMap<&'static str, [usize; 2]>,
     unchecked: Vec<String>,
     the_most_a_square_pipe_leans: f64,
 }
@@ -620,14 +632,16 @@ fn how_far_a_pipe_leans_off_square(normal: Vector, axis: Vector) -> f64 {
     normal.cross(axis).length()
 }
 
-/// How far a pipe's axis may lean off the normal of a plane a circle on it
-/// lies in, as a sine.
+/// How far a surface's axis may lean off the normal of a plane a circle on it
+/// lies in, as a sine, and how far two ellipses' numbers may differ, relative
+/// to their size, and still be read as one.
 ///
 /// Not a modelling tolerance and not what the reader checks — the reader's
-/// check is `a_circle_every_face_holds`, in the reader. This only tells a circle's plane from an
-/// ellipse's, which lean by a large angle or not at all: the corpus's worst
-/// square pipe leans `2.7e-15`, printed beside the count, and the mitre named
-/// under [`A_PLANE_BETWEEN_CURVED_FACES`] leans `0.707`.
+/// check is `every_face_holds_the_curve`, in the reader. This only tells a
+/// circle's plane from an ellipse's, which lean by a large angle or not at
+/// all: the corpus's worst square pipe leans `2.7e-15`, printed beside the
+/// count, and the mitre named under [`A_PLANE_BETWEEN_CURVED_FACES`] leans
+/// `0.707`.
 const A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST: f64 = 1e-12;
 
 impl PlanesBetweenCurvedFaces {
@@ -649,22 +663,42 @@ impl PlanesBetweenCurvedFaces {
             if !all_curved || faces.windows(2).all(|pair| pair[0] == pair[1]) {
                 continue;
             }
-            // A ball holds a circle in any plane, a pipe one in a plane square
-            // to its axis, and nothing else has a check in the reader at all.
+            let normal = flat.normal();
+            let square = |axis: Vector| {
+                how_far_a_pipe_leans_off_square(normal, axis)
+                    <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST
+            };
+            let mut kind = None;
             let a_circle_on_it_could_be_on_every_face = faces.iter().all(|face| {
-                let Surface::Cylinder(pipe) = face else {
-                    return matches!(face, Surface::Sphere(_));
-                };
-                let lean = how_far_a_pipe_leans_off_square(flat.normal(), pipe.axis().direction());
-                let square = lean <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST;
-                if square {
-                    self.the_most_a_square_pipe_leans = self.the_most_a_square_pipe_leans.max(lean);
+                if let Surface::Cylinder(pipe) = face {
+                    let lean = how_far_a_pipe_leans_off_square(normal, pipe.axis().direction());
+                    if square(pipe.axis().direction()) {
+                        self.the_most_a_square_pipe_leans =
+                            self.the_most_a_square_pipe_leans.max(lean);
+                        return true;
+                    }
+                    kind = Some("an ellipse on a pipe");
+                    return one_ellipse_on_every_pipe(flat, &faces);
                 }
-                square
+                if let Surface::Cone(cone) = face {
+                    kind = kind.or(Some("a circle on a cone"));
+                    return square(cone.axis().direction());
+                }
+                if let Surface::Torus(ring) = face {
+                    kind = kind.or(Some("a circle on a torus"));
+                    let up = ring.axis().direction();
+                    return normal.cross(up) == Vector::zero()
+                        || normal.normalized().expect("a normal").dot(up).abs()
+                            <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST;
+                }
+                matches!(face, Surface::Sphere(_))
             });
             if a_circle_on_it_could_be_on_every_face {
                 self.checked += 1;
                 self.closed += usize::from(closed);
+                if let Some(kind) = kind {
+                    self.kinds.entry(kind).or_default()[usize::from(closed)] += 1;
+                }
             } else {
                 self.unchecked
                     .push(format!("{file}: {faces:?} and {and:?}"));
@@ -677,11 +711,13 @@ impl PlanesBetweenCurvedFaces {
     fn assert_every_one_was_checked(&self) {
         println!(
             "planes between two curved faces: {} a check could pass ({} of them closed), {} it \
-             could not; the most a square pipe leans is {:e}",
+             could not; the most a square pipe leans is {:e}; passed only by §222.2's bounds, as \
+             [arcs, closed]: {:?}",
             self.checked,
             self.closed,
             self.unchecked.len(),
-            self.the_most_a_square_pipe_leans
+            self.the_most_a_square_pipe_leans,
+            self.kinds
         );
         assert!(
             self.unchecked.is_empty(),
@@ -698,9 +734,54 @@ impl PlanesBetweenCurvedFaces {
     }
 }
 
+/// Whether `flat` cuts every face in the one ellipse: every face a pipe of one
+/// radius, whose axis crosses `flat` at one point and leans off it the same
+/// way, which gives every pipe the same centre, the same two semi-axes and the
+/// same long direction.
+fn one_ellipse_on_every_pipe(flat: &Plane, faces: &[Surface]) -> bool {
+    let normal = flat
+        .normal()
+        .normalized()
+        .expect("a plane's normal has a length");
+    let Some(ellipses) = faces
+        .iter()
+        .map(|face| {
+            let Surface::Cylinder(pipe) = face else {
+                return None;
+            };
+            let line = pipe.axis();
+            let along = line.direction();
+            let reach = (flat.offset() - flat.normal().dot(line.origin() - Point::origin()))
+                / flat.normal().dot(along);
+            Some((
+                line.origin() + along * reach,
+                along - normal * along.dot(normal),
+                along.dot(normal).abs(),
+                pipe.radius(),
+            ))
+        })
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let (centre, long_way, square, radius) = ellipses[0];
+    let near = |one: f64, other: f64, size: f64| {
+        (one - other).abs() <= A_PIPE_SQUARE_TO_ITS_CIRCLE_LEANS_AT_MOST * size.max(1.0)
+    };
+    ellipses.iter().all(|(there, way, how_square, how_wide)| {
+        near(
+            centre.distance_to(*there),
+            0.0,
+            centre.largest_coordinate_magnitude(),
+        ) && near(long_way.cross(*way).length(), 0.0, 1.0)
+            && near(square, *how_square, 1.0)
+            && near(radius, *how_wide, radius)
+    })
+}
+
 /// How many imported arcs have to name a plane between two curved faces.
 ///
-/// Measured at 354 on 2026-09-24, with 0 a check could not have passed, by
+/// Measured at 688 on 2026-09-25, with 0 a check could not have passed, by
 ///
 /// ```text
 /// mise exec -- just t -p rcad-step --no-capture -E 'test(=how_often_a_real_file_imports)'
@@ -708,8 +789,11 @@ impl PlanesBetweenCurvedFaces {
 ///
 /// and floored at three quarters. Before §220.4 the same files held 848, and 494
 /// of them were planes no check could have passed — the first a mitre where two
-/// pipes of `Relay_DPDT_FCL_FTR-B4C.step` cross in an ellipse at 45°.
-const A_PLANE_BETWEEN_CURVED_FACES: usize = 265;
+/// pipes of `Relay_DPDT_FCL_FTR-B4C.step` cross in an ellipse at 45°. From
+/// §220.4 until the ellipse got a bound there were 354, every one a circle; the
+/// 334 more are ellipses where pipes of one radius meet, that mitre among them,
+/// which the reader now checks rather than naming by a face.
+const A_PLANE_BETWEEN_CURVED_FACES: usize = 516;
 
 /// A corner off the surface it is meant to be on is **two** problems, and both
 /// corpora together have to hold both or the report is describing a corpus this

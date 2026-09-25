@@ -672,7 +672,7 @@ impl Walk {
     ///
     /// This is the one place the reader describes an edge the file wrote as
     /// one as two. Between a ball and a curved face it is limited to the circle
-    /// [`Walk::a_circle_every_face_holds`] passes, where the two only touch and
+    /// [`Walk::every_face_holds_the_curve`] passes, where the two only touch and
     /// nothing but the file's circle draws where (`docs/decisions.md` §189.3).
     fn describe_the_halves_of_a_circle(
         &mut self,
@@ -709,7 +709,7 @@ impl Walk {
         let position = reading.reference_at(curve, "CIRCLE", 1)?;
         let place = reading.placement_at(curve, position)?;
         if a_ball_and_a_curved_face
-            && !self.a_circle_every_face_holds(reading, edge_curve, curve, "CIRCLE", &place)?
+            && !self.every_face_holds_the_curve(reading, edge_curve, curve, "CIRCLE", &place)?
         {
             return Ok(None);
         }
@@ -960,23 +960,24 @@ impl Walk {
     /// an `and` whose curve is not where the file's is (§216, §16.10).
     ///
     /// **Between curved faces that are not one surface bit for bit, the run is
-    /// named the way an arc's is**: by the circle's own plane where the file's
-    /// circle has been checked to lie on every face, and by the faces
+    /// named the way an arc's is**: by the curve's own plane where the file's
+    /// curve has been checked to lie on every face, and by the faces
     /// ([`EdgeRun::RightRoundWhereItsFacesCross`]) where it has not — see
-    /// [`Walk::the_surface_that_names_the_curve`]. That covers one pipe written
-    /// twice a hair apart, whose two spellings cross nowhere near the rim, with
-    /// no tolerance on the surfaces: the check is on the file's circle, and the
-    /// plane crosses either face in exactly that circle (§220.4 for arcs). It is
-    /// also right for two genuinely different curved faces that hold one
-    /// circle — a ball and a pipe of its radius on its axis, which only touch
-    /// round it (§189.3), or two balls that cross in it: the plane crosses each
+    /// [`Walk::the_surface_that_names_the_curve`]. That covers one pipe, cone or
+    /// torus written twice a hair apart, whose two spellings cross nowhere near
+    /// the rim, with no tolerance on the surfaces: the check is on the file's
+    /// curve, and the plane crosses either face in exactly that curve (§220.4
+    /// for arcs). It is also right for two genuinely different curved faces
+    /// that hold one circle — a ball and a pipe of its radius on its axis, which
+    /// only touch round it (§189.3), a ball resting in a cone, a pipe round a
+    /// torus's outer rim, or two balls that cross in it: the plane crosses each
     /// of them in the one circle, so `rcad_geom::walk`'s `[face, and]` draws
     /// the same curve the two faces would, and draws it where they only touch.
     ///
     /// **Everywhere else the faces keep
     /// [`EdgeRun::RightRoundWhereItsFacesCross`]**: a flat face and a curved
-    /// one cross in the curve and want nothing from this reader, and a closed
-    /// `ELLIPSE`, or a circle on a cone or a torus, has no check here.
+    /// one cross in the curve and want nothing from this reader, and a curve
+    /// [`Walk::every_face_holds_the_curve`] has no bound for is left to them.
     fn round_run(
         &self,
         reading: &Reading<'_>,
@@ -999,7 +1000,7 @@ impl Walk {
         let place = reading.placement_at(curve, position)?;
         if right_round
             && curved_faces_meet
-            && !self.a_circle_every_face_holds(reading, edge_curve, curve, keyword, &place)?
+            && !self.every_face_holds_the_curve(reading, edge_curve, curve, keyword, &place)?
         {
             return Ok(EdgeRun::RightRoundWhereItsFacesCross);
         }
@@ -1043,23 +1044,24 @@ impl Walk {
     /// a great circle to a tangency.
     ///
     /// **Between two curved faces the walk reads the plane**, so the plane is
-    /// written only where the file's circle has been checked to lie on every
-    /// face along it — [`Walk::a_circle_every_face_holds`]. The walk has no way
-    /// to check the plane itself, so the reader does. A ball and a pipe that only touch round the circle
-    /// leave the marcher nothing to follow (`docs/decisions.md` §189.3). A pipe
-    /// written twice a hair apart names two nearly-coincident pipes, which
-    /// cross nowhere near the rim (§220.4). In both the plane crosses a face in
-    /// the file's circle, and `rcad_geom::walk` draws it from that pair.
+    /// written only where the file's curve has been checked to lie on every
+    /// face along it — [`Walk::every_face_holds_the_curve`]. The walk has no way
+    /// to check the plane itself, so the reader does. A ball and a pipe that
+    /// only touch round the circle leave the marcher nothing to follow
+    /// (`docs/decisions.md` §189.3). A pipe written twice a hair apart names two
+    /// nearly-coincident pipes, which cross nowhere near the rim (§220.4). In
+    /// both the plane crosses a face in the file's curve, and `rcad_geom::walk`
+    /// draws it from that pair.
     ///
     /// **Where the check fails the run names one of its own faces instead** —
     /// the ball if there is one, since the ball is the face the walk pairs with
     /// the plane — so the walk reads the two faces exactly as it did before the
-    /// plane was read at all. That is every `ELLIPSE`, and every arc along a
-    /// cone or a torus, which [`a_surface_holds_the_circle`] has no bound for:
-    /// a plane crosses a torus in two circles and a slanted pipe in an ellipse,
-    /// so an unchecked plane written there would hand the walk a curve the
-    /// file never drew. A plane beside two curved faces therefore always means
-    /// a circle every face holds.
+    /// plane was read at all. That is every curve the check has no bound for:
+    /// an `ELLIPSE` on anything but a pipe, and a circle on a torus that is
+    /// neither square to its axis nor round its tube. A plane crosses a torus
+    /// in two circles and a slanted pipe in an ellipse, so an unchecked plane
+    /// written there would hand the walk a curve the file never drew. A plane
+    /// beside two curved faces therefore always means a curve every face holds.
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1074,7 +1076,7 @@ impl Walk {
         };
         let faces_along_it = self.surfaces_along_each_edge.get(&edge_curve);
         if let Some(face) = faces_along_it.and_then(|faces| a_face_where_curved_faces_meet(faces))
-            && !self.a_circle_every_face_holds(reading, edge_curve, curve, keyword, place)?
+            && !self.every_face_holds_the_curve(reading, edge_curve, curve, keyword, place)?
         {
             return Ok(face);
         }
@@ -1092,22 +1094,34 @@ impl Walk {
         Ok(Surface::Plane(flat))
     }
 
-    /// Whether the file's `CIRCLE` under this edge lies on the surface of every
-    /// face along it, to within what writing the numbers down costs.
+    /// Whether the file's `CIRCLE` or `ELLIPSE` under this edge lies on the
+    /// surface of every face along it, to within what writing the numbers down
+    /// costs.
     ///
-    /// **This is what lets the reader name a run by the file's circle rather
+    /// **This is what lets the reader name a run by the file's curve rather
     /// than by its faces, and the file's word is not taken for it.** Each face's
-    /// surface is asked in closed form, against the circle's centre `c`, unit
-    /// axis `w` and radius `r` — see [`a_surface_holds_the_circle`] for the two
-    /// bounds. A surface this does not have a bound for holds nothing, so the
-    /// run keeps being named by its faces there.
+    /// surface is asked in closed form, against the curve's centre, the normal
+    /// of the plane it lies in, and its size — see [`a_surface_holds_the_circle`]
+    /// and [`a_surface_holds_the_ellipse`] for the bounds. A surface this does
+    /// not have a bound for holds nothing, so the run keeps being named by its
+    /// faces there.
+    ///
+    /// **The normal is the one the plane this run would name is stored with**,
+    /// not a second rounding of the file's direction. The walk tells a torus's
+    /// two families of flat crossings apart by whether that stored normal
+    /// crosses the torus's axis to exactly nothing, so the check has to ask the
+    /// same vector the walk will.
     ///
     /// The allowance is the one `Model::validate` gives a corner of a curved
     /// face: sixteen times the rounding of writing the largest number involved
     /// down. It is not a modelling tolerance. On the KiCad LED body it passes a
     /// dome whose centre is the circle's own and a body whose axis the centre
     /// misses by `2.1e-16`, and it refuses a circle a thousandth of a unit off.
-    fn a_circle_every_face_holds(
+    ///
+    /// An `ELLIPSE` whose placement leaves out its reference direction holds
+    /// nothing: which way its long axis runs is then a default the schema
+    /// chooses, and nothing here reads that default.
+    fn every_face_holds_the_curve(
         &self,
         reading: &Reading<'_>,
         edge_curve: EntityId,
@@ -1115,19 +1129,43 @@ impl Walk {
         keyword: &'static str,
         place: &crate::geometry::Placement,
     ) -> Result<bool, Refusal> {
-        if keyword != "CIRCLE" {
-            return Ok(false);
-        }
         let Some(faces) = self.surfaces_along_each_edge.get(&edge_curve) else {
             return Ok(false);
         };
-        let radius = reading.real_at(curve, "CIRCLE", 2)?;
-        let Ok(axis) = place.axis.normalized() else {
+        let Ok(its_plane) = Plane::from_point_and_normal(place.origin, place.axis) else {
             return Ok(false);
         };
-        Ok(faces
-            .iter()
-            .all(|face| a_surface_holds_the_circle(face, place.origin, axis, radius)))
+        let normal = its_plane.normal();
+        match keyword {
+            "CIRCLE" => {
+                let radius = reading.real_at(curve, "CIRCLE", 2)?;
+                Ok(faces
+                    .iter()
+                    .all(|face| a_surface_holds_the_circle(face, place.origin, normal, radius)))
+            }
+            "ELLIPSE" => {
+                let Some(reference) = place.reference else {
+                    return Ok(false);
+                };
+                let Ok(first_way) = (reference - normal * reference.dot(normal)).normalized()
+                else {
+                    return Ok(false);
+                };
+                let ellipse = Ellipse {
+                    centre: place.origin,
+                    first_way,
+                    second_way: normal.cross(first_way),
+                    semi_axes: [
+                        reading.real_at(curve, "ELLIPSE", 2)?,
+                        reading.real_at(curve, "ELLIPSE", 3)?,
+                    ],
+                };
+                Ok(faces
+                    .iter()
+                    .all(|face| a_surface_holds_the_ellipse(face, &ellipse)))
+            }
+            other => unreachable!("round_run is only handed a CIRCLE or an ELLIPSE, not {other}"),
+        }
     }
 
     /// The arc of a circle or an ellipse that runs from one corner to the other.
@@ -1812,6 +1850,33 @@ fn the_faces_along_it_name_no_crossing(faces: &[Surface]) -> bool {
 ///   is between `r·(1 − sin θ) − q` and `r + q` from the axis, and
 ///   `|r − R| + q + r·sin θ` bounds how far any point is from the pipe.
 ///
+/// The cone and the torus are surfaces turned round an axis, and a point's
+/// distance from one is read off two numbers: `ρ`, how far the point is from
+/// the axis, and `z`, how far along it. For the circle those move by
+/// `|ρ − r| ≤ q + r·sin θ` and `|z − z_c| ≤ r·sin θ` from what its centre
+/// gives, with `q`, `θ` as for the pipe and `z_c` the centre's own `z`.
+///
+/// - **A cone** of apex `p`, axis `a` and slope `s = tan α`. Its two nappes
+///   are the lines `ρ = ±s·z` in every half-plane through the axis, so a
+///   point is `|ρ·cos α − |z|·sin α|` from it. That moves by at most
+///   `|Δρ| + |Δz|`, so `|r·cos α − |z_c|·sin α| + q + 2·r·sin θ` bounds every
+///   point of the circle.
+/// - **A torus** of centre `o`, axis `a`, ring `R` and tube `ρ_t`. A point is
+///   `|√((ρ − R)² + z²) − ρ_t|` from it, and the root moves by at most
+///   `|Δρ| + |Δz|`, so a circle turning about the torus's axis is bounded by
+///   `|√((r − R)² + z_c²) − ρ_t| + q + 2·r·sin θ`, where `sin θ` is a
+///   rounding at most because this is only asked where `w × a` came out
+///   exactly nothing, and is left out. A circle round the tube is
+///   bounded instead by how far it is from the tube circle it is nearest:
+///   with `m` the point of the centre circle nearest `c` and `t` the centre
+///   circle's direction there, that circle is `m`, `t`, `ρ_t`, and a point of
+///   one circle is at most `|c − m| + |r − ρ_t| + 2·r·sin φ` from the point
+///   of the other the turn from `w` to `t` takes it to, `sin φ = |w × t|`.
+///   Which of the two is asked is what the walk asks — whether `w` crosses
+///   `a` to exactly nothing — because the walk draws a flat crossing of a
+///   torus from the torus alone once it has picked a family, and a circle
+///   leaning a rounding off square would otherwise be drawn round the tube.
+///
 /// These are worked out in plain `f64`, and the allowance is
 /// [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] times the rounding of the largest number
 /// in them, so the few roundings each bound costs cannot carry a circle that
@@ -1862,21 +1927,14 @@ const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
 
 /// The furthest any point of the circle can be from `surface`, and the
 /// largest number the bound was worked out from — see
-/// [`a_surface_holds_the_circle`] for the two bounds. `None` for a surface
-/// with no bound here.
+/// [`a_surface_holds_the_circle`] for the bounds. `None` for a surface with no
+/// bound here.
 fn how_far_off_the_circle_can_be(
     surface: &Surface,
     centre: Point,
     axis: Vector,
     radius: f64,
 ) -> Option<(f64, f64)> {
-    let largest_of = |points: [Point; 2], lengths: [f64; 2]| {
-        points
-            .iter()
-            .map(Point::largest_coordinate_magnitude)
-            .chain(lengths.map(f64::abs))
-            .fold(0.0, f64::max)
-    };
     match surface {
         Surface::Sphere(ball) => {
             let off = centre - ball.centre();
@@ -1884,18 +1942,9 @@ fn how_far_off_the_circle_can_be(
             let across = (off - axis * along).length();
             let [outer, inner] = [radius + across, (radius - across).abs()]
                 .map(|round| ((along * along + round * round).sqrt() - ball.radius()).abs());
-            // Not `f64::max`, which drops a NaN and would hold the circle on
-            // the other bound. `abs` leaves a NaN positive, and `total_cmp`
-            // sorts a positive NaN above everything, so it reaches the
-            // comparison and fails it.
-            let furthest = if outer.total_cmp(&inner).is_ge() {
-                outer
-            } else {
-                inner
-            };
             Some((
-                furthest,
-                largest_of([centre, ball.centre()], [radius, ball.radius()]),
+                the_further_of(outer, inner),
+                largest_of(&[centre, ball.centre()], &[radius, ball.radius()]),
             ))
         }
         Surface::Cylinder(pipe) => {
@@ -1904,14 +1953,144 @@ fn how_far_off_the_circle_can_be(
             let across = line.distance_to_point(centre);
             Some((
                 (radius - pipe.radius()).abs() + across + radius * tilt,
-                largest_of([centre, line.origin()], [radius, pipe.radius()]),
+                largest_of(&[centre, line.origin()], &[radius, pipe.radius()]),
             ))
         }
-        Surface::Plane(_) | Surface::Cone(_) | Surface::Torus(_) => None,
+        Surface::Cone(cone) => {
+            let line = cone.axis();
+            let tilt = axis.cross(line.direction()).length();
+            let across = line.distance_to_point(centre);
+            let along = (centre - cone.apex()).dot(line.direction()).abs();
+            let hypotenuse = cone.slope().hypot(1.0);
+            let [cos, sin] = [hypotenuse.recip(), cone.slope() / hypotenuse];
+            Some((
+                (radius * cos - along * sin).abs() + across + 2.0 * radius * tilt,
+                largest_of(&[centre, cone.apex()], &[radius, along]),
+            ))
+        }
+        Surface::Torus(ring) => {
+            let line = ring.axis();
+            let up = line.direction();
+            let off = centre - ring.centre();
+            let along = off.dot(up);
+            let largest = largest_of(&[centre, ring.centre()], &[radius, ring.ring_radius()]);
+            if axis.cross(up) == Vector::zero() {
+                let across = line.distance_to_point(centre);
+                let from_the_tube = (radius - ring.ring_radius()).hypot(along);
+                return Some(((from_the_tube - ring.tube_radius()).abs() + across, largest));
+            }
+            let outward = off - up * along;
+            let reach = outward.length();
+            let round_the_ring = up.cross(outward.normalized().ok()?);
+            Some((
+                (reach - ring.ring_radius()).hypot(along)
+                    + (radius - ring.tube_radius()).abs()
+                    + 2.0 * radius * axis.cross(round_the_ring).length(),
+                largest,
+            ))
+        }
+        Surface::Plane(_) => None,
         // A surface kind this reader has no bound for holds nothing, which
         // names the run by its faces as before.
         _ => None,
     }
+}
+
+/// The largest coordinate or length a bound was worked out from, which is
+/// what its roundings are measured against.
+fn largest_of(points: &[Point], lengths: &[f64]) -> f64 {
+    points
+        .iter()
+        .map(Point::largest_coordinate_magnitude)
+        .chain(lengths.iter().map(|length| length.abs()))
+        .fold(0.0, f64::max)
+}
+
+/// The larger of two distances, and a NaN if either is one.
+///
+/// Not `f64::max`, which drops a NaN and would hold the curve on the other
+/// bound. Both arguments are `abs` of something, which leaves a NaN positive,
+/// and `total_cmp` sorts a positive NaN above everything, so it reaches the
+/// comparison with the allowance and fails it.
+fn the_further_of(one: f64, other: f64) -> f64 {
+    if one.total_cmp(&other).is_ge() {
+        one
+    } else {
+        other
+    }
+}
+
+/// An `ELLIPSE` as the file writes it: `centre + a·cos t·first_way +
+/// b·sin t·second_way` for `semi_axes = [a, b]`, the two ways unit and square
+/// to each other and to the plane's normal.
+struct Ellipse {
+    centre: Point,
+    first_way: Vector,
+    second_way: Vector,
+    semi_axes: [f64; 2],
+}
+
+/// Whether every point of `ellipse` is within the allowance of `surface`.
+///
+/// **Only a pipe has a bound**, and it is exact but for how far the centre is
+/// off the axis. With `d` the pipe's unit axis, a point of the ellipse is
+/// `c + M(t)` and its part square to the axis is that of `c` plus that of
+/// `M(t)`. The second is as long as `M(t) × d`, and
+///
+/// ```text
+/// |M(t) × d|² = A²·cos²t + B²·sin²t + 2·C·cos t·sin t
+/// A = |a·u × d|,  B = |b·v × d|,  C = (a·u × d)·(b·v × d)
+/// ```
+///
+/// runs over exactly the two eigenvalues of `[[A², C], [C, B²]]` as `t`
+/// goes round, `(A² + B²)/2 ± √(((A² − B²)/2)² + C²)`. With `q` the distance
+/// from `c` to the axis, every point is within `q` of those two lengths from
+/// the axis, and the further of `|√λ − R|` over the two, plus `q`, bounds how
+/// far any point is from the pipe. An ellipse drawn where a plane cuts the
+/// pipe has `A = B = R` and `C = 0`.
+///
+/// **A ball, a cone and a torus hold nothing.** A ball holds no ellipse that
+/// is not a circle, and a file that writes a circle as an `ELLIPSE` with two
+/// equal axes loses nothing by being named by its faces. A plane cuts a cone
+/// in an ellipse too, but no file in either corpus writes one between two
+/// curved faces that anyone has counted, and a bound for it is §13's to wait
+/// for. A plane cuts a torus in an ellipse nowhere.
+fn a_surface_holds_the_ellipse(surface: &Surface, ellipse: &Ellipse) -> bool {
+    how_far_off_the_ellipse_can_be(surface, ellipse).is_some_and(|(off, largest)| {
+        off <= A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest
+    })
+}
+
+/// The furthest any point of `ellipse` can be from `surface`, and the largest
+/// number the bound was worked out from — see [`a_surface_holds_the_ellipse`].
+/// `None` for a surface with no bound here.
+fn how_far_off_the_ellipse_can_be(surface: &Surface, ellipse: &Ellipse) -> Option<(f64, f64)> {
+    let Surface::Cylinder(pipe) = surface else {
+        return None;
+    };
+    let line = pipe.axis();
+    let [first, second] = ellipse.semi_axes;
+    let across_first = ellipse.first_way.cross(line.direction()) * first;
+    let across_second = ellipse.second_way.cross(line.direction()) * second;
+    let [firsts, seconds, both] = [
+        across_first.length_squared(),
+        across_second.length_squared(),
+        across_first.dot(across_second),
+    ];
+    let middle = (firsts + seconds) / 2.0;
+    let spread = ((firsts - seconds) / 2.0).hypot(both);
+    let [nearest, furthest] = [(middle - spread).max(0.0).sqrt(), (middle + spread).sqrt()];
+    let off = the_further_of(
+        (furthest - pipe.radius()).abs(),
+        (nearest - pipe.radius()).abs(),
+    ) + line.distance_to_point(ellipse.centre);
+    Some((
+        off,
+        largest_of(
+            &[ellipse.centre, line.origin()],
+            &[first, second, pipe.radius()],
+        ),
+    ))
 }
 
 fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<HalfSpace> {
@@ -1991,12 +2170,15 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cylinder, NEAREST_F64_POINT_ROUNDOFF, Point, Sphere, Surface, Vector};
+    use rcad_geom::{
+        Axis, Cone, Cylinder, NEAREST_F64_POINT_ROUNDOFF, Point, Sphere, Surface, Torus, Vector,
+    };
     use rcad_predicates::{Decision, Point as PredicatePoint};
 
     use super::{
-        A_CIRCLE_MAY_MISS_ITS_FACE_BY, a_half_space_holding_both, a_surface_holds_the_circle,
-        how_far_off_the_circle_can_be,
+        A_CIRCLE_MAY_MISS_ITS_FACE_BY, Ellipse, a_half_space_holding_both,
+        a_surface_holds_the_circle, a_surface_holds_the_ellipse, how_far_off_the_circle_can_be,
+        how_far_off_the_ellipse_can_be,
     };
 
     /// The LED body's circle, written as the file writes it: on its dome
@@ -2082,6 +2264,382 @@ mod tests {
             axis,
             f64::NAN
         ));
+    }
+
+    /// A cone, a torus and a pipe, each with a curve drawn on it the way a
+    /// plane cuts it, and each curve held. The same curve a thousandth off —
+    /// its centre moved, or its size grown — is held by none of them
+    /// (`docs/decisions.md` §222.2).
+    #[test]
+    fn a_curve_on_a_cone_a_torus_or_a_pipe_is_held_and_one_a_thousandth_off_is_not() {
+        for (surface, curve) in curves_drawn_on_their_surfaces() {
+            assert!(
+                curve.held_by(&surface),
+                "{surface:?} does not hold {curve:?}, which is drawn on it"
+            );
+            for off in [
+                curve.moved(Vector::new(0.0, 0.0, 0.001)),
+                curve.moved(Vector::new(0.001, 0.0, 0.0)),
+                curve.grown(0.001),
+            ] {
+                assert!(
+                    !off.held_by(&surface),
+                    "{surface:?} holds {off:?}, a thousandth off the curve drawn on it"
+                );
+            }
+        }
+    }
+
+    /// Every bound [`how_far_off_the_circle_can_be`] and
+    /// [`how_far_off_the_ellipse_can_be`] publish for the cone, the torus and
+    /// the ellipse on a pipe, held against the curve itself (§15.6): 720
+    /// points round each curve, each point's distance from the surface worked
+    /// out from the closed form for that surface, and none of them further than
+    /// the bound.
+    ///
+    /// The curves are the ones drawn on their surfaces, moved, grown, tilted
+    /// and turned by `1e-9` up to `0.3`, so every bound here is many orders of
+    /// magnitude above what working a point out in `f64` costs. That cost is
+    /// the four roundings of the largest number allowed on top of the bound,
+    /// and it is the whole of the slack: a bound that fell short by more than
+    /// a rounding would fail here.
+    ///
+    /// **The control is that each curve's bound is reached**: over its draws,
+    /// some point comes within half of it, or a bound of infinity would pass
+    /// this test as well as a good one.
+    #[test]
+    fn no_point_of_a_curve_is_further_off_its_surface_than_its_bound() {
+        let mut drawn = 0;
+        for (surface, curve) in curves_drawn_on_their_surfaces() {
+            let mut the_most_of_its_bound_reached: f64 = 0.0;
+            for size in [0.0, 1e-9, 1e-6, 1e-3, 0.3] {
+                for off in [
+                    curve.moved(Vector::new(size, -0.5 * size, 0.25 * size)),
+                    curve.grown(size),
+                    curve.grown(-size),
+                    curve.tilted(size),
+                    curve.turned(size),
+                    curve
+                        .moved(Vector::new(-size, size, size))
+                        .tilted(size)
+                        .grown(size),
+                ] {
+                    let (bound, largest) = off.bound_on(&surface).expect("a bound for each");
+                    let furthest = off
+                        .points(720)
+                        .map(|point| distance_from(&surface, point))
+                        .fold(0.0, f64::max);
+                    assert!(
+                        furthest <= bound + 4.0 * NEAREST_F64_POINT_ROUNDOFF * largest,
+                        "{off:?} has a point {furthest} off {surface:?}, past its bound {bound}"
+                    );
+                    if size > 0.0 {
+                        the_most_of_its_bound_reached =
+                            the_most_of_its_bound_reached.max(furthest / bound);
+                    }
+                    drawn += 1;
+                }
+            }
+            assert!(
+                the_most_of_its_bound_reached >= 0.5,
+                "no draw of {curve:?} on {surface:?} came within half its bound, the most being \
+                 {the_most_of_its_bound_reached}"
+            );
+        }
+        assert_eq!(
+            drawn, 150,
+            "the draw must not shrink without somebody saying so"
+        );
+    }
+
+    /// A curve these tests draw, as the reader would hand it to a bound.
+    #[derive(Clone, Copy, Debug)]
+    enum Curve {
+        Circle {
+            centre: Point,
+            axis: Vector,
+            radius: f64,
+        },
+        Ellipse {
+            centre: Point,
+            first_way: Vector,
+            second_way: Vector,
+            semi_axes: [f64; 2],
+        },
+    }
+
+    impl Curve {
+        fn held_by(&self, surface: &Surface) -> bool {
+            match *self {
+                Curve::Circle {
+                    centre,
+                    axis,
+                    radius,
+                } => a_surface_holds_the_circle(surface, centre, axis, radius),
+                Curve::Ellipse { .. } => a_surface_holds_the_ellipse(surface, &self.as_ellipse()),
+            }
+        }
+
+        fn bound_on(&self, surface: &Surface) -> Option<(f64, f64)> {
+            match *self {
+                Curve::Circle {
+                    centre,
+                    axis,
+                    radius,
+                } => how_far_off_the_circle_can_be(surface, centre, axis, radius),
+                Curve::Ellipse { .. } => {
+                    how_far_off_the_ellipse_can_be(surface, &self.as_ellipse())
+                }
+            }
+        }
+
+        fn as_ellipse(&self) -> Ellipse {
+            let Curve::Ellipse {
+                centre,
+                first_way,
+                second_way,
+                semi_axes,
+            } = *self
+            else {
+                unreachable!("only an ellipse is asked for as one")
+            };
+            Ellipse {
+                centre,
+                first_way,
+                second_way,
+                semi_axes,
+            }
+        }
+
+        fn moved(self, by: Vector) -> Self {
+            match self {
+                Curve::Circle {
+                    centre,
+                    axis,
+                    radius,
+                } => Curve::Circle {
+                    centre: centre + by,
+                    axis,
+                    radius,
+                },
+                Curve::Ellipse {
+                    centre,
+                    first_way,
+                    second_way,
+                    semi_axes,
+                } => Curve::Ellipse {
+                    centre: centre + by,
+                    first_way,
+                    second_way,
+                    semi_axes,
+                },
+            }
+        }
+
+        fn grown(self, by: f64) -> Self {
+            match self {
+                Curve::Circle {
+                    centre,
+                    axis,
+                    radius,
+                } => Curve::Circle {
+                    centre,
+                    axis,
+                    radius: radius + by,
+                },
+                Curve::Ellipse {
+                    centre,
+                    first_way,
+                    second_way,
+                    semi_axes: [first, second],
+                } => Curve::Ellipse {
+                    centre,
+                    first_way,
+                    second_way,
+                    semi_axes: [first + by, second + by],
+                },
+            }
+        }
+
+        /// The plane the curve lies in turned by `angle` about the curve's
+        /// first direction across.
+        fn tilted(self, angle: f64) -> Self {
+            match self {
+                Curve::Circle {
+                    centre,
+                    axis,
+                    radius,
+                } => {
+                    let (_, and) = square_to(axis);
+                    Curve::Circle {
+                        centre,
+                        axis: axis * angle.cos() + and * angle.sin(),
+                        radius,
+                    }
+                }
+                Curve::Ellipse {
+                    centre,
+                    first_way,
+                    second_way,
+                    semi_axes,
+                } => {
+                    let normal = first_way.cross(second_way);
+                    Curve::Ellipse {
+                        centre,
+                        first_way,
+                        second_way: second_way * angle.cos() + normal * angle.sin(),
+                        semi_axes,
+                    }
+                }
+            }
+        }
+
+        /// The curve turned by `angle` in its own plane: nothing for a circle,
+        /// and the long direction of an ellipse swung round.
+        fn turned(self, angle: f64) -> Self {
+            match self {
+                Curve::Circle { .. } => self,
+                Curve::Ellipse {
+                    centre,
+                    first_way,
+                    second_way,
+                    semi_axes,
+                } => Curve::Ellipse {
+                    centre,
+                    first_way: first_way * angle.cos() + second_way * angle.sin(),
+                    second_way: second_way * angle.cos() - first_way * angle.sin(),
+                    semi_axes,
+                },
+            }
+        }
+
+        fn points(self, how_many: u32) -> impl Iterator<Item = Point> {
+            (0..how_many).map(move |step| {
+                let angle = std::f64::consts::TAU * f64::from(step) / f64::from(how_many);
+                match self {
+                    Curve::Circle {
+                        centre,
+                        axis,
+                        radius,
+                    } => {
+                        let (across, and) = square_to(axis);
+                        round_the_circle(centre, across, and, radius, angle)
+                    }
+                    Curve::Ellipse {
+                        centre,
+                        first_way,
+                        second_way,
+                        semi_axes: [first, second],
+                    } => {
+                        centre
+                            + first_way * (first * angle.cos())
+                            + second_way * (second * angle.sin())
+                    }
+                }
+            })
+        }
+    }
+
+    /// Two unit directions square to `axis` and to each other.
+    fn square_to(axis: Vector) -> (Vector, Vector) {
+        let across = axis
+            .cross(Vector::new(0.3, -0.7, 0.2))
+            .normalized()
+            .expect("no axis drawn here runs along (0.3, -0.7, 0.2)");
+        (across, axis.cross(across))
+    }
+
+    /// How far `point` is from `surface`, from the closed form for each: a
+    /// point `ρ` from a turned surface's axis and `z` along it is
+    /// `|ρ·cos α − |z|·sin α|` from a cone and `|√((ρ − R)² + z²) − ρ_t|` from
+    /// a torus, and `|ρ − R|` from a pipe.
+    fn distance_from(surface: &Surface, point: Point) -> f64 {
+        if let Surface::Cone(cone) = surface {
+            let (along, across) = along_and_across(cone.axis(), point - cone.apex());
+            return (across - along.abs() * cone.slope()).abs() / cone.slope().hypot(1.0);
+        }
+        if let Surface::Torus(ring) = surface {
+            let (along, across) = along_and_across(ring.axis(), point - ring.centre());
+            return ((across - ring.ring_radius()).hypot(along) - ring.tube_radius()).abs();
+        }
+        if let Surface::Cylinder(pipe) = surface {
+            let (_, across) = along_and_across(pipe.axis(), point - pipe.axis().origin());
+            return (across - pipe.radius()).abs();
+        }
+        unreachable!("no curve is drawn on {surface:?} here")
+    }
+
+    /// How far `apart` runs along `line` and how far it is from it.
+    fn along_and_across(line: Axis, apart: Vector) -> (f64, f64) {
+        let along = apart.dot(line.direction());
+        (along, (apart - line.direction() * along).length())
+    }
+
+    /// A circle on each nappe of a cone, a circle square to a torus's axis and
+    /// one round its tube, and an ellipse where a leaning plane cuts a pipe —
+    /// each drawn from its surface's own numbers.
+    fn curves_drawn_on_their_surfaces() -> Vec<(Surface, Curve)> {
+        let cone = Cone::new(
+            Axis::new(Point::new(1.0, -2.0, 0.5), Vector::new(0.3, -0.2, 1.0)).expect("an axis"),
+            0.7,
+        )
+        .expect("a slope");
+        let circle_at = |along: f64| Curve::Circle {
+            centre: cone.apex() + cone.axis().direction() * along,
+            axis: cone.axis().direction(),
+            radius: cone.radius_at(along),
+        };
+        let ring = Torus::new(
+            Axis::new(Point::new(0.5, 1.0, -1.0), Vector::new(0.1, 1.0, 0.2)).expect("an axis"),
+            5.0,
+            1.5,
+        )
+        .expect("two radii");
+        let up = ring.axis().direction();
+        let (out, _) = ring.basis();
+        let over = 0.7_f64;
+        let pipe = Cylinder::new(
+            Axis::new(Point::new(1.0, 2.0, 3.0), Vector::new(0.2, 0.3, 1.0)).expect("an axis"),
+            2.0,
+        )
+        .expect("a radius");
+        let along_the_pipe = pipe.axis().direction();
+        let (sideways, _) = square_to(along_the_pipe);
+        let normal = (along_the_pipe + sideways * 0.8)
+            .normalized()
+            .expect("a leaning normal");
+        let first_way = (along_the_pipe - normal * along_the_pipe.dot(normal))
+            .normalized()
+            .expect("the pipe does not run square to the plane");
+        vec![
+            (Surface::Cone(cone), circle_at(3.0)),
+            (Surface::Cone(cone), circle_at(-2.0)),
+            (
+                Surface::Torus(ring),
+                Curve::Circle {
+                    centre: ring.centre() + up * (ring.tube_radius() * over.sin()),
+                    axis: up,
+                    radius: ring.distance_from_the_axis_at(over),
+                },
+            ),
+            (
+                Surface::Torus(ring),
+                Curve::Circle {
+                    centre: ring.centre() + out * ring.ring_radius(),
+                    axis: up.cross(out),
+                    radius: ring.tube_radius(),
+                },
+            ),
+            (
+                Surface::Cylinder(pipe),
+                Curve::Ellipse {
+                    centre: pipe.axis().origin() + along_the_pipe * 1.5,
+                    first_way,
+                    second_way: normal.cross(first_way),
+                    semi_axes: [pipe.radius() / along_the_pipe.dot(normal), pipe.radius()],
+                },
+            ),
+        ]
     }
 
     /// A point on the circle of `radius` about `centre`, at `angle` round the
