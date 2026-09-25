@@ -3083,9 +3083,9 @@ mod tests {
     /// The lid is the disk of radius four on `z = 1`, and that plane rests on
     /// the ring of radius four and tube one along the lid's own circle. The
     /// ring's inside on that plane is empty, so the ring's sign put every point
-    /// of the lid but its circle outside it: `(0, 0, 1)` and `(2, 0, 1)` came
-    /// back not held. A plane square to a ring's axis names no meridian circle,
-    /// so there is no half-space to ask, and the lid is refused (§250).
+    /// of the lid but its circle outside it: the lid's own centre `(0, 0, 1)`
+    /// came back not held. A plane square to a ring's axis names no meridian
+    /// circle, so there is no half-space to ask, and the lid is refused (§250).
     #[test]
     fn a_pucks_lid_is_refused_rather_than_holding_nothing_but_its_rim() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
