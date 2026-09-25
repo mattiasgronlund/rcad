@@ -18,10 +18,13 @@
 //!
 //! # Every face is cut by every plane, its own solid's included
 //!
-//! Two solids whose boxes miss each other are skipped whole, and that changes
-//! no answer: solids that cannot touch leave every face of both alone. Inside a
-//! pair that might touch, though, **no face pair is skipped**, and a box test
-//! there would be wrong rather than merely keen.
+//! Two solids are skipped whole only when no chain of overlapping boxes joins
+//! them: solids that nothing links leave every face of each other alone. Two
+//! that miss each other but are both reached by a third are still cut against
+//! each other, because the third's faces are cut by both and the edges it
+//! shares with each must be split at the same points (§222.3 item 1). Inside a
+//! pair that might touch, **no face pair is skipped**, and a box test there
+//! would be wrong rather than merely keen.
 //!
 //! A cut is by a *plane*, and a plane reaches past the face that carries it. A
 //! face whose box is nowhere near the other solid can still be crossed by one
@@ -75,6 +78,7 @@ use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::{Error, Result};
 
+use super::Sameness;
 use super::arrange::stretches_of_a_line_inside;
 use super::bake::{BakedFace, BakedSolid};
 
@@ -100,10 +104,11 @@ pub(crate) fn gather(
         check_it_does_not_cross_itself(solid, policy, log)?;
     }
 
+    let within_reach = solids_within_reach_of_each_other(solids);
     let mut found: Vec<(usize, usize, Surface)> = Vec::new();
     for one in 0..solids.len() {
         for other in one..solids.len() {
-            if !solids[one].bounds.overlap(solids[other].bounds) {
+            if within_reach.leader(one) != within_reach.leader(other) {
                 continue;
             }
             for mine in 0..solids[one].faces.len() {
@@ -123,6 +128,31 @@ pub(crate) fn gather(
         solids[solid].faces[face].cuts.push(cut);
     }
     Ok(())
+}
+
+/// Which solids are joined to each other by a chain of solids whose boxes
+/// overlap.
+///
+/// **Two solids whose boxes miss are still cut against each other when a third
+/// solid's box reaches both** (§222.3 item 1). A block with one box poking up
+/// through its floor and another sitting inside it: the inside box's walls cut
+/// the block's floor, and that floor meets the poking box's walls along the
+/// footprint. Skip the poking box against the inside one and the floor side of
+/// that edge is split where the inside box's walls cross it while the wall side
+/// is not, so the edge comes back with one face along it. It is the header's
+/// argument one solid further out: both sides of every edge of the answer have
+/// to be diced by the one set of planes, and that set is everything in the
+/// chain.
+fn solids_within_reach_of_each_other(solids: &[BakedSolid]) -> Sameness {
+    let mut within_reach = Sameness::of(solids.len());
+    for one in 0..solids.len() {
+        for other in one + 1..solids.len() {
+            if solids[one].bounds.overlap(solids[other].bounds) {
+                within_reach.join(one, other);
+            }
+        }
+    }
+    within_reach
 }
 
 /// The crossings each of two faces cuts in the other, each as the second surface
