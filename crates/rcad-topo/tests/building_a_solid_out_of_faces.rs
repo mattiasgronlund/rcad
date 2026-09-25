@@ -32,10 +32,11 @@ use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
     Scale, Surface, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, DraftVertex, EdgeKey, EdgeView, Error, Invalid, Measurement, Model,
-    ProfileBuilder, Result, Rule, SolidBuilder, SolidKey, VertexKey, VertexView, WireStepView,
+    Containment, DraftEdge, DraftStep, DraftVertex, EdgeKey, EdgeView, Error, Invalid, Measurement,
+    Model, ProfileBuilder, Result, Rule, SolidBuilder, SolidKey, VertexKey, VertexView,
+    WireStepView,
 };
 
 mod rings;
@@ -156,13 +157,13 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// So the fuse half of the oracle here compares the **refusal**: the same
 /// rule against the same third solid must refuse the same way for both.
 /// That still reads topology the measurement never touches — the refusal is
-/// raised on the bend's torus face once the arrangement has placed and ordered
-/// the corners the rebuild itself produced and walked round them, so a coedge
-/// walked backwards or a picker handed the wrong sign would have to be caught
-/// before that walk gets as far as the question both descriptions are shown to
-/// answer alike.
+/// raised once the arrangement has placed and ordered the corners the rebuild
+/// itself produced, walked round them and cut every face into pieces, so a
+/// coedge walked backwards or a picker handed the wrong sign would have to be
+/// caught before that walk gets as far as the question both descriptions are
+/// shown to answer alike.
 ///
-/// **The question is which side of a plane a point exactly on it is.** The
+/// **It used to be which side of a plane a point exactly on it is.** The
 /// turned bend's end cap at three eighths of a turn is on the plane
 /// `x + y = 0`, which crosses the torus in two circles: the cap's own, and a
 /// far one through `(5/√2, −5/√2, 0)`. Both are drawn on the first bend's torus
@@ -184,14 +185,20 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// is on a curve of a surface it lists only where that curve's picker allows
 /// now (§224.2's joined cone needed the same), and the walk gets past it.
 ///
-/// **The new refusal is a gap in §16.10's sense**: the answer exists and is
+/// **That refusal was a gap in §16.10's sense**: the answer exists and is
 /// nothing at all, and the drawing already knows it — the node is on a
-/// crossing whose partner *is* the plane asked about. The fix that reaches it
-/// is for `arrange.rs`'s `which_side_of_everything` to read that off the
-/// node's own crossings rather than ask, and move on to the next node as it
-/// does for any point on the plane; a walk with no other node then leaves the
-/// side unsaid, which that function already allows. It is not built, and what
-/// the fuse does past it is not measured.
+/// crossing whose partner *is* the plane asked about. `arrange.rs`'s
+/// `which_side_of_everything` now reads that off the node's own crossings
+/// rather than asking, and moves on to the next node as it does for any point
+/// on the plane.
+///
+/// **Past it, both descriptions stop where a bend fused with its copy stops.**
+/// The arrangement runs to the end and selection finds `(4, 0, 0)` inside the
+/// first bend's end cap on `y = 0`, but the ray fired from it at the turned
+/// bend answers `CannotFollowAFacesTrimming` on the turned bend's torus face,
+/// so the cap cannot be placed: "a point in a piece that every solid could
+/// place". Both descriptions refuse it word for word alike, which is what this
+/// half of the oracle compares.
 #[test]
 fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let policy = Policy::certified();
@@ -244,29 +251,51 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
         refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
     let Error::Undecidable { records } = &refusal_of_built else {
         panic!(
-            "expected the side of the plane x + y = 0 to be refused at a node on it, got \
+            "expected the point inside the end cap on y = 0 not to be placed, got \
              {refusal_of_built:?}"
         );
     };
     let record = records.records().last().expect("a refusal names why");
-    assert_eq!(record.predicate(), "side of plane", "{refusal_of_built:?}");
-    let [node] = record.inputs() else {
-        panic!("one node was asked about: {refusal_of_built:?}");
-    };
-    let [x, y, z] = node.enclosure();
-    let far = 5.0 * core::f64::consts::FRAC_1_SQRT_2;
-    assert!(
-        x.lo() <= far && far <= x.hi() && y.lo() <= -far && -far <= y.hi(),
-        "the node is on the far circle, at the tube's outer rim: {refusal_of_built:?}"
+    assert_eq!(
+        record.predicate(),
+        "a point in a piece that every solid could place",
+        "{refusal_of_built:?}"
     );
-    assert!(
-        z.lo() < 0.0 && 0.0 < z.hi(),
-        "and it is a constructed box, straddling z = 0: {refusal_of_built:?}"
+    let corners: Vec<_> = record
+        .inputs()
+        .iter()
+        .map(|corner| corner.enclosure().map(|axis| [axis.lo(), axis.hi()]))
+        .collect();
+    assert_eq!(
+        corners,
+        [[[3.0, 3.0], [0.0, 0.0], [0.0, 0.0]]],
+        "the piece is the first bend's end cap on y = 0: {refusal_of_built:?}"
     );
     assert_eq!(
         format!("{refusal_of_built}"),
         format!("{refusal_of_rebuilt}"),
         "the kernel-built bend and the one described again refused the same fuse differently"
+    );
+
+    let mut scratch = model.clone();
+    let turned = a_turned_bend_of_the_same_ring_and_tube(&mut scratch);
+    let turned = scratch.solid(turned).expect("this model made the key");
+    let placed = turned.classify_uncertain_point(
+        PredicatePoint::from([4.0, 0.0, 0.0]),
+        &policy,
+        &mut ProvenanceLog::new(),
+    );
+    let Containment::CannotFollowAFacesTrimming { face } = placed else {
+        panic!("the ray from the middle of the cap: {placed:?}");
+    };
+    let surface = turned
+        .faces()
+        .find(|each| each.key() == face)
+        .expect("the ray names a face of the solid it was fired at")
+        .surface();
+    assert!(
+        matches!(surface, Surface::Torus(_)),
+        "the face the ray cannot follow: {surface:?}"
     );
 }
 

@@ -38,7 +38,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{EdgeRun, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Vector, intersect};
+use rcad_geom::{
+    EdgeRun, Picker, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Torus, Vector, intersect,
+};
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     orient3d_of_points,
@@ -351,9 +353,10 @@ fn place_the_piece(
     if against.is_empty() {
         return Ok(Placement::Outside);
     }
+    let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
     let mut one_was_inside = false;
     for &candidate in candidates {
-        if the_piece_holds(piece, in_plane, candidate) != Some(true) {
+        if the_piece_holds(piece, in_plane, &also_picked_by, candidate) != Some(true) {
             continue;
         }
         one_was_inside = true;
@@ -397,9 +400,15 @@ fn place_the_piece(
 /// bar takes out of a block's face is bounded by one closed curve and has one
 /// corner. Its wire contributes to the count exactly as a round hole does, which
 /// is `holds.rs`'s rule read the same way round.
+///
+/// A round wire's partner's inside is the region it bounds only where the
+/// partner leaves one region on the plane. A torus leaves two, so
+/// `also_picked_by` — one entry per wire, from [`what_else_each_round_wire_asks`]
+/// — says what else must hold the point, or `None` where nothing can say.
 fn the_piece_holds(
     piece: &Piece,
     in_plane: Option<&InPlane>,
+    also_picked_by: &[Option<Vec<Picker>>],
     point: PredicatePoint,
 ) -> Option<bool> {
     // A piece that is the **whole** of a closed surface is trimmed by nothing.
@@ -445,7 +454,12 @@ fn the_piece_holds(
         let inwards = if position == 0 { 1 } else { -1 };
         match round_wire_of(wire) {
             Some(partner) => match side_of_surface(&partner, point) {
-                Decision::Neg => winding += inwards,
+                Decision::Neg => {
+                    let pickers = also_picked_by[position].as_deref()?;
+                    if every_picker_keeps(pickers, point)? {
+                        winding += inwards;
+                    }
+                }
                 Decision::Pos => (),
                 Decision::Zero | Decision::Undecidable { .. } | _ => return None,
             },
@@ -585,6 +599,105 @@ fn round_wire_of(wire: &[FaceMeet]) -> Option<Surface> {
         }
         _ => None,
     }
+}
+
+/// For each wire of a flat piece, the pickers that must also hold a point
+/// inside the wire's partner before the point is inside what the wire bounds:
+/// none for a ball, a pipe or a cone, which each leave one region on a plane,
+/// and `None` where nothing can say.
+///
+/// **A torus leaves two.** A plane through its axis cuts it in two meridian
+/// circles, and the torus's inside on that plane is both their disks, so the
+/// torus's sign alone holds a point in the other disk as surely as one in this
+/// one. What tells them apart is the flat half-space [`intersect`] names each
+/// circle by, having proved it clears both circles: each disk is exactly
+/// the part of the tube on its own circle's side, so the wire's own corner
+/// says which side is this wire's. A plane square to the axis cuts two
+/// concentric circles, named by pipes, and neither circle's disk is the tube's
+/// inside on one side of a pipe — so that family, and any wire whose corner no
+/// picker certainly keeps, is `None`.
+///
+/// Asked once per piece rather than once per candidate, because the answer is
+/// about the wire and not about the point.
+///
+/// # Errors
+///
+/// Whatever [`intersect`] gives for the piece's plane against the torus.
+fn what_else_each_round_wire_asks(
+    piece: &Piece,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<Option<Vec<Picker>>>> {
+    if piece.surface.as_plane().is_none() {
+        return Ok(Vec::new());
+    }
+    let mut asks = Vec::with_capacity(piece.wires.len());
+    for wire in &piece.wires {
+        asks.push(match round_wire_of(wire) {
+            Some(ring @ Surface::Torus(_)) => the_pickers_of_the_meridian_circle_through(
+                &piece.surface,
+                &ring,
+                wire[0].ends[0].point(),
+                policy,
+                log,
+            )?,
+            Some(_) | None => Some(Vec::new()),
+        });
+    }
+    Ok(asks)
+}
+
+/// The pickers of the one meridian circle `flat` cuts `ring` in that passes
+/// through `corner`, or `None` when the two do not cross in meridian circles or
+/// no one circle certainly keeps the corner.
+///
+/// # Errors
+///
+/// Whatever [`intersect`] gives for the two.
+fn the_pickers_of_the_meridian_circle_through(
+    flat: &Surface,
+    ring: &Surface,
+    corner: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Vec<Picker>>> {
+    let SurfaceMeet::Curves(runs) = intersect(flat, ring, policy, log)? else {
+        return Ok(None);
+    };
+    let mut keeping = runs.iter().filter_map(|run| match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. }
+            if picked_by.iter().all(|picker| {
+                matches!(picker, Picker::InFrontOf(_))
+                    && picker.side_of_point(corner) == Decision::Pos
+            }) =>
+        {
+            Some(picked_by.to_vec())
+        }
+        EdgeRun::PartOfWhereItCrosses { .. }
+        | EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. }
+        | _ => None,
+    });
+    Ok(match (keeping.next(), keeping.next()) {
+        (Some(only), None) => Some(only),
+        _ => None,
+    })
+}
+
+/// Whether every one of `pickers` certainly keeps `point`: `Some(false)` when
+/// one certainly rules it out, `None` when one cannot say or has it on its
+/// boundary.
+fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool> {
+    let mut kept = true;
+    for picker in pickers {
+        match picker.side_of_point(point) {
+            Decision::Pos => (),
+            Decision::Neg => kept = false,
+            Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+        }
+    }
+    Some(kept)
 }
 
 /// Where one point sits relative to each solid in the set, or `None` when this
@@ -1133,11 +1246,11 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
     if let Some(flat) = piece.surface.as_plane() {
         for wire in &piece.wires {
             if let Some(partner) = round_wire_of(wire) {
-                candidates.extend(the_middle_of_a_round_wire(flat, &partner));
+                candidates.extend(the_middles_of_a_round_wire(flat, &partner));
             }
         }
         for side in piece.wires.iter().flatten() {
-            candidates.extend(half_way_into_either_arc(flat, side).into_iter().flatten());
+            candidates.extend(half_way_into_either_arc(flat, side));
         }
         return candidates;
     }
@@ -1214,24 +1327,29 @@ fn towards_every_flat_sides_material(piece: &Piece) -> Option<Vector> {
 /// disk has all of its inside and its corners none (see [`in_the_bulge_of`]).
 ///
 /// Which one is not asked, because nothing about a candidate is trusted: each
-/// is placed and proved by the caller. The circle's centre is
-/// [`the_middle_of_a_round_wire`], and its radius comes from the right angle
-/// at the chord's middle, so for an ellipse the points are near rather than on
-/// that line, which is all a candidate needs. `None` for a straight side, and
-/// for a side with nothing to go round or no length to go square to.
-fn half_way_into_either_arc(flat: &Plane, side: &FaceMeet) -> Option<[PredicatePoint; 2]> {
-    let centre = the_middle_of_a_round_wire(flat, &side.carried_by[1])?;
+/// is placed and proved by the caller. The circle's centre is one of
+/// [`the_middles_of_a_round_wire`], each tried, and its radius comes from the
+/// right angle at the chord's middle, so for an ellipse the points are near
+/// rather than on that line, which is all a candidate needs. Nothing for a
+/// straight side, and for a side with nothing to go round or no length to go
+/// square to.
+fn half_way_into_either_arc(flat: &Plane, side: &FaceMeet) -> Vec<PredicatePoint> {
     let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
     let chord = end - start;
-    let across = flat.normal().cross(chord).normalized().ok()?;
+    let Ok(across) = flat.normal().cross(chord).normalized() else {
+        return Vec::new();
+    };
     let middle = start + chord * 0.5;
-    let off = across.dot(middle_of(centre) - middle);
-    let reach = (off * off + chord.length_squared() / 4.0).sqrt();
-    let points = [off + reach, off - reach].map(|to| middle + across * (to / 2.0));
-    points
-        .iter()
-        .all(Point::is_finite)
-        .then(|| points.map(|point| PredicatePoint::from(point.coordinates())))
+    let mut candidates = Vec::new();
+    for centre in the_middles_of_a_round_wire(flat, &side.carried_by[1]) {
+        let off = across.dot(middle_of(centre) - middle);
+        let reach = (off * off + chord.length_squared() / 4.0).sqrt();
+        let points = [off + reach, off - reach].map(|to| middle + across * (to / 2.0));
+        if points.iter().all(Point::is_finite) {
+            candidates.extend(points.map(|point| PredicatePoint::from(point.coordinates())));
+        }
+    }
+    candidates
 }
 
 /// The middle of a piece's corners, which is somewhere near it and nowhere in
@@ -1272,8 +1390,8 @@ fn how_big_the_surface_is(surface: &Surface, there: Point) -> f64 {
     }
 }
 
-/// Where the ball or pipe that cut a round wire has its middle, on the plane
-/// that wire is drawn on.
+/// Where the ball, pipe, cone or torus that cut a round wire has its middle, on
+/// the plane that wire is drawn on.
 ///
 /// The centre of a circle cut on a plane, without ever saying the word: for a
 /// pipe it is where the axis meets the plane, and for a ball it is the foot of
@@ -1281,23 +1399,33 @@ fn how_big_the_surface_is(surface: &Surface, there: Point) -> f64 {
 /// axis or centre, so both are provably inside — which is what the winding
 /// count then checks, in exact arithmetic and with no trust placed here.
 ///
-/// `None` where the division has nothing to divide by, which is a pipe running
+/// **A torus has two answers, and both are offered.** A plane cuts a torus in
+/// up to four circles, and where it goes through the torus's axis it cuts two,
+/// one round each place the ring crosses the plane. Which of the two a given
+/// wire goes round is not known here, and does not need to be: nothing about a
+/// candidate is trusted, so the one that is not inside is ruled out by the same
+/// count that proves the other in.
+///
+/// Nothing where the division has nothing to divide by, which is a pipe running
 /// along the plane rather than through it — and then the wire it cut is not a
-/// closed curve and this was not asked.
-fn the_middle_of_a_round_wire(flat: &Plane, partner: &Surface) -> Option<PredicatePoint> {
+/// closed curve and this was not asked — or a ring that never reaches the plane.
+fn the_middles_of_a_round_wire(flat: &Plane, partner: &Surface) -> Vec<PredicatePoint> {
     let (normal, offset) = (flat.normal(), flat.offset());
-    let from = match partner {
-        Surface::Sphere(ball) => ball.centre(),
+    let froms = match partner {
+        Surface::Sphere(ball) => vec![ball.centre()],
         Surface::Cylinder(pipe) => {
             let axis = pipe.axis();
             let along = normal.dot(axis.direction());
             if along == 0.0 {
-                return None;
+                return Vec::new();
             }
-            axis.origin()
-                + axis.direction()
-                    * ((offset - normal.dot(axis.origin() - Point::origin())) / along)
+            vec![
+                axis.origin()
+                    + axis.direction()
+                        * ((offset - normal.dot(axis.origin() - Point::origin())) / along),
+            ]
         }
+        Surface::Torus(ring) => where_the_ring_crosses_the_plane(normal, offset, ring),
         // **The same point, and it takes a proof rather than a picture.** Where
         // the cone's axis meets the plane is inside the ellipse they cut, and
         // not obviously: the ellipse's centre is *not* the axis point, it is
@@ -1311,19 +1439,54 @@ fn the_middle_of_a_round_wire(flat: &Plane, partner: &Surface) -> Option<Predica
             let axis = cone.axis();
             let along = normal.dot(axis.direction());
             if along == 0.0 {
-                return None;
+                return Vec::new();
             }
-            axis.origin()
-                + axis.direction()
-                    * ((offset - normal.dot(axis.origin() - Point::origin())) / along)
+            vec![
+                axis.origin()
+                    + axis.direction()
+                        * ((offset - normal.dot(axis.origin() - Point::origin())) / along),
+            ]
         }
-        Surface::Plane(_) | _ => return None,
+        Surface::Plane(_) | _ => return Vec::new(),
     };
-    let there =
-        from + normal * ((offset - normal.dot(from - Point::origin())) / normal.dot(normal));
-    there
-        .is_finite()
-        .then(|| PredicatePoint::from(there.coordinates()))
+    froms
+        .into_iter()
+        .map(|from| {
+            from + normal * ((offset - normal.dot(from - Point::origin())) / normal.dot(normal))
+        })
+        .filter(Point::is_finite)
+        .map(|there| PredicatePoint::from(there.coordinates()))
+        .collect()
+}
+
+/// The points where a torus's ring — the circle down the middle of its tube —
+/// crosses the plane `normal · p = offset`: none, one or two.
+///
+/// The ring is `centre + ring_radius · w` for every unit `w` square to the
+/// axis, so the crossings are the `w` whose part along the plane's normal is
+/// `(offset − normal · centre) / ring_radius`. Only the part of the normal
+/// square to the axis can see `w`; a plane square to the axis has none, and
+/// its ring either misses the plane or lies in it, so it has no crossing to
+/// name.
+fn where_the_ring_crosses_the_plane(normal: Vector, offset: f64, ring: &Torus) -> Vec<Point> {
+    let axis = ring.axis().direction();
+    let across = normal - axis * normal.dot(axis);
+    let how_much = across.length_squared().sqrt();
+    let Ok(towards) = across.normalized() else {
+        return Vec::new();
+    };
+    let Ok(sideways) = axis.cross(across).normalized() else {
+        return Vec::new();
+    };
+    let reach =
+        (offset - normal.dot(ring.centre() - Point::origin())) / (ring.ring_radius() * how_much);
+    if reach.is_nan() || reach.abs() > 1.0 {
+        return Vec::new();
+    }
+    let aside = (1.0 - reach * reach).sqrt();
+    [aside, -aside]
+        .map(|way| ring.centre() + (towards * reach + sideways * way) * ring.ring_radius())
+        .to_vec()
 }
 
 /// A point put back onto the surface it is meant to be a point of.
@@ -1385,4 +1548,178 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
         Measures::Length,
         log,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use rcad_geom::{Axis, Orientation, Plane, Surface, Torus};
+    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+    use smallvec::SmallVec;
+
+    use super::{
+        InPlane, Piece, candidate_points, corners_of, every_picker_keeps,
+        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        what_else_each_round_wire_asks,
+    };
+    use crate::fuse::{FaceMeet, MeetPoint};
+
+    /// The torus `a_quarter_bend(4, 1)` is drawn on, and the plane `y = 0` its
+    /// end cap lies on.
+    fn a_bend_and_its_end_cap_plane() -> (Surface, Plane) {
+        let ring = Torus::new(Axis::z(), 4.0, 1.0).expect("a ring wider than its tube");
+        let flat = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a normal");
+        (Surface::Torus(ring), flat)
+    }
+
+    #[test]
+    fn a_plane_through_a_bends_axis_offers_both_places_the_ring_crosses_it() {
+        let (ring, flat) = a_bend_and_its_end_cap_plane();
+        let mut middles: Vec<[f64; 3]> = the_middles_of_a_round_wire(&flat, &ring)
+            .iter()
+            .map(|middle| middle.enclosure().map(|axis| axis.lo()))
+            .collect();
+        middles.sort_by(|one, other| one[0].total_cmp(&other[0]));
+        assert_eq!(middles, [[-4.0, 0.0, 0.0], [4.0, 0.0, 0.0]]);
+    }
+
+    /// The torus's inside on `y = 0` is two disks, and the sign of the torus
+    /// holds both ring crossings. The half-space the circle through the cap's
+    /// corner is named by holds only the one on the cap's side.
+    #[test]
+    fn a_bends_end_cap_holds_the_ring_crossing_on_its_own_side_and_not_the_other() {
+        let (ring, flat) = a_bend_and_its_end_cap_plane();
+        let policy = Policy::certified();
+        for (corner, own, other) in [([3.0, 0.0, 0.0], 4.0, -4.0), ([-3.0, 0.0, 0.0], -4.0, 4.0)] {
+            let pickers = the_pickers_of_the_meridian_circle_through(
+                &Surface::Plane(flat),
+                &ring,
+                PredicatePoint::from(corner),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a plane through a torus's axis crosses it")
+            .expect("one of the two circles keeps the corner");
+            let keeps = |x: f64| every_picker_keeps(&pickers, PredicatePoint::from([x, 0.0, 0.0]));
+            assert_eq!(keeps(own), Some(true), "the circle through {corner:?}");
+            assert_eq!(keeps(other), Some(false), "the circle through {corner:?}");
+        }
+    }
+
+    /// A plane square to the axis cuts two concentric circles, and neither's
+    /// disk is the tube's inside on one side of the pipe that names it.
+    #[test]
+    fn a_plane_square_to_a_bends_axis_names_no_meridian_circle() {
+        let (ring, _) = a_bend_and_its_end_cap_plane();
+        let across = Plane::from_coefficients([0.0, 0.0, 1.0, 0.5]).expect("a normal");
+        let pickers = the_pickers_of_the_meridian_circle_through(
+            &Surface::Plane(across),
+            &ring,
+            PredicatePoint::from([4.0 + 0.75_f64.sqrt(), 0.0, 0.5]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a plane square to a torus's axis crosses it");
+        assert_eq!(pickers, None);
+    }
+
+    /// The torus's sign is inside at both disks on `y = 0`, so without the
+    /// half-space the circle through the cap's corner is named by, the cap
+    /// holds the other disk too.
+    #[test]
+    fn a_bends_end_cap_holds_the_disk_its_own_corner_is_in_and_not_the_other() {
+        let (ring, flat) = a_bend_and_its_end_cap_plane();
+        let cap = a_flat_piece_inside_the_ring(ring, flat, &[[3.0, 0.0, 0.0]]);
+        let holds = |x: f64| {
+            the_piece_holds_asked_as_selection_asks(&cap, PredicatePoint::from([x, 0.0, 0.0]))
+        };
+        assert_eq!(
+            holds(4.0),
+            Some(true),
+            "the disk round (4, 0, 0) is the cap"
+        );
+        assert_eq!(holds(-4.0), Some(false), "the disk round (-4, 0, 0) is not");
+    }
+
+    /// Of the points offered for a bend's end cap, the first one it holds is in
+    /// its own disk. The ring's crossing at `(−4, 0, 0)` is offered before the
+    /// one at `(4, 0, 0)`, so a cap that held both would be placed from the
+    /// other disk.
+    #[test]
+    fn the_first_point_a_bends_end_cap_offers_and_holds_is_in_its_own_disk() {
+        let (ring, flat) = a_bend_and_its_end_cap_plane();
+        let cap = a_flat_piece_inside_the_ring(ring, flat, &[[3.0, 0.0, 0.0]]);
+        let first_held = candidate_points(&cap, &corners_of(&cap))
+            .into_iter()
+            .find(|&candidate| {
+                the_piece_holds_asked_as_selection_asks(&cap, candidate) == Some(true)
+            })
+            .expect("the cap holds one of the points offered for it");
+        assert_eq!(first_held, PredicatePoint::from([4.0, 0.0, 0.0]));
+    }
+
+    /// A plane square to the axis cuts the tube in a ring-shaped piece, and
+    /// what the torus's sign holds on it is not the piece on either side of a
+    /// pipe, so nothing here can say.
+    #[test]
+    fn a_piece_on_a_plane_square_to_a_bends_axis_cannot_say_what_it_holds() {
+        let (ring, _) = a_bend_and_its_end_cap_plane();
+        let across = Plane::from_coefficients([0.0, 0.0, 1.0, 0.5]).expect("a normal");
+        let reach = 0.75_f64.sqrt();
+        let piece = a_flat_piece_inside_the_ring(
+            ring,
+            across,
+            &[[4.0 + reach, 0.0, 0.5], [4.0 - reach, 0.0, 0.5]],
+        );
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from([4.0, 0.0, 0.5])),
+            None
+        );
+    }
+
+    /// [`the_piece_holds`] with the pickers worked out the way
+    /// `place_the_piece` works them out.
+    fn the_piece_holds_asked_as_selection_asks(
+        piece: &Piece,
+        point: PredicatePoint,
+    ) -> Option<bool> {
+        let flat = piece.surface.as_plane().expect("a flat piece");
+        let in_plane = InPlane::of(flat).expect("a plane with a point off it");
+        let also_picked_by =
+            what_else_each_round_wire_asks(piece, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a plane crosses a torus in circles");
+        the_piece_holds(piece, Some(&in_plane), &also_picked_by, point)
+    }
+
+    /// A piece of `flat` bounded by whole circles it cuts `ring` in, one wire
+    /// through each corner, the first the outer one, with its material inside
+    /// the tube.
+    ///
+    /// It names no ancestor: the two functions it is handed to read the
+    /// surface and the wires and nothing else.
+    fn a_flat_piece_inside_the_ring(ring: Surface, flat: Plane, corners: &[[f64; 3]]) -> Piece {
+        let carried_by = [Surface::Plane(flat), ring];
+        let wires = corners
+            .iter()
+            .map(|&corner| {
+                let starts = MeetPoint::WhereAClosedCurveStarts {
+                    carried_by,
+                    point: PredicatePoint::from(corner),
+                };
+                vec![FaceMeet {
+                    carried_by,
+                    ends: [starts.clone(), starts],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                }]
+            })
+            .collect();
+        Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires,
+            is_the_whole_surface: false,
+        }
+    }
 }

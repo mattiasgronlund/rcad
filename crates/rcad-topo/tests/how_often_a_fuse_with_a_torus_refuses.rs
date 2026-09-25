@@ -91,9 +91,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_geom::{Isometry, Point, Scale, Surface, Vector};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
 mod rings;
 
@@ -440,8 +440,9 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
 /// every plane-and-torus crossing either bend has is one of the two circle
 /// families. So the arrangement runs to the end — it finds the corners, puts
 /// them in order round the circles they sit on and cuts every face into
-/// pieces — and what refuses is choosing the pieces: no point it tries is
-/// inside the end cap on `y = 0`, the disk the tube leaves on that plane.
+/// pieces — and what refuses is choosing the pieces: the point found inside
+/// the end cap on `y = 0`, the disk the tube leaves on that plane, cannot be
+/// placed against the copy.
 ///
 /// **This used to stop earlier, at `TwoCurvesTouchWithoutCrossing`, and that
 /// was the wrong name.** The plane `y = 0` crosses the torus in two circles,
@@ -456,14 +457,23 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
 /// that curve's picker allows (§224.2's joined cone needed the same), the
 /// arrangement gets past it, and this is what the arithmetic really says.
 ///
-/// **A gap in §16.10's sense.** The one point tried is the cap's one corner,
-/// which is on the rim, and a disk has no other corner to blend with. A point
-/// inside exists and is exact: `(4, 0, 0)`, where the plane crosses the ring,
-/// which the piece's own test holds, certified. The fix that reaches it is a
-/// torus arm in `select.rs`'s `the_middle_of_a_round_wire` — where the ring
-/// crosses the plane, as the ball's centre and the pipe's and cone's axis
-/// points are now. It is not built, and whether the copy then fuses is not
-/// measured.
+/// **Then it refused finding a point inside the end cap, and that was a gap**
+/// (§16.10): the one point tried was the cap's one corner, on the rim, and a
+/// disk has no other corner to blend with. `select.rs`'s
+/// `the_middles_of_a_round_wire` now offers where the ring crosses the cap's
+/// plane — both places, `(4, 0, 0)` and `(−4, 0, 0)`, because which circle a
+/// wire goes round is not known there — and the piece holds `(4, 0, 0)`,
+/// certified. It does not hold `(−4, 0, 0)`, which is inside the torus but in
+/// the other circle's disk; the half-space `intersect` names the cap's circle
+/// by is what says so, and without it the piece held that point too.
+///
+/// **What it refuses now is placing that point, and the ray is why.** The
+/// search moves from "a point inside a piece of a face" to "a point in a piece
+/// that every solid could place": `(4, 0, 0)` is on the copy's own end cap,
+/// and the ray fired from it at the copy answers `CannotFollowAFacesTrimming`
+/// on the copy's torus face. `select.rs` reads that as no answer and has no
+/// other candidate inside the cap. Getting past it is teaching the classifier
+/// to follow a bend's torus face, and that is not in `select.rs`.
 ///
 /// This is still the one place in the file where the arrangement is reached
 /// at all, and so the one that says the ordering added for a bend is real code
@@ -480,14 +490,14 @@ fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
         let refused = model.fuse(&[first], &[second], rule, &policy, &mut log);
         let Err(Error::Undecidable { records }) = &refused else {
             panic!(
-                "{rule:?} of a bend and a bit-for-bit copy of itself: expected no point inside \
-                 the end cap to be found, got {refused:?}"
+                "{rule:?} of a bend and a bit-for-bit copy of itself: expected the point \
+                 inside the end cap not to be placed, got {refused:?}"
             );
         };
         let record = records.records().last().expect("a refusal names why");
         assert_eq!(
             record.predicate(),
-            "a point inside a piece of a face",
+            "a point in a piece that every solid could place",
             "{rule:?}: {refused:?}"
         );
         let corners: Vec<_> = record
@@ -501,4 +511,23 @@ fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
             "{rule:?}: the piece is the end cap on y = 0, whose one corner is (3, 0, 0)"
         );
     }
+
+    let copy = model.solid(second).expect("this model made the key");
+    let placed = copy.classify_uncertain_point(
+        PredicatePoint::from([4.0, 0.0, 0.0]),
+        &policy,
+        &mut ProvenanceLog::new(),
+    );
+    let Containment::CannotFollowAFacesTrimming { face } = placed else {
+        panic!("the ray from the middle of the cap: {placed:?}");
+    };
+    let surface = copy
+        .faces()
+        .find(|each| each.key() == face)
+        .expect("the ray names a face of the solid it was fired at")
+        .surface();
+    assert!(
+        matches!(surface, Surface::Torus(_)),
+        "the face the ray cannot follow: {surface:?}"
+    );
 }

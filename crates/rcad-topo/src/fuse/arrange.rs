@@ -2879,7 +2879,11 @@ impl<'f> Arrangement<'f> {
             }
             let partner = self.crossings[crossing].partner;
             for &half_edge in &self.cycles[cycle] {
-                let at = self.nodes[self.arcs[half_edge / 2].ends[half_edge % 2]].point;
+                let node = &self.nodes[self.arcs[half_edge / 2].ends[half_edge % 2]];
+                if self.is_on_the_partner_of_a_crossing_through(node, &partner) {
+                    continue;
+                }
+                let at = node.point;
                 let found = must_decide(
                     side_of_surface(&partner, at),
                     name_of_surface(&partner),
@@ -2895,6 +2899,40 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(sides)
+    }
+
+    /// Whether `node` is on `partner` because a crossing running through it
+    /// has `partner` as its own partner — the same surface, bit for bit.
+    ///
+    /// **This reads the node's list of crossings, never its box.** Every point
+    /// of a crossing is on its partner, so a node that lists one is taken to be
+    /// on that surface, and that is exactly as exact as the list. Under
+    /// [`Policy::certified`] a crossing is on the list because the model says
+    /// so (a corner's own faces and the edge it starts), because the node was
+    /// made for it, or because a sign was proved zero — with two exceptions.
+    /// [`round_a_closed_crossing`] calls two nodes whose boxes are equal bit
+    /// for bit one point without proving it, and [`Arrangement::fold_the_nodes`]
+    /// gives the node two nodes fold into every crossing either had, so a wrong
+    /// fold lists a crossing only one of them was on. Under
+    /// [`Policy::tolerant`], [`Arrangement::passes_through`] and
+    /// [`Arrangement::order_along`] read a narrow undecided sign as zero, so a
+    /// node can list a crossing it is only near.
+    ///
+    /// **That is still no new way to be wrong.** Skipping a node says no side;
+    /// the caller goes on to the walk's next node. The crossing is already
+    /// drawn through the node — its arcs end there — so a wrong list is a
+    /// wrong drawing before it is a wrong skip, and the skip only takes the
+    /// call the arrangement made when it put the crossing on the list.
+    ///
+    /// Two crossings with one partner are the two curves a pair names — a
+    /// plane through a torus's axis cuts two circles — and a node on one is on
+    /// the other's partner too. Asking the sign instead asks a box whether it
+    /// straddles a surface it was solved on, which is undecidable exactly when
+    /// the answer is zero (§229.3).
+    fn is_on_the_partner_of_a_crossing_through(&self, node: &Node, partner: &Surface) -> bool {
+        node.crossings
+            .iter()
+            .any(|&through| self.crossings[through].partner == *partner)
     }
 
     /// How many times the face's boundary winds round each walk, counting only
