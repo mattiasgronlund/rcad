@@ -60,6 +60,10 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
+use crate::holds::{
+    WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart,
+    where_a_closed_crossing_is_centred,
+};
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::validate::{
@@ -75,6 +79,7 @@ use super::arrange::{
     a_plane_cuts_a_cone_in_rulings, a_plane_lies_along_a_pipes_axis, agreement_of_two_planes,
     name_of_surface_bits, name_of_the_surface_either_way_round, two_pipes_run_along_one_line,
 };
+use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
 use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
 
@@ -1761,8 +1766,20 @@ impl Edge {
                     }
                     let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
                     let facing = towards * chord.dot(chord) - chord * chord.dot(towards);
-                    let picker = the_half_space_both_ends_are_on(facing, ends)
-                        .ok_or(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed)?;
+                    let flat = self.carried_by.iter().find_map(Surface::as_plane);
+                    let centred = flat.and_then(|flat| {
+                        let centre = self
+                            .carried_by
+                            .iter()
+                            .find_map(|surface| where_a_closed_crossing_is_centred(surface, flat));
+                        Some(flat).zip(centre)
+                    });
+                    let picker = the_half_space_both_ends_are_on(
+                        facing,
+                        ends,
+                        centred.as_ref().map(|(flat, centre)| (*flat, centre)),
+                    )
+                    .ok_or(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed)?;
                     Ok(EdgeRun::PartOfWhereItCrosses {
                         and: self.the_surface_that_names_it_twice(),
                         picked_by: SmallVec::from_buf([picker]),
@@ -2783,7 +2800,29 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
 /// lying along the crossing's own direction, which for a conic means an arc so
 /// short its chord rounds onto its own tangent
 /// (`an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`).
-fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<Picker> {
+///
+/// # Room for the corners the next fuse will solve
+///
+/// A fuse that takes this answer back in does not read the stored corners: it
+/// re-solves each one from three surfaces into a box, and that box sits up to
+/// [`what_writing_the_corner_down_cost`] from the stored point. A picker the
+/// stored ends only just clear is one those boxes straddle, and the next fuse
+/// cannot tell the arcs apart (§223.2). So the picker is first lowered until the
+/// ends **grown by that room** read on or in front.
+///
+/// **Lowering must not take the plane past the curve's centre.** For a closed
+/// crossing the arc is named by its ends in front and its centre on or behind
+/// ([`a_picker_that_tells_the_two_arcs_apart`]), and an arc within a few
+/// `1e-14` of a semicircle has its centre that close behind the chord. There
+/// the room is not granted: the picker is the one the stored ends alone earn,
+/// exactly as before the room existed, and the next fuse may refuse it as it
+/// always did — `a_near_semicircle_keeps_its_centre_behind_its_picker` measures
+/// the band. Two exact ends on the chord's own plane need neither, and keep it.
+fn the_half_space_both_ends_are_on(
+    facing: Vector,
+    ends: [Point; 2],
+    centred: Option<(&Plane, &WhereTheCurveIsCentred)>,
+) -> Option<Picker> {
     let readings = ends.map(|end| facing.dot(end - Point::origin()));
     let size = facing.length()
         * ends
@@ -2791,17 +2830,49 @@ fn the_half_space_both_ends_are_on(facing: Vector, ends: [Point; 2]) -> Option<P
             .map(|end| (*end - Point::origin()).length())
             .fold(0.0, f64::max);
     let from_here = readings[0].min(readings[1]);
-    let asked = ends.map(|end| PredicatePoint::from(end.coordinates()));
+    let exactly = ends.map(|end| PredicatePoint::from(end.coordinates()));
+    let through_the_chord = HalfSpace::new(facing, from_here).ok()?;
+    if exactly
+        .iter()
+        .all(|end| through_the_chord.side_of_point(*end) == Decision::Zero)
+    {
+        return Some(Picker::from(through_the_chord));
+    }
+    let with_room =
+        exactly.map(|end| grown_by(end, what_writing_the_corner_down_cost(end.enclosure())));
+    let with_room_and_centre_behind = |half: &HalfSpace| match centred {
+        Some((flat, centre)) => {
+            a_picker_that_tells_the_two_arcs_apart(half, flat, centre, with_room)
+        }
+        None => with_room
+            .iter()
+            .all(|end| matches!(half.side_of_point(*end), Decision::Pos | Decision::Zero)),
+    };
+    let stored_ends_alone = |half: &HalfSpace| {
+        exactly
+            .iter()
+            .all(|end| half.side_of_point(*end) != Decision::Neg)
+    };
+    lowered_until(facing, from_here, size, with_room_and_centre_behind)
+        .or_else(|| lowered_until(facing, from_here, size, stored_ends_alone))
+        .map(Picker::from)
+}
 
+/// The half-space facing `facing`, its offset brought down from `from_here` by
+/// a step that starts at one rounding of `size` and doubles, the first time
+/// `holds` says yes — or `None` once it has come down past `2·size`.
+fn lowered_until(
+    facing: Vector,
+    from_here: f64,
+    size: f64,
+    holds: impl Fn(&HalfSpace) -> bool,
+) -> Option<HalfSpace> {
     let mut down_by = 0.0;
     let mut step = (size * f64::EPSILON).max(f64::MIN_POSITIVE);
     while down_by <= 2.0 * size {
-        let picker = Picker::from(HalfSpace::new(facing, from_here - down_by).ok()?);
-        if asked
-            .iter()
-            .all(|end| picker.side_of_point(*end) != Decision::Neg)
-        {
-            return Some(picker);
+        let half = HalfSpace::new(facing, from_here - down_by).ok()?;
+        if holds(&half) {
+            return Some(half);
         }
         down_by += step;
         step *= 2.0;
@@ -3560,7 +3631,7 @@ mod tests {
             Vector::zero(),
             "an arc this short has a chord along its own tangent"
         );
-        assert!(the_half_space_both_ends_are_on(facing, [from, to]).is_none());
+        assert!(the_half_space_both_ends_are_on(facing, [from, to], None).is_none());
     }
 
     /// Two solids flush against each other name the plane they share opposite
