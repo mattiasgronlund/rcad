@@ -49,14 +49,20 @@
 //! shown of the face in hand, and the side is read off the way the wire runs
 //! rather than off a corner, because every corner sits on every cut.
 
-use rcad_geom::{EdgeRun, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, intersect};
+use rcad_geom::{
+    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet, intersect,
+    which_two_surfaces_a_run_is_between,
+};
 use rcad_predicates::{
     Decision, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog,
     Record,
 };
 
 use crate::classify::decide;
-use crate::validate::{name_of_surface, side_of_surface};
+use crate::validate::{
+    a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of, name_of_surface,
+    side_of_surface,
+};
 use crate::view::{CoedgeView, EdgeView, FaceView, WireView};
 use crate::{Error, FaceKey, Invalid, Result, SolidView};
 
@@ -399,6 +405,9 @@ fn what_a_curved_face_holds(
         }
     }
     let trimmings = what_trims_this_face(solid, face)?;
+    if is_a_ring_face_between_two_planes(surface, &trimmings) {
+        return what_a_ring_face_between_two_planes_holds(solid, face, point);
+    }
     let trimmed_once = trimmings.len() == 1;
     for trimming in trimmings {
         if !every_piece_of_that_crossing_is_an_edge(
@@ -432,6 +441,157 @@ fn what_a_curved_face_holds(
     } else {
         OnAFace::Held
     })
+}
+
+/// Whether a face on a ring is trimmed by two planes and has one edge along
+/// each — the wall of a bend of pipe, whose two end caps each cut the ring in
+/// two circles of which the wall has one.
+///
+/// The general rule in [`what_a_curved_face_holds`] refuses every face of that
+/// shape, because a plane that cuts a ring in two circles and holds only one of
+/// them as an edge of this face leaves it unable to say which of the two
+/// pieces that plane cuts the ring into is the face. Answering it takes the
+/// plane's own geometry, which [`what_a_ring_face_between_two_planes_holds`]
+/// reads.
+fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) -> bool {
+    matches!(surface, Surface::Torus(_))
+        && trimmings.len() == 2
+        && trimmings.iter().all(|trimming| {
+            trimming.surface.as_plane().is_some() && trimming.corners_on_it.len() == 1
+        })
+}
+
+/// Whether a ring's face trimmed by two planes, one edge along each, holds
+/// `point`, which is taken as being on the ring (`docs/decisions.md` §243).
+///
+/// **Only planes through the ring's axis are followed.** Such a plane cuts the
+/// ring in two circles round the tube, each at one angle round the axis. With
+/// one of those circles from each plane as its only edges, the face is one of
+/// the two stretches of ring between them, and it is the part of the ring in
+/// front of both planes exactly when that stretch is less than a half-turn.
+/// So:
+///
+/// 1. **Which side of each plane the face keeps** is read off the way its wire
+///    walks the circle on that plane, by the closed-edge rule
+///    [`a_closed_crossing_is_walked_the_way_it_is_stored`] that
+///    `Model::validate` checks every closed edge against. Not off a corner: a
+///    three-quarter bend's wall has its far corner on the other side of the
+///    first cap's plane from where the wall leaves that cap.
+/// 2. **Each circle must lie strictly in front of the other plane.** A circle
+///    round the tube sits at one angle round the axis, so its corner's side is
+///    the whole circle's. This is what turns away a stretch of more than a
+///    half-turn, which is the part of the ring in front of *either* plane and
+///    not of both, and a plane stored twice.
+///
+/// Then the stretch between the circles is the part of the ring in front of
+/// both planes, and `point` is asked against the planes as they read once
+/// moved into place. Everything else is asked of the face where it is stored,
+/// for §168's reason: a movement keeps each of these facts and rounds the
+/// numbers they are read from.
+///
+/// # Errors
+///
+/// [`Error::AFaceMissesPartOfWhereItsSurfacesCross`] when a plane does not hold
+/// the ring's axis or a circle is not in front of the other plane, which is
+/// what the general rule gave every face of this shape.
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
+/// cannot, and [`Error::Undecidable`] when a side could not be settled.
+fn what_a_ring_face_between_two_planes_holds(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let refuse = || Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() };
+    let ring = face.stored_surface();
+    let Surface::Torus(torus) = ring else {
+        panic!("only a face on a ring is sent here, and this one is on {ring:?}");
+    };
+    let mut cuts: Vec<Cut> = Vec::with_capacity(2);
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        if across.location() != face.location() {
+            return Err(refuse());
+        }
+        let cap = across.stored_surface();
+        let Some(flat) = cap.as_plane() else {
+            panic!("a face this was sent is trimmed by planes only, and this one by {cap:?}");
+        };
+        if !holds_the_axis_of(&flat, &torus) {
+            return Err(refuse());
+        }
+        let corner = edge.start().key();
+        let at = where_it_is_stored(solid, corner);
+        let names_it = which_two_surfaces_a_run_is_between(edge.stored_run(), [&ring, &cap]);
+        if names_it != [ring, cap] && names_it != [cap, ring] {
+            return Err(refuse());
+        }
+        let outward = [
+            gradient_of(&ring, at) * face.orientation().sign(),
+            gradient_of(&cap, at) * across.orientation().sign(),
+        ];
+        let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
+            [&names_it[0], &names_it[1]],
+            outward,
+            at,
+            Decision::Neg,
+        )?
+        else {
+            return Err(refuse());
+        };
+        // `Model::validate` hands the rule the side its corners read, turned
+        // round when the plane's face is used reversed; this is that read
+        // backwards.
+        let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
+        let keeps_the_back = walked_forward == forward_if_it_keeps_the_back;
+        let kept = if keeps_the_back != across.orientation().is_reversed() {
+            Decision::Neg
+        } else {
+            Decision::Pos
+        };
+        cuts.push(Cut {
+            surface: cap,
+            placed: across.surface(),
+            kept,
+            corners_on_it: vec![corner],
+        });
+    }
+    let [one, other] = cuts.as_slice() else {
+        panic!(
+            "two planes with one edge along each leave two cuts, and {} came back",
+            cuts.len()
+        );
+    };
+    for (circle, plane) in [(one, other), (other, one)] {
+        let at = PredicatePoint::from(where_it_is_stored(solid, circle.corners_on_it[0]).coordinates());
+        match side_of_surface(&plane.surface, at) {
+            settled if settled == plane.kept => (),
+            Decision::Zero | Decision::Pos | Decision::Neg => return Err(refuse()),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(&plane.surface, at, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    held_in_front_of_all(&cuts, point)
+}
+
+/// Whether `flat` holds the whole of `torus`'s axis: its normal square to the
+/// axis direction and the ring's centre on it, both exactly.
+///
+/// The same two questions [`intersect`] asks before it names the two circles
+/// round the tube, asked here of the numbers as stored. Anything short of
+/// exactly is `false`, and the face is refused rather than read as something
+/// it may not be.
+fn holds_the_axis_of(flat: &Plane, torus: &rcad_geom::Torus) -> bool {
+    let square_to_the_axis = dot(
+        exactly(flat.normal().components()),
+        exactly(torus.axis().direction().components()),
+    );
+    square_to_the_axis.sign() == Decision::Zero
+        && flat.side_of_point(PredicatePoint::from(torus.centre().coordinates())) == Decision::Zero
 }
 
 /// Whether `point`, taken as being on `cone`, is on the half of it `face` is on:
@@ -2516,5 +2676,171 @@ mod tests {
             .zip(round_the_rulings.iter().cycle().skip(1))
             .filter(|(now, next)| !**now && **next)
             .count()
+    }
+
+    /// How far round the ring a bend goes from its cap on `y = 0` at `+x`.
+    #[derive(Clone, Copy)]
+    enum Bend {
+        /// To a cap on `x = 0` at `+y`.
+        Quarter,
+        /// To a cap on `x = 0` at `−y`, the long way round.
+        ThreeQuarters,
+    }
+
+    /// A bend of pipe about `+z`, ring four and tube one, built the way
+    /// `tests/rings/mod.rs` builds its quarter bend but straight into the arena,
+    /// so no sweep stands between the description and the face asked about.
+    ///
+    /// **The three-quarter bend's far end is the quarter bend's turned half a
+    /// turn round the axis** — corner, circle and cap — and a turn about the
+    /// axis keeps which way every coedge runs against its surfaces. So both
+    /// bends walk every coedge the same way, and the near end is the same edge
+    /// for both. That is what makes the long one a real bend and not a guess.
+    fn a_bend(bend: Bend) -> (Model, SolidKey, FaceKey) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let (far_corner, far_cap_facing, the_way_round) = match bend {
+            Bend::Quarter => (
+                rcad_geom::Point::new(0.0, 3.0, 0.0),
+                Vector::new(-1.0, 0.0, 0.0),
+                HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0),
+            ),
+            Bend::ThreeQuarters => (
+                rcad_geom::Point::new(0.0, -3.0, 0.0),
+                Vector::new(1.0, 0.0, 0.0),
+                HalfSpace::new(Vector::new(-1.0, 1.0, 0.0), -3.0),
+            ),
+        };
+        let near = model.add_vertex(rcad_geom::Point::new(3.0, 0.0, 0.0));
+        let far = model.add_vertex(far_corner);
+        let flat_through_the_middle = Plane::from_point_and_normal(
+            rcad_geom::Point::origin(),
+            Vector::new(0.0, 0.0, 1.0),
+        )
+        .expect("the z axis is a unit normal");
+        let seam = model.add_edge_running(
+            near,
+            far,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(flat_through_the_middle),
+                picked_by: smallvec::smallvec![
+                    Picker::InsideAPipe(Cylinder::new(Axis::z(), 4.0).expect("the ring's radius")),
+                    Picker::from(the_way_round.expect("a normal with a length")),
+                ],
+            },
+        );
+        let near_circle = model.add_closed_edge(near);
+        let far_circle = model.add_closed_edge(far);
+
+        let cap = |model: &mut Model, facing: Vector, circle, turn| {
+            let plane = Plane::from_point_and_normal(rcad_geom::Point::origin(), facing)
+                .expect("a coordinate direction is a unit normal");
+            let round_it = model.add_coedge(circle, turn);
+            let wire = model.add_wire(smallvec::smallvec![round_it]);
+            model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
+        };
+        let near_cap = cap(
+            &mut model,
+            Vector::new(0.0, -1.0, 0.0),
+            near_circle,
+            Orientation::Reversed,
+        );
+        let far_cap = cap(&mut model, far_cap_facing, far_circle, Orientation::Forward);
+
+        let round_the_wall: SmallVec<[_; 4]> = [
+            (near_circle, Orientation::Forward),
+            (seam, Orientation::Forward),
+            (far_circle, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ]
+        .map(|(edge, turn)| model.add_coedge(edge, turn))
+        .into_iter()
+        .collect();
+        let wire = model.add_wire(round_the_wall);
+        let ring = rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+        let wall = model.add_face(Surface::Torus(ring), smallvec::smallvec![wire]);
+
+        let shell = model.add_shell(
+            [
+                (near_cap, Orientation::Forward),
+                (far_cap, Orientation::Forward),
+                (wall, Orientation::Reversed),
+            ]
+            .into_iter()
+            .map(|(face, orient)| FaceUse {
+                face,
+                loc: Isometry::identity(),
+                orient,
+            })
+            .collect(),
+        );
+        let solid = model.add_solid(SmallVec::from_buf([ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]));
+        let key = model.key_for_solid(solid);
+        let wall = model
+            .solid(key)
+            .expect("this model made the key")
+            .faces()
+            .find(|face| matches!(face.surface(), Surface::Torus(_)))
+            .expect("a bend has a wall")
+            .key();
+        (model, key, wall)
+    }
+
+    /// A quarter bend's wall holds the quarter of the ring between its caps,
+    /// and nothing of the other three quarters (§243).
+    ///
+    /// Every point asked is exactly on the ring — on its outer equator at a
+    /// 3-4-5 angle, or at the top of the tube — so each answer is a sign and
+    /// the oracle is which quarter the point is in. `(−5, 0, 0)` is on the near
+    /// cap's own plane, on the circle the wall does not have.
+    #[test]
+    fn a_quarter_bends_wall_holds_the_quarter_between_its_caps_and_nothing_else() {
+        let (model, solid, wall) = a_bend(Bend::Quarter);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the bend `tests/rings/mod.rs` builds through the sweep");
+        let expected = [
+            (at(3.0, 4.0, 0.0), OnAFace::Held),
+            (at(4.0, 3.0, 0.0), OnAFace::Held),
+            (at(5.0, 0.0, 0.0), OnAFace::OnItsBoundary),
+            (at(0.0, 4.0, 1.0), OnAFace::OnItsBoundary),
+            (at(-3.0, 4.0, 0.0), OnAFace::NotHeld),
+            (at(-3.0, -4.0, 0.0), OnAFace::NotHeld),
+            (at(3.0, -4.0, 0.0), OnAFace::NotHeld),
+            (at(-5.0, 0.0, 0.0), OnAFace::NotHeld),
+        ];
+        for (point, answer) in expected {
+            assert_eq!(
+                what_it_holds(&model, solid, wall, point),
+                answer,
+                "{point:?}"
+            );
+        }
+    }
+
+    /// A three-quarter bend's wall is refused, and not read as a quarter.
+    ///
+    /// It is the part of the ring in front of *either* cap's plane, not of
+    /// both, so no answer read off the two planes together is right. The
+    /// refusal comes from its circles: the near one is behind the far cap's
+    /// plane. Read off a corner instead of the wire, both kept sides come out
+    /// turned round, both circles look in front, and every point of the one
+    /// quarter the wall does *not* cover comes back held (§243).
+    #[test]
+    fn a_three_quarter_bends_wall_is_refused_rather_than_read_as_a_quarter() {
+        let (model, solid, wall) = a_bend(Bend::ThreeQuarters);
+        for point in [at(3.0, -4.0, 0.0), at(-3.0, 4.0, 0.0), at(3.0, 4.0, 0.0)] {
+            let answer = model
+                .solid(solid)
+                .expect("this model made the key")
+                .face_holds_the_point(wall, point, &Policy::certified(), &mut ProvenanceLog::new());
+            assert!(
+                matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
+                "{point:?}: {answer:?}"
+            );
+        }
     }
 }
