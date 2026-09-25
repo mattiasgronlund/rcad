@@ -104,6 +104,34 @@
 //! **Which makes that sweep load-bearing twice over.** Moving it to the fuse's
 //! own policy, or taking it out, does not merely change what reaches the fuse —
 //! it makes the assertion below start firing on good answers.
+//!
+//! # A union or an intersection is asked both ways round
+//!
+//! A fourth check, and the first of `fuses_that_must_agree.rs`'s laws to reach
+//! a stranger's solids (§129.5 item 3): a two-sided union or intersection is
+//! fused again with the two sides swapped, on a copy of the model as it was,
+//! under the same policy, and the two answers are compared **the way that
+//! file's `both_ways_round_of` compares them**:
+//!
+//! - a refusal on either side is not held to anything, because the two orders
+//!   genuinely take different paths through the arithmetic;
+//! - one order answering and the other handing back an answer no `Model` can
+//!   hold is counted when every input face is flat and a failure when one is
+//!   curved — `both_agree_about_whether_there_is_an_answer`'s split between its
+//!   flat and its round families;
+//! - two answers must be the same bit for bit, arena order aside —
+//!   `same_answer` over `answer_of(..).canonical()`.
+//!
+//! Difference is not asked, because `A − B` is not `B − A`. Nor is a one-sided
+//! draw: the source only ever swaps one solid for one solid.
+//!
+//! **This is a copy of that comparison, not the comparison itself.** It lives
+//! in `fuses_that_must_agree.rs`, a test binary of its own, as private items
+//! returning proptest's `TestCaseError`, and the fuzz crate has no proptest.
+//! Sharing one copy needs `Answer`, `Face`, `Step`, `Run`, `Picking`,
+//! `WhatItSitsOn`, `answer_of`, `written_out`, `turned_to_its_smallest`, `bits`
+//! and `same_answer` moved into a module both reach by `#[path]`, with
+//! `same_answer`'s error made a `String` the proptest side wraps.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -111,8 +139,9 @@
 #[path = "the_door.rs"]
 mod the_door;
 
+use rcad_geom::{EdgeRun, Orientation, Picker, Surface};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule};
+use rcad_topo::{EdgeView, Error, Model, Rule, SolidKey};
 
 use the_door::every_number_the_door_promised_is_real;
 
@@ -163,6 +192,19 @@ pub struct Reached {
     /// comparison would pass on a half-written model and nothing would say so —
     /// and this number would be zero.
     pub ok_that_wrote_something: usize,
+    /// Two-sided unions and intersections fused a second time with the two
+    /// sides swapped.
+    pub asked_both_ways_round: usize,
+    /// Of those, the ones where both orders answered and the two answers were
+    /// compared and found the same.
+    ///
+    /// **The control on the comparison**: were both orders to refuse every
+    /// time, the check would pass for free and this would be zero.
+    pub the_same_both_ways_round: usize,
+    /// Of those, the ones over flat solids where one order answered and the
+    /// other said the answer is not a solid — counted, not failed, exactly as
+    /// `fuses_that_must_agree.rs` counts it on its flat families (§48.2 item 5).
+    pub a_solid_one_way_round_only: usize,
 }
 
 impl Reached {
@@ -181,6 +223,11 @@ impl Reached {
             refused: self.refused + other.refused,
             solids_made: self.solids_made + other.solids_made,
             ok_that_wrote_something: self.ok_that_wrote_something + other.ok_that_wrote_something,
+            asked_both_ways_round: self.asked_both_ways_round + other.asked_both_ways_round,
+            the_same_both_ways_round: self.the_same_both_ways_round
+                + other.the_same_both_ways_round,
+            a_solid_one_way_round_only: self.a_solid_one_way_round_only
+                + other.a_solid_one_way_round_only,
         }
     }
 }
@@ -296,12 +343,15 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
         Policy::tolerant(model.scale().nominal_size())
     };
 
+    let asked_both_ways_round = !one_sided && matches!(rule, Rule::Union | Rule::Intersection);
+    let unfused = asked_both_ways_round.then(|| model.clone());
+
     reached.fused = 1;
     let before = postcard::to_allocvec(&model).expect("a model that decoded serializes again");
     let answer = model.fuse(arguments, tools, rule, &policy, log);
     let after = postcard::to_allocvec(&model).expect("a fused model serializes");
 
-    match answer {
+    let forwards = match answer {
         Ok(fused) => {
             reached.ok = 1;
             reached.solids_made = fused.solids().len();
@@ -316,8 +366,9 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
             model
                 .validate(&policy, log)
                 .expect("an answer the fuse called Ok passes the sweep under its own policy");
+            WhatCameBack::Answered(the_answer_written_out(&model, fused.solids()))
         }
-        Err(_) => {
+        Err(why) => {
             reached.refused = 1;
             assert!(
                 before == after,
@@ -325,7 +376,296 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
                 after.len(),
                 before.len()
             );
+            WhatCameBack::from_refusal(&why)
+        }
+    };
+
+    if let Some(mut unfused) = unfused {
+        reached.asked_both_ways_round = 1;
+        let every_face_is_flat = arguments
+            .iter()
+            .chain(tools)
+            .all(|&solid| every_face_of_it_is_flat(&unfused, solid));
+        let backwards = match unfused.fuse(tools, arguments, rule, &policy, log) {
+            Ok(fused) => WhatCameBack::Answered(the_answer_written_out(&unfused, fused.solids())),
+            Err(why) => WhatCameBack::from_refusal(&why),
+        };
+        match both_ways_round(&forwards, &backwards, every_face_is_flat, rule) {
+            Ok(Agreed::TheSameAnswer) => reached.the_same_both_ways_round = 1,
+            Ok(Agreed::ASolidOneWayRoundOnly) => reached.a_solid_one_way_round_only = 1,
+            Ok(Agreed::NothingToCompare) => {}
+            Err(why) => panic!("{why}"),
         }
     }
     reached
+}
+
+/// What one order of a fuse came back with, in the three shapes
+/// `fuses_that_must_agree.rs`'s `Fused` tells apart.
+#[derive(Debug)]
+pub enum WhatCameBack {
+    /// An answer, written out by [`the_answer_written_out`].
+    Answered(AnAnswer),
+    /// A refusal of any kind but the one below.
+    Refused,
+    /// [`Error::ResultIsNotManifold`]: the answer is not something a `Model`
+    /// can hold.
+    NotASolid,
+}
+
+impl WhatCameBack {
+    fn from_refusal(why: &Error) -> Self {
+        match why {
+            Error::ResultIsNotManifold { .. } => WhatCameBack::NotASolid,
+            _ => WhatCameBack::Refused,
+        }
+    }
+}
+
+/// What asking both ways round found, when it did not find a disagreement.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Agreed {
+    /// Both orders answered, and with the same answer bit for bit.
+    TheSameAnswer,
+    /// Flat solids only: one order answered and the other said the answer is
+    /// not a solid. Counted, not failed.
+    ASolidOneWayRoundOnly,
+    /// At least one order refused, so there was nothing to hold them to.
+    NothingToCompare,
+}
+
+/// **The two orders of one fuse, held to each other.**
+///
+/// A mirror of `both_ways_round_of` in `tests/fuses_that_must_agree.rs`, which
+/// the module doc says why this cannot call:
+/// `both_agree_about_whether_there_is_an_answer` first, then `same_answer`.
+///
+/// # Errors
+///
+/// The disagreement, in words, when the two answers differ, or when solids with
+/// a curved face answer one way round and are not a solid the other.
+pub fn both_ways_round(
+    forwards: &WhatCameBack,
+    backwards: &WhatCameBack,
+    every_face_is_flat: bool,
+    rule: Rule,
+) -> Result<Agreed, String> {
+    match (forwards, backwards) {
+        (WhatCameBack::Answered(one), WhatCameBack::Answered(other)) => {
+            the_same_answer(one, other, rule).map(|()| Agreed::TheSameAnswer)
+        }
+        (WhatCameBack::NotASolid, WhatCameBack::Answered(_))
+        | (WhatCameBack::Answered(_), WhatCameBack::NotASolid) => {
+            if every_face_is_flat {
+                Ok(Agreed::ASolidOneWayRoundOnly)
+            } else {
+                Err(format!(
+                    "swapping the two sides turned a {rule:?} of solids with a curved face whose \
+                     answer is a solid into one whose answer no `Model` can hold, which cannot \
+                     depend on the path taken"
+                ))
+            }
+        }
+        _ => Ok(Agreed::NothingToCompare),
+    }
+}
+
+/// `same_answer` in `tests/fuses_that_must_agree.rs`, with a `String` where
+/// that one has proptest's error.
+///
+/// # Errors
+///
+/// How the two differ, when they do.
+pub fn the_same_answer(one: &AnAnswer, other: &AnAnswer, rule: Rule) -> Result<(), String> {
+    if one.solids == other.solids {
+        return Ok(());
+    }
+    let faces = |answer: &AnAnswer| answer.solids.iter().map(Vec::len).sum::<usize>();
+    let mut why = format!(
+        "swapping the two sides changed the answer to a {rule:?}:\n  {} solids and {} faces one \
+         way, {} solids and {} faces the other",
+        one.solids.len(),
+        faces(one),
+        other.solids.len(),
+        faces(other)
+    );
+    for (position, (mine, theirs)) in one.solids.iter().zip(&other.solids).enumerate() {
+        if let Some(face) = mine.iter().zip(theirs).position(|(a, b)| a != b) {
+            why.push_str(&format!("\n  solid {position} face {face} differs"));
+            break;
+        }
+    }
+    Err(why)
+}
+
+/// An answer written out in one fixed order, so that two answers are equal
+/// exactly when the arena order is the only thing between them.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AnAnswer {
+    solids: Vec<Vec<Vec<u64>>>,
+}
+
+/// `answer_of(model, solids).canonical()` in `tests/fuses_that_must_agree.rs`,
+/// straight to the numbers: every face its surface, which way round its solid
+/// uses it, its outline and then its holes sorted; every wire turned to its
+/// smallest rotation; the faces of a solid sorted, and the solids sorted.
+#[must_use]
+pub fn the_answer_written_out(model: &Model, solids: &[SolidKey]) -> AnAnswer {
+    let mut solids: Vec<Vec<Vec<u64>>> = solids
+        .iter()
+        .map(|&solid| {
+            let mut faces: Vec<Vec<u64>> = model
+                .solid(solid)
+                .expect("a solid the fuse handed back resolves in the model that made it")
+                .faces()
+                .map(|face| {
+                    let wires: Vec<Vec<Vec<u64>>> = face
+                        .wires()
+                        .map(|wire| {
+                            wire.coedges()
+                                .map(|coedge| {
+                                    coedge
+                                        .start()
+                                        .point()
+                                        .coordinates()
+                                        .map(bits)
+                                        .into_iter()
+                                        .chain(run_written_out(coedge.edge()))
+                                        .collect()
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    face_written_out(
+                        &face.surface(),
+                        face.orientation() == Orientation::Reversed,
+                        &wires,
+                    )
+                })
+                .collect();
+            faces.sort_unstable();
+            faces
+        })
+        .collect();
+    solids.sort_unstable();
+    AnAnswer { solids }
+}
+
+fn every_face_of_it_is_flat(model: &Model, solid: SolidKey) -> bool {
+    model
+        .solid(solid)
+        .expect("the draw's own solid resolves")
+        .faces()
+        .all(|face| face.surface().as_plane().is_some())
+}
+
+/// `written_out(face)` there: **the outline stays first and only the holes are
+/// sorted**, because which wire is first is part of a face in this kernel
+/// (§163).
+fn face_written_out(surface: &Surface, reversed: bool, wires: &[Vec<Vec<u64>>]) -> Vec<u64> {
+    let mut written = surface_written_out(surface);
+    written.push(u64::from(reversed));
+
+    let mut rings = wires.iter().map(|wire| turned_to_its_smallest(wire));
+    let outline = rings.next().expect("a face has at least one wire");
+    let mut holes: Vec<Vec<u64>> = rings.collect();
+    holes.sort_unstable();
+    written.push(wires.len() as u64);
+    for ring in core::iter::once(outline).chain(holes) {
+        written.push(ring.len() as u64);
+        written.extend(ring);
+    }
+    written
+}
+
+/// `turned_to_its_smallest` there: which step comes first is arbitrary, but
+/// which follows which is the winding, and the winding is part of the answer.
+fn turned_to_its_smallest(steps: &[Vec<u64>]) -> Vec<u64> {
+    (0..steps.len())
+        .map(|start| -> Vec<u64> {
+            (0..steps.len())
+                .flat_map(|step| steps[(start + step) % steps.len()].iter().copied())
+                .collect()
+        })
+        .min()
+        .unwrap_or_default()
+}
+
+/// `Run::of(edge).written_out()` there, with the same tags.
+///
+/// **One arm more than the source.** That file panics on
+/// `RightRoundWhereItCrosses`, because the fuse never writes one (§216) and its
+/// inputs never carry one. A stranger's model can, so it is written down here —
+/// tag 3 and the surface it names — rather than turned into a crash that says
+/// nothing about the fuse.
+fn run_written_out(edge: EdgeView<'_>) -> Vec<u64> {
+    match edge.run() {
+        EdgeRun::Straight => vec![0],
+        EdgeRun::RightRoundWhereItsFacesCross => {
+            vec![1, u64::from(edge.orientation() == Orientation::Forward)]
+        }
+        EdgeRun::PartOfWhereItCrosses { and, picked_by } => {
+            let mut pickers: Vec<Vec<u64>> = picked_by.iter().map(picker_written_out).collect();
+            pickers.sort_unstable();
+            let mut written = vec![2];
+            written.extend(surface_written_out(&and));
+            written.push(pickers.len() as u64);
+            written.extend(pickers.into_iter().flatten());
+            written
+        }
+        EdgeRun::RightRoundWhereItCrosses { and } => {
+            let mut written = vec![3];
+            written.extend(surface_written_out(&and));
+            written
+        }
+        other => panic!("the fuse fuzzer does not know how to write {other:?} down"),
+    }
+}
+
+/// `Picking::of(picker).written_out()` there.
+fn picker_written_out(picker: &Picker) -> Vec<u64> {
+    let (tag, numbers) = match picker {
+        Picker::InFrontOf(flat) => (0, flat.coefficients().map(bits).to_vec()),
+        Picker::OutsideABall(ball) => (1, surface_written_out(&Surface::Sphere(*ball))),
+        Picker::OutsideAPipe(pipe) => (1, surface_written_out(&Surface::Cylinder(*pipe))),
+        Picker::InsideAPipe(pipe) => (2, surface_written_out(&Surface::Cylinder(*pipe))),
+        other => panic!("the fuse fuzzer does not know how to write {other:?} down"),
+    };
+    core::iter::once(tag).chain(numbers).collect()
+}
+
+/// `WhatItSitsOn::of(surface).written_out()` there: the numbers that name the
+/// surface, behind a tag so two kinds can never write themselves out the same.
+fn surface_written_out(surface: &Surface) -> Vec<u64> {
+    match surface {
+        Surface::Plane(flat) => core::iter::once(0)
+            .chain(flat.coefficients().map(bits))
+            .collect(),
+        Surface::Sphere(ball) => core::iter::once(1)
+            .chain(ball.centre().coordinates().map(bits))
+            .chain([bits(ball.radius())])
+            .collect(),
+        Surface::Cylinder(pipe) => core::iter::once(2)
+            .chain(pipe.axis().origin().coordinates().map(bits))
+            .chain(pipe.axis().direction().components().map(bits))
+            .chain([bits(pipe.radius())])
+            .collect(),
+        Surface::Cone(cone) => core::iter::once(3)
+            .chain(cone.apex().coordinates().map(bits))
+            .chain(cone.axis().direction().components().map(bits))
+            .chain([bits(cone.slope())])
+            .collect(),
+        Surface::Torus(ring) => core::iter::once(4)
+            .chain(ring.centre().coordinates().map(bits))
+            .chain(ring.axis().direction().components().map(bits))
+            .chain([bits(ring.ring_radius()), bits(ring.tube_radius())])
+            .collect(),
+        other => panic!("the fuse fuzzer does not know how to write {other:?} down"),
+    }
+}
+
+/// `bits` there: a number's bits, with `-0.0` and `0.0` counted as one, because
+/// which zero an arithmetic path lands on is not part of the answer.
+fn bits(number: f64) -> u64 {
+    if number == 0.0 { 0 } else { number.to_bits() }
 }
