@@ -2224,7 +2224,11 @@ mod tests {
             ),
             "expected the copy's edges round the cut to be walked once, got {refused:?}"
         );
-        assert_eq!(counts_of(&read_back), counts, "a refused copy wrote something");
+        assert_eq!(
+            counts_of(&read_back),
+            counts,
+            "a refused copy wrote something"
+        );
     }
 
     /// Two corners added and taken out again leave two empty slots, and a file

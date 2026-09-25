@@ -57,7 +57,9 @@ fn a_copy_reads_back_the_same_as_its_original_down_to_the_last_bit() {
         );
         model
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("{what}: the model does not validate after a copy: {why}"));
+            .unwrap_or_else(|why| {
+                panic!("{what}: the model does not validate after a copy: {why}")
+            });
     }
 }
 
@@ -212,7 +214,11 @@ fn a_copy_carries_every_tag_of_its_original_and_tagging_it_leaves_the_original_a
     let original = a_cube(&mut model, 2.0);
     let corner = Approximation::new(2e-9, Cause::ImportedUncertainty);
     let side = Approximation::new(1e-9, Cause::ImportedUncertainty);
-    for vertex in model.vertices().map(|vertex| vertex.key()).collect::<Vec<_>>() {
+    for vertex in model
+        .vertices()
+        .map(|vertex| vertex.key())
+        .collect::<Vec<_>>()
+    {
         model
             .set_vertex_approximation(vertex, corner)
             .expect("a corner may carry more slop than its edges");
@@ -274,10 +280,7 @@ fn a_key_from_another_model_copies_nothing() {
     let refused = model.copy_solid(stranger);
 
     assert!(
-        matches!(
-            refused,
-            Err(Error::KeyFromAnotherModel { entity: "solid" })
-        ),
+        matches!(refused, Err(Error::KeyFromAnotherModel { entity: "solid" })),
         "expected a key from another model to be refused, got {refused:?}"
     );
     assert_eq!(counts_of(&model), counts, "a refused copy wrote something");
@@ -377,7 +380,10 @@ fn every_kind_a_fuse_takes_with_its_copy() -> [(&'static str, Build); 8] {
         ("a pointed cone", |model| {
             cones::a_pointed_cone(model, 0.5, 4.0)
         }),
-        ("two overlapping cubes made one", two_overlapping_cubes_made_one),
+        (
+            "two overlapping cubes made one",
+            two_overlapping_cubes_made_one,
+        ),
         ("a cube with a hollow in it", a_cube_with_a_hollow_in_it),
         (A_TURNED_CUBE, |model| {
             let cube = a_cube(model, 2.0);
