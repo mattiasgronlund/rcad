@@ -390,7 +390,10 @@ fn where_a_bar_started_its_cap_circle_stays_a_corner_where_the_other_circle_cros
                 .validate(&policy, &mut ProvenanceLog::new())
                 .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
             let [solid] = fused.solids() else {
-                panic!("{rule:?} of two crossing bars is one solid: {:?}", fused.solids());
+                panic!(
+                    "{rule:?} of two crossing bars is one solid: {:?}",
+                    fused.solids()
+                );
             };
             let solid = model.solid(*solid).expect("this model made the key");
 

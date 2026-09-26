@@ -2606,7 +2606,8 @@ fn vertices_that_only_start_a_closed_edge<'a>(
     sides_ending
         .into_iter()
         .filter(|(slot, ending)| {
-            !a_corner.contains(slot) && walked_through.get(slot).copied().unwrap_or(0) * 2 == *ending
+            !a_corner.contains(slot)
+                && walked_through.get(slot).copied().unwrap_or(0) * 2 == *ending
         })
         .map(|(slot, _)| slot)
         .collect()
