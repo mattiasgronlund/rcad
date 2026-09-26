@@ -5258,7 +5258,10 @@ fuzz-triage night="" against="main":
         target="${target##*/}"
         case " $valid_targets " in
             *" $target "*) printf '%s\t%s\n' "$target" "$file" ;;
-            *) untellable=$((untellable + 1)) ;;
+            *)
+                untellable=$((untellable + 1))
+                echo "target:   unknown — $target names no fuzz_targets/*.rs on {{ against }}, so this could not be placed and was not decoded" >&2
+                ;;
         esac
     done <<<"$files" >"$manifest"
 
@@ -5442,17 +5445,44 @@ check-fuzz-triage-selftest:
     }
     triage() { RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
 
+    verdicts="$night/fuzz-triage-verdicts.tsv"
+    header=$(printf 'target\tfiles\tstill_fails\tsample\tgroup')
+
     # One: no night given, so it reads the one `latest` names, and everything
-    # the morning asks for comes out of that one line.
-    got=$(triage "") || fail "a night with one artifact made the triage itself fail"
+    # the morning asks for comes out of that one line. A second file with the
+    # same undecodable bytes as the first, under the same target, and a third
+    # under a different target, prove the batch call replays every input but
+    # groups them — two into one bucket, one into a bucket of its own — rather
+    # than costing one `cargo run` each.
+    crash2="$night/artifacts/where_two_surfaces_cross/crash-beadfeed"
+    printf 'not a real crash input' >"$crash2"
+    third="$night/artifacts/two_solids_fused_by_a_stranger/crash-c0ffee"
+    mkdir -p "$(dirname "$third")"
+    printf 'nor is this one' >"$third"
+    got=$(triage "") || fail "a night with three artifacts made the triage itself fail"
     grep -qF "night:    $night" <<<"$got" || fail "it did not say which night it read"
     grep -q '^commit:   9b82e9e$' <<<"$got" \
         || fail "it did not name the commit that was fuzzed, which is the whole of §90"
     grep -q '^targets:  fuzz:crash$' <<<"$got" || fail "it did not name the target that was flagged"
-    grep -qF "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- where_two_surfaces_cross $crash" <<<"$got" \
-        || fail "it did not run the decoder on the artifact, naming the target off the artifact's own directory"
-    grep -q 'still fails on HEAD' <<<"$got" \
-        || fail "it decoded the input without saying whether it still fails"
+    calls=$(grep -c 'cargo run -q -p rcad-fuzz-explain -- --triage' <<<"$got" || true)
+    [ "$calls" = 1 ] \
+        || fail "three artifacts cost $calls batch call(s), not the one this recipe exists to hold at"
+
+    [ -f "$verdicts" ] || fail "no verdict file landed in the night's own directory"
+    [ "$(head -1 "$verdicts")" = "$header" ] \
+        || fail "the verdict file's header does not name its five columns"
+    row1=$(printf 'where_two_surfaces_cross\t2\tyes\t')
+    grep -qF "$row1" "$verdicts" \
+        || fail "the two files with the same undecodable bytes were not collapsed into one bucket of 2"
+    row2=$(printf 'two_solids_fused_by_a_stranger\t1\tyes\t')
+    grep -qF "$row2" "$verdicts" \
+        || fail "the file under the other target did not get a bucket of its own"
+    [ "$(grep -c . "$verdicts")" = 3 ] \
+        || fail "the verdict file should hold a header and two group rows, not $(grep -c . "$verdicts")"
+    grep -q '^groups:   2, 2 of them still failing on HEAD$' <<<"$got" \
+        || fail "the tally did not say two groups, both still failing"
+    grep -q '^files:    3 decoded across 3 total$' <<<"$got" \
+        || fail "the tally did not say all three files were decoded"
 
     # Two: the nights before §91's copy-out landed keep their inputs in a
     # rescued directory beside the night, and 2026-09-14 is one of them.
@@ -5463,8 +5493,11 @@ check-fuzz-triage-selftest:
     got=$(triage "") || fail "a night whose inputs were rescued beside it made the triage fail"
     grep -qF "inputs:   $logs/artifacts-rescued-2026-09-14" <<<"$got" \
         || fail "it did not look beside the night for the rescued inputs"
-    grep -qF "rcad-fuzz-explain -- two_solids_fused_by_a_stranger $rescued/crash-c0ffee" <<<"$got" \
-        || fail "it did not decode the rescued input"
+    calls=$(grep -c 'cargo run -q -p rcad-fuzz-explain -- --triage' <<<"$got" || true)
+    [ "$calls" = 1 ] || fail "one rescued input cost $calls batch call(s)"
+    row=$(printf 'two_solids_fused_by_a_stranger\t1\tyes\t')
+    grep -qF "$row" "$verdicts" || fail "the rescued input's own bucket was not written"
+    grep -qF "$rescued/crash-c0ffee" "$verdicts" || fail "the rescued input was not named as a sample"
 
     # Three: a night nothing reported still says what it can, and says the
     # commit is unknown rather than borrowing the one `latest` happens to name.
@@ -5475,6 +5508,8 @@ check-fuzz-triage-selftest:
         || fail "it read another night's commit off the latest line and reported it as this one's"
     grep -qF "inputs:   none" <<<"$got" \
         || fail "a night that kept nothing did not say so"
+    [ ! -e "$other/fuzz-triage-verdicts.tsv" ] \
+        || fail "a night with nothing to decode still got a verdict file written into it"
 
     # Four: a directory that is not there is a failure and not an empty report.
     if triage "$logs/2026-01-01" >/dev/null 2>&1; then
@@ -5496,8 +5531,12 @@ check-fuzz-triage-selftest:
         || fail "an artifact whose parent directory names no real target was decoded anyway"
     grep -qF "1 of 1 input(s) could not be told which target they came from" <<<"$got" \
         || fail "the untellable count did not reach the tail line"
-    grep -q '^0 of 1 input(s) did not come back clean on HEAD$' <<<"$got" \
-        || fail "an untellable input was folded into the count of inputs that did not come back clean"
+    grep -q '^groups:   0, 0 of them still failing on HEAD$' <<<"$got" \
+        || fail "an untellable input was folded into a group instead of being left out of every one"
+    grep -q '^files:    0 decoded across 1 total$' <<<"$got" \
+        || fail "an untellable input was counted as decoded"
+    [ "$(head -1 "$flat_night/fuzz-triage-verdicts.tsv")" = "$header" ] \
+        || fail "a night with only untellable input still needs a header-only verdict file, for Q146 to read without special-casing it"
 
     # Six: promoting a good artifact keeps the trailing sha1 and lands it under
     # a name — `crash-<name>-<sha1>` is the shape already in the corpus.
