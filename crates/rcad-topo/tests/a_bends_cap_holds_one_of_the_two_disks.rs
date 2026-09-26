@@ -229,8 +229,12 @@ fn a_box_holding_a_point_of_a_turned_fat_bends_cap_is_refused_across_the_plane_b
         .expect("this model made the key");
     let bend = model.solid(solid).expect("this model made the key");
     let on_the_cap = PredicatePoint::from([2.0, 2.0, 0.0]);
-    let answer =
-        bend.face_holds_the_point(cap, on_the_cap, &Policy::certified(), &mut ProvenanceLog::new());
+    let answer = bend.face_holds_the_point(
+        cap,
+        on_the_cap,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
     assert!(
         matches!(answer, Ok(OnAFace::Held)),
         "(2, 2, 0) is a unit and a bit from the centre of the cap's circle, of radius three: \
