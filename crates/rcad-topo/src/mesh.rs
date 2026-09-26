@@ -2196,12 +2196,18 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
 /// **Each loop of a torus face is unwrapped round the ring from its own first
 /// corner**, so two loops of one face can come out a whole turn apart, which in
 /// the chart puts a hole outside the loop it is a hole in. A hole's ring angles
-/// lie inside its outer loop's, and no loop spans a whole turn round the ring,
-/// because [`WalkingAWire::goes_right_round_the_second_way`] refused those. So
-/// the middle of a hole is less than half a turn from the middle of its outer
-/// loop in exactly one turn, and this finds it whichever of the two is the
-/// face's first wire. A loop already in that turn keeps its numbers bit for
-/// bit.
+/// lie inside its outer loop's, so the middle of a hole is at most half the
+/// outer loop's span from the outer loop's middle. An outer loop spanning less
+/// than a whole turn round the ring therefore has its holes less than half a
+/// turn from its middle in exactly one turn, and this finds it whichever of the
+/// two is the face's first wire. A loop already in that turn keeps its numbers
+/// bit for bit.
+///
+/// **What this does not settle is two loops side by side**, neither inside the
+/// other, such as two circles round the tube. They bound two bands round the
+/// ring, and this puts them the nearer way round, which is only the right band
+/// when the face is the narrower one. The loops' directions say which it is,
+/// and nothing here reads them.
 fn with_its_second_coordinate_in_the_turn_of(
     chain: &WalkedLoop,
     frame: &WalkedLoop,
@@ -2885,7 +2891,7 @@ impl WalkingAWire {
             _ => (0.0, false),
         };
         if let Some(whole) = self.second_wraps
-            && self.goes_right_round_the_second_way(whole)
+            && self.climbs_a_whole_turn_the_second_way(whole)
         {
             return None;
         }
@@ -2898,35 +2904,27 @@ impl WalkingAWire {
         })
     }
 
-    /// Whether the loop goes right round the way its second coordinate wraps,
-    /// which on a torus is right round the ring: it comes back a whole turn on,
-    /// or it passes one point at two corners a whole turn apart, which is a
-    /// seam round the ring.
+    /// Whether the loop comes back a whole turn on in its second coordinate,
+    /// which on a torus is a wire right round the ring with no seam across the
+    /// tube.
     ///
-    /// **Either is a face this mesher has no cut for, so it is refused and not
-    /// meshed.** [`BuildingAMesh::cut_off_what_goes_too_far_round`] narrows a
-    /// patch in the first coordinate only, and the triangulator measures a
-    /// side round the ring by its chord, `2S·|sin(Δ/2)|`, which is nothing
-    /// across a whole turn. A patch a whole turn wide would be filled with
-    /// triangles that measure flat and are not. Before §280 such a loop never
-    /// got that far unfolded: read on `atan2`'s branch it jumped across the
-    /// chart and came back crossing itself.
+    /// **This mesher has no cut for that, so it is refused and not meshed.**
+    /// A loop in the chart has to close, and the one place a wire may come
+    /// back a whole turn on is round the tube, where
+    /// [`WalkingAWire::may_come_back_a_whole_turn_on`] says which wires may and
+    /// [`BuildingAMesh::cut_off_what_goes_too_far_round`] cuts what they bound.
+    /// Nothing does that round the ring. A face right round the ring **with**
+    /// a seam across the tube climbs nothing, goes round and comes back, and is
+    /// meshed as a patch a whole turn wide.
     ///
     /// The climb is measured the way [`WalkingAWire::finish`] measures the
     /// longitude's, with the closing step taken the short way round.
-    fn goes_right_round_the_second_way(&self, whole: f64) -> bool {
+    fn climbs_a_whole_turn_the_second_way(&self, whole: f64) -> bool {
         let (Some(first), Some(last)) = (self.corners.first(), self.corners.last()) else {
             return false;
         };
         let climbed = last[1] - first[1] + the_short_way_round(first[1] - last[1], whole);
-        if climbed.abs() >= whole / 2.0 {
-            return true;
-        }
-        let mut first_seen_at: HashMap<u32, f64> = HashMap::new();
-        self.points.iter().zip(&self.corners).any(|(&at, corner)| {
-            let first_seen = *first_seen_at.entry(at).or_insert(corner[1]);
-            (corner[1] - first_seen).abs() >= whole / 2.0
-        })
+        climbed.abs() >= whole / 2.0
     }
 
     /// Whether this wire is allowed to end a whole turn of longitude on from

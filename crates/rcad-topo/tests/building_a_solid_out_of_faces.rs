@@ -387,26 +387,59 @@ fn a_bend_turned_past_where_the_ring_angle_is_cut_is_the_bend_that_was_not_turne
     }
 }
 
-/// A torus face that goes right round the ring is refused by the mesher as a
-/// wire that will not lie flat, whether its wires each climb a whole turn round
-/// the ring or it has one wire with a seam across the tube.
+/// The top half of a ring described with one wire per equator is refused by
+/// name, because each of those wires climbs a whole turn round the ring and a
+/// loop in the chart has to close.
 ///
-/// This mesher cuts a patch narrower in the first coordinate only, the angle
-/// round the tube, and the triangulator's chord round the ring is nothing
-/// across a whole turn. So a face right round the ring is refused by name
-/// rather than handed over a whole turn wide (§280.6).
+/// That is a wire that will not lie flat on its face, the name a wire that
+/// winds round the tube where it may not has always had (§280.6). Before the
+/// ring angle was unwrapped, each equator came back to the corner it left
+/// with no turn counted, and the builder refused the half ring
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 3, used: 3 }`.
 #[test]
-fn the_top_half_of_a_ring_is_a_face_right_round_the_ring_and_is_refused() {
-    for a_seam in [false, true] {
-        let mut model = Model::new(a_working_size());
-        let refused = the_top_half_of_a_ring(&mut model, 4.0, 1.0, a_seam);
-        assert!(
-            matches!(refused, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
-            "the top half of a ring, with a seam across the tube: {a_seam}, came back \
-             {refused:?}"
-        );
-        assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
-    }
+fn the_top_half_of_a_ring_with_no_seam_climbs_a_whole_turn_round_it_and_is_refused() {
+    let mut model = Model::new(a_working_size());
+    let refused = the_top_half_of_a_ring(&mut model, 4.0, 1.0, false);
+    assert!(
+        matches!(refused, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
+        "the top half of a ring with no seam came back {refused:?}"
+    );
+    assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
+}
+
+/// The same half ring with a seam across the tube, which is how a file writes a
+/// face right round the ring, is a solid and measures what Pappus gives,
+/// `π²·r²·R`.
+///
+/// Its one wire goes round the ring and back, so it climbs nothing, and with
+/// the ring angle unwrapped its patch is a whole turn wide round the ring and
+/// half a turn round the tube, which is cut into quarters round the tube as
+/// any patch is.
+#[test]
+fn the_top_half_of_a_ring_with_a_seam_across_the_tube_measures_what_pappus_gives() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let (ring, tube) = (4.0, 1.0);
+    let mut model = Model::new(a_working_size());
+    let half = match the_top_half_of_a_ring(&mut model, ring, tube, true) {
+        Ok(half) => half,
+        Err(refused) => panic!("the top half of a ring with a seam was refused: {refused:?}"),
+    };
+    model
+        .validate(&policy, &mut log)
+        .expect("the half ring is sound");
+    let measured = model
+        .solid(half)
+        .expect("this model made the key")
+        .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
+        .expect("the half ring measures");
+    let pappus = core::f64::consts::PI * core::f64::consts::PI * tube * tube * ring;
+    assert!(
+        (measured.volume() - pappus).abs() <= measured.volume_error(),
+        "{} where Pappus gives {pappus}, allowed {}",
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 /// The seam of a bend, named from geometry a file carries rather than from
