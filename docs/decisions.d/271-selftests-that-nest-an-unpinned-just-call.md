@@ -87,3 +87,6 @@ overrides the one variable the recipe under test actually reads.
 That is not yet a finding for the whole justfile. The ten selftests of §271.3
 were only grepped, and a path built at run time would pass that grep; until
 Q176 reads their bodies, whether any of them reaches the live tree is open.
+§277 has since read them: three of the ten are pinned after all,
+`check-hub-align-selftest` nests no `just` call, and none reaches the live
+tree (§277.4).
