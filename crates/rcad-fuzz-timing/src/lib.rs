@@ -69,7 +69,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -369,6 +369,11 @@ fn the_shared_report_locked(into: &Path) -> Option<std::fs::File> {
 /// **Names are sorted and matched by the numbers in them, never compared as
 /// text**, for the reason [`SlowRun::is`] gives: this runs inside a draw, and a
 /// `memcmp` of two different names would hand both to libFuzzer's mutations.
+///
+/// **The inputs already kept are held in a `BTreeSet`, never a `HashSet`**, for
+/// the same reason. Each `RandomState` made on a thread steps the keys of the
+/// next one made there, so one made here would change the order the target's
+/// own hash maps iterate in, at a moment the clock picked (§267).
 fn prune_to_the_slowest_kept(from: &Path, keep: usize) -> Vec<(Duration, String)> {
     let Ok(listing) = std::fs::read_dir(from) else {
         return Vec::new();
@@ -383,7 +388,7 @@ fn prune_to_the_slowest_kept(from: &Path, keep: usize) -> Vec<(Duration, String)
     found.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
 
     let mut kept: Vec<(Duration, String)> = Vec::new();
-    let mut held: HashSet<u64> = HashSet::new();
+    let mut held: BTreeSet<u64> = BTreeSet::new();
     for (took, input, name) in found {
         if kept.len() < keep && held.insert(input) {
             kept.push((took, name));
@@ -763,6 +768,8 @@ impl TheSlowestRuns {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+    use std::hash::{BuildHasher, RandomState};
 
     /// A directory of this test's own, named so two tests never share one.
     fn somewhere_to_write(what: &str) -> PathBuf {
@@ -891,6 +898,61 @@ mod tests {
         );
         assert!(held.is(held.hash, b"same bytes"));
         assert!(!held.is(held.hash, b"other bytes"));
+    }
+
+    #[test]
+    fn a_draw_that_merges_leaves_the_hash_keys_of_its_thread_where_it_found_them() {
+        // §267: every `RandomState` made on a thread steps the keys the next
+        // one made there gets, and so the order the target's own hash maps
+        // iterate in. The merge runs inside a draw, at a moment the clock
+        // picks. If it made a `RandomState`, the clock would pick when the
+        // target's hash maps change their order, and only with the timings
+        // named. Two names for one input make the merge prune a duplicate.
+        let into = somewhere_to_write("hash-keys");
+        let slowest = into.join("slowest");
+        std::fs::create_dir_all(&slowest).expect("somewhere to write");
+        for took in [30, 70] {
+            std::fs::write(
+                slowest.join(named_for(Duration::from_millis(took), b"same")),
+                b"same",
+            )
+            .expect("a slow input");
+        }
+
+        let before = the_hash_key_this_thread_hands_out_next();
+        let mut watch = a_process_writing_into(&into, 4);
+        let due = watch.last_merged + HOW_OFTEN_TO_MERGE;
+        watch.record(Duration::from_millis(5), b"a draw", due);
+        let after = the_hash_key_this_thread_hands_out_next();
+
+        assert!(
+            !slowest
+                .join(named_for(Duration::from_millis(30), b"same"))
+                .exists(),
+            "the draw did not merge and prune, so this measured nothing"
+        );
+        assert_eq!(
+            after,
+            before.wrapping_add(1),
+            "the draw made {} `RandomState`s on its thread",
+            after.wrapping_sub(before).wrapping_sub(1)
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    /// The first key of the `RandomState` this thread hands out next.
+    ///
+    /// std keeps two keys per thread and adds one to the first each time a
+    /// `RandomState` is made there (`std/src/hash/random.rs`), so the keys of
+    /// two readings say how many were made between them. Nothing public
+    /// returns the key, but a `DefaultHasher`'s `Debug` prints it.
+    fn the_hash_key_this_thread_hands_out_next() -> u64 {
+        let hasher = format!("{:?}", RandomState::new().build_hasher());
+        hasher
+            .split_once("k0: ")
+            .and_then(|(_, rest)| rest.split(',').next())
+            .and_then(|key| key.parse().ok())
+            .unwrap_or_else(|| panic!("a DefaultHasher no longer prints its first key: {hasher}"))
     }
 
     #[test]
