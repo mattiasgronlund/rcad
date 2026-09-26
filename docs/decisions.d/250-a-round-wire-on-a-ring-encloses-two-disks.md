@@ -194,3 +194,44 @@ argued, not run.
 A half-ring's flat ring-shaped face through the ring's middle may have given
 the same wrong answer on the base: the outer wire counts +1 and the hole −1,
 so a point on the face comes out `NotHeld`. That is reasoned, not run.
+
+### 250.7 A half-ring's flat face, run
+
+*Row Q120 (`lane-q120-half-ring-face`, off `df9d24d8`).* The face could not be
+asked on either commit, because `SolidBuilder::build` refuses the half-ring.
+
+The half-ring is ring four and tube one, cut by `z = 0`, keeping `z ≥ 0`. It
+was written face by face, as `rings::a_quarter_bend` writes a bend, in a
+scratch test `crates/rcad-topo/tests/q120_half_ring_probe.rs` that was not
+committed. The flat face is `z = 0`, facing `−z`, with two wires. The outer
+wire is the circle of radius five through the corner `(5, 0, 0)`, and the hole
+is the circle of radius three through `(3, 0, 0)`. Each is one
+`RightRoundWhereItsFacesCross` edge. The wall is one face on the torus, on the
+other side of both circles. It was written three ways, and each way was tried
+with all eight choices of the two circles' directions and the wall's
+orientation in the shell:
+
+| the wall's wires | `build` under `Policy::certified()` |
+|---|---|
+| two wires, one circle each, no seam | `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 3, used: 3 }` |
+| one wire: circle, seam, circle, seam back, with the seam the half circle over `(4, 0, 1)` picked by `x ≥ 0` and `z ≥ 0` | `ADraftFaceCouldNotBeMeshed { face: 1, why: CornersCoincide { position: 5 } }` |
+| the same, with the seam over `(−4, 0, 1)` picked by `x ≤ 0` and `z ≥ 0` | the same |
+
+Face 1 is the wall. All 24 builds refused the same way on `2b932098`
+(`f36e93bc^`; `f36e93bc` changes only `docs/`) and on `df9d24d8`. The tip ran
+`mise exec -- just t -p rcad-topo --test q120_half_ring_probe --no-capture`.
+The base ran the same file in a `git archive 2b932098` export, with
+`mise exec -- cargo nextest run --manifest-path <export>/Cargo.toml -p
+rcad-topo --test q120_half_ring_probe --no-capture`.
+
+So none of the six points, `(4, 0, 0)`, `(3.5, 0, 0)`, `(0, 0, 0)`,
+`(6, 0, 0)`, `(5, 0, 0)` and `(3, 0, 0)`, was asked of the flat face, and
+`classify_point` was not asked about `(4, 0, 0)` or `(0, 0, 0)`. Neither the
+base's `NotHeld` nor a refusal on the tip was seen.
+
+The wall goes right round the ring. 280.5 found that the mesher does not
+unwrap the ring angle, and `CornersCoincide` says the wall's loop names one
+chart point twice. That fits, but it was not traced. A half-ring is a sound
+solid, so this refusal is a gap (§16.10). It is wider than 280.6's fix, which
+refuses a torus face that goes right round the ring on purpose. `Deserialize`
+does not call `validate`, so it may be a door to this face. It was not tried.
