@@ -2823,10 +2823,11 @@ fn exactly_at(point: Point) -> [u64; 3] {
 
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
-/// either side of it. See [`which_curve_it_is`]. The third is which of the two
-/// arcs between the same two corners it is of a closed crossing between a plane
-/// and a surface that curves right round — a ball's circle, or a cone's rim
-/// circle; see [`which_arc_of_a_circle_this_is`].
+/// either side of it. See [`which_curve_it_is`]. The third is, for an arc of a
+/// closed crossing between a plane and a surface that curves right round — a
+/// ball's circle, or a cone's rim circle — that curved surface, and which of the
+/// crossing's two arcs between the same two corners it is; see
+/// [`which_arc_of_a_circle_this_is`].
 ///
 /// The fourth is whether the edge is straight: both surfaces either side are
 /// planes. **A straight side and a curved one can share both corners**, and
@@ -2836,7 +2837,12 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// corners alone the two were one edge with four faces along it. Whether the
 /// surfaces are planes is not a number, so it cannot split one edge in two
 /// the way the surfaces' own names would (see [`which_curve_it_is`]).
-type EdgeName = ([usize; 2], Option<[[u64; 9]; 2]>, Option<bool>, bool);
+type EdgeName = (
+    [usize; 2],
+    Option<[[u64; 9]; 2]>,
+    Option<([u64; 9], bool)>,
+    bool,
+);
 
 /// The edges built so far, and how to find one again.
 #[derive(Default)]
@@ -3372,8 +3378,8 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 
 /// Which of the two arcs between its corners a side is of a closed crossing
 /// between a plane and a surface that curves right round — a ball's circle, or
-/// a cone's rim circle and the ellipse a steeper plane leaves — or `None` for
-/// any other side.
+/// a cone's rim circle and the ellipse a steeper plane leaves — together with
+/// that curved surface, or `None` for any other side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -3395,6 +3401,25 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 /// the lower one against that direction when it arrives. Both faces along an
 /// arc, and both orders of the arguments, come to the same answer, because the
 /// corner numbers are the answer's and both faces share them.
+///
+/// # Which circle, as well as which arc
+///
+/// The sign tells apart the two arcs of **one** crossing. Two crossings on one
+/// plane can pass through the same two corners: the circles two bars side by
+/// side leave on their shared cap plane both pass through `(3, ±4, 0)`. An arc
+/// of each can leave the lower corner along its own `∇round × ∇plane`, so both
+/// get the same sign, and named by that alone two edges were one edge with four
+/// faces along it (§245.4). So the curved surface is named beside the sign.
+///
+/// **Named either way round, because two faces along one arc can carry two
+/// spellings of one wall** (§231.3) — a pipe written with its axis turned
+/// round, or its origin slid along the axis — and the fold is what keeps them
+/// one edge. No shape in this crate's tests reaches such an arc yet: the ones
+/// §231.3 fuses share a closed circle, which is never named here (§247.3).
+///
+/// **The curved surface and not the plane.** Every arc on one plane has that
+/// plane, so it tells no two of them apart, and [`which_curve_it_is`] records
+/// what a plane in an open side's name cost.
 ///
 /// # A cone's rim circle is the same shape of thing, and its seam is not
 ///
@@ -3423,7 +3448,11 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 ///
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`],
 /// as [`which_arc_this_is`] does and for the same reason.
-fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Option<bool> {
+fn which_arc_of_a_circle_this_is(
+    meet: &FaceMeet,
+    from: usize,
+    to: usize,
+) -> Option<([u64; 9], bool)> {
     let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
     // A whole ball's seam is walked down and back up by the one face, with a
     // material side that names the half of the meridian it is and not a side
@@ -3444,7 +3473,10 @@ fn which_arc_of_a_circle_this_is(meet: &FaceMeet, from: usize, to: usize) -> Opt
     };
     let mine_is_the_round_one = round_one == 0;
     let along_the_round_one_then_the_plane = along_mine_then_partner == mine_is_the_round_one;
-    Some(along_the_round_one_then_the_plane != walked_from_the_far_corner)
+    Some((
+        name_of_the_surface_either_way_round(&meet.carried_by[round_one]),
+        along_the_round_one_then_the_plane != walked_from_the_far_corner,
+    ))
 }
 
 /// Which of two surfaces a closed crossing runs round — `0` or `1` — or `None`

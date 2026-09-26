@@ -48,8 +48,8 @@
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Axis, Cylinder, Error as GeomError, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
-    Vector, meet_of_three_surfaces,
+    Axis, Cylinder, Deflection, Error as GeomError, Isometry, MeetOfThree, Plane, Point, Scale,
+    Surface, Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
@@ -179,6 +179,73 @@ fn the_wall_both_orders_stop_at() -> BTreeMap<String, BTreeMap<String, usize>> {
             ]
         })
         .collect()
+}
+
+/// **An arc of one bar's circle and an arc of the other's are two edges, even
+/// where they join the same two corners.**
+///
+/// Both circles pass through `(3, ±4, 0)` on the bottom cap plane, and through
+/// `(3, ±4, 10)` on the top one, so four arcs join each pair of corners: two on
+/// each circle. `assemble.rs` used to name an arc by its two corners and by
+/// which of its own circle's two arcs it is — which tells the two arcs of one
+/// circle apart and not an arc of one circle from an arc of the other. Two good
+/// edges then came out as one edge with four faces along it, and these two
+/// fuses refused `ResultIsNotManifold { count: 4 }` (§245.4).
+///
+/// These are the two of the six fuses that met only that hole (§245.6). The
+/// check is the volume worked out by hand: a bar is `π·5²·10`, and the two
+/// share a lens of two discs of radius 5 whose centres are 6 apart, ten tall.
+/// The lens's half-angle is `acos(3/5)` and its chord is 8 long, so its area is
+/// `2·5²·acos(3/5) − 3·8`.
+#[test]
+fn an_arc_of_each_bar_between_the_same_two_corners_is_an_edge_of_its_own() {
+    let policy = Policy::certified();
+    let (model, here, there) = two_bars_side_by_side();
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let shared = lens * HEIGHT;
+
+    for (rule, arguments, tools, by_hand) in [
+        (Rule::Union, there, here, 2.0 * one_bar - shared),
+        (Rule::Difference, here, there, one_bar - shared),
+    ] {
+        let mut model = model.clone();
+        let fused = model
+            .fuse(
+                &[arguments],
+                &[tools],
+                rule,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{rule:?} of two side-by-side bars: {refused:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
+        let [solid] = fused.solids() else {
+            panic!(
+                "{rule:?} of two overlapping bars is one solid: {:?}",
+                fused.solids()
+            );
+        };
+        let measured = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid measures");
+        assert!(
+            (measured.volume() - by_hand).abs() <= measured.volume_error(),
+            "{rule:?}: measured {} ± {} against {by_hand} by hand",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
 }
 
 /// **The corner the fuse could not place, and now can, asked for on its own.**
