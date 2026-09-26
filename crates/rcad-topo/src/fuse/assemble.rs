@@ -48,6 +48,7 @@
 //! solid each, and asked there. The real model sees the finished answer or
 //! nothing at all.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -366,25 +367,42 @@ impl Assembly {
 
     /// One face per kept piece, and the corners and edges they share.
     ///
+    /// A vertex that only starts a closed input edge is not a corner of the
+    /// answer, and the two sides either side of it are read as one before any
+    /// edge is named. [`vertices_that_only_start_a_closed_edge`] says why.
+    ///
     /// # Errors
     ///
     /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's
     /// one corner is a pole of the surface it is drawn on, where nothing says
     /// which way it runs.
     fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Result<Self> {
-        let mut corners = Corners::with_each_closed_curve_started_once(
+        let only_where_a_closed_edge_starts = vertices_that_only_start_a_closed_edge(
             model,
             chosen
                 .iter()
-                .flat_map(|kept| scratch.pieces[kept.piece].wires.iter().flatten()),
+                .flat_map(|kept| &scratch.pieces[kept.piece].wires),
+        );
+        let kept_wires: Vec<Vec<Cow<'_, [FaceMeet]>>> = chosen
+            .iter()
+            .map(|kept| {
+                scratch.pieces[kept.piece]
+                    .wires
+                    .iter()
+                    .map(|wire| read_through(wire, &only_where_a_closed_edge_starts, model))
+                    .collect()
+            })
+            .collect();
+        let mut corners = Corners::with_each_closed_curve_started_once(
+            model,
+            kept_wires.iter().flatten().flat_map(|wire| wire.iter()),
         );
         let mut edges = Edges::default();
         let mut faces = Vec::new();
-        for kept in chosen {
+        for (kept, kept_wires) in chosen.iter().zip(&kept_wires) {
             let piece = &scratch.pieces[kept.piece];
             let turned_round = piece.orientation.is_reversed() != kept.reversed;
-            let wires = piece
-                .wires
+            let wires = kept_wires
                 .iter()
                 .map(|wire| {
                     sides_of(
@@ -2504,6 +2522,172 @@ fn runs_through(
         }
     }
     runs
+}
+
+/// The input vertices where the kept pieces do nothing but walk along one
+/// closed input edge, which is all such a vertex was: where that edge started.
+///
+/// **A closed edge has to start somewhere, and where is the builder's choice.**
+/// `add_round_bar` starts its cap circles at `(radius, 0, ·)`. No third surface
+/// meets the circle there, so nothing the arrangement cuts another face by
+/// knows the point: two bars side by side leave one bar's cap circle split at
+/// that vertex in the faces cut from that bar, and whole as one cut in the
+/// other bar's cap. Both were kept, the two sides and the one side were three
+/// edges with one face each, and three of the six fuses of that pair refused
+/// `ResultIsNotManifold { count: 1 }` (§245.3, hole A). So the vertex goes, and
+/// every face that walked through it walks one side where it walked two.
+///
+/// **What is tested is the input's own edges and nothing about the geometry.**
+/// A vertex qualifies when every kept side ending there
+///
+/// - runs along exactly one input edge, the same one for every side, and that
+///   edge starts and ends at this vertex;
+/// - does not close on itself, since a closed side needs its one corner; and
+/// - is one of two sides of one wire walked straight through the vertex: one
+///   arriving and the next leaving, on the same two surfaces, with the
+///   material on the same side and along the same edge. The run the two make
+///   must not come back to where it started, which would turn two sides into
+///   a closed one.
+///
+/// A real corner fails the first test. Where a third surface meets the curve,
+/// a side along that surface's crossing ends at the vertex, and the cut the
+/// arrangement makes along it runs along no input edge at all. A cone's apex
+/// fails it too, although every side there can run along one crossing by name:
+/// a plane through the apex cuts the cone in two rulings, and the apex is where
+/// they turn. The rulings are two input edges, or cuts, and never one closed
+/// one. Naming the crossing, as §245.5 put the rule, would have read two
+/// rulings as one side.
+///
+/// **The input's closed edge is one curve, so its start is no bend.** An edge
+/// that closes runs right round one closed crossing, and nothing on it is
+/// special to anything but the builder who started it there.
+fn vertices_that_only_start_a_closed_edge<'a>(
+    model: &Model,
+    kept_wires: impl Iterator<Item = &'a Vec<FaceMeet>>,
+) -> BTreeSet<VertexSlot> {
+    let mut sides_ending: BTreeMap<VertexSlot, usize> = BTreeMap::new();
+    let mut walked_through: BTreeMap<VertexSlot, usize> = BTreeMap::new();
+    let mut edge_at: BTreeMap<VertexSlot, EdgeKey> = BTreeMap::new();
+    let mut a_corner: BTreeSet<VertexSlot> = BTreeSet::new();
+    for wire in kept_wires {
+        for (index, side) in wire.iter().enumerate() {
+            for end in &side.ends {
+                let MeetPoint::Existing { vertex, .. } = end else {
+                    continue;
+                };
+                let slot = vertex.slot_in(model.id());
+                *sides_ending.entry(slot).or_default() += 1;
+                match the_closed_edge_it_only_starts(model, side, *vertex) {
+                    Some(edge) if *edge_at.entry(slot).or_insert(edge) == edge => {}
+                    Some(_) | None => {
+                        a_corner.insert(slot);
+                    }
+                }
+            }
+            let next = &wire[(index + 1) % wire.len()];
+            if let MeetPoint::Existing { vertex, .. } = &side.ends[1]
+                && walks_straight_through(side, next, *vertex)
+            {
+                *walked_through
+                    .entry(vertex.slot_in(model.id()))
+                    .or_default() += 1;
+            }
+        }
+    }
+    sides_ending
+        .into_iter()
+        .filter(|(slot, ending)| {
+            !a_corner.contains(slot) && walked_through.get(slot).copied().unwrap_or(0) * 2 == *ending
+        })
+        .map(|(slot, _)| slot)
+        .collect()
+}
+
+/// The one input edge `side` runs along, where that edge starts and ends at
+/// `vertex` and `side` does not close on itself; `None` otherwise.
+fn the_closed_edge_it_only_starts(
+    model: &Model,
+    side: &FaceMeet,
+    vertex: VertexKey,
+) -> Option<EdgeKey> {
+    if closes_on_itself(side) {
+        return None;
+    }
+    let [along] = side.along.as_slice() else {
+        return None;
+    };
+    let edge = model
+        .edge(*along)
+        .expect("a side of a piece runs along an edge of the model the fuse was given");
+    (edge.start().key() == vertex && edge.end().key() == vertex).then_some(*along)
+}
+
+/// Whether a wire arrives at `vertex` along `arriving` and leaves it along
+/// `leaving` as though the vertex were not there.
+fn walks_straight_through(arriving: &FaceMeet, leaving: &FaceMeet, vertex: VertexKey) -> bool {
+    matches!(&leaving.ends[0], MeetPoint::Existing { vertex: from, .. } if *from == vertex)
+        && arriving.carried_by == leaving.carried_by
+        && arriving.material_side == leaving.material_side
+        && arriving.along == leaving.along
+        && arriving.ends[0] != leaving.ends[1]
+}
+
+/// One wire of a kept piece, with the two sides either side of every vertex in
+/// `walked_through` read as one side.
+///
+/// Borrowed as it is when the wire passes through none of them, which is every
+/// wire of almost every fuse.
+///
+/// # Panics
+///
+/// If every side of the wire starts at one of those vertices. A side leaving
+/// one runs along the closed edge that starts there, so it can only stop
+/// somewhere that edge is cut, and a vertex it could stop at would be where
+/// another closed edge starts: then one side would run along two input edges.
+fn read_through<'a>(
+    wire: &'a [FaceMeet],
+    walked_through: &BTreeSet<VertexSlot>,
+    model: &Model,
+) -> Cow<'a, [FaceMeet]> {
+    let starts_at_one = |side: &FaceMeet| {
+        matches!(
+            &side.ends[0],
+            MeetPoint::Existing { vertex, .. } if walked_through.contains(&vertex.slot_in(model.id()))
+        )
+    };
+    if !wire.iter().any(starts_at_one) {
+        return Cow::Borrowed(wire);
+    }
+    let opens = wire
+        .iter()
+        .position(|side| !starts_at_one(side))
+        .expect("a side leaving a vertex that only starts a closed edge stops at a real corner");
+    let mut read: Vec<FaceMeet> = Vec::with_capacity(wire.len());
+    for step in 0..wire.len() {
+        let side = &wire[(opens + step) % wire.len()];
+        if !starts_at_one(side) {
+            read.push(side.clone());
+            continue;
+        }
+        let arriving = read
+            .pop()
+            .expect("the side before one leaving a vertex walked through arrives at it");
+        read.push(FaceMeet {
+            ends: [arriving.ends[0].clone(), side.ends[1].clone()],
+            approximation: the_wider(arriving.approximation, side.approximation),
+            ..arriving
+        });
+    }
+    Cow::Owned(read)
+}
+
+/// The wider of two descriptions' slop, or whichever one there is.
+fn the_wider(one: Option<Approximation>, other: Option<Approximation>) -> Option<Approximation> {
+    match (one, other) {
+        (Some(one), Some(other)) if other.magnitude() > one.magnitude() => Some(other),
+        (Some(one), Some(_) | None) => Some(one),
+        (None, other) => other,
+    }
 }
 
 /// The corners built so far, and the ways to find one again.
