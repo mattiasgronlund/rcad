@@ -13,8 +13,9 @@ says so.*
 Yes, both do, and one more call does that nobody asked about. In the fuzz
 build of `where_two_surfaces_cross`, the timing crate makes five calls to
 `bcmp`. Each goes through ASan's interceptor to libFuzzer's
-`__sanitizer_weak_hook_memcmp` (273.4). Three of them come out unequal
-inside a draw in normal running (273.3):
+`__sanitizer_weak_hook_memcmp` (273.4). Inside a draw, two come out unequal
+on every merge once `totals` and `slowest/` have something in them, and a
+third on some names (273.3):
 
 - `read_back` compares each word of `totals` with `"runs"`, `"nanos"` and
   `"lost"` by `bcmp`. The `lost` line is compared with `"runs"` first, so
