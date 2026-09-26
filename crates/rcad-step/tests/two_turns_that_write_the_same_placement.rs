@@ -39,8 +39,7 @@ const ITS_TWIN_ONE_ULP_HIGHER_IN_W: [f64; 4] = [0.9238795325112868, 0.0, 0.0, 0.
 
 #[test]
 fn the_eighth_turn_and_its_one_ulp_twin_write_the_same_placement_and_measure_differently() {
-    let turn =
-        Isometry::rotation(&Axis::z(), FRAC_PI_4).expect("a finite angle about a unit axis");
+    let turn = Isometry::rotation(&Axis::z(), FRAC_PI_4).expect("a finite angle about a unit axis");
     assert_eq!(
         turn.rotation_quaternion(),
         EIGHTH_TURN_ABOUT_Z,
