@@ -262,15 +262,63 @@ pub fn two_models_split_and_fused_keeping_the_provenance(
     data: &[u8],
     log: &mut ProvenanceLog,
 ) -> Reached {
+    two_models_split_and_fused_noting_everything(data, log, &mut |_, _| {}, &mut |_| {})
+}
+
+/// **The same draw, handing every refusal's [`Error`] to `on_refusal` instead
+/// of dropping it.**
+///
+/// [`Reached::refused`] is a tally; this is how a caller learns what one of
+/// those refusals actually was. `Error::Undecidable` carries the predicate
+/// that gave up in its records (§253.3, §253.7) — nothing else here reads that
+/// far in, so this is the one door that hands it out.
+///
+/// # Panics
+///
+/// As [`two_models_split_and_fused`] does.
+#[must_use]
+pub fn two_models_split_and_fused_noting_refusals(
+    data: &[u8],
+    on_refusal: &mut dyn FnMut(&Error),
+) -> Reached {
+    two_models_split_and_fused_noting_everything(
+        data,
+        &mut ProvenanceLog::new(),
+        &mut |_, _| {},
+        on_refusal,
+    )
+}
+
+/// The body [`two_models_split_and_fused_keeping_the_provenance`] and
+/// [`two_models_split_and_fused_noting_refusals`] share: cut the draw in two
+/// and fuse each half, threading through whichever of `note` and `on_refusal`
+/// its caller actually wants told about.
+fn two_models_split_and_fused_noting_everything(
+    data: &[u8],
+    log: &mut ProvenanceLog,
+    note: &mut dyn FnMut(&[SolidKey], &[SolidKey]),
+    on_refusal: &mut dyn FnMut(&Error),
+) -> Reached {
     let Some((&header, rest)) = data.split_first() else {
         return Reached::default();
     };
     let half = rest.len() / 2;
     let (first_half, second_half) = rest.split_at(half);
 
-    how_one_model_is_fused_keeping_the_provenance(first_half, header, log).and(
-        how_one_model_is_fused_keeping_the_provenance(second_half, header.rotate_left(4), log),
+    how_one_model_is_fused_noting_which_way_the_second_call_went(
+        first_half,
+        header,
+        log,
+        note,
+        on_refusal,
     )
+    .and(how_one_model_is_fused_noting_which_way_the_second_call_went(
+        second_half,
+        header.rotate_left(4),
+        log,
+        note,
+        on_refusal,
+    ))
 }
 
 /// Decode one `Model`, and — if it passes `validate` — fuse a `header`-chosen
@@ -301,7 +349,13 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
     header: u8,
     log: &mut ProvenanceLog,
 ) -> Reached {
-    how_one_model_is_fused_noting_which_way_the_second_call_went(bytes, header, log, &mut |_, _| {})
+    how_one_model_is_fused_noting_which_way_the_second_call_went(
+        bytes,
+        header,
+        log,
+        &mut |_, _| {},
+        &mut |_| {},
+    )
 }
 
 /// The same draw, and telling `note` the two groups of solids the "both ways
@@ -314,6 +368,12 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
 /// tell "asked the other way round" from "asked the same way twice". This
 /// reads what the caller actually hands to `fuse` instead.
 ///
+/// `on_refusal` is told the same way: it is handed the `Error` of every call
+/// to `Model::fuse` here — the forward one always, the swapped one too when
+/// there is one — right where the refusal is caught, so a caller that wants to
+/// know which predicate gave up does not have to guess which of the two calls
+/// it came from.
+///
 /// # Panics
 ///
 /// As [`how_one_model_is_fused_keeping_the_provenance`] does.
@@ -322,6 +382,7 @@ fn how_one_model_is_fused_noting_which_way_the_second_call_went(
     header: u8,
     log: &mut ProvenanceLog,
     note: &mut dyn FnMut(&[SolidKey], &[SolidKey]),
+    on_refusal: &mut dyn FnMut(&Error),
 ) -> Reached {
     let mut reached = Reached {
         halves: 1,
@@ -401,7 +462,9 @@ fn how_one_model_is_fused_noting_which_way_the_second_call_went(
                 after.len(),
                 before.len()
             );
-            WhatCameBack::from_refusal(&why)
+            let came_back = WhatCameBack::from_refusal(&why);
+            on_refusal(&why);
+            came_back
         }
     };
 
@@ -416,7 +479,11 @@ fn how_one_model_is_fused_noting_which_way_the_second_call_went(
         note(swapped_arguments, swapped_tools);
         let backwards = match unfused.fuse(swapped_arguments, swapped_tools, rule, &policy, log) {
             Ok(fused) => WhatCameBack::Answered(the_answer_written_out(&unfused, fused.solids())),
-            Err(why) => WhatCameBack::from_refusal(&why),
+            Err(why) => {
+                let came_back = WhatCameBack::from_refusal(&why);
+                on_refusal(&why);
+                came_back
+            }
         };
         match both_ways_round(&forwards, &backwards, every_face_is_flat, rule) {
             Ok(Agreed::TheSameAnswer) => reached.the_same_both_ways_round = 1,
@@ -558,6 +625,7 @@ fn the_second_call_asks_the_pair_the_other_way_round() {
         0x01,
         &mut ProvenanceLog::new(),
         &mut |arguments, tools| asked.push((arguments.to_vec(), tools.to_vec())),
+        &mut |_| {},
     );
 
     assert_eq!(
