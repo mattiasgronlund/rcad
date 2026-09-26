@@ -297,39 +297,54 @@ const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 /// of them green while comparing nothing at all. A pass is only worth what was
 /// compared.
 ///
-/// Three tenths, from measurement over this tree, and the number that matters
-/// is the *worst* property rather than the average. These properties run from
-/// a fresh seed every time, so this floor is the one thing in the file that
-/// could go flaky. It was sized against eight fresh-seed runs of each; Q98
-/// re-measured three of the four below, over twenty fresh-seed runs of the
-/// whole file plus twenty of its own fresh-seed runs of each law:
+/// Six tenths, from every one of the twenty-four call sites of
+/// [`Tally::report_what_it_compared`] that run from a fresh seed (`over`),
+/// each over `PROPTEST_RNG_SEED` 1 through 20 — twenty-five series, because
+/// [`a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all`] reports two,
+/// a lattice one and a turned one. The number that matters is each series'
+/// own *worst* run over the twenty seeds, not its average or its best:
 ///
-/// - the properties over the exactly representable pairs reach 90% to 100%,
-///   unmoved since the original eight-run measurement,
-/// - the trio properties, which need three fuses to line up, reach 74% to 95%,
-/// - commutativity over turned pairs is the floor-setter, at 65% to 83%,
-///   because a quarter of turned fuses refuse and a comparison needs both sides,
-/// - the depth-four chain reaches 65% to 84%: four solids united in a row give
-///   an edge with four faces along it often enough that a sixth of its fuses
-///   have no answer to give.
+/// - the two trio laws (`uniting_three_at_once_is_uniting_two_and_then_the_third`
+///   and the other way of grouping the same three) are the floor-setters, at
+///   76.74% worst,
+/// - the degenerate pair's commutativity reaches 79.10% worst,
+/// - the skew pair's commutativity reaches 82.09% worst,
+/// - the turned series of the copy-taken-away law reaches 85.07% worst,
+/// - the rest of the flat laws reach 86.05% to 95.35% worst,
+/// - thirteen of the twenty-five series never miss a single comparison over
+///   any of the twenty seeds: every curved law but the skew pair, and four
+///   of the flat ones.
 ///
-/// Turned pairs and the chain both bottom out around 65%, and against the
-/// twenty whole-file runs' own spread that is (65.12 − 30) / 4.919 ≈ 7.1
-/// standard deviations above three tenths for the chain and (64.93 − 30) /
-/// 4.246 ≈ 8.2 for turned pairs. Three tenths still catches a law that has
-/// stopped comparing anything at all. What it no longer catches, at this
-/// margin, is half of what these two laws do today: halving 65% to about 32%
-/// now passes quietly.
+/// Half of a series whose worst is 100% is 50%. Half of the lowest series'
+/// worst, 76.74%, is 38.37%. **A floor anywhere between those two numbers
+/// catches a halving of every one of the twenty-five series** — none of
+/// their own worst runs falls below it, and none of their own halved worsts
+/// clears it. Six tenths sits **16.74 points below the lowest series' worst
+/// (76.74%)** and **10 points above the highest series' halved worst
+/// (50%)**, comfortably inside that window.
 ///
-/// **Q160 pulled the two worst laws out to
-/// [`A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`]** rather than raising this one:
-/// the other dozen-odd properties under this floor reach 74% to 100%, and
-/// moving three tenths up to clear a 65% law would still leave it able to tie
-/// nothing over most of them. Three tenths stays here for exactly the reason
-/// [`Tally::report_what_it_compared`] gives it: it catches a law that has
-/// stopped comparing anything at all, which is the one thing every property
-/// under it, thin or not, must never do.
-const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
+/// It still needs no per-law exception, unlike two of the five properties
+/// under [`A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`]: turned-pair
+/// commutativity and the depth-four chain measure 64.93% and 65.12% worst,
+/// only 4.9 and 5.1 points above six tenths — about one of their own
+/// standard deviations (§276's 4.246 and 4.919) — where every one of these
+/// twenty-five series sits at least 16.74 points clear. Raising the floor
+/// that close to their own worst would be the same mistake §276 already
+/// warned against, so those two properties, and the two leaning-bar
+/// properties under [`A_LEANING_BAR_STILL_COMPARES_THIS_MUCH`], keep their
+/// own lower floors rather than folding into this one (§279).
+///
+/// This corrects two figures the doc used to give, both stale: "74%" for the
+/// trio laws, which twenty seeds now put at 76.74%, and "90%" for "the
+/// exactly representable pairs", which folded the lattice pair (94.03%
+/// worst) and the degenerate pair (79.10% worst) into one number when they
+/// are two. It also drops the old defense of three tenths: that it only had
+/// to catch a law that stopped comparing anything at all, not a halving,
+/// because every property but the two Q160 pulled out measured comfortably
+/// above 60%. That was already false for the trio laws — 76.74% halved is
+/// 38.37%, which cleared three tenths — so three tenths was letting a
+/// halving of them through unnoticed. Six tenths does not.
+const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.6;
 
 /// The floor for every law measured thinner than [`SOME_COMPARISONS_MUST_HAPPEN`]
 /// can safely clear: turned-pair commutativity, the depth-four chain, and all
@@ -4434,15 +4449,17 @@ impl Tally {
 
     /// The same against a floor the caller names.
     ///
-    /// Several families need it, each for the same reason: their laws measure
-    /// thinner than [`SOME_COMPARISONS_MUST_HAPPEN`], so a floor that still
-    /// catches a halving of them has to sit below their own worst rather than
-    /// at the shared three tenths. `A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`
+    /// Two families need it, each for the same reason: their laws measure too
+    /// thin for even the raised [`SOME_COMPARISONS_MUST_HAPPEN`] to sit below
+    /// their own worst without brushing it. `A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`
     /// serves five properties this way and `A_LEANING_BAR_STILL_COMPARES_THIS_MUCH`
-    /// two more (§276); §279 adds floors for the rest of the curved family's
-    /// thin laws. A floor a property brushes is a flake and not a guard, and
-    /// moving the shared number to suit one family would blunt it for the
-    /// dozen-odd properties that still measure well clear of it.
+    /// two more (§276). §279 raised the shared floor itself high enough to
+    /// catch a halving of every other property in the file, curved included,
+    /// so no further per-law floor was needed there — one shared number now
+    /// covers the rest of the curved family along with the flat one. A floor
+    /// a property brushes is a flake and not a guard, and moving the shared
+    /// number to suit one family would blunt it for the dozen-odd properties
+    /// that still measure well clear of it.
     fn report_what_it_compared_at_least(&self, what: &str, floor: f64) {
         self.report(what);
         let meant_to = self.meant_to_compare.get();
