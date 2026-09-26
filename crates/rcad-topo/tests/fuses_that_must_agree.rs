@@ -297,24 +297,29 @@ const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 /// of them green while comparing nothing at all. A pass is only worth what was
 /// compared.
 ///
-/// Three tenths, from measurement over this tree, and the number that matters is
+/// Four tenths, from measurement over this tree, and the number that matters is
 /// the *worst* property rather than the average. These properties run from a
 /// fresh seed every time, so this floor is the one thing in the file that could
-/// go flaky, and it is sized against eight fresh-seed runs of each:
+/// go flaky. It was sized against eight fresh-seed runs of each; three of the
+/// four below moved enough to need twenty fresh-seed runs each, redone for Q98:
 ///
 /// - the properties over the exactly representable pairs reach 90% to 100%,
-/// - the trio properties, which need three fuses to line up, reach 71% to 79%,
-/// - commutativity over turned pairs reaches 58% to 78%, because a quarter of
-///   turned fuses refuse and a comparison needs both sides,
-/// - the depth-four chain is the floor-setter at 50% to 69%: four solids united
-///   in a row give an edge with four faces along it often enough that a sixth of
-///   its fuses have no answer to give.
+///   unmoved since the original eight-run measurement,
+/// - the trio properties, which need three fuses to line up, reach 77% to 95%,
+/// - commutativity over turned pairs is the floor-setter now, at 65% to 83%,
+///   because a quarter of turned fuses refuse and a comparison needs both sides,
+/// - the depth-four chain reaches 67% to 84%: four solids united in a row give
+///   an edge with four faces along it often enough that a sixth of its fuses
+///   have no answer to give.
 ///
-/// Three tenths is about five standard deviations under the worst of those. It
-/// is far enough not to fire on a hard corpus, and nowhere near far enough to
-/// let a property that has stopped comparing anything through: halving the rate
-/// of any of them trips it.
-const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
+/// Four tenths is about six standard deviations under the worst of those. It is
+/// far enough not to fire on a hard corpus, and nowhere near far enough to let a
+/// property that has stopped comparing anything through: halving turned pairs'
+/// 65% gives 32%, which four tenths still catches. Three tenths no longer would
+/// have: the worst family sits at 65% now rather than the 50% it was sized
+/// against, and half of every family measured here — 32%, 34%, 38% — clears
+/// three tenths without tripping it.
+const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.4;
 
 /// The same for the one family that sits under [`SOME_COMPARISONS_MUST_HAPPEN`].
 ///
