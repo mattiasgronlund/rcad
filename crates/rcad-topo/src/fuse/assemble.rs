@@ -2551,16 +2551,25 @@ fn runs_through(
 ///
 /// A real corner fails the first test. Where a third surface meets the curve,
 /// a side along that surface's crossing ends at the vertex, and the cut the
-/// arrangement makes along it runs along no input edge at all. A cone's apex
-/// fails it too, although every side there can run along one crossing by name:
-/// a plane through the apex cuts the cone in two rulings, and the apex is where
-/// they turn. The rulings are two input edges, or cuts, and never one closed
-/// one. Naming the crossing, as §245.5 put the rule, would have read two
-/// rulings as one side.
+/// arrangement makes along it runs along no input edge at all.
+/// `where_a_bar_started_its_cap_circle_stays_a_corner_where_the_other_circle_crosses_it`
+/// is that case, in `tests/fusing_two_bars_side_by_side.rs`.
+///
+/// **The test is the input edge, and not the crossing by name as §245.5 put
+/// it**, because one crossing can turn. A plane through a cone's apex cuts it
+/// in two rulings that meet there, and every side at the apex then runs along
+/// the same plane and the same cone. The rulings are cuts or two input edges,
+/// never one closed edge. That case was argued here and not built.
 ///
 /// **The input's closed edge is one curve, so its start is no bend.** An edge
 /// that closes runs right round one closed crossing, and nothing on it is
 /// special to anything but the builder who started it there.
+///
+/// **Only sides that name the vertex are counted**, the way [`Corners::of`]
+/// names an input vertex. A side of the other solid that ends at the same
+/// point under another name, as where three surfaces meet, is not counted. It
+/// would need a surface through the vertex that cuts no face of the vertex's
+/// own solid there, which is a tangency, and no test reaches one.
 fn vertices_that_only_start_a_closed_edge<'a>(
     model: &Model,
     kept_wires: impl Iterator<Item = &'a Vec<FaceMeet>>,
