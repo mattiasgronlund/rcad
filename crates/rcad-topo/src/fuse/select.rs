@@ -1718,6 +1718,31 @@ mod tests {
         }
     }
 
+    /// `(0, 4, 0)` sits exactly on the meridian half-space's own plane, not
+    /// strictly in front of or behind it. `every_picker_keeps` still answers
+    /// `Some(true)`, because a point on the half-space's own plane is kept
+    /// (`holds.rs`'s `the_meridian_half_space_keeps`).
+    #[test]
+    fn every_picker_keeps_a_point_on_the_half_spaces_own_plane() {
+        let (ring, flat) = a_bend_and_its_end_cap_plane();
+        let pickers = the_pickers_of_the_meridian_circle_through(
+            &Surface::Plane(flat),
+            &ring,
+            PredicatePoint::from([3.0, 0.0, 0.0]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a plane through a torus's axis crosses it")
+        .expect("one of the two circles keeps the corner");
+        let on_the_plane = PredicatePoint::from([0.0, 4.0, 0.0]);
+        assert_eq!(
+            pickers[0].side_of_point(on_the_plane),
+            Decision::Zero,
+            "(0, 4, 0) must sit exactly on the half-space's own plane for this test to mean anything"
+        );
+        assert_eq!(every_picker_keeps(&pickers, on_the_plane), Some(true));
+    }
+
     /// A plane square to the axis cuts two concentric circles, and neither's
     /// disk is the tube's inside on one side of the pipe that names it.
     #[test]
