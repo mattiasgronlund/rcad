@@ -116,6 +116,14 @@ class Queue:
         del self.lines[row.index]
         self.parse()
 
+    def move_before(self, row, other):
+        """Move `row`'s line to sit just before `other`'s, within the same block."""
+        line = self.lines[row.index]
+        del self.lines[row.index]
+        other_index = other.index if other.index < row.index else other.index - 1
+        self.lines.insert(other_index, line)
+        self.parse()
+
     def append_to_block(self, block, text):
         close = self.blocks[block][1]
         assert close is not None, f"the block {block} is never closed"

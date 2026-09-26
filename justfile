@@ -7158,7 +7158,8 @@ _queue-rows file:
 # it refuses rather than guesses at, and points at `check-queue` for the why.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after` and `pick`, with `show` and `running` to read.
+# `done`, `drop`, `park`, `after`, `rank` and `pick`, with `show` and `running`
+# to read.
 # Each takes the lock on the claims file in the git common directory, checks the
 # file as it would be with `check-queue`, and writes only if that passes. `just
 # queue take` with no arguments, or any verb given the wrong ones, prints the
@@ -7176,11 +7177,11 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|pick|show|running)
+        take|add|done|drop|park|after|rank|pick|show|running)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, pick, show, running" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, pick, show, running" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
@@ -7203,6 +7204,7 @@ queue mode="" *args:
         $1 == "U" { refuse($2, "a fence is never closed"); next }
         $1 != "R" { next }
         $2 == "elsewhere" { e++; eid[e] = $5; est[e] = $7; ews[e] = $9; eraw[e] = $11; heldelse[$5] = e; next }
+        $2 == "closedelsewhere" { c++; cst[c] = $7; craw[c] = $11; closedelse[$5] = c; next }
         $4 < 6 { refuse($2, "a row of " $4 " fields"); next }
         {
             r++
@@ -7226,6 +7228,9 @@ queue mode="" *args:
                 else if (s ~ /^(done|dropped):/) kind[i] = "closed"
                 else refuse(ln[i], "the state \"" s "\"")
                 if (kind[i] == "ready" && (id[i] in heldelse)) kind[i] = "elsewhere"
+                if ((kind[i] == "ready" || kind[i] == "waiting") && (id[i] in closedelse)) {
+                    kind[i] = "closedelsewhere"; cwhere[i] = cst[closedelse[id[i]]]
+                }
             }
             if (bad) exit 1
             w = 0
@@ -7303,6 +7308,10 @@ queue mode="" *args:
             for (t = 1; t <= nt; t++)
                 if (parkedin[tiers[t]]) line = line (line == "" ? "" : ", ") parkedin[tiers[t]] " in tier " tiers[t]
             print "parked: " (line == "" ? "none" : line)
+            line = ""
+            for (i = 1; i <= r; i++)
+                if (kind[i] == "closedelsewhere") line = line (line == "" ? "" : ", ") id[i] " (" cwhere[i] ")"
+            print "closed elsewhere: " (line == "" ? "none" : line)
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
@@ -7750,10 +7759,13 @@ check-queue-merge-driver:
 # Each case is one the brief behind §263 named: two worktrees taking one row,
 # two adding rows at once, two branches changing different rows merging
 # cleanly, one row changed two ways conflicting loudly, `after:` on an id only
-# another worktree holds, and on one that exists nowhere. The hook's cases are
-# `check-hooks`'s. Without `tooling/queue/` the first take already fails, and
-# with the text merge in place of the driver the clean merge conflicts: Q1 and
-# Q2 sit on neighbouring lines, and both sides add at the foot of Tier 2.
+# another worktree holds, and on one that exists nowhere. §263.9's two gaps are
+# here too: `rank` moving a row within its tier, and a row another copy already
+# shows `done:` staying out of `next`'s offers and out of the write-set
+# meeting. The hook's cases are `check-hooks`'s. Without `tooling/queue/` the
+# first take already fails, and with the text merge in place of the driver the
+# clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
+# add at the foot of Tier 2.
 [private]
 [doc("just queue's verbs, its machine count and the merge driver agree with scratch repositories under target/.")]
 check-queue-api-selftest:
@@ -7781,6 +7793,7 @@ check-queue-api-selftest:
     printf '## 230. One queue\n' > "$hub/docs/decisions.d/230-one-queue.md"
     printf 'a\n' > "$hub/docs/a.md"
     printf 'b\n' > "$hub/docs/b.md"
+    printf 'c\n' > "$hub/docs/c.md"
     cat > "$hub/docs/queue.md" <<'MD'
     # Queue
 

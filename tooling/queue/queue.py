@@ -48,6 +48,7 @@ just queue done <id> <merge sha>           state done:<sha>, moved under ## Clos
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
 just queue after <id> <id>[,<id>...]       state after:<ids>; each id must exist in some copy, branch or claim
+just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict"""
 
 
@@ -63,7 +64,7 @@ def main(argv):
     here = Here(os.environ.get("QUEUE_FILE", "docs/queue.md"))
     verbs = {
         "take": take, "add": add, "done": done, "drop": drop, "park": park,
-        "after": after, "pick": pick, "show": show, "running": running,
+        "after": after, "rank": rank, "pick": pick, "show": show, "running": running,
         "elsewhere": elsewhere,
     }
     if verb not in verbs:
@@ -374,6 +375,36 @@ def exists_elsewhere(here, claims, row_id):
     return any(pattern.search(text) for text in branch_copies(here.relative))
 
 
+def rank(here, args):
+    """Move a row to sit just before another row in the same tier (§263.9).
+
+    `add` always appends at its tier's foot, and the write guard refuses
+    reordering rows by hand, so this is the only way to promote a row within
+    its tier. It never changes a row's tier field, only its place in the file.
+    """
+    need(args, 3, "rank <id> before <id>")
+    row_id, keyword, other_id = args
+    if keyword != "before":
+        raise Refused(f"usage: rank <id> before <id>")
+    if row_id == other_id:
+        raise Refused(f"{row_id} cannot rank before itself")
+    with Claims(here.claims):
+        queue = open_row(here, row_id)
+        row = queue.find(row_id)
+        other = queue.find(other_id)
+        if other is None:
+            raise Refused(f"{other_id} is not a row in {here.relative}")
+        if row.is_closed() or other.is_closed():
+            raise Refused("a closed row sits under ## Closed and is never ranked")
+        if row.block != other.block:
+            raise Refused(f"{row_id} is tier {row.tier}, {other_id} is tier {other.tier}; "
+                          f"rank only moves a row within its own tier")
+        queue.move_before(row, other)
+        checked(here, queue)
+        write(here, queue)
+    print(f"{row_id}: ranked before {other_id}")
+
+
 def pick(here, args):
     need(args, 2, "pick <id> ours|theirs")
     row_id, side = args
@@ -458,27 +489,40 @@ def running(here, args):
 
 
 def elsewhere(here, args):
-    """Rows another dispatcher holds, as `_queue-rows` records, for the fill to steer round.
+    """Rows another dispatcher holds or has closed, for the fill to steer round.
 
-    Each is held by a `take` from another worktree, or is `lane:` in another
-    dispatcher's copy, and is neither running nor closed in this one.
+    A held row is `lane:` in another worktree's hold or another dispatcher's
+    copy, and is neither running nor closed in this one: the fill must not
+    offer it, and must treat its write set as busy. A closed row is `done:` or
+    `dropped:` in another copy — main's own worktree among them — while this
+    copy has not caught up: the fill must not offer it either, but its write
+    set is free, since the work behind it is finished (§263.9).
     """
     queue = here.read()
-    found = {}
+    held = {}
     for row_id, hold in Claims(here.claims).holds().items():
         if hold["tree"] != here.top:
-            found[row_id] = (f"lane:{hold['branch']}", hold["write_set"], hold["tree"])
+            held[row_id] = (f"lane:{hold['branch']}", hold["write_set"], hold["tree"])
+    closed = {}
     for tree, text in here.other_copies(lanes_too=False):
         for row in Queue(text).rows:
             if row.state.startswith("lane:"):
-                found.setdefault(row.id, (row.state, row.write_set, tree.path))
+                held.setdefault(row.id, (row.state, row.write_set, tree.path))
+            elif row.is_closed():
+                closed.setdefault(row.id, (row.state, tree.path))
     sep = "\037"
-    for row_id, (state, write_set, where) in sorted(found.items()):
+    for row_id, (state, write_set, where) in sorted(held.items()):
         mine = queue.find(row_id)
         if mine and (mine.is_closed() or mine.state.startswith("lane:")):
             continue
         raw = f"{row_id}  -  {state}  -  {write_set}  (held in {where})"
         print(sep.join(["R", "elsewhere", "", "6", row_id, "-", state, "-", write_set, f"(held in {where})", raw]))
+    for row_id, (state, where) in sorted(closed.items()):
+        mine = queue.find(row_id)
+        if mine is None or mine.is_closed():
+            continue
+        raw = f"{row_id}  -  {state}  -  -  (closed in {where})"
+        print(sep.join(["R", "closedelsewhere", "", "6", row_id, "-", state, "-", "-", f"(closed in {where})", raw]))
 
 
 def open_row(here, row_id):
