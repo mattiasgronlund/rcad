@@ -306,19 +306,17 @@ fn two_models_split_and_fused_noting_everything(
     let (first_half, second_half) = rest.split_at(half);
 
     how_one_model_is_fused_noting_which_way_the_second_call_went(
-        first_half,
-        header,
-        log,
-        note,
-        on_refusal,
+        first_half, header, log, note, on_refusal,
     )
-    .and(how_one_model_is_fused_noting_which_way_the_second_call_went(
-        second_half,
-        header.rotate_left(4),
-        log,
-        note,
-        on_refusal,
-    ))
+    .and(
+        how_one_model_is_fused_noting_which_way_the_second_call_went(
+            second_half,
+            header.rotate_left(4),
+            log,
+            note,
+            on_refusal,
+        ),
+    )
 }
 
 /// Decode one `Model`, and — if it passes `validate` — fuse a `header`-chosen
