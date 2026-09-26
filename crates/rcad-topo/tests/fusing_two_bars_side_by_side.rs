@@ -248,6 +248,182 @@ fn an_arc_of_each_bar_between_the_same_two_corners_is_an_edge_of_its_own() {
     }
 }
 
+/// **Where a bar started its own cap circle is not a corner of the answer.**
+///
+/// `add_round_bar` starts each cap circle at `(5, 0, ·)`, and nothing meets the
+/// circle there: the point is only where the builder began it. The faces cut
+/// from that bar walked its circle as two sides through the point, while the
+/// other bar's cap had the same arc as one cut. Both were kept, so three edges
+/// had one face each, and the three fuses below refused
+/// `ResultIsNotManifold { count: 1 }` (§245.3, hole A).
+///
+/// The fourth is the intersection that answered already, with `(5, 0, 0)` and
+/// `(5, 0, 10)` as corners in the middle of a curved edge. Now it has the four
+/// corners the other three have.
+///
+/// The check is the volume worked out by hand, as in
+/// [`an_arc_of_each_bar_between_the_same_two_corners_is_an_edge_of_its_own`],
+/// and the corners, which are whole numbers in boxes of no width
+/// ([`a_cap_plane_against_two_side_by_side_pipes_meets_them_at_three_and_four`]).
+#[test]
+fn where_a_bar_started_its_cap_circle_is_not_a_corner_of_the_answer() {
+    let policy = Policy::certified();
+    let (model, here, there) = two_bars_side_by_side();
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let shared = lens * HEIGHT;
+    let four_corners = vec![
+        [3.0, -4.0, 0.0],
+        [3.0, -4.0, HEIGHT],
+        [3.0, 4.0, 0.0],
+        [3.0, 4.0, HEIGHT],
+    ];
+
+    for (rule, arguments, tools, by_hand) in [
+        (Rule::Union, here, there, 2.0 * one_bar - shared),
+        (Rule::Intersection, there, here, shared),
+        (Rule::Difference, there, here, one_bar - shared),
+        (Rule::Intersection, here, there, shared),
+    ] {
+        let mut model = model.clone();
+        let fused = model
+            .fuse(
+                &[arguments],
+                &[tools],
+                rule,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{rule:?} of two side-by-side bars: {refused:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
+        let [solid] = fused.solids() else {
+            panic!(
+                "{rule:?} of two overlapping bars is one solid: {:?}",
+                fused.solids()
+            );
+        };
+        let solid = model.solid(*solid).expect("this model made the key");
+
+        let mut corners: Vec<[f64; 3]> = solid
+            .faces()
+            .flat_map(|face| face.wires().collect::<Vec<_>>())
+            .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+            .map(|coedge| coedge.edge().start().point().coordinates())
+            .collect();
+        corners.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+        corners.dedup();
+        assert_eq!(corners, four_corners, "{rule:?}: the corners of the answer");
+
+        let measured = solid
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid measures");
+        assert!(
+            (measured.volume() - by_hand).abs() <= measured.volume_error(),
+            "{rule:?}: measured {} ± {} against {by_hand} by hand",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
+/// **Where a bar started its cap circle stays a corner when the other bar's
+/// circle crosses it there.**
+///
+/// The other side of [`where_a_bar_started_its_cap_circle_is_not_a_corner_of_the_answer`].
+/// A second bar centred at `(5, 5, 0)` has a circle through `(5, 0, 0)`, so
+/// the two circles cross exactly where the first bar began its own. Subtracting
+/// one circle from the other leaves `x + y = 5`, so they cross at `(5, 0, ·)`
+/// and `(0, 5, ·)`, whole numbers again. There a third surface meets the
+/// circle, the cut along it runs along no input edge, and the vertex is a
+/// corner of every answer.
+///
+/// The centres are `5·√2` apart, so the lens's half-angle is `acos(√2/2) = π/4`
+/// and its area is `2·5²·π/4 − (5√2/2)·5√2 = 12.5·π − 25`.
+#[test]
+fn where_a_bar_started_its_cap_circle_stays_a_corner_where_the_other_circle_crosses_it() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let here = model
+        .add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
+        .expect("a bar of radius five, ten tall");
+    let there = model
+        .add_round_bar(
+            RADIUS,
+            HEIGHT,
+            &Isometry::translation(Vector::new(RADIUS, RADIUS, 0.0)).expect("a shift"),
+        )
+        .expect("a second bar whose circle runs through the first one's start");
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let shared = (12.5 * std::f64::consts::PI - 25.0) * HEIGHT;
+    let four_corners = vec![
+        [0.0, 5.0, 0.0],
+        [0.0, 5.0, HEIGHT],
+        [5.0, 0.0, 0.0],
+        [5.0, 0.0, HEIGHT],
+    ];
+
+    for (rule, by_hand) in [
+        (Rule::Union, 2.0 * one_bar - shared),
+        (Rule::Intersection, shared),
+        (Rule::Difference, one_bar - shared),
+    ] {
+        for (arguments, tools) in [(here, there), (there, here)] {
+            let mut model = model.clone();
+            let fused = model
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{rule:?} of two crossing bars: {refused:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
+            let [solid] = fused.solids() else {
+                panic!(
+                    "{rule:?} of two crossing bars is one solid: {:?}",
+                    fused.solids()
+                );
+            };
+            let solid = model.solid(*solid).expect("this model made the key");
+
+            let mut corners: Vec<[f64; 3]> = solid
+                .faces()
+                .flat_map(|face| face.wires().collect::<Vec<_>>())
+                .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+                .map(|coedge| coedge.edge().start().point().coordinates())
+                .collect();
+            corners.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+            corners.dedup();
+            assert_eq!(corners, four_corners, "{rule:?}: the corners of the answer");
+
+            let measured = solid
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid measures");
+            assert!(
+                (measured.volume() - by_hand).abs() <= measured.volume_error(),
+                "{rule:?}: measured {} ± {} against {by_hand} by hand",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
 /// **The corner the fuse could not place, and now can, asked for on its own.**
 ///
 /// A bar's cap plane against the two pipes: one flat surface and two quadrics.
