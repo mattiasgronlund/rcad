@@ -2082,6 +2082,11 @@ claim-section what:
     printf '%s\t%s\t%s\t%s\n' "$next" "$(date -u +%FT%TZ)" "{{invocation_directory()}}" "$1" >> "$claims"
     echo "$next"
 
+# Where `check-decisions` looks for a `§N` citation, beyond the section files
+# themselves. Overridable so the selftest can point it at a fixture instead of
+# scanning this real tree.
+decisions_cite_roots := "crates docs justfile .claude fuzz CLAUDE.md AGENTS.md tooling"
+
 # `decision` finds a section by the number its filename starts with and a
 # subsection by the number its heading starts with, so either one written
 # without a number is a section the lookup cannot reach — and it fails as
@@ -2127,7 +2132,30 @@ claim-section what:
 # so a claim that is never used leaves a permanent hole: §54 and §65 are two
 # such holes today and neither is a fault. A check that asked for 0..N would
 # have been red on the tree it was written against.
-[doc("Every heading in docs/decisions.md can be reached by its number.")]
+#
+# **A `§N` cited anywhere with no `docs/decisions.d/NNN-*.md` behind it fails
+# the gate too**, the way `check-queue` already refuses a queue row that cites
+# a missing section (`docs/decisions.md` §179). `crates/rcad-fuzz-timing`'s
+# `lib.rs` cited §278 three times on `lane-q164-drop-merges` (fac68b59) before
+# the file existed, and `check-decisions` passed it — a gap, not a limit
+# (§16.10), since the fix is the grep `check-queue` already runs, one level up.
+#
+# Only the section number is checked; the subsection is dropped, on purpose.
+# A cite of a subsection that does not exist under a section that does, such as
+# four cites of a §58.11 when §58 stops at §58.10, is real and is not this
+# check's job — that needs the subsection ranges `decisions-toc` already knows,
+# and is `docs/decisions.md` §179's row to fix, not this one's.
+#
+# **§54 and §65 are excused by name, and only those two.** They are the
+# holes the paragraph above names — numbers `claim-section` handed out and
+# nobody wrote a file for — and every one of their nine cites already knows
+# it, in words, at the place it cites them. Nothing else is excused: no list
+# of excused files, no exception for a fixture, a corpus or a comment. A cite
+# this check flags that is not §54 or §65 is either a hole to fill or a typo
+# to fix — a stray "14356" after the sign in `docs/decisions.d/050`, cited
+# nowhere else, turned out to be §24.1, the only section whose own heading
+# matches the sentence around it.
+[doc("Every heading in docs/decisions.md can be reached by its number, and no §N cite outruns the file that backs it.")]
 check-decisions:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2136,7 +2164,8 @@ check-decisions:
 
     ok=1
     nums=$(mktemp)
-    trap 'rm -f "$nums"' EXIT
+    have=$(mktemp)
+    trap 'rm -f "$nums" "$have"' EXIT
     for f in $(ls "$dir" | LC_ALL=C sort); do
         path="$dir/$f"
         if [ "$f" = "00-preamble.md" ]; then
@@ -2213,6 +2242,30 @@ check-decisions:
         exit 1
     fi
 
+    sort -n -u "$nums" > "$have"
+    excused_missing_sections="54 65"
+    roots=""
+    for root in {{decisions_cite_roots}}; do
+        [ -e "$root" ] && roots="$roots $root"
+    done
+    bad_cites=""
+    if [ -n "$roots" ]; then
+        bad_cites=$(grep -rnoE '§[0-9]+' $roots 2>/dev/null | awk -F'§' \
+            -v havefile="$have" -v excused="$excused_missing_sections" '
+            BEGIN {
+                while ((getline line < havefile) > 0) known[line + 0] = 1
+                close(havefile)
+                m = split(excused, es, " ")
+                for (i = 1; i <= m; i++) known[es[i] + 0] = 1
+            }
+            { if (!(($NF + 0) in known)) print }') || true
+    fi
+    if [ -n "$bad_cites" ]; then
+        echo "$bad_cites"
+        echo "^ these cite a §N with no docs/decisions.d/NNN-*.md file (§54 and §65 excused by name, see check-decisions' doc comment)"
+        exit 1
+    fi
+
 # Pins the lookup against fixtures rather than against the real sections, so it
 # stays proven on a tree where the real §1.1 has been rewritten.
 #
@@ -2227,6 +2280,12 @@ check-decisions:
 # impossible went the other way — two `## 1.` in one file is now "a file is one
 # section", and a descending `## 1.` after `## 2.` cannot be expressed at all,
 # because the order is the filenames' and the filenames are sorted.
+#
+# **The stray-cite case is the odd one out**: it does not break the fixture's
+# own numbering at all, only what one line inside it points at, so it needs
+# `decisions_cite_roots` pointed at the fixture too — everywhere else `$j` or
+# `bad` runs `check-decisions`, or the fac68b59 shape (§278, cited before the
+# file existed) would be caught by scanning this real tree instead.
 [private]
 check-decisions-selftest:
     #!/usr/bin/env bash
@@ -2251,7 +2310,7 @@ check-decisions-selftest:
     ## 2. Second
     intro to two
     MD
-    j="{{just_executable()}} --set decisions_dir $dir/fixture.d"
+    j="{{just_executable()}} --set decisions_dir $dir/fixture.d --set decisions_cite_roots $dir/fixture.d"
 
     got=$($j decisions-all)
     want=$(printf '%s\n' "# Design decisions" "## 1. First" "intro to one" \
@@ -2326,6 +2385,7 @@ check-decisions-selftest:
         cp -r "$dir/fixture.d" "$dir/$1.d"
         "break_$1"
         if {{just_executable()}} --set decisions_dir "$dir/$1.d" \
+            --set decisions_cite_roots "$dir/$1.d" \
             check-decisions >/dev/null 2>&1; then
             echo "$2 passed check-decisions"; exit 1
         fi
@@ -2378,6 +2438,13 @@ check-decisions-selftest:
     # one failure the split invites (§179).
     break_pointer() { printf '%s\n' "## 3. Third" > "$dir/pointer.md"; }
     bad pointer "a section appended to the pointer file"
+
+    # A cite of a section with no file behind it, the fac68b59 shape: nothing
+    # about the fixture's own numbering is wrong, only what it points at.
+    break_stray_cite() {
+        printf '%s\n' "See §99 for more." >> "$dir/stray_cite.d/001-first.md"
+    }
+    bad stray_cite "a §99 with no docs/decisions.d/099-*.md file"
 
 # Pins `claim-section` against a throwaway repository with a section in each
 # place the recipe must look: on the checked-out branch, on another branch only,
