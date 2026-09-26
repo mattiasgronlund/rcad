@@ -11,6 +11,7 @@ whether the current target has the same spread.*
   257.4   The cause
   257.5   The current target does not have this spread
   257.6   What is left
+  257.7   Corrected at merge: not a small sample, a different minute
 
 ### 257.1 Rebuilding the old target
 
@@ -156,3 +157,23 @@ spread, and the fix is the same one §241 already made** — moving from a
   proposed for it here; whoever next touches `fuzz/fuzz_targets/no_model_makes_the_writer_panic.rs`
   or its runner should know libFuzzer's own `-seed` does not, by itself,
   make two runs of it identical.
+
+### 257.7 Corrected at merge: not a small sample, a different minute
+
+257.4 item 2 calls the old target's counts "a small sample of a rare event".
+§241.3's own table says otherwise. Runs 1 and 4 reached the writer with a face
+2 601 and 1 213 times. Of those, 1 526 came back the same in run 1 (59%) and
+37 in run 4 (3%). At counts like these, a fixed rate would land within a few
+percent from run to run, not twenty times apart. So the two runs did not draw
+from one distribution with bad luck. They drew from two different ones: run
+4's models panicked 781 times against run 1's 163.
+
+That fits a run that finds one family of models early and spends the rest of
+its minute mutating that family, because libFuzzer keeps what it finds and
+works from it. It also fits the unpinned seed choosing which family a run
+finds first. **Both links are a hypothesis.** Nothing here ran the old target
+twice without a seed and saw the swing come back. The old target is retired
+(§241), so no row is queued to prove it.
+
+257.6's residual is queued, as Q134. Every A/B measurement lane here assumes
+that a seeded run repeats, and 257.2 shows one that did not.

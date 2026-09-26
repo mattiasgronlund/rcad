@@ -15,6 +15,7 @@ fresh measurement.*
   255.6   Nothing was written into RCAD_STEP_CORPUS
   255.7   Recommendation to T7
   255.8   What this leaves
+  255.9   Corrected at merge: the merge is paid once a night, not every slot
 
 ### 255.1 The corpus itself
 
@@ -194,3 +195,21 @@ the STEP corpus handed to it is trimmed well below 516 files.
   recommendation (leave the zips out, pin `-max_len`) and the open point in
   §255.7 (the startup cost survives both changes) carried into its own merge
   decision.
+
+### 255.9 Corrected at merge: the merge is paid once a night, not every slot
+
+255.7's last paragraph reads the night as a slice, `$left`, shared by the five
+targets and shrinking as it goes. That stopped being true on 2026-09-18.
+`fuzz-overnight` now starts all five at once, each for the whole window, and
+its own comment says so: "All five together, each for the whole window".
+§256.1 reads `-max_total_time=28715` off the night of 2026-09-26. So the
+reader pays the merge once, when it starts: 256 to 282 seconds out of 28 715,
+about 1%. §255.3's run did no fuzzing because it asked for only 15 seconds. A
+night would not end that way.
+
+The row asked for one more number, and this section did not measure it: the
+reader's execs/s **after** the merge, with the STEP corpus in. That is the
+number that decides T7. One real file here takes about the whole 10 s
+`-timeout` (§255.4). On 2026-09-26, 951 of where_two_surfaces_cross's 1 104
+jobs ended on that `-timeout` (§256.4). Q133 measures it, and T7 waits on
+Q133, not on 255.7's recommendation.
