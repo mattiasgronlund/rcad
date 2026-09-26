@@ -1,4 +1,5 @@
-// Run a batch of lanes against one pinned base, and check the writing ones.
+// Run lanes against one pinned base, check each writing lane, and merge the
+// ones that pass onto main, one merge at a time.
 //
 // Two runs on 2026-09-19 and 2026-09-20 used scripts that were ~90% the same
 // text, retyped the second time. This is that text, once. What it keeps from
@@ -7,31 +8,52 @@
 // carries the command that produced it, and a lane that did not start from the
 // pinned base is not verified at all -- its measurements are about another tree.
 //
+// A dispatcher runs one workflow per queue row (docs/decisions.md §266): the
+// lane, then its verifier, then a merger that lands it on main, closes the row
+// and hands back about twenty lines. The merge used to be the dispatcher's, in
+// its own context, and was most of what that context grew by. Several lanes in
+// one run still work; their merges wait for one another.
+//
 // Invoke it as the `lanes` workflow, which is `meta.name` below and not this
 // file's name: Claude Code loads `.claude/workflows/*.js`, parses `meta`, and
 // registers what `meta.name` says. Pass args:
 //
 //   { base: "<sha>",
-//     lanes: [ { label, brief, writeSet, ... }, ... ] }
+//     lanes: [ { label, queueId, brief, writeSet, ... }, ... ] }
 //
-// Per lane: `label` (required, names the branch and the progress row), `brief`
-// (required, what the lane is for -- the shared block below is appended),
-// `writeSet` (the files it owns; absent or empty means read-only, which also
-// means no verifier and no commit), `branch` (default `lane-<label>`, and it
-// must not exist yet: the lane creates it and refuses to reset one), `model`,
-// `sourcePaths` (what the verifier reverts to base to prove the tests fail
-// without the change; defaults to the `crates/<c>/src` dirs in `writeSet`),
-// `report` ({properties, required} merged into the lane's schema for findings
-// that are this lane's own), and `verify: false` to skip the check.
+// Per lane: `label` (required, names the branch and the progress row),
+// `queueId` (the docs/queue.md row this lane does; required when it writes,
+// because its merger closes that row), `brief` (required, what the lane is for
+// -- the base and the switch below are appended), `writeSet` (the files it
+// owns; absent or empty means read-only, which also means no verifier, no
+// commit and no merge), `branch` (default `lane-<label>`, and it must not exist
+// yet: the lane creates it and refuses to reset one), `model`, `sourcePaths`
+// (what the verifier reverts to base to prove the tests fail without the
+// change; defaults to the `crates/<c>/src` dirs in `writeSet`), `report`
+// ({properties, required} merged into the lane's schema for findings that are
+// this lane's own), and `verify: false` to skip the check, which leaves the
+// merger's gate as the only one.
+//
+// The standing rules of each role live in `.claude/agents/lane.md`,
+// `verifier.md` and `merger.md`, which `agentType` loads. What stays here is
+// what differs per lane, and the one shell rule all three share.
 export const meta = {
   name: 'lanes',
-  description: 'Run rcad lanes in parallel worktrees off one pinned base, then independently verify each writing lane',
-  whenToUse: 'Dispatching two or more rcad lanes at once against a known-green base sha.',
+  description: 'Run rcad lanes in worktrees off one pinned base, verify each writing lane, and merge the ones that pass onto main one at a time',
+  whenToUse: 'Dispatching one queue row, or several rows off one known-green base sha.',
   phases: [
     { title: 'Work', detail: 'one isolated worktree per lane' },
     { title: 'Verify', detail: 're-derive each writing lane\'s claims from its branch', model: 'sonnet' },
+    { title: 'Merge', detail: 'one at a time: merge onto origin/main, close the row, gate, push', model: 'opus' },
   ],
 }
+
+const MERGE_ATTEMPTS = 3
+const RESULT_LINES = 20
+
+const writes = (lane) => Array.isArray(lane.writeSet) && lane.writeSet.length > 0
+const branchOf = (lane) => lane.branch || `lane-${lane.label}`
+const mergeBranchOf = (lane) => `merge-${lane.label}`
 
 if (!args || typeof args !== 'object') throw new Error('lanes: pass args {base, lanes: [...]}')
 const BASE = args.base
@@ -40,15 +62,103 @@ const LANES = Array.isArray(args.lanes) ? args.lanes : []
 if (!LANES.length) throw new Error('lanes: args.lanes is empty')
 for (const lane of LANES) {
   if (!lane || !lane.label || !lane.brief) throw new Error('lanes: every lane needs a label and a brief')
+  if (writes(lane) && !/^[TDQ][0-9]+$/.test(lane.queueId || '')) {
+    throw new Error(`lanes: ${lane.label} writes, so it needs the queueId of its docs/queue.md row; its merger closes that row`)
+  }
 }
 
-const writes = (lane) => Array.isArray(lane.writeSet) && lane.writeSet.length > 0
-const branchOf = (lane) => lane.branch || `lane-${lane.label}`
+log(`${LANES.length} lane(s) off ${BASE.slice(0, 8)}: ${LANES.map((l) => `${l.label}${writes(l) ? ` (${l.queueId})` : ' (read-only)'}`).join(', ')}`)
+
+// The script body runs top to bottom before the functions below it are
+// reached, and only function declarations are hoisted, so the one piece of
+// state the stages share is declared here.
+let lastMerge = Promise.resolve()
+
+const results = await pipeline(
+  LANES,
+  (lane) => agent(writes(lane) ? WRITING(lane) : READING(lane), {
+    label: lane.label,
+    phase: 'Work',
+    isolation: 'worktree',
+    agentType: 'lane',
+    schema: reportSchema(lane),
+    model: lane.model,
+  }),
+  (report, lane) => verified(report, lane),
+  (prior, lane) => {
+    if (prior.stop) return handedBack(lane, prior)
+    if (!writes(lane)) return { lane: lane.label, answer: prior.report }
+    return mergeAfterTheLast(lane, prior).then((merge) => merged(lane, prior, merge))
+  },
+)
+
+const rows = results.map((r, i) => r || {
+  row: LANES[i].queueId,
+  branch: branchOf(LANES[i]),
+  merged: false,
+  lines: [`${LANES[i].label}: a stage threw, so nothing after it ran; the run's journal says which`],
+})
+log(`done: ${rows.filter((r) => r.merged).length} of ${LANES.length} lane(s) merged`)
+return { base: BASE, lanes: rows }
+
+// A lane that started somewhere else measured another tree; verifying its
+// claims against this base would only tell us they disagree, which we know.
+function verified(report, lane) {
+  const out = { report, check: null, kind: null }
+  if (!report) return stopped(lane, out, 'the lane returned nothing')
+  if (typeof report.base_sha !== 'string' || report.base_sha.slice(0, 8) !== BASE.slice(0, 8)) {
+    return stopped(lane, out, `the lane checked out ${report.base_sha}, not ${BASE.slice(0, 8)}`)
+  }
+  if (!writes(lane)) return out
+  if (report.outcome === 'blocked') return stopped(lane, out, 'the lane is blocked')
+  if (lane.verify === false) return out
+  out.kind = namesTests(report) ? 'tests' : 'moved_text'
+  return agent(VERIFY(lane, report, out.kind), {
+    label: `verify:${lane.label}`,
+    phase: 'Verify',
+    isolation: 'worktree',
+    agentType: 'verifier',
+    schema: verdictSchema(out.kind),
+    model: 'sonnet',
+  }).then((check) => {
+    out.check = check
+    if (!check) return stopped(lane, out, 'the verifier returned nothing')
+    if (check.verdict === 'reject') return stopped(lane, out, 'the verifier rejected it')
+    const why = unproven(lane, out.kind, check)
+    if (why.length) return stopped(lane, out, `the verifier said ${check.verdict}, but ${why.join('; ')}`)
+    return out
+  })
+}
+
+function stopped(lane, out, why) {
+  log(`${lane.label}: not merged -- ${why}`)
+  out.stop = why
+  return out
+}
+
+function namesTests(report) {
+  return Array.isArray(report.tests_that_fail_without_the_change) && report.tests_that_fail_without_the_change.length > 0
+}
+
+// A `merge` that did not watch the tests fail is a `merge` on the verifier's
+// word rather than on a demonstration, which is the whole reason there is a
+// verifier. The script refuses it here rather than leave it to the merger to
+// notice which field was false.
+function unproven(lane, kind, check) {
+  const why = []
+  if (check.files_outside_write_set && check.files_outside_write_set.length) why.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
+  if (kind === 'tests') {
+    if (check.tests_pass_on_branch !== true) why.push('the tests do not pass on the branch')
+    if (check.tests_fail_without_fix !== true) why.push('the tests were never seen to fail with the source reverted')
+    if (!sourcePathsOf(lane).length) why.push('the lane declared no source directory to revert')
+  }
+  return why
+}
 
 // Defaulted rather than asked for, because the verifier's revert step only
 // works on non-test source: reverting the tests too would put back the version
 // that passes and prove nothing.
-const sourcePathsOf = (lane) => {
+function sourcePathsOf(lane) {
   if (Array.isArray(lane.sourcePaths) && lane.sourcePaths.length) return lane.sourcePaths
   const dirs = []
   for (const f of lane.writeSet || []) {
@@ -60,59 +170,117 @@ const sourcePathsOf = (lane) => {
   return dirs
 }
 
-const COMMON = (lane) => `
+// Merges inside one run wait for one another, so they never race each other;
+// they race only other runs and other sessions, and `ff-main` and the ancestor
+// check before the push settle that without a lock of their own (§266.4).
+function mergeAfterTheLast(lane, prior) {
+  const run = lastMerge.then(() => agent(MERGE(lane, prior), MERGER(lane)))
+  lastMerge = run.catch(() => null)
+  return run
+}
+
+function MERGER(lane) {
+  return {
+    label: `merge:${lane.label}`,
+    phase: 'Merge',
+    isolation: 'worktree',
+    agentType: 'merger',
+    schema: mergedSchema(),
+    model: 'opus',
+  }
+}
+
+function merged(lane, prior, m) {
+  const row = { row: lane.queueId, branch: branchOf(lane), merged: false, lines: [] }
+  if (!m) {
+    row.lines.push(`${lane.queueId} ${branchOf(lane)}: the merger returned nothing`)
+    row.unlock = treesOf(prior)
+    return row
+  }
+  row.merged = m.merged === true
+  row.lines.push(row.merged
+    ? `${lane.queueId} ${branchOf(lane)}: pushed ${m.merged_sha} to main, attempt ${m.push_attempts} of ${MERGE_ATTEMPTS}`
+    : `${lane.queueId} ${branchOf(lane)}: not merged -- ${m.not_merged_because || 'the merger gave no reason'}`)
+  if (m.push_attempts > MERGE_ATTEMPTS) log(`${lane.label}: the merger reports ${m.push_attempts} push attempts, past the bound of ${MERGE_ATTEMPTS}`)
+  if (m.gate_pass_line) row.lines.push(`gate: ${m.gate_pass_line}`)
+  if (m.ff_main) row.lines.push(`ff-main: ${m.ff_main}`)
+  for (const r of m.rows_closed || []) row.lines.push(`closed ${r}`)
+  for (const r of m.rows_added || []) row.lines.push(`added ${r}`)
+  for (const f of m.fixes_applied || []) row.lines.push(`fixed ${f}`)
+  for (const n of m.needs_judgement || []) row.lines.push(`for you: ${n}`)
+  if (row.lines.length > RESULT_LINES) log(`${lane.label}: the merger's result is ${row.lines.length} lines, past the ${RESULT_LINES} asked for; all of them are returned`)
+  return row
+}
+
+function handedBack(lane, prior) {
+  const row = { row: lane.queueId, branch: branchOf(lane), merged: false, lines: [`${lane.label}: not merged -- ${prior.stop}`] }
+  if (prior.report) {
+    row.lines.push(`lane said ${prior.report.outcome}: ${prior.report.summary}`)
+    if (prior.report.remaining) row.lines.push(`remaining: ${prior.report.remaining}`)
+  }
+  if (prior.check) {
+    row.lines.push(`verifier said ${prior.check.verdict}${prior.check.notes ? `: ${prior.check.notes}` : ''}`)
+    for (const c of prior.check.unbacked_claims || []) row.lines.push(`unbacked: ${c}`)
+    for (const c of prior.check.number_mismatches || []) row.lines.push(`number: ${c}`)
+    for (const c of prior.check.moved_text_problems || []) row.lines.push(`moved text: ${c}`)
+  }
+  row.unlock = treesOf(prior)
+  return row
+}
+
+function treesOf(prior) {
+  return [prior.report && prior.report.worktree_path, prior.check && prior.check.worktree_path].filter(Boolean)
+}
+
+// The one shell rule every role here shares. It belongs in CLAUDE.md, where
+// every role would read it once; until it moves there, this is its only copy.
+function SHARED() {
+  return `Every cargo and just call needs a \`mise exec --\` prefix (the compile cache is wired through mise's env).
+The Bash guard in a worktree-isolated session refuses any command with a path or argument it cannot resolve before the run -- no variables, no \`$( )\`, no loop over a runtime value, and no \`mise exec\` inside a loop or compound. Write out paths literally, one plain command per call; when you genuinely need a loop, write a script to \`target/\` (gitignored) and run it as \`./target/<name>.sh\`.`
+}
+
+function START(lane) {
+  return `
 Base: main at ${BASE}. Your first two commands, in this order, and report both shas back:
   git log --oneline -1
   git switch -c ${branchOf(lane)} ${BASE}
-A worktree-isolated lane branches from the session's HEAD, not from origin/main, so the switch above is what puts you on the base -- do not skip it and do not assume you are already there.
 If the switch refuses because ${branchOf(lane)} already exists, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`: they reset a branch that another worktree may still have checked out, and that tree then shows a staged revert of everything since its commit.
-Every cargo and just call needs a \`mise exec --\` prefix (the compile cache is wired through mise's env). Run single tests with \`mise exec -- just t <args>\`, never bare cargo nextest.
-Read then Edit; never patch a tracked file through a shell heredoc.
-The Bash guard in a worktree-isolated session refuses any command with a path or argument it cannot resolve before the run -- no variables, no \`$( )\`, no loop over a runtime value, and no \`mise exec\` inside a loop or compound. Write out paths literally, one plain command per call; when you genuinely need a loop, write a script to \`target/\` (gitignored) and run it as \`./target/<name>.sh\`.
-Budget ~45 minutes. If the work is bigger, commit what is done, report what is left, and stop.
-Never restate a number you did not run yourself; every number you report carries the command that produced it.
-Do not merge anything into main and do not push.`
+${SHARED()}`
+}
 
-const WRITING = (lane) => `You own these files and no others: ${lane.writeSet.join(', ')}. Anything outside them, stop and report it in out_of_write_set_needs rather than editing it.
-Stage with explicit \`git add <path>\`, never -A. Commit as you go.
+function WRITING(lane) {
+  return `Queue row ${lane.queueId}. You own these files and no others: ${lane.writeSet.join(', ')}.
 Your branch: ${branchOf(lane)}.
 
 ${lane.brief}
-${COMMON(lane)}`
-
-const READING = (lane) => `You write no tracked file and make no commit. Your branch: ${branchOf(lane)} (a checkout convenience only).
-
-${lane.brief}
-${COMMON(lane)}`
-
-const NUMBER = {
-  type: 'object',
-  required: ['what', 'value', 'command'],
-  properties: {
-    what: { type: 'string' },
-    value: { type: 'string' },
-    command: { type: 'string', description: 'the exact command you ran to get this value' },
-  },
+${START(lane)}`
 }
 
-const reportSchema = (lane) => {
+function READING(lane) {
+  return `This lane is read-only: you own no files. Your branch: ${branchOf(lane)} (a checkout convenience only).
+
+${lane.brief}
+${START(lane)}`
+}
+
+function reportSchema(lane) {
   const core = {
     start_sha: { type: 'string', description: 'what git log -1 said BEFORE your switch' },
     base_sha: { type: 'string', description: 'what you switched to' },
     branch: { type: 'string' },
     worktree_path: { type: 'string' },
     summary: { type: 'string', description: 'plain words, at most 10 lines' },
-    numbers: { type: 'array', items: NUMBER, description: 'every figure you report, with its command' },
+    numbers: { type: 'array', items: numberSchema(), description: 'every figure you report, with its command' },
     out_of_write_set_needs: { type: 'array', items: { type: 'string' } },
     remaining: { type: 'string', description: 'what is left, including what you learned about work you were told not to attempt' },
   }
-  const required = ['start_sha', 'base_sha', 'branch', 'outcome', 'summary', 'numbers', 'remaining']
+  const required = ['start_sha', 'base_sha', 'branch', 'worktree_path', 'outcome', 'summary', 'numbers', 'remaining']
   if (writes(lane)) {
     core.outcome = { type: 'string', enum: ['fixed', 'limit_demonstrated', 'partial', 'blocked'] }
     core.landed_sha = { type: 'string', description: 'your last commit' }
     core.decisions_section = { type: 'string', description: 'the section number you claimed with just claim-section, if any' }
     core.files_changed = { type: 'array', items: { type: 'string' } }
-    core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' } }
+    core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' }, description: 'empty for a lane that changed only .md files' }
     required.push('landed_sha', 'files_changed', 'tests_that_fail_without_the_change')
   } else {
     core.outcome = { type: 'string', enum: ['answered', 'partial', 'blocked'] }
@@ -125,87 +293,98 @@ const reportSchema = (lane) => {
   }
 }
 
-const VERIFY = (lane, r) => `You are checking another lane's claims; do not trust its report. Write no tracked file, make no commit.
+function VERIFY(lane, r, kind) {
+  const revert = sourcePathsOf(lane).join(', ') || '(none declared; say so and skip the revert)'
+  return `Check lane ${lane.label}, queue row ${lane.queueId}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
+Base: ${BASE}
+Branch: ${branchOf(lane)}
+Write set: ${lane.writeSet.join(', ')}
+The lane's worktree: ${r.worktree_path}
+Source paths to revert: ${revert}
 
 The lane claims (JSON): ${JSON.stringify(r)}
 
-1. \`git log --oneline ${BASE}..${branchOf(lane)}\` -- confirm the branch exists and sits on ${BASE}. Then \`git diff --name-only ${BASE}..${branchOf(lane)}\` and flag every file outside the lane's write set: ${lane.writeSet.join(', ')}.
-2. \`git checkout --detach ${branchOf(lane)}\` and run the claimed tests with \`mise exec -- just t <name>\` -- they must pass.
-3. Put the non-test source back to base -- ${sourcePathsOf(lane).map((p) => `\`git checkout ${BASE} -- ${p}\``).join(', ') || '(the lane declared no source dir; say so and skip this step)'} -- and rerun the same tests. They must FAIL, and record the exact failure: a test that passes here proves nothing about the change. Then put the branch's source back the same way before going on.
-4. \`mise exec -- just gate quiet\` on the branch tip, including any docs commit -- one plain Bash call, timeout 600000, no redirect and no pipe through tail (a pipe hands you tail's exit code, not the gate's). Record the summary block verbatim.
-5. Re-run every command in the lane's numbers list and compare the values you get.
-6. Read the lane's new decisions section if it claimed one. Per §16.10 every "cannot", "unreachable" or "limit" claim owes a demonstration and not a paragraph -- say which ones have one. If the lane demonstrated a limit rather than fixing the thing, check that demonstration hardest: does it name the family of fixes it considered and say why that family is the only one?
-Every cargo/just call needs a \`mise exec --\` prefix. The Bash guard refuses runtime-computed paths; write them out literally.`
+${SHARED()}`
+}
 
-const VERDICT = {
-  type: 'object',
-  required: ['branch_ok', 'tests_pass_on_branch', 'tests_fail_without_fix', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'verdict'],
-  properties: {
+function MERGE(lane, prior) {
+  const r = prior.report
+  const verifier = prior.check
+    ? `the verifier's, ${prior.check.worktree_path}`
+    : 'none: the dispatcher set verify: false for this lane, so your gate is the only check'
+  return `Merge queue row ${lane.queueId}, lane ${lane.label}, onto main, or say why not.
+Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
+The lane's write set: ${lane.writeSet.join(', ')}
+Trees to unlock: the lane's, ${r.worktree_path}; ${verifier}
+Your first commands, in this order:
+  git log --oneline -1
+  git fetch origin
+  git switch -c ${mergeBranchOf(lane)} origin/main
+If the switch refuses because ${mergeBranchOf(lane)} already exists, stop and report it as not merged. Never reach for \`checkout -B\` or \`switch -C\`.
+Push attempts: at most ${MERGE_ATTEMPTS}.
+
+The lane's report (JSON): ${JSON.stringify(r)}
+
+The verifier's verdict (JSON): ${JSON.stringify(prior.check)}
+
+${SHARED()}`
+}
+
+function verdictSchema(kind) {
+  const properties = {
+    worktree_path: { type: 'string', description: 'your own worktree' },
     branch_ok: { type: 'boolean', description: 'exists, sits on the pinned base' },
     files_outside_write_set: { type: 'array', items: { type: 'string' } },
-    tests_pass_on_branch: { type: 'boolean' },
-    tests_fail_without_fix: { type: 'boolean', description: 'false if you could not make them fail with the source reverted' },
     gate_summary: { type: 'string', description: 'the summary block, verbatim, or why you could not run it' },
     number_mismatches: { type: 'array', items: { type: 'string' } },
     unbacked_claims: { type: 'array', items: { type: 'string' } },
+    fixes: { type: 'array', items: { type: 'string' }, description: 'each fix fix_first asks for: the file, the change, and why' },
     verdict: { type: 'string', enum: ['merge', 'fix_first', 'reject'] },
     notes: { type: 'string' },
-  },
+  }
+  const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'fixes', 'verdict']
+  if (kind === 'tests') {
+    properties.tests_pass_on_branch = { type: 'boolean' }
+    properties.tests_fail_without_fix = { type: 'boolean', description: 'false if you could not make them fail with the source reverted' }
+    required.push('tests_pass_on_branch', 'tests_fail_without_fix')
+  } else {
+    properties.paragraphs_checked = { type: 'integer', description: 'how many removed or moved paragraphs you traced' }
+    properties.moved_text_problems = { type: 'array', items: { type: 'string' }, description: 'a paragraph that landed nowhere, twice, or with its meaning changed' }
+    required.push('paragraphs_checked', 'moved_text_problems')
+  }
+  return { type: 'object', required, properties }
 }
 
-log(`${LANES.length} lane(s) off ${BASE.slice(0, 8)}: ${LANES.map((l) => `${l.label}${writes(l) ? '' : ' (read-only)'}`).join(', ')}`)
-
-const results = await pipeline(
-  LANES,
-  (lane) => agent(writes(lane) ? WRITING(lane) : READING(lane), {
-    label: lane.label,
-    phase: 'Work',
-    isolation: 'worktree',
-    schema: reportSchema(lane),
-    model: lane.model,
-  }),
-  (report, lane) => {
-    if (!report) return { lane: lane.label, report: null, check: null, skipped: 'lane returned nothing' }
-    // A lane that started somewhere else measured another tree; verifying its
-    // claims against this base would only tell us they disagree, which we know.
-    if (typeof report.base_sha !== 'string' || report.base_sha.slice(0, 8) !== BASE.slice(0, 8)) {
-      log(`${lane.label}: checked out ${report.base_sha}, not ${BASE.slice(0, 8)} -- not verifying`)
-      return { lane: lane.label, report, check: null, skipped: 'wrong base' }
-    }
-    if (!writes(lane)) return { lane: lane.label, report, check: null, skipped: 'read-only lane' }
-    if (lane.verify === false) return { lane: lane.label, report, check: null, skipped: 'verify disabled for this lane' }
-    if (report.outcome === 'blocked') return { lane: lane.label, report, check: null, skipped: 'lane blocked' }
-    if (!report.tests_that_fail_without_the_change || !report.tests_that_fail_without_the_change.length) {
-      return { lane: lane.label, report, check: null, skipped: 'lane named no test that fails without the change' }
-    }
-    return agent(VERIFY(lane, report), {
-      label: `verify:${lane.label}`,
-      phase: 'Verify',
-      isolation: 'worktree',
-      schema: VERDICT,
-      model: 'sonnet',
-    }).then((check) => {
-      // A `merge` that did not watch the tests fail is a `merge` on the
-      // verifier's word rather than on a demonstration, which is the whole
-      // reason there is a verifier. Say so here; do not leave it to whoever
-      // reads the JSON to notice which field was false.
-      const unproven = []
-      if (check && check.verdict === 'merge') {
-        if (check.tests_fail_without_fix !== true) unproven.push('the tests were never seen to fail with the source reverted')
-        if (!sourcePathsOf(lane).length) unproven.push('the lane declared no source directory to revert')
-        if (check.files_outside_write_set && check.files_outside_write_set.length) unproven.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
-      }
-      if (unproven.length) log(`${lane.label}: verifier said merge, but ${unproven.join('; ')}`)
-      return { lane: lane.label, report, check, unproven: unproven.length ? unproven : undefined }
-    })
-  },
-)
-
-const checked = results.filter((r) => r && r.check)
-const clean = checked.filter((r) => r.check.verdict === 'merge' && !r.unproven)
-log(`done: ${checked.length} of ${LANES.length} lane(s) verified, ${clean.length} of those came back merge with nothing unproven`)
-for (const r of results) {
-  if (r && r.skipped) log(`${r.lane}: not verified -- ${r.skipped}`)
+function numberSchema() {
+  return {
+    type: 'object',
+    required: ['what', 'value', 'command'],
+    properties: {
+      what: { type: 'string' },
+      value: { type: 'string' },
+      command: { type: 'string', description: 'the exact command you ran to get this value' },
+    },
+  }
 }
 
-return { base: BASE, lanes: results }
+function mergedSchema() {
+  return {
+    type: 'object',
+    required: ['start_sha', 'merge_branch', 'merged', 'push_attempts', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
+    properties: {
+      start_sha: { type: 'string', description: 'what git log -1 said before your switch' },
+      merge_branch: { type: 'string' },
+      merged: { type: 'boolean', description: 'true only when your push to origin/main went through' },
+      merged_sha: { type: 'string', description: 'the sha you pushed to origin/main' },
+      gate_pass_line: { type: 'string', description: 'the PASS line of the gate on the tree you pushed, verbatim' },
+      push_attempts: { type: 'integer', minimum: 0 },
+      ff_main: { type: 'string', description: 'the last line just ff-main printed' },
+      fixes_applied: { type: 'array', items: { type: 'string' }, description: 'each verifier fix you made, one line each' },
+      rows_closed: { type: 'array', items: { type: 'string' }, description: 'e.g. "Q142 done:<sha>"' },
+      rows_added: { type: 'array', items: { type: 'string' }, description: 'e.g. "Q160 tier 1 sonnet: <what, in a few words>"' },
+      unlocked: { type: 'array', items: { type: 'string' } },
+      not_merged_because: { type: 'string' },
+      needs_judgement: { type: 'array', items: { type: 'string' }, description: 'only what the dispatcher must decide, one line each' },
+    },
+  }
+}
