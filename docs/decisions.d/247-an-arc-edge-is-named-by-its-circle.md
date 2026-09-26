@@ -13,6 +13,7 @@ The three that meet hole A still refuse `count: 1`, at the same edges as in
   247.3   The three legs: all held, and the second only as far as anything reaches it
   247.4   What the six fuses do now
   247.5   What this leaves
+  247.6   What the verifier found: two planes on one ball
 
 ### 247.1 The test, and how it failed on the base
 
@@ -199,3 +200,33 @@ added.
 - Once hole A is fixed (Q77), rewrite `two_overlapping_parallel_bars_stop_in_select_whichever_way_round` as six fuses that answer, and take off its `#[ignore]`. Its file header still says the pair stops in `select.rs`, which is wrong for every fuse since §245. `crates/rcad-topo/tests/fusing_two_bars_side_by_side.rs`.
 - Find a shape that puts an open arc between two spellings of one wall, so that the fold in an arc's name has a test that fails without it (§247.3). `crates/rcad-topo/src/fuse/assemble.rs`.
 - Two half bars stacked on one pipe refuse `AFaceTrimmedByACurveThisCannotFollow` with one spelling, before `assemble`. That refusal is not in §245 and was not looked into here. `crates/rcad-topo/src/holds.rs`.
+
+### 247.6 What the verifier found: two planes on one ball
+
+The verifier re-ran the base failure (`ResultIsNotManifold { count: 4 }`),
+checked that `None` comes back in the same cases as before, re-derived the
+volumes and bounds, and found the new name strictly finer than the old one, so
+the change cannot join two edges that were apart before. It said merge. It
+also found where the name is still not fine enough, and wrote a probe for it
+that was not committed:
+
+- **Arcs of two circles on one ball, cut by two planes, still get one name.**
+  A ball of radius 5 at the origin, less the block `x ∈ [−10, −3]`,
+  `y ∈ [−10, 10]`, `z ∈ [0, 10]`: the planes `x = −3` and `z = 0` cut the ball
+  in two circles through `(−3, ±4, 0)`, and an arc of each runs between those
+  two corners on the same curved surface. `ball − wedge` refuses
+  `ResultIsNotManifold { count: 4 }` on the base and on the tip. With the plane
+  folded into the name as well, it moves on to
+  `ACurvedFaceGoesRightRoundWithNoSeam { face: FaceSlot(2v1) }`. The other
+  three fuses of the pair (`ball ∩ wedge` both ways round, `wedge − ball`)
+  answer right. So 247.2's argument that the curved surface is named and the
+  plane is not holds only for arcs that lie on one plane.
+- **That shape might also reach a wrong answer.** Two spellings of one wall
+  that the fold leaves apart could pair four faces crosswise into two edges
+  that each look sound. Nobody built it.
+- **The surface fold has no test that fails without it.** With the raw bits
+  in its place, 951 of 951 tests pass, and 39 more fuses tried all refused in
+  `holds.rs` first. That is 247.5's third item, measured.
+- **Two half bars stacked on one pipe refuse before `assemble`** even with one
+  spelling, as `AFaceTrimmedByACurveThisCannotFollow` and in some fuses
+  `AFaceMeetsItsNeighbourOnItsOwnSurface`. That is 247.5's fourth item.

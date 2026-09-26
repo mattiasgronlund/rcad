@@ -1304,12 +1304,22 @@ impl<'f> Arrangement<'f> {
     /// Whether a corner of the face already is `place`, one of the `places`
     /// where the face's surface and the partners of `first` and `second` meet.
     ///
-    /// **A corner on both crossings is on all three surfaces**, so it is one of
-    /// their meets, and its true point is inside the box of one of `places`.
-    /// When `place` is the only one whose box reaches the corner's, `place` is
-    /// that corner — which is a proof about boxes, and not a guess that two
-    /// boxes touching are one point. When a second place reaches the corner as
-    /// well, nothing here says which of the two it is.
+    /// **A corner on both crossings is taken to be on all three surfaces**, so
+    /// one of their meets, with its true point inside the box of one of
+    /// `places`. When `place` is the only one whose box reaches the corner's,
+    /// `place` is taken to be that corner. When a second place reaches the
+    /// corner as well, nothing here says which of the two it is.
+    ///
+    /// **That first sentence is the model's word, not a proof**, so neither is
+    /// the fold. A corner gets its crossings in
+    /// [`Arrangement::place_the_corners`], where the edge's own crossing and a
+    /// surface the corner already knows about are taken as read, and
+    /// `derive_a_corner` in `bake.rs` accepts a surface that answers
+    /// `Undecidable` under any policy. Under `Policy::certified` the suites
+    /// fold meets into exact corners that `side_of_surface` proves are off one
+    /// of the three surfaces, by the ulps an earlier fuse rounded them by
+    /// (§248.6). The fold made those same drops before §248, and whether it is
+    /// sound is still open.
     ///
     /// **Anything short of that stays a node of its own**, and whether two
     /// overlapping nodes are one point is left to

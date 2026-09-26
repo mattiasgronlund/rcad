@@ -9,13 +9,14 @@ other meet of the call reaches. Every other meet stays a node, and
 are one point, as §17.4 says it should. No suite fuse reaches the changed
 drop. No fuse was found that carried the old drop through to a wrong answer.*
 
-  248.1   What the drop did, and the one drop that is a proof
+  248.1   What the drop did, and the one drop it keeps
   248.2   What the suites drop, measured
   248.3   The test, and why its edge runs along `z`
   248.4   Whether the old drop gave a wrong answer
   248.5   What this leaves
+  248.6   The drop it keeps is not a proof
 
-### 248.1 What the drop did, and the one drop that is a proof
+### 248.1 What the drop did, and the one drop it keeps
 
 The brief gave three legs. Each was checked.
 
@@ -42,8 +43,9 @@ pair takes the route every other overlapping pair already takes.
 **Leg 3: the drops the suites make are against corners.** A corner on both
 crossings is on all three surfaces, so it is one of their meets, and its true
 point lies inside the box of one of the call's meets. If only one meet's box
-reaches the corner's box, that meet is the corner. That is a proof about boxes,
-and it is what `a_corner_is_this_place` checks now. It counts every meet of the
+reaches the corner's box, that meet is the corner. That is a proof about boxes
+*if* the corner is on all three surfaces, and 248.6 shows the model's word is
+all that says it is. It is what `a_corner_is_this_place` checks now. It counts every meet of the
 call, including meets a picker rules out, since those are still meets of the
 three surfaces. If a second meet's box also reaches the corner, nothing says
 which of the two is the corner, and both stay nodes for the policy.
@@ -182,9 +184,9 @@ far, and no other family was tried.
   suites puts such a pair on one closed crossing. That was not measured past the
   drop.
 - `crates/rcad-topo/src/fuse/arrange.rs`: `a_corner_is_this_place` relies on the
-  corner being on all three surfaces. Where that came from a tolerant
-  `passes_through`, it rests on the policy's earlier acceptance, not on a proof.
-  Not measured.
+  corner being on all three surfaces. That is not only a tolerant
+  `passes_through`'s acceptance: under `Policy::certified` it is the model's
+  word, and 248.6 measured it false.
 - `crates/rcad-topo/src/fuse/select.rs`: `a point inside a piece of a face`
   refuses with an infinite enclosure on the piece a plane cuts from a ball in a
   circle of radius `2⁻²⁵` (248.3). Whether that is a limit or a gap was not
@@ -193,3 +195,51 @@ far, and no other family was tried.
   `x` refuses on an `orient3d` against the plane of the ball's seam picker, with
   the fix or without it. The call site was not found, and whether that refusal
   is a limit or a gap was not looked at.
+
+### 248.6 The drop it keeps is not a proof
+
+The verifier ran its own probe and found nothing new against the change: the
+test fails on the base, and across about 2.6 M places in the suites only 12 went
+from dropped to kept, all from this row's own `h = 16` tests. Leg 1 held by
+structure and by the probe. It said merge, and asked for the wording of leg 3
+and of `a_corner_is_this_place`'s doc comment to be corrected, because under
+`Policy::certified` they are false.
+
+**224 certified drops a run were into an exact corner that `side_of_surface`
+proves `Pos` or `Neg` on one of the three surfaces**: 140 off the first
+crossing's partner, a cone, and 84 off the face's own plane. They come from five
+tests:
+
+- `a_block_and_cone_united_with_a_copy_of_that_union_is_that_union` (128)
+- `a_block_shared_with_its_union_with_a_cone_is_the_block` (32)
+- `a_cone_shared_with_its_union_with_a_block_is_the_cone` (32)
+- `a_block_and_frustum_united_can_be_united_again` (16)
+- `a_frustum_cut_by_a_block_and_a_far_cube_unite_one_way_and_not_the_other` (16)
+
+One is the corner `Exact([-1.7320508075688772, 1.0, 4.0])`, a rounded `−√3` left
+by an earlier union, on the plane `z = 4`, a cone of slope 0.5 and the plane
+`y = 1`.
+
+**Leg 3's first sentence is where it breaks.** A corner gets its crossings in
+`place_the_corners`, and two of its three routes take the model's word: the
+edge's own crossing (`crossing_of_edge`), and a surface the corner already
+knows about (`around.contains(&partner)`). Only the third, `passes_through`,
+asks. And the model's word is itself soft: `derive_a_corner` in `bake.rs` takes
+a surface that answers `Undecidable` about the corner as agreeing with it,
+under any policy. So "a corner on both crossings is on all three surfaces" is
+what the model says, not what the arithmetic proves, and the fold of a meet
+into such a corner is taken without asking the policy.
+
+The old code made the same 224 drops, so this is not a regression of §248.
+Whether the fold is sound is open. It is not measured here what keeping those
+meets as nodes would do to the five tests.
+
+Two more findings, for the queue:
+
+- **The `== 1` branch has no test.** Changing it to `>= 1` passes every suite,
+  and neither of the verifier's two scratch families (60 fuses) nor the suites
+  put two meets' boxes on one corner.
+- Dropping `node.vertex.is_some() &&` changes nothing. The only other nodes on
+  both crossings are this call's earlier meets (248.1), and such a node's box is
+  one of `places`, so any `place` it reaches makes the count two. The test is
+  redundant and harmless, and needs no row.
