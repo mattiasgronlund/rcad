@@ -180,7 +180,7 @@ splits first and the shape discriminant is second.
 | **`cuts.rs`, most of `three_surfaces.rs`** | §49.6 records them **unaudited**, and they stay recorded that way. §50.7 charge 5 covers two files, not four |
 | **`ResultIsNotManifold` with `count` other than 1** | 864 of 31 104 and counted by nothing. Unmeasured is not this unit's spine |
 | **the writer, fillets, B-splines** | unchanged. Fillets stay gated on §44.7's reason |
-| **connecting `BSplineSurface`** | built, tested, and reachable from nothing. Left deliberately: §13 wants a named consumer and §14356 already sent the free-form marcher away. Recorded here so it is a decision and not an omission |
+| **connecting `BSplineSurface`** | built, tested, and reachable from nothing. Left deliberately: §13 wants a named consumer and §24.1 already sent the free-form marcher away. Recorded here so it is a decision and not an omission |
 
 ### 50.7 The gate's five charges
 
