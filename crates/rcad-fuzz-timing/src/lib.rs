@@ -143,8 +143,20 @@ fn stop_the_clock(started: Option<Instant>, bytes: &[u8]) {
 /// process only ever loses what it has seen since its last merge, and under
 /// `-fork` a process lives about seventeen seconds — so at thirty seconds most
 /// children would exit having merged nothing at all, and the loss would be the
-/// whole night rather than the edge of it. libFuzzer kills its children from
-/// outside, so there is no exit to hook and no way to make the loss zero.
+/// whole night rather than the edge of it.
+///
+/// **How a child ends decides whether that last second could be saved.**
+/// libFuzzer's parent never kills a child. In libfuzzer-sys 0.4.13,
+/// `WorkerThread` waits for each one to finish (`FuzzerFork.cpp:303-309`),
+/// and at the end of the night `StopJobs` only writes a stop file
+/// (`:368-373`). A child that reaches its `-max_total_time` or finds the stop
+/// file ends with `exit(0)` (`FuzzerDriver.cpp:930`), which runs the functions
+/// registered to run at exit and, on Linux, the exiting thread's thread-local
+/// destructors, so a merge there could save that second. Nothing here does
+/// that yet: that loss is a gap (§267.6). A `-timeout`, a crash or an
+/// out-of-memory ends in `_Exit` (`FuzzerLoop.cpp:307`, `:238`, `:135` and
+/// `:322`), which runs nothing, so what those lose cannot be saved: that loss
+/// is a limit.
 ///
 /// **The merge is made by the draw that finds it due, on libFuzzer's own
 /// thread**, and not by a thread of this crate's ticking beside it (§267).
@@ -154,10 +166,11 @@ fn stop_the_clock(started: Option<Instant>, bytes: &[u8]) {
 /// inputs again at whatever moments the clock chose. A merge inside a draw
 /// frees everything it allocated before the draw ends.
 ///
-/// That costs one thing the thread did not: a process killed in the middle of
-/// a draw — a `-timeout` under `-fork` — loses the runs since its last merge,
-/// up to a second of them, where the thread would have merged them while the
-/// long draw ran. The draw that was killed was never counted either way.
+/// That costs one thing the thread did not: a process that times out in the
+/// middle of a draw loses the runs since its last merge, up to a second of
+/// them, where the thread went on merging them while the long draw ran
+/// (§262.2). The draw that timed out was never counted either way. §267.6
+/// sizes the cost on one night.
 ///
 /// The cost is a lock and a small read-modify-write per process per second,
 /// which against twenty-four of them is a rounding error next to the fuzzing.
