@@ -50,14 +50,28 @@
 //! # It is off unless a directory is named
 //!
 //! `RCAD_FUZZ_TIMINGS` is a directory, and nothing here runs without it — not
-//! even the clock, and not the merging thread. `RCAD_FUZZ_SLOWEST` is how many
-//! of the slowest runs to keep, and defaults to [`HOW_MANY_SLOW_RUNS_TO_KEEP`].
+//! even the clock. `RCAD_FUZZ_SLOWEST` is how many of the slowest runs to keep,
+//! and defaults to [`HOW_MANY_SLOW_RUNS_TO_KEEP`].
+//!
+//! # With it named, libFuzzer must not be able to tell
+//!
+//! The night fuzzes with the directory named, so whatever this crate does is
+//! part of the process libFuzzer is steering. Four things here used to steer
+//! it (§267): code compiled into the fuzz target that ran only when the
+//! directory was named, allocations a draw made and kept, a thread of its own,
+//! and a `memcmp` of each draw against the slow inputs held. Each is gone, and
+//! why is written where it would come back: [`timed`],
+//! `TheSlowestRuns::keeping`, `HOW_OFTEN_TO_MERGE` and `SlowRun::is`.
+//!
+//! What is left is this crate's own code, which libFuzzer still counts as
+//! coverage unless the build leaves it uninstrumented — and that is the
+//! build's job, not this file's (§267).
 
 #![forbid(unsafe_code)]
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 /// How many of the slowest runs are kept, where `RCAD_FUZZ_SLOWEST` says nothing.
@@ -72,43 +86,55 @@ pub const HOW_MANY_SLOW_RUNS_TO_KEEP: usize = 64;
 /// report.
 static WATCH: OnceLock<Option<Mutex<Watch>>> = OnceLock::new();
 
-/// Guards the one merging thread, for the same reason `WATCH` is out here.
-static START_MERGING: Once = Once::new();
-
 /// Run one draw of a fuzz target, timing it where a directory has been named.
 ///
 /// Pass `env!("CARGO_BIN_NAME")` as `target` — it is the fuzz target's own name
 /// and cannot drift from the one `cargo fuzz` was asked for.
 ///
-/// With `RCAD_FUZZ_TIMINGS` unset this is the body and one already-resolved
-/// `OnceLock` read, so the three targets that nobody is measuring pay nothing.
+/// **Two calls and the draw, and nothing else**, because this function is
+/// generic and so is compiled into the fuzz target, whose code libFuzzer counts
+/// as coverage. Anything here that went one way with `RCAD_FUZZ_TIMINGS` named
+/// and another without it — a lock, a first-call branch, the arithmetic on two
+/// clock readings — would be edges and comparisons libFuzzer sees only when the
+/// night is measuring. `start_the_clock` and `stop_the_clock` hold all of it,
+/// and are neither generic nor inlined, so they are compiled here once.
+///
+/// With the directory unset those two are a resolved `OnceLock` read and a
+/// return, so the targets nobody is measuring pay nothing.
 pub fn timed<T>(target: &str, bytes: &[u8], run: impl FnOnce() -> T) -> T {
-    let Some(watch) = WATCH.get_or_init(|| Watch::asked_for(target).map(Mutex::new)) else {
-        return run();
-    };
-
-    // The thread is started here rather than in the initialiser above because
-    // `get_or_init`'s closure cannot hand itself the `&'static` its thread needs.
-    START_MERGING.call_once(|| {
-        std::thread::spawn(|| {
-            loop {
-                std::thread::sleep(HOW_OFTEN_TO_MERGE);
-                merge_out(watch);
-            }
-        });
-    });
-
-    // The clock is stopped before the lock is taken, and `run` is called outside
-    // it, so a draw that panics — which is what a fuzz target is for — neither
-    // poisons the lock nor counts its own half-finished time.
-    let started = Instant::now();
+    let started = start_the_clock(target);
     let answer = run();
-    let took = started.elapsed();
-    let mut watch = watch
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    watch.record(took, bytes);
+    stop_the_clock(started, bytes);
     answer
+}
+
+/// When this draw started, where a directory has been named.
+#[inline(never)]
+fn start_the_clock(target: &str) -> Option<Instant> {
+    WATCH
+        .get_or_init(|| Watch::asked_for(target).map(Mutex::new))
+        .as_ref()
+        .map(|_| Instant::now())
+}
+
+/// Count the draw that `started` began, and merge if one is due.
+///
+/// Only a draw that returns gets here, so a draw that panics — which is what a
+/// fuzz target is for — neither poisons the lock nor counts its own
+/// half-finished time.
+#[inline(never)]
+fn stop_the_clock(started: Option<Instant>, bytes: &[u8]) {
+    let Some(started) = started else {
+        return;
+    };
+    let now = Instant::now();
+    WATCH
+        .get()
+        .and_then(Option::as_ref)
+        .expect("a clock is only started where the watch it was started for exists")
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .record(now.duration_since(started), bytes, now);
 }
 
 /// How long to leave between merges into the shared accumulation.
@@ -120,6 +146,19 @@ pub fn timed<T>(target: &str, bytes: &[u8], run: impl FnOnce() -> T) -> T {
 /// whole night rather than the edge of it. libFuzzer kills its children from
 /// outside, so there is no exit to hook and no way to make the loss zero.
 ///
+/// **The merge is made by the draw that finds it due, on libFuzzer's own
+/// thread**, and not by a thread of this crate's ticking beside it (§267).
+/// libFuzzer re-runs any draw that ends with more `malloc`s than `free`s, to
+/// look for a leak, and it counts every thread's: a merge on another thread
+/// that allocated during one draw and freed during the next made libFuzzer run
+/// inputs again at whatever moments the clock chose. A merge inside a draw
+/// frees everything it allocated before the draw ends.
+///
+/// That costs one thing the thread did not: a process killed in the middle of
+/// a draw — a `-timeout` under `-fork` — loses the runs since its last merge,
+/// up to a second of them, where the thread would have merged them while the
+/// long draw ran. The draw that was killed was never counted either way.
+///
 /// The cost is a lock and a small read-modify-write per process per second,
 /// which against twenty-four of them is a rounding error next to the fuzzing.
 const HOW_OFTEN_TO_MERGE: Duration = Duration::from_secs(1);
@@ -130,8 +169,7 @@ struct Watch {
     keep: usize,
     took: HowLongRunsTook,
     slowest: TheSlowestRuns,
-    /// Slow inputs already on disk, so a steady top is not rewritten every tick.
-    written: HashSet<String>,
+    last_merged: Instant,
 }
 
 impl Watch {
@@ -142,119 +180,89 @@ impl Watch {
             .ok()
             .and_then(|how_many| how_many.parse().ok())
             .unwrap_or(HOW_MANY_SLOW_RUNS_TO_KEEP);
-        Some(Self {
-            into: Path::new(&root).join(target),
+        Some(Self::writing_into(Path::new(&root).join(target), keep))
+    }
+
+    fn writing_into(into: PathBuf, keep: usize) -> Self {
+        Self {
+            into,
             keep,
             took: HowLongRunsTook::new(),
             slowest: TheSlowestRuns::keeping(keep),
-            written: HashSet::new(),
-        })
+            last_merged: Instant::now(),
+        }
     }
 
-    /// One run, counted and — where it is among the slowest — kept.
-    ///
-    /// No clock is read and nothing is written. Everything this process has seen
-    /// goes out on the merging thread's tick, which is what lets the run path
-    /// stay two `Instant::now()`s and an add.
-    fn record(&mut self, took: Duration, bytes: &[u8]) {
+    /// One run, counted, kept where it is among the slowest, and merged out
+    /// with everything since the last merge once [`HOW_OFTEN_TO_MERGE`] has
+    /// passed by `now`.
+    fn record(&mut self, took: Duration, bytes: &[u8], now: Instant) {
         self.took.record(took);
         self.slowest.offer(took, bytes);
-    }
-}
-
-/// Add what this process has seen to the shared accumulation, and rewrite the
-/// report from the result.
-///
-/// Two failures are recovered rather than swallowed: if the directory cannot
-/// be made or the shared lock cannot be taken, the run count just collected
-/// goes back to the live watch so the next tick tries again, and no slow
-/// input is marked as written — nothing was written, so the next tick offers
-/// every one of them again. The same recovery covers a slow input's own write
-/// failing on its own, past that point: only the inputs [`write_slow_input`]
-/// actually lands under their real name go into `written`, in one call to
-/// [`mark_slow_inputs_written`], so one that did not is retried out of
-/// `slowest` on the next tick rather than refused forever. §236.6: landing
-/// under the real name is itself a write to a temporary name and then a
-/// rename, so a write cut short by a full disk or a process killed
-/// mid-write — libFuzzer kills forked jobs from outside, with no chance to
-/// finish — never leaves a truncated input under a name `cargo fuzz run`
-/// would be asked to replay. What is still swallowed is the totals file and
-/// the report text themselves — a write that fails there loses just that one
-/// merge's counts and its report, not a night's worth of runs, since
-/// `slowest` is untouched by either; a torn `totals` file is read back a
-/// line at a time, so it drops what got cut instead of lying about it. A
-/// fuzz target that stopped fuzzing because its measurements could not be
-/// filed would be measuring the disk.
-fn merge_out(watch: &Mutex<Watch>) {
-    let (into, keep, mine, to_write) = {
-        let mut watch = watch
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        // The histogram is handed over and reset, so what is merged is a delta
-        // and a process that merges twice does not count its runs twice. The
-        // slowest are *not* reset: they are the process's running top, and
-        // dropping them would make every tick re-offer the whole corpus.
-        let mine = std::mem::replace(&mut watch.took, HowLongRunsTook::new());
-        let to_write: Vec<(Duration, Vec<u8>)> = watch
-            .slowest
-            .slowest_first()
-            .filter(|(took, bytes)| !watch.written.contains(&named_for(*took, bytes)))
-            .map(|(took, bytes)| (took, bytes.to_vec()))
-            .collect();
-        (watch.into.clone(), watch.keep, mine, to_write)
-    };
-
-    if mine.runs == 0 && to_write.is_empty() {
-        return;
+        if now.duration_since(self.last_merged) >= HOW_OFTEN_TO_MERGE {
+            self.last_merged = now;
+            self.merge_out();
+        }
     }
 
-    let slowest = into.join("slowest");
-    if std::fs::create_dir_all(&slowest).is_err() {
-        hand_back_what_could_not_be_written(watch, mine);
-        return;
+    /// Add what this process has seen to the shared accumulation, and rewrite
+    /// the report from the result.
+    ///
+    /// Two failures are recovered rather than swallowed: if the directory
+    /// cannot be made or the shared lock cannot be taken, the run count stays
+    /// where it is so the next merge tries again, and no slow input is marked
+    /// as written — nothing was written, so the next merge offers every one of
+    /// them again. Every run still waiting then counts as lost — *set*, not
+    /// added to, so a run stuck across three failed merges in a row is one run
+    /// lost, not three. The same recovery covers a slow input's own write
+    /// failing on its own, past that point: only an input [`write_slow_input`]
+    /// actually lands under its real name is marked written, so one that did
+    /// not is retried on the next merge rather than refused forever. §236.6:
+    /// landing under the real name is itself a write to a temporary name and
+    /// then a rename, so a write cut short by a full disk or a process killed
+    /// mid-write — libFuzzer kills forked jobs from outside, with no chance to
+    /// finish — never leaves a truncated input under a name `cargo fuzz run`
+    /// would be asked to replay. What is still swallowed is the totals file
+    /// and the report text themselves — a write that fails there loses just
+    /// that one merge's counts and its report, not a night's worth of runs,
+    /// since the slowest are untouched by either; a torn `totals` file is read
+    /// back a line at a time, so it drops what got cut instead of lying about
+    /// it. A fuzz target that stopped fuzzing because its measurements could
+    /// not be filed would be measuring the disk.
+    ///
+    /// Everything this allocates is freed before it returns, which is what
+    /// lets it run inside a draw ([`HOW_OFTEN_TO_MERGE`]).
+    fn merge_out(&mut self) {
+        if self.took.runs == 0 && self.slowest.all_written() {
+            return;
+        }
+
+        let slowest = self.into.join("slowest");
+        if std::fs::create_dir_all(&slowest).is_err() {
+            self.took.lost = self.took.runs;
+            return;
+        }
+        let Some(lock) = the_shared_report_locked(&self.into) else {
+            self.took.lost = self.took.runs;
+            return;
+        };
+
+        // What is merged is a delta, and it is cleared once it is in, so a
+        // process that merges twice does not count its runs twice. The slowest
+        // are *not* cleared: they are the process's running top, and dropping
+        // them would make every merge re-offer the whole corpus.
+        let mut everyones = HowLongRunsTook::read_back(&self.into.join("totals"));
+        everyones.add(&self.took);
+        let _ = std::fs::write(self.into.join("totals"), everyones.written_out());
+        self.took.clear();
+
+        self.slowest.write_what_is_not_on_disk(&slowest);
+
+        let kept = prune_to_the_slowest_kept(&slowest, self.keep);
+        let _ = std::fs::write(self.into.join("report"), report_text(&everyones, &kept));
+
+        let _ = lock.unlock();
     }
-    let Some(lock) = the_shared_report_locked(&into) else {
-        hand_back_what_could_not_be_written(watch, mine);
-        return;
-    };
-
-    let mut everyones = HowLongRunsTook::read_back(&into.join("totals"));
-    everyones.add(&mine);
-    let _ = std::fs::write(into.join("totals"), everyones.written_out());
-
-    let written_now: Vec<String> = to_write
-        .iter()
-        .filter(|(took, bytes)| write_slow_input(&slowest, *took, bytes))
-        .map(|(took, bytes)| named_for(*took, bytes))
-        .collect();
-    if !written_now.is_empty() {
-        mark_slow_inputs_written(watch, written_now);
-    }
-
-    let kept = prune_to_the_slowest_kept(&slowest, keep);
-    let _ = std::fs::write(into.join("report"), report_text(&everyones, &kept));
-
-    let _ = lock.unlock();
-}
-
-/// Put a run count that a merge could not write back into the live watch, so
-/// the next tick tries again instead of the runs vanishing with this one.
-///
-/// Every run in `mine` just failed to write, whether or not some of them had
-/// already failed on an earlier tick — `mine.lost` is *set* to `mine.runs`
-/// rather than added to, so a run stuck across three failed ticks in a row is
-/// counted as one run lost, not three. The lock is taken fresh here rather
-/// than reusing the caller's guard, because another thread's [`Watch::record`]
-/// may have added new runs to the watch in the meantime; a fresh lock merges
-/// onto whatever is there now instead of overwriting it.
-fn hand_back_what_could_not_be_written(watch: &Mutex<Watch>, mut mine: HowLongRunsTook) {
-    mine.lost = mine.runs;
-    watch
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .took
-        .add(&mine);
 }
 
 /// Write one slow input's bytes under its real name, so a reader never sees
@@ -322,34 +330,6 @@ fn write_that_might_be_cut_short(path: &Path, bytes: &[u8]) -> bool {
     std::fs::write(path, bytes).is_ok()
 }
 
-/// Mark slow inputs as written now that their bytes are actually on disk.
-///
-/// `written` used to gain an entry the moment a write was *attempted*, not
-/// once it had *landed* — so an input whose write failed, for any reason,
-/// was refused a retry forever after, even once whatever blocked it cleared.
-/// Marking only what [`merge_out`] just confirmed on disk is the fix: a
-/// write that fails leaves its input out of `written`, and the next tick
-/// finds it still sitting in `slowest` — which nothing here ever clears on a
-/// failed write — and offers it again.
-///
-/// The lock is taken fresh, for the same reason as
-/// [`hand_back_what_could_not_be_written`]: a thread calling
-/// [`Watch::record`] for this same input while the write above was in flight
-/// may have offered it a slower time, replacing the `slowest` entry this
-/// merge just wrote bytes for with one under a different name. That
-/// replacement is not lost — the newer entry is still in `slowest`, not yet
-/// in `written`, so the next tick writes *it* out too — and the older file
-/// on disk is harmless leftover that [`prune_to_the_slowest_kept`] clears on
-/// the next successful merge, the same way it already dedupes one input kept
-/// under two names from two processes.
-fn mark_slow_inputs_written(watch: &Mutex<Watch>, written: Vec<String>) {
-    watch
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .written
-        .extend(written);
-}
-
 /// The lock every process takes before touching the shared accumulation.
 ///
 /// A plain advisory lock on a file of its own. It is held for a read, an add and
@@ -385,25 +365,26 @@ fn the_shared_report_locked(into: &Path) -> Option<std::fs::File> {
 /// since it does not start with `slow-`, so it is never counted, never
 /// kept, and never named in [`report_text`] — the same as any file this
 /// module did not write.
+///
+/// **Names are sorted and matched by the numbers in them, never compared as
+/// text**, for the reason [`SlowRun::is`] gives: this runs inside a draw, and a
+/// `memcmp` of two different names would hand both to libFuzzer's mutations.
 fn prune_to_the_slowest_kept(from: &Path, keep: usize) -> Vec<(Duration, String)> {
     let Ok(listing) = std::fs::read_dir(from) else {
         return Vec::new();
     };
-    let mut found: Vec<(Duration, String)> = Vec::new();
+    let mut found: Vec<(Duration, u64, String)> = Vec::new();
     for entry in listing.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some((took, _)) = how_slow_the_name_says(&name) {
-            found.push((took, name));
+        if let Some((took, input)) = how_slow_the_name_says(&name) {
+            found.push((took, input, name));
         }
     }
     found.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
 
     let mut kept: Vec<(Duration, String)> = Vec::new();
-    let mut held: HashSet<String> = HashSet::new();
-    for (took, name) in found {
-        let input = how_slow_the_name_says(&name)
-            .map(|(_, input)| input.to_string())
-            .unwrap_or_default();
+    let mut held: HashSet<u64> = HashSet::new();
+    for (took, input, name) in found {
         if kept.len() < keep && held.insert(input) {
             kept.push((took, name));
         } else {
@@ -455,22 +436,30 @@ fn report_text(everyones: &HowLongRunsTook, kept: &[(Duration, String)]) -> Stri
 /// input keeps the same name across rewrites, across nights and across the many
 /// processes a `-fork` run is made of.
 fn named_for(took: Duration, bytes: &[u8]) -> String {
+    format!("slow-{:012}us-{:016x}", took.as_micros(), hash_of(bytes))
+}
+
+/// The FNV-1a hash of an input, which names it on disk and tells two apart.
+fn hash_of(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in bytes {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("slow-{:012}us-{hash:016x}", took.as_micros())
+    hash
 }
 
-/// How slow a slow run's file name says it was, and which input it names.
+/// How slow a slow run's file name says it was, and the hash of its input.
 ///
 /// The inverse of [`named_for`], and the reason the slow runs need no shared
 /// accumulation of their own.
-fn how_slow_the_name_says(name: &str) -> Option<(Duration, &str)> {
+fn how_slow_the_name_says(name: &str) -> Option<(Duration, u64)> {
     let rest = name.strip_prefix("slow-")?;
     let (micros, input) = rest.split_once("us-")?;
-    Some((Duration::from_micros(micros.parse().ok()?), input))
+    Some((
+        Duration::from_micros(micros.parse().ok()?),
+        u64::from_str_radix(input, 16).ok()?,
+    ))
 }
 
 /// How many runs landed in each bucket of nanoseconds.
@@ -480,8 +469,8 @@ struct HowLongRunsTook {
     buckets: Box<[u64; HOW_MANY_BUCKETS]>,
     /// Of `runs`, how many needed more than one merge because an earlier one
     /// failed to write. Not a count of runs still missing — every run counted
-    /// here is also counted in `runs`, since [`hand_back_what_could_not_be_written`]
-    /// is what sets this before the retry that eventually succeeds.
+    /// here is also counted in `runs`, since a failed [`Watch::merge_out`] is
+    /// what sets this before the retry that eventually succeeds.
     lost: u64,
 }
 
@@ -510,6 +499,15 @@ impl HowLongRunsTook {
             *mine += theirs;
         }
         self.lost += other.lost;
+    }
+
+    /// Back to no runs at all, in place: a merge runs inside a draw, and a
+    /// fresh histogram would be an allocation it has to free again.
+    fn clear(&mut self) {
+        self.runs = 0;
+        self.total = Duration::ZERO;
+        self.buckets.fill(0);
+        self.lost = 0;
     }
 
     /// The accumulation as it is stored, which only this module reads.
@@ -638,14 +636,64 @@ fn nanos_at(bucket: usize) -> u64 {
 struct TheSlowestRuns {
     keep: usize,
     /// Quickest first, so the one to drop is the one at the front.
-    runs: Vec<(Duration, Vec<u8>)>,
+    runs: Vec<SlowRun>,
+    /// A buffer for every run not yet kept, so `runs.len() + spare.len()` is
+    /// always `keep`.
+    spare: Vec<Vec<u8>>,
 }
 
+/// One of the slowest runs.
+struct SlowRun {
+    took: Duration,
+    bytes: Vec<u8>,
+    /// [`hash_of`] `bytes`.
+    hash: u64,
+    /// Whether this run is on disk under the name `took` and `bytes` give it,
+    /// so a steady top is not rewritten on every merge.
+    written: bool,
+}
+
+impl SlowRun {
+    /// Whether this run's input is `bytes`, whose hash is `hash`.
+    ///
+    /// **The hashes are compared first, and the bytes only where they match**,
+    /// so two different inputs never go through `memcmp`. ASan's `memcmp`
+    /// hands libFuzzer both sides of every comparison that comes out unequal,
+    /// from any code in the process, and libFuzzer keeps them to mutate with.
+    /// Comparing each draw with the slow inputs held — which ones are held is
+    /// the clock's choice — made the mutations depend on the clock (§267).
+    fn is(&self, hash: u64, bytes: &[u8]) -> bool {
+        self.hash == hash && self.bytes == bytes
+    }
+}
+
+/// How many bytes each spare buffer starts with room for.
+///
+/// Anything above zero: see [`TheSlowestRuns::keeping`].
+const ROOM_A_SPARE_BUFFER_STARTS_WITH: usize = 64;
+
 impl TheSlowestRuns {
+    /// Room for `keep` runs, **every buffer allocated now, in the draw that
+    /// made the watch**, and never again after it.
+    ///
+    /// libFuzzer re-runs a draw that ended with more `malloc`s than `free`s, to
+    /// look for a leak, and counts the re-run against `-runs`. Copying a slow
+    /// input into a fresh `Vec` is one `malloc` and no `free`, so the first
+    /// `keep` slow inputs of every process were each run twice, and only when
+    /// the night was measuring (§267). Copying it into a buffer that already
+    /// exists is nothing at all, or a `realloc` — one of each — when the input
+    /// is longer than the buffer. So each buffer starts with room for
+    /// something, because growing an empty `Vec` is a `malloc` alone.
+    ///
+    /// The draw that makes the watch is the first one, which is the empty
+    /// input libFuzzer runs once at start-up and never looks at for leaks.
     fn keeping(keep: usize) -> Self {
         Self {
             keep,
-            runs: Vec::new(),
+            runs: Vec::with_capacity(keep),
+            spare: (0..keep)
+                .map(|_| Vec::with_capacity(ROOM_A_SPARE_BUFFER_STARTS_WITH))
+                .collect(),
         }
     }
 
@@ -658,28 +706,57 @@ impl TheSlowestRuns {
         if self.keep == 0 {
             return false;
         }
-        if self.runs.len() == self.keep && took <= self.runs[0].0 {
+        if self.runs.len() == self.keep && took <= self.runs[0].took {
             return false;
         }
-        if let Some(held) = self.runs.iter().position(|(_, held)| held == bytes) {
-            if self.runs[held].0 >= took {
+        let hash = hash_of(bytes);
+        let mut run = if let Some(held) = self.runs.iter().position(|run| run.is(hash, bytes)) {
+            if self.runs[held].took >= took {
                 return false;
             }
-            self.runs.remove(held);
-        } else if self.runs.len() == self.keep {
-            self.runs.remove(0);
-        }
-        let at = self.runs.partition_point(|(seen, _)| *seen <= took);
-        self.runs.insert(at, (took, bytes.to_vec()));
+            self.runs.remove(held)
+        } else {
+            let mut buffer = if self.runs.len() == self.keep {
+                self.runs.remove(0).bytes
+            } else {
+                self.spare
+                    .pop()
+                    .expect("a spare buffer for every run not yet kept")
+            };
+            buffer.clear();
+            buffer.extend_from_slice(bytes);
+            SlowRun {
+                took,
+                bytes: buffer,
+                hash,
+                written: false,
+            }
+        };
+        run.took = took;
+        run.written = false;
+        let at = self.runs.partition_point(|seen| seen.took <= took);
+        self.runs.insert(at, run);
         true
     }
 
+    fn all_written(&self) -> bool {
+        self.runs.iter().all(|run| run.written)
+    }
+
+    /// Write every kept run not yet on disk, and mark the ones that landed.
+    fn write_what_is_not_on_disk(&mut self, slowest: &Path) {
+        for run in self.runs.iter_mut().rev().filter(|run| !run.written) {
+            run.written = write_slow_input(slowest, run.took, &run.bytes);
+        }
+    }
+
     /// What is kept, slowest first.
+    #[cfg(test)]
     fn slowest_first(&self) -> impl Iterator<Item = (Duration, &[u8])> {
         self.runs
             .iter()
             .rev()
-            .map(|(took, bytes)| (*took, bytes.as_slice()))
+            .map(|run| (run.took, run.bytes.as_slice()))
     }
 }
 
@@ -699,14 +776,121 @@ mod tests {
     }
 
     /// A watch writing into `into`, as a process under `-fork` would have.
-    fn a_process_writing_into(into: &Path, keep: usize) -> Mutex<Watch> {
-        Mutex::new(Watch {
-            into: into.to_path_buf(),
-            keep,
-            took: HowLongRunsTook::new(),
-            slowest: TheSlowestRuns::keeping(keep),
-            written: HashSet::new(),
-        })
+    fn a_process_writing_into(into: &Path, keep: usize) -> Watch {
+        Watch::writing_into(into.to_path_buf(), keep)
+    }
+
+    impl Watch {
+        /// One run, counted the way a draw counts it, with no merge due yet.
+        fn ran(&mut self, took: Duration, bytes: &[u8]) {
+            self.record(took, bytes, self.last_merged);
+        }
+    }
+
+    #[test]
+    fn a_merge_that_is_due_is_made_before_the_draw_that_found_it_returns() {
+        // §267: the merge used to be made by a thread of this crate's own,
+        // ticking beside libFuzzer. Its allocations landed in whichever draw
+        // was running, and libFuzzer re-runs a draw that ends with more
+        // `malloc`s than `free`s — so with the timings named, libFuzzer ran
+        // inputs again at moments the clock chose. A merge made inside the
+        // draw, and finished before it returns, cannot do that.
+        let into = somewhere_to_write("merge-in-the-draw");
+        let mut watch = a_process_writing_into(&into, 4);
+        let later = watch.last_merged + HOW_OFTEN_TO_MERGE;
+
+        watch.record(Duration::from_millis(2), b"not due yet", watch.last_merged);
+        assert!(
+            !into.join("report").exists(),
+            "a merge was made before a second had passed"
+        );
+
+        watch.record(Duration::from_millis(3), b"due now", later);
+        let report = std::fs::read_to_string(into.join("report"))
+            .expect("the draw that found a merge due returned without making it");
+        assert!(
+            report.starts_with("2 runs"),
+            "the merge made in the draw did not carry both runs: {:?}",
+            report.lines().next()
+        );
+
+        watch.record(Duration::from_millis(4), b"just merged", later);
+        assert_eq!(
+            watch.took.runs, 1,
+            "a second merge was made in the same second as the first"
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn keeping_a_slow_run_uses_a_buffer_set_aside_when_the_watch_was_made() {
+        // §267: copying a slow input into a fresh `Vec` is a `malloc` with no
+        // `free`, and libFuzzer re-runs any draw that ends that way — so the
+        // first sixty-four slow inputs of every process were run twice, and
+        // only when the timings were named. Every buffer is made up front
+        // instead, and passed from run to run.
+        let mut slowest = TheSlowestRuns::keeping(3);
+        let set_aside: HashSet<*const u8> =
+            slowest.spare.iter().map(|buffer| buffer.as_ptr()).collect();
+        assert_eq!(set_aside.len(), 3, "three buffers, each its own");
+        assert!(
+            slowest.spare.iter().all(|buffer| buffer.capacity() > 0),
+            "an empty buffer's first copy would be a malloc alone"
+        );
+
+        for (run, bytes) in [
+            (5u64, &b"five"[..]),
+            (1, b"one"),
+            (9, b"nine"),
+            (3, b"three"),
+            (7, b"seven"),
+            (8, b"eight"),
+            (9, b"five"),
+        ] {
+            slowest.offer(Duration::from_millis(run), bytes);
+        }
+
+        let kept: Vec<_> = slowest
+            .slowest_first()
+            .map(|(took, bytes)| (took.as_millis(), bytes.to_vec()))
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                (9, b"five".to_vec()),
+                (9, b"nine".to_vec()),
+                (8, b"eight".to_vec())
+            ]
+        );
+        for run in &slowest.runs {
+            assert!(
+                set_aside.contains(&run.bytes.as_ptr()),
+                "a kept run's bytes are in a buffer made after the watch was"
+            );
+        }
+        assert_eq!(slowest.runs.len() + slowest.spare.len(), 3);
+    }
+
+    #[test]
+    fn two_inputs_are_told_apart_by_their_hashes_before_their_bytes() {
+        // §267: comparing a draw's bytes with a different held input's bytes
+        // is a `memcmp` that comes out unequal, and ASan hands both sides of
+        // that to libFuzzer's mutations. A run whose hash does not match is
+        // not the same input, whatever its bytes say — so the bytes are never
+        // looked at. The hash here is deliberately not the bytes' own, which
+        // only a comparison that never reached the bytes can get right.
+        let held = SlowRun {
+            took: Duration::from_millis(9),
+            bytes: b"same bytes".to_vec(),
+            hash: hash_of(b"same bytes") ^ 1,
+            written: false,
+        };
+        assert!(
+            !held.is(hash_of(b"same bytes"), b"same bytes"),
+            "the bytes were compared although the hashes differ"
+        );
+        assert!(held.is(held.hash, b"same bytes"));
+        assert!(!held.is(held.hash, b"other bytes"));
     }
 
     #[test]
@@ -716,23 +900,17 @@ mod tests {
         // Each used to write its own report over the last one's, so a measured
         // 54 845 runs across 12 jobs left a report reading `1 runs`.
         let into = somewhere_to_write("two-processes");
-        let first = a_process_writing_into(&into, 4);
-        let second = a_process_writing_into(&into, 4);
+        let mut first = a_process_writing_into(&into, 4);
+        let mut second = a_process_writing_into(&into, 4);
 
         for run in 1..=3u64 {
-            first
-                .lock()
-                .unwrap()
-                .record(Duration::from_millis(run), &[run as u8]);
+            first.ran(Duration::from_millis(run), &[run as u8]);
         }
         for run in 4..=9u64 {
-            second
-                .lock()
-                .unwrap()
-                .record(Duration::from_millis(run), &[run as u8]);
+            second.ran(Duration::from_millis(run), &[run as u8]);
         }
-        merge_out(&first);
-        merge_out(&second);
+        first.merge_out();
+        second.merge_out();
 
         let report = std::fs::read_to_string(into.join("report")).expect("a report");
         assert!(
@@ -745,23 +923,17 @@ mod tests {
 
     #[test]
     fn a_process_that_merges_twice_does_not_count_its_runs_twice() {
-        // The merging thread ticks once a second for the whole life of a
-        // process, so all but the first tick of every process merges a delta on
-        // top of what that same process already put in.
+        // A merge is made once a second for the whole life of a process, so
+        // all but the first merge of every process adds a delta on top of what
+        // that same process already put in.
         let into = somewhere_to_write("merge-twice");
-        let watch = a_process_writing_into(&into, 4);
+        let mut watch = a_process_writing_into(&into, 4);
 
-        watch
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(5), b"once");
-        merge_out(&watch);
-        merge_out(&watch);
-        watch
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(5), b"twice");
-        merge_out(&watch);
+        watch.ran(Duration::from_millis(5), b"once");
+        watch.merge_out();
+        watch.merge_out();
+        watch.ran(Duration::from_millis(5), b"twice");
+        watch.merge_out();
 
         let report = std::fs::read_to_string(into.join("report")).expect("a report");
         assert!(
@@ -783,43 +955,33 @@ mod tests {
         let in_the_way = root.join("in-the-way");
         std::fs::write(&in_the_way, b"not a directory").expect("a blocking file");
         let into = in_the_way.join("timing");
-        let watch = a_process_writing_into(&into, 4);
+        let mut watch = a_process_writing_into(&into, 4);
 
-        watch
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(3), b"first");
-        merge_out(&watch);
+        watch.ran(Duration::from_millis(3), b"first");
+        watch.merge_out();
 
         assert!(
             !into.join("report").exists(),
             "a merge that could not even make its directory wrote a report anyway"
         );
-        {
-            let watch = watch.lock().unwrap();
-            assert_eq!(
-                watch.took.runs, 1,
-                "the run was dropped instead of handed back"
-            );
-            assert_eq!(
-                watch.took.lost, 1,
-                "a run just handed back was not counted as lost"
-            );
-        }
-
-        watch
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(4), b"second");
-        merge_out(&watch);
         assert_eq!(
-            watch.lock().unwrap().took.lost,
-            2,
+            watch.took.runs, 1,
+            "the run was dropped instead of kept for the next merge"
+        );
+        assert_eq!(
+            watch.took.lost, 1,
+            "a run a merge could not write was not counted as lost"
+        );
+
+        watch.ran(Duration::from_millis(4), b"second");
+        watch.merge_out();
+        assert_eq!(
+            watch.took.lost, 2,
             "a second failed merge should count both runs now stuck, not add to the first count"
         );
 
         std::fs::remove_file(&in_the_way).expect("clear the way for the directory");
-        merge_out(&watch);
+        watch.merge_out();
 
         let report = std::fs::read_to_string(into.join("report")).expect("a report");
         assert!(
@@ -847,14 +1009,11 @@ mod tests {
         let in_the_way = root.join("in-the-way");
         std::fs::write(&in_the_way, b"not a directory").expect("a blocking file");
         let into = in_the_way.join("timing");
-        let watch = a_process_writing_into(&into, 4);
+        let mut watch = a_process_writing_into(&into, 4);
 
         let bytes = b"a slow input";
-        watch
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(50), bytes);
-        merge_out(&watch);
+        watch.ran(Duration::from_millis(50), bytes);
+        watch.merge_out();
 
         assert!(
             !into.join("slowest").exists(),
@@ -862,7 +1021,7 @@ mod tests {
         );
 
         std::fs::remove_file(&in_the_way).expect("clear the way for the directory");
-        merge_out(&watch);
+        watch.merge_out();
 
         let name = named_for(Duration::from_millis(50), bytes);
         assert!(
@@ -889,12 +1048,9 @@ mod tests {
         std::fs::create_dir_all(into.join("slowest").join(&name))
             .expect("a directory where the slow input's file needs to go");
 
-        let watch = a_process_writing_into(&into, 4);
-        watch
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(40), bytes);
-        merge_out(&watch);
+        let mut watch = a_process_writing_into(&into, 4);
+        watch.ran(Duration::from_millis(40), bytes);
+        watch.merge_out();
 
         assert!(
             into.join("slowest").join(&name).is_dir(),
@@ -902,7 +1058,7 @@ mod tests {
         );
 
         std::fs::remove_dir_all(into.join("slowest").join(&name)).expect("clear the way");
-        merge_out(&watch);
+        watch.merge_out();
 
         assert!(
             into.join("slowest").join(&name).is_file(),
@@ -975,23 +1131,14 @@ mod tests {
         // and happens to hold both. That is how the old rewrite behaved, and a
         // first draft of this test passed against it.
         let into = somewhere_to_write("slowest-across");
-        let first = a_process_writing_into(&into, 2);
-        let second = a_process_writing_into(&into, 2);
+        let mut first = a_process_writing_into(&into, 2);
+        let mut second = a_process_writing_into(&into, 2);
 
-        first
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(85), b"second slowest of all");
-        second
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(90), b"slowest of all");
-        second
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(10), b"quick");
-        merge_out(&first);
-        merge_out(&second);
+        first.ran(Duration::from_millis(85), b"second slowest of all");
+        second.ran(Duration::from_millis(90), b"slowest of all");
+        second.ran(Duration::from_millis(10), b"quick");
+        first.merge_out();
+        second.merge_out();
 
         let kept: HashSet<String> = std::fs::read_dir(into.join("slowest"))
             .expect("a slowest directory")
@@ -1020,19 +1167,13 @@ mod tests {
         // rule `TheSlowestRuns::offer` applies inside a process, applied across
         // them.
         let into = somewhere_to_write("same-input");
-        let first = a_process_writing_into(&into, 8);
-        let second = a_process_writing_into(&into, 8);
+        let mut first = a_process_writing_into(&into, 8);
+        let mut second = a_process_writing_into(&into, 8);
 
-        first
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(30), b"same");
-        second
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(70), b"same");
-        merge_out(&first);
-        merge_out(&second);
+        first.ran(Duration::from_millis(30), b"same");
+        second.ran(Duration::from_millis(70), b"same");
+        first.merge_out();
+        second.merge_out();
 
         let kept: Vec<String> = std::fs::read_dir(into.join("slowest"))
             .expect("a slowest directory")
@@ -1248,14 +1389,11 @@ mod tests {
     #[test]
     fn a_report_names_every_slow_input_it_wrote() {
         let into = somewhere_to_write("names-what-it-wrote");
-        let watch = a_process_writing_into(&into, 2);
+        let mut watch = a_process_writing_into(&into, 2);
         for run in [1u64, 40, 90] {
-            watch
-                .lock()
-                .unwrap()
-                .record(Duration::from_millis(run), &[run as u8]);
+            watch.ran(Duration::from_millis(run), &[run as u8]);
         }
-        merge_out(&watch);
+        watch.merge_out();
 
         let report = std::fs::read_to_string(into.join("report")).expect("a report");
         assert!(report.contains("3 runs"), "{report}");
@@ -1279,12 +1417,9 @@ mod tests {
         std::fs::create_dir_all(&slowest).expect("somewhere to write");
         std::fs::write(slowest.join("something-else"), b"not ours").expect("a stranger");
 
-        let watch = a_process_writing_into(&into, 1);
-        watch
-            .lock()
-            .unwrap()
-            .record(Duration::from_millis(9), b"new");
-        merge_out(&watch);
+        let mut watch = a_process_writing_into(&into, 1);
+        watch.ran(Duration::from_millis(9), b"new");
+        watch.merge_out();
 
         assert!(
             slowest.join("something-else").exists(),
