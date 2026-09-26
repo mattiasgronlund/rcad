@@ -3,14 +3,17 @@
 *Row Q55 (`lane-q55-round-wire-two-disks`, off `f36e93bc`). §232.2 fixed
 `select.rs`'s `the_piece_holds` for a flat piece bounded by a torus's meridian
 circle and named `holds.rs`'s `what_a_round_wire_encloses` as having the same
-defect. §243.5 found that neither bend pin reaches it. It is reached anyway, by
-two public calls, and it answered wrongly there.*
+defect. §243.5 found that neither bend pin asks it about a point in the other
+disk. Two public calls do ask that, and it answered wrongly there. `Model::fuse`
+reaches the function too, but only at a cap's own centre, where the answer is
+unchanged (250.6).*
 
   250.1   The wrong answer, and where it is reached
   250.2   The rule now
   250.3   What each pinned answer rests on
-  250.4   No fuse reaches it today
+  250.4   No fuse asks it about the other disk today
   250.5   What this leaves
+  250.6   What the verifier found
 
 ### 250.1 The wrong answer, and where it is reached
 
@@ -106,10 +109,11 @@ classification test with `OnBoundary` at all four, and the lid test with
 `Exact([0.0, 0.0, 1.0]): Ok(NotHeld)`. The two integration tests failed the same
 way on unmodified `f36e93bc` source, before any edit to `holds.rs`.
 
-### 250.4 No fuse reaches it today
+### 250.4 No fuse asks it about the other disk today
 
-§243.5's two bend pins stop earlier. Three more fuses were tried, all six rule
-and order combinations each, and none reaches the cap's question:
+§243.5's two bend pins ask it only at a cap's own centre (250.6). Three more
+fuses were tried, all six rule and order combinations each, and none asks the
+cap about a point in the other disk:
 
 - The bend and a unit block round `(−4, 0, 0)`, one face on `y = 0` inside the
   other disk: every combination refuses `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`.
@@ -141,3 +145,52 @@ refusals is lifted, the classification in 250.1 is what a fuse would get.
   the region a circle round the axis bounds, which is not the tube's inside.
   That is a gap, and it has no consumer yet: nothing dispatched builds a puck
   (§243.4).
+
+### 250.6 What the verifier found
+
+The verifier checked out `holds.rs` at `f36e93bc`, kept the new tests, and
+saw all three fail with the wrong answers 250.1 quotes. Its hand arithmetic
+agreed with 250.3 at six points, on both disks. It committed nothing and said
+merge, with 250.4's wording corrected, which is done above.
+
+**Every route to `what_a_round_wire_encloses`** from the public API:
+`SolidView::face_holds_the_point`; `classify_point` and
+`classify_uncertain_point`, through `classify.rs`; `Model::fuse`, through
+`select.rs`'s `a_face_of_the_input_holds` and through the ray in
+`settle_against_each`; and `Model::check_no_two_solids_share_space`, through
+`overlap.rs`, where a refusal other than `Undecidable` becomes "found none" and
+so can only weaken the search. A probe that logged every call with a torus
+partner, over `just t --workspace --no-fail-fast` (2422 passed), found five
+tests reaching it:
+
+- The lane's puck test holds the only three calls whose plane does not hold the
+  axis, so the new refusal moves no other answer.
+- Its two bend-cap tests: every point the half-space put in the other disk was
+  wrong on the base.
+- `a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds`: five calls,
+  all outside the tube, where the half-space is not asked.
+- `a_bend_fused_with_a_copy_of_itself_is_nothing_less_it_and_refused_otherwise`:
+  25 calls, all at a cap's own centre, all `Pos`, answer unchanged. 24 of them
+  come from `Model::fuse`, which is why 250.4 no longer says no fuse reaches it.
+
+**The copied helper** differs from `select.rs`'s
+`the_pickers_of_the_meridian_circle_through` in four ways: its argument types,
+its return type, and that it accepts only one `InFrontOf` where `select.rs`
+accepts any list of them. None changes an answer, because
+`intersect(plane, torus)` is the only producer and it gives one `InFrontOf`
+per run through the axis.
+
+**What was not done.** The verifier stopped at its budget before running any
+mutation. From its probe counts: flipping the side would fail the bend-cap
+test, and dropping the refusal would fail the puck test. **No test reaches the
+half-space's `Undecidable` or `Zero` arm**, so a mutation there would pass.
+`Zero` counts as kept, which matches `Picker::InFrontOf`'s own "on or in
+front of". `select.rs`'s `every_picker_keeps` answers `None` on `Zero`
+instead, so the two files disagree about a point on the half-space's plane.
+The verifier argues that no point on the face's plane can land there, since
+`two_meridian_circles` proves a margin between the circles first. That is
+argued, not run.
+
+A half-ring's flat ring-shaped face through the ring's middle may have given
+the same wrong answer on the base: the outer wire counts +1 and the hole −1,
+so a point on the face comes out `NotHeld`. That is reasoned, not run.
