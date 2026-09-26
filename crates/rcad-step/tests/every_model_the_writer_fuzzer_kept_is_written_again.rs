@@ -162,6 +162,56 @@ fn every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model() {
     }
 }
 
+/// Mutator seeds checked, seed by seed against every corpus entry, that draw
+/// `Draw::below(8)` as 0, 1 or 2 on every entry — the byte-mutation branch
+/// [`MUTATOR_SEEDS`] is chosen to miss. Found by running the same check the
+/// other way: for each of these five, all 1190 corpus entries take that
+/// branch, decoded or not.
+const BYTE_MUTATION_SEEDS: [u32; 5] = [4, 6, 10, 33, 51];
+
+/// A deterministic stand-in for libFuzzer's own byte mutation: flip one fixed
+/// bit and touch nothing else, so a replayed seed reaches the same bytes every
+/// time.
+///
+/// `still_a_model` cannot be handed the real mutation here — it draws from
+/// libFuzzer's own generator, not from `seed` (`docs/decisions.md` §241.1) —
+/// so this is what the replay passes instead, on the seeds chosen to reach the
+/// branch that would call it.
+fn one_bit_flipped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
+    if size == 0 {
+        return size;
+    }
+    data[size / 2] ^= 0x01;
+    size
+}
+
+/// Every checked-in seed, mutated by each of [`BYTE_MUTATION_SEEDS`], still
+/// decodes into a `Model`.
+///
+/// [`every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model`] replays
+/// `still_a_model` on seeds chosen to skip its byte-mutation branch; this
+/// replays it on seeds chosen to take that branch every time, so
+/// `one_byte_changed_and_still_a_model`'s own decode check is what keeps this
+/// test passing.
+#[test]
+fn every_seed_mutated_by_a_seed_that_flips_a_byte_still_decodes_into_a_model() {
+    for (name, bytes) in every_seed() {
+        for &seed in &BYTE_MUTATION_SEEDS {
+            let mut buffer = [0u8; 4096];
+            let max_size = buffer.len();
+            buffer[..bytes.len()].copy_from_slice(&bytes);
+            let written =
+                still_a_model(&mut buffer, bytes.len(), max_size, seed, one_bit_flipped);
+            postcard::from_bytes::<Model>(&buffer[..written]).unwrap_or_else(|why| {
+                panic!(
+                    "mutating {name} with seed {seed} gave {written} byte(s) that do \
+                     not decode into a model: {why}"
+                )
+            });
+        }
+    }
+}
+
 /// Where the middle of a quarter of a torus of ring 6 and tube 2 lies, along
 /// each of the two axes it runs between: the whole torus's middle circle,
 /// `6 + 2² / (4 · 6)`, pulled in by a quarter arc's `sin(π/4) / (π/4)`, then
