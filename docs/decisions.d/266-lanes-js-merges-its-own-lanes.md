@@ -196,6 +196,18 @@ thrown stage on every row. That failure is loud, which is why this merged
 anyway. A fresh session's first `lanes` run is still the only test that a type
 resolves together with `isolation: 'worktree'` and a schema.
 
+Both halves of that were checked after the merge, on 2026-09-26. **`/clear`
+does not re-read the agent files.** rcad-18 was cleared in its tree at
+`e079e592`, which holds all three. The new `CLAUDE.md` came back after the
+clear, but its Agent tool still listed only `claude, claude-code-guide,
+Explore, general-purpose, lookup, Plan, statusline-setup`. **A new process
+does.** `claude -p` started in that same tree, then at `c1c57d98`, listed
+`claude, Explore, general-purpose, lane, lookup, merger, Plan,
+statusline-setup, verifier`. So the files load from the session's own
+worktree, not from the hub, whose `.claude/agents/` holds only `lookup.md`. A
+handoff that needs the three types needs a new `claude` process, started in a
+tree that holds them, and not a `/clear`.
+
 ### 266.7 The test
 
 `check-lanes-workflow` keeps its three arms for §237 and gains three:
