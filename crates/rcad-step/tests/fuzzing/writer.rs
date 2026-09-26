@@ -297,6 +297,23 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) {
 /// A move with no turn is still a placement here — §249.4 item 2 measured one
 /// ulp off a bar moved by `(0.1, 0.2, 0.3)` and no turn, so only the identity
 /// is exempt from the measurement check above.
+///
+/// # Why shells are enough, and a face's own location is not also checked
+///
+/// A face use carries a location of its own (`rcad_topo`'s `FaceUse::loc`),
+/// composed with its shell's on the way to a face view — so in the type this
+/// function does not look far enough. It does not have to: every solid this
+/// function ever sees came from `postcard::from_bytes::<Model>`
+/// (`one_model_decoded_and_written`, this file), and that is `Model`'s
+/// `Deserialize` impl (`crates/rcad-topo/src/serialize.rs:167`), which calls
+/// `check_shape_is_possible` before handing back a `Model`. That check refuses
+/// the bytes outright — `Invalid::AFaceUseCarriesAPlacement`
+/// (`crates/rcad-topo/src/validate.rs:1060-1074`) — if any face use's own
+/// location is not exactly the identity. `crates/rcad-topo/src/model.rs`'s
+/// `a_file_that_shifts_one_face_off_its_shell_never_becomes_a_model` pins that
+/// down through this same decode call. So a face use's own location is always
+/// the identity here, on every solid this function is asked about, and a
+/// shell's location is the only placement such a solid can carry.
 fn solid_has_no_placement(solid: SolidView) -> bool {
     solid
         .shells()
