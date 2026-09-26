@@ -199,9 +199,7 @@ pub struct GroupedVerdict {
 /// A `target` this binary does not recognise is skipped rather than guessed
 /// at, and counted in the returned total instead — the caller decides what
 /// "not a real target" means for the files it hands in.
-pub fn triage(
-    inputs: impl IntoIterator<Item = (String, PathBuf)>,
-) -> (Vec<GroupedVerdict>, usize) {
+pub fn triage(inputs: impl IntoIterator<Item = (String, PathBuf)>) -> (Vec<GroupedVerdict>, usize) {
     let mut buckets: HashMap<(String, String), GroupedVerdict> = HashMap::new();
     let mut skipped = 0;
     for (target, path) in inputs {
@@ -242,18 +240,22 @@ pub fn triage(
 fn bucket_for(target: &str, path: &Path) -> (String, bool) {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(why) => return (format!("{target}: could not read this artifact: {why}"), true),
+        Err(why) => {
+            return (
+                format!("{target}: could not read this artifact: {why}"),
+                true,
+            );
+        }
     };
     match explain(target, &bytes) {
         Err(_why) => (format!("{target}: bytes did not decode to a case"), true),
         Ok(explained) => match explained.outcome {
             Outcome::Panicked { message } => (message, true),
-            Outcome::Refused { named, .. } => {
-                (format!("{target}: no longer fails — refused {named}"), false)
-            }
-            Outcome::Succeeded { .. } => {
-                (format!("{target}: no longer fails — succeeded"), false)
-            }
+            Outcome::Refused { named, .. } => (
+                format!("{target}: no longer fails — refused {named}"),
+                false,
+            ),
+            Outcome::Succeeded { .. } => (format!("{target}: no longer fails — succeeded"), false),
         },
     }
 }
@@ -833,8 +835,10 @@ mod tests {
     impl TempFile {
         fn holding(contents: &[u8]) -> Self {
             let id = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
-            let dir = std::env::temp_dir()
-                .join(format!("rcad-fuzz-explain-test-{}-{id}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!(
+                "rcad-fuzz-explain-test-{}-{id}",
+                std::process::id()
+            ));
             std::fs::create_dir_all(&dir).expect("a scratch directory for one test file");
             let path = dir.join("artifact");
             std::fs::write(&path, contents).expect("one test artifact");
