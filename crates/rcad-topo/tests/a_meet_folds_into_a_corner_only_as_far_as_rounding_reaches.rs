@@ -46,14 +46,14 @@ const ALONG_A_CROSSING: &str = "order along a crossing";
 ///
 /// If `why` is not `Error::Undecidable`, or if its log is empty.
 fn which_predicate_the_refusal_names(why: &Error) -> &'static str {
-    match why {
-        Error::Undecidable { records } => records
-            .records()
-            .last()
-            .expect("a refusal names at least one decision")
-            .predicate(),
-        other => panic!("expected `Undecidable`, got {other:?}"),
-    }
+    let Error::Undecidable { records } = why else {
+        panic!("expected `Undecidable`, got {why:?}");
+    };
+    records
+        .records()
+        .last()
+        .expect("a refusal names at least one decision")
+        .predicate()
 }
 
 #[test]
