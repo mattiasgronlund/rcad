@@ -1535,7 +1535,7 @@ check-lanes-workflow:
             return 4
         fi
         for t in lane verifier merger; do
-            if ! printf '%s\n' "$types" | grep -qxF -- "$t"; then
+            if ! grep -qxF -- "$t" <<<"$types"; then
                 echo "$1 sends no agent of type $t"
                 return 4
             fi
