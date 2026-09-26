@@ -65,12 +65,29 @@ fn triage_from_stdin() -> ExitCode {
         eprintln!("--triage: could not read the manifest from stdin: {why}");
         return ExitCode::FAILURE;
     }
-    let inputs = manifest.lines().filter_map(|line| {
-        let (target, path) = line.split_once('\t')?;
-        Some((target.to_owned(), PathBuf::from(path)))
+    let mut inputs = Vec::new();
+    for line in manifest.lines() {
+        let Some((target, path)) = line.split_once('\t') else {
+            eprintln!("--triage: a manifest line is not <target>\\t<path>: {line}");
+            return ExitCode::FAILURE;
+        };
+        inputs.push((target.to_owned(), PathBuf::from(path)));
+    }
+    let total = inputs.len();
+    let inputs = inputs.into_iter().enumerate().map(|(started, input)| {
+        // A hang shows up as the last of these lines with nothing after it,
+        // which is the only sign of one that a single process can give.
+        if started > 0 && started % PROGRESS_EVERY == 0 {
+            eprintln!("--triage: {started} of {total} replayed");
+        }
+        input
     });
     let (groups, skipped) = triage(inputs);
     print!("{}", as_tsv(&groups));
-    eprintln!("skipped: {skipped}");
+    eprintln!("--triage: {total} of {total} replayed, {skipped} skipped as no target");
     ExitCode::SUCCESS
 }
+
+/// How many inputs go by between two progress lines: often enough that a stall
+/// shows over a night of tens of thousands, and never for a selftest's three.
+const PROGRESS_EVERY: usize = 2000;

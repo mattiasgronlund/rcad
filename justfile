@@ -5139,12 +5139,13 @@ check-gate-fresh-cleanup-selftest:
 # the triage ran, because a morning that stops on the first undecodable input
 # tells you nothing about the other five.
 #
-# **Every file is replayed once, but in one process rather than one `cargo run`
-# each.** `no_model_makes_the_writer_panic` wrote 22 528 crash files on
-# 2026-09-26 alone, and a `cargo run` per file is what made those uncountable
+# **Every crash file is replayed once, but in one process rather than one
+# `cargo run` each.** `no_model_makes_the_writer_panic` wrote 22 528 crash files
+# on 2026-09-26 alone, and a `cargo run` per file is what made those uncountable
 # (§265.2). `rcad-fuzz-explain --triage` reads `<target>\t<path>` lines off
 # stdin and replays every one of them inside itself, so the whole night costs
-# one build and one process. What it hands back is already grouped: one bucket
+# one build and one process, and it says on stderr every 2000 inputs how far it
+# has got. What it hands back is already grouped: one bucket
 # per panic's own message and place — which already names both, see
 # `Outcome::Panicked` in `crates/rcad-fuzz-explain/src/lib.rs` — and one bucket
 # per target for everything that no longer fails. **The night's verdicts land
@@ -5153,6 +5154,13 @@ check-gate-fresh-cleanup-selftest:
 # `target`, `files`, `still_fails` (`yes`/`no`), `sample` (one input from the
 # bucket), `group` (the panic's message and place, or a fixed name for a
 # bucket that no longer fails). A fault is a row with `still_fails` = `yes`.
+#
+# **Only `crash-*` files are replayed; every other kind is counted by kind and
+# named, not decoded.** The per-file recipe before this one took every file
+# under the night. A `timeout-` or `slow-unit-` input has no panic to
+# group by, and in one process one that hangs stalls every file after it: the
+# first real run over 2026-09-26, with its 3 072 timeouts and 1 365 slow-units
+# in the manifest, sat for 21 CPU-minutes and was killed.
 #
 # **The target comes from the artifact's own parent directory, and that name is
 # checked against `fuzz/fuzz_targets/*.rs` before anything is decoded.** A flat
@@ -5224,9 +5232,8 @@ fuzz-triage night="" against="main":
     borrowed=""
     manifest=$(mktemp)
     report=$(mktemp)
-    triage_err=$(mktemp)
     cleanup() {
-        rm -f "$manifest" "$report" "$triage_err"
+        rm -f "$manifest" "$report"
         if [ -n "$borrowed" ]; then
             git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true
             rm -rf "$borrowed"
@@ -5253,7 +5260,20 @@ fuzz-triage night="" against="main":
     done
 
     untellable=0
+    crash_files=0
+    not_crash=0
+    declare -A not_crash_kinds=()
     while IFS= read -r file; do
+        name="${file##*/}"
+        case "$name" in
+            crash-*) crash_files=$((crash_files + 1)) ;;
+            *)
+                kind="${name%-*}"
+                not_crash=$((not_crash + 1))
+                not_crash_kinds[$kind]=$(( ${not_crash_kinds[$kind]:-0} + 1 ))
+                continue
+                ;;
+        esac
         target="${file%/*}"
         target="${target##*/}"
         case " $valid_targets " in
@@ -5268,9 +5288,8 @@ fuzz-triage night="" against="main":
     tellable=$(grep -c . <"$manifest" || true)
     echo
     echo "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- --triage   (replaying $tellable input(s) in one process)"
-    (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- --triage) <"$manifest" >"$report" 2>"$triage_err"
+    (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- --triage) <"$manifest" >"$report"
     triage_status=$?
-    cat "$triage_err" >&2
     if [ "$triage_status" -ne 0 ]; then
         echo "fuzz-triage: the decoder itself failed (exit $triage_status), so nothing was replayed"
         exit 1
@@ -5284,7 +5303,14 @@ fuzz-triage night="" against="main":
     decoded=$(awk -F'\t' 'NR>1{n+=$2} END{print n+0}' "$report")
     total=$(grep -c . <<<"$files")
     echo "groups:   $groups, $faults of them still failing on {{ against }}"
-    echo "files:    $decoded decoded across $total total"
+    echo "files:    $decoded decoded of $crash_files crash file(s), out of $total in all"
+    if [ "$not_crash" -gt 0 ]; then
+        kinds=""
+        for kind in $(printf '%s\n' "${!not_crash_kinds[@]}" | LC_ALL=C sort); do
+            kinds="${kinds:+$kinds, }$kind: ${not_crash_kinds[$kind]}"
+        done
+        echo "not replayed: $not_crash that are not crash files ($kinds) — none has a panic to group by, and one that hangs would stall every file after it"
+    fi
     if [ "$untellable" -gt 0 ]; then
         echo "$untellable of $total input(s) could not be told which target they came from, and are not in the groups above"
     fi
@@ -5453,13 +5479,17 @@ check-fuzz-triage-selftest:
     # same undecodable bytes as the first, under the same target, and a third
     # under a different target, prove the batch call replays every input but
     # groups them — two into one bucket, one into a bucket of its own — rather
-    # than costing one `cargo run` each.
+    # than costing one `cargo run` each. A fourth, a timeout, is counted and
+    # named but never replayed: the first real night's 3 072 timeouts, replayed
+    # back to back in one process, stalled it for 21 CPU-minutes.
     crash2="$night/artifacts/where_two_surfaces_cross/crash-beadfeed"
     printf 'not a real crash input' >"$crash2"
     third="$night/artifacts/two_solids_fused_by_a_stranger/crash-c0ffee"
     mkdir -p "$(dirname "$third")"
     printf 'nor is this one' >"$third"
-    got=$(triage "") || fail "a night with three artifacts made the triage itself fail"
+    hang="$night/artifacts/where_two_surfaces_cross/timeout-feedface"
+    printf 'a hang is not a panic' >"$hang"
+    got=$(triage "") || fail "a night with four artifacts made the triage itself fail"
     grep -qF "night:    $night" <<<"$got" || fail "it did not say which night it read"
     grep -q '^commit:   9b82e9e$' <<<"$got" \
         || fail "it did not name the commit that was fuzzed, which is the whole of §90"
@@ -5481,8 +5511,12 @@ check-fuzz-triage-selftest:
         || fail "the verdict file should hold a header and two group rows, not $(grep -c . "$verdicts")"
     grep -q '^groups:   2, 2 of them still failing on HEAD$' <<<"$got" \
         || fail "the tally did not say two groups, both still failing"
-    grep -q '^files:    3 decoded across 3 total$' <<<"$got" \
-        || fail "the tally did not say all three files were decoded"
+    grep -q '^files:    3 decoded of 3 crash file(s), out of 4 in all$' <<<"$got" \
+        || fail "the tally did not say all three crash files were decoded, out of four"
+    grep -q '^not replayed: 1 that are not crash files (timeout: 1)' <<<"$got" \
+        || fail "the timeout was not counted by its kind"
+    ! grep -qF "$hang" "$verdicts" \
+        || fail "a timeout was replayed and grouped, and one that hangs stalls every file after it"
 
     # Two: the nights before §91's copy-out landed keep their inputs in a
     # rescued directory beside the night, and 2026-09-14 is one of them.
@@ -5533,7 +5567,7 @@ check-fuzz-triage-selftest:
         || fail "the untellable count did not reach the tail line"
     grep -q '^groups:   0, 0 of them still failing on HEAD$' <<<"$got" \
         || fail "an untellable input was folded into a group instead of being left out of every one"
-    grep -q '^files:    0 decoded across 1 total$' <<<"$got" \
+    grep -q '^files:    0 decoded of 1 crash file(s), out of 1 in all$' <<<"$got" \
         || fail "an untellable input was counted as decoded"
     [ "$(head -1 "$flat_night/fuzz-triage-verdicts.tsv")" = "$header" ] \
         || fail "a night with only untellable input still needs a header-only verdict file, for Q146 to read without special-casing it"
