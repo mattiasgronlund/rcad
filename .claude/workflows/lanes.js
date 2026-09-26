@@ -285,14 +285,20 @@ function reportSchema(lane) {
   }
 }
 
+// The lane's tree and the verifier's own tree are two different worktrees the
+// harness made. Naming only the lane's path here, with the schema saying
+// "your own worktree", is what made a verifier echo the lane's path back
+// (§263.4): it was never told its own tree has a path at all, let alone how
+// to find it.
 function VERIFY(lane, r, kind) {
   const revert = sourcePathsOf(lane).join(', ') || '(none declared; say so and skip the revert)'
   return `Check lane ${lane.label}, queue row ${lane.queueId}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
 Base: ${BASE}
 Branch: ${branchOf(lane)}
 Write set: ${lane.writeSet.join(', ')}
-The lane's worktree: ${r.worktree_path}
+The lane's worktree, to unlock once you are done with it -- this is not your own tree, and not what you report as worktree_path: ${r.worktree_path}
 Source paths to revert: ${revert}
+Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
 
 The lane claims (JSON): ${JSON.stringify(r)}`
 }
@@ -320,7 +326,7 @@ The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
 
 function verdictSchema(kind) {
   const properties = {
-    worktree_path: { type: 'string', description: 'your own worktree' },
+    worktree_path: { type: 'string', description: 'the output of git rev-parse --show-toplevel run in your OWN tree, not the lane\'s worktree path given in the prompt' },
     branch_ok: { type: 'boolean', description: 'exists, sits on the pinned base' },
     files_outside_write_set: { type: 'array', items: { type: 'string' } },
     gate_summary: { type: 'string', description: 'the summary block, verbatim, or why you could not run it' },
