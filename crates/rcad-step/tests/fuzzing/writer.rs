@@ -40,19 +40,20 @@
 //!
 //! **What is compared, and why it stops short of the measurement for some
 //! solids** (`docs/decisions.md` §249.6, amending §129.5 item 3). Every
-//! solid's located numbers are checked bit for bit for every solid: each
-//! face's surface, and for every coedge its two corners and its edge's run, in
-//! walk order. That is the comparison a turned round bar cannot fail — the
-//! writer and the reader never move a bit of it (§249.2). Volume, surface area
-//! and centroid are then also checked bit for bit, but only for a solid that
-//! sits wholly on planes or that carries no placement at all. A curved solid
-//! placed with a turn is meshed in the frame it is stored in on the way out and
-//! in the frame the reader baked it into on the way back — two different
-//! roundings of the same true surface — so its measurement can come back a few
-//! ulps off with nothing wrong in either the writer or the reader (§249.5, a
-//! limit, not a defect). `two_turns_that_write_the_same_placement.rs` pins that
-//! limit down: two placements that write the very same file still measure
-//! differently.
+//! solid's located numbers are checked bit for bit: each face's surface, and
+//! for every coedge its two corners and its edge's run, in walk order. These
+//! are the numbers the writer writes and the reader reads, and §249.2 found
+//! every one of them come back the same bits for a turned round bar. Volume,
+//! surface area and centroid are then also checked bit for bit, but only for a
+//! solid that sits wholly on planes or that carries no placement at all. A
+//! curved solid placed with a turn is meshed in the frame it is stored in on
+//! the way out and in the frame the reader baked it into on the way back — two
+//! different roundings of the same true surface — so its measurement can come
+//! back a few ulps off with nothing wrong in either the writer or the reader
+//! (§249.5, a limit, not a defect). `two_turns_that_write_the_same_placement.rs`
+//! pins that limit down: two turns that turn the three axes to the same nine
+//! numbers, so that STEP would write them as one placement, still leave a bar
+//! measuring differently.
 //!
 //! What the source explains is counted and not failed. A model that does not
 //! pass `Model::validate` was never a solid, so a file of it owes nothing on
@@ -300,6 +301,87 @@ fn solid_has_no_placement(solid: SolidView) -> bool {
     solid
         .shells()
         .all(|shell| shell.location() == Isometry::identity())
+}
+
+/// The bar whose measurement §249.1 saw come back a few ulps off: a curved
+/// solid turned, so its measurement is left out, and nothing else is.
+///
+/// Built without new `use` lines: this file is also compiled into the fuzz
+/// target, where `#[test]` functions are dropped and an import only they used
+/// would be unused.
+#[test]
+fn a_round_bar_turned_an_eighth_about_z_comes_back_from_its_own_file() {
+    let eighth_turn = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_4)
+        .expect("a finite angle about a unit axis");
+    let bytes = postcard::to_allocvec(&one_solid_placed_by(a_round_bar, &eighth_turn))
+        .expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
+/// Moved along its own axis, so that the first face compared, the bottom cap,
+/// is on another plane.
+#[test]
+#[should_panic(expected = "with a different surface")]
+fn a_round_bar_moved_one_unit_up_its_axis_is_told_apart_by_its_surfaces() {
+    let moved = Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite offset");
+    let here = one_solid_placed_by(a_round_bar, &Isometry::identity());
+    let back = one_solid_placed_by(a_round_bar, &moved);
+    assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
+}
+
+/// A quarter turn about the bar's own axis leaves its three surfaces the same
+/// bits and moves the corner on its seam.
+#[test]
+#[should_panic(expected = "at a different corner")]
+fn a_round_bar_turned_a_quarter_about_its_axis_is_told_apart_by_its_corners() {
+    let quarter_turn = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_2)
+        .expect("a finite angle about a unit axis");
+    let here = one_solid_placed_by(a_round_bar, &Isometry::identity());
+    let back = one_solid_placed_by(a_round_bar, &quarter_turn);
+    assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
+}
+
+/// A quarter turn about the line through a ball's poles leaves its sphere and
+/// its two poles the same bits and turns the half-plane its seam is cut from.
+#[test]
+#[should_panic(expected = "with a different edge run")]
+fn a_ball_turned_a_quarter_about_its_poles_is_told_apart_by_its_seam() {
+    let quarter_turn = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_2)
+        .expect("a finite angle about a unit axis");
+    let here = one_solid_placed_by(a_ball, &Isometry::identity());
+    let back = one_solid_placed_by(a_ball, &quarter_turn);
+    assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
+}
+
+fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    model.add_round_bar(3.0, 5.0, &Isometry::identity())
+}
+
+fn a_ball(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    model.add_ball(2.0, &Isometry::identity())
+}
+
+/// A model holding one shape, built at the origin and then placed by
+/// `placement`, the order the mutator builds one in.
+fn one_solid_placed_by(
+    shape: fn(&mut Model) -> rcad_topo::Result<SolidKey>,
+    placement: &Isometry,
+) -> Model {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = shape(&mut model).expect("each shape fits in a model this size");
+    model
+        .place_solid(solid, placement)
+        .expect("the key came from this model");
+    model
+}
+
+fn the_one_solid(model: &Model) -> SolidView<'_> {
+    model.solids().next().expect("the model holds one solid")
 }
 
 /// Change `data[..size]` into the `postcard` bytes of a model, and return how
