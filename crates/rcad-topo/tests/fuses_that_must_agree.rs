@@ -297,23 +297,33 @@ const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 /// of them green while comparing nothing at all. A pass is only worth what was
 /// compared.
 ///
-/// Three tenths, from measurement over this tree, and the number that matters is
-/// the *worst* property rather than the average. These properties run from a
-/// fresh seed every time, so this floor is the one thing in the file that could
-/// go flaky, and it is sized against eight fresh-seed runs of each:
+/// Three tenths, from measurement over this tree, and the number that matters
+/// is the *worst* property rather than the average. These properties run from
+/// a fresh seed every time, so this floor is the one thing in the file that
+/// could go flaky. It was sized against eight fresh-seed runs of each; Q98
+/// re-measured three of the four below, over twenty fresh-seed runs of the
+/// whole file plus twenty of its own fresh-seed runs of each law:
 ///
 /// - the properties over the exactly representable pairs reach 90% to 100%,
-/// - the trio properties, which need three fuses to line up, reach 71% to 79%,
-/// - commutativity over turned pairs reaches 58% to 78%, because a quarter of
-///   turned fuses refuse and a comparison needs both sides,
-/// - the depth-four chain is the floor-setter at 50% to 69%: four solids united
-///   in a row give an edge with four faces along it often enough that a sixth of
-///   its fuses have no answer to give.
+///   unmoved since the original eight-run measurement,
+/// - the trio properties, which need three fuses to line up, reach 74% to 95%,
+/// - commutativity over turned pairs is the floor-setter, at 65% to 83%,
+///   because a quarter of turned fuses refuse and a comparison needs both sides,
+/// - the depth-four chain reaches 65% to 84%: four solids united in a row give
+///   an edge with four faces along it often enough that a sixth of its fuses
+///   have no answer to give.
 ///
-/// Three tenths is about five standard deviations under the worst of those. It
-/// is far enough not to fire on a hard corpus, and nowhere near far enough to
-/// let a property that has stopped comparing anything through: halving the rate
-/// of any of them trips it.
+/// Turned pairs and the chain both bottom out around 65%, and against the
+/// twenty whole-file runs' own spread that is (65.12 − 30) / 4.919 ≈ 7.1
+/// standard deviations above three tenths for the chain and (64.93 − 30) /
+/// 4.246 ≈ 8.2 for turned pairs. Three tenths still catches a law that has
+/// stopped comparing anything at all. What it no longer catches, at this
+/// margin, is half of what these two laws do today: halving 65% to about 32%
+/// now passes quietly. Q98 raised this to four tenths, to keep catching that
+/// halving. The rule set before the twenty whole-file runs were made was to
+/// keep three tenths if the worst run came within about five standard
+/// deviations of four tenths, and the chain's came within 5.1, so three
+/// tenths stays. Whether the two worst laws want a floor of their own is Q160.
 const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 
 /// The same for the one family that sits under [`SOME_COMPARISONS_MUST_HAPPEN`].
@@ -325,11 +335,13 @@ const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 /// three-valued number rather than with 126 comparisons, and it swung widely.
 ///
 /// **Eighteen fresh-seed runs came out between 30% and 46%**, and 30% turned up
-/// twice. That clears [`SOME_COMPARISONS_MUST_HAPPEN`] by four hundredths of one
-/// comparison — a floor a property brushes rather than a guard, and shipping it
-/// would have been a flake. A fifth is a **margin of ten points under the worst
-/// of the eighteen**, about two of that spread's own standard deviations, and it
-/// still fires on anything that halves the rate, which is what a floor is for.
+/// twice — the same three tenths as [`SOME_COMPARISONS_MUST_HAPPEN`], not clear
+/// of it. A floor a property only ties, rather than clears, is a flake waiting
+/// to happen and not a guard: shipping this family under the shared number
+/// would have been exactly that. A fifth is a **margin of ten points under the
+/// worst of the eighteen**, about two of that spread's own standard deviations,
+/// and it still fires on anything that halves the rate, which is what a floor
+/// is for.
 ///
 /// **The boundary that sized it is gone and the eighteen runs were not redone.**
 /// `arrange`'s third `HowItRuns` variant answers the configurations that
@@ -4386,8 +4398,10 @@ impl Tally {
     ///
     /// One family needs it, and needs it because
     /// [`SOME_COMPARISONS_MUST_HAPPEN`] was sized against the properties that
-    /// existed when it was written — the worst of which reached 50% to 69% —
-    /// and the frustum family sits below all of them. A floor a property brushes
+    /// existed when it was written — the worst of which reached 50% to 69% then —
+    /// and the frustum family sat below all of them. It no longer does: twenty
+    /// fresh-seed runs put it at 78% and up, and whether it still needs a floor
+    /// of its own is Q160. A floor a property brushes
     /// is a flake and not a guard, and moving the shared number to suit one
     /// family would blunt it for the other fourteen.
     fn report_what_it_compared_at_least(&self, what: &str, floor: f64) {
