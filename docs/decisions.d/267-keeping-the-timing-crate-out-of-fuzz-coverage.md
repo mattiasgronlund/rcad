@@ -269,8 +269,8 @@ made there ("we increment one of the seeds on every RandomState creation",
 `std/src/hash/random.rs`). So the clock picked when the target's own hash maps
 changed the order they iterate in. `where_two_surfaces_cross` cannot show
 this, because its oracle has no hash map (§259.6). The reader, writer and fuse
-targets do use them (§259.3). The set is a `BTreeSet` now, and nothing else in
-the crate names `HashMap`, `HashSet` or `RandomState` outside its tests.
+targets do use them (§259.3). The set is a `BTreeSet` now, and no other code in
+the crate, outside its tests, makes a `HashMap`, `HashSet` or `RandomState`.
 
 The test, `a_draw_that_merges_leaves_the_hash_keys_of_its_thread_where_it_found_them`,
 reads the thread's next key before and after a draw that merges and prunes a
