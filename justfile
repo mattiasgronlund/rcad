@@ -1486,6 +1486,15 @@ check-skills-selftest:
 # slot, until a merger found it by hand (§263.4). The arm checks that both the
 # prompt and the schema tell the verifier to find its own tree with
 # `git rev-parse --show-toplevel`, and that `verifier.md` says so too.
+#
+# **A ninth arm holds the mutation that can stand in for a revert.** A revert
+# can't fail for a fix that only moves a floor or a bound -- Q160's verifier
+# reproduced a halving mutation the new 0.3 floor caught and the old 0.5 one
+# didn't, and `lanes.js` still refused the merge because `tests_fail_without_fix`
+# was false (§266). The arm counts `reproduced_mutation` across the file --
+# `grep -c 'reproduced_mutation' .claude/workflows/lanes.js` shows 0 on main and
+# 4 here -- and fails under 3, which is what naming it in the readiness check,
+# `VERIFY`'s prompt and `verdictSchema` alone adds up to.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -1501,6 +1510,7 @@ check-lanes-workflow:
     shared_prefix='call needs a `mise exec --` prefix, whichever role'
     shared_guard='no loop over a runtime value, and no `mise exec` inside a loop or compound.'
     rev_parse='git rev-parse --show-toplevel'
+    mutation='reproduced_mutation'
     scan() {
         local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -1578,6 +1588,11 @@ check-lanes-workflow:
             echo "$2/verifier.md does not tell the verifier to find its own tree with '$rev_parse'"
             return 8
         fi
+        n=$(grep -cF -- "$mutation" "$1" || true)
+        if [ "$n" -lt 3 ]; then
+            echo "$1 does not give the verdict a way to report a '$mutation' that stands in for the revert, named in the readiness check, VERIFY's prompt and verdictSchema alike ('grep -c $mutation $1' shows $n, want at least 3; §266)"
+            return 9
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -1615,7 +1630,9 @@ check-lanes-workflow:
     grep -vF -- "$rev_parse" "$file" > "$dir/no-own-tree-script/lanes.js"
     fresh no-own-tree-doc
     grep -vF -- "$rev_parse" "$agents/verifier.md" > "$dir/no-own-tree-doc/agents/verifier.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8)
+    fresh no-mutation-verdict
+    grep -vF -- "$mutation" "$file" > "$dir/no-mutation-verdict/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
