@@ -5139,18 +5139,28 @@ check-gate-fresh-cleanup-selftest:
 # the triage ran, because a morning that stops on the first undecodable input
 # tells you nothing about the other five.
 #
-# **What each input then did is `fuzz-triage-verdict` below, off the decoder's
-# `outcome:` line.** It is a separate recipe because the gate can hand that one
-# canned text and this one it cannot; §91.5 has the morning that bought the
-# split.
+# **Every file is replayed once, but in one process rather than one `cargo run`
+# each.** `no_model_makes_the_writer_panic` wrote 22 528 crash files on
+# 2026-09-26 alone, and a `cargo run` per file is what made those uncountable
+# (§265.2). `rcad-fuzz-explain --triage` reads `<target>\t<path>` lines off
+# stdin and replays every one of them inside itself, so the whole night costs
+# one build and one process. What it hands back is already grouped: one bucket
+# per panic's own message and place — which already names both, see
+# `Outcome::Panicked` in `crates/rcad-fuzz-explain/src/lib.rs` — and one bucket
+# per target for everything that no longer fails. **The night's verdicts land
+# in the night's own directory**, at `$night/fuzz-triage-verdicts.tsv`, for
+# `just fuzz-yield` (Q146) to read: five tab-separated columns, header first —
+# `target`, `files`, `still_fails` (`yes`/`no`), `sample` (one input from the
+# bucket), `group` (the panic's message and place, or a fixed name for a
+# bucket that no longer fails). A fault is a row with `still_fails` = `yes`.
 #
 # **The target comes from the artifact's own parent directory, and that name is
 # checked against `fuzz/fuzz_targets/*.rs` before anything is decoded.** A flat
 # directory of rescued artifacts — no target subdirectory at all — hands the
 # decoder a name that is not a target, and every one of those used to come back
 # as "did not come back clean", which reads exactly like a live crash and is
-# none. That input gets a third outcome instead, counted apart from the ones
-# that were actually decoded and actually failed.
+# none. That input is counted as untellable instead, apart from every bucket
+# that was actually decoded.
 [doc("The morning after: what the night found, decoded, and whether main still fails.")]
 fuzz-triage night="" against="main":
     #!/usr/bin/env bash
@@ -5211,12 +5221,23 @@ fuzz-triage night="" against="main":
         exit 1
     fi
     work="."
+    borrowed=""
+    manifest=$(mktemp)
+    report=$(mktemp)
+    triage_err=$(mktemp)
+    cleanup() {
+        rm -f "$manifest" "$report" "$triage_err"
+        if [ -n "$borrowed" ]; then
+            git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true
+            rm -rf "$borrowed"
+        fi
+    }
+    # Detached, so it never asks for a branch that is checked out elsewhere,
+    # and taken away on the way out however this ends — a worktree left behind
+    # would show up in `just lanes` as a lane nobody dispatched.
+    trap cleanup EXIT
     if [ "$at" != "$(git rev-parse HEAD)" ]; then
         borrowed=$(mktemp -d)
-        # Detached, so it never asks for a branch that is checked out elsewhere,
-        # and taken away on the way out however this ends — a worktree left
-        # behind would show up in `just lanes` as a lane nobody dispatched.
-        trap 'git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true; rm -rf "$borrowed"' EXIT
         if ! git worktree add --quiet --detach "$borrowed/tree" "$at"; then
             echo "could not borrow a worktree at {{ against }}, so nothing was replayed against it"
             exit 1
@@ -5231,38 +5252,38 @@ fuzz-triage night="" against="main":
         valid_targets="$valid_targets $(basename "$target_rs" .rs)"
     done
 
-    still=0
     untellable=0
     while IFS= read -r file; do
-        target=$(basename "$(dirname "$file")")
-        echo
-        echo "--- $target / $(basename "$file") ---"
+        target="${file%/*}"
+        target="${target##*/}"
         case " $valid_targets " in
-            *" $target "*) ;;
-            *)
-                untellable=$((untellable + 1))
-                echo "target:   unknown — $target names no fuzz_targets/*.rs on {{ against }}, so this could not be placed and was not decoded"
-                continue
-                ;;
+            *" $target "*) printf '%s\t%s\n' "$target" "$file" ;;
+            *) untellable=$((untellable + 1)) ;;
         esac
-        echo "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- $target $file"
-        said=$(mktemp)
-        reason=$(mktemp)
-        (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- "$target" "$file") >"$said" 2>"$reason"
-        decoded=$?
-        cat "$said"
-        if ! {{just_executable()}} fuzz-triage-verdict '{{ against }}' "$decoded" "$said"; then
-            still=$((still + 1))
-            [ "$decoded" -eq 0 ] || sed 's/^/    /' "$reason"
-        fi
-        rm -f "$said" "$reason"
-    done <<<"$files"
+    done <<<"$files" >"$manifest"
 
+    tellable=$(grep -c . <"$manifest" || true)
     echo
+    echo "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- --triage   (replaying $tellable input(s) in one process)"
+    (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- --triage) <"$manifest" >"$report" 2>"$triage_err"
+    triage_status=$?
+    cat "$triage_err" >&2
+    if [ "$triage_status" -ne 0 ]; then
+        echo "fuzz-triage: the decoder itself failed (exit $triage_status), so nothing was replayed"
+        exit 1
+    fi
+
+    cp "$report" "$night/fuzz-triage-verdicts.tsv"
+    echo
+    echo "verdicts: $night/fuzz-triage-verdicts.tsv"
+    groups=$(($(wc -l <"$report") - 1))
+    faults=$(awk -F'\t' 'NR>1 && $3=="yes"' "$report" | grep -c . || true)
+    decoded=$(awk -F'\t' 'NR>1{n+=$2} END{print n+0}' "$report")
     total=$(grep -c . <<<"$files")
-    echo "$still of $total input(s) did not come back clean on {{ against }}"
+    echo "groups:   $groups, $faults of them still failing on {{ against }}"
+    echo "files:    $decoded decoded across $total total"
     if [ "$untellable" -gt 0 ]; then
-        echo "$untellable of $total input(s) could not be told which target they came from, and are not counted as failures above"
+        echo "$untellable of $total input(s) could not be told which target they came from, and are not in the groups above"
     fi
 
 # Turns one artifact `fuzz-triage` found into a seed, which today is a `cp`
