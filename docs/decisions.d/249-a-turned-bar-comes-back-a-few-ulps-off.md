@@ -9,7 +9,7 @@ number in the file comes back exact. The bits move in `measure`, because the
 bar going in is stored unturned with a turn on it, and the bar coming back is
 stored turned with no turn on it, and a curved face is cut into triangles in
 the frame it is stored in. It is a limit: two different turns write the same
-file and measure differently.*
+placement and measure differently.*
 
   249.1   What was compared
   249.2   Every number in the file comes back bit for bit
@@ -205,8 +205,11 @@ Both went through `Isometry::try_from`, which scales them to length one, so
 both are placements a model can hold. "The same three columns" means that
 `apply_to_vector` turns the three unit axes to the same nine numbers, bit for
 bit. That is how the kernel turns a vector, and how every other located number
-in the file is made. Written that way, both turns give the same file, so a
-reader handed it cannot tell which of the two it came from. The two bars
+in the file is made. Written that way — the bar in the frame it is stored in,
+which the two share, and the placement as those nine numbers — both turns give
+the same file, so a reader handed it cannot tell which of the two it came from.
+(Today's writer is not written that way: it turns every corner into the file,
+and writes the corner `(3, 0, 0)` one ulp apart for the two turns.) The two bars
 measure differently, so whichever turn the reader rebuilds, one of the two
 models comes back with different bits. The search only nudged one of the four
 numbers, by at most two ulps, so 870 of 4000 is a lower bound.

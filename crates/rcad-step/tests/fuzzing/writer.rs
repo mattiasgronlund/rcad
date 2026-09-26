@@ -30,14 +30,30 @@
 //! **A file that was written is read back and compared with the model that went
 //! in** (`docs/decisions.md` §129.5 item 3). Not panicking was all this target
 //! asked before, and the writer is the highest-throughput target there is. The
-//! comparison is `round_trip_one`'s in
-//! `a_real_file_written_out_and_read_back_is_the_same_solid.rs`, at the level
-//! that test compares: the written text parses, every reference in it points
-//! somewhere, `Import::read` turns it back into a model that validates, the
-//! same number of solids comes back, and each solid's volume, surface area and
-//! centroid are the same bit for bit. That test's last leg, a `Rule::Difference`
-//! against a third solid, is left out: it is a fuse, and a fuse that panics on
-//! a sound model here would be a fuse defect reported by the writer's target.
+//! written text parses, every reference in it points somewhere, `Import::read`
+//! turns it back into a model that validates, and the same number of solids
+//! comes back — the same door `round_trip_one` in
+//! `a_real_file_written_out_and_read_back_is_the_same_solid.rs` checks. That
+//! test's last leg, a `Rule::Difference` against a third solid, is left out: it
+//! is a fuse, and a fuse that panics on a sound model here would be a fuse
+//! defect reported by the writer's target.
+//!
+//! **What is compared, and why it stops short of the measurement for some
+//! solids** (`docs/decisions.md` §249.6, amending §129.5 item 3). Every
+//! solid's located numbers are checked bit for bit: each face's surface, and
+//! for every coedge its two corners and its edge's run, in walk order. These
+//! are the numbers the writer writes and the reader reads, and §249.2 found
+//! every one of them come back the same bits for a turned round bar. Volume,
+//! surface area and centroid are then also checked bit for bit, but only for a
+//! solid that sits wholly on planes or that carries no placement at all. A
+//! curved solid placed with a turn is meshed in the frame it is stored in on
+//! the way out and in the frame the reader baked it into on the way back — two
+//! different roundings of the same true surface — so its measurement can come
+//! back a few ulps off with nothing wrong in either the writer or the reader
+//! (§249.5, a limit, not a defect). `two_turns_that_write_the_same_placement.rs`
+//! pins that limit down: two turns that turn the three axes to the same nine
+//! numbers, so that STEP would write them as one placement, still leave a bar
+//! measuring differently.
 //!
 //! What the source explains is counted and not failed. A model that does not
 //! pass `Model::validate` was never a solid, so a file of it owes nothing on
@@ -60,7 +76,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
 
 use the_door::every_number_the_door_promised_is_real;
 
@@ -85,8 +101,10 @@ pub struct Reached {
     /// Read-back models not compared because a solid of the model that went in
     /// does not measure.
     pub did_not_measure: usize,
-    /// Solids whose volume, surface area and centroid were compared bit for bit
-    /// with the solid that went in, and matched.
+    /// Solids whose located numbers were compared bit for bit with the solid
+    /// that went in, and matched — plus, for a solid wholly flat or at no
+    /// placement, whose volume, surface area and centroid also matched bit
+    /// for bit (§249.6).
     pub solids_the_same: usize,
     /// Models written, read back, and the same in every solid.
     pub came_back_the_same: usize,
@@ -187,35 +205,183 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
     // mesh finer than the solid, and it is the same mesh on both sides.
     let deflection = Deflection::for_scale(there.scale());
     for (&here_key, &back_key) in source_solids.iter().zip(&there_solids) {
-        let Ok(here) = source
-            .solid(here_key)
-            .expect("this model made the key")
-            .measure(deflection, &policy, &mut log)
-        else {
+        let here_solid = source.solid(here_key).expect("this model made the key");
+        let back_solid = there.solid(back_key).expect("this model made the key");
+        assert_located_numbers_the_same(here_solid, back_solid);
+
+        let Ok(here) = here_solid.measure(deflection, &policy, &mut log) else {
             reached.did_not_measure = 1;
             return reached;
         };
-        let back = there
-            .solid(back_key)
-            .expect("this model made the key")
+        let back = back_solid
             .measure(deflection, &policy, &mut log)
             .unwrap_or_else(|why| {
                 panic!("a solid that measured does not measure after its own file: {why}")
             });
-        assert!(
-            here.volume() == back.volume() && here.surface_area() == back.surface_area(),
-            "a sound solid came back from its own file with a different volume or area: \
-             {here:?} went in, {back:?} came back"
-        );
-        assert!(
-            here.centroid() == back.centroid(),
-            "a sound solid came back from its own file with a different centroid: \
-             {here:?} went in, {back:?} came back"
-        );
+        if here_solid.is_wholly_flat() || solid_has_no_placement(here_solid) {
+            assert!(
+                here.volume() == back.volume() && here.surface_area() == back.surface_area(),
+                "a sound solid came back from its own file with a different volume or area: \
+                 {here:?} went in, {back:?} came back"
+            );
+            assert!(
+                here.centroid() == back.centroid(),
+                "a sound solid came back from its own file with a different centroid: \
+                 {here:?} went in, {back:?} came back"
+            );
+        }
         reached.solids_the_same += 1;
     }
     reached.came_back_the_same = 1;
     reached
+}
+
+/// Every located number of `here` and `back`, walked the way §249.1 walked it
+/// by hand: each face's surface, and for every coedge its two corners and its
+/// edge's run, in walk order.
+///
+/// Compared as `{:?}` text rather than with `==`, because derived float
+/// equality treats `0.0` and `-0.0` as one number and this has to mean the
+/// same bits (§249.1). A mismatch here is never a limit: the writer writes
+/// every one of these numbers unchanged and the reader parses them back
+/// exactly (§249.2), so a difference is a defect in one of the two, not a
+/// frame the file cannot name.
+///
+/// # Panics
+///
+/// If a face, a coedge, a corner or a run differs between `here` and `back`.
+fn assert_located_numbers_the_same(here: SolidView, back: SolidView) {
+    let here_faces: Vec<_> = here.faces().collect();
+    let back_faces: Vec<_> = back.faces().collect();
+    assert_eq!(
+        here_faces.len(),
+        back_faces.len(),
+        "a sound solid came back from its own file with a different number of faces"
+    );
+    for (here_face, back_face) in here_faces.iter().zip(&back_faces) {
+        assert_eq!(
+            format!("{:?}", here_face.surface()),
+            format!("{:?}", back_face.surface()),
+            "a sound solid's face came back from its own file with a different surface"
+        );
+        let here_coedges: Vec<_> = here_face.wires().flat_map(WireView::coedges).collect();
+        let back_coedges: Vec<_> = back_face.wires().flat_map(WireView::coedges).collect();
+        assert_eq!(
+            here_coedges.len(),
+            back_coedges.len(),
+            "a sound solid's face came back from its own file with a different number of coedges"
+        );
+        for (here_coedge, back_coedge) in here_coedges.iter().zip(&back_coedges) {
+            assert_eq!(
+                format!("{:?}", here_coedge.start().point()),
+                format!("{:?}", back_coedge.start().point()),
+                "a sound solid's coedge came back from its own file starting at a different corner"
+            );
+            assert_eq!(
+                format!("{:?}", here_coedge.end().point()),
+                format!("{:?}", back_coedge.end().point()),
+                "a sound solid's coedge came back from its own file ending at a different corner"
+            );
+            assert_eq!(
+                format!("{:?}", here_coedge.edge().run()),
+                format!("{:?}", back_coedge.edge().run()),
+                "a sound solid's coedge came back from its own file with a different edge run"
+            );
+        }
+    }
+}
+
+/// Whether `solid` carries no placement at all: every shell it uses sits at
+/// exactly [`Isometry::identity`].
+///
+/// A move with no turn is still a placement here — §249.4 item 2 measured one
+/// ulp off a bar moved by `(0.1, 0.2, 0.3)` and no turn, so only the identity
+/// is exempt from the measurement check above.
+fn solid_has_no_placement(solid: SolidView) -> bool {
+    solid
+        .shells()
+        .all(|shell| shell.location() == Isometry::identity())
+}
+
+/// The bar whose measurement §249.1 saw come back a few ulps off: a curved
+/// solid turned, so its measurement is left out, and nothing else is.
+///
+/// Built without new `use` lines: this file is also compiled into the fuzz
+/// target, where `#[test]` functions are dropped and an import only they used
+/// would be unused.
+#[test]
+fn a_round_bar_turned_an_eighth_about_z_comes_back_from_its_own_file() {
+    let eighth_turn = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_4)
+        .expect("a finite angle about a unit axis");
+    let bytes = postcard::to_allocvec(&one_solid_placed_by(a_round_bar, &eighth_turn))
+        .expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
+/// Moved along its own axis, so that the first face compared, the bottom cap,
+/// is on another plane.
+#[test]
+#[should_panic(expected = "with a different surface")]
+fn a_round_bar_moved_one_unit_up_its_axis_is_told_apart_by_its_surfaces() {
+    let moved = Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite offset");
+    let here = one_solid_placed_by(a_round_bar, &Isometry::identity());
+    let back = one_solid_placed_by(a_round_bar, &moved);
+    assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
+}
+
+/// A quarter turn about the bar's own axis leaves its three surfaces the same
+/// bits and moves the corner on its seam.
+#[test]
+#[should_panic(expected = "at a different corner")]
+fn a_round_bar_turned_a_quarter_about_its_axis_is_told_apart_by_its_corners() {
+    let quarter_turn = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_2)
+        .expect("a finite angle about a unit axis");
+    let here = one_solid_placed_by(a_round_bar, &Isometry::identity());
+    let back = one_solid_placed_by(a_round_bar, &quarter_turn);
+    assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
+}
+
+/// A quarter turn about the line through a ball's poles leaves its sphere and
+/// its two poles the same bits and turns the half-plane its seam is cut from.
+#[test]
+#[should_panic(expected = "with a different edge run")]
+fn a_ball_turned_a_quarter_about_its_poles_is_told_apart_by_its_seam() {
+    let quarter_turn = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_2)
+        .expect("a finite angle about a unit axis");
+    let here = one_solid_placed_by(a_ball, &Isometry::identity());
+    let back = one_solid_placed_by(a_ball, &quarter_turn);
+    assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
+}
+
+fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    model.add_round_bar(3.0, 5.0, &Isometry::identity())
+}
+
+fn a_ball(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    model.add_ball(2.0, &Isometry::identity())
+}
+
+/// A model holding one shape, built at the origin and then placed by
+/// `placement`, the order the mutator builds one in.
+fn one_solid_placed_by(
+    shape: fn(&mut Model) -> rcad_topo::Result<SolidKey>,
+    placement: &Isometry,
+) -> Model {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = shape(&mut model).expect("each shape fits in a model this size");
+    model
+        .place_solid(solid, placement)
+        .expect("the key came from this model");
+    model
+}
+
+fn the_one_solid(model: &Model) -> SolidView<'_> {
+    model.solids().next().expect("the model holds one solid")
 }
 
 /// Change `data[..size]` into the `postcard` bytes of a model, and return how

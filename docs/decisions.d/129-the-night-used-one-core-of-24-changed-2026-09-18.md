@@ -124,6 +124,27 @@ the order they can land in.
    and both halves are already in the tree. The fuse asks three questions (§95.6)
    and none of `fuses_that_must_agree.rs`'s algebraic laws.
 
+   **Amended by §249.6 and §249.7.** "Compared against the model that went in"
+   first meant volume, surface area and centroid, bit for bit, and that is not
+   an answer every sound model can give: a curved solid placed with a turn is
+   meshed in the frame it is stored in on the way out and in the frame the
+   reader bakes it into on the way back, two different roundings of the same
+   true surface, so the measurement can differ by a few ulps with neither side
+   at fault (§249.5, a limit). `read_back_and_compared`
+   (`crates/rcad-step/tests/fuzzing/writer.rs`) now checks every located
+   number bit for bit for every solid — each face's surface, and for every
+   coedge its two corners and its edge's run, in walk order (§249.1's own
+   comparison, which a turned bar passed in every number: §249.2) — and
+   keeps the bit-for-bit measurement only for a solid that sits wholly on
+   planes or carries no placement at all. A move with no turn is still a
+   placement (§249.4 item 2), so only a curved solid at the identity keeps
+   the measurement check. `two_turns_that_write_the_same_placement.rs` pins
+   the limit down: two turns that take the three axes to the same nine
+   numbers, and so would be written as one STEP placement, still leave a bar
+   measuring differently. Today's writer does not write that placement; it
+   turns every corner into the file, and writes the two bars' corner one ulp
+   apart.
+
 ### 129.6 Corrections to §81
 
 - §81's opening says the night "fuzzes all four targets in turn inside a fixed
