@@ -319,37 +319,57 @@ const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 /// 4.246 ≈ 8.2 for turned pairs. Three tenths still catches a law that has
 /// stopped comparing anything at all. What it no longer catches, at this
 /// margin, is half of what these two laws do today: halving 65% to about 32%
-/// now passes quietly. Q98 raised this to four tenths, to keep catching that
-/// halving. The rule set before the twenty whole-file runs were made was to
-/// keep three tenths if the worst run came within about five standard
-/// deviations of four tenths, and the chain's came within 5.1, so three
-/// tenths stays. Whether the two worst laws want a floor of their own is Q160.
+/// now passes quietly.
+///
+/// **Q160 pulled the two worst laws out to
+/// [`A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`]** rather than raising this one:
+/// the other dozen-odd properties under this floor reach 74% to 100%, and
+/// moving three tenths up to clear a 65% law would still leave it able to tie
+/// nothing over most of them. Three tenths stays here for exactly the reason
+/// [`Tally::report_what_it_compared`] gives it: it catches a law that has
+/// stopped comparing anything at all, which is the one thing every property
+/// under it, thin or not, must never do.
 const SOME_COMPARISONS_MUST_HAPPEN: f64 = 0.3;
 
-/// The same for the one family that sits under [`SOME_COMPARISONS_MUST_HAPPEN`].
+/// The floor for every law measured thinner than [`SOME_COMPARISONS_MUST_HAPPEN`]
+/// can safely clear: turned-pair commutativity, the depth-four chain, and all
+/// three properties over a frustum standing through a block (§276).
 ///
-/// A frustum standing up through a block used to answer exactly when the cone
-/// above its own top cap stayed clear of the block's side walls. Which side of
-/// that boundary a drawn case landed on was decided almost entirely by the one
-/// slope the case drew, so the share that answers swung with 48 draws of a
-/// three-valued number rather than with 126 comparisons, and it swung widely.
+/// **One floor serves all five**, because their measured ranges overlap by a
+/// wide margin. Twenty fresh seeds (`PROPTEST_RNG_SEED` 1 to 20) of the shipped
+/// corpus, run at `just t`'s own case counts:
 ///
-/// **Eighteen fresh-seed runs came out between 30% and 46%**, and 30% turned up
-/// twice — the same three tenths as [`SOME_COMPARISONS_MUST_HAPPEN`], not clear
-/// of it. A floor a property only ties, rather than clears, is a flake waiting
-/// to happen and not a guard: shipping this family under the shared number
-/// would have been exactly that. A fifth is a **margin of ten points under the
-/// worst of the eighteen**, about two of that spread's own standard deviations,
-/// and it still fires on anything that halves the rate, which is what a floor
-/// is for.
+/// | law | worst | best | half the worst |
+/// |---|---|---|---|
+/// | turned-pair commutativity | 64.93% | 82.09% | 32.46% |
+/// | the depth-four chain | 65.12% | 81.40% | 32.56% |
+/// | a turned frustum and block, commutativity | 76.12% | 93.28% | 38.06% |
+/// | a turned frustum and block, volume under a turn | 76.12% | 93.03% | 38.06% |
+/// | a frustum and block, commutativity (not turned) | 95.52% | 100% | 47.76% |
 ///
-/// **The boundary that sized it is gone and the eighteen runs were not redone.**
-/// `arrange`'s third `HowItRuns` variant answers the configurations that
-/// boundary turned down, so this family compares more than it did and a fifth is
-/// slacker than it was. It is left where it was measured rather than moved on a
-/// guess: raising it needs the eighteen fresh-seed runs done again, and a floor
-/// nobody re-measured is worth less than one that is merely generous.
-const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
+/// A half is **13.8 to 61.9 points** below every one of the five laws' own
+/// worst run — 2.9 standard deviations and up, using each law's own population
+/// standard deviation over its twenty runs (5.08, 4.28, 3.48, 3.45 for the
+/// first four; the fifth answers or refuses so consistently that a standard
+/// deviation on it is not the right question, see below) — and **2.2 to 17.5
+/// points above** every one of the five laws' own halved worst. It sits inside
+/// all five windows at once, so it catches a halving of any one of them
+/// without brushing what any of them actually does. The fifth's own margin is
+/// the thinnest, 2.24 points above its halved worst, because nothing has ever
+/// measured that property below 95.5% — the margin is thin only in the sense
+/// that a law running this well leaves little air between "half of what it
+/// does" and "all of what it does."
+///
+/// This retires the frustum family's own floor. A frustum standing up through a
+/// block used to answer exactly when the cone above its own top cap stayed
+/// clear of the block's side walls, which made the share that answers swing
+/// widely; eighteen fresh-seed runs before that boundary was removed came out
+/// between 30% and 46%. **The boundary is gone** — `arrange`'s third
+/// `HowItRuns` variant now answers the configurations it used to turn down —
+/// and the twenty runs above measure what replaced it: 76% to 100% across all
+/// three frustum properties, comfortably inside this shared floor's own
+/// margin.
+const A_THINNER_LAW_STILL_COMPARES_THIS_MUCH: f64 = 0.5;
 
 /// How many of the eighty-four-configuration grid's comparisons have both sides.
 ///
@@ -392,18 +412,30 @@ const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 168;
 
 /// How many of the comparisons a law over a bar leaning through a block has to
-/// have made (§191).
+/// have made (§191, §276).
 ///
 /// **This family refuses most of what it draws, and says so here rather than
-/// shipping as coverage** (§14.7). Its rate row refuses 298 of 429 fuses,
-/// 69.5%, against its upright control's none. Both laws over it run from the
-/// fixed seed ([`over_a_fixed_corpus`]), so the share compared is one number:
-/// commutativity reaches **28 of 126**, 22%, and inclusion and exclusion
-/// **11 of 63**, 17%, because it needs two fuses to answer and not one. A tenth
-/// is a little over half the smaller: it fires if either law loses half of what
-/// it compares, and a law that compares eleven cases is thin, which is what
-/// this paragraph is for.
-const A_LEANING_BAR_STILL_COMPARES_THIS_MUCH: f64 = 0.1;
+/// shipping as coverage** (§14.7). Both laws over it run from the fixed seed
+/// ([`over_a_fixed_corpus`]), so unlike every other floor in this file the
+/// share compared here is not a range — the seed passed to the RNG makes no
+/// difference to it, checked directly by running both properties under
+/// `PROPTEST_RNG_SEED` 1 and 2 and getting bit-identical reports either way —
+/// so **one run measures it for good.** Commutativity reaches **60 of 134**,
+/// 44.78%, and inclusion and exclusion **18 of 67**, 26.87%, both risen since
+/// the tenth this floor started at was sized against 22% and 17% — the
+/// generator has moved and the two are not the pair they were.
+///
+/// **A tenth no longer catches a halving of either law.** Half of 44.78% is
+/// 22.39% and half of 26.87% is 13.43%, both well clear of the old floor. What
+/// serves both at once is anywhere in **22.39% to 26.87%** — above each law's
+/// own halved worst, below each law's own measured worst — a window of 4.5
+/// points, which is safe to sit inside precisely because there is no run to
+/// run noise for the shipped seed to add to it. A quarter is 1.87 points under
+/// the tighter measurement (inclusion and exclusion's 26.87%) and 2.61 points
+/// over the tighter half (commutativity's 22.39%), and it moves only when the
+/// corpus does, which is a regression or a deliberate change and not a flake
+/// either way.
+const A_LEANING_BAR_STILL_COMPARES_THIS_MUCH: f64 = 0.25;
 
 /// How much of a curved fixture turned together a certified fuse may refuse
 /// (§191).
@@ -835,7 +867,10 @@ fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
     let tally = over(CASES, a_turned_pair(), |configuration, tally| {
         both_ways_round(tally, Coordinates::AreUnderAGeneralRotation, configuration)
     });
-    tally.report_what_it_compared("commutativity, turned pairs");
+    tally.report_what_it_compared_at_least(
+        "commutativity, turned pairs",
+        A_THINNER_LAW_STILL_COMPARES_THIS_MUCH,
+    );
 }
 
 /// §48.2 item 5's defect, at the first configuration that found it, **and it is
@@ -1303,7 +1338,10 @@ fn uniting_four_at_once_is_uniting_them_one_at_a_time() {
         );
         Ok(())
     });
-    tally.report_what_it_compared("fuse([A,B,C,D]) = uniting them one at a time, lattice chains");
+    tally.report_what_it_compared_at_least(
+        "fuse([A,B,C,D]) = uniting them one at a time, lattice chains",
+        A_THINNER_LAW_STILL_COMPARES_THIS_MUCH,
+    );
 }
 
 /// Uniting a turned solid with bit-identical copies of itself moves nothing
@@ -2587,7 +2625,7 @@ fn swapping_the_two_sides_of_a_block_and_a_frustum_changes_not_one_bit() {
     });
     tally.report_what_it_compared_at_least(
         "commutativity, a frustum up through a block",
-        A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH,
+        A_THINNER_LAW_STILL_COMPARES_THIS_MUCH,
     );
 }
 
@@ -3022,7 +3060,7 @@ fn swapping_the_two_sides_of_a_turned_frustum_and_block_changes_not_one_bit() {
     });
     tally.report_what_it_compared_at_least(
         "commutativity, a frustum up through a block, turned together",
-        A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH,
+        A_THINNER_LAW_STILL_COMPARES_THIS_MUCH,
     );
 }
 
@@ -3073,7 +3111,7 @@ fn turning_a_frustum_and_block_together_changes_no_answer_s_volume() {
     });
     tally.report_what_it_compared_at_least(
         "volume under a turn, a frustum up through a block",
-        A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH,
+        A_THINNER_LAW_STILL_COMPARES_THIS_MUCH,
     );
 }
 
