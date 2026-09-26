@@ -203,3 +203,47 @@ test and the temporary `eprintln!`s in `cut_up` and `finish` described in
 280.1 and 280.2. Both were removed before this commit. The line numbers are
 from `git show HEAD:crates/rcad-topo/src/mesh.rs | grep -n` and `git show
 HEAD:crates/rcad-geom/src/torus.rs | grep -n`, at `b0744a1e`.
+
+### 280.8 What Q190 made of 280.6
+
+Q190 (`lane-q190-ring-angle-unwrapped`, 87c3ed43) made the fix 280.6 names.
+`how_far_the_second_coordinate_wraps` gives `Some(TAU)` for a torus. The walk
+unwraps the ring angle as it does the tube angle, and a wire that never
+crosses `π` keeps its numbers bit for bit. A loop that climbs a whole turn
+round the ring is refused as `AWireWillNotLieFlatOnItsFace`, and
+`with_its_second_coordinate_in_the_turn_of` moves a face's later loops into
+the first loop's turn. The quarter bend turned half a turn and the half bend
+across `π` build and validate. Each matches the unturned bend's volume within
+both measurements' errors.
+
+**One refusal goes past 280.6.** A torus face whose one wire has a seam across
+the tube, so that one point is two corners a whole turn apart round the ring,
+is refused by the same name. The lane turned that refusal off and back on.
+With it off, the crown of a ring folded (`TwoPatchesOfTheMeshDrewTheSameSide
+{ drawn: 4, used: 4 }`), and a seamed half ring measured right. One fold
+against one right answer, on a path where nothing cuts a patch round the ring,
+so the refusal stays. The crown's pin in
+`a_mesh_that_folds_at_one_deflection_and_not_the_next.rs` moves from
+`CornersCoincide` to `AWireWillNotLieFlatOnItsFace`. It is still a gap: the
+crown is an ordinary solid, and a mesher that cut round the ring as well as
+round the tube would reach it. That cut is also what a fillet ring written
+with a seam needs, which real files have. It is Q37's gap, now refused under
+this name.
+
+**Not settled.** Two loops side by side on a torus, each going round the tube
+and neither inside the other, bound two bands. The move puts the later loop
+the nearer way round, which is the wrong band when the face is the wider one.
+Only the loops' directions can tell the two apart. The base chose by position
+too, so this is not new. It is reasoned, not run, and is Q196.
+
+**How it was checked.** The run's verifier read the diff and found the pin
+above, but it ran out of room before its gate finished, and said fix first.
+The dispatcher merged the branch, moved the pin, and ran the three new tests
+in `building_a_solid_out_of_faces.rs` with `mesh.rs` checked out at the base
+`b0623d41`. All three failed, and the turned bend was refused. With the fix
+restored, all three passed (`./target/q190-revert.sh`, which runs `just t -p
+rcad-topo --test building_a_solid_out_of_faces` on the three names). Then
+`just gate quiet` ran on the merged tree.
+
+Q40's relay file still does not import: `assert_pinned_kicad_imports` passes
+unchanged. Whether its refusal moved was not checked; that is Q40's.

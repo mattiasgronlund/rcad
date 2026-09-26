@@ -289,15 +289,18 @@ fn chopped_sliver(
 /// So the shape is forced, and this is it: everything of a torus above a plane
 /// square to its axis, cut high enough up the tube that the patch spans under a
 /// quarter turn. It describes as a solid — the shell closes, both corners are
-/// exact on the quartic — and then the mesher refuses its curved face by name,
-/// because that face goes right round the **ring** and a walked loop carries one
-/// wrapping coordinate, which `Torus::point_at` spends on the tube. The walk
-/// comes back to where it started after four quarter steps and says so.
+/// exact on the quartic — and then the mesher refuses its curved face by name.
+/// The face is one wire: the outer circle, a seam across the tube, the inner
+/// circle, and the seam back. Since Q190 the walk unwraps the ring angle as it
+/// does the tube angle, so it sees the seam's two ends a whole turn apart round
+/// the **ring**, and refuses the wire as `AWireWillNotLieFlatOnItsFace`. Without
+/// that refusal the crown folds, `TwoPatchesOfTheMeshDrewTheSameSide`, because
+/// nothing yet cuts a patch round the ring as well as round the tube (§280.7).
 ///
 /// **§16.10's line is whether the answer exists, and here it does.** The crown
 /// of a ring is an ordinary solid with an ordinary volume; what stops it is a
-/// walk that can only wrap one way round, which is arithmetic that could be
-/// reached and has not been. §208.4 is the warning read the other way: a ring of
+/// mesher that can only cut a patch round one way, which is arithmetic that
+/// could be reached and has not been. §208.4 is the warning read the other way: a ring of
 /// arcs with no seam was unwalkable until it was walked, and nothing in the
 /// argument for refusing it had been about cones. So this pins the refusal the
 /// mesher gives today, with the mesher's own reason, and it is a *gap* — a
@@ -306,10 +309,10 @@ fn chopped_sliver(
 #[test]
 fn the_crown_of_a_ring_is_a_gap_in_the_mesher_and_not_a_limit_of_the_shape() {
     let mut model = Model::new(Scale::millimetres(500.0).expect("a positive size"));
-    assert_eq!(
-        format!("{:?}", a_crown_of_a_ring(&mut model)),
-        "Err(ADraftFaceCouldNotBeMeshed { face: 0, why: CornersCoincide { position: 4 } })",
-        "the crown's curved face goes right round the ring"
+    let refusal = a_crown_of_a_ring(&mut model);
+    assert!(
+        matches!(refusal, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
+        "the crown's curved face goes right round the ring, and was {refusal:?}"
     );
 }
 
