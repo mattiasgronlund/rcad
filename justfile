@@ -5152,8 +5152,19 @@ check-gate-fresh-cleanup-selftest:
 # in the night's own directory**, at `$night/fuzz-triage-verdicts.tsv`, for
 # `just fuzz-yield` (Q146) to read: five tab-separated columns, header first —
 # `target`, `files`, `still_fails` (`yes`/`no`), `sample` (one input from the
-# bucket), `group` (the panic's message and place, or a fixed name for a
-# bucket that no longer fails). A fault is a row with `still_fails` = `yes`.
+# bucket), `group` (the panic's place and words with every number in the words
+# written `N`, or a fixed name for a bucket that no longer fails). A fault is a
+# row with `still_fails` = `yes`. Keyed on the whole message instead, the one
+# writer assertion that prints two planes made 1 676 rows out of one fault.
+#
+# **The decoder is built in the `test` profile, not `dev` and not `release`.**
+# `cargo fuzz` builds its targets optimised with `debug_assertions` on, and
+# `[profile.test]` is the one profile here that is both. `dev` gives the same
+# verdicts and is slow: 2026-09-26's 22 633 crash files took 28 minutes in it,
+# and a sample of 1 232 of them took 276 s against 16.5 s, identical verdicts
+# byte for byte. `release` turns the assertions off, and that changes what the
+# kernel answers rather than how fast (`check-release-build` says how), so a
+# replay in it is not a replay of what the fuzzer ran.
 #
 # **Only `crash-*` files are replayed; every other kind is counted by kind and
 # named, not decoded.** The per-file recipe before this one took every file
