@@ -1,0 +1,206 @@
+[
+  {
+    "expect": "deny",
+    "why": "Edit on the queue, by its path in the tree",
+    "tool": "Edit",
+    "file_path": "docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "Write on the queue, by an absolute path into another worktree",
+    "tool": "Write",
+    "file_path": "/home/mattias/git/mattiasgronlund/rcad-worktrees/main/docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "Edit on a selftest's scratch copy under target/",
+    "tool": "Edit",
+    "file_path": "/home/mattias/git/mattiasgronlund/rcad-worktrees/main/target/queue-selftest.abc/one/docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "Edit on a decisions section, which merely sits beside the queue",
+    "tool": "Edit",
+    "file_path": "docs/decisions.d/230-one-queue-in-five-tiers.md"
+  },
+  {
+    "expect": "deny",
+    "why": "sed -i on the queue",
+    "command": "sed -i 's/^Q5  2  todo/Q5  2  lane:lane-q5/' docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "sed -i with a backup suffix, on an absolute path",
+    "command": "sed -i.bak -e 's/x/y/' /home/mattias/git/mattiasgronlund/rcad-worktrees/main/docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "perl -pi on the queue",
+    "command": "perl -pi -e 's/todo/lane:x/' docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "an append redirect into the queue",
+    "command": "printf 'Q9  2  todo  opus  -  a row by hand §230\\n' >> docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "a redirect with no space before the path",
+    "command": "echo x >docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "git show redirected over the queue is a write, whatever produced the text",
+    "command": "git show main:docs/queue.md > docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "the second command of a chain writes it",
+    "command": "awk '{print}' docs/queue.md > /tmp/q.md && cat /tmp/q.md > docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "tee -a into the queue",
+    "command": "echo 'Q9  2  todo  opus  -  x §230' | tee -a docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "a Python heredoc that reads the queue and writes it back through pathlib",
+    "command": "python3 - <<'PY'\nfrom pathlib import Path\np = Path('docs/queue.md')\ns = p.read_text()\np.write_text(s.replace('todo', 'lane:x', 1))\nPY"
+  },
+  {
+    "expect": "deny",
+    "why": "python -c opening the queue to append",
+    "command": "python3 -c \"open('docs/queue.md', 'a').write('x')\""
+  },
+  {
+    "expect": "deny",
+    "why": "a Python heredoc handed the path as an argument, opening sys.argv[1] for writing",
+    "command": "python3 - docs/queue.md <<'PY'\nimport sys\nwith open(sys.argv[1], 'w') as f:\n    f.write('x')\nPY"
+  },
+  {
+    "expect": "deny",
+    "why": "a Python heredoc holding the path in a variable and opening it with 'w'",
+    "command": "python3 - <<'PY'\nq = 'docs/queue.md'\ntext = open(q).read()\nwith open(q, 'w') as f:\n    f.write(text)\nPY"
+  },
+  {
+    "expect": "deny",
+    "why": "a shell variable holding the path",
+    "command": "Q=docs/queue.md; sed -i 's/a/b/' \"$Q\""
+  },
+  {
+    "expect": "deny",
+    "why": "cd into docs and edit the bare name",
+    "command": "cd docs && sed -i 's/a/b/' queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "bash -c around a sed -i",
+    "command": "bash -c \"sed -i 's/a/b/' docs/queue.md\""
+  },
+  {
+    "expect": "deny",
+    "why": "cp onto the queue",
+    "command": "cp /tmp/q.md docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "gawk -i inplace on the queue",
+    "command": "awk -i inplace '{print}' docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "a perl script opening the queue to append",
+    "command": "perl -e 'open(my $f, \">>\", \"docs/queue.md\"); print $f \"x\"'"
+  },
+  {
+    "expect": "deny",
+    "why": "sed -i reached through mise exec",
+    "command": "mise exec -- sed -i 's/a/b/' docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "grep reads it",
+    "command": "grep -n Q80 docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "git show of another ref's copy",
+    "command": "git show main:docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "git show redirected into the scratchpad",
+    "command": "git show main:docs/queue.md > /tmp/claude-1000/x/scratchpad/q.md"
+  },
+  {
+    "expect": "allow",
+    "why": "git diff of it",
+    "command": "git diff main -- docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "git log of it through a pipe",
+    "command": "git log -p --follow -- docs/queue.md | head -50"
+  },
+  {
+    "expect": "allow",
+    "why": "2026-09-26's false positive: a read-only Python analysis that writes its own report elsewhere",
+    "command": "python3 - <<'PY'\nimport re, collections\nrows = [l for l in open('docs/queue.md') if re.match(r'^[TDQ][0-9]+ ', l)]\ncounts = collections.Counter(l.split()[2].split(':')[0] for l in rows)\nwith open('/tmp/claude-1000/scratchpad/counts.txt', 'w') as out:\n    out.write(str(counts))\nprint(counts)\nPY"
+  },
+  {
+    "expect": "allow",
+    "why": "python -c reading it",
+    "command": "python3 -c \"print(open('docs/queue.md').read().count('todo'))\""
+  },
+  {
+    "expect": "allow",
+    "why": "a Python heredoc reading it through pathlib",
+    "command": "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('docs/queue.md').read_text().splitlines()[0])\nPY"
+  },
+  {
+    "expect": "allow",
+    "why": "a Python heredoc opening it with an explicit read mode",
+    "command": "python3 - <<'PY'\nwith open('docs/queue.md', 'r', encoding='utf-8') as f:\n    print(len(f.readlines()))\nPY"
+  },
+  {
+    "expect": "allow",
+    "why": "sed -n prints lines",
+    "command": "sed -n '27,41p' docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "the verb that replaces the hand edit",
+    "command": "mise exec -- just queue take Q5 lane-q5-x"
+  },
+  {
+    "expect": "allow",
+    "why": "a commit message holding a > inside quotes",
+    "command": "git add docs/queue.md && git commit -m \"docs: queue — Q5 > lane\""
+  },
+  {
+    "expect": "allow",
+    "why": "a commit message heredoc that describes a write",
+    "command": "git commit -F - <<'MSG'\nqueue: sed -i docs/queue.md > nothing\nMSG"
+  },
+  {
+    "expect": "allow",
+    "why": "cp from the queue to the scratchpad",
+    "command": "cp docs/queue.md /tmp/q.md"
+  },
+  {
+    "expect": "allow",
+    "why": "git settles a conflict, and git is left alone",
+    "command": "git checkout --theirs docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "diff against another ref through process substitution",
+    "command": "diff <(git show main:docs/queue.md) docs/queue.md"
+  },
+  {
+    "expect": "allow",
+    "why": "a stderr redirect beside a read",
+    "command": "wc -l docs/queue.md 2>&1"
+  }
+]
