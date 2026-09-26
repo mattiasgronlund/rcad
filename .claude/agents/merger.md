@@ -61,8 +61,12 @@ in `needs_judgement`.
 5. If §0 names what this merge closes (`mise exec -- just decision 0`), edit
    §0 in this same commit (§172.5).
 6. `mise exec -- just check-queue`.
-7. `git commit`: "Merge <lane branch>: <what, in plain words>; <row> done",
-   with the attribution line your session gives.
+7. `git add docs/queue.md`, and the §0 file if you edited it: `just queue`
+   writes the file and stages nothing, and a `--no-commit` merge commits only
+   what is staged, so without this the merge lands with its row still open.
+   Then `git commit`: "Merge <lane branch>: <what, in plain words>; <row>
+   done", with the attribution line your session gives, and `git status
+   --short` must print nothing after it.
 
 Never edit `docs/queue.md` by hand; every change to it goes through `just
 queue` (§263).
