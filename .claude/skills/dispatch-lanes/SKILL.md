@@ -117,9 +117,13 @@ For each row the fill took:
    from `origin/main`, so a `lane:` it finds there flips to `done:` on one side
    only. A take left on your branch meets that flip at your next merge of
    `main` as a row changed on both sides, and costs a `just queue pick`.
-2. `Workflow` with `name: "lanes"` (or `scriptPath:
-   ".claude/workflows/lanes.js"` if the registry answers *not found*), one call
-   per row, all of a fill's rows in one message.
+2. `Workflow` with `scriptPath: ".claude/workflows/lanes.js"`, one call per
+   row, all of a fill's rows in one message. **Never `name: "lanes"`**: the
+   name runs the copy the registry read earlier in the process, and neither a
+   merge into your tree nor a `/clear` refreshes it. Q118's run by name got
+   `lanes.js` as of Q182, from before Q186, and refused a merge its verifier
+   had proven by three reproduced mutations. `scriptPath` runs the file in your
+   tree as it is when you call.
 
 The args are `{ base, lanes: [ { label, queueId, brief, writeSet, model,
 sourcePaths, report, verify } ] }`. The workflow appends the base, the `switch
