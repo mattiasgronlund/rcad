@@ -1230,8 +1230,9 @@ impl<'f> Arrangement<'f> {
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
-                for (which, place) in places.into_iter().enumerate() {
-                    let place = as_exact_as_it_is(place);
+                let places: SmallVec<[PredicatePoint; 2]> =
+                    places.into_iter().map(as_exact_as_it_is).collect();
+                for (which, &place) in places.iter().enumerate() {
                     // Being *on* both surfaces is what the meet just worked out,
                     // and asking a predicate to confirm it would be a second
                     // opinion about a fact this line already holds — one that a
@@ -1243,16 +1244,7 @@ impl<'f> Arrangement<'f> {
                     {
                         continue;
                     }
-                    // Only a node that is *this* place is already this place.
-                    // Asking whether any node is on both crossings was right
-                    // while three planes met once; three surfaces meet twice,
-                    // and it threw the second one away — which left a line
-                    // crossing a closed curve entering it and never coming out.
-                    if self.nodes.iter().any(|node| {
-                        node.crossings.contains(&first)
-                            && node.crossings.contains(&second)
-                            && boxes_overlap(node.point, place)
-                    }) {
+                    if self.a_corner_is_this_place(first, second, place, &places) {
                         continue;
                     }
                     let mut sorted = surfaces;
@@ -1307,6 +1299,54 @@ impl<'f> Arrangement<'f> {
             intersect(&one, &other, policy, log),
             Ok(SurfaceMeet::Nothing)
         )
+    }
+
+    /// Whether a corner of the face already is `place`, one of the `places`
+    /// where the face's surface and the partners of `first` and `second` meet.
+    ///
+    /// **A corner on both crossings is taken to be on all three surfaces**, so
+    /// one of their meets, with its true point inside the box of one of
+    /// `places`. When `place` is the only one whose box reaches the corner's,
+    /// `place` is taken to be that corner. When a second place reaches the
+    /// corner as well, nothing here says which of the two it is.
+    ///
+    /// **That first sentence is the model's word, not a proof**, so neither is
+    /// the fold. A corner gets its crossings in
+    /// [`Arrangement::place_the_corners`], where the edge's own crossing and a
+    /// surface the corner already knows about are taken as read, and
+    /// `derive_a_corner` in `bake.rs` accepts a surface that answers
+    /// `Undecidable` under any policy. Under `Policy::certified` the suites
+    /// fold meets into exact corners that `side_of_surface` proves are off one
+    /// of the three surfaces, by the ulps an earlier fuse rounded them by
+    /// (§248.6). The fold made those same drops before §248, and whether it is
+    /// sound is still open.
+    ///
+    /// **Anything short of that stays a node of its own**, and whether two
+    /// overlapping nodes are one point is left to
+    /// [`Arrangement::merge_points_that_are_one_point`], which asks the policy
+    /// (§17.4). The fold here used to be taken on any node of both crossings
+    /// whose box touched — which includes the other place of this very meet,
+    /// and three surfaces that meet twice meet at two *different* points. A
+    /// block edge grazing a ball `2⁻⁵¹` either side of `x = 16` came out as one
+    /// node that way, with no policy asked (§244.3).
+    fn a_corner_is_this_place(
+        &self,
+        first: usize,
+        second: usize,
+        place: PredicatePoint,
+        places: &[PredicatePoint],
+    ) -> bool {
+        self.nodes.iter().any(|node| {
+            node.vertex.is_some()
+                && node.crossings.contains(&first)
+                && node.crossings.contains(&second)
+                && boxes_overlap(node.point, place)
+                && places
+                    .iter()
+                    .filter(|&&other| boxes_overlap(node.point, other))
+                    .count()
+                    == 1
+        })
     }
 
     /// A closed crossing with no node on it still needs one.
@@ -3571,10 +3611,10 @@ fn across_a_circle_that_starts_at_a_pole(
 
 /// Whether two boxes have any point in common, so that one may be the other.
 ///
-/// A conservative dedupe and nothing more: two nodes this calls apart are still
-/// folded together by [`Arrangement::merge_points_that_are_one_point`] if they
-/// turn out to be one point, which is where that decision is taken under a
-/// policy.
+/// *May be*, and never *is*: two boxes that touch can hold two different
+/// points, so nothing folds two nodes on this answer alone. Whether they are
+/// one point is [`Arrangement::merge_points_that_are_one_point`]'s to settle,
+/// under a policy (§17.4).
 fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
     let (mine, theirs) = (one.enclosure(), other.enclosure());
     (0..3).all(|axis| mine[axis].lo() <= theirs[axis].hi() && theirs[axis].lo() <= mine[axis].hi())

@@ -12,6 +12,12 @@ use rcad_geom::Unit;
 
 use crate::geometry::Reading;
 use crate::graph::EntityId;
+use crate::names::{
+    CENTI, CONVERSION_BASED_UNIT, EnumerationName, GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT,
+    GLOBAL_UNIT_ASSIGNED_CONTEXT, LENGTH_MEASURE_WITH_UNIT, LENGTH_UNIT, MEASURE_WITH_UNIT, METRE,
+    MICRO, MILLI, PLANE_ANGLE_MEASURE_WITH_UNIT, PLANE_ANGLE_UNIT, RADIAN, SI_UNIT,
+    UNCERTAINTY_MEASURE_WITH_UNIT,
+};
 use crate::refusal::Refusal;
 
 /// What one file declared.
@@ -42,8 +48,8 @@ pub(crate) fn what_the_file_declared(reading: &Reading<'_>) -> Result<Declared, 
     let mut how_many_uncertainties = 0;
 
     for context in reading.file().instances() {
-        if context.part("GLOBAL_UNIT_ASSIGNED_CONTEXT").is_some() {
-            let named = reading.references_at(context.id(), "GLOBAL_UNIT_ASSIGNED_CONTEXT", 0)?;
+        if context.part(GLOBAL_UNIT_ASSIGNED_CONTEXT.name()).is_some() {
+            let named = reading.references_at(context.id(), GLOBAL_UNIT_ASSIGNED_CONTEXT, 0)?;
             for one in named {
                 let Some(found) = length_unit_at(reading, one)? else {
                     radians_per_angle_unit =
@@ -63,11 +69,11 @@ pub(crate) fn what_the_file_declared(reading: &Reading<'_>) -> Result<Declared, 
             }
         }
         if context
-            .part("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT")
+            .part(GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT.name())
             .is_some()
         {
             let declared =
-                reading.references_at(context.id(), "GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT", 0)?;
+                reading.references_at(context.id(), GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT, 0)?;
             for one in declared {
                 let Some(measure) = length_uncertainty_at(reading, one)? else {
                     continue;
@@ -98,13 +104,13 @@ fn length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Option<Unit>, R
     let Some(held) = reading.file().instance(id) else {
         return Ok(None);
     };
-    if held.part("LENGTH_UNIT").is_none() {
+    if held.part(LENGTH_UNIT.name()).is_none() {
         return Ok(None);
     }
-    if held.part("SI_UNIT").is_some() {
+    if held.part(SI_UNIT.name()).is_some() {
         return si_length_unit_at(reading, id).map(Some);
     }
-    if held.part("CONVERSION_BASED_UNIT").is_some() {
+    if held.part(CONVERSION_BASED_UNIT.name()).is_some() {
         return converted_length_unit_at(reading, id).map(Some);
     }
     Err(Refusal::ALengthUnitThisKernelDoesNotHave {
@@ -114,9 +120,9 @@ fn length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Option<Unit>, R
 }
 
 fn si_length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Unit, Refusal> {
-    let record = reading.record(id, "SI_UNIT")?;
+    let record = reading.record(id, SI_UNIT)?;
     let name = record.attribute(1).and_then(crate::Value::as_enumeration);
-    if name != Some("METRE") {
+    if name.and_then(EnumerationName::of) != Some(METRE) {
         return Err(Refusal::ALengthUnitThisKernelDoesNotHave {
             id,
             described: format!("SI unit {}", name.unwrap_or("with no name")),
@@ -124,18 +130,18 @@ fn si_length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Unit, Refusa
     }
     match record.attribute(0) {
         Some(crate::Value::Nothing) => Ok(Unit::Metre),
-        Some(crate::Value::Enumeration(prefix)) => match prefix.as_str() {
-            "MICRO" => Ok(Unit::Micrometre),
-            "MILLI" => Ok(Unit::Millimetre),
-            "CENTI" => Ok(Unit::Centimetre),
-            other => Err(Refusal::ALengthUnitThisKernelDoesNotHave {
+        Some(crate::Value::Enumeration(prefix)) => match EnumerationName::of(prefix) {
+            Some(MICRO) => Ok(Unit::Micrometre),
+            Some(MILLI) => Ok(Unit::Millimetre),
+            Some(CENTI) => Ok(Unit::Centimetre),
+            _ => Err(Refusal::ALengthUnitThisKernelDoesNotHave {
                 id,
-                described: format!("{other} metre"),
+                described: format!("{prefix} metre"),
             }),
         },
         _ => Err(Refusal::AnAttributeIsNotWhatTheSchemaWants {
             id,
-            keyword: "SI_UNIT",
+            keyword: SI_UNIT.name(),
             position: 0,
             wanted: "prefix",
         }),
@@ -143,12 +149,8 @@ fn si_length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Unit, Refusa
 }
 
 fn converted_length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Unit, Refusal> {
-    let measure = reading.reference_at(id, "CONVERSION_BASED_UNIT", 1)?;
-    let says = reading.keyword_of(
-        id,
-        measure,
-        &["LENGTH_MEASURE_WITH_UNIT", "MEASURE_WITH_UNIT"],
-    )?;
+    let measure = reading.reference_at(id, CONVERSION_BASED_UNIT, 1)?;
+    let says = reading.keyword_of(id, measure, &[LENGTH_MEASURE_WITH_UNIT, MEASURE_WITH_UNIT])?;
     let factor = reading.real_at(measure, says, 0)?;
     let of = reading.reference_at(measure, says, 1)?;
     let base = length_unit_at(reading, of)?.ok_or(Refusal::ALengthUnitThisKernelDoesNotHave {
@@ -187,21 +189,21 @@ fn converted_length_unit_at(reading: &Reading<'_>, id: EntityId) -> Result<Unit,
 /// is `None`, and `None` only refuses a file that has a cone in it.
 fn how_big_an_angle_unit_is(reading: &Reading<'_>, id: EntityId) -> Option<f64> {
     let held = reading.file().instance(id)?;
-    held.part("PLANE_ANGLE_UNIT")?;
-    if held.part("SI_UNIT").is_some() {
+    held.part(PLANE_ANGLE_UNIT.name())?;
+    if held.part(SI_UNIT.name()).is_some() {
         let name = reading
-            .record(id, "SI_UNIT")
+            .record(id, SI_UNIT)
             .ok()?
             .attribute(1)
             .and_then(crate::Value::as_enumeration)?;
-        return (name == "RADIAN").then_some(1.0);
+        return (EnumerationName::of(name) == Some(RADIAN)).then_some(1.0);
     }
-    let measure = reading.reference_at(id, "CONVERSION_BASED_UNIT", 1).ok()?;
+    let measure = reading.reference_at(id, CONVERSION_BASED_UNIT, 1).ok()?;
     let says = reading
         .keyword_of(
             id,
             measure,
-            &["PLANE_ANGLE_MEASURE_WITH_UNIT", "MEASURE_WITH_UNIT"],
+            &[PLANE_ANGLE_MEASURE_WITH_UNIT, MEASURE_WITH_UNIT],
         )
         .ok()?;
     let factor = reading.real_at(measure, says, 0).ok()?;
@@ -219,14 +221,14 @@ fn length_uncertainty_at(reading: &Reading<'_>, id: EntityId) -> Result<Option<f
     let Some(held) = reading.file().instance(id) else {
         return Ok(None);
     };
-    if held.part("UNCERTAINTY_MEASURE_WITH_UNIT").is_none() {
+    if held.part(UNCERTAINTY_MEASURE_WITH_UNIT.name()).is_none() {
         return Ok(None);
     }
-    let of = reading.reference_at(id, "UNCERTAINTY_MEASURE_WITH_UNIT", 1)?;
+    let of = reading.reference_at(id, UNCERTAINTY_MEASURE_WITH_UNIT, 1)?;
     if length_unit_at(reading, of)?.is_none() {
         return Ok(None);
     }
     reading
-        .real_at(id, "UNCERTAINTY_MEASURE_WITH_UNIT", 0)
+        .real_at(id, UNCERTAINTY_MEASURE_WITH_UNIT, 0)
         .map(Some)
 }

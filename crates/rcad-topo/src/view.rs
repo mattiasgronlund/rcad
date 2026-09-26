@@ -1373,6 +1373,45 @@ impl<'m> EdgeView<'m> {
         &self.data().run
     }
 
+    /// This edge's two ends in the frame its face is stored in, in the order
+    /// the edge is stored, with this view's location left off.
+    ///
+    /// Not public, for [`EdgeView::stored_run`]'s reason. [`EdgeView::length`]
+    /// wants it because a movement changes no length, so the stored numbers
+    /// give a placed edge the same answer bit for bit as one at the origin —
+    /// where the located ends would carry the placement's rounding into it.
+    pub(crate) fn stored_ends(self) -> [Point; 2] {
+        let data = self.data();
+        let vertices = &self.model.data().vertices;
+        [vertices[data.start].point, vertices[data.end].point]
+    }
+
+    /// The surfaces of the faces either side of this edge, in the frame they are
+    /// stored in.
+    ///
+    /// A seam has one face on both sides and it comes back twice, which is what
+    /// tells [`rcad_geom::which_two_surfaces_a_run_is_between`] to read the
+    /// second surface off the run; an edge only one face uses is read the same
+    /// way.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] when no face or
+    /// three or more run along it, so no pair of them says where it runs. The
+    /// mesher's refusal and for its reason: [`Model`] is `Deserialize`, and a
+    /// model that never went through [`Model::validate`] reaches here first.
+    pub(crate) fn stored_surfaces_either_side(self) -> Result<[Surface; 2]> {
+        let mut faces = self.model.faces_along_edge(self.slot);
+        let sides = match (faces.next(), faces.next(), faces.next()) {
+            (Some(only), None, None) => [only, only],
+            (Some(one), Some(other), None) => [one, other],
+            _ => {
+                return Err(Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge: self.key() });
+            }
+        };
+        Ok(sides.map(|face| self.model.face_at(face).stored_surface()))
+    }
+
     /// How much slop a decision put into this edge, if any.
     #[must_use]
     pub fn approximation(self) -> Option<Approximation> {

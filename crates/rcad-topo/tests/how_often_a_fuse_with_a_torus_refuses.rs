@@ -91,9 +91,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Isometry, Point, Scale, Surface, Vector};
+use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 mod rings;
 
@@ -467,50 +467,47 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
 /// the other circle's disk; the half-space `intersect` names the cap's circle
 /// by is what says so, and without it the piece held that point too.
 ///
-/// **What it refuses now is placing that point, and the ray is why.** The
-/// search moves from "a point inside a piece of a face" to "a point in a piece
-/// that every solid could place": `(4, 0, 0)` is on the copy's own end cap,
-/// and the ray fired from it at the copy answers `CannotFollowAFacesTrimming`
-/// on the copy's torus face. `select.rs` reads that as no answer and has no
-/// other candidate inside the cap. Getting past it is teaching the classifier
-/// to follow a bend's torus face, and that is not in `select.rs`.
+/// **Then it refused placing that point, and the ray was why**: the ray fired
+/// from `(4, 0, 0)` at the copy answered `CannotFollowAFacesTrimming` on the
+/// copy's torus face. `holds.rs` follows a bend's wall now (§243), and every
+/// piece of both bends is placed on the other one, facing the same way.
+///
+/// **So the difference is answered, and the answer is nothing**, which is what
+/// a solid less itself is. The union and the intersection keep the first
+/// bend's three faces and drop the copy's — the table's "keep once" — and then
+/// writing those three faces back as a solid is refused:
+/// `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`. The pieces chosen
+/// are the bend itself, so that refusal is about writing an answer out and not
+/// about which pieces were chosen (§243).
 ///
 /// This is still the one place in the file where the arrangement is reached
 /// at all, and so the one that says the ordering added for a bend is real code
 /// and not a gate nothing walks through.
 #[test]
-fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
+fn a_bend_fused_with_a_copy_of_itself_is_nothing_less_it_and_refused_otherwise() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let first = a_quarter_bend(&mut model, 4.0, 1.0);
     let second = a_quarter_bend(&mut model, 4.0, 1.0);
 
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+    for rule in [Rule::Union, Rule::Intersection] {
         let mut log = ProvenanceLog::new();
         let refused = model.fuse(&[first], &[second], rule, &policy, &mut log);
-        let Err(Error::Undecidable { records }) = &refused else {
-            panic!(
-                "{rule:?} of a bend and a bit-for-bit copy of itself: expected the point \
-                 inside the end cap not to be placed, got {refused:?}"
-            );
-        };
-        let record = records.records().last().expect("a refusal names why");
-        assert_eq!(
-            record.predicate(),
-            "a point in a piece that every solid could place",
-            "{rule:?}: {refused:?}"
-        );
-        let corners: Vec<_> = record
-            .inputs()
-            .iter()
-            .map(|corner| corner.enclosure().map(|axis| [axis.lo(), axis.hi()]))
-            .collect();
-        assert_eq!(
-            corners,
-            [[[3.0, 3.0], [0.0, 0.0], [0.0, 0.0]]],
-            "{rule:?}: the piece is the end cap on y = 0, whose one corner is (3, 0, 0)"
+        assert!(
+            matches!(
+                refused,
+                Err(Error::TheFuseWroteABrokenAnswer {
+                    broken: Invalid::CoedgesRunTheSameWay
+                })
+            ),
+            "{rule:?} of a bend and a bit-for-bit copy of itself: {refused:?}"
         );
     }
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(&[first], &[second], Rule::Difference, &policy, &mut log)
+        .expect("a bend less a copy of itself");
+    assert!(fused.solids().is_empty(), "{fused:?}");
 
     let copy = model.solid(second).expect("this model made the key");
     let placed = copy.classify_uncertain_point(
@@ -518,16 +515,9 @@ fn a_bend_refuses_to_fuse_with_a_copy_of_itself_under_every_rule() {
         &policy,
         &mut ProvenanceLog::new(),
     );
-    let Containment::CannotFollowAFacesTrimming { face } = placed else {
-        panic!("the ray from the middle of the cap: {placed:?}");
-    };
-    let surface = copy
-        .faces()
-        .find(|each| each.key() == face)
-        .expect("the ray names a face of the solid it was fired at")
-        .surface();
-    assert!(
-        matches!(surface, Surface::Torus(_)),
-        "the face the ray cannot follow: {surface:?}"
+    assert_eq!(
+        placed,
+        Containment::OnBoundary,
+        "the middle of the end cap on y = 0 is on the copy's own cap"
     );
 }

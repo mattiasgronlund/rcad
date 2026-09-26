@@ -36,8 +36,6 @@
 //! plane whose side has been proved — see [`InPlane`]. No new predicate, and
 //! nothing is projected into two dimensions, which is §15.5's rule.
 
-use std::collections::BTreeMap;
-
 use rcad_geom::{
     Cone, EdgeRun, Picker, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Torus, Vector,
     intersect,
@@ -47,7 +45,6 @@ use rcad_predicates::{
     orient3d_of_points,
 };
 
-use crate::key::FaceSlot;
 use crate::validate::side_of_surface;
 use crate::{Containment, Error, Model, Result, SolidView};
 
@@ -99,13 +96,14 @@ pub(crate) fn choose(
 ) -> Result<Vec<Chosen>> {
     let solids: Vec<&BakedSolid> = scratch.arguments.iter().chain(&scratch.tools).collect();
     let arguments = scratch.arguments.len();
-    let owner = which_solid_owns_each_face(model, &solids);
+    assert_eq!(
+        scratch.pieces.len(),
+        scratch.cut_from.len(),
+        "every piece is cut from one operand"
+    );
 
     let mut chosen = Vec::new();
-    for (index, piece) in scratch.pieces.iter().enumerate() {
-        // Every ancestor of a piece is a face of one solid, so the first of them
-        // names which one as well as any other.
-        let mine = owner[&piece.ancestors[0].slot_in(model.id())];
+    for (index, (piece, &mine)) in scratch.pieces.iter().zip(&scratch.cut_from).enumerate() {
         let side = if mine < arguments {
             Side::Argument
         } else {
@@ -325,7 +323,8 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// Where one piece sits relative to a set of solids.
 ///
 /// Inside beats on, and on beats outside: a piece lying on one solid of a group
-/// but buried in another is inside the union of them.
+/// but buried in another is inside the union of them. So is a piece lying on
+/// two of them that face opposite ways — see [`LyingOn::placement`].
 ///
 /// # Errors
 ///
@@ -769,7 +768,7 @@ fn settle_against_each(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Placement>> {
-    let mut on = None;
+    let mut lying_on = LyingOn::default();
     for &index in against {
         // A **curved** piece is asked about coincidence before the ray and not
         // after it. A candidate on a plane is exactly on it and a ray fired at a
@@ -781,14 +780,10 @@ fn settle_against_each(
         // asking it first costs nothing and reaching for it afterwards would be
         // too late.
         if in_plane.is_none()
-            && let Some(face) = coincident_face(model, solids[index], piece, point, policy, log)?
+            && let Some(same_way) =
+                coincident_face(model, solids[index], piece, point, policy, log)?
         {
-            if on.is_none() {
-                on = Some(Placement::On {
-                    solid: index,
-                    same_way: face,
-                });
-            }
+            lying_on.add(index, same_way);
             continue;
         }
         let solid: SolidView<'_> = model.solid_at(solids[index].key.slot_in(model.id()));
@@ -818,20 +813,64 @@ fn settle_against_each(
             Containment::CannotFollowAFacesTrimming { .. }
             | Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(None),
             Containment::OnBoundary | Containment::Undecidable { .. } => {
-                let Some(face) = coincident_face(model, solids[index], piece, point, policy, log)?
+                let Some(same_way) =
+                    coincident_face(model, solids[index], piece, point, policy, log)?
                 else {
                     return Ok(None);
                 };
-                if on.is_none() {
-                    on = Some(Placement::On {
-                        solid: index,
-                        same_way: face,
-                    });
-                }
+                lying_on.add(index, same_way);
             }
         }
     }
-    Ok(Some(on.unwrap_or(Placement::Outside)))
+    Ok(Some(lying_on.placement()))
+}
+
+/// The solids of a group a piece lies flush on, the first of each way round.
+///
+/// **The first, because "keep once" reads it.** Of several coincident faces
+/// facing the same way, [`Fate::KeepIfItComesFirst`] keeps the piece only when
+/// it comes before the solid named here, and `against` runs in the operands'
+/// order — so naming the lowest-numbered one is what leaves exactly one of them.
+#[derive(Default)]
+struct LyingOn {
+    same_way: Option<usize>,
+    opposite_way: Option<usize>,
+}
+
+impl LyingOn {
+    fn add(&mut self, solid: usize, same_way: bool) {
+        let first = if same_way {
+            &mut self.same_way
+        } else {
+            &mut self.opposite_way
+        };
+        first.get_or_insert(solid);
+    }
+
+    /// Where the piece sits against the group, once none of its solids had the
+    /// piece inside it.
+    ///
+    /// **Flush on one solid facing the same way and on another facing against it
+    /// is inside.** The first has its material behind the piece and the second
+    /// in front of it, so the group's union has material on both sides and the
+    /// piece is buried in it, exactly as it would be inside one solid. Reading
+    /// only whichever of the two came first made the answer depend on the order
+    /// the solids were named in: `s0 \ (s1 ∪ s2)` was refused where
+    /// `s0 \ (s2 ∪ s1)` answered (`tests/a_face_between_two_tools_facing_opposite_ways.rs`).
+    fn placement(self) -> Placement {
+        match (self.same_way, self.opposite_way) {
+            (Some(_), Some(_)) => Placement::Inside,
+            (Some(solid), None) => Placement::On {
+                solid,
+                same_way: true,
+            },
+            (None, Some(solid)) => Placement::On {
+                solid,
+                same_way: false,
+            },
+            (None, None) => Placement::Outside,
+        }
+    }
 }
 
 /// Whether the ray and the arrangement put `point` on opposite sides of one of
@@ -1053,18 +1092,6 @@ fn corners_of(piece: &Piece) -> Vec<Vec<PredicatePoint>> {
         .iter()
         .map(|wire| wire.iter().map(|side| side.ends[0].point()).collect())
         .collect()
-}
-
-fn which_solid_owns_each_face(model: &Model, solids: &[&BakedSolid]) -> BTreeMap<FaceSlot, usize> {
-    let mut owner = BTreeMap::new();
-    for (index, solid) in solids.iter().enumerate() {
-        for face in &solid.faces {
-            for key in &face.keys {
-                owner.insert(key.slot_in(model.id()), index);
-            }
-        }
-    }
-    owner
 }
 
 /// A face's plane with a point off it whose side has been proved.
