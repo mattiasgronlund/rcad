@@ -121,7 +121,9 @@ fn the_same_block_one_unit_off_the_apex_answers_every_fuse() {
         model
             .validate(&policy, &mut ProvenanceLog::new())
             .unwrap_or_else(|error| {
-                panic!("{rule:?} (cone first: {cone_first}): the answer does not validate: {error:?}")
+                panic!(
+                    "{rule:?} (cone first: {cone_first}): the answer does not validate: {error:?}"
+                )
             });
     }
 }
