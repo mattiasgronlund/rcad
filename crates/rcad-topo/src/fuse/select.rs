@@ -546,8 +546,9 @@ fn the_piece_holds(
 /// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by).**
 /// What this count needs is that the cone leave *one* region on the plane and
 /// that its boundary bulge the same way all along; a closed crossing is exactly
-/// that, and an undecided or open one is read as no bulge, which costs a refusal
-/// and never a wrong answer.
+/// that, an open one is that once the point is held to the side's own nappe,
+/// and an undecided one is read as no bulge, which costs a refusal and never a
+/// wrong answer.
 ///
 /// It used to compare the stored normal against the stored axis direction, so
 /// only a cap's own plane counted, and `holds.rs` and `assemble.rs` each spelled

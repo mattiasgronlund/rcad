@@ -24,11 +24,13 @@
 //! Ordering along the bend takes the grid from thirty-eight answers to
 //! fifty-three, and naming the two arcs of a cone's rim circle apart takes it to
 //! fifty-seven; **not one configuration refuses on the ordering any more**. The
-//! twenty-seven that still refuse all give up in `fuse/select.rs`, which §49.6
+//! twenty-seven that still refused all gave up in `fuse/select.rs`, which §49.6
 //! lists among what stands under its own name — twenty-five of them for want of
 //! any point inside the piece, and two where a point was found and no solid
-//! could place it. §217 split those two names apart. That is a separate gap and
-//! the numbers below never blend it with the ordering (§17.7).
+//! could place it. §217 split those two names apart; §224.4 answered the two,
+//! and §251 the twenty-five, so all eighty-four answer now, and
+//! [`every_answer_on_the_grid_holds_what_the_shapes_hold_by_hand`] holds each
+//! of them against the frustum's closed form.
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -149,13 +151,23 @@ fn not_one_block_on_the_grid_is_refused_for_want_of_an_order_along_its_curve() {
 /// edge. Naming the two arcs apart answers all four, which is why the second
 /// wall is gone rather than smaller. §206.4.
 ///
-/// **It is 59 now, and the second wall is gone.** The two that found a point and
+/// **It was 59, and the second wall was gone.** The two that found a point and
 /// could not place it were the flush pair, whose top cap lies in the block's
 /// roof: the cap piece's point lay on the frustum's cap, and that cap, a disk
 /// with one corner, was wound by its corners and held nothing. §224.4 asks a
 /// flat face with a curved side through the solid's own point test instead.
+///
+/// **It is 84, and the first wall is gone too** (§251). The twenty-five were a
+/// block wall's piece inside the cone carried on above the frustum's top cap:
+/// bounded by one arc of the hyperbola the wall cuts and the chord the roof cuts
+/// across it, so two corners and no polygon. `select.rs` now counts a
+/// hyperbola arc's bulge on the arc's own half of the cone and aims a candidate
+/// square off the chord at the cone, so that piece gets a point, is outside the
+/// frustum, and stays in the union.
+/// [`every_answer_on_the_grid_holds_what_the_shapes_hold_by_hand`] is what says
+/// the twenty-five are right and not just answered.
 #[test]
-fn fifty_nine_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
+fn all_eighty_four_answer() {
     let mut answered = 0;
     let mut elsewhere: Vec<String> = Vec::new();
     for pair in the_grid() {
@@ -179,15 +191,76 @@ fn fifty_nine_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
     println!("and the walls they gave up at are {walls:?}");
     assert_eq!(
         walls,
-        BTreeMap::from([("a point inside a piece of a face", 25)]),
+        BTreeMap::new(),
         "these are the walls the grid's refusals were measured against; re-derive them when they \
          move rather than widening the test (§19.1)"
     );
     assert_eq!(
-        answered, 59,
+        answered, 84,
         "the grid answered 38 of 84 before the bend could be ordered, 53 after, 57 once a cone's \
-         rim circle had its two arcs named apart, and 59 once a flat cap was asked what it holds"
+         rim circle had its two arcs named apart, 59 once a flat cap was asked what it holds, and \
+         84 once a hyperbola arc's bulge was counted on its own half of the cone"
     );
+}
+
+/// Every union and every intersection on the grid holds what the frustum and
+/// the block hold, worked out by hand.
+///
+/// **Only the frustum's closed form is needed**, because on this grid the
+/// frustum's own face never reaches a wall: its widest cap has radius two and
+/// its axis is at least three from every wall. So a wall cuts only the cone
+/// carried on past the face, and what the two solids share is the frustum
+/// between the floor and whichever of its top cap and the roof comes first.
+/// With the frustum dropped as [`FrustumAndBlock::build`] drops it, its radius
+/// at height `z` is `ρ(z) = 1 + (z + 1)/u` from `z = −1` to `z = u − 1`, for
+/// `u` up per unit wider, and the volume between two heights is
+/// `π u (ρ(b)³ − ρ(a)³) / 3`. The union is the block, the unit below the floor,
+/// and what pokes out of the roof — only the steepest cone in the smallest
+/// block, whose top cap is at seven against a roof at six.
+///
+/// The tolerance is what `measure` declares and nothing chosen here.
+#[test]
+fn every_answer_on_the_grid_holds_what_the_shapes_hold_by_hand() {
+    let policy = Policy::certified();
+    let how_fine = Deflection::of(0.01).expect("a length");
+    for pair in the_grid() {
+        let up = f64::from(pair.up_per_unit_wider);
+        let side = f64::from(pair.side);
+        let radius_at = |z: f64| 1.0 + (z + 1.0) / up;
+        let frustum_between = |from: f64, to: f64| {
+            core::f64::consts::PI * up * (radius_at(to).powi(3) - radius_at(from).powi(3)) / 3.0
+        };
+        let top = up - 1.0;
+        let shared = frustum_between(0.0, top.min(side));
+        let out_of_the_roof = if top > side {
+            frustum_between(side, top)
+        } else {
+            0.0
+        };
+        let united = side.powi(3) + frustum_between(-1.0, 0.0) + out_of_the_roof;
+        for (rule, held) in [(Rule::Union, united), (Rule::Intersection, shared)] {
+            let (mut model, keys) = pair.build();
+            let answer = model
+                .fuse(
+                    &keys[..1],
+                    &keys[1..],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{pair:?} {rule:?} answers: {why:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{pair:?} {rule:?} is sound: {why:?}"));
+            assert_eq!(answer.solids().len(), 1, "{pair:?} {rule:?}: one solid");
+            let (volume, worst) = how_much_it_holds(&model, answer.solids(), how_fine);
+            assert!(
+                (volume - held).abs() <= worst,
+                "{pair:?} {rule:?}: holds {held} by hand and measured {volume}, further off than \
+                 the {worst} the mesh declares"
+            );
+        }
+    }
 }
 
 /// §49.6's rule, asked of the same grid: it is now false, and here is by how
@@ -195,14 +268,15 @@ fn fifty_nine_of_the_eighty_four_answer_and_the_rest_give_up_somewhere_else() {
 ///
 /// A rule that no longer holds is worth a measurement rather than a deleted
 /// line. The rule allows forty of the eighty-four and turns down forty-four.
-/// **Nineteen of the forty-four answer now** — fifteen until a cone's rim circle
-/// had its two arcs named apart, and four more since; the other twenty-five stop
-/// in `select.rs`. Of the forty it allows, all forty answer. The last two were
-/// the pair whose top cap lands exactly in the block's roof, which §49.6
-/// counted separately as a flush cap, and they answer since §224.4 asks the
-/// frustum's one-cornered cap what it holds rather than winding its corners.
+/// **All forty-four answer now** — fifteen until a cone's rim circle had its
+/// two arcs named apart, nineteen after that, and the other twenty-five since
+/// §251 counted a hyperbola arc's bulge. Of the forty it allows, all forty
+/// answer. The last two were the pair whose top cap lands exactly in the
+/// block's roof, which §49.6 counted separately as a flush cap, and they answer
+/// since §224.4 asks the frustum's one-cornered cap what it holds rather than
+/// winding its corners.
 #[test]
-fn the_rule_that_said_which_frustums_a_block_could_cut_has_nineteen_exceptions() {
+fn the_rule_that_said_which_frustums_a_block_could_cut_is_wrong_about_all_it_turned_down() {
     let mut the_rule_said_yes_and_it_answered = 0;
     let mut the_rule_said_no_and_it_answered = 0;
     for pair in the_grid() {
@@ -220,7 +294,7 @@ fn the_rule_that_said_which_frustums_a_block_could_cut_has_nineteen_exceptions()
         "the rule allowed 40, and the flush pair among them answers since §224.4"
     );
     assert_eq!(
-        the_rule_said_no_and_it_answered, 19,
+        the_rule_said_no_and_it_answered, 44,
         "the rule turned down 44 and this many of them answer now"
     );
 }

@@ -366,9 +366,18 @@ const A_FRUSTUM_FAMILY_STILL_COMPARES_THIS_MUCH: f64 = 0.2;
 /// [`a_frustum_whose_cap_lies_in_the_blocks_roof_answers_the_same_either_way_round`]
 /// checks their volumes.
 ///
+/// **It is all 168 since §251.** The fifty that were left, twenty-five
+/// configurations under both rules, were each a block wall's piece inside the
+/// cone carried on above the frustum: one arc of a hyperbola and the chord the
+/// roof cuts across it. `select.rs` counts that arc's bulge on its own half of
+/// the cone now, and every one of the fifty agrees both ways round.
+/// `tests/ordering_points_along_an_endless_bend.rs`'s
+/// `every_answer_on_the_grid_holds_what_the_shapes_hold_by_hand` checks all
+/// 168 answers' volumes against the frustum's closed form.
+///
 /// A drop here is a fuse that stopped answering, which is a regression and not a
 /// draw. Re-derive it when it moves; do not relax it to a floor (§19.1).
-const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 118;
+const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 168;
 
 /// How many of the comparisons a law over a bar leaning through a block has to
 /// have made (§191).
