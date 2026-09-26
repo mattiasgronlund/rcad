@@ -10,7 +10,7 @@
 //! `.claude/skills/fuse-debugging/SKILL.md` repeats it — *"`count: 1` is
 //! withdrawn (§38.6); seeing it again is a regression, not a refusal"*. Both
 //! sentences are false on this tree, and neither is a near miss: one pair of
-//! boxes reaches it 107 times in 624 fuses.
+//! boxes reaches it 104 times in 624 fuses.
 //!
 //! Both fixes that landed the day this was written are in the tree and both
 //! helped. A solid's own planes now cut its own faces, and a plane and its
@@ -29,7 +29,7 @@
 //! | six families of `tests/pairs`, 500 draws each, all three rules both ways round | 18,000 | 81 |
 //! | every turn of one pair of boxes: 342 whole-number axes × 63 angles × 3 rules | 64,638 | 14,230 |
 //! | the block and the frame §48's lane reported, three rules both ways round | 6 | 0 |
-//! | the sweep [`how_often_one_pair_of_turned_boxes_leaves_such_an_edge`] re-runs | 624 | 107 |
+//! | the sweep [`how_often_one_pair_of_turned_boxes_leaves_such_an_edge`] re-runs | 624 | 104 |
 //!
 //! The six families are `a_lattice_pair`, `a_flush_pair`, `a_turned_pair`,
 //! `a_skew_pair`, `a_pair_somewhere_else` and a trio of lattice solids fused two
@@ -189,7 +189,7 @@ fn a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned() {
 /// [`a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned`]'s,
 /// turned about each of the twenty-six whole-number directions whose parts are
 /// `-1`, `0` or `1`, by one to eight sixty-fourths of a turn, under all three
-/// rules. **107 of the 624 come back `count: 1` and the other 517 are answered**,
+/// rules. **104 of the 624 come back `count: 1` and the other 520 are answered**,
 /// so it is neither a corner of the grid nor most of it.
 ///
 /// The numbers are asserted rather than printed, and §19 is why: the day the
