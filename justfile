@@ -5287,8 +5287,9 @@ fuzz-triage night="" against="main":
 
     tellable=$(grep -c . <"$manifest" || true)
     echo
-    echo "\$ mise exec -- cargo run -q -p rcad-fuzz-explain -- --triage   (replaying $tellable input(s) in one process)"
-    (cd "$work" && mise exec -- cargo run -q -p rcad-fuzz-explain -- --triage) <"$manifest" >"$report"
+    decode=(cargo run -q --profile test -p rcad-fuzz-explain -- --triage)
+    echo "\$ mise exec -- ${decode[*]}   (replaying $tellable input(s) in one process)"
+    (cd "$work" && mise exec -- "${decode[@]}") <"$manifest" >"$report"
     triage_status=$?
     if [ "$triage_status" -ne 0 ]; then
         echo "fuzz-triage: the decoder itself failed (exit $triage_status), so nothing was replayed"
@@ -5494,9 +5495,9 @@ check-fuzz-triage-selftest:
     grep -q '^commit:   9b82e9e$' <<<"$got" \
         || fail "it did not name the commit that was fuzzed, which is the whole of §90"
     grep -q '^targets:  fuzz:crash$' <<<"$got" || fail "it did not name the target that was flagged"
-    calls=$(grep -c 'cargo run -q -p rcad-fuzz-explain -- --triage' <<<"$got" || true)
+    calls=$(grep -c 'cargo run -q --profile test -p rcad-fuzz-explain -- --triage' <<<"$got" || true)
     [ "$calls" = 1 ] \
-        || fail "three artifacts cost $calls batch call(s), not the one this recipe exists to hold at"
+        || fail "three artifacts cost $calls optimised batch call(s), not the one this recipe exists to hold at"
 
     [ -f "$verdicts" ] || fail "no verdict file landed in the night's own directory"
     [ "$(head -1 "$verdicts")" = "$header" ] \
@@ -5527,8 +5528,8 @@ check-fuzz-triage-selftest:
     got=$(triage "") || fail "a night whose inputs were rescued beside it made the triage fail"
     grep -qF "inputs:   $logs/artifacts-rescued-2026-09-14" <<<"$got" \
         || fail "it did not look beside the night for the rescued inputs"
-    calls=$(grep -c 'cargo run -q -p rcad-fuzz-explain -- --triage' <<<"$got" || true)
-    [ "$calls" = 1 ] || fail "one rescued input cost $calls batch call(s)"
+    calls=$(grep -c 'cargo run -q --profile test -p rcad-fuzz-explain -- --triage' <<<"$got" || true)
+    [ "$calls" = 1 ] || fail "one rescued input cost $calls optimised batch call(s)"
     row=$(printf 'two_solids_fused_by_a_stranger\t1\tyes\t')
     grep -qF "$row" "$verdicts" || fail "the rescued input's own bucket was not written"
     grep -qF "$rescued/crash-c0ffee" "$verdicts" || fail "the rescued input was not named as a sample"

@@ -8,7 +8,7 @@
 //! case then did. Non-zero, with one line on stderr, when they did not.
 //!
 //! ```text
-//! cargo run -q -p rcad-fuzz-explain -- --triage
+//! cargo run -q --profile test -p rcad-fuzz-explain -- --triage
 //! ```
 //!
 //! Reads `<target>\t<path>` lines from stdin, one per artifact, and replays
