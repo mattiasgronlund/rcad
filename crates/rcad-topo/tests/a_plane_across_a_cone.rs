@@ -98,12 +98,27 @@ fn a_leaning_block(model: &mut Model) -> SolidKey {
 /// arc's own nappe, and aims a candidate square off the chord at the cone, so
 /// the wall's piece gets a point: outside the frustum, kept in the union.
 ///
-/// **What is refused now is a piece of the frustum's own face**, one step on:
-/// the cone face as the block's low-`x` face cuts it, with corners at the
-/// bottom rim's seam `(1, 0, 2)`, the top rim's seam `(4, 0, 8)`, and the two
-/// points `(3.375, ±2.147, 8)` where that face crosses the top rim. A curved
-/// piece is asked its sides' signs and not wound, so `in_the_bulge_of` is not
-/// reached there and this is a separate refusal, left for its own row.
+/// **What is refused now is a piece of the frustum's own face**, one step on,
+/// and it is **two pieces glued into one** (§282). The block's low-`x` face
+/// cuts the frustum's face in an arc of the upper branch, from `(3.375, −2.147,
+/// 8)` on the top rim down to `(1.5, 0, 3)` and back up to `(3.375, 2.147, 8)`.
+/// That leaves two pieces: the patch inside the block, between the arc and the
+/// top rim through `(4, 0, 8)`, and the rest, between the bottom rim and the
+/// arc with the far side of the top rim. The piece refused has **three wires**
+/// — the bottom rim; the rim through `(4, 0, 8)` and the arc; the far rim and
+/// the arc again, run the other way — so it holds the arc with the block's
+/// material on one side of it and the outside on the other, and no point is on
+/// both sides of one plane. Every candidate was asked, and each failed exactly
+/// one of the arc's two sides.
+///
+/// **The glue is `arrange.rs`'s `group_the_cycles_into_cells`.** §36.3 joins
+/// two walks in different lumps when they agree about every closed curve. The
+/// bottom rim's upper walk agrees about both rims with the inside patch *and*
+/// with the rest, since what tells those two apart is the arc, which runs on
+/// past the rim and is never drawn in full; so it is joined to both, and they to
+/// each other through it. Selection is right to refuse: a point held for the
+/// glued piece would keep or drop both halves as one, and in the union one half
+/// is dropped and the other kept.
 #[test]
 fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_face() {
     let policy = Policy::certified();
@@ -129,7 +144,7 @@ fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_
         6,
         "the piece's corners, wire by wire: {corners:?}"
     );
-    let mut where_they_are: Vec<[i64; 3]> = corners
+    let where_they_are: Vec<[i64; 3]> = corners
         .iter()
         .map(|corner| {
             let [x, y, z] = corner.enclosure();
@@ -143,17 +158,19 @@ fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_
             [x.lo(), y.lo(), z.lo()].map(|along| (along * 1000.0).round() as i64)
         })
         .collect();
-    where_they_are.sort_unstable();
-    where_they_are.dedup();
     assert_eq!(
         where_they_are,
         [
             [1000, 0, 2000],
+            [3375, 2147, 8000],
+            [4000, 0, 8000],
+            [3375, -2147, 8000],
             [3375, -2147, 8000],
             [3375, 2147, 8000],
-            [4000, 0, 8000]
         ],
-        "the two seam corners and where the block's low-x face crosses the top rim"
+        "wire by wire: the bottom rim's seam; the patch inside the block, round the \
+         top rim's seam and back down the arc; and the rest of the top rim, back \
+         along the same arc the other way"
     );
 
     let skin = Cone::new(Axis::z(), 0.5).expect("a positive slope");

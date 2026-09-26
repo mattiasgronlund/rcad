@@ -63,6 +63,14 @@ use cones::{a_frustum, a_pointed_cone};
 /// **All ninety-six refused until §251**, eighty-four of them for want of a
 /// point inside a piece. Forty answer now, each held to the four checks at the
 /// top of this file.
+///
+/// **The forty-four left are a wrong piece and not a missing point** (§282).
+/// Each refuses on a piece of the frustum's face with three wires, one side of
+/// which has the block's steep face as its partner with the material on one
+/// side, and another the same face with the material on the other: the part
+/// inside the block and the part outside it glued into one, which no point can
+/// be in. The glue is `arrange.rs`'s, and the leaning block of
+/// `a_plane_across_a_cone.rs` shows it cycle by cycle.
 #[test]
 fn a_steeper_plane_across_a_frustum_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -134,7 +142,14 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// inside a piece. Fifty-eight answered then; of the eighty, eight still find
 /// no point and fourteen gave up one step on, meshing the answer. Two of those
 /// fourteen answer since §252 stopped a closed edge's start being a corner,
-/// so sixty answer now and twelve give up meshing (§252.9).
+/// so sixty answered and twelve gave up meshing (§252.9).
+///
+/// **The eight that found no point were a triangle with the apex for a
+/// corner** (§282). A face through the apex cuts the cone in two rulings that
+/// meet the cap's chord, and the only candidate aimed across that chord ran
+/// through the apex, where the two crossings are one root and rounding put the
+/// discriminant below zero. Read as that one root, four of the eight answer and
+/// four give up meshing: sixty-four right, sixteen meshing.
 #[test]
 fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -152,11 +167,10 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 60,
+            right: 64,
             refused: [
-                ("CannotMeshAFace", 12),
+                ("CannotMeshAFace", 16),
                 ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 16),
-                ("a point inside a piece of a face", 8),
             ]
             .into()
         }

@@ -1436,6 +1436,19 @@ fn half_way_into_either_arc(flat: &Plane, side: &FaceMeet) -> Vec<PredicatePoint
 /// between the arc and its chord whenever the arc is part of the boundary of a
 /// convex region that holds the chord. Nothing is trusted: the caller proves
 /// each candidate is inside or drops it.
+///
+/// **A plane through the apex makes the two roots one**, and a discriminant
+/// below zero is read as that one root rather than as no crossing. Such a plane
+/// cuts the cone in two rulings, and where both reach the same cap the piece
+/// between them and the cap's chord is a triangle with the apex for its third
+/// corner — a corner nothing names, so the triangle's two named corners wind
+/// round nothing. The line square to that chord through its middle runs through
+/// the apex, where it touches the cone twice over, and rounding puts the
+/// discriminant either side of zero. Below it, the pointed cone of
+/// `tests/a_plane_cut_along_a_cones_other_nappe.rs` had no candidate inside the
+/// triangle and refused eight fuses on [`INSIDE_A_PIECE`] (§282). Where the
+/// line misses the cone the step lands somewhere on it that the caller then
+/// proves or drops, like any other.
 fn half_way_across_the_chord_to_a_cone(flat: &Plane, side: &FaceMeet) -> Vec<PredicatePoint> {
     let Surface::Cone(cone) = side.carried_by[1] else {
         return Vec::new();
@@ -1459,10 +1472,7 @@ fn half_way_across_the_chord_to_a_cone(flat: &Plane, side: &FaceMeet) -> Vec<Pre
         vec![-constant / linear]
     } else {
         let discriminant = linear * linear - 4.0 * square * constant;
-        if discriminant < 0.0 {
-            return Vec::new();
-        }
-        let root = discriminant.sqrt();
+        let root = discriminant.max(0.0).sqrt();
         vec![
             (-linear + root) / (2.0 * square),
             (-linear - root) / (2.0 * square),
