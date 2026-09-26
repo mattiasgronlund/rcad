@@ -10,6 +10,7 @@ cap cannot follow the other bend's torus face.*
   232.3   A node on a crossing whose partner is the asked surface is on that surface
   232.4   What both bends do past it
   232.5   What this leaves
+  232.6   The second item of 232.5 was already fixed when it was written
 
 ### 232.1 A flat piece on a meridian circle offers both places the ring crosses its plane
 
@@ -138,3 +139,45 @@ source too, so nothing moved. `ignored_tests` stays 15.
   instead, and it has 232.2's defect.
 - `holds.rs`'s `what_a_round_wire_encloses` should ask the meridian circle's
   half-space as `the_piece_holds` now does (232.2).
+
+### 232.6 The second item of 232.5 was already fixed when it was written
+
+*Added 2026-09-26, from queue row Q56.*
+
+`16a9d4c4` (§222.3, the cone and its copy) sends a flat input face through
+`SolidView::face_holds_the_point` whenever any of its sides has a neighbour
+that is not a plane. It no longer winds its corners. `a_cone_and_its_copy.rs`
+pins it: a cone's cap is a disk with one corner, the same shape as a bend's.
+This section was written off `1aec994c`, which does not have that commit.
+
+Q56's lane, off `441f359e`, printed what `a_face_of_the_input_holds` answered
+in every fuse of two bends where a flat piece lies on an input disk. It
+answered `Held` every time: at `(0, 4, 0)` for two quarter bends on one torus,
+in both orders, and at `(−4, 0, 0)` and `(4, 0, 0)` for a half bend with either
+quarter bend. The verifier re-ran the ancestry check. Q56 is closed as done at
+`16a9d4c4`, not at a commit of its own.
+
+Those fuses still refuse, somewhere else:
+
+- **Two quarter bends on one torus.** The wall piece's points on the inner
+  equator are fired at the other bend's torus face. The ray answers
+  `CannotFireARayAtAFacesSurface`, and `settle_against_each` reads that as
+  "cannot place". A torus takes a ray only along an exact line (`classify.rs`),
+  so this is probably Q102's cause: a curved piece's points are boxes. That is
+  not traced. The verifier reproduced 6 of 6 fuses refusing, but not the lane's
+  count of refusal lines, because `select.rs` swallows the answer into
+  `Ok(None)` without logging it.
+- **A half bend with a quarter bend.** `classify_uncertain_point` answers
+  `CannotFollowAFacesTrimming` on the half bend's torus face at every point
+  the lane tried, the centre of its own cap included. A half bend's two end
+  circles lie in one plane through the axis, and §243's step 3 refuses a wall
+  whose two stored planes are one plane. That it is this step and not another
+  is not traced. The wall is the ring on one side of that plane, so an answer
+  exists and the refusal is a gap (§16.10).
+
+The lane also claimed that only a second bend on the same torus can put a flat
+piece on a torus disk through the public API. The verifier checked one leg of
+that: a plane parallel to the ring's axis but off it is refused as a quartic,
+even when it misses the torus (`intersect.rs`, lines 3313–3314). The other
+legs, that a pipe, a ball and a cone are each refused against a torus, were
+not checked. Nothing here builds on that claim.
