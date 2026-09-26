@@ -1810,7 +1810,10 @@ mod tests {
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .expect_err("a face with no area is not a sound model");
         assert!(
-            matches!(swept, Error::Invalid(Invalid::OuterWireWindsAgainstTheNormal)),
+            matches!(
+                swept,
+                Error::Invalid(Invalid::OuterWireWindsAgainstTheNormal)
+            ),
             "validate gave {swept:?}"
         );
 
@@ -1831,7 +1834,10 @@ mod tests {
             )
             .expect_err("a face with no area has no measurement");
         assert!(
-            matches!(refused, Error::Invalid(Invalid::OuterWireWindsAgainstTheNormal)),
+            matches!(
+                refused,
+                Error::Invalid(Invalid::OuterWireWindsAgainstTheNormal)
+            ),
             "measure_one_face gave {refused:?}"
         );
     }
