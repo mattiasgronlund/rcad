@@ -433,3 +433,64 @@ R7's row stays parked on this section until the count names a kind.
 
 Every open item here, and every finding in §242.6's list, is a row of
 `docs/queue.md` citing this section, landed in the same commit.
+
+### 242.8 Q80: the two wrong answers are fixed, and §48's trio with them
+
+Q80 landed as `5684991d`, with four tests added at merge.
+
+- **A key named twice.** Each piece now carries the operand it was cut from,
+  `Scratch::cut_from`, filled while `split_both_groups` cuts each operand's
+  faces. `which_solid_owns_each_face` is gone. `a ∪ a`, `a ∩ a` and
+  `fuse([a, a], [], Union)` are `a`, and `a − a` is empty
+  (`tests/one_solid_named_twice_in_a_fuse.rs`).
+- **The tools' order.** `settle_against_each` keeps the first solid a piece is
+  flush on facing each way (`LyingOn`). A piece flush both ways is inside the
+  group, because one solid has material behind it and the other in front.
+  s0 − (s1 ∪ s2) and s0 − (s2 ∪ s1) both answer volume 4, bit for bit, and
+  s0 ∩ (s1 ∪ s2) is s0 ∩ s2 (`tests/a_face_between_two_tools_facing_opposite_ways.rs`).
+- **The same rule fixed four wrong answers that validated.** Q80's verifier
+  found that nothing tested the rule on a curved piece, which is asked about on
+  a branch of its own before any ray. It also found that before the fix a unit
+  ball in the cavity it fills gave wrong answers. Take a cube of side four less a
+  unit ball, that ball, and a second unit ball in the same place:
+  - the second ball less the other two kept the whole ball;
+  - the second ball shared with the other two gave nothing;
+  - the three united, split one way, gave two solids;
+  - the cavity and the first ball less the second gave the whole cube back.
+
+  `validate` accepted every one. Four tests in the same file now hold the right
+  answers. I checked that each fails when `LyingOn` keeps only the first solid
+  again, and that each of those failures comes after `validate` has passed.
+- **§48's trio is closed.** `(far ∪ near) ∩ bar` now answers `near`, volume 2,
+  bit for bit equal to `near ∩ bar`: `bar`'s y = 4 face lies on `near` facing the
+  same way and on `far` facing the other. So `ResultIsNotManifold { count: 1 }`
+  is reached only by turned pairs now, 104 of 624 in
+  `how_often_one_pair_of_turned_boxes_leaves_such_an_edge`, and §39.4 says so.
+  The prose around that pin still said 107, from before §120. It is corrected.
+- **What the verifier ran against it.** 300 triples of boxes on a 0..3 grid,
+  through every split into arguments and tools, every order and all three rules:
+  12 600 fuses, each checked against a count of unit cells. On the base, 340
+  were refused `count: 1`, 172 `count: 3`, and 239 splits answered differently
+  by order. On the tip, none of those, and 36 of the old refusals became
+  `count: 4`. On neither side was an answer wrong, and no fuse that answered on
+  the base refuses or answers differently on the tip.
+- **Pairs cannot move.** With two solids each group holds one, so no piece is
+  flush on two solids of one group. The lane measured the trio and chain laws
+  over twenty seeds each and saw small moves both ways. Those came from base and
+  tip drawing different seeds. On the same seeds (1 to 20, `PROPTEST_RNG_SEED`)
+  the verifier measured 738 of 860 for both trio laws on both sides, and 632
+  against 635 of 860 for the chain of four.
+- **Found beside it:** the comparison floor's doc in `fuses_that_must_agree.rs`
+  says the trio laws reach 71% to 79% and the chain 50% to 69%. Both are above
+  that on the base and the tip alike. That is Q98.
+- **Outside this repo:** the `practices` plugin's `fuse-debugging` skill still
+  names the three boxes as `count: 1`'s sharpest form. The sharpest live form is
+  now a box and a taller one turned together,
+  `a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned`.
+  The skill lives in the marketplace repo, so Mattias has been told rather than
+  the skill edited.
+
+Q80 merged cleanly beside §243, which had already moved the quarter-bend pin in
+`copying_a_solid.rs` (Q82), and did not move it again. Q86 is next in the chain,
+but Q5 writes `fuse/select.rs` too and outranks it, so by the queue's own rule
+Q86 waits for Q5.
