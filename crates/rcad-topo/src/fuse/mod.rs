@@ -48,9 +48,10 @@
 //! - **Selection.** [`Scratch::pieces`] is every face of both groups cut into
 //!   the pieces the two groups' boundaries leave. Each [`Piece`] names the
 //!   ancestor faces it was cut out of, carries their plane bit for bit, and says
-//!   which way round the ancestors' solid used them. Which group a piece belongs
-//!   to is whether its ancestors are faces of a solid in [`Scratch::arguments`]
-//!   or in [`Scratch::tools`]. §17.4's selection table is a table plus one `match` on
+//!   which way round the ancestors' solid used them. Which operand a piece was
+//!   cut from, and so which group it belongs to, is [`Scratch::cut_from`] and
+//!   never its ancestors, since one solid may be named twice. §17.4's selection
+//!   table is a table plus one `match` on
 //!   `Rule`, and classifying a piece is
 //!   [`SolidView::classify_point`](crate::SolidView::classify_point) on a point
 //!   inside it; the ON columns are
@@ -374,6 +375,15 @@ pub(crate) struct Scratch {
     /// Every face of both groups, cut into pieces. Each piece names the input
     /// faces it came from.
     pub(crate) pieces: Vec<Piece>,
+    /// Which operand each of [`Scratch::pieces`] was cut from, by its place in
+    /// [`Scratch::arguments`] and [`Scratch::tools`] laid end to end.
+    ///
+    /// **Not derivable from the faces a piece names.** One solid may be named
+    /// twice — `fuse([a], [a], Union)` — and then both copies' pieces name the
+    /// same faces. Looking the operand up by face credited every piece to the
+    /// later copy, every piece then lay on the earlier one and was dropped as
+    /// the one that came second, and `a ∪ a` came back empty.
+    pub(crate) cut_from: Vec<usize>,
 }
 
 impl Scratch {
@@ -405,15 +415,18 @@ impl Scratch {
         let arguments = solids;
 
         let mut pieces = Vec::new();
-        for solid in arguments.iter().chain(&tools) {
+        let mut cut_from = Vec::new();
+        for (operand, solid) in arguments.iter().chain(&tools).enumerate() {
             for face in &solid.faces {
                 pieces.extend(split_a_face(face, policy, log)?);
             }
+            cut_from.resize(pieces.len(), operand);
         }
         Ok(Self {
             arguments,
             tools,
             pieces,
+            cut_from,
         })
     }
 }

@@ -10,7 +10,7 @@
 //! `.claude/skills/fuse-debugging/SKILL.md` repeats it — *"`count: 1` is
 //! withdrawn (§38.6); seeing it again is a regression, not a refusal"*. Both
 //! sentences are false on this tree, and neither is a near miss: one pair of
-//! boxes reaches it 107 times in 624 fuses.
+//! boxes reaches it 104 times in 624 fuses.
 //!
 //! Both fixes that landed the day this was written are in the tree and both
 //! helped. A solid's own planes now cut its own faces, and a plane and its
@@ -29,35 +29,39 @@
 //! | six families of `tests/pairs`, 500 draws each, all three rules both ways round | 18,000 | 81 |
 //! | every turn of one pair of boxes: 342 whole-number axes × 63 angles × 3 rules | 64,638 | 14,230 |
 //! | the block and the frame §48's lane reported, three rules both ways round | 6 | 0 |
-//! | the sweep [`how_often_one_pair_of_turned_boxes_leaves_such_an_edge`] re-runs | 624 | 107 |
+//! | the sweep [`how_often_one_pair_of_turned_boxes_leaves_such_an_edge`] re-runs | 624 | 104 |
 //!
 //! The six families are `a_lattice_pair`, `a_flush_pair`, `a_turned_pair`,
 //! `a_skew_pair`, `a_pair_somewhere_else` and a trio of lattice solids fused two
-//! against one. **Two of the six reach it**: the turned pairs, and the trio. The
-//! two-solid lattice, flush, skew and elsewhere families reach it in none of
-//! their 3,000 fuses each, which is why the case §48's lane started from looks
-//! closed when you only look there.
+//! against one. **Two of the six reached it** when this was measured: the turned
+//! pairs, and the trio. The two-solid lattice, flush, skew and elsewhere
+//! families reached it in none of their 3,000 fuses each, which is why the case
+//! §48's lane started from looks closed when you only look there.
+//!
+//! **Only the turned pairs reach it now.** The trio's refusal was a fuse
+//! reading a piece flush with two solids by whichever one was named first; once
+//! a piece that one solid faces and another backs counted as inside both,
+//! [`two_boxes_fused_against_a_third_that_used_to_leave_an_edge_with_one_face_along_it`]
+//! answered, and it now pins that answer. The table above is the search as it
+//! was run and was not re-run, so its `81` still counts the trio's refusals.
 //!
 //! # It is a gap and not a limit
 //!
-//! §16.10's test is whether the answer exists. It does, in both cases below, and
-//! each test asserts the answer beside the refusal:
-//!
-//! - the trio's answer is a `1 × 2 × 1` box, and the **two halves of the same
-//!   question hand it back**: one of the two arguments meets the tool in nothing
-//!   at all, and the other meets it in that box, volume 2, validating;
-//! - the turned pair's answer is the taller of the two boxes, and the same pair
-//!   unturned hands it back, volume 2, validating.
-//!
-//! So a question whose two halves are both answered is refused when it is asked
-//! at once, and a pair that is answered standing still is refused turned.
-//! `Policy::tolerant` refuses both too, so it is not a budget.
+//! §16.10's test is whether the answer exists. It does for the turned pair: its
+//! answer is the taller of the two boxes, and the same pair unturned hands it
+//! back, volume 2, validating. So a pair that is answered standing still is
+//! refused turned. `Policy::tolerant` refuses it too, so it is not a budget.
+
+#[path = "fuzzing/comparison.rs"]
+mod comparison;
 
 use core::f64::consts::TAU;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+
+use comparison::{Answer, answer_of, same_answer};
 
 /// Two boxes fused as one argument against a third, on the integer grid, with
 /// no turn anywhere — and an edge of the answer gets one face along it.
@@ -74,62 +78,56 @@ use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 /// rounds: `(far ∪ near) ∩ bar` is exactly `near`, a `1 × 2 × 1` box of volume
 /// two.
 ///
-/// The two runs after it are the demonstration that the answer exists rather
-/// than an argument that it ought to, and neither needs a word of reasoning to
-/// read: `far ∩ bar` is **empty**, and `near ∩ bar` is `near`, volume two. So
-/// `far` contributes nothing to `(far ∪ near) ∩ bar`, both halves of it are
-/// answered on their own, and adding the solid that contributes nothing is what
-/// turns the answer into a refusal.
+/// It was refused `ResultIsNotManifold { count: 1 }`, certified and tolerant
+/// alike, until a fuse stopped reading a piece flush with two solids by
+/// whichever of them was named first. `bar`'s `y = 4` face, where
+/// `z ∈ [1, 2]`, is such a piece: it lies on `near` facing the same way and on
+/// `far` facing the other, so the union of the two has material on both sides
+/// of it.
+///
+/// The answer is checked against `near ∩ bar`, which reaches the same region
+/// without `far`: `far ∩ bar` is **empty**, so `far` contributes nothing, and
+/// the two must agree bit for bit.
 #[test]
-fn two_boxes_fused_against_a_third_leave_an_edge_with_one_face_along_it() {
+fn two_boxes_fused_against_a_third_that_used_to_leave_an_edge_with_one_face_along_it() {
     let (mut model, [far, near, bar]) = three_boxes();
+    let (both, volume) = intersected(&mut model, &[far, near], bar);
+    assert_eq!(volume, 2.0, "`(far ∪ near) ∩ bar` is `near`");
 
-    let refused = model.fuse(
-        &[far, near],
-        &[bar],
-        Rule::Intersection,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(refused, Err(Error::ResultIsNotManifold { count: 1 })),
-        "an edge of the answer got one face along it, and §39.4 calls that withdrawn: {refused:?}"
-    );
+    let (mut model, [far, _, bar]) = three_boxes();
+    let (_, volume) = intersected(&mut model, &[far], bar);
+    assert_eq!(volume, 0.0, "`far` meets `bar` in a face and nothing more");
 
-    let tolerant = model.fuse(
-        &[far, near],
-        &[bar],
-        Rule::Intersection,
-        &Policy::tolerant(model.scale().nominal_size()),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(tolerant, Err(Error::ResultIsNotManifold { count: 1 })),
-        "not a budget: tolerant refuses it the same way, {tolerant:?}"
-    );
+    let (mut model, [_, near, bar]) = three_boxes();
+    let (near_alone, volume) = intersected(&mut model, &[near], bar);
+    assert_eq!(volume, 2.0);
 
-    let nothing = model
+    assert_eq!(
+        same_answer(
+            &near_alone,
+            &both,
+            Rule::Intersection,
+            "adding a box that only touches the tool"
+        ),
+        Ok(())
+    );
+}
+
+/// The answer's geometry and its volume, once it has been checked to validate.
+fn intersected(model: &mut Model, arguments: &[SolidKey], tool: SolidKey) -> (Answer, f64) {
+    let solids = model
         .fuse(
-            &[far],
-            &[bar],
+            arguments,
+            &[tool],
             Rule::Intersection,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .expect("`far` against `bar` is answered");
-    assert_eq!(volume_of(&model, nothing.solids()), 0.0);
-
-    let answered = model
-        .fuse(
-            &[near],
-            &[bar],
-            Rule::Intersection,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .expect("`near` against `bar` is answered");
-    assert_eq!(volume_of(&model, answered.solids()), 2.0);
-    validates(&model);
+        .expect("boxes on the integer grid leave nothing to round")
+        .solids()
+        .to_vec();
+    validates(model);
+    (answer_of(model, &solids), volume_of(model, &solids))
 }
 
 /// The same box and a taller copy of it in the same place, refused once the two
@@ -191,7 +189,7 @@ fn a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned() {
 /// [`a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned`]'s,
 /// turned about each of the twenty-six whole-number directions whose parts are
 /// `-1`, `0` or `1`, by one to eight sixty-fourths of a turn, under all three
-/// rules. **107 of the 624 come back `count: 1` and the other 517 are answered**,
+/// rules. **104 of the 624 come back `count: 1` and the other 520 are answered**,
 /// so it is neither a corner of the grid nor most of it.
 ///
 /// The numbers are asserted rather than printed, and §19 is why: the day the

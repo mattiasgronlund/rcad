@@ -342,6 +342,13 @@ geometry disagree, which §16.11 says arrive from a file.
 > from — two-solid lattice, flush, skew and elsewhere — reach it in none of
 > 3 000 fuses each, which is why it looked closed.
 
+> **§242.8 corrects §48's note: the trio is closed.** A piece flush on one tool
+> facing the same way and on another facing the other is now inside them, and
+> the three boxes answer `near`, volume 2, bit for bit. Only the turned pairs
+> still reach `count: 1`, 104 of 624 in
+> `how_often_one_pair_of_turned_boxes_leaves_such_an_edge`, and it is still a
+> gap.
+
 **Seven rows are named, classified and undemonstrated**, marked above. §30.5 had
 one such row and called it the one worth reading twice; seven is a different
 quantity of the same thing, and §39.7 hands it on. Six are reachable in principle
