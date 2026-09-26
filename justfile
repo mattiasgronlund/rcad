@@ -122,6 +122,7 @@ gate_steps := "check-plugins \
     check-fuzz-triage-selftest \
     check-fuzz-unit \
     check-fuzz-unit-selftest \
+    check-fuzz-yield-selftest \
     check-spend-selftest \
     lint \
     test \
@@ -1667,8 +1668,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "49" ]; then \
-        echo "found $n check-* recipes, expected 49"; \
+    if [ "$n" != "50" ]; then \
+        echo "found $n check-* recipes, expected 50"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -5797,6 +5798,259 @@ check-fuzz-unit-selftest:
     check "installed and stale names the missing line" 1 "Environment=PATH="
 
     [ "$failed" -eq 0 ]
+
+# Q146: which target finds the most per core-hour, read straight off the logs
+# `fuzz-overnight` already writes, with no new state of its own kept anywhere.
+# `docs/decisions.md` §265 is the analysis this reproduces; §265.4's coverage
+# table came from a scratch script, and this recipe is that script folded into
+# the house shape. `tooling/fuzz-yield/log_stats.py` holds the arithmetic for
+# one log — runs, coverage at start/30m/end, the hour it last rose — kept in
+# its own file because that half a plain Python test can cover without a
+# fixture night on disk. This recipe holds the shell around it: which nights,
+# which files, and how Q147's verdicts fold in.
+#
+# **`$night/artifacts/<target>/` is a cumulative copy, not that night's own
+# finds.** `fuzz-overnight`'s `cp -Rn` stamps every file's mtime with whenever
+# that night's copy-out ran, carry-over and new find alike, so mtime cannot
+# tell them apart. A night's "new files" here is instead a filename diff
+# against the nearest earlier night on disk that has any artifacts at all —
+# the one thing about a find that survives being copied forward every night
+# since.
+#
+# **A night with no `fuzz-triage-verdicts.tsv` says "not triaged", never
+# `0`.** `just fuzz-triage` (Q147) is what writes that file, and a night it has
+# not reached yet has told this recipe nothing, which is a different answer
+# from "nothing here is still failing".
+[doc("Per night, per target: core-hours, runs, coverage's start/30m/end, when it last rose, new files by kind, and Q147's faults.")]
+fuzz-yield from="" to="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    root='{{ fuzz_log_root }}'
+    from='{{ from }}'
+    to='{{ to }}'
+    stats='{{ justfile_directory() }}/tooling/fuzz-yield/log_stats.py'
+
+    nights=()
+    while IFS= read -r d; do
+        nights+=("$(basename "$d")")
+    done < <(find "$root" -mindepth 1 -maxdepth 1 -type d \
+        -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' 2>/dev/null | sort)
+    if [ ${#nights[@]} -eq 0 ]; then
+        echo "no night directories under $root"
+        exit 0
+    fi
+
+    artifacts_dir() {
+        local night="$1" target="$2" candidate
+        candidate="$root/$night/artifacts/$target"
+        [ -d "$candidate" ] && { echo "$candidate"; return 0; }
+        candidate="$root/artifacts-rescued-$night/$target"
+        [ -d "$candidate" ] && { echo "$candidate"; return 0; }
+        return 1
+    }
+
+    # Walks the whole list on disk, not just `[from, to]`: the nearest earlier
+    # night with anything to diff against can sit outside the range asked for.
+    nearest_earlier() {
+        local night="$1" target="$2" i idx=-1
+        for i in "${!nights[@]}"; do
+            [ "${nights[$i]}" = "$night" ] && { idx=$i; break; }
+        done
+        for ((i = idx - 1; i >= 0; i--)); do
+            artifacts_dir "${nights[$i]}" "$target" >/dev/null && { echo "${nights[$i]}"; return 0; }
+        done
+        return 1
+    }
+
+    for night in "${nights[@]}"; do
+        [ -n "$from" ] && [[ "$night" < "$from" ]] && continue
+        [ -n "$to" ] && [[ "$night" > "$to" ]] && continue
+        night_dir="$root/$night"
+        echo "night: $night"
+
+        shopt -s nullglob
+        logs=("$night_dir"/fuzz*.log)
+        shopt -u nullglob
+        if [ ${#logs[@]} -eq 0 ]; then
+            echo "  no fuzz logs under $night_dir"
+            continue
+        fi
+
+        verdicts="$night_dir/fuzz-triage-verdicts.tsv"
+        for log in "${logs[@]}"; do
+            if grep -q ': skipped,' "$log"; then
+                echo "  $(basename "$log" .log)"
+                echo "    status: skipped — no time left in the window"
+                continue
+            fi
+
+            line=$(python3 "$stats" "$log")
+            IFS=$'\t' read -r status target fork window_s runs cov_start cov_30 cov_end rise_s <<<"$line"
+            case "$status" in
+                NOLAUNCH)
+                    echo "  $(basename "$log" .log)"
+                    echo "    status: never launched, no 'Running \`...\`' line in this log"
+                    continue
+                    ;;
+                NODATA)
+                    echo "  $target"
+                    echo "    status: launched, but no coverage line was ever printed"
+                    continue
+                    ;;
+                OK) ;;
+                *)
+                    echo "  $(basename "$log" .log)"
+                    echo "    status: log_stats.py said '$status', which this recipe does not know how to read"
+                    continue
+                    ;;
+            esac
+
+            echo "  $target"
+            awk -v f="$fork" -v w="$window_s" \
+                'BEGIN { printf "    core-hours: %.1f (fork %d x window %.2fh)\n", f * w / 3600, f, w / 3600 }'
+            echo "    runs: $runs"
+            echo "    coverage: $cov_start at start, $cov_30 at 30m, $cov_end at end"
+            awk -v r="$rise_s" 'BEGIN { printf "    last rose: hour %.1f\n", r / 3600 }'
+
+            if artifacts=$(artifacts_dir "$night" "$target"); then
+                if prev=$(nearest_earlier "$night" "$target"); then
+                    prev_dir=$(artifacts_dir "$prev" "$target")
+                    new=$(comm -13 <(ls "$prev_dir" | sort) <(ls "$artifacts" | sort) \
+                        | sed -E 's/-[0-9a-f]{40}$//' | sort | uniq -c)
+                    if [ -z "$new" ]; then
+                        echo "    new files: none since $prev"
+                    else
+                        echo "    new files since $prev: $(awk '{printf "%s%s %s", sep, $1, $2; sep=", "}' <<<"$new")"
+                    fi
+                else
+                    n=$(find "$artifacts" -maxdepth 1 -type f | wc -l)
+                    echo "    new files: no earlier night on disk to diff against — counting all $n as new, not tonight's own find"
+                fi
+            else
+                echo "    new files: no artifacts directory for $target under $night"
+            fi
+
+            if [ -f "$verdicts" ]; then
+                faults=$(awk -F'\t' -v t="$target" 'NR > 1 && $1 == t && $3 == "yes"' "$verdicts" | wc -l)
+                echo "    faults: $faults distinct, still failing on main"
+            else
+                echo "    faults: night not triaged"
+            fi
+        done
+    done
+
+# Pins `fuzz-yield` against two nights this builds itself: round numbers for
+# the coverage arithmetic, and a second night whose artifacts carry two files
+# forward unchanged (which must not recount as new) beside two genuinely new
+# ones (which must). A skipped log and a never-covered target are each other's
+# own fixture, and a canned `fuzz-triage-verdicts.tsv` with one matching row,
+# one non-matching row, and one row under a different target checks that the
+# fault count reads its own target's column and nothing else's.
+[private]
+check-fuzz-yield-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    logs="$dir/logs"
+    night1="$logs/2026-09-10"
+    night2="$logs/2026-09-11"
+    mkdir -p "$night1/artifacts/demo_target" "$night2/artifacts/demo_target"
+
+    running() {
+        printf '     Running `target/release/%s -artifact_prefix=/x/ -max_total_time=%s -max_len=81 -fork=%s -timeout=10 /corpus %s`\n' \
+            "$1" "$3" "$2" "$1"
+    }
+    run_line() {
+        printf '#%s: cov: %s ft: 1 corp: 1 exec/s: 1 oom/timeout/crash: 0/0/0 time: %ss\n' "$1" "$2" "$3"
+    }
+
+    {
+        running demo_target 4 28800
+        run_line 1000 500 0
+        run_line 2000 600 1800
+        run_line 5000 900 28800
+    } >"$night1/fuzz-demo.log"
+
+    {
+        running demo_target 2 3600
+        run_line 100 900 0
+        run_line 200 950 1800
+        run_line 400 1000 3600
+    } >"$night2/fuzz-demo.log"
+
+    printf 'fuzz-skip: skipped, -42 s left in the window\n' >"$night2/fuzz-skip.log"
+    running ghost_target 1 60 >"$night2/fuzz-nodata.log"
+
+    deadbeef="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    cafebabe="cafebabecafebabecafebabecafebabecafebabe"
+    beadfeed="beadfeedbeadfeedbeadfeedbeadfeedbeadfeed"
+    c0ffeec0="c0ffeec0c0ffeec0c0ffeec0c0ffeec0c0ffeec0"
+    printf x >"$night1/artifacts/demo_target/crash-$deadbeef"
+    printf x >"$night1/artifacts/demo_target/timeout-$cafebabe"
+    printf x >"$night2/artifacts/demo_target/crash-$deadbeef"
+    printf x >"$night2/artifacts/demo_target/timeout-$cafebabe"
+    printf x >"$night2/artifacts/demo_target/crash-$beadfeed"
+    printf x >"$night2/artifacts/demo_target/slow-unit-$c0ffeec0"
+
+    verdicts="$night2/fuzz-triage-verdicts.tsv"
+    printf 'target\tfiles\tstill_fails\tsample\tgroup\n' >"$verdicts"
+    printf 'demo_target\t2\tyes\tsample-a\tpanic-a\n' >>"$verdicts"
+    printf 'demo_target\t1\tno\tsample-b\tpanic-b\n' >>"$verdicts"
+    printf 'ghost_target\t1\tyes\tsample-c\tpanic-c\n' >>"$verdicts"
+
+    fail() {
+        echo "fuzz-yield drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    yield() { RCAD_FUZZ_LOGS="$logs" {{ just_executable() }} fuzz-yield "$@" 2>&1; }
+
+    got=$(yield 2026-09-10 2026-09-11) || fail "the recipe itself failed on two ordinary nights"
+
+    grep -q '^night: 2026-09-10$' <<<"$got" || fail "it did not report the first night"
+    grep -q '^night: 2026-09-11$' <<<"$got" || fail "it did not report the second night"
+    grep -q '^  demo_target$' <<<"$got" || fail "it did not name the target read off the Running line"
+    grep -qF '    core-hours: 32.0 (fork 4 x window 8.00h)' <<<"$got" \
+        || fail "core-hours is not fork times window for the first night"
+    grep -qF '    runs: 5000' <<<"$got" || fail "it did not report the run count"
+    grep -qF '    coverage: 500 at start, 600 at 30m, 900 at end' <<<"$got" \
+        || fail "coverage at start/30m/end does not match the first night's fixture log"
+    grep -qF '    last rose: hour 8.0' <<<"$got" || fail "the last rise hour is wrong"
+    grep -qF '    core-hours: 2.0 (fork 2 x window 1.00h)' <<<"$got" \
+        || fail "core-hours is not fork times window for the second night"
+    grep -qF '    coverage: 900 at start, 950 at 30m, 1000 at end' <<<"$got" \
+        || fail "the second night's coverage line is wrong"
+
+    grep -qF 'no earlier night on disk to diff against — counting all 2 as new' <<<"$got" \
+        || fail "the first night on disk should count its own baseline artifacts as new, and say why"
+    grep -qF 'new files since 2026-09-10: 1 crash, 1 slow-unit' <<<"$got" \
+        || fail "carried-over crash-$deadbeef and timeout-$cafebabe were recounted, or the genuinely new files were missed"
+
+    grep -qF '  fuzz-skip' <<<"$got" || fail "the skipped log was not named by its own basename"
+    grep -qF 'status: skipped — no time left in the window' <<<"$got" \
+        || fail "a skipped target was not reported as skipped"
+
+    grep -qF '  ghost_target' <<<"$got" || fail "the never-covered target was not named"
+    grep -qF 'status: launched, but no coverage line was ever printed' <<<"$got" \
+        || fail "a target with no coverage line was not reported"
+
+    grep -qF 'faults: night not triaged' <<<"$got" \
+        || fail "a night with no verdicts file said something other than not triaged"
+    grep -qF 'faults: 1 distinct, still failing on main' <<<"$got" \
+        || fail "the fault count did not filter the verdicts file down to this target's own rows"
+
+    narrow=$(yield 2026-09-11 2026-09-11) || fail "a single-night range made the recipe fail"
+    got="$narrow"
+    # Negated with `!`, not written as `grep && fail`: the passing case here is
+    # the grep finding nothing, a non-zero status, and `set -e` would take the
+    # recipe down on the arm that just succeeded (see the same note at the
+    # hand-run fuzz arm above).
+    ! grep -q '^night: 2026-09-10$' <<<"$narrow" \
+        || fail "a range naming only the second night still reported the first"
+
+    echo "fuzz-yield: coverage arithmetic, the artifact diff, and the fault count all match their fixtures"
 
 [doc("The benchmarks.")]
 bench:
