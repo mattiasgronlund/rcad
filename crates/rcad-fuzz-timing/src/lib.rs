@@ -61,7 +61,9 @@
 //! directory was named, allocations a draw made and kept, a thread of its own,
 //! and a `memcmp` of each draw against the slow inputs held. Each is gone, and
 //! why is written where it would come back: [`timed`],
-//! `TheSlowestRuns::keeping`, `HOW_OFTEN_TO_MERGE` and `SlowRun::is`.
+//! `TheSlowestRuns::keeping`, `HOW_OFTEN_TO_MERGE` and `SlowRun::is`. Moving
+//! the merge into the draw made one more thing matter, the hash keys of the
+//! draw's thread, and `prune_to_the_slowest_kept` says why.
 //!
 //! What is left is this crate's own code, which libFuzzer still counts as
 //! coverage unless the build leaves it uninstrumented — and that is the
