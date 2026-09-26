@@ -180,10 +180,17 @@ command is tokenized and each simple command judged on what it does: grep,
 its report to the scratchpad, and a commit message that describes a write all
 pass. git is left alone entirely, since git is how a conflict is settled.
 
-It is not registered: `.claude/settings.json` is Mattias's to change. The entry
-is a `PreToolUse` hook with matcher `Bash|Edit|Write|MultiEdit|NotebookEdit`
-running `"$CLAUDE_PROJECT_DIR/.claude/hooks/queue-write-guard.sh"`. Until it is,
-the verbs are a better way to change the file and not yet the only one.
+`.claude/settings.json` is Mattias's to change, so the lane built the guard and
+left it unregistered. He registered it on 2026-09-26 in 5909be09, merged to
+`main` at ccbbcee8: a `PreToolUse` hook with matcher
+`Bash|Edit|Write|MultiEdit|NotebookEdit` running
+`"$CLAUDE_PROJECT_DIR/.claude/hooks/queue-write-guard.sh"`.
+
+A session keeps the hooks it started with. rcad-18's tree was merged up to
+ccbbcee8, and an `Edit` to `docs/queue.md` from that session still went
+through, with no hook error, and was put back. So the guard holds for a session
+*started* in a tree at or after ccbbcee8. A session already running when it
+merges `main` can still edit the file by hand, and should use the verbs anyway.
 
 ### 263.8 The tests
 
@@ -217,9 +224,9 @@ dangling `after:` it refuses is now a `T` id.
 
 ### 263.9 What is left
 
-- The guard is not registered until Mattias adds the entry in §263.7.
 - `add` puts a row at the foot of its tier. There is no verb to rank a row
-  higher, and ranking by hand is now what the guard refuses.
+  higher, and since ccbbcee8 the guard refuses ranking by hand. Q151 adds the
+  verb.
 - A row closed in another copy, or on `main`, and still open in this one is
   offered by `next`: the copy is behind, and `next` reads it as it stands.
   Merging `main` first is the answer today.
