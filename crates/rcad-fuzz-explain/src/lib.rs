@@ -29,8 +29,10 @@
 // dropping one harness — is dropping a target this has to explain.
 #![allow(clippy::duplicate_mod)]
 
-use std::fmt;
+use std::collections::HashMap;
+use std::fmt::{self, Write as _};
 use std::panic::{self, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rcad_geom::{Surface, SurfaceMeet, intersect};
@@ -160,6 +162,125 @@ impl fmt::Display for Outcome {
             }
         }
     }
+}
+
+/// One bucket [`triage`] collapsed a night's files into: how many landed
+/// there, one to look at, and whether that bucket still fails against the
+/// commit this binary was built at.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupedVerdict {
+    /// Which of [`TARGETS`] every file in this bucket belongs to.
+    pub target: String,
+    /// How many files landed in this bucket.
+    pub files: usize,
+    /// Whether a file from this bucket still fails against the commit this
+    /// binary was built at. `false` for a bucket that used to crash and does
+    /// not any more.
+    pub still_fails: bool,
+    /// One file from the bucket, to read or replay by hand.
+    pub sample: PathBuf,
+    /// The panic's own message and place, where the bucket is a panic; a
+    /// fixed name for everything else, so a night's harmless residue does not
+    /// fragment into one bucket per file.
+    pub group: String,
+}
+
+/// Replay every `(target, path)` pair once, in this one process, and collapse
+/// them into the buckets a night's report is made of.
+///
+/// This is what `--triage` replaces: the shell loop it used to run spent one
+/// `cargo run` per file, which is what made 22 528 writer crash files from the
+/// night of 2026-09-26 too slow to count as faults (§265.2). Reading every
+/// file inside one already-running process, in a plain loop, is the whole
+/// fix — nothing here changes what a single [`explain`] call decides about one
+/// file, and a caller replaying one file by hand still gets the same answer
+/// from the two-argument command line.
+///
+/// A `target` this binary does not recognise is skipped rather than guessed
+/// at, and counted in the returned total instead — the caller decides what
+/// "not a real target" means for the files it hands in.
+pub fn triage(
+    inputs: impl IntoIterator<Item = (String, PathBuf)>,
+) -> (Vec<GroupedVerdict>, usize) {
+    let mut buckets: HashMap<(String, String), GroupedVerdict> = HashMap::new();
+    let mut skipped = 0;
+    for (target, path) in inputs {
+        if !TARGETS.contains(&target.as_str()) {
+            skipped += 1;
+            continue;
+        }
+        let (group, still_fails) = bucket_for(&target, &path);
+        buckets
+            .entry((target.clone(), group.clone()))
+            .and_modify(|verdict| verdict.files += 1)
+            .or_insert_with(|| GroupedVerdict {
+                target,
+                files: 1,
+                still_fails,
+                sample: path,
+                group,
+            });
+    }
+    let mut groups: Vec<_> = buckets.into_values().collect();
+    groups.sort_by(|a, b| {
+        b.files
+            .cmp(&a.files)
+            .then_with(|| a.target.cmp(&b.target))
+            .then_with(|| a.group.cmp(&b.group))
+    });
+    (groups, skipped)
+}
+
+/// What one file is worth to the tally: its bucket, and whether that bucket
+/// still fails.
+///
+/// A panic's bucket is its own message, which already names the place — see
+/// [`Outcome::Panicked`] — so two files that panicked at the same line group
+/// together even when the values an assertion printed differ. Everything else
+/// is a fixed name per target, because a fault report does not need to tell
+/// two successful replays, or two refusals, apart.
+fn bucket_for(target: &str, path: &Path) -> (String, bool) {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(why) => return (format!("{target}: could not read this artifact: {why}"), true),
+    };
+    match explain(target, &bytes) {
+        Err(_why) => (format!("{target}: bytes did not decode to a case"), true),
+        Ok(explained) => match explained.outcome {
+            Outcome::Panicked { message } => (message, true),
+            Outcome::Refused { named, .. } => {
+                (format!("{target}: no longer fails — refused {named}"), false)
+            }
+            Outcome::Succeeded { .. } => {
+                (format!("{target}: no longer fails — succeeded"), false)
+            }
+        },
+    }
+}
+
+/// [`triage`]'s report as tab-separated text, one line per bucket, for
+/// `fuzz-triage` to write into the night's own directory.
+///
+/// The columns are `target`, `files`, `still_fails` (`yes`/`no`), `sample`,
+/// `group`, in that order, header first, so `cut` or `awk -F'\t'` reads any
+/// one of them by name without counting the others. `group` is last because it
+/// is the one field not tab-safe by construction elsewhere but is here: a
+/// [`Outcome::Panicked`] message is already squeezed to one line with no tabs
+/// in it (see [`on_one_line`]), so nothing after it needs escaping.
+pub fn as_tsv(groups: &[GroupedVerdict]) -> String {
+    let mut out = String::from("target\tfiles\tstill_fails\tsample\tgroup\n");
+    for verdict in groups {
+        let _ = writeln!(
+            out,
+            "{}\t{}\t{}\t{}\t{}",
+            verdict.target,
+            verdict.files,
+            if verdict.still_fails { "yes" } else { "no" },
+            verdict.sample.display(),
+            verdict.group
+        );
+    }
+    out
 }
 
 /// A plane, a ball or a pipe against another, read the way
@@ -695,5 +816,116 @@ mod tests {
     #[test]
     fn bytes_outside_plain_ascii_are_escaped() {
         assert_eq!(as_a_literal(&[0, b'a', 0xff, b'"']), r#"b"\x00a\xff\"""#);
+    }
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NEXT_TEMP_FILE: AtomicU32 = AtomicU32::new(0);
+
+    /// A file under a fresh directory of its own, removed when it drops —
+    /// [`triage`] and [`bucket_for`] read artifacts off disk, so grouping them
+    /// needs real paths and not just byte slices in memory.
+    struct TempFile {
+        dir: PathBuf,
+        path: PathBuf,
+    }
+
+    impl TempFile {
+        fn holding(contents: &[u8]) -> Self {
+            let id = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir()
+                .join(format!("rcad-fuzz-explain-test-{}-{id}", std::process::id()));
+            std::fs::create_dir_all(&dir).expect("a scratch directory for one test file");
+            let path = dir.join("artifact");
+            std::fs::write(&path, contents).expect("one test artifact");
+            Self { dir, path }
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// Two files that fail to decode the same way group into one bucket
+    /// rather than one line each — the whole point of `--triage` over the
+    /// per-file loop it replaces.
+    #[test]
+    fn two_files_with_the_same_undecodable_bytes_are_one_bucket() {
+        let a = TempFile::holding(b"not a real crash input");
+        let b = TempFile::holding(b"not a real crash input");
+        let (groups, skipped) = triage([
+            (WHERE_TWO_SURFACES_CROSS.to_owned(), a.path.clone()),
+            (WHERE_TWO_SURFACES_CROSS.to_owned(), b.path.clone()),
+        ]);
+        assert_eq!(skipped, 0);
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(groups[0].files, 2);
+        assert!(
+            groups[0].still_fails,
+            "an input that could not even be decoded is counted as still failing, \
+             not silently dropped from the tally"
+        );
+    }
+
+    /// The same bytes under two different targets are two buckets, never
+    /// merged into one just because the bucket's name happens to match.
+    #[test]
+    fn the_same_bytes_under_two_targets_are_two_buckets() {
+        let a = TempFile::holding(&[255; 64]);
+        let b = TempFile::holding(&[255; 64]);
+        let (groups, _) = triage([
+            (NO_MODEL_MAKES_THE_WRITER_PANIC.to_owned(), a.path.clone()),
+            (TWO_SOLIDS_FUSED_BY_A_STRANGER.to_owned(), b.path.clone()),
+        ]);
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        assert_ne!(groups[0].target, groups[1].target);
+    }
+
+    /// A target this binary has never heard of is skipped and counted, not
+    /// guessed at or folded into some other bucket.
+    #[test]
+    fn an_unknown_target_is_skipped_and_counted() {
+        let a = TempFile::holding(b"whatever");
+        let (groups, skipped) = triage([("no_such_target".to_owned(), a.path.clone())]);
+        assert!(groups.is_empty(), "{groups:?}");
+        assert_eq!(skipped, 1);
+    }
+
+    /// A replay that answers, rather than panicking, is not counted as still
+    /// failing — the same distinction §91.5 needed `fuzz-triage-verdict` for.
+    #[test]
+    fn a_replay_that_answers_does_not_still_fail() {
+        let numbers = [
+            0.0, 0.0, 1.0, -5.0, // a plane well clear of the ball below
+            0.0, 0.0, 0.0, 1.0, // a unit ball at the origin
+        ];
+        let bytes = surfaces::bytes_for([0, 1], &numbers);
+        let a = TempFile::holding(&bytes);
+        let (groups, _) = triage([(WHERE_TWO_SURFACES_CROSS.to_owned(), a.path.clone())]);
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert!(
+            !groups[0].still_fails,
+            "a plane that misses the ball entirely is not a fault: {:?}",
+            groups[0]
+        );
+    }
+
+    /// The report is tab-separated with the group's own text last, so a
+    /// squeezed panic message with spaces in it cannot shift the columns
+    /// before it.
+    #[test]
+    fn as_tsv_keeps_four_tabs_before_the_group_text() {
+        let a = TempFile::holding(b"not a real crash input");
+        let (groups, _) = triage([(WHERE_TWO_SURFACES_CROSS.to_owned(), a.path.clone())]);
+        let text = as_tsv(&groups);
+        let mut lines = text.lines();
+        assert_eq!(
+            lines.next(),
+            Some("target\tfiles\tstill_fails\tsample\tgroup")
+        );
+        let body = lines.next().expect("one data row");
+        assert_eq!(body.matches('\t').count(), 4, "{body}");
     }
 }
