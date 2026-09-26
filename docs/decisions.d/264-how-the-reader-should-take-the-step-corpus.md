@@ -188,9 +188,11 @@ minutes and not for a night. Q144's long pair is the run that measures it.
    keeping 64 KiB finds as D2 does.
 3. **A -max_len between the two, or above 65 536.** 46 files fit whole in
    32 768 bytes, and 124 in 65 536. Neither 32 768 nor 131 072 was run, so
-   where the coverage falls off between D1 and D2 is not known.
+   where the coverage falls off between D1 and D2 is not known. *Answered by
+   §274 (Q158): coverage is still rising at 131 072.*
 4. **Which part of D2's coverage comes from the 124 files that fit whole.** A
-   merge-only run over those 124 alone would say.
+   merge-only run over those 124 alone would say. *Answered by §274 (Q158):
+   almost all of it.*
 5. **The exit status 70** (§264.5): whether cargo-fuzz passes it on, and what
    `fuzz-overnight` does when a target exits non-zero.
 6. **Why C's first job line is above §258.6's arm A** by about 700 edges,
