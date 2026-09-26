@@ -1304,31 +1304,39 @@ impl<'f> Arrangement<'f> {
     /// Whether a corner of the face already is `place`, one of the `places`
     /// where the face's surface and the partners of `first` and `second` meet.
     ///
-    /// **A corner on both crossings is taken to be on all three surfaces**, so
-    /// one of their meets, with its true point inside the box of one of
-    /// `places`. When `place` is the only one whose box reaches the corner's,
-    /// `place` is taken to be that corner. When a second place reaches the
-    /// corner as well, nothing here says which of the two it is.
+    /// **It is, when the model says so and `place` is no further from the
+    /// corner than writing the corner down cost.** The model says so when the
+    /// corner is on both crossings: [`Arrangement::place_the_corners`] takes
+    /// the edge's own crossing and a surface the corner already knows about as
+    /// read. Its word is not a proof. A corner is written down rounded, so it
+    /// can be a few ulps off a surface it is on. Under `Policy::certified` the
+    /// suites fold meets into exact corners that `side_of_surface` proves are
+    /// off one of the three surfaces (§248.6).
     ///
-    /// **That first sentence is the model's word, not a proof**, so neither is
-    /// the fold. A corner gets its crossings in
-    /// [`Arrangement::place_the_corners`], where the edge's own crossing and a
-    /// surface the corner already knows about are taken as read, and
-    /// `derive_a_corner` in `bake.rs` accepts a surface that answers
-    /// `Undecidable` under any policy. Under `Policy::certified` the suites
-    /// fold meets into exact corners that `side_of_surface` proves are off one
-    /// of the three surfaces, by the ulps an earlier fuse rounded them by
-    /// (§248.6). The fold made those same drops before §248, and whether it is
-    /// sound is still open.
+    /// **So the fold takes the model's word only as far as rounding reaches.**
+    /// Every point `place`'s box holds has to lie inside the corner's box grown
+    /// by [`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost).
+    /// That is the allowance `bake.rs` uses to let a meet stand in for a
+    /// stored corner, from the same function. Within it, the two are one point
+    /// written down two ways. That is representation wobble, not a decision
+    /// anybody failed to prove (§17.2), so no policy is asked. Every fold the
+    /// suites make under `Policy::certified` lies within a quarter of that
+    /// allowance, and the 224 into corners proved off a surface lie within
+    /// under one percent of it (§253.2).
     ///
-    /// **Anything short of that stays a node of its own**, and whether two
+    /// **Anything further stays a node of its own**, and whether two
     /// overlapping nodes are one point is left to
     /// [`Arrangement::merge_points_that_are_one_point`], which asks the policy
-    /// (§17.4). The fold here used to be taken on any node of both crossings
-    /// whose box touched — which includes the other place of this very meet,
-    /// and three surfaces that meet twice meet at two *different* points. A
-    /// block edge grazing a ball `2⁻⁵¹` either side of `x = 16` came out as one
-    /// node that way, with no policy asked (§244.3).
+    /// (§17.4). Before §253 the fold was taken whenever the boxes touched,
+    /// however wide the meet's box was. One corpus draw folded a meet reaching
+    /// `1.4e-10` from its corner, 2 012 times the allowance, and answered under
+    /// a tolerant policy. With the meet kept as a node, that fuse refuses
+    /// (§253.3).
+    ///
+    /// **A second place within the allowance** means nothing here says which
+    /// of the two the corner is, and both stay nodes. The places of one meet
+    /// are *different* points, and folding on a touch alone once merged them
+    /// (§244.3, §248).
     fn a_corner_is_this_place(
         &self,
         first: usize,
@@ -1337,15 +1345,25 @@ impl<'f> Arrangement<'f> {
         places: &[PredicatePoint],
     ) -> bool {
         self.nodes.iter().any(|node| {
-            node.vertex.is_some()
+            if !(node.vertex.is_some()
                 && node.crossings.contains(&first)
                 && node.crossings.contains(&second)
-                && boxes_overlap(node.point, place)
-                && places
-                    .iter()
-                    .filter(|&&other| boxes_overlap(node.point, other))
-                    .count()
-                    == 1
+                && boxes_overlap(node.point, place))
+            {
+                return false;
+            }
+            let allowed = super::bake::grown_by(
+                node.point,
+                super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
+            );
+            let (meet, room) = (place.enclosure(), allowed.enclosure());
+            (0..3).all(|axis| {
+                room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+            }) && places
+                .iter()
+                .filter(|&&other| boxes_overlap(allowed, other))
+                .count()
+                == 1
         })
     }
 
