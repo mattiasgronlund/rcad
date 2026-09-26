@@ -65,7 +65,12 @@
 //! the merge into the draw made two more things matter. One is the hash keys
 //! of the draw's thread, and `prune_to_the_slowest_kept` says why. The other
 //! is how the merge matches words and file names, and `read_back` and
-//! `how_slow_the_name_says` say why they do it byte by byte (§273).
+//! `how_slow_the_name_says` say why they do it byte by byte (§273). A third
+//! thing came from moving the merge into the draw rather than a thread: a
+//! child that ends normally never returns from the draw it is in, so a run
+//! since the last merge was stuck in that process's memory. `HOW_OFTEN_TO_MERGE`
+//! and `MergeWhenThisThreadEnds` say how that run reaches `totals` anyway
+//! (§278).
 //!
 //! What is left is this crate's own code, which libFuzzer still counts as
 //! coverage unless the build leaves it uninstrumented — and that is the
@@ -116,9 +121,47 @@ pub fn timed<T>(target: &str, bytes: &[u8], run: impl FnOnce() -> T) -> T {
 #[inline(never)]
 fn start_the_clock(target: &str) -> Option<Instant> {
     WATCH
-        .get_or_init(|| Watch::asked_for(target).map(Mutex::new))
+        .get_or_init(|| {
+            let watch = Watch::asked_for(target).map(Mutex::new);
+            if watch.is_some() {
+                MERGE_WHEN_THIS_THREAD_ENDS.with(|_| {});
+            }
+            watch
+        })
         .as_ref()
         .map(|_| Instant::now())
+}
+
+/// A merge made once more when this thread ends, so a run counted since the
+/// last due merge is not lost when the process ends normally.
+///
+/// **How a child ends decides whether this can save anything** — see
+/// [`HOW_OFTEN_TO_MERGE`]. A `-max_total_time` or the stop file ends a child
+/// with `exit(0)`, which runs the calling thread's `thread_local!`
+/// destructors, so a merge from here reaches `totals` before the process is
+/// gone. A `-timeout`, a crash or an out-of-memory ends in `_Exit`, which
+/// runs no destructors, so this closes the first gap and does nothing for
+/// the second (§278).
+///
+/// **Touched once, from inside the same [`OnceLock::get_or_init`] that makes
+/// [`WATCH`]** — the empty input libFuzzer runs once at start-up and never
+/// checks for a leak — so registering this destructor costs nothing on every
+/// other draw, and nothing at all where `RCAD_FUZZ_TIMINGS` is unset.
+struct MergeWhenThisThreadEnds;
+
+impl Drop for MergeWhenThisThreadEnds {
+    fn drop(&mut self) {
+        if let Some(Some(watch)) = WATCH.get() {
+            watch
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .merge_out();
+        }
+    }
+}
+
+thread_local! {
+    static MERGE_WHEN_THIS_THREAD_ENDS: MergeWhenThisThreadEnds = const { MergeWhenThisThreadEnds };
 }
 
 /// Count the draw that `started` began, and merge if one is due.
@@ -156,11 +199,10 @@ fn stop_the_clock(started: Option<Instant>, bytes: &[u8]) {
 /// (`:368-373`). A child that reaches its `-max_total_time` or finds the stop
 /// file ends with `exit(0)` (`FuzzerDriver.cpp:930`), which runs the functions
 /// registered to run at exit and, on Linux, the exiting thread's thread-local
-/// destructors, so a merge there could save that second. Nothing here does
-/// that yet: that loss is a gap (§267.6). A `-timeout`, a crash or an
-/// out-of-memory ends in `_Exit` (`FuzzerLoop.cpp:307`, `:238`, `:135` and
-/// `:322`), which runs nothing, so what those lose cannot be saved: that loss
-/// is a limit.
+/// destructors — [`MergeWhenThisThreadEnds`] merges from one of those, so
+/// that second is saved (§278). A `-timeout`, a crash or an out-of-memory
+/// ends in `_Exit` (`FuzzerLoop.cpp:307`, `:238`, `:135` and `:322`), which
+/// runs nothing, so what those lose cannot be saved: that loss is a limit.
 ///
 /// **The merge is made by the draw that finds it due, on libFuzzer's own
 /// thread**, and not by a thread of this crate's ticking beside it (§267).
