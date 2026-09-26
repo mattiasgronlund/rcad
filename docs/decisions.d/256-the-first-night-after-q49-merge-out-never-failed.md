@@ -87,7 +87,8 @@ whatever the merge thread last flushed, and the design bound already covered
 it.
 
 `where_two_surfaces_cross`'s last cumulative line reads
-`oom/timeout/crash: 0/951/0` at `job: 1104` — **86% of its job-endings were a
+`oom/timeout/crash: 0/951/0` at `job: 1102`, and the last job its log names is
+1104 — **86% of its job-endings were a
 10-second `-timeout` kill**, not a crash and not ordinary fork rotation. Its
 gap per job-ending is 293 405 / 1 104 ≈ **266 runs**; its gap per *timeout*
 job-ending is 293 405 / 951 ≈ **309 runs** — close to the night's own overall
