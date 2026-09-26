@@ -1363,7 +1363,7 @@ _skills-check dir:
                 if ($i == "just" && $(i + 1) ~ /^[a-z][a-z0-9-]*$/) print $(i + 1) }' \
             | sort -u)
         for r in $named; do
-            printf '%s\n' "$recipes" | grep -qx "$r" && continue
+            grep -qxF -- "$r" <<<"$recipes" && continue
             echo "$f says \`just $r\`, which this justfile does not define"
             bad=1
         done
@@ -5617,13 +5617,13 @@ fuzz-promote target file name="":
 # shape `fuzz-overnight` writes, artifacts in both of the two places they land,
 # and a night nothing has reported.
 #
-# **The decoder is asserted by name, first, and that is not decoration.** It is
-# another lane's crate, and without it every arm below would still pass: a
-# decoder that cannot run reports as an input that did not come back clean,
-# which is the right thing for the recipe to do and says nothing at all about
-# whether the decoder was ever there. So this arm fails loudly until
-# `rcad-fuzz-explain` exists, rather than going quietly green over a contract
-# nothing implements.
+# **The decoder is asserted by name, first, and that is not decoration.**
+# Without it every arm below would still pass: a decoder that cannot run
+# reports as an input that did not come back clean, which is the right thing
+# for the recipe to do and says nothing at all about whether the decoder was
+# ever there. So this arm fails loudly if `rcad-fuzz-explain` is ever missing
+# from the workspace, rather than going quietly green over a contract nothing
+# implements.
 #
 # `HEAD` rather than `main` for `against`, because the arms are about the
 # recipe's parse and not about which tree it borrows: pointing it at `main` from
@@ -5633,10 +5633,9 @@ fuzz-promote target file name="":
 check-fuzz-triage-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo metadata --no-deps --format-version 1 2>/dev/null \
-        | grep -q '"name":"rcad-fuzz-explain"' \
-        || { echo "fuzz-triage decodes an artifact with rcad-fuzz-explain, and this workspace has no such crate"; \
-             echo "it is lane-fuzz-explain's deliverable; this stays red until that branch is merged"; \
+    metadata=$(cargo metadata --no-deps --format-version 1 2>/dev/null)
+    grep -q '"name":"rcad-fuzz-explain"' <<<"$metadata" \
+        || { echo "fuzz-triage decodes an artifact with rcad-fuzz-explain, and cargo metadata does not list that crate here"; \
              exit 1; }
 
     dir=$(mktemp -d)
