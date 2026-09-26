@@ -191,6 +191,17 @@ The verifier argues that no point on the face's plane can land there, since
 `two_meridian_circles` proves a margin between the circles first. That is
 argued, not run.
 
+**Since Q118 (c3920eb3), tests do reach both arms**, through
+`face_holds_the_point`, which does not ask whether its point is on the face.
+Three tests in `a_bends_cap_holds_one_of_the_two_disks.rs` hand the cap a
+point off it: a point in the tube on `x = 0`, the plane between the two
+disks, reaches `Zero` and is kept, and two boxes reaching across that plane
+reach `Undecidable` — one round the other cap's centre, and one on a fat bend
+turned an eighth of a turn, where the plane is `x = −y` and the box holds a
+point of the cap. The argument above, that no point on the
+face's plane lands there, still stands; the tests reach the arms only from off
+the plane.
+
 A half-ring's flat ring-shaped face through the ring's middle may have given
 the same wrong answer on the base: the outer wire counts +1 and the hole −1,
 so a point on the face comes out `NotHeld`. That is reasoned, not run.
