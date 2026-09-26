@@ -18,6 +18,7 @@ losing to `-timeout` rather than exclude those inputs from the corpus.*
           corpus change
   260.5   Why this target's tail was already named, before fork mode existed
   260.6   What is left
+  260.7   At merge
 
 ### 260.1 Why 2026-09-20 is as far back as this question can go
 
@@ -164,10 +165,26 @@ per-input.
   Seven points and one early outlier on the high side (09-22) are not enough
   to separate a real narrowing from noise; a few more nights' cumulative
   lines, read the same way, would settle it cheaply.
-- The two `crates/rcad-geom/src` commits named in this window that touch
-  surface-crossing code (`3a853568`, `65785037`, plus `73e5863a` and
+- The four `crates/rcad-geom/src` commits in this window that touch
+  surface-crossing code (`3a853568`, `65785037`, `73e5863a` and
   `a7df89e2`) were checked for landing on the target's own harness file and
   found not to touch it (§260.4); whether any of them changed the *speed* of
   the surface-crossing path itself, as opposed to its harness, was not
   checked, and nothing in §260.3's table lines up with any of their dates
   closely enough to suggest it matters.
+
+### 260.7 At merge
+
+The dispatcher re-read two nights from the logs. On 2026-09-21 the last
+cumulative line reads `0/623/1` at `job: 797`, and the largest job named is
+797. On 2026-09-24 it reads `0/775/0` at `job: 905`, and the largest job named
+is 908. Both match §260.3's table, which uses the largest job named, as
+§260.2 says.
+
+Only the first item of §260.6 becomes a row, Q139, and it is parked on Q130.
+The share matters if a job killed by `-timeout` also costs the timing record
+that job's runs, which is §256.4's hypothesis and Q130's question. If Q130
+finds it does not, knowing which inputs time out changes no decision. The
+second item gets no row, because no decision depends on whether the band
+narrowed. Nor does the third: the lane found no night whose share moved with
+one of those four commits, and §13 builds nothing without a consumer.

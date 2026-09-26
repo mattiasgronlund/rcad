@@ -15,6 +15,7 @@ citations are to `libfuzzer-sys-0.4.13`, the version `fuzz/Cargo.lock` pins.*
   258.6   The coverage the STEP files buy
   258.7   -max_len, read from the source and not yet run
   258.8   What this leaves, and what T7 should do meanwhile
+  258.9   At merge
 
 ### 258.1 What was run
 
@@ -164,3 +165,25 @@ writes big inputs into the night's own corpus at 30 MB a quarter hour. The
 likely fix is to pin `-max_len` for the reader when the STEP corpus is passed,
 and to leave the zips out as §255.7 said. The value, and whether it keeps the
 coverage, waits on arm D.
+
+### 258.9 At merge
+
+The dispatcher ran the lane's own `summarize.sh` again over the round-1 logs,
+and it printed the same figures as §258.2: 374 and 25 148 execs/s from about
+600 s to the end, 63 and 82 jobs, and 6 and 0 of them ended on `-timeout`.
+The rate was taken after the merge, not over a total that includes it, which
+is what §255.9 asked for.
+
+The lane ran one round of the two it was asked for and stopped at its
+budget. §258.8's items become two rows:
+
+- **Q143** runs arms D and C beside arm B, twice, and says how T7 should
+  pass the corpus. Items 1, 3 and 4 of §258.8 are one deliverable, the
+  choice T7 waits on, so they are one row. T7 is now `after:Q143`.
+- **Q144**, the long pair to job 300, is parked until Q143 picks an arm. The
+  steady rate matters only for the arm T7 takes, and three hours of two
+  fork-mode readers is not worth spending on an arm that will not be taken.
+
+§258.2's rates came from a pair run side by side in one round, so the noise
+that §259.7 warns about still applies. Q143 runs every arm twice for this
+reason.

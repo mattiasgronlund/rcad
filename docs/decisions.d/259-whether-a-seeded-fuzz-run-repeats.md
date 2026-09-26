@@ -211,3 +211,62 @@ through it.
   rather than a crash, run both arms with `RCAD_FUZZ_TIMINGS` unset —
   259.5 shows that variable alone is enough to move the numbers on a
   target that otherwise reproduces exactly.
+
+### 259.8 Corrected at merge: the thread is not shown to be the cause, and the variable changes how many inputs libFuzzer runs
+
+**Re-run.** At merge the dispatcher re-ran 259.5's four runs on the lane's
+own `where_two_surfaces_cross` binary, each on a fresh copy of the 834-file
+corpus, `-seed=42 -runs=1500 -print_final_stats=1`, all four at once:
+
+| | `RCAD_FUZZ_TIMINGS` | `INITED` at | `INITED` cov/ft | ended at | final cov/ft | corp | new units | time |
+|---|---|---|---|---|---|---|---|---|
+| Run 1 | unset | `#835` | 3107 / 8779 | `#1500` | 3112 / 8873 | 526 | 22 | 19 s |
+| Run 2 | unset | `#835` | 3107 / 8779 | `#1500` | 3112 / 8873 | 526 | 22 | 19 s |
+| Run 1 | set | `#902` | 3745 / 9680 | `#1500` | 3752 / 9837 | 534 | 27 | 37 s |
+| Run 2 | set | `#903` | 3746 / 9754 | `#1794` | 3768 / 10063 | 535 | 24 | 51 s |
+
+The unset pair matches 259.5's unset pair in every figure, so that result
+stands. The set pair diverges, as 259.5 found.
+
+**The mechanism paragraph in 259.5 is wrong on one leg.** It says the cause
+is "not the clock value itself feeding into any decision the target makes"
+and calls candidate (d), the thread, "demonstrated rather than argued." The
+clock value does feed decisions, not in the target but inside `timed()`
+(`crates/rcad-fuzz-timing/src/lib.rs`), on the main thread, on every draw:
+`record` puts the elapsed time through `bucket_of`, and `Slowest::offer`
+branches on it at `took <= self.runs[0].0`, in its `position` scan and in
+`partition_point`. That code is instrumented like the rest of the binary; the
+≈640 more edges at `INITED` with the variable set are that crate's own code
+being counted. So candidate (a), the clock steering instrumented branches, is
+enough on its own to break repeat without any help from the thread, and
+259.5's own first paragraph is right that this pair cannot tell (a) from (d).
+What 259.5 shows is that **setting the variable** breaks repeat. Both
+candidates are code in `rcad-fuzz-timing`, so keeping that crate's code out
+of what libFuzzer counts would remove both (Q136).
+
+**The variable also changes how many inputs libFuzzer runs.** Unset, `INITED`
+lands at `#835`, one run per corpus file plus the empty input. Set, it lands
+67 and 68 runs later, and `-runs=1500` ended at 1643 runs in 259.5 and at
+1794 here. Which inputs libFuzzer runs again, and why, is not known. Each
+set run took about twice the unset time, with 10 s as the slowest unit in all
+four, so the extra runs may include slow inputs run again; that is a
+guess.
+
+**Why this matters beyond measurement lanes.** `fuzz-overnight` exports
+`RCAD_FUZZ_TIMINGS` for every target, so every night's corpus is chosen with
+the timing crate's clock-steered edges counted as coverage. An input can be
+kept because it took a new length of time rather than because it reached new
+kernel code. How much of a night's new corpus that is has not been measured
+(Q136).
+
+**One smaller point.** 259.3's `strace` shows one `getrandom` call per
+process. That this call is std's `RandomState` seed is inferred from reading
+the code; the shim pins that one call, whatever makes it. The cause 259.3
+confirms is therefore "the process's one random draw", and the reading that
+names it the HashMap seed is very likely but was not traced.
+
+Rows at merge: Q136 (keep the timing crate out of the coverage signal),
+Q137 (the shim on the writer and fuse targets, parked until a lane needs two
+runs that repeat exactly rather than 259.7's distributions), Q138 (the
+cone/torus residual of 259.6, parked until someone needs to reproduce a run
+of that target).
