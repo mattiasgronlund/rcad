@@ -1430,8 +1430,8 @@ check-skills-selftest:
         echo "a missing skills directory is not the same as a broken scan"; exit 1
     fi
 
-# Every lane the `lanes` workflow sends out creates its own branch, and nothing
-# in the workflow resets one.
+# Every lane the `lanes` workflow sends out creates its own branch, nothing in
+# the workflow resets one, and it lands its lanes on `main` one at a time.
 #
 # `.claude/workflows/lanes.js` hands each lane its first commands, and until
 # §237 one of them was `git checkout -B <branch> <base>`. That resets a branch
@@ -1448,21 +1448,41 @@ check-skills-selftest:
 # and the lane is told what to do when the switch refuses — without that, the
 # nearest fix a lane knows is the reset.
 #
-# **It proves each arm by cutting the real file**, not against fixtures kept
-# beside it, because this file is the only one it will ever scan. Each cut must
-# change the file and must be caught by the arm it was made for, so a rewrite of
-# `lanes.js` that moves the line cannot leave an arm passing having compared
-# nothing.
-[doc("The lanes workflow makes each lane's branch with switch -c and resets none.")]
+# **Since §266 it also merges, and three more arms hold that half.** Each lane
+# is followed by its verifier and then an Opus merger that pushes to `main`, so
+# a mistake here now lands on `main` rather than in a report:
+#
+# - Every `agent(` call names an `agentType`, the three roles are all there, and
+#   each type is a file in `.claude/agents/` whose `name:` says so. Until §266
+#   none did, so `lane.md` and `verifier.md` never loaded (§261.6).
+# - The merger is started on one line behind the merge before it, through
+#   `lastMerge`, so merges inside one run never overlap. The other runs and
+#   sessions are what `ff-main` and the ancestor check settle (§266.4).
+# - `merger.md` fetches, checks that `origin/main` is an ancestor of `HEAD`,
+#   pushes and then runs `ff-main`, in that order and once each, and no other
+#   role is told to `git push`.
+#
+# None of it runs the workflow, pushes, or touches `docs/queue.md`: it reads
+# the script and the agent files as text, for the same reason as above.
+#
+# **It proves each arm by cutting the real files**, not against fixtures kept
+# beside them, because these files are the only ones it will ever scan. Each
+# cut must change a file and must be caught by the arm it was made for, so a
+# rewrite of `lanes.js` that moves a line cannot leave an arm passing having
+# compared nothing.
+[doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
     set -euo pipefail
     file=.claude/workflows/lanes.js
+    agents=.claude/agents
     create='  git switch -c ${branchOf(lane)} ${BASE}'
     reset='  git checkout -B ${branchOf(lane)} ${BASE}'
     refusal='already exists, stop and report it as blocked'
+    serial='lastMerge.then(() => agent(MERGE('
+    pushes=('git fetch origin' 'git merge-base --is-ancestor origin/main HEAD' 'git push origin HEAD:main' 'mise exec -- just ff-main')
     scan() {
-        local n
+        local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
         if [ "$n" != 1 ]; then
             echo "$1 has the line '$create' $n times, expected once"
@@ -1477,28 +1497,94 @@ check-lanes-workflow:
             echo "and without that the nearest fix a lane knows is the reset"
             return 3
         fi
+        n=$(grep -vE '^[[:space:]]*//' "$1" | grep -cE '(^|[^A-Za-z_])agent\(' || true)
+        types=$(grep -oE "agentType: '[a-z-]+'" "$1" | cut -d"'" -f2 || true)
+        if [ "$n" != "$(printf '%s' "$types" | grep -c '' || true)" ]; then
+            echo "$1 starts $n agents and names a type for $(printf '%s' "$types" | grep -c '' || true);"
+            echo "an agent with no type never loads its file in $2 (§261.6)"
+            return 4
+        fi
+        for t in lane verifier merger; do
+            if ! printf '%s\n' "$types" | grep -qxF -- "$t"; then
+                echo "$1 sends no agent of type $t"
+                return 4
+            fi
+        done
+        for t in $types; do
+            if ! grep -qxF -- "name: $t" "$2/$t.md" 2>/dev/null; then
+                echo "$1 names the agent type $t, and no $2/$t.md defines it"
+                return 4
+            fi
+        done
+        n=$(grep -cF -- 'agent(MERGE(' "$1" || true)
+        if [ "$n" != 1 ] || ! grep -F -- 'agent(MERGE(' "$1" | grep -qF -- "$serial" \
+            || ! grep -A1 -F -- "$serial" "$1" | grep -qF -- 'lastMerge = run.catch('; then
+            echo "$1 does not start its one merger behind the merge before it:"
+            echo "expected '$serial' and then 'lastMerge = run.catch(' on the next line (§266.4)"
+            return 5
+        fi
+        prev=0
+        for line in "${pushes[@]}"; do
+            n=$(grep -cxF -- "$line" "$2/merger.md" || true)
+            if [ "$n" != 1 ]; then
+                echo "$2/merger.md has the line '$line' $n times, expected once"
+                return 6
+            fi
+            at=$(grep -nxF -- "$line" "$2/merger.md" | cut -d: -f1)
+            if [ "$at" -le "$prev" ]; then
+                echo "$2/merger.md has '$line' before a line it must follow: fetch, ancestor check, push, ff-main"
+                return 6
+            fi
+            prev=$at
+        done
+        if grep -nF 'git push' "$1" "$2/lane.md" "$2/verifier.md"; then
+            echo "only the merger pushes, and the lines above tell another role to (§266)"
+            return 6
+        fi
     }
-    scan "$file" || exit 1
+    scan "$file" "$agents" || exit 1
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
-    awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead"
-    awk -v l="$create" '{ print } $0 == l { print "  git switch -C lane-x base" }' "$file" > "$dir/reset-as-well"
-    grep -vF -- "$refusal" "$file" > "$dir/no-refusal"
-    for cut in reset-instead:1 reset-as-well:2 no-refusal:3; do
+    fresh() {
+        mkdir "$dir/$1"
+        cp "$file" "$dir/$1/lanes.js"
+        cp -r "$agents" "$dir/$1/agents"
+    }
+    fresh reset-instead
+    awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead/lanes.js"
+    fresh reset-as-well
+    awk -v l="$create" '{ print } $0 == l { print "  git switch -C lane-x base" }' "$file" > "$dir/reset-as-well/lanes.js"
+    fresh no-refusal
+    grep -vF -- "$refusal" "$file" > "$dir/no-refusal/lanes.js"
+    fresh untyped-verifier
+    grep -vF -- "agentType: 'verifier'," "$file" > "$dir/untyped-verifier/lanes.js"
+    fresh no-merger-file
+    rm "$dir/no-merger-file/agents/merger.md"
+    fresh merges-at-once
+    awk -v s="$serial" -v r='Promise.resolve().then(() => agent(MERGE(' \
+        '{ i = index($0, s); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(s)); print }' \
+        "$file" > "$dir/merges-at-once/lanes.js"
+    fresh push-unchecked
+    awk -v a="${pushes[1]}" -v p="${pushes[2]}" '$0 == a { print p; next } $0 == p { print a; next } { print }' \
+        "$agents/merger.md" > "$dir/push-unchecked/agents/merger.md"
+    fresh lane-pushes
+    printf '\n    git push origin HEAD:main\n' >> "$dir/lane-pushes/agents/lane.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6)
+    for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
-        if cmp -s "$file" "$dir/$name"; then
-            echo "the cut '$name' found nothing to cut in $file, so it proves nothing"
+        if cmp -s "$file" "$dir/$name/lanes.js" && diff -rq "$agents" "$dir/$name/agents" > /dev/null; then
+            echo "the cut '$name' found nothing to cut in $file or $agents, so it proves nothing"
             exit 1
         fi
         got=0
-        scan "$dir/$name" > /dev/null || got=$?
+        scan "$dir/$name/lanes.js" "$dir/$name/agents" > /dev/null || got=$?
         if [ "$got" != "$want" ]; then
-            echo "the cut '$name' of $file was caught by arm $got, expected arm $want"
+            echo "the cut '$name' was caught by arm $got, expected arm $want"
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none; 3 cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time; ${#cuts[@]} cuts, each caught"
 
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
