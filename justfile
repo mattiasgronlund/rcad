@@ -7158,7 +7158,8 @@ _queue-rows file:
 # it refuses rather than guesses at, and points at `check-queue` for the why.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after` and `pick`, with `show` and `running` to read.
+# `done`, `drop`, `park`, `after`, `rank` and `pick`, with `show` and `running`
+# to read.
 # Each takes the lock on the claims file in the git common directory, checks the
 # file as it would be with `check-queue`, and writes only if that passes. `just
 # queue take` with no arguments, or any verb given the wrong ones, prints the
@@ -7176,11 +7177,11 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|pick|show|running)
+        take|add|done|drop|park|after|rank|pick|show|running)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, pick, show, running" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, pick, show, running" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
@@ -7203,6 +7204,7 @@ queue mode="" *args:
         $1 == "U" { refuse($2, "a fence is never closed"); next }
         $1 != "R" { next }
         $2 == "elsewhere" { e++; eid[e] = $5; est[e] = $7; ews[e] = $9; eraw[e] = $11; heldelse[$5] = e; next }
+        $2 == "closedelsewhere" { c++; cst[c] = $7; craw[c] = $11; closedelse[$5] = c; next }
         $4 < 6 { refuse($2, "a row of " $4 " fields"); next }
         {
             r++
@@ -7226,6 +7228,9 @@ queue mode="" *args:
                 else if (s ~ /^(done|dropped):/) kind[i] = "closed"
                 else refuse(ln[i], "the state \"" s "\"")
                 if (kind[i] == "ready" && (id[i] in heldelse)) kind[i] = "elsewhere"
+                if ((kind[i] == "ready" || kind[i] == "waiting") && (id[i] in closedelse)) {
+                    kind[i] = "closedelsewhere"; cwhere[i] = cst[closedelse[id[i]]]
+                }
             }
             if (bad) exit 1
             w = 0
@@ -7303,6 +7308,10 @@ queue mode="" *args:
             for (t = 1; t <= nt; t++)
                 if (parkedin[tiers[t]]) line = line (line == "" ? "" : ", ") parkedin[tiers[t]] " in tier " tiers[t]
             print "parked: " (line == "" ? "none" : line)
+            line = ""
+            for (i = 1; i <= r; i++)
+                if (kind[i] == "closedelsewhere") line = line (line == "" ? "" : ", ") id[i] " (" cwhere[i] ")"
+            print "closed elsewhere: " (line == "" ? "none" : line)
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
@@ -7750,10 +7759,13 @@ check-queue-merge-driver:
 # Each case is one the brief behind §263 named: two worktrees taking one row,
 # two adding rows at once, two branches changing different rows merging
 # cleanly, one row changed two ways conflicting loudly, `after:` on an id only
-# another worktree holds, and on one that exists nowhere. The hook's cases are
-# `check-hooks`'s. Without `tooling/queue/` the first take already fails, and
-# with the text merge in place of the driver the clean merge conflicts: Q1 and
-# Q2 sit on neighbouring lines, and both sides add at the foot of Tier 2.
+# another worktree holds, and on one that exists nowhere. §263.9's two gaps are
+# here too: `rank` moving a row within its tier, and a row another copy already
+# shows `done:` staying out of `next`'s offers and out of the write-set
+# meeting. The hook's cases are `check-hooks`'s. Without `tooling/queue/` the
+# first take already fails, and with the text merge in place of the driver the
+# clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
+# add at the foot of Tier 2.
 [private]
 [doc("just queue's verbs, its machine count and the merge driver agree with scratch repositories under target/.")]
 check-queue-api-selftest:
@@ -7859,6 +7871,13 @@ check-queue-api-selftest:
     g "$hub" worktree add -q -b lane-q1 "$lanes/lane" main && lock "$lanes/lane"
     g "$hub" worktree add -q -b lane-q1-verify "$lanes/verify" main && lock "$lanes/verify"
     g "$hub" worktree add -q -b idle "$lanes/idle" main
+    got=$(q "$lanes/idle" rank Q3 before Q1 2>&1) || fail "rank refused to move Q3 before Q1, in its own tier"
+    got=$(awk '/^Q[0-9]+  1  / { printf "%s ", $1 }' "$lanes/idle/docs/queue.md")
+    [ "$got" = "Q3 Q1 Q2 " ] || fail "rank did not put Q3 just before Q1"
+    got=$(q "$lanes/idle" ready 2>&1) || fail "ready failed"
+    [ "$(awk 'NR == 1 { print $1 }' <<<"$got")" = Q3 ] || fail "ready did not take the ranked Q3 ahead of Q2"
+    got=$(q "$lanes/idle" rank Q3 before Q4 2>&1) && fail "rank moved Q3 into tier 2"
+    grep -qF 'rank only moves a row within its own tier' <<<"$got" || fail "rank did not say why it refused to move Q3 into tier 2"
     got=$(q "$two" take Q2 lane-q2 2>&1) || fail "two could not take Q2"
     got=$(q "$one" running 2>&1) || fail "running failed"
     grep -qx '3 running' <<<"$got" \
@@ -7874,6 +7893,13 @@ check-queue-api-selftest:
         || fail "done did not move Q1 under ## Closed"
     got=$(q "$one" running 2>&1) || fail "running failed"
     grep -qx '3 running' <<<"$got" || fail "done released a hold whose lane tree still stands, or counted it twice"
+    got=$(q "$two" add 2.5 opus docs/a.md "a row on Q1's file, added in two §230" 2>&1) || fail "two could not add a row on docs/a.md"
+    on_a=$got
+    got=$(q "$two" next 9 2>&1) || fail "next failed"
+    grep -q '^take Q1 ' <<<"$got" && fail "next offered Q1, which one's copy already shows done"
+    grep -q "^take $on_a " <<<"$got" || fail "Q1, done in one's copy, still kept docs/a.md busy in two's fill"
+    got=$(q "$two" 2>&1) || fail "the plain queue failed"
+    grep -qx "closed elsewhere: Q1 (done:$sha)" <<<"$got" || fail "the plain queue did not name Q1 as closed in one's copy"
     g "$one" commit -qam "one's queue"
     g "$two" commit -qam "two's queue"
     g "$hub" merge -q --no-edit one || fail "main did not take one"
