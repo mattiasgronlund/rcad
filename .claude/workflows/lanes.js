@@ -35,8 +35,8 @@
 // merger's gate as the only one.
 //
 // The standing rules of each role live in `.claude/agents/lane.md`,
-// `verifier.md` and `merger.md`, which `agentType` loads. What stays here is
-// what differs per lane, and the one shell rule all three share.
+// `verifier.md` and `merger.md`, which `agentType` loads, and CLAUDE.md, which
+// every role reads once. What stays here is what differs per lane.
 export const meta = {
   name: 'lanes',
   description: 'Run rcad lanes in worktrees off one pinned base, verify each writing lane, and merge the ones that pass onto main one at a time',
@@ -232,20 +232,12 @@ function treesOf(prior) {
   return [prior.report && prior.report.worktree_path, prior.check && prior.check.worktree_path].filter(Boolean)
 }
 
-// The one shell rule every role here shares. It belongs in CLAUDE.md, where
-// every role would read it once; until it moves there, this is its only copy.
-function SHARED() {
-  return `Every cargo and just call needs a \`mise exec --\` prefix (the compile cache is wired through mise's env).
-The Bash guard in a worktree-isolated session refuses any command with a path or argument it cannot resolve before the run -- no variables, no \`$( )\`, no loop over a runtime value, and no \`mise exec\` inside a loop or compound. Write out paths literally, one plain command per call; when you genuinely need a loop, write a script to \`target/\` (gitignored) and run it as \`./target/<name>.sh\`.`
-}
-
 function START(lane) {
   return `
 Base: main at ${BASE}. Your first two commands, in this order, and report both shas back:
   git log --oneline -1
   git switch -c ${branchOf(lane)} ${BASE}
-If the switch refuses because ${branchOf(lane)} already exists, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`: they reset a branch that another worktree may still have checked out, and that tree then shows a staged revert of everything since its commit.
-${SHARED()}`
+If the switch refuses because ${branchOf(lane)} already exists, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`: they reset a branch that another worktree may still have checked out, and that tree then shows a staged revert of everything since its commit.`
 }
 
 function WRITING(lane) {
@@ -302,9 +294,7 @@ Write set: ${lane.writeSet.join(', ')}
 The lane's worktree: ${r.worktree_path}
 Source paths to revert: ${revert}
 
-The lane claims (JSON): ${JSON.stringify(r)}
-
-${SHARED()}`
+The lane claims (JSON): ${JSON.stringify(r)}`
 }
 
 function MERGE(lane, prior) {
@@ -325,9 +315,7 @@ Push attempts: at most ${MERGE_ATTEMPTS}.
 
 The lane's report (JSON): ${JSON.stringify(r)}
 
-The verifier's verdict (JSON): ${JSON.stringify(prior.check)}
-
-${SHARED()}`
+The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
 }
 
 function verdictSchema(kind) {
