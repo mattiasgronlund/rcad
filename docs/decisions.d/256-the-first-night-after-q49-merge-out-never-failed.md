@@ -123,6 +123,12 @@ ending on its own" — not "because create_dir_all or the lock fails more often.
 §236.6's question about the write path specifically is left exactly where it
 was: unfired, and so unanswered, on this night.**
 
+*Since §262 (2026-09-26), the hypothesis in bold above is broken. A hung run
+does not starve the merge thread. On a probe where nearly every job ended on a
+`-timeout` kill, each kill lost about six runs, and the record read above
+libFuzzer's count. The 1 104 jobs were counted correctly (§262.7). Why this
+target's record holds about half its runs is still open, as Q150.*
+
 ### 256.5 What is left
 
 - **The starved-merge-thread hypothesis in §256.4 is not run down.** It would
