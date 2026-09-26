@@ -1566,7 +1566,7 @@ mod tests {
     use rcad_geom::{Axis, Orientation, Point, Scale, Vector};
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
 
-    use super::Model;
+    use super::{Model, WireStep};
     use crate::{Error, Invalid, Rule, SolidKey};
 
     fn a_cube() -> (Model, SolidKey) {
@@ -1764,6 +1764,75 @@ mod tests {
                 Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume == -8.0
             ),
             "validate gave {swept:?}"
+        );
+    }
+
+    /// `measure_one_face`'s doc comment says it hands back whatever
+    /// `Model::validate` refuses for a face with no area, rather than the panic
+    /// it takes for a face `validate` would have accepted. This puts a cube's
+    /// first face through exactly that.
+    #[test]
+    fn measuring_a_face_with_no_area_gives_validates_refusal() {
+        let (mut model, _) = a_cube();
+
+        let target = model.data.faces.keys().next().expect("a cube has faces");
+        let wire = model.data.faces[target].wires[0];
+        let corners: Vec<_> = model.data.wires[wire]
+            .steps
+            .iter()
+            .map(|step| match *step {
+                WireStep::Along(coedge) => {
+                    let coedge = &model.data.coedges[coedge];
+                    let edge = &model.data.edges[coedge.edge];
+                    if coedge.orientation.is_reversed() {
+                        edge.end
+                    } else {
+                        edge.start
+                    }
+                }
+                WireStep::Pole(vertex) => vertex,
+            })
+            .collect();
+        assert_eq!(corners.len(), 4, "a cube's face is a quadrilateral");
+
+        // Leave the first two corners alone and put the other two on the line
+        // through them, so the wire sweeps no area at all.
+        let first = model.data.vertices[corners[0]].point;
+        let second = model.data.vertices[corners[1]].point;
+        let along = second - first;
+        model.data.vertices[corners[2]].point = second + along;
+        model.data.vertices[corners[3]].point = first - along;
+
+        let bytes = postcard::to_allocvec(&model).expect("a model writes out");
+        let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+
+        let swept = read_back
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect_err("a face with no area is not a sound model");
+        assert!(
+            matches!(swept, Error::Invalid(Invalid::OuterWireWindsAgainstTheNormal)),
+            "validate gave {swept:?}"
+        );
+
+        let solid = read_back.solids().next().expect("the cube came back");
+        let moved_to = second + along;
+        let face = solid
+            .faces()
+            .find(|face| face.outer_wire().points().any(|point| point == moved_to))
+            .expect("the face whose corners were moved came back too")
+            .key();
+
+        let refused = solid
+            .measure_one_face(
+                face,
+                rcad_geom::Deflection::of(0.1).expect("a length a polyhedron ignores"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a face with no area has no measurement");
+        assert!(
+            matches!(refused, Error::Invalid(Invalid::OuterWireWindsAgainstTheNormal)),
+            "measure_one_face gave {refused:?}"
         );
     }
 
