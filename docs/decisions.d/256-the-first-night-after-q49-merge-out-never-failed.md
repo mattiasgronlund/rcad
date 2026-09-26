@@ -127,7 +127,9 @@ was: unfired, and so unanswered, on this night.**
 does not starve the merge thread. On a probe where nearly every job ended on a
 `-timeout` kill, each kill lost about six runs, and the record read above
 libFuzzer's count. The 1 104 jobs were counted correctly (§262.7). Why this
-target's record holds about half its runs is still open, as Q150.*
+target's record holds about half its runs was Q150's question, and §269
+answers it: a process that ends while `merge_out` has emptied `totals` wipes
+the record, and the next merge starts again from its own runs.*
 
 ### 256.5 What is left
 

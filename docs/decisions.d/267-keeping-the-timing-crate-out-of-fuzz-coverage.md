@@ -320,7 +320,8 @@ In the base, any `_Exit` on the main thread could land while the merging
 thread was mid-write, so every timeout was a chance. On this lane's tip the
 merge runs in a draw, so it takes a timeout that fires during a merge, or an
 out-of-memory from libFuzzer's RSS thread. How often it happened on a real
-night is Q150's question. This lane only fixed it.
+night is §269's answer: about once in five target-nights. This lane only
+fixed it.
 
 **What removing the thread costs, sized.** §262 found that the merging thread
 went on ticking through a hang (§262.2), so a timeout cost the probe about six

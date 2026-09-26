@@ -243,7 +243,9 @@ average rate, and the last two status lines print `exec/s` of 3 and 1. §262.5's
 second bullet says a job that hangs early had little to lose. That is about how
 §256.4 averaged, not about where runs went missing. A run libFuzzer counted is
 in `#N` whichever job ran it. So what takes about half of this target's runs
-out of its record, with `lost 0`, is not known. Q150 asks.
+out of its record, with `lost 0`, is not known here. §269 answers it: a
+process that ends between `merge_out`'s truncating open and its write leaves
+`totals` empty.
 
 One smaller correction. The second thread §262.2 watched is libFuzzer's RSS
 thread, which sleeps a second between checks (`FuzzerDriver.cpp:314-316`).
