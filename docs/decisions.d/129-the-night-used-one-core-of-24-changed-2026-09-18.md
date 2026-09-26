@@ -134,12 +134,16 @@ the order they can land in.
    (`crates/rcad-step/tests/fuzzing/writer.rs`) now checks every located
    number bit for bit for every solid — each face's surface, and for every
    coedge its two corners and its edge's run, in walk order (§249.1's own
-   comparison, and one the writer and the reader never fail: §249.2) — and
+   comparison, which a turned bar passed in every number: §249.2) — and
    keeps the bit-for-bit measurement only for a solid that sits wholly on
    planes or carries no placement at all. A move with no turn is still a
-   placement (§249.4 item 2), so only the identity is exempt.
-   `two_turns_that_write_the_same_placement.rs` pins the limit down: two
-   placements that write the very same file still measure differently.
+   placement (§249.4 item 2), so only a curved solid at the identity keeps
+   the measurement check. `two_turns_that_write_the_same_placement.rs` pins
+   the limit down: two turns that take the three axes to the same nine
+   numbers, and so would be written as one STEP placement, still leave a bar
+   measuring differently. Today's writer does not write that placement; it
+   turns every corner into the file, and writes the two bars' corner one ulp
+   apart.
 
 ### 129.6 Corrections to §81
 
