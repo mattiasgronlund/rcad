@@ -145,7 +145,9 @@ fn a_point_in_the_other_disk_is_outside_the_bend() {
 
 /// A point the tube holds on `x = 0`, the plane between the cap's disk and the
 /// other one, is counted in the cap's disk: the half-space naming the cap's
-/// circle keeps what is on its plane, as `holds.rs` says it does.
+/// circle keeps what is on its plane, as a picker keeps what is on it. The
+/// fuse asks the same half-space through the same function, so this is its
+/// rule too, though no piece it tries a point in can reach it (Q117).
 ///
 /// **None of these points is on the cap's plane**, and no caller inside the
 /// kernel hands the cap one: ray casting, the fuse and the overlap search all

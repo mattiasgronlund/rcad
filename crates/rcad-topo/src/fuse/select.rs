@@ -45,6 +45,9 @@ use rcad_predicates::{
     orient3d_of_points,
 };
 
+use crate::holds::{
+    the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
+};
 use crate::validate::side_of_surface;
 use crate::{Containment, Error, Model, Result, SolidView};
 
@@ -688,6 +691,10 @@ fn what_else_each_round_wire_asks(
 /// through `corner`, or `None` when the two do not cross in meridian circles or
 /// no one circle certainly keeps the corner.
 ///
+/// That is one half-space, looked up by `holds.rs`'s
+/// [`the_half_space_naming_the_meridian_circle_through`] for a face of a solid
+/// too, and handed back as a list because every other wire's answer is one.
+///
 /// # Errors
 ///
 /// Whatever [`intersect`] gives for the two.
@@ -698,41 +705,23 @@ fn the_pickers_of_the_meridian_circle_through(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Vec<Picker>>> {
-    let SurfaceMeet::Curves(runs) = intersect(flat, ring, policy, log)? else {
-        return Ok(None);
-    };
-    let mut keeping = runs.iter().filter_map(|run| match run.run() {
-        EdgeRun::PartOfWhereItCrosses { picked_by, .. }
-            if picked_by.iter().all(|picker| {
-                matches!(picker, Picker::InFrontOf(_))
-                    && picker.side_of_point(corner) == Decision::Pos
-            }) =>
-        {
-            Some(picked_by.to_vec())
-        }
-        EdgeRun::PartOfWhereItCrosses { .. }
-        | EdgeRun::Straight
-        | EdgeRun::RightRoundWhereItsFacesCross
-        | EdgeRun::RightRoundWhereItCrosses { .. }
-        | _ => None,
-    });
-    Ok(match (keeping.next(), keeping.next()) {
-        (Some(only), None) => Some(only),
-        _ => None,
-    })
+    Ok(
+        the_half_space_naming_the_meridian_circle_through(flat, ring, corner, policy, log)?
+            .map(|this_circle| vec![this_circle]),
+    )
 }
 
-/// Whether every one of `pickers` certainly keeps `point`: `Some(false)` when
-/// one certainly rules it out, `None` when one cannot say or has it on its
-/// boundary.
+/// Whether every one of `pickers` keeps `point`: `Some(false)` when one
+/// certainly rules it out, `None` when one cannot say.
+///
+/// Each list is empty or holds the one half-space naming a ring's meridian
+/// circle ([`what_else_each_round_wire_asks`]), so each picker is asked what
+/// `holds.rs` asks it, [`the_meridian_half_space_keeps`], and a point on its
+/// plane is kept.
 fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool> {
     let mut kept = true;
     for picker in pickers {
-        match picker.side_of_point(point) {
-            Decision::Pos => (),
-            Decision::Neg => kept = false,
-            Decision::Zero | Decision::Undecidable { .. } | _ => return None,
-        }
+        kept &= the_meridian_half_space_keeps(picker, point).ok()?;
     }
     Some(kept)
 }

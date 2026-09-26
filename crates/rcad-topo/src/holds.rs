@@ -320,8 +320,13 @@ fn what_a_round_wire_encloses(
         return Ok(side);
     }
     let corner = wire.points().next().ok_or_else(cannot)?;
-    let Some(this_circle) =
-        the_half_space_naming_the_meridian_circle_through(face, &surface, corner, policy, log)?
+    let Some(this_circle) = the_half_space_naming_the_meridian_circle_through(
+        &face.surface(),
+        &surface,
+        PredicatePoint::from(corner.coordinates()),
+        policy,
+        log,
+    )?
     else {
         return Err(cannot());
     };
@@ -329,43 +334,41 @@ fn what_a_round_wire_encloses(
         return Ok(side);
     }
     // The tube holds the point, so it is in one of the two disks or on one of
-    // the two circles; the half-space says which. A point on the half-space's
-    // own boundary is kept, as a picker keeps what is on it.
-    match this_circle.side_of_point(point) {
-        Decision::Pos | Decision::Zero => Ok(side),
-        Decision::Neg => Ok(Decision::Pos),
-        Decision::Undecidable { enclosure } => Err(gave_up(
-            this_circle.predicate_name(),
-            point,
-            Level::Exact,
-            enclosure,
-            Measures::Length,
-        )),
-        other => panic!("a half-space came back with a decision nothing here knows: {other:?}"),
-    }
+    // the two circles; the half-space says which.
+    Ok(if the_meridian_half_space_keeps(&this_circle, point)? {
+        side
+    } else {
+        Decision::Pos
+    })
 }
 
-/// The flat half-space that names the one meridian circle `face`'s plane cuts
-/// `ring` in through `corner`, or `None` when the plane does not cut the ring
-/// in meridian circles or no one of them certainly keeps the corner.
+/// The flat half-space that names the one meridian circle `flat` cuts `ring`
+/// in through `corner`, or `None` when the plane does not cut the ring in
+/// meridian circles or no one of them certainly keeps the corner.
 ///
-/// The same question `fuse/select.rs` asks of a flat piece, asked here of a
-/// face of a solid.
+/// **The one place this is looked up**: `fuse/select.rs` asks it of a flat
+/// piece through this function, and [`what_a_round_wire_encloses`] of a face
+/// of a solid (`docs/decisions.md` §250.5).
+///
+/// **One half-space, not a list.** A run is taken only when exactly one
+/// [`Picker::InFrontOf`] picks it, because that is what [`intersect`] makes of a
+/// plane through a ring's axis — one half-space per circle, the one it has
+/// proved clears both — and it is that proof, and nothing about a list, that
+/// makes each disk the part of the tube on its own circle's side.
 ///
 /// # Errors
 ///
 /// Whatever [`intersect`] gives for the two.
-fn the_half_space_naming_the_meridian_circle_through(
-    face: FaceView<'_>,
+pub(crate) fn the_half_space_naming_the_meridian_circle_through(
+    flat: &Surface,
     ring: &Surface,
-    corner: Point,
+    corner: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Picker>> {
-    let SurfaceMeet::Curves(runs) = intersect(&face.surface(), ring, policy, log)? else {
+    let SurfaceMeet::Curves(runs) = intersect(flat, ring, policy, log)? else {
         return Ok(None);
     };
-    let corner = PredicatePoint::from(corner.coordinates());
     let mut keeping = runs.iter().filter_map(|run| match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
             [flat @ Picker::InFrontOf(_)] if flat.side_of_point(corner) == Decision::Pos => {
@@ -382,6 +385,45 @@ fn the_half_space_naming_the_meridian_circle_through(
         (Some(only), None) => Some(only),
         _ => None,
     })
+}
+
+/// Whether the half-space naming a meridian circle keeps `point`: `true` on or
+/// in front of it, `false` behind it. Asked of a point the tube holds, `true`
+/// puts it in this circle's disk and `false` in the other's.
+///
+/// **A point on the half-space's own plane is kept**, because that is what a
+/// [`Picker::InFrontOf`] is: everything on or in front of a flat surface. It is
+/// the reading the circle's own edge is picked by, and `fuse/select.rs` asks
+/// through this function too, so the two files cannot disagree about it again.
+///
+/// **No point on the face's plane gets that far.** [`intersect`] names meridian
+/// circles only for a plane that holds the ring's axis exactly, and only once
+/// it has proved the half-space's plane clears both circles. So the tube's
+/// inside on the face's plane is the two disks, each strictly on one side of
+/// the half-space's plane, and a point on the half-space's plane that the tube
+/// holds is off the face's plane. [`SolidView::face_holds_the_point`] does not
+/// ask whether its point is on the face, so it can be handed one; a refusal
+/// here would be a check for that made in this one place and nowhere else.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`], naming the half-space, when it cannot say.
+pub(crate) fn the_meridian_half_space_keeps(
+    this_circle: &Picker,
+    point: PredicatePoint,
+) -> Result<bool> {
+    match this_circle.side_of_point(point) {
+        Decision::Pos | Decision::Zero => Ok(true),
+        Decision::Neg => Ok(false),
+        Decision::Undecidable { enclosure } => Err(gave_up(
+            this_circle.predicate_name(),
+            point,
+            Level::Exact,
+            enclosure,
+            Measures::Length,
+        )),
+        other => panic!("a half-space came back with a decision nothing here knows: {other:?}"),
+    }
 }
 
 /// One polygonal wire's contribution to the crossing count, or `None` when
