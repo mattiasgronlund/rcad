@@ -4434,14 +4434,15 @@ impl Tally {
 
     /// The same against a floor the caller names.
     ///
-    /// One family needs it, and needs it because
-    /// [`SOME_COMPARISONS_MUST_HAPPEN`] was sized against the properties that
-    /// existed when it was written — the worst of which reached 50% to 69% then —
-    /// and the frustum family sat below all of them. It no longer does: twenty
-    /// fresh-seed runs put it at 78% and up, and whether it still needs a floor
-    /// of its own is Q160. A floor a property brushes
-    /// is a flake and not a guard, and moving the shared number to suit one
-    /// family would blunt it for the other fourteen.
+    /// Several families need it, each for the same reason: their laws measure
+    /// thinner than [`SOME_COMPARISONS_MUST_HAPPEN`], so a floor that still
+    /// catches a halving of them has to sit below their own worst rather than
+    /// at the shared three tenths. `A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`
+    /// serves five properties this way and `A_LEANING_BAR_STILL_COMPARES_THIS_MUCH`
+    /// two more (§276); §279 adds floors for the rest of the curved family's
+    /// thin laws. A floor a property brushes is a flake and not a guard, and
+    /// moving the shared number to suit one family would blunt it for the
+    /// dozen-odd properties that still measure well clear of it.
     fn report_what_it_compared_at_least(&self, what: &str, floor: f64) {
         self.report(what);
         let meant_to = self.meant_to_compare.get();
