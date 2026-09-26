@@ -116,7 +116,51 @@ use rcad_geom::Surface;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::Model;
 
-use fuzzing::writer::{Reached, one_model_decoded_and_written};
+use fuzzing::writer::{Reached, one_model_decoded_and_written, still_a_model};
+
+/// Mutator seeds checked, seed by seed against every corpus entry with a
+/// `byte_mutate` stand-in that panics, to never draw `Draw::below(8)` as 0, 1
+/// or 2 on the first draw — the one branch that calls `byte_mutate` rather than
+/// drawing only from the seed (§241.1). Found by that check, not chosen by hand.
+const MUTATOR_SEEDS: [u32; 5] = [0, 3, 7, 16, 34];
+
+/// Every checked-in seed, mutated by each of [`MUTATOR_SEEDS`], still decodes
+/// into a `Model`.
+///
+/// `byte_mutate` here panics if it is ever called. `still_a_model` only calls
+/// it from the branch [`MUTATOR_SEEDS`] was chosen to avoid, so this also
+/// proves those seeds take the same branch — one more solid, one moved, or a
+/// fresh model — on every run, decoded input or not.
+#[test]
+fn every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model() {
+    fn byte_mutate_must_not_run(_: &mut [u8], _: usize, _: usize) -> usize {
+        panic!(
+            "still_a_model reached libFuzzer's own byte mutation, which \
+             MUTATOR_SEEDS is chosen to avoid"
+        );
+    }
+
+    for (name, bytes) in every_seed() {
+        for &seed in &MUTATOR_SEEDS {
+            let mut buffer = [0u8; 4096];
+            let max_size = buffer.len();
+            buffer[..bytes.len()].copy_from_slice(&bytes);
+            let written = still_a_model(
+                &mut buffer,
+                bytes.len(),
+                max_size,
+                seed,
+                byte_mutate_must_not_run,
+            );
+            postcard::from_bytes::<Model>(&buffer[..written]).unwrap_or_else(|why| {
+                panic!(
+                    "mutating {name} with seed {seed} gave {written} byte(s) that do \
+                     not decode into a model: {why}"
+                )
+            });
+        }
+    }
+}
 
 /// Where the middle of a quarter of a torus of ring 6 and tube 2 lies, along
 /// each of the two axes it runs between: the whole torus's middle circle,
