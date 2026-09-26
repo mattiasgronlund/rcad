@@ -7,9 +7,13 @@ when the arithmetic proves that corner is off one of the three surfaces.
 **Sound, within the allowance a stored corner already has, and now held to
 it.** Every certified fold in the workspace lies within a quarter of the
 allowance `bake.rs` grants a stored corner. The rule did not require that,
-and one tolerant corpus draw folded a meet 2 012 times that far away. The fold
-now requires it. Past the allowance the meet stays a node, and the policy is
-asked about it.*
+and one tolerant corpus draw folded a meet whose box reached 2 012 times that
+far. The fold now requires it. Past the allowance the meet stays a node, and
+the policy is asked about it. **That draw's old answer was right** (253.7):
+the point in the box is `4.1e-16` from the corner, and the box is wide only
+because two of its planes are nearly parallel. So the one thing this change
+moves in the workspace is a right answer that is now refused, a gap left for
+a row.*
 
   253.1   The legs, and the one that broke
   253.2   What the workspace folds, measured
@@ -17,6 +21,7 @@ asked about it.*
   253.4   The rule now, and why it is not a new tolerance
   253.5   What H2 needed and did not get
   253.6   What this leaves
+  253.7   What the verifier found: the old answer was right
 
 ### 253.1 The legs, and the one that broke
 
@@ -97,11 +102,13 @@ in `tests/a_meet_folds_into_a_corner_only_as_far_as_rounding_reaches.rs`. It
 fails without the change with `ok: 1, refused: 0`: the rule was switched back
 behind an environment variable in a probe build, and the test was run.
 
-**Which predicate the refusal names was not read.** The harness keeps a
-refusal's records inside the `Error` and hands back only the tally. That the
-fuse refuses on the pair it can no longer fold is the likely reading, and it
-has not been checked. Either way, the answer the old rule gave rested on
-identifying two points `1.4e-10` apart, which no policy was asked about.
+**Which predicate the refusal names was not read here.** The harness keeps a
+refusal's records inside the `Error` and hands back only the tally. The
+verifier read it: `Undecidable` on "order along a crossing", with an enclosure
+of `2.86e-10` against a tolerant budget of `1.42e-12` (253.7). **The sentence
+that stood here said the old answer rested on identifying two points `1.4e-10`
+apart. That is wrong.** `1.4e-10` is how far the meet's *box* reaches; the two
+points are `4.1e-16` apart, and the old answer was right.
 
 A probe patch then logged every place the old rule would have folded and the
 new one did not. Across the workspace, that was this one fold and nothing
@@ -157,7 +164,8 @@ came from, the wall or `y = 1`, was not traced either.
 
 The tolerant draw of 253.3 is the only fold past the allowance anywhere in
 the workspace. Whether its old answer was wrong, rather than just unasked,
-was not measured.
+was not measured by the lane. The verifier measured it, and it was right
+(253.7).
 
 ### 253.6 What this leaves
 
@@ -173,3 +181,32 @@ was not measured.
   reaches it with two places (§248.6). It now counts places within the
   allowance rather than places touching the corner, and that widening of the
   count is also untested.
+
+### 253.7 What the verifier found: the old answer was right
+
+An independent verifier worked the draw out in exact rationals, ran
+mutations, and merged the lane onto `732a849a` (1015 rcad-topo tests passed)
+and against Q5 and Q76 (both clean).
+
+- **The draw is a tolerant union of two blocks that do not meet.** On the
+  base it gave two solids, which validate under both policies, with a total
+  volume of 2000. That is the right answer.
+- **The meet and the corner are `4.1e-16` apart, not `1.4e-10`.** The meet's
+  *box* is `±1.43e-10` wide because two of its three planes are about `1.5e-6`
+  off parallel (the determinant is `1.54e-6`). 253.3 read the box's reach as
+  the distance between the points, and it is not.
+- **So the refusal is a gap**: "order along a crossing", enclosure `2.86e-10`
+  against a tolerant budget of `1.42e-12`. A right answer is now refused, and
+  it is the only effect of the change anywhere in the workspace.
+- **Merge anyway.** The change only narrows the fold, which the verifier
+  checked from the code, and it sends an identification nobody asked about to
+  the policy, as §17.4 wants. Refusing is the safe way to be wrong.
+- **Mutations.** Growing the room a thousand times passes every test; three
+  thousand times is caught only by the new test. Dropping the uniqueness
+  condition passes all 2481 workspace tests. Both are untested, and fold into
+  the `== 1` row above.
+- At merge, the test file, its assertion message and the doc comment on
+  `a_corner_is_this_place` were corrected to say the above, and the draw was
+  copied beside the test as a fixture, so that minimising the corpus cannot
+  drop it. When the meet's box is tightened the test's pin moves to one answer
+  with two solids.

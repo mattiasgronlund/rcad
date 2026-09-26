@@ -2559,7 +2559,10 @@ fn runs_through(
 /// it**, because one crossing can turn. A plane through a cone's apex cuts it
 /// in two rulings that meet there, and every side at the apex then runs along
 /// the same plane and the same cone. The rulings are cuts or two input edges,
-/// never one closed edge. That case was argued here and not built.
+/// never one closed edge. That case was argued here and not built, and today
+/// it cannot arise: a pointed cone's apex is not a vertex of the model
+/// (`tests/cones/mod.rs` builds none there), and only an existing vertex is
+/// ever dropped.
 ///
 /// **The input's closed edge is one curve, so its start is no bend.** An edge
 /// that closes runs right round one closed crossing, and nothing on it is

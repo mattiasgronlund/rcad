@@ -49,7 +49,10 @@ test, because one crossing can turn. A plane through a pointed cone's apex cuts
 the cone in two rulings that meet at the apex. Every side there then runs along
 the same plane and the same cone, and the apex is a real corner. The rulings
 are cuts, or two input edges, and never one closed edge, so the test used here
-keeps the apex. That case was argued and not built.
+keeps the apex. That case was argued and not built. The verifier found it
+cannot arise at all today: a pointed cone's apex is not a vertex of the model
+(`crates/rcad-topo/tests/cones/mod.rs` builds none there), and the rule only
+ever drops an `Existing` vertex (252.8).
 
 A closed input edge runs right round one closed crossing. Where it starts is
 the builder's choice and is no bend in the curve, which is what makes it safe
@@ -127,9 +130,11 @@ differences. The two unions, the two intersections and the two differences
 agree to within a few ulps.
 
 Neither bar's rim start is a corner of any of them. `(11, 0, ·)`, where
-`there` started its circle, is gone from both unions as well. It lies on
-`there`'s outer arc, which both faces along it used to split there. That arc
-is now one edge of about 254 degrees.
+`there` started its circle, is absent from both unions now. It lies on
+`there`'s outer arc, which is one edge of about 254 degrees. On the base the
+union with `there` as the argument already answered with those four corners
+and no `(11, 0, ·)`, and the union with `here` as the argument refused, so the
+fix moved one union and not two (252.8).
 
 `two_overlapping_parallel_bars_stop_in_select_whichever_way_round`, still
 ignored for Q77, now stops at its first fuse because the union answers:
@@ -171,12 +176,46 @@ fewer on a rim, and moves no count that anything pins.
   answers now, as 252.5 shows. `crates/rcad-topo/tests/fusing_two_bars_side_by_side.rs`.
 - Fuse the side-by-side answers once more. Both unions now carry an arc of
   about 254 degrees round `(11, 0, ·)`, the shape §224.1 found the next fuse
-  may not follow. `where_curved_pieces_met` in `Assembly::what_is_left` keeps
-  corners between joined cone pieces for that reason. The intersection has only
-  arcs under a semicircle. `crates/rcad-topo/tests/fusing_two_bars_side_by_side.rs`.
+  may not follow. **252.8 found this is not what stops it**: every answer
+  refuses the second fuse, the lens included, and did on the base too.
+  `crates/rcad-topo/tests/fusing_two_bars_side_by_side.rs`.
 - A side of another solid that ends at the same point as the vertex under
   another name is not counted (252.1). That would need a surface through the
   vertex that cuts no face of the vertex's own solid there, which is a
   tangency, and no test builds one. `crates/rcad-topo/src/fuse/assemble.rs`.
 - Build the cone case of 252.2, a plane through a pointed cone's apex, to show
   that the apex stays a corner. `crates/rcad-topo/src/fuse/assemble.rs`.
+  252.8 built it, and all six fuses refuse, so it shows nothing about the rule
+  yet.
+
+### 252.8 What the verifier found
+
+An independent verifier read the fix and the record, ran mutations, and
+merged the lane onto `732a849a` and with Q5's `fcf02a14`. Its verdict was to
+merge, with the correction to 252.5 made above.
+
+- **Confirmed.** `read_through` is exact: the two sides it joins keep their
+  direction, and the other fields are equal because the third test
+  (the pairing) already asked. Only an `Existing` vertex can be dropped. Two
+  closed edges meeting at one vertex keep it. The plane `y = 0` through a
+  bar's rim start keeps `(5, 0, ·)`, and all six of those fuses are within
+  bound. Both new tests fail on the base, and the second one fails with extra
+  corners `(10, 5, ·)` as well, which 252.4 did not mention. Every volume was
+  worked again by hand, and each test asserts `|measured − by_hand| ≤`
+  the mesh's bound.
+- **Mutations.** Dropping the pairing test, or its "does not come back"
+  check, fails five tests in `a_rim_a_fuse_cut_round_one_cone.rs` and
+  `fuse_laws_over_a_cone.rs`. **Dropping test 1, or test 2, passes every
+  suite.** Test 2 is covered by test 3. Test 1 guards a shape no test reaches
+  today. Neither blocks the merge, and a row pins both on hand-built sides.
+- **Fusing an answer again** refuses `AFaceTrimmedByACurveThisCannotFollow`
+  (§35) for every one of the six answers, the lens included, and did on the
+  base. So the 254° arc is not the cause.
+- **A pointed cone and a block whose face `x = 0` passes through the apex**:
+  all six fuses refuse `CannotTellTheCellsOfAFaceApart { face: 8v1 }`.
+- **A plane leaning through a bar's rim start** (`z = y` through
+  `(5, 0, 0)`): all six refuse `Undecidable` on "order along a crossing".
+- **The tangency of 252.7's third item** could not be built: all nine shapes
+  tried refuse "which way a crossing runs" first.
+- The two tests collect corners from each edge's start only. Taking both ends
+  would be a stronger check, and it is not needed for this merge.

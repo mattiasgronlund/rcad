@@ -570,7 +570,7 @@ fn in_the_bulge_of(
             Some(false) => is_on_the_nappe_the_side_is_on(&cone, side, point),
             None => false,
         },
-        Surface::Plane(_) | _ => false,
+        Surface::Plane(_) | Surface::Torus(_) | _ => false,
     };
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
@@ -1676,7 +1676,7 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Orientation, Plane, Surface, Torus};
+    use rcad_geom::{Axis, Cone, Orientation, Plane, Surface, Torus};
     use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
@@ -1798,6 +1798,117 @@ mod tests {
             the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from([4.0, 0.0, 0.5])),
             None
         );
+    }
+
+    /// A piece of the wall `y = −10` inside the lower nappe of `x² + y² = (z/2)²`:
+    /// one arc of the hyperbola and the chord `z = −52` across it, corners
+    /// `(±24, −10, −52)`. The upper nappe's region on the same wall is inside the
+    /// cone by its sign and on the bulge side of the chord, and is not the piece.
+    #[test]
+    fn a_hyperbola_arcs_piece_holds_nothing_on_the_other_nappe() {
+        let cone = Cone::new(Axis::z(), 0.5).expect("a positive slope");
+        let wall = Plane::from_coefficients([0.0, 1.0, 0.0, 10.0]).expect("a normal");
+        let floor = Plane::from_coefficients([0.0, 0.0, 1.0, 52.0]).expect("a normal");
+        assert_eq!(cone.is_cut_in_a_closed_curve_by(&wall), Some(false));
+        let corner = |at: [f64; 3], which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [
+                Surface::Plane(wall),
+                Surface::Cone(cone),
+                Surface::Plane(floor),
+            ],
+            which,
+            point: PredicatePoint::from(at),
+        };
+        let [left, right] = [[-24.0, -10.0, -52.0], [24.0, -10.0, -52.0]];
+        let piece = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(wall),
+            orientation: Orientation::Forward,
+            wires: vec![vec![
+                FaceMeet {
+                    carried_by: [Surface::Plane(wall), Surface::Cone(cone)],
+                    ends: [corner(left, 0), corner(right, 1)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+                FaceMeet {
+                    carried_by: [Surface::Plane(wall), Surface::Plane(floor)],
+                    ends: [corner(right, 1), corner(left, 0)],
+                    material_side: Decision::Pos,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+            ]],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(at))
+        };
+        assert_eq!(
+            holds([0.0, -10.0, -30.0]),
+            Some(true),
+            "between the arc and its chord"
+        );
+        assert_eq!(holds([0.0, -10.0, -60.0]), Some(false), "past the chord");
+        assert_eq!(
+            holds([0.0, -10.0, 30.0]),
+            Some(false),
+            "the upper nappe's region"
+        );
+        assert_eq!(
+            holds([3.0, -10.0, 25.0]),
+            Some(false),
+            "the upper nappe's region"
+        );
+    }
+
+    /// A triangle on the plane `y = 0`, which passes through the apex: one ruling
+    /// from `(10, 0, 20)` down to the apex, then up `x = 0` and back along `z = 20`.
+    /// The apex end's nappe sign is zero, and the opposite wedge `z < 0` is inside
+    /// the cone by its sign and right of the ruling's line.
+    #[test]
+    fn a_piece_with_a_corner_at_the_apex_holds_nothing_in_the_opposite_wedge() {
+        let cone = Cone::new(Axis::z(), 0.5).expect("a positive slope");
+        let wall = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a normal");
+        let roof = Plane::from_coefficients([0.0, 0.0, 1.0, -20.0]).expect("a normal");
+        let upright = Plane::from_coefficients([1.0, 0.0, 0.0, 0.0]).expect("a normal");
+        assert_eq!(cone.is_cut_in_a_closed_curve_by(&wall), Some(false));
+        let corner = |at: [f64; 3], which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [
+                Surface::Plane(wall),
+                Surface::Cone(cone),
+                Surface::Plane(roof),
+            ],
+            which,
+            point: PredicatePoint::from(at),
+        };
+        let [out, apex, up] = [[10.0, 0.0, 20.0], [0.0, 0.0, 0.0], [0.0, 0.0, 20.0]];
+        let side =
+            |from: [f64; 3], to: [f64; 3], by: Surface, kept: Decision, which: [u8; 2]| FaceMeet {
+                carried_by: [Surface::Plane(wall), by],
+                ends: [corner(from, which[0]), corner(to, which[1])],
+                material_side: kept,
+                along: SmallVec::new(),
+                approximation: None,
+            };
+        let piece = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(wall),
+            orientation: Orientation::Forward,
+            wires: vec![vec![
+                side(out, apex, Surface::Cone(cone), Decision::Neg, [0, 1]),
+                side(apex, up, Surface::Plane(upright), Decision::Pos, [1, 2]),
+                side(up, out, Surface::Plane(roof), Decision::Neg, [2, 0]),
+            ]],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([2.0, 0.0, 10.0]), Some(true), "inside the triangle");
+        assert_eq!(holds([0.0, 0.0, -10.0]), Some(false), "the opposite wedge");
+        assert_eq!(holds([1.0, 0.0, -10.0]), Some(false), "the opposite wedge");
     }
 
     /// [`the_piece_holds`] with the pickers worked out the way

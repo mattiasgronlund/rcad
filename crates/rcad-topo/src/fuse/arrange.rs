@@ -1328,10 +1328,13 @@ impl<'f> Arrangement<'f> {
     /// overlapping nodes are one point is left to
     /// [`Arrangement::merge_points_that_are_one_point`], which asks the policy
     /// (§17.4). Before §253 the fold was taken whenever the boxes touched,
-    /// however wide the meet's box was. One corpus draw folded a meet reaching
-    /// `1.4e-10` from its corner, 2 012 times the allowance, and answered under
-    /// a tolerant policy. With the meet kept as a node, that fuse refuses
-    /// (§253.3).
+    /// however wide the meet's box was. One corpus draw folded a meet whose box
+    /// reached `1.4e-10` from its corner, 2 012 times the allowance, and
+    /// answered under a tolerant policy. The point in that box is `4.1e-16`
+    /// from the corner and the answer was right; the box is wide because two
+    /// of the three planes are nearly parallel. With the meet kept as a node,
+    /// that fuse refuses, which is a right answer lost to a loose box and not a
+    /// wrong one prevented (§253.3, §253.7).
     ///
     /// **A second place within the allowance** means nothing here says which
     /// of the two the corner is, and both stay nodes. The places of one meet

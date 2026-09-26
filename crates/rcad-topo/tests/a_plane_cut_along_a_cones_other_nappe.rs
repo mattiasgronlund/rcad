@@ -53,7 +53,8 @@ use cones::{a_frustum, a_pointed_cone};
 /// **Two of the six planes miss the frustum.** The upper branch's lowest point
 /// is where `z/2 = lean · (z − crossing)`, and at a lean of three eighths that
 /// is `z = 9` for a crossing of `−3` and `z = 18` for `−6`, both above the top
-/// cap at `8`: the block misses the frustum by `0.125` in `x` at the top rim,
+/// cap at `8`: the block misses the frustum at the top rim by `0.125` in `x`
+/// for `−3` and by `1.25` for `−6`,
 /// and every point of the frustum is on the far side of that plane. So those
 /// eight cases are [`APART`]. It was written [`OVERLAPPING`] for all of them
 /// and nothing read it while every one refused; §251 is when the first of them

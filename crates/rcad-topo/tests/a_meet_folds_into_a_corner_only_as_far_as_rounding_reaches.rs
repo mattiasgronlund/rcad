@@ -1,17 +1,27 @@
-//! A meet of three surfaces is folded into a corner of the face only when it is
-//! no further from the corner than writing the corner down cost (§253).
+//! A meet of three surfaces is folded into a corner of the face only when its
+//! box is no further from the corner than writing the corner down cost (§253).
 //!
 //! `place_the_meets` used to fold a meet into any corner on both of its
 //! crossings whose box it touched, without asking the policy, however wide the
-//! meet's box was. Across every test in the workspace, one fold reached further
-//! than the allowance `bake.rs` grants a stored corner: a draw in the fuse
-//! target's corpus, whose meet reached `1.4e-10` from its corner, 2 012 times
-//! that allowance. Under the tolerant policy the harness hands it, the fuse
-//! answered with two solids. With the meet kept as a node, the pair goes to
-//! `merge_points_that_are_one_point`, and the fuse refuses.
+//! meet's box was. Across every test in the workspace, one fold's box reached
+//! further than the allowance `bake.rs` grants a stored corner: a draw in the
+//! fuse target's corpus, a tolerant union of two blocks that do not meet. Two
+//! of the meet's three planes are about `1.5e-6` off parallel, so its box is
+//! `±1.43e-10` wide, 2 012 times the allowance, while the point it holds is
+//! `4.1e-16` from the corner (§253.7, worked in exact rationals). The old fold
+//! gave two solids, and that answer was right. With the meet kept as a node
+//! the fuse refuses on "order along a crossing", so this pins a right answer
+//! refused, not a wrong one prevented.
 //!
-//! The draw is named rather than rebuilt here because it is four and a half
-//! kilobytes of `Model` and reads as nothing, the reason
+//! **When the meet's box is tightened, this pin should move to `ok: 1` with
+//! two solids made**, which is the answer the old fold gave. A fold that
+//! comes back past the allowance moves it the same way, so check which of
+//! the two happened before moving it.
+//!
+//! The draw is a copy of `fuzz/corpus/two_solids_fused_by_a_stranger/a45aa71b…`
+//! beside this file, so that minimising the corpus cannot drop it. It is named
+//! rather than rebuilt here because it is four and a half kilobytes of `Model`
+//! and reads as nothing, the reason
 //! `a_fused_draw_hands_its_provenance_back_through_the_door.rs` gives for the
 //! same choice.
 
@@ -19,20 +29,14 @@
 
 mod fuzzing;
 
-use std::path::PathBuf;
-
 use fuzzing::fuse::two_models_split_and_fused;
 
-/// The one draw in the corpus whose fold reached past the allowance.
-const THE_DRAW: &str = "a45aa71b95846001b737b93456a65be63b2b815f";
+const THE_DRAW: &[u8] =
+    include_bytes!("a_meet_folds_into_a_corner_only_as_far_as_rounding_reaches.draw");
 
 #[test]
 fn a_meet_further_from_a_corner_than_rounding_reaches_is_not_folded_into_it() {
-    let seed = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fuzz/corpus/two_solids_fused_by_a_stranger")
-        .join(THE_DRAW);
-    let bytes = std::fs::read(&seed).expect("the draw is checked in beside the fuse target");
-    let reached = two_models_split_and_fused(&bytes);
+    let reached = two_models_split_and_fused(THE_DRAW);
     assert_eq!(
         (reached.fused, reached.one_sided),
         (1, 1),
@@ -41,7 +45,8 @@ fn a_meet_further_from_a_corner_than_rounding_reaches_is_not_folded_into_it() {
     assert_eq!(
         (reached.ok, reached.refused),
         (0, 1),
-        "the fuse answered, so a meet 2 012 times the allowance from its corner was folded \
-         into it again without the policy being asked: {reached:?}"
+        "the fuse answered: either the meet's box was tightened, and two solids is \
+         the right answer, or a meet whose box is 2 012 times the allowance was folded \
+         into its corner again without the policy being asked: {reached:?}"
     );
 }

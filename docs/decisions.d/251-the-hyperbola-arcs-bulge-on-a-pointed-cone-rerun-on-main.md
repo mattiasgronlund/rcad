@@ -106,7 +106,8 @@ tree: 1010 run, 8 fail. After re-deriving them: 1011 run, 1011 pass.
   **A label in the first family was wrong.** Eight of its cases, lean 3/8 with
   crossing −3 or −6, were `OVERLAPPING` and miss the frustum: the plane
   `x = 3/8 (z − crossing)` meets the upper nappe first at `z = 9` or `z = 18`,
-  above the top cap at 8, and clears the top rim by 0.125 in `x`. Their union
+  above the top cap at 8, and clears the top rim by 0.125 in `x` for −3 and
+  by 1.25 for −6. Their union
   came back as two solids, which is right; the case now computes the label
   from where the upper branch starts. It went unread while every case refused.
 - **`a_plane_across_a_cone.rs`**,
@@ -152,3 +153,33 @@ tree: 1010 run, 8 fail. After re-deriving them: 1011 run, 1011 pass.
 - `crates/rcad-topo/tests/fuse_laws_over_a_cone.rs`: the two ignored
   swallowed-cone trios keep the reasons `184962b9` wrote for them; neither
   moved.
+
+### 251.7 What the verifier found
+
+An independent verifier read the argument, re-derived pins by hand, ran
+mutations, and merged the lane onto `732a849a` (1014 rcad-topo tests passed).
+Its verdict was to merge, with three changes that were made at merge.
+
+- **Confirmed.** The nappe guard is proved and not assumed: it reads interval
+  signs, and only `Pos` and `Neg` count. Convexity carries 251.4's argument
+  over, so a point on the other nappe, or one whose nappe cannot be told, can
+  only lose a candidate and never give a wrong answer. The apex cases are safe,
+  but only because of the guard. Both of 251.2's tests fail on the base. The
+  eight cases relabelled `APART` are right. Three grid shapes and the roof case
+  were worked again by hand, all within the bound, and the new grid test's
+  tolerance is exactly `volume_error()`. All 120 other-nappe answers match a
+  Simpson-rule volume the verifier worked out, within the bound.
+- **The guard had no test of its own.** Making it answer yes when it cannot
+  tell **passed all of `rcad-topo`** (1011 of 1011), while a unit probe showed
+  a triangle with a corner at the apex then holding points in the opposite
+  wedge, which is a wrong answer. Counting every open cone side was caught only
+  by a refusal changing its name in one test. So two unit tests went into
+  `select.rs`'s `mod tests` at merge:
+  `a_hyperbola_arcs_piece_holds_nothing_on_the_other_nappe` and
+  `a_piece_with_a_corner_at_the_apex_holds_nothing_in_the_opposite_wedge`.
+  Measured at merge: with `Some(false) => true` in `in_the_bulge_of`, which
+  counts every open cone side, both fail; with the guard answering yes
+  whenever a sign is not `Pos` or `Neg`, the second fails.
+- `in_the_bulge_of`'s last arm names `Surface::Torus(_)` now (§40).
+- The gap for a crossing of −6 is 1.25 and not 0.125; 251.5 and the test's
+  doc comment say so now.
