@@ -226,10 +226,13 @@ dangling `after:` it refuses is now a `T` id.
 
 - `add` puts a row at the foot of its tier. There is no verb to rank a row
   higher, and since ccbbcee8 the guard refuses ranking by hand. Q151 adds the
-  verb.
+  verb. **Closed by Q151 (b4501695):** `just queue rank <id> before <id>`,
+  within one tier.
 - A row closed in another copy, or on `main`, and still open in this one is
   offered by `next`: the copy is behind, and `next` reads it as it stands.
-  Merging `main` first is the answer today.
+  Merging `main` first is the answer today. **Closed by Q151 (b4501695):**
+  `next` no longer offers such a row, `just queue` names it as closed
+  elsewhere, and it holds no files in the write-set meeting.
 - The patching hook in the `guardrails` plugin still refuses a read-only Python
   heredoc that names a tracked `.md` file. That is the plugin's, and this guard
   does not change it.
