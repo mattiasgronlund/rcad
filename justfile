@@ -98,6 +98,8 @@ gate_steps := "check-plugins \
     check-plan-selftest \
     check-queue \
     check-queue-selftest \
+    check-queue-api-selftest \
+    check-queue-merge-driver \
     check-hub \
     check-hub-selftest \
     check-hub-align-selftest \
@@ -1274,8 +1276,10 @@ test-ignored:
 # is named here rather than hidden. The shared 24 have a runner of their own in
 # the marketplace repo now.
 #
-# The three hooks below it are rcad's own, need no plugin, and run either way —
-# which is why the skip wraps one line and not the recipe.
+# The four hooks below it are rcad's own, need no plugin, and run either way —
+# which is why the skip wraps one line and not the recipe. The fourth is the
+# guard that sends a write to `docs/queue.md` through `just queue` (§263.7): its
+# cases hold each writing form refused and each reading form allowed.
 [doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
     #!/usr/bin/env bash
@@ -1288,6 +1292,7 @@ check-hooks:
     .claude/hooks/check-worktree-create.sh
     .claude/hooks/check-session-start-hub.sh
     .claude/hooks/check-decisions-zero.sh
+    .claude/hooks/check-queue-write-guard.sh
 
 # Every `just` recipe and every repo path a project skill names still exists.
 #
@@ -1425,8 +1430,8 @@ check-skills-selftest:
         echo "a missing skills directory is not the same as a broken scan"; exit 1
     fi
 
-# Every lane the `lanes` workflow sends out creates its own branch, and nothing
-# in the workflow resets one.
+# Every lane the `lanes` workflow sends out creates its own branch, nothing in
+# the workflow resets one, and it lands its lanes on `main` one at a time.
 #
 # `.claude/workflows/lanes.js` hands each lane its first commands, and until
 # §237 one of them was `git checkout -B <branch> <base>`. That resets a branch
@@ -1443,21 +1448,41 @@ check-skills-selftest:
 # and the lane is told what to do when the switch refuses — without that, the
 # nearest fix a lane knows is the reset.
 #
-# **It proves each arm by cutting the real file**, not against fixtures kept
-# beside it, because this file is the only one it will ever scan. Each cut must
-# change the file and must be caught by the arm it was made for, so a rewrite of
-# `lanes.js` that moves the line cannot leave an arm passing having compared
-# nothing.
-[doc("The lanes workflow makes each lane's branch with switch -c and resets none.")]
+# **Since §266 it also merges, and three more arms hold that half.** Each lane
+# is followed by its verifier and then an Opus merger that pushes to `main`, so
+# a mistake here now lands on `main` rather than in a report:
+#
+# - Every `agent(` call names an `agentType`, the three roles are all there, and
+#   each type is a file in `.claude/agents/` whose `name:` says so. Until §266
+#   none did, so `lane.md` and `verifier.md` never loaded (§261.6).
+# - The merger is started on one line behind the merge before it, through
+#   `lastMerge`, so merges inside one run never overlap. The other runs and
+#   sessions are what `ff-main` and the ancestor check settle (§266.4).
+# - `merger.md` fetches, checks that `origin/main` is an ancestor of `HEAD`,
+#   pushes and then runs `ff-main`, in that order and once each, and no other
+#   role is told to `git push`.
+#
+# None of it runs the workflow, pushes, or touches `docs/queue.md`: it reads
+# the script and the agent files as text, for the same reason as above.
+#
+# **It proves each arm by cutting the real files**, not against fixtures kept
+# beside them, because these files are the only ones it will ever scan. Each
+# cut must change a file and must be caught by the arm it was made for, so a
+# rewrite of `lanes.js` that moves a line cannot leave an arm passing having
+# compared nothing.
+[doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
     set -euo pipefail
     file=.claude/workflows/lanes.js
+    agents=.claude/agents
     create='  git switch -c ${branchOf(lane)} ${BASE}'
     reset='  git checkout -B ${branchOf(lane)} ${BASE}'
     refusal='already exists, stop and report it as blocked'
+    serial='lastMerge.then(() => agent(MERGE('
+    pushes=('git fetch origin' 'git merge-base --is-ancestor origin/main HEAD' 'git push origin HEAD:main' 'mise exec -- just ff-main')
     scan() {
-        local n
+        local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
         if [ "$n" != 1 ]; then
             echo "$1 has the line '$create' $n times, expected once"
@@ -1472,28 +1497,94 @@ check-lanes-workflow:
             echo "and without that the nearest fix a lane knows is the reset"
             return 3
         fi
+        n=$(grep -vE '^[[:space:]]*//' "$1" | grep -cE '(^|[^A-Za-z_])agent\(' || true)
+        types=$(grep -oE "agentType: '[a-z-]+'" "$1" | cut -d"'" -f2 || true)
+        if [ "$n" != "$(printf '%s' "$types" | grep -c '' || true)" ]; then
+            echo "$1 starts $n agents and names a type for $(printf '%s' "$types" | grep -c '' || true);"
+            echo "an agent with no type never loads its file in $2 (§261.6)"
+            return 4
+        fi
+        for t in lane verifier merger; do
+            if ! printf '%s\n' "$types" | grep -qxF -- "$t"; then
+                echo "$1 sends no agent of type $t"
+                return 4
+            fi
+        done
+        for t in $types; do
+            if ! grep -qxF -- "name: $t" "$2/$t.md" 2>/dev/null; then
+                echo "$1 names the agent type $t, and no $2/$t.md defines it"
+                return 4
+            fi
+        done
+        n=$(grep -cF -- 'agent(MERGE(' "$1" || true)
+        if [ "$n" != 1 ] || ! grep -F -- 'agent(MERGE(' "$1" | grep -qF -- "$serial" \
+            || ! grep -A1 -F -- "$serial" "$1" | grep -qF -- 'lastMerge = run.catch('; then
+            echo "$1 does not start its one merger behind the merge before it:"
+            echo "expected '$serial' and then 'lastMerge = run.catch(' on the next line (§266.4)"
+            return 5
+        fi
+        prev=0
+        for line in "${pushes[@]}"; do
+            n=$(grep -cxF -- "$line" "$2/merger.md" || true)
+            if [ "$n" != 1 ]; then
+                echo "$2/merger.md has the line '$line' $n times, expected once"
+                return 6
+            fi
+            at=$(grep -nxF -- "$line" "$2/merger.md" | cut -d: -f1)
+            if [ "$at" -le "$prev" ]; then
+                echo "$2/merger.md has '$line' before a line it must follow: fetch, ancestor check, push, ff-main"
+                return 6
+            fi
+            prev=$at
+        done
+        if grep -nF 'git push' "$1" "$2/lane.md" "$2/verifier.md"; then
+            echo "only the merger pushes, and the lines above tell another role to (§266)"
+            return 6
+        fi
     }
-    scan "$file" || exit 1
+    scan "$file" "$agents" || exit 1
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
-    awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead"
-    awk -v l="$create" '{ print } $0 == l { print "  git switch -C lane-x base" }' "$file" > "$dir/reset-as-well"
-    grep -vF -- "$refusal" "$file" > "$dir/no-refusal"
-    for cut in reset-instead:1 reset-as-well:2 no-refusal:3; do
+    fresh() {
+        mkdir "$dir/$1"
+        cp "$file" "$dir/$1/lanes.js"
+        cp -r "$agents" "$dir/$1/agents"
+    }
+    fresh reset-instead
+    awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead/lanes.js"
+    fresh reset-as-well
+    awk -v l="$create" '{ print } $0 == l { print "  git switch -C lane-x base" }' "$file" > "$dir/reset-as-well/lanes.js"
+    fresh no-refusal
+    grep -vF -- "$refusal" "$file" > "$dir/no-refusal/lanes.js"
+    fresh untyped-verifier
+    grep -vF -- "agentType: 'verifier'," "$file" > "$dir/untyped-verifier/lanes.js"
+    fresh no-merger-file
+    rm "$dir/no-merger-file/agents/merger.md"
+    fresh merges-at-once
+    awk -v s="$serial" -v r='Promise.resolve().then(() => agent(MERGE(' \
+        '{ i = index($0, s); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(s)); print }' \
+        "$file" > "$dir/merges-at-once/lanes.js"
+    fresh push-unchecked
+    awk -v a="${pushes[1]}" -v p="${pushes[2]}" '$0 == a { print p; next } $0 == p { print a; next } { print }' \
+        "$agents/merger.md" > "$dir/push-unchecked/agents/merger.md"
+    fresh lane-pushes
+    printf '\n    git push origin HEAD:main\n' >> "$dir/lane-pushes/agents/lane.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6)
+    for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
-        if cmp -s "$file" "$dir/$name"; then
-            echo "the cut '$name' found nothing to cut in $file, so it proves nothing"
+        if cmp -s "$file" "$dir/$name/lanes.js" && diff -rq "$agents" "$dir/$name/agents" > /dev/null; then
+            echo "the cut '$name' found nothing to cut in $file or $agents, so it proves nothing"
             exit 1
         fi
         got=0
-        scan "$dir/$name" > /dev/null || got=$?
+        scan "$dir/$name/lanes.js" "$dir/$name/agents" > /dev/null || got=$?
         if [ "$got" != "$want" ]; then
-            echo "the cut '$name' of $file was caught by arm $got, expected arm $want"
+            echo "the cut '$name' was caught by arm $got, expected arm $want"
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none; 3 cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time; ${#cuts[@]} cuts, each caught"
 
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
@@ -1576,8 +1667,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "47" ]; then \
-        echo "found $n check-* recipes, expected 47"; \
+    if [ "$n" != "49" ]; then \
+        echo "found $n check-* recipes, expected 49"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -6642,6 +6733,12 @@ check-plan-selftest:
 queue_file := "docs/queue.md"
 queue_slots := "6"
 
+# How many slots are held, when a fixture needs to say so. Empty — always, outside
+# a selftest — means `queue next` counts the machine (§263.4): a queue file under
+# `mktemp` has no machine of its own, and one counted from wherever the selftest
+# happens to run is §173's check that answers for its environment.
+queue_running := ""
+
 # **One parse, and both readers use it.** `queue` decides what to dispatch and
 # `check-queue` decides whether the file is sound. If each split a row its own
 # way, a row could pass the check and still be read differently by the fill. So
@@ -6696,26 +6793,53 @@ _queue-rows file:
 #
 # What it cannot read — an open fence, a short row, a state it does not know —
 # it refuses rather than guesses at, and points at `check-queue` for the why.
-[doc("What to dispatch from docs/queue.md: the ready rows by tier, `ready` for those alone, or `next [N]` for §230.3's fill.")]
-queue mode="" n="":
+#
+# **The verbs change the file, one row at a time** (§263): `take`, `add`,
+# `done`, `drop`, `park`, `after` and `pick`, with `show` and `running` to read.
+# Each takes the lock on the claims file in the git common directory, checks the
+# file as it would be with `check-queue`, and writes only if that passes. `just
+# queue take` with no arguments, or any verb given the wrong ones, prints the
+# usage of all of them. The logic is `tooling/queue/queue.py`; this only hands
+# it the arguments.
+#
+# **`next` counts the machine, not this copy** (§263.4). A slot is held by every
+# worktree an agent has locked that is not a session's own tree — every lane and
+# every verifier, whichever dispatcher sent it — and by every row taken with no
+# tree yet. `lane:` rows in this copy still say which write sets are busy, and so
+# do rows another dispatcher holds, from its hold or its own copy.
+[doc("What to dispatch from docs/queue.md, and the verbs that change it one row at a time: `just queue take` prints their usage.")]
+queue mode="" *args:
     #!/usr/bin/env bash
     set -uo pipefail
-    mode='{{ mode }}'
-    n='{{ n }}'
+    mode="${1:-}"
     case "$mode" in
+        take|add|done|drop|park|after|pick|show|running)
+            QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
+                exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|next) ;;
-        *) echo "queue: '$mode' is not a mode; give nothing, ready, or next [N]" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, pick, show, running" >&2; exit 1 ;;
     esac
+    n="${2:-}"
+    if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
     if [ -n "$n" ]; then
         [ "$mode" = next ] || { echo "queue: a count goes with next, and only with next" >&2; exit 1; }
         case "$n" in *[!0-9]*) echo "queue: '$n' is not a number of slots" >&2; exit 1 ;; esac
     fi
-    rows=$({{ just_executable() }} _queue-rows '{{ queue_file }}') || exit 1
-    printf '%s\n' "$rows" | LC_ALL=C awk -v mode="$mode" -v n="$n" \
+    rows=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _queue-rows '{{ queue_file }}') || exit 1
+    machine='{{ queue_running }}'
+    elsewhere=""
+    if [ -z "$machine" ]; then
+        tool='{{ justfile_directory() }}/tooling/queue/queue.py'
+        machine=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" running --count) || exit 1
+        elsewhere=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" elsewhere) || exit 1
+    fi
+    { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; } \
+        | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" \
         -v slots='{{ queue_slots }}' -v file='{{ queue_file }}' '
         BEGIN { FS = "\037"; nt = split("1 2 2.5 3 4", tiers, " ") }
         $1 == "U" { refuse($2, "a fence is never closed"); next }
         $1 != "R" { next }
+        $2 == "elsewhere" { e++; eid[e] = $5; est[e] = $7; ews[e] = $9; eraw[e] = $11; heldelse[$5] = e; next }
         $4 < 6 { refuse($2, "a row of " $4 " fields"); next }
         {
             r++
@@ -6724,10 +6848,11 @@ queue mode="" n="":
         }
         END {
             if (bad) exit 1
+            running = machine + 0
             for (i = 1; i <= r; i++) {
                 s = st[i]
                 if (s == "todo") kind[i] = "ready"
-                else if (s ~ /^lane:/) { kind[i] = "running"; running++ }
+                else if (s ~ /^lane:/) { kind[i] = "running"; lanes++ }
                 else if (s ~ /^after:/) {
                     kind[i] = "ready"
                     m = split(substr(s, 7), a, ",")
@@ -6737,6 +6862,7 @@ queue mode="" n="":
                 else if (s ~ /^parked:/) { kind[i] = "parked"; parkedin[tier[i]]++ }
                 else if (s ~ /^(done|dropped):/) kind[i] = "closed"
                 else refuse(ln[i], "the state \"" s "\"")
+                if (kind[i] == "ready" && (id[i] in heldelse)) kind[i] = "elsewhere"
             }
             if (bad) exit 1
             w = 0
@@ -6760,6 +6886,11 @@ queue mode="" n="":
                     for (j = 1; j <= r && !hit; j++)
                         if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
                             printf "skip %s (tier %s): its %s meets %s\047s %s, held by %s\n", id[i], tier[i], mine, id[j], theirs, st[j]
+                            hit = 1
+                        }
+                    for (j = 1; j <= e && !hit; j++)
+                        if (sets_meet(ws[i], ews[j])) {
+                            printf "skip %s (tier %s): its %s meets %s\047s %s, held elsewhere by %s\n", id[i], tier[i], mine, eid[j], theirs, est[j]
                             hit = 1
                         }
                     for (j = 1; j <= taken_n && !hit; j++)
@@ -6787,9 +6918,10 @@ queue mode="" n="":
                 if (tier[i] != cur) { print "  tier " tier[i]; cur = tier[i] }
                 print "    " raw[i]
             }
-            printf "running, %d of %d slots:\n", running, slots
-            if (!running) print "    none"
+            printf "running, %d of %d slots on this machine (`just queue running` names them); the rows held:\n", running, slots
+            if (!lanes && !e) print "    none"
             for (i = 1; i <= r; i++) if (kind[i] == "running") print "    " raw[i]
+            for (j = 1; j <= e; j++) print "    " eraw[j]
             print "waiting:"
             none = 1
             for (t = 1; t <= nt; t++)
@@ -6840,8 +6972,14 @@ queue mode="" n="":
 # no fenced block under anything else, since rows there would be rows nobody
 # ranked. **Rows**: a unique id, a real tier, a state from the grammar, a model,
 # a write set, and a description whose last word is the section that argues for
-# it. An `after:` names rows that are in the file and can still finish. An open
-# row sits under its own tier, and a closed one under Closed.
+# it. An `after:` names rows that can still finish. An open row sits under its
+# own tier, and a closed one under Closed.
+#
+# **An `after:` may name a `Q` row this copy does not hold yet** (§263.5): the
+# other dispatcher's new row, handed out by `just queue add` in its worktree and
+# not merged here. A tree cannot see another worktree, so the gate cannot tell
+# that row from a typo; `just queue after` can, and refuses an id that exists
+# nowhere. A `T` or `D` id is never handed out again, so one missing is refused.
 #
 # **Write sets are held against what git tracks, not against the disk.**
 # `fuzz/artifacts/` is here and not on a fresh clone, so `[ -e ]` would pass
@@ -6864,14 +7002,15 @@ check-queue file=queue_file:
     set -uo pipefail
     all=$(mktemp)
     trap 'rm -f "$all"' EXIT
-    {{ just_executable() }} decisions-all > "$all" || exit 1
-    {{ just_executable() }} _queue-check '{{ file }}' "$all"
+    here=(--justfile '{{ justfile() }}' --working-directory "$PWD")
+    {{ just_executable() }} "${here[@]}" decisions-all > "$all" || exit 1
+    {{ just_executable() }} "${here[@]}" _queue-check '{{ file }}' "$all"
 
 [doc("Check a queue file against §230.2, citing sections from the given decisions file.")]
 _queue-check file decisions:
     #!/usr/bin/env bash
     set -uo pipefail
-    rows=$({{ just_executable() }} _queue-rows '{{ file }}') || exit 1
+    rows=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _queue-rows '{{ file }}') || exit 1
     tracked=$(git ls-files) || exit 1
     [ -f '{{ decisions }}' ] || { echo "_queue-check: {{ decisions }} is not a file" >&2; exit 1; }
     {
@@ -6957,7 +7096,8 @@ _queue-check file decisions:
                 m = split(waits[id], a, ",")
                 for (j = 1; j <= m; j++) {
                     if (a[j] == id) err(wline[id], id ": waits on itself")
-                    else if (!(a[j] in kindof)) err(wline[id], id ": waits on " a[j] ", which is not a row in this file")
+                    else if (!(a[j] in kindof) && a[j] ~ /^Q/) notheld++
+                    else if (!(a[j] in kindof)) err(wline[id], id ": waits on " a[j] ", which is not a row in this file, and a T or D id is never handed out again")
                     else if (kindof[a[j]] == "dropped") err(wline[id], id ": waits on " a[j] ", which was dropped and will never be done")
                     if (kindof[a[j]] != "done") ok = 0
                 }
@@ -6967,7 +7107,7 @@ _queue-check file decisions:
             for (i = 1; i <= 6; i++) if (!(order[i] in seen)) err("", "heading \"" name[order[i]] "\" is missing")
             if (rows == 0) err("", "has no rows, so there was nothing to check")
             if (bad) { printf "%s: %d problem%s\n", file, bad, (bad == 1 ? "" : "s"); exit 1 }
-            printf "%s: %d rows; %d ready, %d waiting, %d running in %d slots, %d parked, %d closed\n", file, rows, ready, waiting, running, slots, parked, closedrows
+            printf "%s: %d rows; %d ready, %d waiting, %d running in %d slots, %d parked, %d closed%s\n", file, rows, ready, waiting, running, slots, parked, closedrows, (notheld ? "; " notheld " wait on a Q row this copy does not hold yet" : "")
         }
         function err(line, msg) {
             if (line == "") printf "%s: %s\n", file, msg
@@ -7095,7 +7235,7 @@ check-queue-selftest:
     refused tier        's/^T1  1 /T1  5 /'                         'tier "5"'
     refused state       's/lane:lane-q2/running/'                   'state "running"'
     refused sha         's/done:42df376e/done:42DF/'                'state "done:42DF"'
-    refused after-none  's/after:Q2/after:Q99/'                     'Q99, which is not a row'
+    refused after-none  's/after:Q2/after:T99/'                     'T99, which is not a row'
     refused after-self  's/after:Q2/after:Q5/'                      'waits on itself'
     refused after-drop  's/after:Q2/after:D1/'                      'which was dropped'
     refused model       's/^T1  1  todo  opus/T1  1  todo  haiku/'  'model "haiku"'
@@ -7114,7 +7254,7 @@ check-queue-selftest:
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
-        got=$("$j" --set queue_file "$dir/$1.md" queue "${@:2}" 2>&1) \
+        got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 queue "${@:2}" 2>&1) \
             || fail "queue ${*:2} failed on the $1 fixture"
     }
     takes() { grep '^take ' <<<"$got" | cut -d' ' -f2 | tr '\n' ' '; }
@@ -7191,6 +7331,212 @@ check-queue-selftest:
     grep -qxF '      waits on Q1 (lane:lane-y)' <<<"$got" \
         || fail "a waiting row does not say what it waits on and that row's state"
 
+    exit 0
+
+# The merge driver `.gitattributes` names for `docs/queue.md`, spelt as this
+# clone's git config must hold it. The path goes through `rev-parse` because
+# every worktree shares the one config and git runs the driver from the top of
+# whichever worktree is merging (§263.6).
+queue_merge_driver := 'python3 "$(git rev-parse --show-toplevel)/tooling/queue/merge.py" %O %A %B %P'
+
+# Registers the `docs/queue.md` merge driver in this clone's git config. Once
+# per clone is enough, since every worktree reads the same config;
+# `check-queue-merge-driver` names this recipe when the entry is missing or
+# spelt differently.
+[doc("Register the docs/queue.md merge driver (§263) in this clone's git config, which every worktree shares.")]
+queue-merge-driver:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git config merge.queue-rows.name 'docs/queue.md, merged by row id (docs/decisions.md §263)'
+    git config merge.queue-rows.driver '{{ queue_merge_driver }}'
+    echo 'merge.queue-rows is registered in this clone'
+
+# **git ignores a merge driver that `.gitattributes` names and its config does
+# not define**, and merges the file line by line without a word. That is the
+# failure this exists for: the two dispatchers would be back to one text
+# conflict per concurrent edit, and nothing would say why.
+#
+# **Skipped, not passed, where there is no Claude Code** — CI and `gate-fresh`,
+# the same test as `check-plugins` (§77). A fresh clone has no config from here,
+# and registering the driver there would prove only that this recipe can write
+# a config. What is being asked is whether *this* clone merges the queue by row,
+# and only a clone a dispatcher merges in can be asked that. The driver itself
+# is not skipped anywhere: `check-queue-api-selftest` registers it in a scratch
+# repository and merges through it, on the runner as here.
+[doc("This clone's git config registers the docs/queue.md merge driver that .gitattributes names; skipped where there is no Claude Code.")]
+check-queue-merge-driver:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    grep -qxF 'docs/queue.md merge=queue-rows' .gitattributes \
+        || { echo ".gitattributes does not name the queue-rows driver for docs/queue.md"; exit 1; }
+    if [ ! -d "{{claude_config}}" ]; then
+        echo "no {{claude_config}}, so no Claude Code and no dispatcher merging here: the queue merge driver's registration is skipped, not passed"
+        exit 0
+    fi
+    got=$(git config --get merge.queue-rows.driver || true)
+    if [ "$got" != '{{ queue_merge_driver }}' ]; then
+        echo "git config merge.queue-rows.driver is '${got:-unset}', so git merges docs/queue.md line by line and says nothing; register it with: mise exec -- just queue-merge-driver"
+        exit 1
+    fi
+    echo "merge.queue-rows is registered, and .gitattributes names it for docs/queue.md"
+
+# `just queue`'s verbs, its count of the machine, and the merge driver, against
+# scratch repositories under `target/` — a hub, two session trees, lane trees
+# locked the way the worktree hook locks them — and never the live queue.
+#
+# Each case is one the brief behind §263 named: two worktrees taking one row,
+# two adding rows at once, two branches changing different rows merging
+# cleanly, one row changed two ways conflicting loudly, `after:` on an id only
+# another worktree holds, and on one that exists nowhere. The hook's cases are
+# `check-hooks`'s. Without `tooling/queue/` the first take already fails, and
+# with the text merge in place of the driver the clean merge conflicts: Q1 and
+# Q2 sit on neighbouring lines, and both sides add at the foot of Tier 2.
+[private]
+[doc("just queue's verbs, its machine count and the merge driver agree with scratch repositories under target/.")]
+check-queue-api-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p '{{ justfile_directory() }}/target'
+    root=$(mktemp -d '{{ justfile_directory() }}/target/queue-selftest.XXXXXX')
+    trap 'rm -rf "$root"' EXIT
+    j='{{ just_executable() }}'
+    got=""
+    fail() {
+        echo "just queue drifted from its selftest: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    g() { git -C "$1" -c user.name=selftest -c user.email=selftest@invalid "${@:2}"; }
+    q() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" queue "${@:2}"; }
+    check() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" check-queue 2>&1; }
+    lock() { g "$hub" worktree lock --reason "agent $(basename "$1") since 2026-09-26T00:00:00Z" "$1"; }
+
+    hub="$root/rcad"
+    mkdir -p "$hub/docs/decisions.d" "$hub/tooling/queue"
+    cp '{{ justfile_directory() }}'/tooling/queue/*.py "$hub/tooling/queue/"
+    cp '{{ justfile_directory() }}/.gitattributes' "$hub/.gitattributes"
+    printf '## 230. One queue\n' > "$hub/docs/decisions.d/230-one-queue.md"
+    printf 'a\n' > "$hub/docs/a.md"
+    printf 'b\n' > "$hub/docs/b.md"
+    cat > "$hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q1  1  todo  opus  docs/a.md  the first row §230
+    Q2  1  todo  opus  docs/b.md  the second row §230
+    Q3  1  todo  opus  -  the third row §230
+    ```
+
+    ## Tier 2
+
+    ```
+    Q4  2  after:Q1  opus  -  waits on the first §230
+    ```
+
+    ## Tier 2.5
+
+    ```
+    ```
+
+    ## Tier 3
+
+    ```
+    ```
+
+    ## Tier 4
+
+    ```
+    ```
+
+    ## Closed
+
+    ```
+    T1  1  done:abcdef0  -  -  a closed row §230
+    ```
+    MD
+    g "$hub" init -q -b main
+    g "$hub" add -A
+    g "$hub" commit -q -m root
+    "$j" --justfile '{{ justfile() }}' --working-directory "$hub" queue-merge-driver >/dev/null \
+        || fail "queue-merge-driver could not register the driver"
+    one="$root/rcad-worktrees/one"
+    two="$root/rcad-worktrees/two"
+    g "$hub" worktree add -q -b one "$one" main && lock "$one"
+    g "$hub" worktree add -q -b two "$two" main && lock "$two"
+
+    got=$(q "$one" take Q1 lane-q1 2>&1) || fail "the first take of Q1 was refused"
+    grep -q '^Q1  1  lane:lane-q1 ' "$one/docs/queue.md" || fail "take did not write lane:lane-q1"
+    got=$(q "$two" take Q1 lane-q1-again 2>&1) && fail "a second worktree took Q1 while the first held it"
+    grep -qF 'Q1 is held by lane-q1 from' <<<"$got" || fail "the second take did not name who holds Q1"
+    grep -q '^Q1  1  todo ' "$two/docs/queue.md" || fail "a refused take wrote the file anyway"
+    got=$(q "$two" take Q4 lane-q4 2>&1) && fail "take dispatched Q4, which waits on Q1"
+    grep -qF 'Q4 is not ready: it waits on Q1 (todo)' <<<"$got" || fail "take did not say why Q4 is not ready"
+
+    for n in 1 2; do
+        q "$one" add 2 opus - "a row added in one, $n §230" > "$root/add-one-$n" 2> "$root/err-one-$n" &
+        q "$two" add 2 opus - "a row added in two, $n §230" > "$root/add-two-$n" 2> "$root/err-two-$n" &
+    done
+    wait
+    got=$(cat "$root"/add-* "$root"/err-* | sort | tr '\n' ' ')
+    [ "$got" = "Q5 Q6 Q7 Q8 " ] || fail "four adds at once from two worktrees did not get Q5 to Q8 once each"
+    in_two=$(awk '/a row added in two, 1 / { print $1 }' "$two/docs/queue.md")
+    [ -n "$in_two" ] || fail "an add from two did not reach two's copy"
+    grep -q "^$in_two " "$one/docs/queue.md" && fail "an add from two reached one's copy, so the next case proves nothing"
+
+    got=$(q "$one" after Q3 "$in_two" 2>&1) || fail "after refused $in_two, which two handed out and one does not hold yet"
+    grep -q "^Q3  1  after:$in_two " "$one/docs/queue.md" || fail "after did not write after:$in_two"
+    got=$(check "$one") || fail "check-queue refused a wait on a Q row only two holds"
+    grep -qF '1 wait on a Q row this copy does not hold yet' <<<"$got" || fail "check-queue did not count the wait on a row it cannot see"
+    got=$(q "$one" after Q2 Q99 2>&1) && fail "after accepted Q99, which exists nowhere"
+    grep -qF 'Q99 exists nowhere' <<<"$got" || fail "after did not say Q99 exists nowhere"
+
+    lanes="$root/rcad-worktrees/one-worktrees"
+    g "$hub" worktree add -q -b lane-q1 "$lanes/lane" main && lock "$lanes/lane"
+    g "$hub" worktree add -q -b lane-q1-verify "$lanes/verify" main && lock "$lanes/verify"
+    g "$hub" worktree add -q -b idle "$lanes/idle" main
+    got=$(q "$two" take Q2 lane-q2 2>&1) || fail "two could not take Q2"
+    got=$(q "$one" running 2>&1) || fail "running failed"
+    grep -qx '3 running' <<<"$got" \
+        || fail "a lane, its verifier and a take with no tree are three slots, and two session trees and an unlocked tree none"
+    got=$(q "$one" next 2>&1) || fail "next failed"
+    grep -q '^take Q2 ' <<<"$got" && fail "next offered Q2, which two holds"
+    grep -qx 'took 2 of 3: no other row is ready' <<<"$got" \
+        || fail "next did not offer the three slots the machine leaves to one's two ready rows"
+
+    sha=$(g "$one" rev-parse HEAD)
+    got=$(q "$one" done Q1 "$sha" 2>&1) || fail "done refused Q1"
+    awk '/^## Closed/ { c = 1 } c && /^Q1  1  done:/ { f = 1 } END { exit !f }' "$one/docs/queue.md" \
+        || fail "done did not move Q1 under ## Closed"
+    got=$(q "$one" running 2>&1) || fail "running failed"
+    grep -qx '3 running' <<<"$got" || fail "done released a hold whose lane tree still stands, or counted it twice"
+    g "$one" commit -qam "one's queue"
+    g "$two" commit -qam "two's queue"
+    g "$hub" merge -q --no-edit one || fail "main did not take one"
+    got=$(g "$hub" merge --no-edit two 2>&1) || fail "one and two changed different rows and did not merge through the driver"
+    got=$(check "$hub") || fail "the merged queue fails check-queue"
+    for row in '^Q1  1  done:' '^Q2  1  lane:lane-q2 ' "^Q3  1  after:$in_two " 'added in one, 1 ' 'added in one, 2 ' 'added in two, 1 ' 'added in two, 2 '; do
+        grep -q "$row" "$hub/docs/queue.md" || fail "the merge lost the row matching $row"
+    done
+
+    g "$hub" switch -q -c three
+    got=$(q "$hub" park Q3 §230 2>&1) || fail "park refused Q3"
+    g "$hub" commit -qam park
+    g "$hub" switch -q -c four main
+    got=$(q "$hub" drop Q3 230 2>&1) || fail "drop refused Q3"
+    g "$hub" commit -qam drop
+    g "$hub" switch -q main
+    g "$hub" merge -q --no-edit three
+    got=$(g "$hub" merge --no-edit four 2>&1) && fail "Q3 parked on one side and dropped on the other merged without a conflict"
+    grep -qF 'Q3 changed on both sides' <<<"$got" || fail "the driver did not name the row that conflicted"
+    [ -n "$(g "$hub" ls-files -u docs/queue.md)" ] || fail "git did not mark docs/queue.md unmerged"
+    grep -q '^<<<<<<< ours: Q3$' "$hub/docs/queue.md" || fail "the row in conflict is not marked in the file"
+    got=$(q "$hub" park Q2 §230 2>&1) && fail "a verb wrote a file that still holds a conflict"
+    got=$(q "$hub" pick Q3 theirs 2>&1) || fail "pick could not settle Q3"
+    awk '/^## Closed/ { c = 1 } c && /^Q3  1  dropped:§230 / { f = 1 } END { exit !f }' "$hub/docs/queue.md" \
+        || fail "pick theirs did not keep four's drop under ## Closed"
+    got=$(check "$hub") || fail "the file pick settled fails check-queue"
     exit 0
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it
