@@ -20,10 +20,8 @@ fn a_merge_reads_back_every_word_another_process_wrote_to_totals() {
         two_draws_a_merge_apart();
         return;
     }
-    let root = std::env::temp_dir().join(format!(
-        "rcad-fuzz-timing-read-back-{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("rcad-fuzz-timing-read-back-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let into = root.join(TARGET);
     std::fs::create_dir_all(&into).expect("somewhere to write");
