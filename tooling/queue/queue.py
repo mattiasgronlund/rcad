@@ -27,6 +27,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rows import Queue, highest_q  # noqa: E402
 
@@ -390,14 +391,29 @@ def pick(here, args):
                 middle = next(i for i, text in enumerate(block) if text.startswith("======="))
                 ours, theirs = block[1:middle], block[middle + 1:-1]
                 if any(text.split()[:1] == [row_id] for text in ours + theirs):
-                    queue.lines = lines[:start] + (ours if side == "ours" else theirs) + lines[index + 1:]
+                    kept = ours if side == "ours" else theirs
+                    queue.lines = lines[:start] + kept + lines[index + 1:]
                     queue.parse()
+                    for text in kept:
+                        put_in_its_block(queue, queue.find(text.split()[0]))
                     checked(here, queue)
                     write(here, queue)
                     print(f"{row_id}: kept {side}")
                     return
                 start = None
         raise Refused(f"no conflict in {here.relative} holds {row_id}")
+
+
+def put_in_its_block(queue, row):
+    """The markers stand where the frame side had the row; the side kept may belong elsewhere."""
+    home = "closed" if row.is_closed() else row.tier
+    if row.block[0] == home:
+        return
+    block = queue.block_of_key(home)
+    if block is None:
+        raise Refused(f"{row.id} belongs under the {home} heading, and the file has no block there")
+    queue.remove(row)
+    queue.append_to_block(block, row.text)
 
 
 def show(here, args):

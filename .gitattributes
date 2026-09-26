@@ -1,0 +1,7 @@
+# docs/queue.md is merged by row id, not by line (docs/decisions.md §263).
+#
+# git ignores a driver named here that its config does not define, and falls
+# back to the line merge without a word, so `just check-queue-merge-driver`
+# fails when this clone has not registered it, and names the command:
+# `mise exec -- just queue-merge-driver`.
+docs/queue.md merge=queue-rows
