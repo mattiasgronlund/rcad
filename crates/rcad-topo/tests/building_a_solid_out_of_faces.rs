@@ -41,7 +41,7 @@ use rcad_topo::{
 
 mod rings;
 
-use rings::a_quarter_bend;
+use rings::{a_bend_turned_and_written_out, a_quarter_bend, the_top_half_of_a_ring};
 
 fn a_working_size() -> Scale {
     Scale::millimetres(100.0).expect("100 mm is a working size")
@@ -316,6 +316,118 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
         matches!(surface, Surface::Torus(_)),
         "the face the ray cannot be fired at: {surface:?}"
     );
+}
+
+/// A quarter bend written out where it sits after half a turn round its own
+/// axis is the bend that was not turned, and so is a half bend written out a
+/// quarter turn round, across `π`.
+///
+/// Both walls run past `π` round the ring, which is where `atan2` cuts the ring
+/// angle. The mesher unwrapped the angle round the tube and took the one round
+/// the ring as it came, so it read each wall as the rest of the ring with its
+/// seam folded, and the builder refused both
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }` (§280).
+///
+/// **Compared within what the two measurements say they can be out by, and
+/// not bit for bit.** The two charts differ by a half or a quarter turn, so
+/// `point_at` takes different sines and the mesh points land differently.
+/// Each is also held to the volume Pappus gives, `π·r²·θ·R`, so that two
+/// turned copies wrong the same way could not pass.
+#[test]
+fn a_bend_turned_past_where_the_ring_angle_is_cut_is_the_bend_that_was_not_turned() {
+    let policy = Policy::certified();
+    let (ring, tube) = (4.0, 1.0);
+    for (quarters, turns) in [(1, 2), (2, 1)] {
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(a_working_size());
+        let unturned = a_bend_turned_and_written_out(&mut model, ring, tube, quarters, 0)
+            .expect("the bend that was not turned is a solid");
+        let turned = match a_bend_turned_and_written_out(&mut model, ring, tube, quarters, turns) {
+            Ok(turned) => turned,
+            Err(refused) => panic!(
+                "a bend {quarters} quarter turns long, turned {turns} quarter turns and \
+                 written out, was refused: {refused:?}"
+            ),
+        };
+        model
+            .validate(&policy, &mut log)
+            .expect("the model holding both is sound");
+
+        let deflection = Deflection::for_scale(model.scale());
+        let [one, other] = [unturned, turned].map(|key| {
+            model
+                .solid(key)
+                .expect("this model made the key")
+                .measure(deflection, &policy, &mut log)
+                .expect("a bend measures")
+        });
+        let apart = (one.volume() - other.volume()).abs();
+        assert!(
+            apart <= one.volume_error() + other.volume_error(),
+            "{quarters} quarters turned {turns}: {} against {}, {apart} apart where the two \
+             measurements allow {} and {}",
+            other.volume(),
+            one.volume(),
+            other.volume_error(),
+            one.volume_error()
+        );
+        let pappus = core::f64::consts::PI
+            * tube
+            * tube
+            * (f64::from(quarters) * core::f64::consts::FRAC_PI_2)
+            * ring;
+        for (which, measured) in [("unturned", one), ("turned", other)] {
+            assert!(
+                (measured.volume() - pappus).abs() <= measured.volume_error(),
+                "{quarters} quarters, {which}: {} where Pappus gives {pappus}, allowed {}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
+/// The top half of a ring described with one wire per equator is refused by
+/// name, because each of those wires climbs a whole turn round the ring and a
+/// loop in the chart has to close.
+///
+/// That is a wire that will not lie flat on its face, the name a wire that
+/// winds round the tube where it may not has always had (§280.6). Before the
+/// ring angle was unwrapped, each equator came back to the corner it left
+/// with no turn counted, and the builder refused the half ring
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 3, used: 3 }`.
+#[test]
+fn the_top_half_of_a_ring_with_no_seam_climbs_a_whole_turn_round_it_and_is_refused() {
+    let mut model = Model::new(a_working_size());
+    let refused = the_top_half_of_a_ring(&mut model, 4.0, 1.0, false);
+    assert!(
+        matches!(refused, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
+        "the top half of a ring with no seam came back {refused:?}"
+    );
+    assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
+}
+
+/// The same half ring with a seam across the tube, which is how a file writes a
+/// face right round the ring, is refused by the same name: its one wire passes
+/// the seam's points a whole turn apart round the ring.
+///
+/// **This refuses a solid that exists, and on purpose.** With that half of the
+/// refusal switched off this very shape built and measured `38.396` where
+/// Pappus, `π²·r²·R`, gives `39.478`, inside its stated `8.742`; the crown of
+/// a ring in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs` folded
+/// instead. Nothing cuts a patch narrower round the ring, so the mesher is
+/// not trusted with a patch a whole turn wide that way (§280.6, and
+/// `WalkingAWire::goes_right_round_the_second_way` in `mesh.rs`). A gap, and
+/// this test is what moves when it is closed.
+#[test]
+fn the_top_half_of_a_ring_with_a_seam_across_the_tube_is_refused_by_the_same_name() {
+    let mut model = Model::new(a_working_size());
+    let refused = the_top_half_of_a_ring(&mut model, 4.0, 1.0, true);
+    assert!(
+        matches!(refused, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
+        "the top half of a ring with a seam came back {refused:?}"
+    );
+    assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
 }
 
 /// The seam of a bend, named from geometry a file carries rather than from
