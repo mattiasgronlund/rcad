@@ -217,18 +217,20 @@ impl Watch {
     /// lost, not three. The same recovery covers a slow input's own write
     /// failing on its own, past that point: only an input [`write_slow_input`]
     /// actually lands under its real name is marked written, so one that did
-    /// not is retried on the next merge rather than refused forever. §236.6:
-    /// landing under the real name is itself a write to a temporary name and
-    /// then a rename, so a write cut short by a full disk or a process killed
-    /// mid-write — libFuzzer kills forked jobs from outside, with no chance to
-    /// finish — never leaves a truncated input under a name `cargo fuzz run`
-    /// would be asked to replay. What is still swallowed is the totals file
-    /// and the report text themselves — a write that fails there loses just
-    /// that one merge's counts and its report, not a night's worth of runs,
-    /// since the slowest are untouched by either; a torn `totals` file is read
-    /// back a line at a time, so it drops what got cut instead of lying about
-    /// it. A fuzz target that stopped fuzzing because its measurements could
-    /// not be filed would be measuring the disk.
+    /// not is retried on the next merge rather than refused forever.
+    ///
+    /// Every file here is replaced whole or not at all ([`replace_whole`]), so
+    /// a write cut short by a full disk or by the process ending mid-merge
+    /// leaves the old file where it was. That matters most for `totals`,
+    /// which every process for the target reads back and adds to: written in
+    /// place, a process that ended between emptying it and writing it left it
+    /// empty, `read_back` read that as no runs, and the next merge started
+    /// the whole target's count again from its own runs, `lost` included.
+    /// What is still swallowed is a failure to write `totals` or the report:
+    /// that loses just that one merge's counts and its report, since the old
+    /// `totals` stays until the rename and the slowest are untouched by
+    /// either. A fuzz target that stopped fuzzing because its measurements
+    /// could not be filed would be measuring the disk.
     ///
     /// Everything this allocates is freed before it returns, which is what
     /// lets it run inside a draw ([`HOW_OFTEN_TO_MERGE`]).
@@ -253,48 +255,41 @@ impl Watch {
         // them would make every merge re-offer the whole corpus.
         let mut everyones = HowLongRunsTook::read_back(&self.into.join("totals"));
         everyones.add(&self.took);
-        let _ = std::fs::write(self.into.join("totals"), everyones.written_out());
+        let _ = replace_whole(
+            &self.into.join(TOTALS_BEING_WRITTEN),
+            &self.into.join("totals"),
+            everyones.written_out().as_bytes(),
+        );
         self.took.clear();
 
         self.slowest.write_what_is_not_on_disk(&slowest);
 
         let kept = prune_to_the_slowest_kept(&slowest, self.keep);
-        let _ = std::fs::write(self.into.join("report"), report_text(&everyones, &kept));
+        let _ = replace_whole(
+            &self.into.join(REPORT_BEING_WRITTEN),
+            &self.into.join("report"),
+            report_text(&everyones, &kept).as_bytes(),
+        );
 
         let _ = lock.unlock();
     }
 }
 
 /// Write one slow input's bytes under its real name, so a reader never sees
-/// fewer bytes than the input actually had.
+/// fewer bytes than the input actually had: `cargo fuzz run` on a short one
+/// replays something other than what was slow. §236.6.
 ///
-/// `std::fs::write` alone cannot do this: it creates the file and then
-/// writes, so a write cut short by a full disk or a process killed
-/// mid-write — libFuzzer kills forked jobs from outside, with no chance to
-/// finish — leaves a truncated input sitting under a real name, and
-/// `cargo fuzz run` on it replays something other than what was slow.
-/// §236.6.
-///
-/// The fix is the usual one: write the bytes to a temporary name in the same
-/// directory, then [`std::fs::rename`] them onto the real one. A rename
-/// within one directory either lands whole or does not happen; there is no
-/// state in between for a reader to catch.
-///
-/// The temporary name is fixed, not one per call, because the caller only
-/// ever reaches this while holding the one lock every process for this
-/// target shares — so there is never more than one writer at a time, and a
-/// leftover from a process killed mid-write is silently overwritten by the
-/// next successful write rather than piling up one file per crash. If
-/// nothing ever writes again — the last run of the night dies mid-write and
-/// nobody restarts that target — the leftover just sits there, harmlessly:
-/// it can never be mistaken for a slow run, because it does not start with
-/// `slow-`, so `how_slow_the_name_says` does not parse it and
+/// A leftover under the temporary name, from a process that ended mid-write
+/// with nothing written after it, is never mistaken for a slow run: it does
+/// not start with `slow-`, so `how_slow_the_name_says` does not parse it and
 /// [`prune_to_the_slowest_kept`] leaves it alone the same way it leaves any
 /// file this module did not write.
 fn write_slow_input(slowest: &Path, took: Duration, bytes: &[u8]) -> bool {
-    let temp = slowest.join(SLOW_INPUT_BEING_WRITTEN);
-    write_that_might_be_cut_short(&temp, bytes)
-        && std::fs::rename(&temp, slowest.join(named_for(took, bytes))).is_ok()
+    replace_whole(
+        &slowest.join(SLOW_INPUT_BEING_WRITTEN),
+        &slowest.join(named_for(took, bytes)),
+        bytes,
+    )
 }
 
 /// The temporary name [`write_slow_input`] writes under before renaming.
@@ -302,6 +297,33 @@ fn write_slow_input(slowest: &Path, took: Duration, bytes: &[u8]) -> bool {
 /// Never `slow-...`, the shape every real name has, so a leftover is never
 /// read as one.
 const SLOW_INPUT_BEING_WRITTEN: &str = "being-written";
+
+/// Put `bytes` under `real`, whole or not at all, by writing them to `temp`
+/// in the same directory and renaming that onto `real`.
+///
+/// `std::fs::write` cannot do this: it empties the file when it opens it and
+/// writes after, so a write cut short by a full disk, or a process that ends
+/// in between, leaves a short or empty file under the real name. And a
+/// process under `-fork` can end at any moment: a `-timeout`, a crash and an
+/// out-of-memory all end in `_Exit`, which finishes nothing, and an
+/// out-of-memory can come from libFuzzer's own thread while this one is
+/// mid-write. A rename within one directory either lands whole or does not
+/// happen.
+///
+/// Each `temp` is a fixed name, not one per call, because every caller holds
+/// the one lock every process for this target shares. So there is never
+/// more than one writer at a time, and a leftover from a process that ended
+/// mid-write is overwritten by the next write rather than piling up one file
+/// per crash.
+fn replace_whole(temp: &Path, real: &Path, bytes: &[u8]) -> bool {
+    write_that_might_be_cut_short(temp, bytes) && std::fs::rename(temp, real).is_ok()
+}
+
+/// The temporary name `totals` is written under before renaming.
+const TOTALS_BEING_WRITTEN: &str = "totals-being-written";
+
+/// The temporary name the report is written under before renaming.
+const REPORT_BEING_WRITTEN: &str = "report-being-written";
 
 /// Write `bytes` to `path` in one call, the way `std::fs::write` does.
 #[cfg(not(test))]
@@ -1153,13 +1175,103 @@ mod tests {
         let _ = std::fs::remove_dir_all(&into);
     }
 
+    /// Set to the directory a copy of this test binary merges into until it
+    /// is killed, by [`a_process_killed_while_it_merges_never_sets_the_totals_back`].
+    const MERGE_UNTIL_KILLED: &str = "RCAD_FUZZ_TIMING_MERGE_UNTIL_KILLED";
+
+    /// How many copies that test kills, each at a different moment.
+    const KILLS: u64 = 200;
+
+    #[test]
+    fn a_process_killed_while_it_merges_never_sets_the_totals_back() {
+        // Every process for a target adds its runs to the one `totals`, and
+        // any of them can end in the middle of a merge: a `-timeout`, a crash
+        // or an out-of-memory is `_Exit`, and an out-of-memory can come from
+        // another thread. `std::fs::write` empties the file when it opens it
+        // and writes after, so a process that ended between the two left
+        // `totals` empty, `read_back` read that as no runs at all, and the
+        // next merge started the whole target's count again from its own.
+        if let Some(into) = std::env::var_os(MERGE_UNTIL_KILLED) {
+            merge_until_killed(Path::new(&into));
+            return;
+        }
+        let into = somewhere_to_write("killed-mid-merge");
+        std::fs::create_dir_all(&into).expect("somewhere to write");
+        let this_binary = std::env::current_exe().expect("this test's own binary");
+        let mut counted = 0;
+        for kill in 0..KILLS {
+            let mut child = std::process::Command::new(&this_binary)
+                .args([
+                    "--exact",
+                    "tests::a_process_killed_while_it_merges_never_sets_the_totals_back",
+                ])
+                .env(MERGE_UNTIL_KILLED, &into)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("a copy of this test binary");
+            let before = runs_once_merged_past(&into, counted, &mut child);
+            std::thread::sleep(Duration::from_micros(kill * 37 % 500));
+            let was_running = child.try_wait().expect("the copy's state").is_none();
+            child.kill().expect("the copy killed");
+            child.wait().expect("the killed copy reaped");
+            assert!(was_running, "copy {kill} stopped before it was killed");
+
+            let after = runs_in_totals(&into);
+            assert!(
+                after >= before,
+                "copy {kill} was killed with `totals` at {before} runs, and it read {after} after"
+            );
+            counted = after;
+        }
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    /// Merge one run at a time into `into` until killed, or for ten seconds,
+    /// so a copy whose test died before killing it does not run on.
+    fn merge_until_killed(into: &Path) {
+        let mut watch = a_process_writing_into(into, 0);
+        let stop = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < stop {
+            watch.ran(Duration::from_micros(1), b"");
+            watch.merge_out();
+        }
+    }
+
+    /// The runs in `totals` once `child`'s merges have taken it past `counted`.
+    fn runs_once_merged_past(into: &Path, counted: u64, child: &mut std::process::Child) -> u64 {
+        let give_up = Instant::now() + Duration::from_secs(10);
+        loop {
+            let runs = runs_in_totals(into);
+            if runs > counted {
+                return runs;
+            }
+            let exited = child.try_wait().expect("the copy's state").is_some();
+            if exited || Instant::now() > give_up {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("a copy never merged past {counted} runs; it exited: {exited}");
+            }
+            std::thread::sleep(Duration::from_micros(100));
+        }
+    }
+
+    /// The runs in `totals`, read under the lock every merge takes.
+    fn runs_in_totals(into: &Path) -> u64 {
+        let lock = the_shared_report_locked(into).expect("the lock every merge takes");
+        let runs = HowLongRunsTook::read_back(&into.join("totals")).runs;
+        lock.unlock().expect("the lock released");
+        runs
+    }
+
     #[test]
     fn a_totals_file_cut_short_drops_the_torn_line_rather_than_lying() {
-        // Q67 asked whether the same short-write problem reaches `totals`.
-        // It does not need the same fix: `read_back` already treats a line
-        // it cannot parse as absent rather than guessing at it, so a torn
-        // tail loses what got cut and nothing more — it never reads back as
-        // *more* than was written, which is what would mislead a reader.
+        // Q67 asked whether the short-write problem reaches `totals`. A file
+        // cut short cannot land under the name any more (see
+        // `a_process_killed_while_it_merges_never_sets_the_totals_back`), but
+        // `read_back` still treats a line it cannot parse as absent rather
+        // than guessing at it, so a torn tail loses what got cut and nothing
+        // more — it never reads back as *more* than was written.
         let into = somewhere_to_write("totals-cut-short");
         std::fs::create_dir_all(&into).expect("somewhere to write");
         let mut took = HowLongRunsTook::new();
