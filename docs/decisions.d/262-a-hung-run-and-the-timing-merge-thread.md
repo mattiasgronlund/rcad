@@ -182,3 +182,70 @@ mechanism this row could reproduce did not need it.
   §262.5's second point is offered as a plausible shape, not a finding; it
   would need per-job run counts from a real night, which the current log
   format does not carry.
+
+### 262.7 Corrected at merge: the extra processes are libFuzzer's merges, and §256's own method finds no shortfall on the probe
+
+Read at merge against the libFuzzer source that `libfuzzer-sys` 0.4.13 builds
+(`~/.cargo/registry/src/*/libfuzzer-sys-0.4.13/libfuzzer/`), and against the
+lane's own run output. The logs are deleted, but the lane's transcript still
+holds what it printed. §262.2's finding stands, and so does the loss §262.3 and
+§262.4 measure between the side-log and `totals`. Four things change.
+
+**The "2× job-counter lag" is not a lag.** In fork mode the parent prints the
+status line after every job it collects. The guard that would skip some is
+commented out (`FuzzerFork.cpp:222-227`), and job numbers go up by one per job
+(`:381`, `:478`). So `job:` is the number of the job just collected, and it
+counts jobs correctly. When a job has left inputs with new features, the parent
+then runs `CrashResistantMerge` over them (`:229-237`). That is a second process,
+and it runs the same target on those inputs, through `timed` and the side-log
+like any other. The side-log's 229, 215 and 2 436 files are the jobs, plus these
+merge processes, plus the one merge over the seed corpus at start (`:348`). This
+row did not measure how they split. §262.3's last paragraph, §262.4's "about
+half", §262.5's first bullet and §262.6's second are withdrawn. 1 104 is
+`where_two_surfaces_cross`'s job count, and §256.4 was dividing by the right
+number.
+
+**Each kill lost about six runs on the probe.** §262.3's last column divides by
+processes, and many of those are merges, not jobs. Divided by timeout
+job-endings instead, the gap is 825 / 116 ≈ 7.1 (control), 668 / 112 ≈ 6.0
+(poison) and 8 020 / 1 241 ≈ 6.5 (`-fork=48`), against §256.4's ≈ 309.
+
+**§256.3's method, run on the probe, gives the healthy shape.** The lane never
+put `totals` against libFuzzer's last `#N`, which is the comparison §256.3 made.
+Its transcript holds both numbers for every run:
+
+| run | `totals` `runs` | libFuzzer's last `#N` | gap |
+|---|---|---|---|
+| control | 24 184 | 23 923 | **+261** (+1.09%) |
+| poison | 18 391 | 17 949 | **+442** (+2.46%) |
+| poison, `-fork=48` | 250 774 | 242 558 | **+8 216** (+3.39%) |
+
+On all three runs, 99% of jobs ended on a `-timeout` kill (112 of 113, 116 of
+117, 1 241 of 1 242). Yet the record reads *above* libFuzzer's count, like the
+cone, fuse and reader rows of §256.3's table, and nothing like
+`where_two_surfaces_cross`'s −49.56%. Some of every positive gap is built in.
+`#N` adds up only the jobs' own final stats (`FuzzerFork.cpp:200-201`). The merge
+processes inherit `RCAD_FUZZ_TIMINGS`, so `totals` counts their runs and `#N`
+does not. By how far the side-log beats `#N` (1 086, 1 110 and 16 236 runs), the
+merges add a count of their own. So do the jobs still running at exit. §256.3
+put its three positive gaps down to the status line lagging between prints.
+That is one of two causes, and those two gaps say nothing about lost runs either
+way.
+
+**At the design bound, the kills cannot account for `where_two_surfaces_cross`'s
+gap. Neither of §262.5's two leads explains it.** The night's own log
+(`~/rcad-fuzz-logs/2026-09-26/fuzz.log`) shows `-fork=4 -timeout=10`, `-max_total_time=28715`,
+and 592 047 as the last `#N`. Take the 951 kills' 10 s of hanging out of
+28 715 s × 4 children. What is left is 105 350 child-seconds, about 5.6 runs a
+second. For the design bound to cover the 293 405-run gap, each of the 1 104
+job-endings would have to lose 266 runs in its last second. That is 47 times the
+average rate, and the last two status lines print `exec/s` of 3 and 1. §262.5's
+second bullet says a job that hangs early had little to lose. That is about how
+§256.4 averaged, not about where runs went missing. A run libFuzzer counted is
+in `#N` whichever job ran it. So what takes about half of this target's runs
+out of its record, with `lost 0`, is not known. Q150 asks.
+
+One smaller correction. The second thread §262.2 watched is libFuzzer's RSS
+thread, which sleeps a second between checks (`FuzzerDriver.cpp:314-316`).
+libFuzzer's `-timeout` is a `SIGALRM` timer (`FuzzerUtilPosix.cpp:110-114`), not
+a thread. Nothing in §262.2's reading depends on which thread it was.
