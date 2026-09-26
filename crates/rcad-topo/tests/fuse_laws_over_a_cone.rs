@@ -161,6 +161,27 @@ fn uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first() {
         .print_and_check("associativity, a block, a cone and a cube", 3);
 }
 
+/// Three trios that refused both ways round until `select.rs` counted the
+/// bulge of a hyperbola arc on the arc's own half of the cone, and answer one
+/// way round now.
+///
+/// Neither grouping of any of them gives a second answer to compare, so no law
+/// is broken; one grouping gets further than it did. Where each of the other
+/// groupings stops is pinned by name, so that when it answers too the trio goes
+/// back to [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`] and is compared.
+#[test]
+fn three_trios_that_refused_both_ways_now_answer_one_way_round() {
+    for (trio, want) in TRIOS_THAT_ANSWER_ONE_WAY_ROUND {
+        let (left, right) = both_groupings(trio);
+        let found = [left.err(), right.err()];
+        assert_eq!(
+            found.each_ref().map(Option::as_deref),
+            want,
+            "{trio:?}: where (block ∪ cone) ∪ third and (cone ∪ third) ∪ block stop"
+        );
+    }
+}
+
 /// A frustum up through a block's floor, and a small cube wholly inside the
 /// block, above the frustum.
 ///
@@ -231,11 +252,22 @@ fn a_block_with_one_box_through_its_floor_and_one_inside_it_unites_to_the_block_
 
 /// A pointed cone the block swallows whole, and a cube cutting through both.
 ///
-/// `(block ∪ cone) ∪ cube` answers, since `block ∪ cone` is the block. `cone ∪
-/// cube` is refused, undecided on a point inside a piece of a face.
+/// `(block ∪ cone) ∪ cube` answers, since `block ∪ cone` is the block.
+///
+/// `cone ∪ cube` used to be refused, undecided on a point inside a piece of a
+/// face, and answers now:
+/// [`a_cube_wall_parallel_to_a_pointed_cones_axis_cuts_it_and_both_ways_answer`].
+/// What still refuses is uniting that answer with the block, with
+/// [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`] on the answer's
+/// cone face — the part with `x < 3.5`, round the apex, whose one wire is a long
+/// arc of the cap circle and the hyperbola arc the wall cut, between
+/// `(3.5, 1.064, 5)` and `(3.5, 4.936, 5)`. That is items 4 and 5 of §222.3
+/// again: the fuse cannot take back in a face of its own answer bounded by a
+/// hyperbola arc.
 #[test]
-#[ignore = "associativity: pointed cone inside a block, cube cutting both — one grouping answers, \
-            cone ∪ cube is Undecidable"]
+#[ignore = "associativity: pointed cone inside a block, cube cutting both — (cone ∪ cube) ∪ block \
+            is AFaceTrimmedByACurveThisCannotFollow on the answer's cone face, bounded by a \
+            hyperbola arc; the other grouping answers"]
 fn a_swallowed_pointed_cone_and_a_cube_through_it_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: a_pointed_cone_in_a_block_six_across(1.0),
@@ -245,14 +277,95 @@ fn a_swallowed_pointed_cone_and_a_cube_through_it_unite_one_way_and_not_the_othe
     .print_and_check("associativity, a cube through a swallowed cone", 1);
 }
 
+/// The pointed cone of the two tests either side, and the cube whose wall
+/// `x = 3.5` runs half a unit off the cone's axis, parallel to it.
+///
+/// That wall cuts the cone in a hyperbola, and the part of the wall inside the
+/// cone is a piece bounded by one arc of it and the chord the cap's plane cuts
+/// across — two corners, and until `select.rs` counted the bulge of a
+/// hyperbola arc on the arc's own half of the cone, no point inside it, so
+/// `cone ∪ cube` was Undecidable on a point inside a piece of a face.
+///
+/// Union and intersection both answer now, and what they measure adds up to
+/// what the two inputs measure, within `measure`'s own bounds.
+#[test]
+fn a_cube_wall_parallel_to_a_pointed_cones_axis_cuts_it_and_both_ways_answer() {
+    let mut model = a_model();
+    let (_, cone) = a_pointed_cone_in_a_block_six_across(1.0).build_into(&mut model);
+    let cube = model
+        .add_cube(6.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a whole-number cube");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(3.5, 0.5, 0.5)).expect("a finite shift"),
+        )
+        .expect("this model made the key");
+
+    let (united_model, united) =
+        fused(&model, &[cone], &[cube], Rule::Union).expect("cone ∪ cube answers");
+    let (shared_model, shared) =
+        fused(&model, &[cone], &[cube], Rule::Intersection).expect("cone ∩ cube answers");
+    assert_eq!((united.len(), shared.len()), (1, 1));
+
+    let where_the_cap_crosses_the_wall =
+        [1.063_508_326_896_291_5, 4.936_491_673_103_708].map(|y| [3.5, y, 5.0].map(f64::to_bits));
+    let shared_corners = corners_of(&shared_model, &shared);
+    for corner in where_the_cap_crosses_the_wall {
+        assert!(
+            shared_corners.contains(&corner),
+            "the intersection's corners {shared_corners:?} miss {corner:?}"
+        );
+    }
+
+    let [united, shared, cone, cube] = [
+        volume_of(&united_model, &united),
+        volume_of(&shared_model, &shared),
+        volume_of(&model, &[cone]),
+        volume_of(&model, &[cube]),
+    ];
+    let off_by = (united.volume + shared.volume) - (cone.volume + cube.volume);
+    let bound = united.bound + shared.bound + cone.bound + cube.bound;
+    assert!(
+        off_by.abs() <= bound,
+        "union {} and intersection {} against cone {} and cube {}: off by {off_by:e} beyond {bound:e}",
+        united.volume,
+        shared.volume,
+        cone.volume,
+        cube.volume
+    );
+}
+
 /// A pointed cone the block swallows whole, and a small cube grazing the cone's
 /// wall near the block's corner.
 ///
 /// `(block ∪ cone) ∪ cube` answers. `cone ∪ cube` is refused with
-/// [`rcad_topo::Error::ACurvedFaceGoesRightRoundWithNoSeam`].
+/// [`rcad_topo::Error::ACurvedFaceGoesRightRoundWithNoSeam`], and the refusal is
+/// right to stop there, though not for the reason its name gives.
+///
+/// The cube's three planes through its corner `(2.5, 2.5, 2.5)` cut the cone's
+/// face **past the cube** as well: the plane `x = 2.5` along a whole hyperbola
+/// branch through `(2.5, 3, 2)`, `y = 2.5` likewise, and `z = 2.5` right round.
+/// The union keeps every piece outside the cube as a face of its own, so one of
+/// them is the patch round the apex bounded by those three arcs, with corners
+/// `(2.5, 3.559, 2.5)`, `(3.559, 2.5, 2.5)` and `(2.5, 2.5, 2.414)`, and every
+/// edge of it has the cone on both sides. Measuring the answer meshes that
+/// patch, and `mesh.rs`'s `which_pole_this_cap_reaches` looks for the surface
+/// across its first edge among the faces' surfaces, finds only the cone, and
+/// gives up — which is where the refusal is raised.
+///
+/// Reading that surface off the edge's run instead (`EdgeRun::PartOfWhereItCrosses`
+/// names the plane) meshes it, and the union then answers with those extra
+/// corners on it — and uniting that answer with the block is refused with
+/// `AFaceMeetsItsNeighbourOnItsOwnSurface`, and `A ∪ (A ∩ B)` over the cone
+/// whose apex is at `z = 3` answers with a corner `(3, 4.5, 6)` the cone does
+/// not have. So the mesher is not the fault: the answer should not carry pieces
+/// of one cone as separate faces, and until the fuse joins them the refusal is
+/// the better of the two outcomes.
 #[test]
-#[ignore = "associativity: pointed cone inside a block, small cube grazing it — one grouping \
-            answers, cone ∪ cube is ACurvedFaceGoesRightRoundWithNoSeam"]
+#[ignore = "associativity: pointed cone inside a block, small cube grazing it — cone ∪ cube keeps \
+            the cone's face cut into pieces by the cube's planes past the cube, and the piece \
+            round the apex cannot be meshed (ACurvedFaceGoesRightRoundWithNoSeam)"]
 fn a_swallowed_pointed_cone_and_a_cube_grazing_it_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: a_pointed_cone_in_a_block_six_across(1.0),
@@ -401,12 +514,14 @@ const POINTED: [Pair; 3] = [
     a_pointed_cone_in_a_block_six_across(1.0),
 ];
 
-/// Trios on which the two groupings either both answer or both refuse.
+/// Trios on which the two groupings both answer: a far cube with a frustum, a
+/// cube on the block's roof with a frustum, and a far cube with a swallowed
+/// pointed cone.
 ///
-/// Three answer both ways: a far cube with a frustum, a cube on the block's roof
-/// with a frustum, and a far cube with a swallowed pointed cone. The rest refuse
-/// both ways and are here so a change that makes one grouping answer is seen.
-const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 6] = [
+/// Three more used to be here refusing both ways, so that a change making one
+/// grouping answer would be seen. Counting the bulge of a hyperbola arc was
+/// that change, and they are [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`] now.
+const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 3] = [
     Trio {
         pair: on_the_grid(6, 2, [3, 3]),
         third_side: 2.0,
@@ -422,21 +537,42 @@ const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 6] = [
         third_side: 2.0,
         third_at: [20.0, 20.0, 20.0],
     },
-    Trio {
-        pair: on_the_grid(8, 2, [4, 4]),
-        third_side: 8.0,
-        third_at: [5.0, 0.5, -2.5],
-    },
-    Trio {
-        pair: on_the_grid(6, 2, [3, 3]),
-        third_side: 4.0,
-        third_at: [3.5, 0.5, -3.5],
-    },
-    Trio {
-        pair: a_pointed_cone_in_a_block_six_across(-1.0),
-        third_side: 2.0,
-        third_at: [20.0, 20.0, 20.0],
-    },
+];
+
+/// Trios on which one grouping answers and the other refuses, with where each
+/// grouping stops: `(block ∪ cone) ∪ third` first, then `(cone ∪ third) ∪
+/// block`, and `None` for the one that answers.
+const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 3] = [
+    (
+        Trio {
+            pair: on_the_grid(8, 2, [4, 4]),
+            third_side: 8.0,
+            third_at: [5.0, 0.5, -2.5],
+        },
+        [None, Some("the first union: Undecidable on side of plane")],
+    ),
+    (
+        Trio {
+            pair: on_the_grid(6, 2, [3, 3]),
+            third_side: 4.0,
+            third_at: [3.5, 0.5, -3.5],
+        },
+        [
+            None,
+            Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
+        ],
+    ),
+    (
+        Trio {
+            pair: a_pointed_cone_in_a_block_six_across(-1.0),
+            third_side: 2.0,
+            third_at: [20.0, 20.0, 20.0],
+        },
+        [
+            Some("the second union: ACurvedFaceGoesRightRoundWithNoSeam"),
+            None,
+        ],
+    ),
 ];
 
 /// A frustum of slope `1 / up_per_unit_wider` from a cap of radius one a unit
@@ -709,26 +845,7 @@ fn absorption(pairs: &[Pair], which: Which, inner: Rule, outer: Rule) -> Report 
 fn associativity(trios: &[Trio]) -> Report {
     let mut report = Report::default();
     for &trio in trios {
-        let mut model = a_model();
-        let (block, cone) = trio.pair.build_into(&mut model);
-        let third = model
-            .add_cube(
-                trio.third_side,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a whole-number cube");
-        let [x, y, z] = trio.third_at;
-        model
-            .place_solid(
-                third,
-                &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
-            )
-            .expect("this model made the key");
-
-        let left = united_in_turn(&model, &[block], &[cone], &[third]);
-        let right = united_in_turn(&model, &[cone], &[third], &[block]);
-        match (left, right) {
+        match both_groupings(trio) {
             (Ok((left_model, left_pieces)), Ok((right_model, right_pieces))) => report.compare(
                 &format!("{trio:?}: block ∪ (cone ∪ third) against (block ∪ cone) ∪ third"),
                 (&right_model, &right_pieces),
@@ -751,6 +868,34 @@ fn associativity(trios: &[Trio]) -> Report {
     report
 }
 
+/// Two unions in turn: the model and solids they left, or where they stopped.
+type United = Result<(Model, Vec<SolidKey>), String>;
+
+/// `(block ∪ cone) ∪ third` and `(cone ∪ third) ∪ block`, in that order, each
+/// built into a fresh model.
+fn both_groupings(trio: Trio) -> (United, United) {
+    let mut model = a_model();
+    let (block, cone) = trio.pair.build_into(&mut model);
+    let third = model
+        .add_cube(
+            trio.third_side,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a whole-number cube");
+    let [x, y, z] = trio.third_at;
+    model
+        .place_solid(
+            third,
+            &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
+        )
+        .expect("this model made the key");
+    (
+        united_in_turn(&model, &[block], &[cone], &[third]),
+        united_in_turn(&model, &[cone], &[third], &[block]),
+    )
+}
+
 /// Unite the first two, then unite that with the third; a refusal at either
 /// step comes back named.
 fn united_in_turn(
@@ -758,7 +903,7 @@ fn united_in_turn(
     first: &[SolidKey],
     second: &[SolidKey],
     third: &[SolidKey],
-) -> Result<(Model, Vec<SolidKey>), String> {
+) -> United {
     let (model, two) = match fused(model, first, second, Rule::Union) {
         Ok(answer) => answer,
         Err(name) => return Err(format!("the first union: {name}")),

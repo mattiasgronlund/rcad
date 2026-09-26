@@ -1,7 +1,9 @@
 //! A plane steeper than a cone's side cuts it in two branches, and a fuse sees
-//! both — which is why `select.rs`'s `in_the_bulge_of` does not count a side
-//! cut by a cone (§198.2 flagged that sentence as prose with nothing behind it;
-//! this file is what is behind it).
+//! both — which is why `select.rs`'s `in_the_bulge_of` counts a side cut by a
+//! cone in a curve that does not close only when the point is on that side's
+//! own nappe (§251; §198.2 flagged the older sentence, that it did not count
+//! such a side at all, as prose with nothing behind it, and this file is what
+//! is behind it).
 //!
 //! A cone *face* as rcad builds it is on one nappe (`tests/cones/mod.rs`), but
 //! the surface it carries is the whole double cone (`rcad_geom::Cone`), and two
@@ -83,11 +85,25 @@ fn a_leaning_block(model: &mut Model) -> SolidKey {
 /// read an arc's own side of a chord from, so the piece gets a point inside it
 /// and the fuse walks on.
 ///
-/// The wall is the family that is still refused and rightly: `y = −10` is
-/// parallel to the axis, so it cuts a **hyperbola**, and "inside the cone" on it
-/// is two regions with the band round the apex between them —
+/// # And it used to be the block's `y = −10` wall, at `z ≈ −20`
+///
+/// That piece is answered too, since §251. The wall is parallel to the axis, so
+/// it cuts a **hyperbola**, and "inside the cone" on it is two regions with the
+/// band round the apex between them —
 /// [`on_a_block_wall_inside_the_cone_is_two_regions_either_side_of_the_apex`] is
-/// that same wall. A refusal there is the limit and not a gap.
+/// that same wall. That was read as the limit, and it is not one: the two
+/// regions are one per nappe, told apart by the sign of `(x − apex)·w`, and on
+/// one nappe the inside is a convex cone that leaves one convex region on any
+/// plane. `select.rs` counts a hyperbola arc's bulge when the point is on the
+/// arc's own nappe, and aims a candidate square off the chord at the cone, so
+/// the wall's piece gets a point: outside the frustum, kept in the union.
+///
+/// **What is refused now is a piece of the frustum's own face**, one step on:
+/// the cone face as the block's low-`x` face cuts it, with corners at the
+/// bottom rim's seam `(1, 0, 2)`, the top rim's seam `(4, 0, 8)`, and the two
+/// points `(3.375, ±2.147, 8)` where that face crosses the top rim. A curved
+/// piece is asked its sides' signs and not wound, so `in_the_bulge_of` is not
+/// reached there and this is a separate refusal, left for its own row.
 #[test]
 fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_face() {
     let policy = Policy::certified();
@@ -108,21 +124,37 @@ fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_
     let record = records.records().last().expect("a refusal names why");
     assert_eq!(record.predicate(), "a point inside a piece of a face");
     let corners = record.inputs();
-    assert_eq!(corners.len(), 2, "a piece with two corners: {corners:?}");
-    for corner in corners {
-        let [x, y, z] = corner.enclosure();
-        assert!(
-            y.lo() == -10.0 && y.hi() == -10.0,
-            "on the wall: {corner:?}"
-        );
-        assert!(
-            z.hi() < -20.0,
-            "the corner is on the nappe below the apex, where the frustum has no face: {corner:?}"
-        );
-        // On the cone, `x² + y² = (z/2)²`, to a rounding.
-        let across = (x.lo() * x.lo() + y.lo() * y.lo()).sqrt();
-        assert!((across - 0.5 * z.lo().abs()).abs() < 1e-9, "{corner:?}");
-    }
+    assert_eq!(
+        corners.len(),
+        6,
+        "the piece's corners, wire by wire: {corners:?}"
+    );
+    let mut where_they_are: Vec<[i64; 3]> = corners
+        .iter()
+        .map(|corner| {
+            let [x, y, z] = corner.enclosure();
+            assert!(
+                (2.0..=8.0).contains(&z.lo()) && (2.0..=8.0).contains(&z.hi()),
+                "on the frustum's own face, between its caps: {corner:?}"
+            );
+            // On the cone, `x² + y² = (z/2)²`, to a rounding.
+            let across = (x.lo() * x.lo() + y.lo() * y.lo()).sqrt();
+            assert!((across - 0.5 * z.lo()).abs() < 1e-9, "{corner:?}");
+            [x.lo(), y.lo(), z.lo()].map(|along| (along * 1000.0).round() as i64)
+        })
+        .collect();
+    where_they_are.sort_unstable();
+    where_they_are.dedup();
+    assert_eq!(
+        where_they_are,
+        [
+            [1000, 0, 2000],
+            [3375, -2147, 8000],
+            [3375, 2147, 8000],
+            [4000, 0, 8000]
+        ],
+        "the two seam corners and where the block's low-x face crosses the top rim"
+    );
 
     let skin = Cone::new(Axis::z(), 0.5).expect("a positive slope");
     let wall = Plane::from_coefficients([0.0, 1.0, 0.0, 10.0]).expect("a plane");

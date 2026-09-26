@@ -47,18 +47,37 @@ use cones::{a_frustum, a_pointed_cone};
 ///
 /// Its low-`x` face is the plane `x = lean · (z − crossing)`, leaning at a
 /// quarter or three eighths against the cone's half, so it cuts both nappes:
-/// through the frustum above, and through the lower nappe, where the frustum
-/// has no face, below.
+/// through the upper nappe above, and through the lower nappe, where the
+/// frustum has no face, below.
+///
+/// **Two of the six planes miss the frustum.** The upper branch's lowest point
+/// is where `z/2 = lean · (z − crossing)`, and at a lean of three eighths that
+/// is `z = 9` for a crossing of `−3` and `z = 18` for `−6`, both above the top
+/// cap at `8`: the block misses the frustum by `0.125` in `x` at the top rim,
+/// and every point of the frustum is on the far side of that plane. So those
+/// eight cases are [`APART`]. It was written [`OVERLAPPING`] for all of them
+/// and nothing read it while every one refused; §251 is when the first of them
+/// answered, with the two solids a union of shapes that never meet leaves.
+///
+/// **All ninety-six refused until §251**, eighty-four of them for want of a
+/// point inside a piece. Forty answer now, each held to the four checks at the
+/// top of this file.
 #[test]
-fn a_steeper_plane_across_a_frustum_refuses_every_time() {
+fn a_steeper_plane_across_a_frustum_answers_right_or_refuses() {
     let mut cases = Vec::new();
     for lean in [0.25, 0.375] {
         for crossing in [-1.0, -3.0, -6.0] {
+            let lowest_on_the_upper_branch = -lean * crossing / (THE_FRUSTUM.slope - lean);
+            let solids = if lowest_on_the_upper_branch < THE_FRUSTUM.far {
+                OVERLAPPING
+            } else {
+                APART
+            };
             for turn in [0.0, 0.5, 2.0, 3.0] {
                 cases.push(Case {
                     cone: THE_FRUSTUM,
                     block: a_leaning_block(lean, crossing, turn),
-                    solids: OVERLAPPING,
+                    solids,
                 });
             }
         }
@@ -66,9 +85,9 @@ fn a_steeper_plane_across_a_frustum_refuses_every_time() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 0,
+            right: 40,
             refused: [
-                ("a point inside a piece of a face", 84),
+                ("a point inside a piece of a face", 44),
                 ("order along a crossing", 12),
             ]
             .into()
@@ -78,8 +97,12 @@ fn a_steeper_plane_across_a_frustum_refuses_every_time() {
 
 /// The same blocks turned half round, so the frustum's apex is inside the
 /// block and so is the stretch of the lower nappe round it.
+///
+/// **All thirty-two refused until §251**, twenty-four of them for want of a
+/// point inside a piece. Twenty-two answer now, and two of the twenty-four
+/// give up one step on, meshing the answer.
 #[test]
-fn a_frustum_whose_apex_is_inside_the_block_refuses_every_time() {
+fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
     let mut cases = Vec::new();
     for (lean, crossing) in [(0.25, 1.0), (0.375, 0.5), (0.25, 0.0), (0.375, -0.25)] {
         for turn in [3.0, 3.5] {
@@ -93,10 +116,10 @@ fn a_frustum_whose_apex_is_inside_the_block_refuses_every_time() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 0,
+            right: 22,
             refused: [
-                ("a point inside a piece of a face", 24),
                 ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 8),
+                ("TwoPatchesOfTheMeshDrewTheSameSide", 2),
             ]
             .into()
         }
@@ -105,8 +128,12 @@ fn a_frustum_whose_apex_is_inside_the_block_refuses_every_time() {
 
 /// A cone that ends in a point, with a steeper face through the apex or an
 /// eighth or a half either side of it.
+///
+/// **All ninety-six refused until §251**, eighty of them for want of a point
+/// inside a piece. Fifty-eight answer now; of the eighty, eight still find no
+/// point and fourteen give up one step on, meshing the answer.
 #[test]
-fn a_pointed_cone_with_its_apex_near_a_steeper_face_refuses_every_time() {
+fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     let mut cases = Vec::new();
     for lean in [0.25, 0.375] {
         for crossing in [0.0, 0.125, -0.125, 0.5] {
@@ -122,10 +149,11 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_refuses_every_time() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 0,
+            right: 58,
             refused: [
-                ("a point inside a piece of a face", 80),
+                ("CannotMeshAFace", 14),
                 ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 16),
+                ("a point inside a piece of a face", 8),
             ]
             .into()
         }
@@ -518,10 +546,12 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 }
 
 /// Every way a fuse in this file refuses today.
-const REFUSALS: [&str; 3] = [
+const REFUSALS: [&str; 5] = [
     "a point inside a piece of a face",
     "order along a crossing",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
+    "CannotMeshAFace",
+    "TwoPatchesOfTheMeshDrewTheSameSide",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the

@@ -884,14 +884,24 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 /// **The control halves the cone's slope and nothing else.** The same wedge
 /// against a cone of slope a sixteenth: the slanted face no longer rests on the
 /// side, it leans across it and meets the cone at the apex alone, and the
-/// refusal changes to a different one by name — `Undecidable` over a point
-/// inside a piece of a face, §36.28's chord-and-arc gap, which has nothing to do
-/// with tangency. Two named outcomes either side of one number is what says this
-/// row is about what it claims. The bar's control used to give this same second
-/// name and now gives an answer; this one still gives the name, and the slanted
-/// face here meets the cone at its apex, which is where
-/// `Cone::is_cut_in_a_closed_curve_by` says no closed curve and the bulge is not
-/// counted.
+/// refusal changes to a different one by name. Two named outcomes either side of
+/// one number is what says this row is about what it claims.
+///
+/// **The control's name is `ResultIsNotManifold { count: 4 }` since §251**, and
+/// it has nothing to do with tangency either. It was `Undecidable` over a point
+/// inside a piece of a face, §36.28's chord-and-arc gap: the wedge's two faces
+/// `(−8, ±16, ·)` each cut the cone in an ellipse, both ellipses pass through the
+/// two points where the edge those faces share pierces the cone, and each face's
+/// piece inside the cone is one ellipse arc and that edge as its chord. §251's
+/// candidate square off the chord gets a point in both, and the union then
+/// reaches `assemble`, where the arc on one plane and the arc on the other run
+/// between the same two corners along the same cone and are named as one edge —
+/// four faces along it. Printed while §251 was written: the two arcs' sides
+/// carry the planes with normals `(−0.43, −0.86, 0.27)` and
+/// `(−0.44, 0.88, 0.17)`, and `which_arc_of_a_circle_this_is` gives both the
+/// cone's name and the same sign. That is §245.4's two-crossings-through-one-
+/// corner-pair gap on two planes rather than one, and `assemble.rs` is where it
+/// closes.
 ///
 /// A tolerant policy makes no difference, which is the other half: this is a
 /// statement about the shape and not about a budget.
@@ -931,10 +941,10 @@ fn a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction() {
         Rule::Union,
         &Policy::certified(),
     );
-    assert_eq!(
-        what_it_gave_up_on(&why),
-        "a point inside a piece of a face",
-        "taking the wedge's face off the cone's side changes which refusal this is"
+    assert!(
+        matches!(why, Error::ResultIsNotManifold { count: 4 }),
+        "taking the wedge's face off the cone's side changes which refusal this is, and it is \
+         two ellipse arcs on two planes named as one edge: {why:?}"
     );
 }
 
