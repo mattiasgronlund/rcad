@@ -110,6 +110,7 @@
 mod fuzzing;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rcad_geom::Deflection;
 use rcad_geom::Surface;
@@ -169,6 +170,15 @@ fn every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model() {
 /// branch, decoded or not.
 const BYTE_MUTATION_SEEDS: [u32; 5] = [4, 6, 10, 33, 51];
 
+/// How many times [`one_bit_flipped`] has run since it was last reset.
+///
+/// `still_a_model` only calls `byte_mutate` from inside the byte-mutation
+/// branch, so resetting this before a call and reading it after tells the
+/// test whether that call actually reached the branch — not just that
+/// whatever `still_a_model` produced happens to decode, which every branch
+/// guarantees on its own and so proves nothing about which one ran.
+static BYTE_MUTATION_BRANCH_RUNS: AtomicUsize = AtomicUsize::new(0);
+
 /// A deterministic stand-in for libFuzzer's own byte mutation: flip one fixed
 /// bit and touch nothing else, so a replayed seed reaches the same bytes every
 /// time.
@@ -178,6 +188,7 @@ const BYTE_MUTATION_SEEDS: [u32; 5] = [4, 6, 10, 33, 51];
 /// so this is what the replay passes instead, on the seeds chosen to reach the
 /// branch that would call it.
 fn one_bit_flipped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
+    BYTE_MUTATION_BRANCH_RUNS.fetch_add(1, Ordering::Relaxed);
     if size == 0 {
         return size;
     }
@@ -185,14 +196,17 @@ fn one_bit_flipped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
     size
 }
 
-/// Every checked-in seed, mutated by each of [`BYTE_MUTATION_SEEDS`], still
-/// decodes into a `Model`.
+/// Every checked-in seed, mutated by each of [`BYTE_MUTATION_SEEDS`], reaches
+/// the byte-mutation branch and still decodes into a `Model`.
 ///
 /// [`every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model`] replays
 /// `still_a_model` on seeds chosen to skip its byte-mutation branch; this
 /// replays it on seeds chosen to take that branch every time, so
 /// `one_byte_changed_and_still_a_model`'s own decode check is what keeps this
-/// test passing.
+/// test passing. Every other branch also decodes on its own, so the run count
+/// is what proves [`BYTE_MUTATION_SEEDS`] still does what its doc comment
+/// says rather than the assertion below passing for a reason that has nothing
+/// to do with byte mutation.
 #[test]
 fn every_seed_mutated_by_a_seed_that_flips_a_byte_still_decodes_into_a_model() {
     for (name, bytes) in every_seed() {
@@ -200,8 +214,14 @@ fn every_seed_mutated_by_a_seed_that_flips_a_byte_still_decodes_into_a_model() {
             let mut buffer = [0u8; 4096];
             let max_size = buffer.len();
             buffer[..bytes.len()].copy_from_slice(&bytes);
-            let written =
-                still_a_model(&mut buffer, bytes.len(), max_size, seed, one_bit_flipped);
+            BYTE_MUTATION_BRANCH_RUNS.store(0, Ordering::Relaxed);
+            let written = still_a_model(&mut buffer, bytes.len(), max_size, seed, one_bit_flipped);
+            assert!(
+                BYTE_MUTATION_BRANCH_RUNS.load(Ordering::Relaxed) > 0,
+                "mutating {name} with seed {seed} never reached the byte-mutation \
+                 branch, so BYTE_MUTATION_SEEDS no longer takes it and this test is \
+                 not checking what its name says"
+            );
             postcard::from_bytes::<Model>(&buffer[..written]).unwrap_or_else(|why| {
                 panic!(
                     "mutating {name} with seed {seed} gave {written} byte(s) that do \
