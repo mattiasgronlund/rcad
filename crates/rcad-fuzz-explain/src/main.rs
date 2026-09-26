@@ -6,15 +6,31 @@
 //!
 //! Exit 0 when the bytes decoded to a case and the case replayed, whatever the
 //! case then did. Non-zero, with one line on stderr, when they did not.
+//!
+//! ```text
+//! cargo run -q --profile test -p rcad-fuzz-explain -- --triage
+//! ```
+//!
+//! Reads `<target>\t<path>` lines from stdin, one per artifact, and replays
+//! every one of them in this single process — a night of tens of thousands of
+//! files then costs one `cargo run`, not one per file (§265.2). Prints
+//! [`rcad_fuzz_explain::as_tsv`]'s report of [`rcad_fuzz_explain::triage`] to
+//! stdout, and always exits 0: a bucket that still fails is data in that
+//! report, not a reason for this process itself to fail.
 
 #![forbid(unsafe_code)]
 
+use std::io::Read;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use rcad_fuzz_explain::{TARGETS, explain};
+use rcad_fuzz_explain::{TARGETS, as_tsv, explain, triage};
 
 fn main() -> ExitCode {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
+    if arguments.first().map(String::as_str) == Some("--triage") {
+        return triage_from_stdin();
+    }
     let [target, artifact] = arguments.as_slice() else {
         eprintln!(
             "usage: rcad-fuzz-explain <target-name> <artifact-path>; the targets are {}",
@@ -40,3 +56,38 @@ fn main() -> ExitCode {
         }
     }
 }
+
+/// `--triage`'s whole job: read the manifest `fuzz-triage` built, replay it,
+/// print the report.
+fn triage_from_stdin() -> ExitCode {
+    let mut manifest = String::new();
+    if let Err(why) = std::io::stdin().read_to_string(&mut manifest) {
+        eprintln!("--triage: could not read the manifest from stdin: {why}");
+        return ExitCode::FAILURE;
+    }
+    let mut inputs = Vec::new();
+    for line in manifest.lines() {
+        let Some((target, path)) = line.split_once('\t') else {
+            eprintln!("--triage: a manifest line is not <target>\\t<path>: {line}");
+            return ExitCode::FAILURE;
+        };
+        inputs.push((target.to_owned(), PathBuf::from(path)));
+    }
+    let total = inputs.len();
+    let inputs = inputs.into_iter().enumerate().map(|(started, input)| {
+        // A hang shows up as the last of these lines with nothing after it,
+        // which is the only sign of one that a single process can give.
+        if started > 0 && started % PROGRESS_EVERY == 0 {
+            eprintln!("--triage: {started} of {total} replayed");
+        }
+        input
+    });
+    let (groups, skipped) = triage(inputs);
+    print!("{}", as_tsv(&groups));
+    eprintln!("--triage: {total} of {total} replayed, {skipped} skipped as no target");
+    ExitCode::SUCCESS
+}
+
+/// How many inputs go by between two progress lines: often enough that a stall
+/// shows over a night of tens of thousands, and never for a selftest's three.
+const PROGRESS_EVERY: usize = 2000;

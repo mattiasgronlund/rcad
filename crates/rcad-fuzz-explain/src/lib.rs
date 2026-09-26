@@ -29,8 +29,10 @@
 // dropping one harness — is dropping a target this has to explain.
 #![allow(clippy::duplicate_mod)]
 
-use std::fmt;
+use std::collections::HashMap;
+use std::fmt::{self, Write as _};
 use std::panic::{self, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rcad_geom::{Surface, SurfaceMeet, intersect};
@@ -160,6 +162,200 @@ impl fmt::Display for Outcome {
             }
         }
     }
+}
+
+/// One bucket [`triage`] collapsed a night's files into: how many landed
+/// there, one to look at, and whether that bucket still fails against the
+/// commit this binary was built at.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupedVerdict {
+    /// Which of [`TARGETS`] every file in this bucket belongs to.
+    pub target: String,
+    /// How many files landed in this bucket.
+    pub files: usize,
+    /// Whether a file from this bucket still fails against the commit this
+    /// binary was built at. `false` for a bucket that used to crash and does
+    /// not any more.
+    pub still_fails: bool,
+    /// One file from the bucket, to read or replay by hand.
+    pub sample: PathBuf,
+    /// The panic's own message and place, where the bucket is a panic; a
+    /// fixed name for everything else, so a night's harmless residue does not
+    /// fragment into one bucket per file.
+    pub group: String,
+}
+
+/// Replay every `(target, path)` pair once, in this one process, and collapse
+/// them into the buckets a night's report is made of.
+///
+/// This is what `--triage` replaces: the shell loop it used to run spent one
+/// `cargo run` per file, which is what made 22 528 writer crash files from the
+/// night of 2026-09-26 too slow to count as faults (§265.2). Reading every
+/// file inside one already-running process, in a plain loop, is the whole
+/// fix — nothing here changes what a single [`explain`] call decides about one
+/// file, and a caller replaying one file by hand still gets the same answer
+/// from the two-argument command line.
+///
+/// A `target` this binary does not recognise is skipped rather than guessed
+/// at, and counted in the returned total instead — the caller decides what
+/// "not a real target" means for the files it hands in.
+pub fn triage(inputs: impl IntoIterator<Item = (String, PathBuf)>) -> (Vec<GroupedVerdict>, usize) {
+    let mut buckets: HashMap<(String, String), GroupedVerdict> = HashMap::new();
+    let mut skipped = 0;
+    for (target, path) in inputs {
+        if !TARGETS.contains(&target.as_str()) {
+            skipped += 1;
+            continue;
+        }
+        let (group, still_fails) = bucket_for(&target, &path);
+        buckets
+            .entry((target.clone(), group.clone()))
+            .and_modify(|verdict| verdict.files += 1)
+            .or_insert_with(|| GroupedVerdict {
+                target,
+                files: 1,
+                still_fails,
+                sample: path,
+                group,
+            });
+    }
+    let mut groups: Vec<_> = buckets.into_values().collect();
+    groups.sort_by(|a, b| {
+        b.files
+            .cmp(&a.files)
+            .then_with(|| a.target.cmp(&b.target))
+            .then_with(|| a.group.cmp(&b.group))
+    });
+    (groups, skipped)
+}
+
+/// What one file is worth to the tally: its bucket, and whether that bucket
+/// still fails.
+fn bucket_for(target: &str, path: &Path) -> (String, bool) {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(why) => {
+            return (
+                format!("{target}: could not read this artifact: {why}"),
+                true,
+            );
+        }
+    };
+    match explain(target, &bytes) {
+        Err(_why) => (format!("{target}: bytes did not decode to a case"), true),
+        Ok(explained) => bucket_of(target, explained.outcome),
+    }
+}
+
+/// A replay's bucket, and whether that bucket still fails.
+///
+/// A panic's bucket is its own message and place with the numbers in the
+/// message taken out — see [`with_the_numbers_taken_out`] — so two files that
+/// panicked at the same line with the same words group together even when the
+/// values the assertion printed differ. Everything else is a fixed name per
+/// target, because a fault report does not need to tell two successful
+/// replays, or two refusals, apart.
+fn bucket_of(target: &str, outcome: Outcome) -> (String, bool) {
+    match outcome {
+        Outcome::Panicked { message } => (with_the_numbers_taken_out(&message), true),
+        Outcome::Refused { named, .. } => (
+            format!("{target}: no longer fails — refused {named}"),
+            false,
+        ),
+        Outcome::Succeeded { .. } => (format!("{target}: no longer fails — succeeded"), false),
+    }
+}
+
+/// A panic's message with every number after its place written as `N`, and
+/// the place itself left whole.
+///
+/// Keyed on the whole message, the 4 219 writer files of 2026-09-26 that still
+/// failed made 1 725 buckets, because the messages print entity numbers
+/// (`#20, in the solid #53`) and the coordinates of a plane; with the numbers
+/// out they are 5 buckets, and the fuse's 95 files are 2. The place keeps its
+/// line and column, because two assertions in one file are two faults.
+fn with_the_numbers_taken_out(message: &str) -> String {
+    let Some(after) = message.strip_prefix("panicked at ") else {
+        return numbers_as_n(message);
+    };
+    match after.split_once(": ") {
+        Some((place, said)) => format!("panicked at {place}: {}", numbers_as_n(said)),
+        None => message.to_owned(),
+    }
+}
+
+/// Every number in `text` written as `N`: its sign, its fraction and its
+/// exponent with it, so `-1.5e-3` is one `N`. Digits that belong to a word,
+/// as in `f64`, stay, because they are part of a name and not a value.
+fn numbers_as_n(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let part_of_a_word =
+            at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
+        let signed = bytes[at] == b'-' && bytes.get(at + 1).is_some_and(u8::is_ascii_digit);
+        if part_of_a_word || !(signed || bytes[at].is_ascii_digit()) {
+            at += 1;
+            continue;
+        }
+        let end = end_of_the_number(bytes, at + usize::from(signed));
+        out.push_str(&text[copied..at]);
+        out.push('N');
+        copied = end;
+        at = end;
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+/// Where the number whose first digit is at `from` ends: its digits, then a
+/// fraction if a digit follows the point, then an exponent if a digit follows
+/// the `e` and its sign.
+fn end_of_the_number(bytes: &[u8], from: usize) -> usize {
+    let past_the_digits = |from: usize| {
+        from + bytes[from..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count()
+    };
+    let mut end = past_the_digits(from);
+    if bytes.get(end) == Some(&b'.') && bytes.get(end + 1).is_some_and(u8::is_ascii_digit) {
+        end = past_the_digits(end + 1);
+    }
+    if bytes.get(end) == Some(&b'e') {
+        let sign = usize::from(matches!(bytes.get(end + 1), Some(b'-' | b'+')));
+        if bytes.get(end + 1 + sign).is_some_and(u8::is_ascii_digit) {
+            end = past_the_digits(end + 1 + sign);
+        }
+    }
+    end
+}
+
+/// [`triage`]'s report as tab-separated text, one line per bucket, for
+/// `fuzz-triage` to write into the night's own directory.
+///
+/// The columns are `target`, `files`, `still_fails` (`yes`/`no`), `sample`,
+/// `group`, in that order, header first, so `cut` or `awk -F'\t'` reads any
+/// one of them by name without counting the others. `group` is last because it
+/// is the one field not tab-safe by construction elsewhere but is here: a
+/// [`Outcome::Panicked`] message is already squeezed to one line with no tabs
+/// in it (see [`on_one_line`]), so nothing after it needs escaping.
+pub fn as_tsv(groups: &[GroupedVerdict]) -> String {
+    let mut out = String::from("target\tfiles\tstill_fails\tsample\tgroup\n");
+    for verdict in groups {
+        let _ = writeln!(
+            out,
+            "{}\t{}\t{}\t{}\t{}",
+            verdict.target,
+            verdict.files,
+            if verdict.still_fails { "yes" } else { "no" },
+            verdict.sample.display(),
+            verdict.group
+        );
+    }
+    out
 }
 
 /// A plane, a ball or a pipe against another, read the way
@@ -695,5 +891,188 @@ mod tests {
     #[test]
     fn bytes_outside_plain_ascii_are_escaped() {
         assert_eq!(as_a_literal(&[0, b'a', 0xff, b'"']), r#"b"\x00a\xff\"""#);
+    }
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NEXT_TEMP_FILE: AtomicU32 = AtomicU32::new(0);
+
+    /// A file under a fresh directory of its own, removed when it drops —
+    /// [`triage`] and [`bucket_for`] read artifacts off disk, so grouping them
+    /// needs real paths and not just byte slices in memory.
+    struct TempFile {
+        dir: PathBuf,
+        path: PathBuf,
+    }
+
+    impl TempFile {
+        fn holding(contents: &[u8]) -> Self {
+            let id = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "rcad-fuzz-explain-test-{}-{id}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).expect("a scratch directory for one test file");
+            let path = dir.join("artifact");
+            std::fs::write(&path, contents).expect("one test artifact");
+            Self { dir, path }
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// Two files that fail to decode the same way group into one bucket
+    /// rather than one line each — the whole point of `--triage` over the
+    /// per-file loop it replaces.
+    #[test]
+    fn two_files_with_the_same_undecodable_bytes_are_one_bucket() {
+        let a = TempFile::holding(b"not a real crash input");
+        let b = TempFile::holding(b"not a real crash input");
+        let (groups, skipped) = triage([
+            (WHERE_TWO_SURFACES_CROSS.to_owned(), a.path.clone()),
+            (WHERE_TWO_SURFACES_CROSS.to_owned(), b.path.clone()),
+        ]);
+        assert_eq!(skipped, 0);
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(groups[0].files, 2);
+        assert!(
+            groups[0].still_fails,
+            "an input that could not even be decoded is counted as still failing, \
+             not silently dropped from the tally"
+        );
+    }
+
+    /// The same bytes under two different targets are two buckets, never
+    /// merged into one just because the bucket's name happens to match.
+    #[test]
+    fn the_same_bytes_under_two_targets_are_two_buckets() {
+        let a = TempFile::holding(&[255; 64]);
+        let b = TempFile::holding(&[255; 64]);
+        let (groups, _) = triage([
+            (NO_MODEL_MAKES_THE_WRITER_PANIC.to_owned(), a.path.clone()),
+            (TWO_SOLIDS_FUSED_BY_A_STRANGER.to_owned(), b.path.clone()),
+        ]);
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        assert_ne!(groups[0].target, groups[1].target);
+    }
+
+    /// A target this binary has never heard of is skipped and counted, not
+    /// guessed at or folded into some other bucket.
+    #[test]
+    fn an_unknown_target_is_skipped_and_counted() {
+        let a = TempFile::holding(b"whatever");
+        let (groups, skipped) = triage([("no_such_target".to_owned(), a.path.clone())]);
+        assert!(groups.is_empty(), "{groups:?}");
+        assert_eq!(skipped, 1);
+    }
+
+    /// A replay that answers, rather than panicking, is not counted as still
+    /// failing — the same distinction §91.5 needed `fuzz-triage-verdict` for.
+    #[test]
+    fn a_replay_that_answers_does_not_still_fail() {
+        let numbers = [
+            0.0, 0.0, 1.0, -5.0, // a plane well clear of the ball below
+            0.0, 0.0, 0.0, 1.0, // a unit ball at the origin
+        ];
+        let bytes = surfaces::bytes_for([0, 1], &numbers);
+        let a = TempFile::holding(&bytes);
+        let (groups, _) = triage([(WHERE_TWO_SURFACES_CROSS.to_owned(), a.path.clone())]);
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert!(
+            !groups[0].still_fails,
+            "a plane that misses the ball entirely is not a fault: {:?}",
+            groups[0]
+        );
+    }
+
+    /// The report is tab-separated with the group's own text last, so a
+    /// squeezed panic message with spaces in it cannot shift the columns
+    /// before it.
+    #[test]
+    fn as_tsv_keeps_four_tabs_before_the_group_text() {
+        let a = TempFile::holding(b"not a real crash input");
+        let (groups, _) = triage([(WHERE_TWO_SURFACES_CROSS.to_owned(), a.path.clone())]);
+        let text = as_tsv(&groups);
+        let mut lines = text.lines();
+        assert_eq!(
+            lines.next(),
+            Some("target\tfiles\tstill_fails\tsample\tgroup")
+        );
+        let body = lines.next().expect("one data row");
+        assert_eq!(body.matches('\t').count(), 4, "{body}");
+    }
+
+    const THE_WRITERS_PLACE: &str =
+        "panicked at crates/rcad-fuzz-explain/src/../../rcad-step/tests/fuzzing/writer.rs";
+
+    /// Two of 2026-09-26's writer panics, the same assertion printing two
+    /// different planes. Keyed on the whole message they were two of that
+    /// night's 1 725 writer buckets.
+    #[test]
+    fn one_assertion_that_printed_different_planes_is_one_bucket() {
+        let said = "assertion `left == right` failed: a sound solid's face came back from \
+                    its own file with a different surface left:";
+        let one = format!(
+            "{THE_WRITERS_PLACE}:262:9: {said} \"Plane(Plane {{ normal: \
+             Vector([[0.7071067811865475, 0.0, 0.7071067811865475]]), offset: 0.0 }})\" \
+             right: \"Plane(Plane {{ normal: Vector([[0.7071067811865476, 0.0, \
+             0.7071067811865476]]), offset: 0.0 }})\""
+        );
+        let other = format!(
+            "{THE_WRITERS_PLACE}:262:9: {said} \"Plane(Plane {{ normal: \
+             Vector([[-0.28, 7.347880794884119e-17, 0.96]]), offset: 6.119999999999999 }})\" \
+             right: \"Plane(Plane {{ normal: Vector([[-0.28, 7.347880794884119e-17, \
+             0.96]]), offset: 6.119999999999998 }})\""
+        );
+        let bucket_of_a_panic = |message| {
+            bucket_of(
+                "no_model_makes_the_writer_panic",
+                Outcome::Panicked { message },
+            )
+        };
+        let (bucket, still_fails) = bucket_of_a_panic(one);
+        assert_eq!((bucket.clone(), still_fails), bucket_of_a_panic(other));
+        assert!(still_fails);
+        assert!(
+            bucket.starts_with(&format!("{THE_WRITERS_PLACE}:262:9: ")),
+            "the place lost its line and column: {bucket}"
+        );
+        assert!(
+            bucket.contains("Vector([[N, N, N]]), offset: N"),
+            "{bucket}"
+        );
+    }
+
+    /// Entity numbers are values too: the reader refusing `#20` and refusing
+    /// `#68` is one refusal. A different assertion in the same file is not.
+    #[test]
+    fn two_assertions_in_one_file_are_two_buckets() {
+        let refuses = |entity: u32, solid: u32| {
+            with_the_numbers_taken_out(&format!(
+                "{THE_WRITERS_PLACE}:186:9: a sound model was written as a file the reader \
+                 refuses: #{entity}, in the solid #{solid}, is not one this kernel can build"
+            ))
+        };
+        assert_eq!(refuses(20, 53), refuses(68, 101));
+        let does_not_measure = with_the_numbers_taken_out(&format!(
+            "{THE_WRITERS_PLACE}:219:17: a solid that measured does not measure after its \
+             own file: a face of this solid could not be cut into triangles: the corner at \
+             14 is outside the range a triangulation takes: TooSmall"
+        ));
+        assert_ne!(refuses(20, 53), does_not_measure);
+    }
+
+    /// A sign, a fraction and an exponent are one number; the digits of a
+    /// name are not a number at all.
+    #[test]
+    fn digits_inside_a_word_are_not_a_number() {
+        assert_eq!(
+            numbers_as_n("a f64 of -1.5e-3 at #20, §265, x-1 and 7."),
+            "a f64 of N at #N, §N, x-N and N."
+        );
     }
 }
