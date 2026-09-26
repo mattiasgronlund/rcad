@@ -1466,6 +1466,13 @@ check-skills-selftest:
 # None of it runs the workflow, pushes, or touches `docs/queue.md`: it reads
 # the script and the agent files as text, for the same reason as above.
 #
+# **Since §266 a seventh arm holds the shell rule the three roles share.** It
+# used to live once in `lanes.js`, sent inline in every brief; §266 moved it
+# into `CLAUDE.md`, which every role reads anyway. The arm checks both
+# directions: `CLAUDE.md` still carries the `mise exec --` prefix rule and the
+# Bash guard's rule against a path it cannot resolve, and `lanes.js` carries no
+# second copy of either.
+#
 # **It proves each arm by cutting the real files**, not against fixtures kept
 # beside them, because these files are the only ones it will ever scan. Each
 # cut must change a file and must be caught by the arm it was made for, so a
@@ -1477,11 +1484,14 @@ check-lanes-workflow:
     set -euo pipefail
     file=.claude/workflows/lanes.js
     agents=.claude/agents
+    claude=CLAUDE.md
     create='  git switch -c ${branchOf(lane)} ${BASE}'
     reset='  git checkout -B ${branchOf(lane)} ${BASE}'
     refusal='already exists, stop and report it as blocked'
     serial='lastMerge.then(() => agent(MERGE('
     pushes=('git fetch origin' 'git merge-base --is-ancestor origin/main HEAD' 'git push origin HEAD:main' 'mise exec -- just ff-main')
+    shared_prefix='call needs a `mise exec --` prefix, whichever role'
+    shared_guard='no loop over a runtime value, and no `mise exec` inside a loop or compound.'
     scan() {
         local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -1542,14 +1552,23 @@ check-lanes-workflow:
             echo "only the merger pushes, and the lines above tell another role to (§266)"
             return 6
         fi
+        if ! grep -qF -- "$shared_prefix" "$3" || ! grep -qF -- "$shared_guard" "$3"; then
+            echo "$3 does not carry the mise exec -- rule and the Bash guard rule for every role (§266)"
+            return 7
+        fi
+        if grep -qF -- "$shared_guard" "$1"; then
+            echo "$1 carries a second copy of the shared shell rule; it belongs only in $3 (§266)"
+            return 7
+        fi
     }
-    scan "$file" "$agents" || exit 1
+    scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
     fresh() {
         mkdir "$dir/$1"
         cp "$file" "$dir/$1/lanes.js"
         cp -r "$agents" "$dir/$1/agents"
+        cp "$claude" "$dir/$1/CLAUDE.md"
     }
     fresh reset-instead
     awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead/lanes.js"
@@ -1570,16 +1589,21 @@ check-lanes-workflow:
         "$agents/merger.md" > "$dir/push-unchecked/agents/merger.md"
     fresh lane-pushes
     printf '\n    git push origin HEAD:main\n' >> "$dir/lane-pushes/agents/lane.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6)
+    fresh missing-claude-rule
+    grep -vF -- "$shared_guard" "$claude" > "$dir/missing-claude-rule/CLAUDE.md"
+    fresh duplicate-rule
+    printf '\n// %s\n' "$shared_guard" >> "$dir/duplicate-rule/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
-        if cmp -s "$file" "$dir/$name/lanes.js" && diff -rq "$agents" "$dir/$name/agents" > /dev/null; then
-            echo "the cut '$name' found nothing to cut in $file or $agents, so it proves nothing"
+        if cmp -s "$file" "$dir/$name/lanes.js" && diff -rq "$agents" "$dir/$name/agents" > /dev/null \
+            && cmp -s "$claude" "$dir/$name/CLAUDE.md"; then
+            echo "the cut '$name' found nothing to cut in $file, $agents or $claude, so it proves nothing"
             exit 1
         fi
         got=0
-        scan "$dir/$name/lanes.js" "$dir/$name/agents" > /dev/null || got=$?
+        scan "$dir/$name/lanes.js" "$dir/$name/agents" "$dir/$name/CLAUDE.md" > /dev/null || got=$?
         if [ "$got" != "$want" ]; then
             echo "the cut '$name' was caught by arm $got, expected arm $want"
             exit 1

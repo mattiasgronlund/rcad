@@ -77,7 +77,15 @@ of trust.
 
 The compile cache is wired through mise's `[env]`
 as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
-so every `cargo` and `just` in a lane's brief needs a `mise exec --` prefix.
+so every `cargo` and `just` call needs a `mise exec --` prefix, whichever role
+is running it: a lane, its verifier, its merger, or a top-level session.
+
+**The Bash guard in a worktree-isolated session refuses any command with a
+path or argument it cannot resolve before the run** — no variables, no `$( )`,
+no loop over a runtime value, and no `mise exec` inside a loop or compound.
+Write out paths literally, one plain command per call; when you genuinely need
+a loop, write a script to `target/` (gitignored) and run it as
+`./target/<name>.sh`.
 
 **A bare `just` lists the recipes, one line each** — `just` runs the first
 recipe in the file, and that is `list`. Every listed recipe carries a real
