@@ -36,12 +36,25 @@ otherwise puts both sides into the table libFuzzer's `CMP` mutations draw
 from. When a merge happens is the clock's choice, so these calls let the
 clock change libFuzzer's table.
 
+The fix is on this branch. `read_back` matches each word with byte array
+patterns, and `how_slow_the_name_says` finds `slow-` with one and `us-` with
+`windows(3)` and a byte pattern. Rebuilt the same way, the crate has one call
+to `bcmp` left, `SlowRun::is`'s, and nothing `merge_out` calls reaches a
+hooked function (273.5). LLVM did not turn the byte compares back into a
+`bcmp`.
+
+What the change cannot reach is the crate's coverage instrumentation, which
+still traces the merge's compares whether a draw is running or not. That
+belongs to the build row, Q161 (273.6).
+
 ### 273.2 How it was read
 
 **The build.** `where_two_surfaces_cross` built the way `fuzz-target` builds
 it, `RUSTFLAGS="-C target-cpu=x86-64-v3" cargo +nightly fuzz build
-where_two_surfaces_cross`, on this lane's base `3319f838`. That is release,
-optimised, with debug info, `-Cdebug-assertions` and ASan. The first lane
+where_two_surfaces_cross`, on this lane's base `3319f838`. The timing crate's
+`rustc` line in the verbose log has `-C opt-level=3`, `-C
+debuginfo=line-tables-only`, `-Cdebug-assertions`, `-Zsanitizer=address`
+and `-sanitizer-coverage-trace-compares`. The first lane
 built it in its own tree at the same sha, with a clean status. This lane
 copied that binary and re-read everything below from the copy
 (`target/q163-before.bin`). The compiler is `rustc 1.100.0-nightly
@@ -170,9 +183,9 @@ Of the other 84 functions `merge_out` calls, none reaches a hooked function
 along a path the disassembly names. That covers `std::fs::read_to_string`,
 `read_dir`, `Path::join`, `File::lock`, `remove_file`, the `Split` iterator
 behind `split_whitespace`, `memchr_aligned`, the allocator and
-`format_inner`. The paths not followed are calls through a vtable, such as
-`fmt`'s writer. `merge_out` makes 12 of them itself, and each callee's line
-counts its own.
+`format_inner`. What the scan cannot follow is a call through a computed
+pointer, a vtable or a jump table. `merge_out` makes 12 of them itself, and
+the scan counts each callee's own.
 
 ### 273.4 ASan's `bcmp` reaches libFuzzer's hook
 
@@ -198,3 +211,140 @@ binary with `objdump -d --disassemble=<name>`:
   `TracePC::AddValueForMemcmp`. That is `FuzzerTracePC.cpp:623-629` in
   libfuzzer-sys 0.4.13, as compiled. `AddValueForMemcmp` ends with
   `TORCW.Insert(Idx ^ Hash, Word(B1, Len), Word(B2, Len))` (`:380`).
+
+### 273.5 After: the words and the name compared byte by byte
+
+`read_back` now matches `words.next().map(str::as_bytes)` against
+`[b'r', b'u', b'n', b's']` and the like, and `how_slow_the_name_says` is:
+
+```rust
+let [b's', b'l', b'o', b'w', b'-', ..] = name.as_bytes() else {
+    return None;
+};
+let rest = &name["slow-".len()..];
+let at = rest
+    .as_bytes()
+    .windows(3)
+    .position(|three| matches!(three, [b'u', b's', b'-']))?;
+let (micros, input) = (&rest[..at], &rest[at + "us-".len()..]);
+```
+
+It finds the same first `us-` that `split_once` did. The slicing cannot
+panic, because `slow-` and `us-` are ASCII and no byte of a longer UTF-8
+character is below `0x80`.
+
+Rebuilt by `target/q163-build.sh after`, into this lane's own `fuzz/target`,
+and copied to `target/q163-after.bin`. The timing crate's `rustc` line in the
+verbose log matches the first lane's, apart from the paths of the two trees
+and the hash in the output directory's name.
+
+```
+$ python3 target/q163-got-calls.py target/q163-after.bin after
+GOT slots whose relocation names a hooked function: 3964c8 -> 127d98 ['__interceptor_trampoline_bcmp', 'bcmp']
+calls and tail jumps to a hooked function anywhere in the binary: 136 ({'GOT memory': 14, 'GOT register': 1, 'direct': 121})
+of those, in a function whose symbol names rcad_fuzz_timing: 1
+loads of a hooked GOT slot in those functions with no call matched to them: 0 []
+the same, anywhere in the binary: 0
+
+1fdfd3  call ['__interceptor_trampoline_bcmp', 'bcmp']  via GOT slot 3964c8  rdx: set by mov at 1fdfcf
+  in rcad_fuzz_timing[d5b75b1568706c15]::stop_the_clock
+    ...
+    /proc/self/cwd/src/lib.rs:734  (is)
+    /proc/self/cwd/src/lib.rs:781  ({closure#0})
+    ...
+```
+
+The four gone are the four in `merge_out`, and 140 less 4 is the 136 left in
+the binary. The one left is `SlowRun::is`, which compares bytes only after
+the hashes match and the lengths match, so it comes out equal unless two
+inputs of the same length share a 64-bit hash.
+
+What `merge_out` calls, read by `q163-reach.py` from the same root on both
+binaries:
+
+| | before | after |
+|---|---|---|
+| functions `merge_out` calls | 85 | 82 |
+| a hooked function, called directly | 1 (`bcmp`) | 0 |
+| reaches a hooked function | 1 (`StrSearcher::new`) | 0 |
+| ends the draw (panics, ASan reports, abort) | 25 | 24 |
+| reaches no hooked function | 58 | 58 |
+
+By name (`target/q163-reach-diff.sh`), the three gone are `bcmp`,
+`StrSearcher::new` and `panic_bounds_check`, which `split_once` could reach.
+From `stop_the_clock`, the only hooked call is `SlowRun::is`'s `bcmp`.
+`merge_out` reaches no hooked function among the 802 functions the scan
+follows from there, with 217 calls through a computed pointer not followed.
+
+Inside the two functions there are no calls left but ASan's and the
+coverage hooks'. `q163-chain-calls.py` over
+`target/q163-after.merge_out.dis`, made by `objdump -d -l --inlines
+--no-show-raw-insn --disassemble=<merge_out>`, with the chain regex
+`\(how_slow_the_name_says\)`, prints no call at all. Its counts are 12 ASan
+load reports, 2 `__asan_handle_no_return`, and 57 coverage hooks.
+
+The tests. With the change, `just t -p rcad-fuzz-timing` runs 32 and all
+pass. The new one, `tests/a_merge_reads_back_every_word_of_totals.rs`, runs
+the crate through `timed` in a child process with `RCAD_FUZZ_TIMINGS` set. It
+leaves a `totals` holding one line of each word, and checks that the second
+draw's merge reports all four. **No behaviour test fails without this
+change**, because the change is to generated code, not to behaviour. That
+was checked on a scratch crate holding the base's `lib.rs` and the new test
+(`target/q163-base-crate`, `cargo test`): the 31 unit tests and the new test
+all pass. What the new test catches is a byte pattern spelled wrong. With
+`[b'l', b'o', b't', b's']` in place of `lost`, it failed with ``the `lost`
+line was not read back``. No other test in the crate reads a `lost` line
+back.
+
+### 273.6 What the coverage instrumentation still traces
+
+While the crate is built with `-sanitizer-coverage-trace-compares`, its
+compares call `__sanitizer_cov_trace_*` hooks. Those hooks never read
+`RunningUserCallback`. In `FuzzerTracePC.cpp` it is read only in the
+`__sanitizer_weak_hook_*` functions, lines 625 to 685. So they run at the
+clock's moments too. What each one does with a compare in the merge:
+
+- `__sanitizer_cov_trace_switch` returns at once when the largest case is
+  below 256 (`:560-561`). `q163-switches.py` read the case table of every
+  switch in `merge_out`, 27 before and 27 after. The largest case in any of
+  them is 255, so this hook does nothing here. That includes `read_back`'s
+  length switch (cases 4 and 5) and the one table the change added, with
+  cases 108 and 114, which are `l` and `r`.
+- `__sanitizer_cov_trace_const_cmp1` and `__sanitizer_cov_trace_cmp1`, which
+  trace the `"b"` compare and now every byte of the patterns, go to
+  `TracePC::HandleCmp` with a one-byte type (`:386-396`). That inserts into
+  neither `TORC4` nor `TORC8` and adds only to `ValueProfileMap`, which is
+  read only under `-use_value_profile` (`FuzzerTracePC.h:264`).
+- `__sanitizer_cov_trace_const_cmp4`, `const_cmp8` and `cmp8` do insert into
+  `TORC4` and `TORC8`, the tables the `CMP` mutations draw from. The length
+  checks in both functions are 8-byte compares, and the old code also traced
+  each `bcmp`'s result against 0 as a 4-byte one. Counted by
+  `q163-chain-calls.py` over calls whose chain passes through `read_back` or
+  `how_slow_the_name_says`, there were 25 `const_cmp4`, 31 `const_cmp8` and
+  42 `cmp8` before, and 14, 25 and 19 after.
+
+This change fixes none of that, and it is not this row's to fix. Once the
+crate is built without coverage instrumentation, which is §267.4's route and
+row Q161, these calls are gone. The `bcmp` calls this row removed would not
+have been. ASan intercepts `bcmp` for every caller, instrumented or not
+(§267.3 item 4), so this change is needed whatever Q161 does.
+
+### 273.7 What is left
+
+- **Q161, the build row**, removes 273.6's trace calls. When it lands,
+  `q163-got-calls.py` on the night's own binary should still report one
+  hooked call in the crate, `SlowRun::is`'s.
+- **Only `where_two_surfaces_cross` was read.** The timing crate is compiled
+  the same way into every target, and `merge_out` is not generic, so the
+  other four should carry the same code. That was not checked.
+- **`start_the_clock` was not scanned.** It reads `RCAD_FUZZ_TIMINGS` and
+  `RCAD_FUZZ_SLOWEST` once, in the first draw, which is the empty input at
+  start-up and not a moment the clock chooses.
+- **Calls through a computed pointer were not followed.** That is 12 in
+  `merge_out` itself. A hooked call behind one of them would not show in
+  273.5's table.
+- **The scripts live in the gitignored `target/`** of this lane's tree:
+  `q163-build.sh`, `q163-got-calls.py`, `q163-chain-calls.py`,
+  `q163-reach.py`, `q163-reach-diff.sh`, `q163-switches.py`, `q163-probe.rs`
+  and `q163-base-crate/`. The first lane's
+  `q163-calls.sh` misses every call in 273.3, for the two reasons in 273.2.
