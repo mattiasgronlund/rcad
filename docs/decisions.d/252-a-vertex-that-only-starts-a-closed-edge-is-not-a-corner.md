@@ -219,3 +219,17 @@ merge, with the correction to 252.5 made above.
   tried refuse "which way a crossing runs" first.
 - The two tests collect corners from each edge's start only. Taking both ends
   would be a stronger check, and it is not needed for this merge.
+
+### 252.9 One pin moved when this met §251
+
+Neither this lane nor Q5's ran with the other's change, and together they
+move one pin. On the merged tree `a_plane_cut_along_a_cones_other_nappe.rs`'s
+`a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses`
+went from 58 right and 14 `CannotMeshAFace` to **60 right and 12**. Its other
+refusals did not move. With `assemble.rs` put back to `732a849a`, on the same
+merged tree, the test passes at 58 and 14, so this section's rule is what
+moves it. Before §251 those fuses never got past selection, so the rule could
+not reach them. The file's `fuse_and_check` panics on a wrong answer, and a
+case counts as right only after it validates, has the right number of solids,
+measures within the bound of the volume by hand, and holds exactly the right
+points on a grid. So both new answers are right. The pin was moved at merge.

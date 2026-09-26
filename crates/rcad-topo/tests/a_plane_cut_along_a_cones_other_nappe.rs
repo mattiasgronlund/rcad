@@ -131,8 +131,10 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// eighth or a half either side of it.
 ///
 /// **All ninety-six refused until §251**, eighty of them for want of a point
-/// inside a piece. Fifty-eight answer now; of the eighty, eight still find no
-/// point and fourteen give up one step on, meshing the answer.
+/// inside a piece. Fifty-eight answered then; of the eighty, eight still find
+/// no point and fourteen gave up one step on, meshing the answer. Two of those
+/// fourteen answer since §252 stopped a closed edge's start being a corner,
+/// so sixty answer now and twelve give up meshing (§252.9).
 #[test]
 fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -150,9 +152,9 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 58,
+            right: 60,
             refused: [
-                ("CannotMeshAFace", 14),
+                ("CannotMeshAFace", 12),
                 ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 16),
                 ("a point inside a piece of a face", 8),
             ]

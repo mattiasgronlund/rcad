@@ -147,7 +147,8 @@ tree: 1010 run, 8 fail. After re-deriving them: 1011 run, 1011 pass.
   a curved piece of a frustum's face cut by a steeper plane —
   `a_plane_across_a_cone.rs`'s leaning block, now the first thing that union
   stops on, and the remaining 44 and 8 of the other-nappe families.
-- The mesher: 14 `CannotMeshAFace` and 2 `TwoPatchesOfTheMeshDrewTheSameSide`
+- The mesher: 14 `CannotMeshAFace` (12 once merged with §252, 252.9) and 2
+  `TwoPatchesOfTheMeshDrewTheSameSide`
   in `a_plane_cut_along_a_cones_other_nappe.rs`, reached now that those fuses
   get past selection. Not looked into here.
 - `crates/rcad-topo/tests/fuse_laws_over_a_cone.rs`: the two ignored
