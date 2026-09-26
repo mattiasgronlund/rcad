@@ -62,8 +62,10 @@
 //! and a `memcmp` of each draw against the slow inputs held. Each is gone, and
 //! why is written where it would come back: [`timed`],
 //! `TheSlowestRuns::keeping`, `HOW_OFTEN_TO_MERGE` and `SlowRun::is`. Moving
-//! the merge into the draw made one more thing matter, the hash keys of the
-//! draw's thread, and `prune_to_the_slowest_kept` says why.
+//! the merge into the draw made two more things matter. One is the hash keys
+//! of the draw's thread, and `prune_to_the_slowest_kept` says why. The other
+//! is how the merge matches words and file names, and `read_back` and
+//! `how_slow_the_name_says` say why they do it byte by byte (§273).
 //!
 //! What is left is this crate's own code, which libFuzzer still counts as
 //! coverage unless the build leaves it uninstrumented — and that is the
@@ -495,9 +497,23 @@ fn hash_of(bytes: &[u8]) -> u64 {
 ///
 /// The inverse of [`named_for`], and the reason the slow runs need no shared
 /// accumulation of their own.
+///
+/// **The `slow-` and the `us-` are found byte by byte**, not with
+/// `strip_prefix` and `split_once`. This runs inside a draw, and both of those
+/// call `bcmp`, which ASan hands to libFuzzer's mutations whenever it comes out
+/// unequal ([`SlowRun::is`] says why that matters). `split_once` did so on
+/// every name: before it searches for `us-`, `core` compares `us` with `s-`
+/// (§273).
 fn how_slow_the_name_says(name: &str) -> Option<(Duration, u64)> {
-    let rest = name.strip_prefix("slow-")?;
-    let (micros, input) = rest.split_once("us-")?;
+    let [b's', b'l', b'o', b'w', b'-', ..] = name.as_bytes() else {
+        return None;
+    };
+    let rest = &name["slow-".len()..];
+    let at = rest
+        .as_bytes()
+        .windows(3)
+        .position(|three| matches!(three, [b'u', b's', b'-']))?;
+    let (micros, input) = (&rest[..at], &rest[at + "us-".len()..]);
     Some((
         Duration::from_micros(micros.parse().ok()?),
         u64::from_str_radix(input, 16).ok()?,
@@ -578,6 +594,12 @@ impl HowLongRunsTook {
     /// A file this cannot parse is treated as empty rather than as an error, for
     /// the same reason every other failure here is swallowed — and losing a
     /// night's counts to a torn file is better than a fuzz target that stops.
+    ///
+    /// **Each line's first word is matched byte by byte**, not against a
+    /// `&str` pattern. This runs inside a draw, and a `&str` pattern compiles
+    /// to a `bcmp`, which ASan hands to libFuzzer's mutations whenever it comes
+    /// out unequal ([`SlowRun::is`] says why that matters). The `lost` line was
+    /// compared with `"runs"` first, on every merge (§273).
     fn read_back(from: &Path) -> Self {
         let mut took = Self::new();
         let Ok(text) = std::fs::read_to_string(from) else {
@@ -585,15 +607,19 @@ impl HowLongRunsTook {
         };
         for line in text.lines() {
             let mut words = line.split_whitespace();
-            match (words.next(), words.next(), words.next()) {
-                (Some("runs"), Some(runs), None) => took.runs = runs.parse().unwrap_or(0),
-                (Some("nanos"), Some(nanos), None) => {
+            match (words.next().map(str::as_bytes), words.next(), words.next()) {
+                (Some([b'r', b'u', b'n', b's']), Some(runs), None) => {
+                    took.runs = runs.parse().unwrap_or(0);
+                }
+                (Some([b'n', b'a', b'n', b'o', b's']), Some(nanos), None) => {
                     took.total = Duration::from_nanos(
                         u64::try_from(nanos.parse::<u128>().unwrap_or(0)).unwrap_or(u64::MAX),
                     );
                 }
-                (Some("lost"), Some(lost), None) => took.lost = lost.parse().unwrap_or(0),
-                (Some("b"), Some(bucket), Some(count)) => {
+                (Some([b'l', b'o', b's', b't']), Some(lost), None) => {
+                    took.lost = lost.parse().unwrap_or(0);
+                }
+                (Some([b'b']), Some(bucket), Some(count)) => {
                     if let Ok(bucket) = bucket.parse::<usize>()
                         && bucket < HOW_MANY_BUCKETS
                     {
