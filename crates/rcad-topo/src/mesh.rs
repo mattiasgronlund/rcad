@@ -788,6 +788,13 @@ impl BuildingAMesh {
                     .ok_or(Error::AWireWillNotLieFlatOnItsFace { face: face.key() })?,
             );
         }
+        if let Some(whole) = how_far_the_second_coordinate_wraps(&stored)
+            && let Some((first, later)) = walked.split_first_mut()
+        {
+            for chain in later {
+                *chain = with_its_second_coordinate_in_the_turn_of(chain, first, whole);
+            }
+        }
         // **A wire that winds is only allowed beside wires that wind too.** The
         // loops of a face cut the chart into stretches, and the one the face is
         // has every one of its wires in its boundary. Two that go right round
@@ -1738,6 +1745,7 @@ impl BuildingAMesh {
             .all(|coedge| used.insert(coedge.edge().key()));
         let mut walk = WalkingAWire::new(
             how_far_the_longitude_wraps(stored),
+            how_far_the_second_coordinate_wraps(stored),
             wire.closes_on_one_edge(),
             no_side_of_this_wire_is_a_seam,
         );
@@ -2182,6 +2190,43 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
     }
 }
 
+/// One loop moved by whole turns of its second coordinate, so that the middle
+/// of the span it covers is within half a turn of the middle of `frame`'s.
+///
+/// **Each loop of a torus face is unwrapped round the ring from its own first
+/// corner**, so two loops of one face can come out a whole turn apart, which in
+/// the chart puts a hole outside the loop it is a hole in. A hole's ring angles
+/// lie inside its outer loop's, and no loop spans a whole turn round the ring,
+/// because [`WalkingAWire::goes_right_round_the_second_way`] refused those. So
+/// the middle of a hole is less than half a turn from the middle of its outer
+/// loop in exactly one turn, and this finds it whichever of the two is the
+/// face's first wire. A loop already in that turn keeps its numbers bit for
+/// bit.
+fn with_its_second_coordinate_in_the_turn_of(
+    chain: &WalkedLoop,
+    frame: &WalkedLoop,
+    whole: f64,
+) -> WalkedLoop {
+    let middle = |around: &WalkedLoop| {
+        let (least, most) = around
+            .corners
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(least, most), corner| {
+                (least.min(corner[1]), most.max(corner[1]))
+            });
+        (least + most) / 2.0
+    };
+    let by = whole_turns_between(middle(chain), middle(frame), whole);
+    WalkedLoop {
+        corners: chain
+            .corners
+            .iter()
+            .map(|corner| [corner[0], corner[1] - by])
+            .collect(),
+        ..chain.clone()
+    }
+}
+
 /// The lowest longitude any corner of a loop sits at.
 fn least_longitude(around: &WalkedLoop) -> f64 {
     around
@@ -2489,6 +2534,10 @@ fn the_pole_side_a_line_from_a_hole_reaches(
 /// The running state of a walk round one wire.
 struct WalkingAWire {
     wraps: Option<f64>,
+    /// How far the second coordinate runs before it comes back, which only a
+    /// torus's does: it is the angle round the ring. See
+    /// [`how_far_the_second_coordinate_wraps`].
+    second_wraps: Option<f64>,
     /// Whether this wire is one whole closed curve, so that it is allowed to
     /// come back to where it started a whole turn on rather than at the
     /// longitude it left. Whether it *did* is measured in
@@ -2525,11 +2574,13 @@ struct WalkingAWire {
 impl WalkingAWire {
     fn new(
         wraps: Option<f64>,
+        second_wraps: Option<f64>,
         closes_on_one_curve: bool,
         no_side_of_this_wire_is_a_seam: bool,
     ) -> Self {
         Self {
             wraps,
+            second_wraps,
             closes_on_one_curve,
             no_side_of_this_wire_is_a_seam,
             stood_at_a_pole: false,
@@ -2566,8 +2617,16 @@ impl WalkingAWire {
     /// towards a meridian the face is not on. A ball whose seam is half a turn
     /// away is where that stops being invisible and comes back as a wire that
     /// will not lie flat.
+    ///
+    /// **On a torus the second coordinate is unwrapped too**, and for the same
+    /// reason. It is the angle round the ring, which `atan2` answers in
+    /// `(−π, π]` as well, and a wall whose ring angles run past `π` was read as
+    /// one corner at `+π` and the rest near `−π`: the other three quarters of
+    /// the ring, with the seam folded back on itself. The builder refused a
+    /// quarter bend turned half a turn for it (§280).
     fn arrive(&mut self, at: u32, sits_at: (f64, f64), is_a_pole: bool) {
         let (raw, up) = sits_at;
+        let up = self.in_the_turn_of_the_last_corner(up);
         if is_a_pole {
             self.stood_at_a_pole = true;
             if self.corners.is_empty() {
@@ -2617,6 +2676,20 @@ impl WalkingAWire {
         self.leave_the_pole_at(longitude);
         self.corners.push([longitude, up]);
         self.points.push(at);
+    }
+
+    /// The second coordinate moved by whole turns to within half a turn of the
+    /// corner before it, where that coordinate wraps; as it came everywhere
+    /// else, and at the first corner, which is what the rest are measured from.
+    ///
+    /// **The turns are taken off rather than the difference added back on**, so
+    /// a corner that needs no turn keeps its number bit for bit, and a wire
+    /// that never crosses `π` round the ring meshes exactly as it did.
+    fn in_the_turn_of_the_last_corner(&self, up: f64) -> f64 {
+        match (self.second_wraps, self.corners.last()) {
+            (Some(whole), Some(last)) => up - whole_turns_between(up, last[1], whole),
+            (Some(_), None) | (None, _) => up,
+        }
     }
 
     /// Close the pole side, if the walk is standing on one: a second corner at
@@ -2811,12 +2884,48 @@ impl WalkingAWire {
             }
             _ => (0.0, false),
         };
+        if let Some(whole) = self.second_wraps
+            && self.goes_right_round_the_second_way(whole)
+        {
+            return None;
+        }
         Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
             closes_on_one_curve: self.closes_on_one_curve,
             goes_right_round,
             climbed,
+        })
+    }
+
+    /// Whether the loop goes right round the way its second coordinate wraps,
+    /// which on a torus is right round the ring: it comes back a whole turn on,
+    /// or it passes one point at two corners a whole turn apart, which is a
+    /// seam round the ring.
+    ///
+    /// **Either is a face this mesher has no cut for, so it is refused and not
+    /// meshed.** [`BuildingAMesh::cut_off_what_goes_too_far_round`] narrows a
+    /// patch in the first coordinate only, and the triangulator measures a
+    /// side round the ring by its chord, `2S·|sin(Δ/2)|`, which is nothing
+    /// across a whole turn. A patch a whole turn wide would be filled with
+    /// triangles that measure flat and are not. Before §280 such a loop never
+    /// got that far unfolded: read on `atan2`'s branch it jumped across the
+    /// chart and came back crossing itself.
+    ///
+    /// The climb is measured the way [`WalkingAWire::finish`] measures the
+    /// longitude's, with the closing step taken the short way round.
+    fn goes_right_round_the_second_way(&self, whole: f64) -> bool {
+        let (Some(first), Some(last)) = (self.corners.first(), self.corners.last()) else {
+            return false;
+        };
+        let climbed = last[1] - first[1] + the_short_way_round(first[1] - last[1], whole);
+        if climbed.abs() >= whole / 2.0 {
+            return true;
+        }
+        let mut first_seen_at: HashMap<u32, f64> = HashMap::new();
+        self.points.iter().zip(&self.corners).any(|(&at, corner)| {
+            let first_seen = *first_seen_at.entry(at).or_insert(corner[1]);
+            (corner[1] - first_seen).abs() >= whole / 2.0
         })
     }
 
@@ -3482,6 +3591,25 @@ fn how_far_the_longitude_wraps(surface: &Surface) -> Option<f64> {
             Some(core::f64::consts::TAU)
         }
         other => panic!("this crate cannot say whether {other:?} wraps round"),
+    }
+}
+
+/// How far this surface's **second** coordinate has to run to come back to
+/// where it started, or `None` if it never does.
+///
+/// Only a torus's does: it is the angle round the ring. A ball's second
+/// coordinate is a latitude and a pipe's or a cone's a height, and none of
+/// those wraps.
+///
+/// # Panics
+///
+/// On a surface this has not been taught, as [`how_far_the_longitude_wraps`]
+/// does.
+fn how_far_the_second_coordinate_wraps(surface: &Surface) -> Option<f64> {
+    match surface {
+        Surface::Torus(_) => Some(core::f64::consts::TAU),
+        Surface::Plane(_) | Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) => None,
+        other => panic!("this crate cannot say whether {other:?} wraps round a second way"),
     }
 }
 
@@ -4822,7 +4950,7 @@ mod tests {
     #[test]
     fn a_pole_between_two_meridians_gets_a_corner_at_each_end_of_it() {
         let whole = 2.0 * core::f64::consts::PI;
-        let mut walk = WalkingAWire::new(Some(whole), false, false);
+        let mut walk = WalkingAWire::new(Some(whole), None, false, false);
         walk.arrive(0, (core::f64::consts::FRAC_PI_2, -0.5), false);
         walk.arrive(1, (0.0, -core::f64::consts::FRAC_PI_2), true);
         walk.arrive(2, (core::f64::consts::PI, 0.0), false);
@@ -4855,7 +4983,7 @@ mod tests {
     fn a_walk_that_sets_off_from_a_pole_arrives_back_at_it_down_the_other_meridian() {
         use core::f64::consts::{FRAC_PI_2, PI};
         let whole = 2.0 * PI;
-        let mut walk = WalkingAWire::new(Some(whole), false, false);
+        let mut walk = WalkingAWire::new(Some(whole), None, false, false);
         walk.arrive(0, (0.0, FRAC_PI_2), true);
         walk.arrive(1, (FRAC_PI_2, 0.0), false);
         walk.arrive(2, (0.0, -FRAC_PI_2), true);
@@ -4884,7 +5012,7 @@ mod tests {
     #[test]
     fn a_walk_that_ends_at_a_pole_closes_the_side_back_to_where_it_started() {
         let whole = 2.0 * core::f64::consts::PI;
-        let mut walk = WalkingAWire::new(Some(whole), false, false);
+        let mut walk = WalkingAWire::new(Some(whole), None, false, false);
         walk.arrive(0, (core::f64::consts::FRAC_PI_2, -0.5), false);
         walk.arrive(1, (0.0, -0.9), false);
         walk.arrive(2, (0.0, -core::f64::consts::FRAC_PI_2), true);
@@ -4917,7 +5045,7 @@ mod tests {
     #[test]
     fn a_ring_of_arcs_round_a_pinch_comes_back_a_whole_turn_on() {
         let whole = 2.0 * core::f64::consts::PI;
-        let mut walk = WalkingAWire::new(Some(whole), false, true);
+        let mut walk = WalkingAWire::new(Some(whole), None, false, true);
         for step in 0..6 {
             walk.arrive(step, (-f64::from(step) * whole / 6.0, 2.5), false);
         }
@@ -4944,7 +5072,7 @@ mod tests {
     #[test]
     fn a_wire_with_a_seam_that_ends_a_whole_turn_on_still_will_not_lie_flat() {
         let whole = 2.0 * core::f64::consts::PI;
-        let mut walk = WalkingAWire::new(Some(whole), false, false);
+        let mut walk = WalkingAWire::new(Some(whole), None, false, false);
         for step in 0..6 {
             walk.arrive(step, (-f64::from(step) * whole / 6.0, 2.5), false);
         }
