@@ -10,6 +10,7 @@ last is reported as a failure or stops the targets after it." §264.5 §264.8.*
   275.2   `fuzz-target`'s own exit code is exactly cargo-fuzz's, unchanged by `set -euo pipefail`
   275.3   What reaches `fuzz-overnight`'s `wait`, and what it does with it
   275.4   Verdict: §264.5's "not checked" is now checked, and it changes the picture
+  275.5   Q180: witnessing `fuzz-target` itself end on a last-job timeout — close, not clean
 
 ### 275.1 `cargo fuzz run` always exits 1 on any target failure, never the child's own code
 
@@ -128,3 +129,128 @@ Left for whoever next touches `fuzz-overnight` (Q148, while it runs, per this
 row's brief — nothing here was fixed): reword that comment to say `$status`
 there is cargo-fuzz's own 0/1, not libFuzzer's fork exit code, so a future
 reader does not go looking for a 70 that cannot land in that variable.
+
+### 275.5 Q180: witnessing `fuzz-target` itself end on a last-job timeout — close, not clean
+
+*Q180. §275.2 composed its `-timeout=10` claim from `exec_fuzz`'s source plus
+a `-timeout=1` run (§275.1's, done by hand, not through the recipe). The row
+asked for the thing itself: run `just fuzz-target`, with its hardcoded
+`-timeout=10` under `-fork`, end on a last job that timed out, and show the
+recipe exiting 1 with `INFO: exiting: 70` in its log — off 21:50–06:00Z.*
+
+A prior Q180 lane found the obstacle first: a real `just fuzz-target
+where_two_surfaces_cross 150 <scratch> 71 1` with two slow (`timeout-*`)
+seeds in the scratch corpus ran ten fork jobs at oom/timeout/crash 0/0/0 and
+exited 0. The dispatcher's hypothesis for why: a `-fork` run's first step
+merges the seed corpus and keeps only inputs that add features (a); the
+tracked 834-file corpus already covers what the slow inputs reach, so the
+merge drops them (b); a job only ever sees inputs that survived that merge
+(c). If all three held, seeding more slow files would not help.
+
+**(a) and (c), read from `FuzzerFork.cpp` (libfuzzer-sys 0.4.13, the copy
+under `~/.cargo/registry`), both hold.** `FuzzWithFork`'s startup calls
+`CrashResistantMerge(Env.Args, {}, SeedFiles, &Env.Files, Env.Features, ...)`
+with `Env.Features` freshly empty (`FuzzerFork.cpp:346-354`) — a coverage
+minimizing merge over every file in every `CorpusDirs` entry, `SizedFile`
+sorted ascending by byte size (`FuzzerIO.h:90`), keeping a file only when it
+adds a feature no earlier (smaller) file already claimed. That is (a).
+`CreateNewJob` (`FuzzerFork.cpp:120-197`) then draws each job's
+`-seed_inputs` only from `Env.Files` — the survivors of that merge and of
+each later `RunOneMergeJob` — never straight from `CorpusDirs` again
+(`Files[Rand->SkewTowardsLast(Files.size())]`, `FuzzerFork.cpp:156`,
+`FuzzerRandom.h:27-31`: `SkewTowardsLast` draws `sqrt(rand(n²))`, a density
+rising *linearly* towards the last index, not excluding early ones). That is
+(c): a job can only ever be seeded with something the merge let through.
+
+**(b) is false, checked directly and not inferred.** Built
+`where_two_surfaces_cross` (`mise exec -- cargo +nightly fuzz build
+where_two_surfaces_cross`) and ran the merge (b) describes by hand:
+
+```
+./fuzz/target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
+    -merge=1 -timeout=30 <scratch>/merge-out <scratch>/slow-seeds fuzz/corpus/where_two_surfaces_cross
+```
+
+with `<scratch>/slow-seeds` holding two files copied read-only from
+`~/rcad-fuzz-logs/2026-09-26/artifacts/where_two_surfaces_cross/timeout-*`
+(the row's own two). `MERGE-OUTER: 502 new files with 8812 new features
+added` — and both slow files' own content hashes are among the 502: `ls
+<scratch>/merge-out` contains `d5f895da...` and `ca050275...` by name
+(libFuzzer names a merge survivor after its own hash). The 834 tracked files
+do **not** already cover what these two reach; the merge keeps them. (b) was
+the leg that broke the hypothesis, not (a) or (c) — the tracked corpus isn't
+what stands between a slow seed and a job, low odds of the *particular* slow
+file being drawn is.
+
+**First real run, following "find a slow input that adds features the
+tracked corpus lacks, however many": 25 slow files, still not enough.**
+Seeded 25 `timeout-*` files (distinct from the row's two) into a fresh
+scratch corpus root and ran the recipe itself, unedited:
+
+```
+mise exec -- just fuzz-target where_two_surfaces_cross 120 <scratch-root> "" 3
+```
+
+(`-artifact_prefix` is the recipe's own default here — `fuzz/artifacts/`,
+gitignored — never `fuzz/corpus/`.) Merge kept 497 of the 834+25 candidates.
+System load was heavy throughout (a nightly fuzz row, Q148, pinned to 20 of
+24 cores the whole time) and inflated the run's wall time far past its
+nominal 120s budget: `#6080: cov: 3134 ft: 8829 corp: 497 exec/s: 1520
+oom/timeout/crash: 0/0/0 time: 306s job: 3`, `INFO: exiting: 0 time: 313s`,
+recipe exit 0. Only 3 fork jobs completed in that time (contention, not the
+merge) — too few draws against 497 candidates, of which perhaps 15 were
+slow, to expect a hit; not a repeat of the first lane's finding so much as
+the same low-odds draw landing wrong again.
+
+**Second run, seeding far more: the mechanism fires, but this lane's own
+kill overwrote the trailer line.** Copied 300 more `timeout-*` files into the
+same scratch root (322 slow files total, plus corpus growth from the first
+run, 388 entries against the 834 tracked) and reran the same recipe
+invocation. This time real `-timeout=10` alarms fired repeatedly during the
+run: `fuzz/artifacts/where_two_surfaces_cross/` — gitignored, `git status
+--porcelain fuzz` stayed clean throughout — ended up holding 23 `timeout-*`
+files, written between 16:22:57 and 16:31:35 local time, and every one
+matches by content hash a file this lane had seeded (confirmed for
+`timeout-0fec3f722efe6e298f84ce4bec175f214d698549`,
+`sha1sum` against the scratch copy). That is 23 separate confirmations that
+a slow seed **was** drawn into a job and **did** hit the alarm, under the
+recipe's own hardcoded `-timeout=10`, under `-fork` — the exact mechanism
+`fuzz-overnight` relies on, happening for real, repeatedly, once enough slow
+seeds are in the pool.
+
+It did not end cleanly. This lane's context budget warning landed while the
+run was still going (wall time again inflated far past the nominal 120s by
+system load), and the run was killed (`kill -9` on the fork orchestrator
+process) rather than left to finish on its own. The log's tail is cargo-fuzz
+reporting the artifacts directory's contents after detecting the kill, not
+libFuzzer's own trailer:
+
+```
+Error: Fuzz target exited with signal: 9 (SIGKILL)
+error: Recipe `fuzz-target` failed with exit code 1
+RECIPE_EXIT=1
+```
+
+`RECIPE_EXIT=1` is consistent with §275.2 but proves nothing beyond it here,
+because a `SIGKILL` from outside is a different failure than a `-fork` run
+finishing with its last job's timeout. **`INFO: exiting: 70` was never
+printed in this run** — the last artifact (`timeout-0fec3f722e...`) was
+written at 16:31:35.147 local, one seventh of a second before this lane's own
+kill landed, so the orchestrator may well have been about to print that line
+and exit 70 on its own; that is a plausible reading of the timing, not a
+witnessed one. The row's exact ask — `fuzz-target` exiting 1 *with* `INFO:
+exiting: 70` in its own log, from a natural finish — is not yet demonstrated.
+
+**What is settled and what is not.** Settled: the dispatcher's hypothesis is
+wrong, and (b) is the leg that breaks it, not (a) or (c) — a slow input that
+adds coverage is never filtered out by the merge, and enough of them in the
+seed pool do get drawn into jobs and do hit the timeout, repeatedly, under
+`-fork` with `-timeout=10`. Not settled: the clean trailer line, because this
+run was killed rather than let finish. Left for whoever picks this up: the
+scratch corpus root this lane built already has 388 files (322 of them
+slow) and is reusable as-is — rerun the same `fuzz-target` invocation above
+against it (off 21:50–06:00Z, and only when Q148 or another night isn't
+already using most of the cores) and let it run to its own completion this
+time; on this evidence it should not need more than one or two more
+attempts to catch `INFO: exiting: 70` on the last job before the process's
+own `exit(ExitCode)`.
