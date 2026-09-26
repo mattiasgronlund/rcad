@@ -1478,6 +1478,14 @@ check-skills-selftest:
 # cut must change a file and must be caught by the arm it was made for, so a
 # rewrite of `lanes.js` that moves a line cannot leave an arm passing having
 # compared nothing.
+#
+# **An eighth arm holds the verifier's own tree apart from the lane's.**
+# `VERIFY`'s prompt used to name only the lane's worktree, and the schema's
+# `worktree_path` said just "your own worktree" -- so a verifier echoed the
+# lane's path back as its own, and its real tree stayed locked, holding a
+# slot, until a merger found it by hand (§263.4). The arm checks that both the
+# prompt and the schema tell the verifier to find its own tree with
+# `git rev-parse --show-toplevel`, and that `verifier.md` says so too.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -1492,6 +1500,7 @@ check-lanes-workflow:
     pushes=('git fetch origin' 'git merge-base --is-ancestor origin/main HEAD' 'git push origin HEAD:main' 'mise exec -- just ff-main')
     shared_prefix='call needs a `mise exec --` prefix, whichever role'
     shared_guard='no loop over a runtime value, and no `mise exec` inside a loop or compound.'
+    rev_parse='git rev-parse --show-toplevel'
     scan() {
         local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -1560,6 +1569,15 @@ check-lanes-workflow:
             echo "$1 carries a second copy of the shared shell rule; it belongs only in $3 (§266)"
             return 7
         fi
+        n=$(grep -cF -- "$rev_parse" "$1" || true)
+        if [ "$n" -lt 2 ]; then
+            echo "$1 does not tell the verifier, in both its prompt and its schema, to find its own tree with '$rev_parse'; naming only the lane's tree is what made a verifier echo that path back as its own (§263.4)"
+            return 8
+        fi
+        if ! grep -qF -- "$rev_parse" "$2/verifier.md"; then
+            echo "$2/verifier.md does not tell the verifier to find its own tree with '$rev_parse'"
+            return 8
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -1593,7 +1611,11 @@ check-lanes-workflow:
     grep -vF -- "$shared_guard" "$claude" > "$dir/missing-claude-rule/CLAUDE.md"
     fresh duplicate-rule
     printf '\n// %s\n' "$shared_guard" >> "$dir/duplicate-rule/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7)
+    fresh no-own-tree-script
+    grep -vF -- "$rev_parse" "$file" > "$dir/no-own-tree-script/lanes.js"
+    fresh no-own-tree-doc
+    grep -vF -- "$rev_parse" "$agents/verifier.md" > "$dir/no-own-tree-doc/agents/verifier.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}

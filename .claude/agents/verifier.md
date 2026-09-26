@@ -21,6 +21,13 @@ tracked file and make no commit.
 tree holds a slot that `just queue next` counts (§263.4). "is not locked" means
 someone did it already, and is fine.
 
+Your own tree is a different one, made for this check. Run
+`git rev-parse --show-toplevel` in it and report exactly that as
+`worktree_path` in your verdict -- never the lane's worktree above, which you
+unlock but do not report as your own. A verifier that skips this and copies
+the lane's path back leaves its own tree locked, holding a slot, until someone
+finds it by hand (§263.4).
+
 ## Every lane
 
 1. `git log --oneline <base>..<branch>` — the branch exists and sits on the
