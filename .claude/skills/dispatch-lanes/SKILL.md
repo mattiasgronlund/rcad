@@ -1,6 +1,6 @@
 ---
 name: dispatch-lanes
-description: Fill rcad's free lane slots from `docs/queue.md`, one `Agent` per row, against a base you have watched go green, and close each lane as it finishes. Use when taking on the next work, when a lane finishes and its slot is free, or when a batch of rows off one base is due through the `lanes` workflow.
+description: Fill rcad's free lane slots from `docs/queue.md`, one `lanes` workflow per row — lane, verifier, merger — against a base you have watched go green, and read back what each run merged. Use when taking on the next work, or when a row's run returns and its slot is free.
 argument-hint: "A row id to take first, or nothing to take what `just queue next` gives"
 ---
 
@@ -84,8 +84,8 @@ mise exec -- just queue next        # or: just queue next N
 
 It takes the first ready row of the highest tier whose write set meets no
 running `lane:` row and no row taken above it, and names what each skipped row
-met. N defaults to the free slots, counted from the `lane:` rows. **A verifier
-holds a slot and has no row**, so take one fewer for each verifier running.
+met. N defaults to the free slots, counted from the trees agents hold on this
+machine — lanes, verifiers and mergers alike, whoever sent them (§263.4).
 
 Before a brief, check the row's write set against what the work really
 touches. A row whose write set is wrong is fixed in the file first: a lane that
@@ -99,87 +99,87 @@ fuzz artifact, bisecting, running the gate and reporting, sweeping references
 after a renumber, resolving a `decisions.md` conflict down to a marker
 deletion, disk and worktree sweeps.
 
-## 5. Dispatch: one `Agent` per row
+## 5. Dispatch: one `lanes` workflow per row
 
-`Agent` with `isolation: "worktree"` and the row's model, one call per row, all
-of a fill's rows in one message. Flip each row to `lane:<branch>` in
-`docs/queue.md` and commit that before or with the dispatch.
+A row is one run of the `lanes` workflow: its lane, then the lane's verifier,
+then a merger that lands it on `main` and hands back about twenty lines. You no
+longer merge in your own context, which is where most of it went (§266). For
+each row the fill took:
 
-The agent types: `subagent_type: "lane"` for a row's lane
-(`.claude/agents/lane.md`), `subagent_type: "verifier"` for its verifier in
-step 6 (`.claude/agents/verifier.md`), and `lookup` for a hunt
-(`.claude/agents/lookup.md`). Each adds its own prompt to `CLAUDE.md`; none
-replaces it.
+1. `mise exec -- just queue take <id> <branch>`, commit that line, and push it
+   to `main` — a docs commit goes straight there. The merger reads the queue
+   from `origin/main`, so a `lane:` it finds there flips to `done:` on one side
+   only. A take left on your branch meets that flip at your next merge of
+   `main` as a row changed on both sides, and costs a `just queue pick`.
+2. `Workflow` with `name: "lanes"` (or `scriptPath:
+   ".claude/workflows/lanes.js"` if the registry answers *not found*), one call
+   per row, all of a fill's rows in one message.
 
-**The worktree branches from your own `HEAD`**, not from `origin/main`, so
-every brief carries:
+The args are `{ base, lanes: [ { label, queueId, brief, writeSet, model,
+sourcePaths, report, verify } ] }`. The workflow appends the base, the `switch
+-c` and its refusal to the brief itself, and sends each role with its type, so
+`.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the standing rules
+and a brief carries only what is this row's:
 
-- the base sha, and as its first two commands `git log --oneline -1` and
-  `git switch -c <branch> <base sha>`, with both outputs reported back — and
-  "if the switch says the branch already exists, stop and report it as
-  blocked". A reset (`checkout -B`, `switch -C`) rewinds a branch an older
-  worktree may still hold, and that tree's next commit reverts everything
-  after it (§237). **The branch must not exist yet**: this repo keeps its
-  finished `lane-*` branches, so check `git branch --list 'lane-*'` first;
-- the write set, as "you own these files and no others; stop and report a
-  change outside them";
+- the work, and anything to report beyond the standard record;
+- the write set, as `writeSet`. The branch defaults to `lane-<label>` and must
+  not exist yet — this repo keeps its finished `lane-*` branches, so check `git
+  branch --list 'lane-*'` first; a reused label stops the lane at its second
+  command (§237);
 - nothing about the context hook, unless you expect the lane to run long. A
   lane that sees "Lane budget passed" is past 150k of its own context and is
   told to commit and report; say "carry on past it" only in a brief whose work
-  needs that much. (Until guardrails v0.3.7 the hook read the dispatcher's
-  transcript, so it fired on a lane's first call and every brief had to
-  countermand it. It no longer does.);
+  needs that much;
 - for a row that writes a section, `mise exec -- just claim-section '<what>'`
   before writing;
-- `mise exec --` on every `cargo` and `just`, `Read` then `Edit`, explicit
-  `git add <path>`, commit as it goes, ~45 minutes, and every number with the
-  command that produced it;
 - the verbatim API signatures and exact-arithmetic facts that lane needs,
   because rediscovering those costs it twenty minutes.
 
-A test-only row gets no write access to `src/` and reports defects instead.
+`base` is a sha you have seen go green: step 3's, or the sha a merger pushed,
+since it gated that tree. `sourcePaths` defaults to the `crates/<c>/src`
+directories in the write set; set it by hand when that is not what the verifier
+should revert — for a tooling row whose test is a recipe, the file the recipe
+checks. A row that changes only `.md` files names no failing test, and its
+verifier traces every paragraph it moved instead. An empty `writeSet` makes a
+read-only lane, which is neither verified nor merged, and its answer comes back
+whole. A test-only row gets no write access to `src/` and reports defects
+instead.
 
-**The `lanes` workflow is for a real batch**: several rows off one base, all
-ready at once, with a dispatcher who means to wait for all of them. `Workflow`
-with `name: "lanes"` (or `scriptPath: ".claude/workflows/lanes.js"` if the
-registry answers *not found*); its `args` are `{ base, lanes: [ { label, brief,
-writeSet, model, sourcePaths, report, verify } ] }`, and it appends the shared
-rules above to each brief itself, the `switch -c` and its refusal included. A
-lane's `branch` defaults to `lane-<label>`, so a label reused from an earlier
-batch stops that lane at its second command. An empty `writeSet` makes a
-read-only lane. `sourcePaths` defaults to the `crates/<c>/src` directories in the
-write set; set it by hand when that is not what the verifier should revert.
+Several rows off one base can share a run, and their merges then wait for one
+another. But a slot refills when its run returns (§230.4), so a shared run
+holds every slot in it until the slowest row is merged.
 
-## 6. When a lane reports: verify it, then refill the slot
+## 6. When a row's run returns
 
-A lane reporting its own result is reporting what it believes, and a lane's
-`landed_sha` can be invented — `git rev-parse` its branch.
+A merged row comes back as the sha the merger pushed, the gate's PASS line,
+the rows it closed and added, and anything it left for you. A row that did not
+merge comes back as why, the lane's summary and the verifier's findings, and
+the trees to unlock. What the verifier checks is `verifier.md`'s to say, and how
+the merger merges is `merger.md`'s; neither is repeated here.
 
-**Each writing lane gets its own verifier** when it reports, not at the end of
-a batch: Sonnet, in its own worktree, reverting
-the lane's source directories to the base to show its tests fail without the
-change, and reading any exactness claim the lane makes. A read-only row that
-wrote only a section needs no verifier; read the section.
+- **Merged**: `git fetch origin` and `git rev-parse origin/main` — a reported
+  sha can be invented — then merge `origin/main` into your branch, so the copy
+  of the queue you fill from sees the row closed (§263.9). The slot is free:
+  `mise exec -- just queue next 1`, and back to step 5.
+- **Not merged**: the branch is still on disk. `git worktree unlock` each tree
+  the result names, then decide: send the row again under a new label, fix it
+  in a tree of your own, or `just queue drop` or `just queue park` it.
 
-A lane is finished when its worktree unlocks, not when it reports. Unlock it
-yourself once its report is in — `git worktree unlock <path>` — and fill the
-slot it freed: `just queue next 1`.
+A lane's tree is unlocked by its verifier when checking starts, the verifier's
+by the merger, and the merger's by itself at the end, so a row holds one slot
+at a time. A row whose run stopped early leaves its trees locked, and the
+result names them.
 
-## 7. Close each lane yourself
+## 7. What is still yours
 
-Merge in a tree that is yours alone, never the hub and never one where another
-session has `main` checked out. In **the same commit** as the merge:
+Whatever the merger lists as for you. Two cases come up:
 
-- flip the row to `done:<sha>`, and move it under `## Closed`;
-- turn the lane's `remaining` and `out_of_write_set_needs`, and the "what this
-  leaves" of any section the merge brings, into rows (§230.7);
-- if the merge closes something §0 names, edit §0 too.
-
-`mise exec -- just check-queue` must pass on the file you commit. Then run
-`mise exec -- just gate quiet` on the tree you actually merged — `main` moves
-while lanes run, so gate the merge, not the branch. **A green gate on that tree
-is the authorisation to push**; do not wait to be told. Then
-`mise exec -- just ff-main`.
+- **It spent its push attempts.** Other merges reached `main` first each time,
+  and its branch `merge-<label>` holds the merged tree. Merge `origin/main` into
+  it in a tree of your own, gate, and push, or send the row again.
+- **`ff-main` refused.** It refuses on purpose: the tree holding `main` is
+  ahead, diverged or dirty, and that tree names no owner. Find out whose work
+  it is before moving it.
 
 Reclaim the disk as you go:
 
