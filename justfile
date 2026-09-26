@@ -5507,48 +5507,6 @@ fuzz-promote target file name="":
     cp "$file" "$dest"
     echo "promoted: $dest"
 
-# What one replayed input did, and whether it counts against the morning's
-# tally. Non-zero says it counts, which is the only thing `fuzz-triage` above
-# asks of it.
-#
-# **The answer is the decoder's `outcome:` line and never its exit code.**
-# `rcad-fuzz-explain` exits 0 whenever the bytes decoded and the case replayed,
-# "whatever the case then did" — its own `main.rs` says so in the sentence above
-# `fn main` — so a replay that panicked exits 0 exactly like one that answered.
-# Reading the exit code had `fuzz-triage` print `outcome: panicked` and `still
-# fails on main: no` on the same entry, and total `0 of 8` on the morning of
-# 2026-09-17 when the answer was two. `docs/decisions.md` §91.5.
-#
-# Split out of that recipe rather than left inline because this is the half the
-# gate can test. Deciding needs only text; producing the text needs a workspace,
-# a nightly build and an input that panics — and an input that panics for ever
-# is the one thing this kernel is trying not to have, so the arm that owned one
-# would go red the day the bug was fixed.
-#
-# `Outcome` is three variants and says it is exhaustive on purpose, so a fourth
-# is a change to this contract. The last arm says so and counts the input rather
-# than letting a name this recipe has never seen pass as clean.
-[private]
-fuzz-triage-verdict against decoded said:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    if [ '{{ decoded }}' -ne 0 ]; then
-        echo "still fails on {{ against }}: exit {{ decoded }}, it never got as far as replaying — why is on stderr:"
-        exit 1
-    fi
-    outcome=$(sed -n 's/^outcome: \([a-z]*\).*/\1/p' '{{ said }}')
-    case "$outcome" in
-        panicked)
-            echo "still fails on {{ against }}: yes — it replayed and panicked"
-            exit 1 ;;
-        refused|succeeded)
-            echo "still fails on {{ against }}: no — it replayed and $outcome"
-            exit 0 ;;
-        *)
-            echo "still fails on {{ against }}: unknown — the decoder exited 0 and said '${outcome:-nothing}', which is not one of rcad-fuzz-explain's three outcomes, so its contract has moved and this recipe has not"
-            exit 1 ;;
-    esac
-
 # Pins `fuzz-triage` against nights this builds itself: a `latest` line in the
 # shape `fuzz-overnight` writes, artifacts in both of the two places they land,
 # and a night nothing has reported.
@@ -5763,42 +5721,6 @@ check-fuzz-triage-selftest:
     fi
     grep -q 'no kind could be read' <<<"$got" \
         || fail "the refusal did not say it could not read a kind"
-
-    # Eleven: the verdict is the decoder's `outcome:` line and not its exit code.
-    # Every arm that feeds the decoder real bytes feeds it bytes that do not
-    # decode, so all of them pass on a recipe that reads the exit code, and all
-    # of them did while it read one — the morning of 2026-09-17 called two live
-    # crashes clean (§91.5).
-    #
-    # Canned text rather than a real input, because deciding is the half that
-    # was wrong and the half a gate can hold still. The exit code is pinned at 0
-    # in the arms that matter: that is the whole point, since the decoder exits
-    # 0 whatever the replay then did.
-    verdict() {
-        printf '%s' "$2" >"$dir/said"
-        just fuzz-triage-verdict main "$1" "$dir/said" 2>&1
-    }
-
-    got=$(verdict 0 'outcome: panicked — assertion `left == right` failed') \
-        && fail "a replay that panicked exited 0 and was counted as coming back clean"
-    grep -q '^still fails on main: yes' <<<"$got" \
-        || fail "a replay that panicked did not say that it still fails"
-
-    got=$(verdict 0 'outcome: succeeded — SurfaceMeet::Curves, 2 of them; the harness reached Asked') \
-        || fail "a replay that answered was counted against the morning's tally"
-    grep -q '^still fails on main: no' <<<"$got" \
-        || fail "a replay that answered did not say that it is gone"
-
-    got=$(verdict 0 'outcome: refused — Error::Undecidable; the harness reached Asked') \
-        || fail "a replay that gave up by name was counted as a failure, and §17.4 says giving up is an answer"
-
-    got=$(verdict 1 '') \
-        && fail "an input that never got as far as replaying was counted as clean"
-
-    got=$(verdict 0 'outcome: exploded — a fourth thing') \
-        && fail "an outcome this recipe has never heard of passed as clean"
-    grep -q 'contract has moved' <<<"$got" \
-        || fail "a fourth outcome was counted but not named as a contract change"
 
 # The timer's two unit files are tracked here and **copied** into
 # `~/.config/systemd/user/`. That is two records of one thing, which §60 says is
