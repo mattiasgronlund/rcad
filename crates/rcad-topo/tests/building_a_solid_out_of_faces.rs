@@ -408,38 +408,26 @@ fn the_top_half_of_a_ring_with_no_seam_climbs_a_whole_turn_round_it_and_is_refus
 }
 
 /// The same half ring with a seam across the tube, which is how a file writes a
-/// face right round the ring, is a solid and measures what Pappus gives,
-/// `π²·r²·R`.
+/// face right round the ring, is refused by the same name: its one wire passes
+/// the seam's points a whole turn apart round the ring.
 ///
-/// Its one wire goes round the ring and back, so it climbs nothing, and with
-/// the ring angle unwrapped its patch is a whole turn wide round the ring and
-/// half a turn round the tube, which is cut into quarters round the tube as
-/// any patch is.
+/// **This refuses a solid that exists, and on purpose.** With that half of the
+/// refusal switched off this very shape built and measured `38.396` where
+/// Pappus, `π²·r²·R`, gives `39.478`, inside its stated `8.742`; the crown of
+/// a ring in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs` folded
+/// instead. Nothing cuts a patch narrower round the ring, so the mesher is
+/// not trusted with a patch a whole turn wide that way (§280.6, and
+/// `WalkingAWire::goes_right_round_the_second_way` in `mesh.rs`). A gap, and
+/// this test is what moves when it is closed.
 #[test]
-fn the_top_half_of_a_ring_with_a_seam_across_the_tube_measures_what_pappus_gives() {
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
-    let (ring, tube) = (4.0, 1.0);
+fn the_top_half_of_a_ring_with_a_seam_across_the_tube_is_refused_by_the_same_name() {
     let mut model = Model::new(a_working_size());
-    let half = match the_top_half_of_a_ring(&mut model, ring, tube, true) {
-        Ok(half) => half,
-        Err(refused) => panic!("the top half of a ring with a seam was refused: {refused:?}"),
-    };
-    model
-        .validate(&policy, &mut log)
-        .expect("the half ring is sound");
-    let measured = model
-        .solid(half)
-        .expect("this model made the key")
-        .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
-        .expect("the half ring measures");
-    let pappus = core::f64::consts::PI * core::f64::consts::PI * tube * tube * ring;
+    let refused = the_top_half_of_a_ring(&mut model, 4.0, 1.0, true);
     assert!(
-        (measured.volume() - pappus).abs() <= measured.volume_error(),
-        "{} where Pappus gives {pappus}, allowed {}",
-        measured.volume(),
-        measured.volume_error()
+        matches!(refused, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
+        "the top half of a ring with a seam came back {refused:?}"
     );
+    assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
 }
 
 /// The seam of a bend, named from geometry a file carries rather than from
