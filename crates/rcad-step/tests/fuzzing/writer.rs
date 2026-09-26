@@ -460,7 +460,11 @@ fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> rcad_topo::R
         )
         .expect("a cap plane cuts the cone in one closed curve");
     let top_circle = builder
-        .add_edge(top_corner, top_corner, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(
+            top_corner,
+            top_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
         .expect("a cap plane cuts the cone in one closed curve");
 
     let bottom = a_cap(
@@ -477,7 +481,13 @@ fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> rcad_topo::R
         top_circle,
         Orientation::Forward,
     );
-    let side = a_wall(&mut builder, Surface::Cone(skin), bottom_circle, seam, top_circle);
+    let side = a_wall(
+        &mut builder,
+        Surface::Cone(skin),
+        bottom_circle,
+        seam,
+        top_circle,
+    );
     builder
         .add_shell(&[
             (bottom, Orientation::Forward),
@@ -565,10 +575,18 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
         )
         .expect("a quarter of the inner equator");
     let start_circle = builder
-        .add_edge(start_corner, start_corner, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(
+            start_corner,
+            start_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
         .expect("one whole circle of the two this plane cuts");
     let end_circle = builder
-        .add_edge(end_corner, end_corner, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(
+            end_corner,
+            end_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
         .expect("one whole circle of the two this plane cuts");
 
     let start_cap = a_cap(
@@ -585,7 +603,13 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
         end_circle,
         Orientation::Forward,
     );
-    let side = a_wall(&mut builder, Surface::Torus(skin), start_circle, seam, end_circle);
+    let side = a_wall(
+        &mut builder,
+        Surface::Torus(skin),
+        start_circle,
+        seam,
+        end_circle,
+    );
     builder
         .add_shell(&[
             (start_cap, Orientation::Forward),
