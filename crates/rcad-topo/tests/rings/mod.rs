@@ -126,10 +126,16 @@ pub fn the_top_half_of_a_ring(
 
     let outer_corner = builder.add_vertex(Point::new(ring + tube, 0.0, 0.0))?;
     let inner_corner = builder.add_vertex(Point::new(ring - tube, 0.0, 0.0))?;
-    let outer_equator =
-        builder.add_edge(outer_corner, outer_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
-    let inner_equator =
-        builder.add_edge(inner_corner, inner_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let outer_equator = builder.add_edge(
+        outer_corner,
+        outer_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let inner_equator = builder.add_edge(
+        inner_corner,
+        inner_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
 
     let underneath = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
         .expect("the z axis is a unit normal");
@@ -270,10 +276,16 @@ fn a_bend(model: &mut Model, ring: f64, tube: f64, sits: &WhereABendSits) -> Res
         },
     )?;
 
-    let start_circle =
-        builder.add_edge(start_corner, start_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
-    let end_circle =
-        builder.add_edge(end_corner, end_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let start_circle = builder.add_edge(
+        start_corner,
+        start_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let end_circle = builder.add_edge(
+        end_corner,
+        end_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
 
     let cap = |builder: &mut SolidBuilder, [x, y]: [f64; 2], edge, turn| -> Result<_> {
         let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(x, y, 0.0))
