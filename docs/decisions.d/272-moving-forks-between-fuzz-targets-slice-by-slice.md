@@ -1,11 +1,16 @@
-## 272. Moving forks between fuzz targets slice by slice found no more coverage than the even split, and is not built — 2026-09-26
+## 272. Moving forks between fuzz targets slice by slice did not beat the even split, and is not built — 2026-09-26
 
 *Queue row Q148, which §265.7 queued: split the night's cores between the
 targets slice by slice instead of evenly, and build it only if it beats the
 even split on runs and coverage. This lane measured it on one commit, both ways
 at once, for eight hours of daytime. It changed no code. Nothing in the night's
 corpus or the nightly tree was written. Every fuzz process this lane started
-ran between 12:20Z and 21:20Z, outside 21:50–06:00Z.*
+ran between 12:20Z and 21:20Z, outside 21:50–06:00Z; the last was gone by
+21:07:14Z (`final.log` line 12). The lane died on the weekly usage limit
+before the last three end measurements were written in. A second lane folded
+them in from the first lane's scratchpad,
+`/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad/b852311c-8277-48ef-9cba-cf5fc23a70a0/scratchpad`,
+which every file named below is relative to. It ran no fuzz binary.*
 
   272.1   What ran
   272.2   What a restart costs
@@ -62,8 +67,9 @@ quotes for the reader's reload does not apply here. The reader's reload is
 **The binaries were built at the base and copied into the lane's scratchpad
 before the run** (§268.5). The scratchpad turned out to be shared with the
 dispatcher's other lanes, so once that was seen, about fifty minutes in, the
-binaries and their directory were made read-only. Their sha256 sums were
-checked then and at the end, and they had not changed.
+binaries and their directory were made read-only. Their sha256 sums, written
+to `bin.sha256` when they were copied, were checked then, and `sha256sum -c
+bin.sha256` still passed for all five on 09-27, after the last measurement.
 
 **The slice length is 9 736 s, three slices in the window.** It was chosen
 from the nights' own reloads. On the nights of 09-22 to 09-26, the first job
@@ -158,7 +164,8 @@ corpus was hard-linked at the second boundary and at the end, and measured
 with the same single pass, `RCAD_FUZZ_TIMINGS` unset, as the starting corpus.
 That pass is not free of noise either. `where_two_surfaces_cross`'s starting
 corpus measured 3 283, and both arms' corpora at the second boundary measured
-3 280, although they held every starting file.
+3 280, although they held every starting file. At the end both measured 3 283
+again (`final.log` lines 10–11).
 
 ### 272.4 Runs and coverage, per target and per arm
 
@@ -166,11 +173,18 @@ corpus measured 3 283, and both arms' corpora at the second boundary measured
 
 | target | start | E, boundary 2 | R, boundary 2 | E, end | R, end |
 |---|--:|--:|--:|--:|--:|
-| where_two_surfaces_cross | 3 283 | 3 280 | 3 280 | ‹S_E› | ‹S_R› |
+| where_two_surfaces_cross | 3 283 | 3 280 | 3 280 | 3 283 | 3 283 |
 | reader | 4 943 | 4 953 | 4 943 | 4 953 | 4 944 |
 | writer | 10 795 | 10 889 | 10 894 | 10 892 | 10 899 |
-| fuse | 19 859 | 19 859 | 19 860 | ‹F_E› | ‹F_R› |
-| cones and tori | 2 530 | 2 530 | 2 534 | ‹C_E› | ‹C_R› |
+| fuse | 19 859 | 19 859 | 19 860 | 19 859 | 19 861 |
+| cones and tori | 2 530 | 2 530 | 2 534 | 2 530 | 2 534 |
+
+The start column is `measure/results.txt` lines 3–8, the boundary-2 columns
+are its lines 9–18, and the end columns are `final.log` lines 2–11, which
+`measure/results.txt` lines 19–28 repeat. Each corpus holds every file of the
+one to its left: no starting file is missing from either arm's corpus at the
+second boundary or at the end, and no second-boundary file is missing from the
+same arm's end corpus, for any target.
 
 **Coverage as the fork parents logged it** (`cov:`, timing crate included).
 For E, the first line, the value at each boundary, and the last line. For R,
@@ -205,6 +219,52 @@ and 581 571 for the writer, 407 030 and 450 063 for the fuse, and 392 260 and
 507 432 for the cone-or-torus target. That is up to 29% apart with nothing
 different between them.
 
+**At the end, R's coverage stands 0 to 9 edges from E's, and the lane never
+measured how far two identical runs drift apart on that count.** With the
+timing directory unset, R ends level with E on `where_two_surfaces_cross`, 9
+behind on the reader, 7 ahead on the writer, 2 ahead on the fuse and 4 ahead
+on the cone-or-torus target (`final.log` lines 2–11). The spread that would
+settle whether those gaps mean anything is two identical runs measured the same
+way. Slice 1 was two identical runs, but no corpus was snapshotted at the
+first boundary, so it has no figure on this count. What the lane did measure
+comes close from three sides:
+
+- **The measuring pass on its own.** Over the reader's starting corpus it gave
+  4 943 twice (`measure/results.txt` lines 3–4). On `where_two_surfaces_cross`
+  it gave 3 283 for the starting corpus (line 8), 3 280 for both arms at the
+  second boundary (lines 15–16), and 3 283 for both at the end (`final.log`
+  lines 10–11), although each corpus holds every file of the one before. So the
+  pass alone moves by 3 edges on that target.
+- **Two identical runs, on the count the fork parents log.** That count
+  includes the timing crate. At the end of slice 1, R stood 1 ahead of E on
+  `where_two_surfaces_cross`, 7 behind on the reader, 5 ahead on the writer, 2
+  ahead on the fuse and 5 ahead on the cone-or-torus target
+  (`boundaries.jsonl` line 1, each target's `E.last.cov` against
+  `R.last.cov`). On their first lines, from the same corpus, they already
+  stood 12 apart on `where_two_surfaces_cross`: 3 856
+  (`E/logs/where_two_surfaces_cross.whole.log` line 9) and 3 868 (R's
+  `first.cov` in `boundaries.jsonl` line 1).
+- **Slice 3, where both arms ran two forks a target** and differed only in R's
+  restart. It moved R's gap to E by at most 2 edges on any target, with the
+  timing directory unset (the boundary-2 columns of the table above against
+  its end columns).
+
+Each end gap is within 2 edges of the gap the same target showed after the
+identical slice 1, and on four of the five it has the same sign: 0 against 1,
+−9 against −7, +7 against +5, +2 against +2, and +4 against +5. So the gaps at
+the end were about there before the rule moved a fork. That comparison mixes
+two counts, the one without the timing crate and the one with it, so it is not
+a measured tie. It is a gap this lane cannot tell from the drift between two
+identical runs.
+
+**`ft:` tells the same story.** `ft:` counts features, which is finer than
+edges. With the timing directory unset, R ends 20 ahead of E on
+`where_two_surfaces_cross`, 27 behind on the reader, 213 ahead on the writer,
+10 ahead on the fuse and 14 ahead on the cone-or-torus target (`final.log`
+lines 2–11). The writer's 213 is the only gap above 30. After the identical
+slice 1, the two arms already stood 182 apart on the writer's logged `ft:`,
+55 298 for E and 55 480 for R (`boundaries.jsonl` line 1).
+
 ### 272.5 What the rule did with its forks
 
 | boundary | `cov:` gains it read (surfaces, reader, writer, fuse, cones) | forks for the next slice |
@@ -234,18 +294,31 @@ on this target.
 
 ### 272.6 Verdict
 
-**R does not beat E, so the rule is not built.** On coverage, with the timing
-directory unset, the two arms end within ‹N› edges of each other on every
-target, and within a few edges of where they started, except for the writer.
-On runs, R is ahead where it had more forks and behind where it had fewer, in
-about the proportion of fork-seconds moved. Its one large gain, on the
-cone-or-torus target, was not from its forks.
+**R does not beat E, so the rule is not built.** The row asks for the rule to
+win before it is built, and it did not. On coverage, with the timing directory
+unset, the two arms end within 9 edges of each other on every target. Those
+gaps are about the ones two identical runs already had after slice 1, and this
+lane cannot tell them from drift (§272.4). On runs, R is ahead where it had
+more forks and behind where it had fewer, in about the proportion of
+fork-seconds moved. Its one large gain, on the cone-or-torus target, was not
+from its forks. So Q148 is dropped with these numbers, as the row says to do
+when the rule does not win.
+
+**Nor do the gaps point the rule's way.** The rule moved forks in slice 2 only
+(§272.5). Of the two targets it gave a third fork, R ends 7 ahead on the writer
+and 9 behind on the reader, where it was already 7 behind after slice 1. Of
+the two it cut to one fork, R ends level on `where_two_surfaces_cross` and 2
+ahead on the fuse. Had the moved forks bought coverage, the first two would
+end ahead and the second two behind.
 
 There was little for the rule to find. In eight hours on one commit, the
-coverage that did not come from the timing crate rose by about 100 edges on
-the writer, 10 on the reader in E, and ‹…› on the other three. That matches
-§265.4: coverage creeps. A rule that moves forks toward rising coverage has
-nothing to steer by when four of five targets barely move.
+coverage that did not come from the timing crate rose by 97 edges on the
+writer in E and 104 in R, by 10 on the reader in E and 1 in R, and by at most
+4 on the other three: 0 in both arms on `where_two_surfaces_cross`, 0 and 2 on
+the fuse, 0 and 4 on the cone-or-torus target (§272.4's table, its start
+column against its end columns). That matches §265.4: coverage creeps. A rule
+that moves forks toward rising coverage has nothing to steer by when four of
+five targets barely move.
 
 **It would read the wrong number anyway.** Until §267's build change lands,
 the `cov:` the night logs counts the timing crate's own edges, and two passes
@@ -261,6 +334,11 @@ of 0 to 25 edges. After a restart, it read re-found edges as new ground.
 - **Any coverage-steered rule needs §267's build change first.** Without it,
   the signal includes 570 to 600 edges of timing code per target, and they
   move between passes and across restarts.
+- **A rerun should snapshot both corpora at the first boundary too.** Slice 1
+  is two identical runs, and measured with the timing directory unset it would
+  give the spread that §272.4 had to approach from three sides. It costs one
+  more measuring pass per target and arm. On the starting corpus the longest,
+  `where_two_surfaces_cross`'s, took 2 577 s (`measure/results.txt` line 8).
 - **Two cheaper restarts were not measured.** Restarting only the targets whose
   count changed would have skipped all of R's third-slice restarts, since that
   split was even. And `-keep_seed=1` makes a fork parent skip the start pass
