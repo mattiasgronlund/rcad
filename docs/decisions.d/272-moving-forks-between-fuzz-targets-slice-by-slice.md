@@ -8,9 +8,13 @@ corpus or the nightly tree was written. Every fuzz process this lane started
 ran between 12:20Z and 21:20Z, outside 21:50–06:00Z; the last was gone by
 21:07:14Z (`final.log` line 12). The lane died on the weekly usage limit
 before the last three end measurements were written in. A second lane folded
-them in from the first lane's scratchpad,
-`/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad/b852311c-8277-48ef-9cba-cf5fc23a70a0/scratchpad`,
-which every file named below is relative to. It ran no fuzz binary.*
+them in from the first lane's scratchpad. It ran no fuzz binary. A third lane
+(Q212) copied the files this section cites out of that scratchpad, before a
+reboot could wipe it, into
+`/home/mattias/rcad-fuzz-logs/q148-forks-slice-by-slice-2026-09-26`, which
+every file named below is relative to; it checked each copy against the
+scratchpad's file with `sha256sum`. The corpora and the five binaries were
+left behind in the scratchpad, since nothing below cites them by path.*
 
   272.1   What ran
   272.2   What a restart costs
