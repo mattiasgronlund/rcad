@@ -4006,6 +4006,29 @@ fuzz-overnight window="28800":
         exit 1
     fi
 
+    # `docs/decisions.d/273` found the timing crate itself, in a fuzz target's
+    # own build, making calls that reach libFuzzer's `__sanitizer_weak_hook_*`
+    # memcmp-family hooks from outside `SlowRun::is` — handing it bytes from a
+    # `totals` file or a `slowest/` name to libFuzzer's mutator whenever the
+    # crate's own bookkeeping compares unequal mid-draw. Checked here, after
+    # every target's own binary exists and before any of them is started, so a
+    # build that reintroduces one fails loudly instead of quietly steering the
+    # night's mutations. `RCAD_FUZZ_TIMING_CHECK` overrides which script runs,
+    # for `check-fuzz-overnight-selftest` alone; nothing else sets it.
+    timing_check="${RCAD_FUZZ_TIMING_CHECK:-{{ justfile_directory() }}/fuzz/timing-hooked-calls.py}"
+    if ! "$timing_check" \
+            fuzz/target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
+            fuzz/target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic \
+            fuzz/target/x86_64-unknown-linux-gnu/release/no_model_makes_the_writer_panic \
+            fuzz/target/x86_64-unknown-linux-gnu/release/two_solids_fused_by_a_stranger \
+            fuzz/target/x86_64-unknown-linux-gnu/release/where_a_cone_or_a_torus_crosses \
+            >"$night/timing-hooked-calls.log" 2>&1; then
+        tail -n 20 "$night/timing-hooked-calls.log"
+        echo "the timing crate reaches a memcmp-family hook from outside SlowRun::is: $night/timing-hooked-calls.log"
+        printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
+        exit 1
+    fi
+
     # The input a target found is kept beside the log that describes it, because
     # `fuzz/artifacts/` is the wrong place to leave the only copy of anything
     # (§91). Two reasons, and each one lost a finding.
@@ -4862,6 +4885,21 @@ check-fuzz-overnight-selftest:
     STUB
     chmod +x "$dir/bin/cargo"
 
+    # A stand-in for `fuzz/timing-hooked-calls.py` (docs/decisions.d/273,
+    # Q181): the real script disassembles a real binary, which a stub cargo
+    # never produces, so this is what `RCAD_FUZZ_TIMING_CHECK` points the
+    # recipe at instead, armed by `STUB_TIMING_HOOKED`.
+    cat >"$dir/bin/timing-check-stub.sh" <<'STUB'
+    #!/usr/bin/env bash
+    if [ -n "${STUB_TIMING_HOOKED:-}" ]; then
+        echo "stub-binary: 1 call from rcad_fuzz_timing reaches a memcmp-family hook outside SlowRun::is"
+        exit 1
+    fi
+    echo "stub-binary: clean"
+    exit 0
+    STUB
+    chmod +x "$dir/bin/timing-check-stub.sh"
+
     # These arms run the night in whatever worktree the gate was run from, and
     # `fuzz-watermark` would move that tree onto the tip of `origin/main` — a
     # lane's tree, checked out from under it by its own gate. So `run` tells the
@@ -4876,10 +4914,15 @@ check-fuzz-overnight-selftest:
         exit 1
     }
 
+    # `RCAD_FUZZ_TIMING_CHECK` defaults every arm to the clean stub, because
+    # the stub `cargo` above never writes a real target binary for the real
+    # `fuzz/timing-hooked-calls.py` to disassemble — Twenty-four is the one
+    # arm that overrides `STUB_TIMING_HOOKED` to see the other branch.
     run() {
         STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" STUB_ARTIFACT_TAG="$tag" \
             RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
             RCAD_FUZZ_ALREADY_ADVANCED=1 RCAD_STEP_CORPUS="$dir/step-corpus" \
+            RCAD_FUZZ_TIMING_CHECK="$dir/bin/timing-check-stub.sh" \
             {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
     }
 
@@ -5068,6 +5111,7 @@ check-fuzz-overnight-selftest:
     RCAD_STEP_CORPUS="$dir/no-such-step-corpus" STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
         STUB_ARTIFACT_TAG="$tag" RCAD_FUZZ_ALREADY_ADVANCED=1 \
         RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        RCAD_FUZZ_TIMING_CHECK="$dir/bin/timing-check-stub.sh" \
         {{just_executable()}} fuzz-overnight 8 >"$dir/out" 2>&1 || status=$?
     [ "$status" -eq 0 ] \
         || fail "a night with no STEP corpus fetched yet failed instead of fuzzing without it: $(cat "$dir/out")"
@@ -5251,6 +5295,7 @@ check-fuzz-overnight-selftest:
     (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
         RCAD_FUZZ_ALREADY_ADVANCED=1 \
         RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        RCAD_FUZZ_TIMING_CHECK="$dir/bin/timing-check-stub.sh" \
         {{just_executable()}} fuzz-overnight 8) >"$dir/out" 2>&1 \
         || fail "a night told it had already advanced exited non-zero: $(cat "$dir/out")"
     [ "$(git -C "$night_repo" rev-parse HEAD)" = "$woke_on" ] \
@@ -5353,6 +5398,7 @@ check-fuzz-overnight-selftest:
     RCAD_FUZZ_COPY_EVERY=1 STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
         STUB_ARTIFACT_TAG="$tag" RCAD_FUZZ_ALREADY_ADVANCED=1 \
         RCAD_FUZZ_LOGS="$copier_logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        RCAD_FUZZ_TIMING_CHECK="$dir/bin/timing-check-stub.sh" \
         {{just_executable()}} fuzz-overnight 12 >"$dir/out" 2>&1 &
     night_pid=$!
     sleep 4
@@ -5683,6 +5729,35 @@ check-fuzz-overnight-selftest:
     [ "$line" = "no_model_makes_the_writer_panic: 1 slow-unit" ] \
         || fail "a target with nothing before tonight was not counted as new: $(cat "$dir/logs/latest")"
     rm -f "$carried"
+
+    # Twenty-four: the scan for a timing-crate call that reaches libFuzzer's
+    # memcmp-family hook from outside `SlowRun::is` (docs/decisions.d/273,
+    # Q181) fails the night loudly, before any target is started, when it
+    # finds one. This is a test of the recipe's own wiring — that a non-zero
+    # exit from the scan reads as a build failure and stops every target —
+    # and not of the scan's own logic, which a stub can never exercise
+    # because it never disassembles a real binary; docs/decisions.d/273
+    # demonstrates the scan itself against a real build of 3319f838.
+    : >"$dir/log"
+    status=0
+    STUB_TIMING_HOOKED=1 run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a timing-crate call reaching a hook outside SlowRun::is was found and the night reported success"
+    grep -q 'reaches a memcmp-family hook' "$dir/out" \
+        || fail "the night did not say why it failed: $(cat "$dir/out")"
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "a hooked timing-crate call did not read as a build failure in the summary: $(cat "$dir/logs/latest")"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "the night fuzzed targets after finding a timing-crate call reaching a hook"
+
+    # Twenty-five: the same check passes a night whose scan finds nothing to
+    # report, which is the ordinary case — every arm above already relies on
+    # this, since `run()` defaults every one of them to the clean stub, and
+    # this one says so directly.
+    : >"$dir/log"
+    run 8 || fail "a night with a clean timing-hooked-calls scan failed: $(cat "$dir/out")"
+    ! grep -q 'reaches a memcmp-family hook' "$dir/out" \
+        || fail "a clean scan was still read as finding a hooked call"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
