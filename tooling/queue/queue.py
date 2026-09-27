@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rows import Queue, highest_q  # noqa: E402
+from rows import TIERS_IN_ORDER, Queue, highest_q  # noqa: E402
 
 ID = re.compile(r"^[TDQ][0-9]+$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -44,6 +44,7 @@ just queue running                         what holds a slot on this machine, on
 just queue show <id>                       one row, its hold, and its state in other worktrees
 just queue take <id> <branch>              dispatch a ready row to <branch>: state lane:<branch>, held until done/drop/park
 just queue add <tier> <model> <write set> <what ending in §N>    a new todo row at the foot of its tier; prints the id
+just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing
 just queue done <id> <merge sha>           state done:<sha>, moved under ## Closed
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
@@ -64,7 +65,7 @@ def main(argv):
     here = Here(os.environ.get("QUEUE_FILE", "docs/queue.md"))
     verbs = {
         "take": take, "add": add, "done": done, "drop": drop, "park": park,
-        "after": after, "rank": rank, "pick": pick, "show": show, "running": running,
+        "after": after, "rank": rank, "tier": move_to_tier, "pick": pick, "show": show, "running": running,
         "elsewhere": elsewhere,
     }
     if verb not in verbs:
@@ -247,12 +248,13 @@ def add(here, args):
         raise Refused("usage: add <tier> <model> <write set> <what, ending in §N>")
     tier, model, write_set = args[:3]
     what = " ".join(args[3:])
+    refuse_unless_a_tier(tier)
     with Claims(here.claims) as claims:
         queue = here.read()
         refuse_conflicted(here, queue)
-        block = queue.block_of_key(tier)
+        block = queue.block_for_tier(tier)
         if block is None:
-            raise Refused(f"there is no '## Tier {tier}' block to add a row to")
+            raise Refused(f"there is no '## Tier {tier}' block, and no later heading to write one above")
         top = highest_q(queue.text())
         for _, text in here.other_copies(lanes_too=True):
             top = max(top, highest_q(text))
@@ -406,6 +408,40 @@ def rank(here, args):
         checked(here, queue)
         write(here, queue)
     print(f"{row_id}: ranked before {other_id}")
+
+
+def move_to_tier(here, args):
+    """Move an open row to the foot of another tier, writing that tier's heading if the file has none (§307.5).
+
+    The write guard refuses the hand edit, and a heading a hand edit would have
+    added is refused with it, so this is how a row reaches a tier nobody has
+    filed in yet. The row keeps its state and its hold; only its tier field and
+    its place change, and `rank` then places it within the tier.
+    """
+    need(args, 2, "tier <id> <tier>")
+    row_id, to = args
+    refuse_unless_a_tier(to)
+    with Claims(here.claims):
+        queue = open_row(here, row_id)
+        row = queue.find(row_id)
+        if row.is_closed():
+            raise Refused(f"{row_id} is closed: {row.state}, and a closed row sits under ## Closed in no tier")
+        if row.tier == to:
+            raise Refused(f"{row_id} is tier {to} already")
+        block = queue.block_for_tier(to)
+        if block is None:
+            raise Refused(f"there is no '## Tier {to}' block, and no later heading to write one above")
+        moved = queue.find(row_id)
+        queue.remove(moved)
+        queue.append_to_block(block, moved.with_tier(to))
+        checked(here, queue)
+        write(here, queue)
+    print(f"{row_id}: tier {row.tier} -> {to}, at the foot of ## Tier {to}")
+
+
+def refuse_unless_a_tier(tier):
+    if tier not in TIERS_IN_ORDER:
+        raise Refused(f"'{tier}' is not a tier: {', '.join(TIERS_IN_ORDER)}")
 
 
 def pick(here, args):
