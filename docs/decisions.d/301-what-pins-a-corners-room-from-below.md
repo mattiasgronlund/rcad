@@ -223,10 +223,9 @@ lane's scratchpad.
 
 ### 301.7 What this leaves
 
-- **A corner with four planes round it** (301.4) is the family most likely to
-  fill the room and was not built. A pyramid's apex through `SolidBuilder`,
-  turned so the planes round, where `bake` solves another triple than the face
-  asks.
+- **A corner with four planes round it** (301.4) is now recorded in §310: a
+  pyramid's apex through `SolidBuilder`, turned so the planes round, where
+  `bake` solves another triple than the face asks, does fill the room.
 - **The corpus folds at 0.49** are the only folds past a tenth. Which draws
   they are, what policy they ran under, and what they answer with the room at
   x0.45, is not known. No test reads their answer.
