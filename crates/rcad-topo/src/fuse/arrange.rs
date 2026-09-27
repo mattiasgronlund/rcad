@@ -4821,13 +4821,15 @@ mod tests {
     use rcad_geom::{
         Isometry, MeetOfThree, Plane, Point, Scale, Surface, Vector, meet_of_three_surfaces,
     };
-    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, orient3d};
+    use rcad_predicates::{
+        Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d,
+    };
 
     use super::{
         Arrangement, Piece, as_exact_as_it_is, canonical_cut_surfaces, prove_the_hinted_order,
         split_a_face, the_other_way, three_planes_faced_the_one_way, where_the_crossing_starts,
     };
-    use crate::fuse::bake::{BakedFace, BakedSolid, bake};
+    use crate::fuse::bake::{BakedFace, BakedSolid, bake, what_writing_the_corner_down_cost};
     use crate::fuse::{FaceMeet, MeetPoint};
     use crate::{Model, ProfileBuilder, SolidKey};
 
@@ -5491,6 +5493,62 @@ mod tests {
                 "the corner is its own place, and the second place is outside its room"
             );
         }
+    }
+
+    /// A place whose box reaches exactly as far from a corner as writing the
+    /// corner down cost, `2⁻⁴⁶` at the unit cube's corner at the origin, is
+    /// folded into it. One a step further is not. That is the room the doc
+    /// comment names, from the function `bake.rs` lets a meet stand in for a
+    /// stored corner with, and this holds it from both sides (§301).
+    ///
+    /// **The places are written by hand, and no shape measured needs a room
+    /// this wide.** The fold measures how far a place sticks out past the
+    /// corner's own box, not how wide the place is. At a corner `bake` solved
+    /// from the same three planes, both boxes hold one point and differ only by
+    /// the order the solve took its rows in: a turned wedge's meet box 4.5 rooms
+    /// wide sticks out a fiftieth of one. Every certified fold in the workspace
+    /// sticks out under a sixteenth of the room, and none of the shapes tried
+    /// past a tenth, so a room shrunk to half or a tenth failed no test until
+    /// this one (§301.1, §301.2).
+    #[test]
+    fn a_place_as_far_off_a_corner_as_its_room_is_folded_into_it_and_one_a_step_further_is_not() {
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let cube = model
+            .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a unit cube");
+        let [cube] = baked(&model, [cube]);
+        let bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        let arrangement = drawn_up_to_its_corners(&bottom);
+        let one_wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let other_wall = the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], one_wall, other_wall),
+            "the fold is only asked about a corner on both crossings"
+        );
+
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        assert_eq!(
+            room,
+            f64::powi(2.0, -46),
+            "the room at a corner no bigger than one"
+        );
+        let reaching = |far: f64| {
+            PredicatePoint::Constructed(
+                [Interval::new(-far, far).expect("a finite reach either side of zero"); 3],
+            )
+        };
+        let folds = |place: PredicatePoint| {
+            arrangement.a_corner_is_this_place(one_wall, other_wall, place, &[place])
+        };
+        assert!(
+            folds(reaching(room)),
+            "a place reaching the room's edge on every side is the corner written down another way"
+        );
+        assert!(
+            !folds(reaching(room.next_up())),
+            "a place reaching one step past the room is not the model's to fold, and the policy is \
+             asked about it"
+        );
     }
 
     fn baked<const N: usize>(model: &Model, solids: [SolidKey; N]) -> [BakedSolid; N] {
