@@ -29,7 +29,16 @@
 // commit and no merge), `branch` (default `lane-<label>`, and it must not exist
 // yet: the lane creates it and refuses to reset one), `model`, `sourcePaths`
 // (what the verifier reverts to base to prove the tests fail without the
-// change; defaults to the `crates/<c>/src` dirs in `writeSet`), `report`
+// change; defaults to the `crates/<c>/src` dirs in `writeSet`), `pinsOnly`
+// (true for a lane whose write set has nothing to revert -- a verdict, a
+// pinned test and a decisions section, no `src/` path anywhere in its work.
+// The verifier then proves the merge on the new tests passing on the branch,
+// not on a revert or a mutation. Never inferred from an empty `sourcePaths`:
+// that stays the safe refusal, so a dispatcher who forgot to pass
+// `sourcePaths` for a tooling lane still gets stopped, not waved through. Set
+// `pinsOnly` and also declare a `src/` path, in `writeSet` or `sourcePaths`,
+// and the lane is refused instead: there is something to revert, so it is not
+// pins-only), `report`
 // ({properties, required} merged into the lane's schema for findings that are
 // this lane's own), and `verify: false` to skip the check, which leaves the
 // merger's gate as the only one.
@@ -151,13 +160,26 @@ function namesTests(report) {
 // verifier's other way to demonstrate the same thing -- a mutation the fix
 // catches and the base commit doesn't -- and `mutationProven` is the one place
 // that decides whether a reported one counts.
+//
+// A third lane has nothing to revert at all: a verdict, a pinned test and a
+// decisions section, with no `src/` path in its write set (Q126, Q127, Q203).
+// Those came back "verifier said merge" and were merged by hand, because the
+// script refused for want of a revert that does not exist. `lane.pinsOnly`
+// says so explicitly, and only an explicit `true` gets past the check below --
+// never an empty `sourcePathsOf(lane)` on its own, which stays the refusal a
+// dispatcher who forgot `sourcePaths` for a tooling lane needs (§287).
 function unproven(lane, kind, check) {
   const why = []
   if (check.files_outside_write_set && check.files_outside_write_set.length) why.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
   if (kind === 'tests') {
     if (check.tests_pass_on_branch !== true) why.push('the tests do not pass on the branch')
-    if (check.tests_fail_without_fix !== true && !mutationProven(check.reproduced_mutation)) why.push('the tests were never seen to fail with the source reverted, and no reproduced mutation stands in for it')
-    if (!sourcePathsOf(lane).length) why.push('the lane declared no source directory to revert')
+    const sources = sourcePathsOf(lane)
+    if (lane.pinsOnly === true && sources.length) why.push('the lane is marked pinsOnly, but it declares a source directory to revert -- there is something to revert, so pinsOnly does not apply')
+    const pinsOnly = lane.pinsOnly === true && !sources.length
+    if (!pinsOnly) {
+      if (check.tests_fail_without_fix !== true && !mutationProven(check.reproduced_mutation)) why.push('the tests were never seen to fail with the source reverted, and no reproduced mutation stands in for it')
+      if (!sources.length) why.push('the lane declared no source directory to revert')
+    }
   }
   return why
 }
@@ -303,12 +325,15 @@ function reportSchema(lane) {
 // to find it.
 function VERIFY(lane, r, kind) {
   const revert = sourcePathsOf(lane).join(', ') || '(none declared; say so and skip the revert)'
+  const pinsOnlyNote = lane.pinsOnly === true
+    ? '\nThis lane is marked pinsOnly: a verdict, a pinned test and a decisions section, nothing in src/ to revert. Skip the revert step. Instead run the new tests on the branch and watch them pass, then report tests_fail_without_fix: false with no reproduced_mutation and say in notes that pinsOnly is why -- that is the expected shape here, not a defect.'
+    : ''
   return `Check lane ${lane.label}, queue row ${lane.queueId}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
 Base: ${BASE}
 Branch: ${branchOf(lane)}
 Write set: ${lane.writeSet.join(', ')}
 The lane's worktree, to unlock once you are done with it -- this is not your own tree, and not what you report as worktree_path: ${r.worktree_path}
-Source paths to revert: ${revert}
+Source paths to revert: ${revert}${pinsOnlyNote}
 Revert them and watch the tests fail, then restore them and watch the tests pass -- that is the default proof, and report it as tests_fail_without_fix.
 Only when the revert itself cannot fail -- a fix that just moves a floor or a bound, where a value on the wrong side of the old one can still pass a proptest run at most seeds -- report a reproduced_mutation instead: make a small, uncommitted change to the source that reintroduces the kind of bug the fix is meant to catch, run one command unchanged against the base commit and against this branch, and give the exact scratch change, the command, and both outcomes ('pass' or 'fail'). Say in notes why the revert could not fail here. Do not reach for a mutation when a revert would do.
 Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
