@@ -4785,7 +4785,10 @@ fn scaled_by_soak_factor_gives_the_literal_back_at_one_and_sixty_six_times_it_at
     assert_eq!(scaled_by_soak_factor(LONGER_CASES, 1), LONGER_CASES);
     assert_eq!(scaled_by_soak_factor(LONGER_CASES, 66), LONGER_CASES * 66);
     assert_eq!(scaled_by_soak_factor(MEASURED_CASES, 1), MEASURED_CASES);
-    assert_eq!(scaled_by_soak_factor(MEASURED_CASES, 66), MEASURED_CASES * 66);
+    assert_eq!(
+        scaled_by_soak_factor(MEASURED_CASES, 66),
+        MEASURED_CASES * 66
+    );
 }
 
 /// The fixed seed, or the one [`SOAK_SEED`] names.
