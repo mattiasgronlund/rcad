@@ -31,6 +31,9 @@ no row above it can use that slot.
 | 3 | STEP corpus files that fail | §171.5's A, the corpus half |
 | 4 | New functionality | §171.5's B, still under §13 |
 
+*§311 swapped tiers 1 and 2 on 2026-09-27, at Mattias's word: new defects are
+tier 1 and finding defects better is tier 2.*
+
 This amends two sections. §171.5 kept C out of every dispatch list, because C
 frees no file and so loses any ranking by what a lane frees. §226.2 answered that
 with one reserved lane. Mattias's order puts C first, above everything, which is
