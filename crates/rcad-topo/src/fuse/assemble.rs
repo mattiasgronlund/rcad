@@ -2209,8 +2209,10 @@ impl Edge {
         };
         let at = corners[from].point;
         let [mine, partner] = self.carried_by;
-        let across =
-            squared_off_from(from, gradient_of(&mine, at).cross(gradient_of(&partner, at)));
+        let across = squared_off_from(
+            from,
+            gradient_of(&mine, at).cross(gradient_of(&partner, at)),
+        );
         let agreement = across.dot(squared_off_from(named_from, towards));
         if agreement > 0.0 {
             Some(across)
