@@ -8447,6 +8447,8 @@ check-queue-api-selftest:
     root=$(mktemp -d '{{ justfile_directory() }}/target/queue-selftest.XXXXXX')
     trap 'rm -rf "$root"' EXIT
     j='{{ just_executable() }}'
+    page_dir="$root/queue-page"
+    export RCAD_QUEUE_PAGE_DIR="$page_dir"
     got=""
     fail() {
         echo "just queue drifted from its selftest: $1"
@@ -8515,6 +8517,7 @@ check-queue-api-selftest:
 
     got=$(q "$one" take Q1 lane-q1 2>&1) || fail "the first take of Q1 was refused"
     grep -q '^Q1  1  lane:lane-q1 ' "$one/docs/queue.md" || fail "take did not write lane:lane-q1"
+    [ -f "$page_dir/index.html" ] || fail "queue take did not render queue-page to RCAD_QUEUE_PAGE_DIR"
     got=$(q "$two" take Q1 lane-q1-again 2>&1) && fail "a second worktree took Q1 while the first held it"
     grep -qF 'Q1 is held by lane-q1 from' <<<"$got" || fail "the second take did not name who holds Q1"
     grep -q '^Q1  1  todo ' "$two/docs/queue.md" || fail "a refused take wrote the file anyway"
