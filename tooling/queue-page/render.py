@@ -1,0 +1,538 @@
+#!/usr/bin/env python3
+"""Render docs/queue.md's history and current state as one HTML page (Q254).
+
+`just queue-page [out-dir]` runs this after every queue verb that writes, and
+`just ff-main` runs it too, so the page stays current as a side effect of the
+queue work rather than needing its own trigger. It reads **main's** copy of
+`docs/queue.md` — never this worktree's own, which may sit on a lane branch —
+plus the claims file `tooling/queue/queue.py` also reads, and writes a
+self-contained page: two SVG charts of the queue's shape over every commit of
+`docs/queue.md` on main's first-parent line, then the current ready, running
+and lately-closed rows, and rows added against rows closed per day.
+`docs/decisions.md` §230, §263.
+
+The only state this keeps across runs is `<out>/.history-cache.json`, one
+entry per commit sha already tallied. Recomputing every commit on every write
+would make the render the queue pays for grow with the queue's own history;
+a sha's tally never changes once it is written, so the cache never goes stale.
+
+A failure here — no `main` here, no commit ever touched the file — is said on
+stderr and returned as a nonzero exit, never raised past `main`: the caller
+(`just queue`, `just ff-main`) must keep going either way.
+"""
+
+import html
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from collections import namedtuple
+
+sys.dont_write_bytecode = True
+QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
+sys.path.insert(0, QUEUE_TOOLING)
+from rows import Queue, TIERS  # noqa: E402
+
+QUEUE_PATH = "docs/queue.md"
+CLOSED_ROWS_SHOWN = 12
+
+
+def main(argv):
+    if len(argv) != 1:
+        print("usage: render.py <out-dir>", file=sys.stderr)
+        return 2
+    out_dir = argv[0]
+    git = Git()
+    if git.rev_parse("refs/heads/main") is None:
+        print("queue-page: no 'main' branch here, so there is nothing to render", file=sys.stderr)
+        return 1
+    history = git.history(QUEUE_PATH)
+    if not history:
+        print(f"queue-page: no commit on main's first-parent line touched {QUEUE_PATH}", file=sys.stderr)
+        return 1
+    cache_path = os.path.join(out_dir, ".history-cache.json")
+    cache = load_cache(cache_path)
+    points = [tallied(git, sha, when, cache) for sha, when in history]
+    save_cache(cache_path, cache)
+    tip = Queue(git.show(history[-1][0], QUEUE_PATH))
+    page = render_page(points, current_state(tip))
+    write_atomically(os.path.join(out_dir, "index.html"), page)
+    return 0
+
+
+class Git:
+    """Plumbing against the repository the caller's working directory is in.
+
+    No `-C`: the caller sets the working directory (`--working-directory` on
+    `just`, or a plain `cd`), the same convention `tooling/queue/queue.py`
+    already relies on for `just check-queue-api-selftest`'s scratch clones.
+    """
+
+    def rev_parse(self, ref):
+        result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def history(self, path):
+        """Every commit on `main`'s first-parent line that touched `path`, oldest first."""
+        result = subprocess.run(
+            ["git", "log", "--first-parent", "--reverse", "--format=%H%x1f%cI", "refs/heads/main", "--", path],
+            capture_output=True, text=True, check=True)
+        pairs = []
+        for line in result.stdout.splitlines():
+            sha, when = line.split("\x1f")
+            pairs.append((sha, when))
+        return pairs
+
+    def show(self, sha, path):
+        result = subprocess.run(["git", "show", f"{sha}:{path}"], capture_output=True, text=True)
+        return result.stdout if result.returncode == 0 else ""
+
+
+Point = namedtuple("Point", "sha when counts")
+
+
+def load_cache(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_cache(path, cache):
+    write_atomically(path, json.dumps(cache, sort_keys=True))
+
+
+def tallied(git, sha, when, cache):
+    if sha not in cache:
+        cache[sha] = tally(git.show(sha, QUEUE_PATH))
+    return Point(sha, when, cache[sha])
+
+
+def tally(text):
+    """One commit's shape: open rows by tier, parked rows, and how many are closed.
+
+    A row is closed, or parked, or open under its tier — the three are
+    exclusive, and a tier `check-queue` would have refused (§230.2) is folded
+    into whichever count it is not, rather than dropped, so a bad historical
+    commit still balances against the total the page's own count can check.
+    """
+    by_tier = {tier: 0 for tier in TIERS}
+    parked = 0
+    closed = 0
+    for row in Queue(text).rows:
+        if row.is_closed():
+            closed += 1
+        elif row.state.startswith("parked:"):
+            parked += 1
+        elif row.tier in by_tier:
+            by_tier[row.tier] += 1
+        else:
+            parked += 1
+    return {"by_tier": by_tier, "parked": parked, "closed": closed}
+
+
+def current_state(tip):
+    verbs = load_queue_verbs()
+    here = verbs.Here(QUEUE_PATH)
+    return {
+        "ready": ready_rows(tip),
+        "running": running_rows(verbs, here, tip),
+        "closed": closed_rows(tip),
+    }
+
+
+def load_queue_verbs():
+    """`tooling/queue/queue.py`, loaded under its own name so it never shadows the stdlib `queue` module."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rcad_queue_verbs", os.path.join(QUEUE_TOOLING, "queue.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ready_rows(tip):
+    done_ids = {row.id for row in tip.rows if row.is_closed()}
+    by_tier = {tier: [] for tier in TIERS}
+    for row in tip.rows:
+        if row.state == "todo":
+            ready = True
+        elif row.state.startswith("after:"):
+            ready = all(other in done_ids for other in row.state[len("after:"):].split(","))
+        else:
+            ready = False
+        if ready and row.tier in by_tier:
+            by_tier[row.tier].append(row)
+    return by_tier
+
+
+def running_rows(verbs, here, tip):
+    """What `just queue running` would say, joined back to the row it names (§263.4).
+
+    The claims file, not the file's own `lane:` state, is what a running lane
+    actually holds right now — a take can be committed on a branch main has
+    not merged yet, so the row it names may not even be `lane:` in main's copy.
+    """
+    trees = here.trees()
+    branches = {tree.branch for tree in trees if tree.is_lane}
+    claimed = set()
+    rows = []
+    for row_id, hold in sorted(verbs.Claims(here.claims).holds().items()):
+        before = set(claimed)
+        found = verbs.has_a_tree(hold["branch"], branches, trees, claimed)
+        row = tip.find(row_id)
+        rows.append({
+            "id": row_id,
+            "branch": hold["branch"],
+            "where": tree_path_for(hold, trees, found, claimed - before),
+            "what": row.text if row else f"{row_id}  -  -  -  {hold['write_set']}  (not merged into main yet)",
+        })
+    return rows
+
+
+def tree_path_for(hold, trees, found, newly_claimed):
+    if newly_claimed:
+        return next(iter(newly_claimed))
+    if found:
+        for tree in trees:
+            if tree.branch == hold["branch"]:
+                return tree.path
+            if hold["branch"].startswith("lane-") and tree.branch == "merge-" + hold["branch"][len("lane-"):]:
+                return tree.path
+    return f"no tree yet, taken from {hold['tree']}"
+
+
+def closed_rows(tip):
+    closed = [row for row in tip.rows if row.is_closed()]
+    return closed[-CLOSED_ROWS_SHOWN:]
+
+
+def daily_deltas(points):
+    """Rows added and rows closed per day, from the same per-commit tallies as the charts.
+
+    Both totals are monotonic — a row is never removed once added, and a
+    closed row never reopens — so a day's count is just the last commit seen
+    that day, and the delta against the previous day is never negative.
+    """
+    latest_of_day = {}
+    for point in points:
+        latest_of_day[point.when[:10]] = point
+    previous_total = 0
+    previous_closed = 0
+    deltas = []
+    for day in sorted(latest_of_day):
+        counts = latest_of_day[day].counts
+        total = sum(counts["by_tier"].values()) + counts["parked"] + counts["closed"]
+        deltas.append({
+            "day": day,
+            "added": max(0, total - previous_total),
+            "closed": max(0, counts["closed"] - previous_closed),
+        })
+        previous_total = total
+        previous_closed = counts["closed"]
+    return deltas
+
+
+def write_atomically(path, text):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".queue-page-", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        os.unlink(tmp)
+        raise
+
+
+# --- the page itself ---------------------------------------------------
+#
+# Six categorical slots, in the fixed order `dataviz`'s palette validates for
+# stacked areas (adjacent pairs only, which is all a stack needs): tier 1
+# through tier 4, then parked as its own band, in both charts' legends. The
+# open/closed chart reuses slot 1 for "open" and slot 6 (green) for "closed",
+# since that pair is unrelated to the first chart's bands and each chart
+# carries its own legend.
+
+TIER_LABELS = {"1": "Tier 1", "2": "Tier 2", "2.5": "Tier 2.5", "3": "Tier 3", "4": "Tier 4"}
+SLOT_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
+SLOT_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"]
+
+
+def render_page(points, state):
+    by_tier_chart = stacked_area(
+        points=points,
+        series=[(TIER_LABELS[t], lambda counts, t=t: counts["by_tier"][t]) for t in TIERS]
+        + [("Parked", lambda counts: counts["parked"])],
+        chart_id="by-tier",
+        caption="The open queue, split by tier, parked rows as their own band",
+    )
+    progress_chart = stacked_area(
+        points=points,
+        series=[
+            ("Open", lambda counts: sum(counts["by_tier"].values()) + counts["parked"]),
+            ("Closed", lambda counts: counts["closed"]),
+        ],
+        chart_id="progress",
+        caption="The open queue stacked on every row closed so far",
+    )
+    deltas = daily_deltas(points)
+    added_closed_chart = grouped_bars(deltas, chart_id="added-closed", caption="Rows added against rows closed per day")
+    return PAGE.format(
+        generated_at=points[-1].when,
+        commit_count=len(points),
+        by_tier_chart=by_tier_chart,
+        progress_chart=progress_chart,
+        added_closed_chart=added_closed_chart,
+        ready_section=ready_section(state["ready"]),
+        running_section=running_section(state["running"]),
+        closed_section=closed_section(state["closed"]),
+        series_colors=series_color_css(),
+    )
+
+
+def stacked_area(points, series, chart_id, caption):
+    width, height = 720, 220
+    margin = {"top": 12, "right": 12, "bottom": 22, "left": 12}
+    plot_w = width - margin["left"] - margin["right"]
+    plot_h = height - margin["top"] - margin["bottom"]
+
+    values = [[getter(point.counts) for point in points] for _, getter in series]
+    totals = [sum(v[i] for v in values) for i in range(len(points))]
+    top_total = max(totals) or 1
+
+    def x_of(i):
+        return margin["left"] if len(points) == 1 else margin["left"] + plot_w * i / (len(points) - 1)
+
+    def y_of(v):
+        return margin["top"] + plot_h * (1 - v / top_total)
+
+    bands = []
+    baseline = [0] * len(points)
+    colors_light = SLOT_LIGHT[: len(series)]
+    colors_dark = SLOT_DARK[: len(series)]
+    for series_index, (label, _) in enumerate(series):
+        top = [baseline[i] + values[series_index][i] for i in range(len(points))]
+        upper = " ".join(f"{x_of(i):.1f},{y_of(top[i]):.1f}" for i in range(len(points)))
+        lower = " ".join(f"{x_of(i):.1f},{y_of(baseline[i]):.1f}" for i in range(len(points) - 1, -1, -1))
+        bands.append(
+            f'<polygon class="qp-band" data-series="{series_index}" points="{upper} {lower}">'
+            f'<title>{html.escape(label)}</title></polygon>'
+        )
+        baseline = top
+
+    legend = "".join(
+        f'<span class="qp-legend-item"><i data-series="{i}"></i>{html.escape(label)}</span>'
+        for i, (label, _) in enumerate(series)
+    )
+    style_vars = "".join(f"--qp-{chart_id}-{i}-light:{c};" for i, c in enumerate(colors_light))
+    style_vars += "".join(f"--qp-{chart_id}-{i}-dark:{c};" for i, c in enumerate(colors_dark))
+    first_label = html.escape(points[0].when[:10])
+    last_label = html.escape(points[-1].when[:10])
+    axis_y = height - 4
+    axis_x_end = width - margin["right"]
+    return f"""
+<figure class="qp-chart" id="qp-{chart_id}" style="{style_vars}">
+  <figcaption>{html.escape(caption)}</figcaption>
+  <svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(caption)}">
+    {"".join(bands)}
+    <text class="qp-axis" x="{margin['left']}" y="{axis_y}">{first_label}</text>
+    <text class="qp-axis" x="{axis_x_end}" y="{axis_y}" text-anchor="end">{last_label}</text>
+  </svg>
+  <div class="qp-legend">{legend}</div>
+</figure>"""
+
+
+def grouped_bars(deltas, chart_id, caption):
+    width, height = 720, 180
+    margin = {"top": 12, "right": 12, "bottom": 22, "left": 12}
+    plot_w = width - margin["left"] - margin["right"]
+    plot_h = height - margin["top"] - margin["bottom"]
+    if not deltas:
+        return f'<figure class="qp-chart" id="qp-{chart_id}"><figcaption>{html.escape(caption)}</figcaption></figure>'
+    top = max((max(d["added"], d["closed"]) for d in deltas), default=1) or 1
+    n = len(deltas)
+    slot = plot_w / n
+    bar_w = max(1.5, slot * 0.32)
+
+    def y_of(v):
+        return margin["top"] + plot_h * (1 - v / top)
+
+    bars = []
+    for i, d in enumerate(deltas):
+        cx = margin["left"] + slot * (i + 0.5)
+        for offset, key, series_index in ((-1, "added", 0), (1, "closed", 1)):
+            v = d[key]
+            x = cx + offset * bar_w * 0.55 - bar_w / 2
+            y = y_of(v)
+            h = margin["top"] + plot_h - y
+            bars.append(
+                f'<rect class="qp-bar" data-series="{series_index}" x="{x:.1f}" y="{y:.1f}" '
+                f'width="{bar_w:.1f}" height="{max(h, 0):.1f}" rx="1.5">'
+                f'<title>{html.escape(d["day"])}: {v} {key}</title></rect>'
+            )
+    legend = "".join(
+        f'<span class="qp-legend-item"><i data-series="{i}"></i>{label}</span>'
+        for i, label in enumerate(("Added", "Closed"))
+    )
+    style_vars = f"--qp-{chart_id}-0-light:{SLOT_LIGHT[0]};--qp-{chart_id}-1-light:{SLOT_LIGHT[5]};"
+    style_vars += f"--qp-{chart_id}-0-dark:{SLOT_DARK[0]};--qp-{chart_id}-1-dark:{SLOT_DARK[5]};"
+    return f"""
+<figure class="qp-chart" id="qp-{chart_id}" style="{style_vars}">
+  <figcaption>{html.escape(caption)}</figcaption>
+  <svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(caption)}">
+    {"".join(bars)}
+  </svg>
+  <div class="qp-legend">{legend}</div>
+</figure>"""
+
+
+def ready_section(by_tier):
+    items = []
+    for tier in TIERS:
+        rows = by_tier[tier]
+        if not rows:
+            continue
+        items.append(f"<h3>{html.escape(TIER_LABELS[tier])}</h3><ul>")
+        items.extend(f"<li>{row_html(row)}</li>" for row in rows)
+        items.append("</ul>")
+    return "".join(items) if items else "<p>none ready</p>"
+
+
+def running_section(rows):
+    if not rows:
+        return "<p>nothing running</p>"
+    items = (
+        f"<li><code>{html.escape(row['id'])}</code> on <code>{html.escape(row['branch'])}</code> "
+        f"at <code>{html.escape(row['where'])}</code> — {row_html_text(row['what'])}</li>"
+        for row in rows
+    )
+    return "<ul>" + "".join(items) + "</ul>"
+
+
+def closed_section(rows):
+    if not rows:
+        return "<p>none closed yet</p>"
+    return "<ul>" + "".join(f"<li>{row_html(row)}</li>" for row in reversed(rows)) + "</ul>"
+
+
+def row_html(row):
+    return row_html_text(row.text)
+
+
+def row_html_text(text):
+    return f"<code>{html.escape(text.split()[0])}</code> {html.escape(' '.join(text.split()[5:]))}"
+
+
+PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rcad queue</title>
+<style>
+:root {{
+  color-scheme: light;
+  --qp-surface: #fcfcfb;
+  --qp-page: #f9f9f7;
+  --qp-ink: #0b0b0b;
+  --qp-ink-2: #52514e;
+  --qp-muted: #898781;
+  --qp-grid: #e1e0d9;
+  --qp-border: rgba(11,11,11,0.10);
+}}
+@media (prefers-color-scheme: dark) {{
+  :root {{
+    color-scheme: dark;
+    --qp-surface: #1a1a19;
+    --qp-page: #0d0d0d;
+    --qp-ink: #ffffff;
+    --qp-ink-2: #c3c2b7;
+    --qp-muted: #898781;
+    --qp-grid: #2c2c2a;
+    --qp-border: rgba(255,255,255,0.10);
+  }}
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  padding: 16px;
+  background: var(--qp-page);
+  color: var(--qp-ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}}
+h1 {{ font-size: 18px; margin: 0 0 4px; }}
+h2 {{ font-size: 15px; margin: 28px 0 8px; }}
+h3 {{ font-size: 13px; margin: 12px 0 4px; color: var(--qp-ink-2); }}
+p.qp-sub {{ color: var(--qp-muted); margin: 0 0 20px; }}
+ul {{ margin: 0 0 8px; padding-left: 20px; }}
+li {{ margin: 2px 0; }}
+code {{ font-size: 12px; }}
+.qp-chart {{
+  background: var(--qp-surface);
+  border: 1px solid var(--qp-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 0 0 16px;
+  max-width: 760px;
+}}
+.qp-chart figcaption {{ color: var(--qp-ink-2); margin-bottom: 6px; }}
+.qp-chart svg {{ width: 100%; height: auto; display: block; }}
+.qp-axis {{ font-size: 10px; fill: var(--qp-muted); }}
+.qp-band {{ stroke: var(--qp-surface); stroke-width: 2; }}
+.qp-bar {{ stroke: var(--qp-surface); stroke-width: 1; }}
+.qp-legend {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 12px; color: var(--qp-ink-2); }}
+.qp-legend-item i {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }}
+{series_colors}
+.qp-grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1200px; }}
+@media (max-width: 700px) {{ .qp-grid2 {{ grid-template-columns: 1fr; }} }}
+</style>
+</head>
+<body>
+<h1>rcad queue</h1>
+<p class="qp-sub">{commit_count} commits of docs/queue.md on main's first-parent line, through {generated_at}</p>
+
+{by_tier_chart}
+{progress_chart}
+
+<div class="qp-grid2">
+<div>
+<h2>Ready</h2>
+{ready_section}
+</div>
+<div>
+<h2>Running</h2>
+{running_section}
+</div>
+</div>
+
+<h2>Lately closed</h2>
+{closed_section}
+
+<h2>Pace</h2>
+{added_closed_chart}
+</body>
+</html>
+"""
+
+
+def series_color_css():
+    """One CSS rule per chart × slot, generated once rather than hand-written per chart id."""
+    rules = []
+    for chart_id, count in (("by-tier", 6), ("progress", 2), ("added-closed", 2)):
+        for i in range(count):
+            rules.append(
+                f'#qp-{chart_id} [data-series="{i}"] {{ fill: var(--qp-{chart_id}-{i}-light); }}\n'
+                f'#qp-{chart_id} .qp-legend-item i[data-series="{i}"] {{ background: var(--qp-{chart_id}-{i}-light); }}\n'
+                f'@media (prefers-color-scheme: dark) {{\n'
+                f'  #qp-{chart_id} [data-series="{i}"] {{ fill: var(--qp-{chart_id}-{i}-dark); }}\n'
+                f'  #qp-{chart_id} .qp-legend-item i[data-series="{i}"] {{ background: var(--qp-{chart_id}-{i}-dark); }}\n'
+                f'}}'
+            )
+    return "\n".join(rules)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
