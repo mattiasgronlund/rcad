@@ -25,6 +25,7 @@ each fail it (301.5). No kernel code changed.*
   301.5   The two new tests and their mutations
   301.6   The probe
   301.7   What this leaves
+  301.8   Which draws the 0.49 fold belongs to, and whether shrinking the room changes their answer
 
 ### 301.1 The room shrunk to half, a tenth and nothing
 
@@ -231,3 +232,54 @@ lane's scratchpad.
   x0.45, is not known. No test reads their answer.
 - **The rate test failing at zero** is the only shape-level pin below the
   wedge's hundredth, and a rate test is coarse.
+
+### 301.8 Which draws the 0.49 fold belongs to, and whether shrinking the room changes their answer
+
+*Queue row Q241.* §301.6's probe was reapplied to `a_corner_is_this_place` (the
+same scratch edit, taken back out before this was committed — `git diff
+6f3c62e0 -- crates/rcad-topo/src/fuse/arrange.rs` is empty, checked at the
+commit that carries this section) plus a `MARK` line, and a scratch test
+walked `fuzz/corpus/two_solids_fused_by_a_stranger` itself, replaying each
+half's header, split, rule and policy exactly as
+`crates/rcad-topo/tests/fuzzing/fuse.rs`'s `how_one_model_is_fused_noting_which_way_the_second_call_went`
+does, and calling `Model::fuse` once forwards and — for a two-sided union or
+intersection — once swapped, the way that harness's "both ways round" check
+does. The command was
+`Q225_PROBE=<file> mise exec -- just t -p rcad-topo --test q241_scratch_probe --no-capture`,
+run once with `Q225_SCALE` unset (x1, as shipped) and once with
+`Q225_SCALE=0.45`.
+
+**Three draws carry the fold**, all `first` half, header `0x94` — which is
+`Policy::tolerant` (`header & 0x80 = 0x80`) and `Rule::Union`
+(`(0x94 >> 4) % 3 = 0`) — and all two-sided (one solid on each side):
+
+| seed | forwards | swapped |
+|---|---|---|
+| `76405eecf690b34fabb09db4a396aff25fb7c542` | `Err(Undecidable)`, "a point in a piece that every solid could place" | `Err(Undecidable)`, same predicate |
+| `8e8cff1316a6c48db5d7941fc91cd081ad950ccc` | `Err(CannotTellTheCellsOfAFaceApart { face: FaceSlot(6v1) })` | `Err(CannotTellTheCellsOfAFaceApart { face: FaceSlot(8v1) })` |
+| `a63af238a6bc4459c21a055015ea5e495e702e46` | `Err(CannotTellTheCellsOfAFaceApart { face: FaceSlot(6v1) })` | `Err(CannotTellTheCellsOfAFaceApart { face: FaceSlot(8v1) })` |
+
+No draw answers `Ok`, so there is no face count or volume to report for any of
+the three.
+
+**None of the three changes between x1 and x0.45.** For every one of the six
+calls above (three draws, forwards and swapped), the `Err` — variant, payload
+and, for the two `Undecidable` answers, the whole `ProvenanceLog` of records
+behind it — is **byte-identical** between the two runs, compared line for line
+by a scratch script over the probe's own output. Shrinking the room to
+`x0.45` does take the fold away (`folds=false` where it was `true`, `out=0.492`
+against the room now `0.45`, from the same probe line), so the draws that
+carried the 0.49 are confirmed to be the right three and the two scales really
+do take different paths through `a_corner_is_this_place` for them; the
+downstream answer is simply insensitive to which path was taken, on all three.
+
+**So there is nothing to check the x1 answer against.** The row's next step —
+weighing the x1 answer against something that does not go through the fold —
+only applies to a draw whose answer *moves*, and none of these three move.
+This is not the same as the fold being harmless in general: it says the room
+between x0.45 and x1 is not what decides these three draws' answers, not that
+no draws are decided by it (301.7's untried four-plane family is still open).
+
+The scratch probe test (`q241_scratch_probe.rs`) and its two log files are not
+committed — the probe edit to `arrange.rs` came back out and the test file was
+deleted before this commit, per the row's instruction.
