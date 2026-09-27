@@ -9446,6 +9446,12 @@ check-release-lanes-selftest:
 # every recipe is the hub re-park's cost in another currency). This one is typed
 # on purpose, once, and "aligned with `origin/main`" is a claim about the remote
 # and not about whatever a stale remote-tracking ref last said.
+#
+# **It runs `queue-page` against `$held` after a fast-forward or a no-op**
+# (Q254), the same as the `queue` recipe: a render that fails says so on
+# stderr and fails nothing, since a bad page is not a reason to fail a
+# fast-forward that already landed. The three refusals below run it never,
+# since none of them changed what `main` holds.
 [doc("Fast-forward the worktree that holds main up to origin/main.")]
 ff-main dir=".":
     #!/usr/bin/env bash
@@ -9480,6 +9486,7 @@ ff-main dir=".":
     short() { git -C "$held" rev-parse --short "$1"; }
     if [ "$before" = "$onto" ]; then
         echo "$held is already at origin/main, $(short "$before")"
+        {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$held" queue-page || true
         exit 0
     fi
     if git -C "$held" merge-base --is-ancestor "$onto" "$before"; then
@@ -9498,6 +9505,7 @@ ff-main dir=".":
     gained=$(git -C "$held" rev-list --count "$before..$onto")
     git -C "$held" merge --ff-only --quiet "$onto"
     echo "$held: main fast-forwarded $gained commit(s), $(short "$before") -> $(short "$onto")"
+    {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$held" queue-page || true
 
 # Pins `ff-main` against a repository it builds itself, with a real `origin` on
 # disk, because the live one is in one of these five states at a time.
