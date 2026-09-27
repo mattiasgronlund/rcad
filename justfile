@@ -4084,6 +4084,49 @@ fuzz-overnight window="28800":
     # answers exactly this question and costs one `touch`.
     since="$night/.started"
     : >"$since"
+
+    # Which files each target's writable corpus already held, before any
+    # target is started tonight — the record §240.3 and §240.7 say an mtime
+    # alone cannot give: a later night's `-merge=1` rewrites whatever file
+    # already sits at the same name, same bytes, with a fresh mtime, so a
+    # file's mtime says only when some night's merge last decided it was new
+    # to that night, not which night actually found it first. A file's
+    # arrival night is the first night whose list here names it — nothing
+    # later ever has to ask its mtime again.
+    #
+    # One list per target, and each one is the target's own *writable*
+    # directory under `{{fuzz_corpus_root}}` — the only place a file can
+    # arrive tonight, by libFuzzer's own write or by tonight's own merge
+    # below:
+    #
+    #   - the four non-reader targets write straight into
+    #     `{{fuzz_corpus_root}}/<target>`, so that is what is listed for them.
+    #   - the reader writes tonight into `…-scratch`, not
+    #     `{{fuzz_corpus_root}}/no_step_file_makes_the_reader_panic` — but the
+    #     scratch directory is one the night makes fresh (or inherits
+    #     unmerged from a night that died before its own merge, §237), so it
+    #     says nothing yet about which night a file belongs to. What Q237's
+    #     merge folds tonight's scratch *into* is the same persistent
+    #     directory every other target already has one of, so that is what is
+    #     listed for the reader too — named once, from the same directory a
+    #     later night's rewrite would land in.
+    #
+    # `fuzz/corpus/` — the tracked one — is not among them: it is handed to
+    # libFuzzer as a read-only seed for every target (§81) and nothing ever
+    # writes into it during a night, so no list would ever gain a name there.
+    mkdir -p "$night/corpus-names"
+    for target in where_two_surfaces_cross no_step_file_makes_the_reader_panic \
+            no_model_makes_the_writer_panic two_solids_fused_by_a_stranger \
+            where_a_cone_or_a_torus_crosses; do
+        target_corpus="{{fuzz_corpus_root}}/$target"
+        if [ -d "$target_corpus" ]; then
+            find "$target_corpus" -maxdepth 1 -type f -printf '%f\n' | sort \
+                >"$night/corpus-names/$target"
+        else
+            : >"$night/corpus-names/$target"
+        fi
+    done
+
     for recipe in "${recipes[@]}"; do
         # No floor beyond "there is time left". A minimum worth starting would
         # be a number nobody can defend — an 18 MB corpus takes seconds just to
