@@ -294,3 +294,139 @@ kept count (`find $OUTPUT -type f | wc -l`, before and after, as
 `persistent_files_before`/`persistent_files_after`) is the number that
 describes what the corpus actually gained. Changing `fuzz-overnight` to use it
 is not this row's write set.
+
+### 306.8 The hasher is the traced cause, and it never changes what the reader built
+
+*Queue row Q283, off `main` at `6f3c62e09f8625023ca129b2c0105b25da6defc3`. Same
+input as 306.7: `693eec976b5723a5fe252d81d39c2dc5d8c73353`, 5,110 bytes,
+`sha1sum`-checked against the copy handed to this row before use. The
+`no_step_file_makes_the_reader_panic` binary is a fresh build off this row's
+own base, not 306.2-306.3's binary sitting in Q157's scratchpad — built the way
+`fuzz-target` builds it (`CI=1 RUSTC=fuzz/rustc-stand-in.sh RUSTFLAGS="-C
+target-cpu=x86-64-v3" cargo +nightly fuzz build`), so the two arms below
+(plain and fixed-seed) differ only by the scratch hasher edit. Every fuzz
+build and run below ran under `taskset -c 0-5`, foreground, logged under this
+row's `target/q283/`.*
+
+**Question 1: coverage per process.** `FuzzerFlags.def` (checked in the
+vendored `libfuzzer-sys-0.4.13` under `~/.cargo/registry`, not from memory)
+has `-print_pcs`, `-print_final_stats` and `-print_coverage`/`-print_full_coverage`.
+`-print_coverage=1` alone printed a `COVERAGE:` header and then nothing every
+function scored as `UNCOVERED_FUNC`, hits 0 — because `RunOneTest`
+(`FuzzerDriver.cpp:331-342`) only calls `TPCUpdateObservedPCs()`, the call that
+actually populates the observed-PC set, when `-print_full_coverage` is also
+set; `-print_coverage` on its own only decides which of two **print formats**
+`PrintFinalStats` uses, on whatever `ObservedPCs` happens to hold. Passing
+both flags together (`-print_coverage=1 -print_full_coverage=1
+-print_final_stats=1`) populates `ObservedPCs` and prints it in the readable
+`COVERED_FUNC: hits: N edges: X/Y <function> <file>:<line>` form. Symbolizing
+that form also needed an unversioned `llvm-symbolizer` on `PATH` — this
+machine only has `llvm-symbolizer-18`; without a symlink to it every function
+name and file came back `<null>` and `IsInterestingCoverageFile` dropped it
+silently (`FuzzerIOPosix.cpp:149-157`), so a `PATH` that omits this is a false
+"no coverage to report", not evidence of anything (`target/q283/bin/llvm-symbolizer`
+here is that symlink).
+
+Running the file through ten separate processes this way (`run_ten_plain.sh`),
+every run reports the same 239 covered functions by name — no function
+appears in one run's list and not another's — but four of those 239 do not
+report the same edge count in every run:
+
+| function | file:line | edge counts seen across the ten runs |
+|---|---|---|
+| `rcad_step::read::gather_missing` | `crates/rcad-step/src/read.rs:362` | 11/41, 12/41, 13/41 |
+| `rcad_step::read::index` | `crates/rcad-step/src/read.rs:320` | 17/60, 18/60, 20/60 |
+| `<rcad_step::brep::Walk>::find_the_closed_edges` | `crates/rcad-step/src/brep.rs:203` | 22/126, 23/126, 24/126 |
+| `<rcad_step::graph::StepFile>::instance` | `crates/rcad-step/src/graph.rs:51` | 2/20, 3/20, 4/20 |
+
+(`target/q283/plain_run{1..10}.log`, `plain_covered{1..10}.txt` — `md5sum`
+over the ten sorted `COVERED_FUNC` lists gives four distinct hashes, one
+shared by six of the ten runs and three singletons, matching this table:
+`diff`ing run 1 against each of the other nine surfaces only these four
+functions, never a fifth.) All four sit on, or immediately call into, the same
+`HashMap`: `index` builds `slot_of_id`, `gather_missing` calls
+`slot_of_id.contains_key`, `StepFile::instance` calls `slot_of_id.get`, and
+`find_the_closed_edges` (`brep.rs`) walks entity references through
+`StepFile::instance` inside a loop over every face and every bound. None of
+these edge counts is a whole function coming or going — every run covers the
+same named functions — it is specific branches **inside** those functions
+(most plausibly `HashMap`'s own inlined collision-probe branches) that differ.
+
+**Question 2: a fixed-seed hasher.** `grep` for `HashMap`/`HashSet` in
+`rcad-step`'s `graph.rs`, `read.rs` and `write.rs` finds only `HashMap` (no
+`HashSet`), at `graph.rs:14` (`StepFile::slot_of_id`), `read.rs:320-364`
+(`index`, `references_that_point_nowhere`, `gather_missing`), and
+`write.rs:273-593` (the writer's own edge/corner/vertex maps, not on the
+reader's path but edited too since the grep named the file). Every one of
+those was scratch-edited to
+`HashMap<K, V, std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>>`,
+built with `with_hasher`/`with_capacity_and_hasher`/`default()` in place of
+`HashMap::new()`/`HashMap::with_capacity()`. `find_the_closed_edges` in
+`brep.rs` is in another crate's file only in the sense that it is a different
+file in the same crate (`rcad-step`); it does not use a `HashMap` of its own —
+it calls `StepFile::instance`, which does, so it inherited the scratch edit
+through that call rather than needing one of its own.
+
+Rebuilt the same way and run through the same ten-process script
+(`run_ten_fixed.sh`): **all ten runs report the identical 238-function,
+byte-for-byte-identical `COVERED_FUNC` list** (`md5sum` over the ten sorted
+lists: one hash, ten times — `target/q283/fixed_covered{1..10}.txt`). The
+four functions from question 1 settle too, each at one fixed count on every
+run: `gather_missing` 11/38, `index` 15/50, `StepFile::instance` 2/18,
+`find_the_closed_edges` 22/110 (the totals themselves shifted from question
+1's 41/60/20/126 because `DefaultHasher` compiles to different code than
+`SipHash`, not because anything about the file changed). **The edges settle.**
+This is the strongest form of evidence CLAUDE.md's "validate your hypotheses"
+asks for: not "consistent with", but a controlled swap of the one thing named
+as a candidate cause, with the effect it predicted and nothing else moving.
+The scratch edit was reverted after this (`git checkout -- crates/rcad-step/src/graph.rs
+crates/rcad-step/src/read.rs crates/rcad-step/src/write.rs`; `git diff
+--stat crates/rcad-step/src` is empty at this row's last commit — checked).
+
+**Question 3: the model.** A throwaway crate (`q283-probe`, in this session's
+scratchpad, depending on `rcad-step`, `rcad-topo`, `rcad-predicates` and
+`rcad-geom` by path) reads the file through the public API only —
+`StepFile::read`, `Import::read`, `Model::faces/edges/vertices`,
+`SolidView::faces`/`box_around_it`, `FaceView::surface` — and prints instance
+count, parse/import result, the model's total face/edge/vertex counts, and
+per solid its id, bounding box (17 significant digits) and sorted list of
+face kinds. Run ten times on the **plain** build (no scratch hasher):
+
+```
+parse: Ok, instances: 137
+import: Ok
+model.faces: 6
+model.edges: 12
+model.vertices: 8
+solids: 1
+  solid #501: faces=6 bbox=[(0e0, 0e0, 0e0) .. (2e0, 4e0, 8e0)] kinds=["Plane", "Plane", "Plane", "Plane", "Plane", "Plane"]
+```
+
+(`target/q283/model_run{1..10}.txt`, `md5sum`: one hash, ten times.) **The
+model and the result do not differ between processes for this input.** The
+coverage churn in questions 1 and 2 is real and is randomized-hasher bucket
+layout changing which branch of `HashMap`'s own internals gets exercised on a
+given process's random seed — not a difference in what the reader decided.
+`slot_of_id` is built once, keyed by `EntityId`, and every lookup against it
+in this file's 137 instances resolves to the same answer regardless of which
+bucket the entry landed in. **No defect to report for this input**: nothing
+here is a tier-2 row.
+
+**Which of 306.7's candidate causes this supports, breaks, or cannot tell.**
+306.7 offered `rcad-step`'s randomized-per-process `HashMap` hasher as "what
+is consistent with the finding, not a traced cause", and named the one thing
+it had not done: "this row did not instrument the target to confirm
+hash-iteration order is the specific mechanism." This row is that
+instrumentation, and it **supports** 306.7's candidate cause directly: the
+same four functions vary on the plain build and settle to one fixed value
+each, everywhere else identical, the moment the hasher stops being random.
+306.7 also raised, and left open, whether the underlying corpus-membership
+churn traces to something that changes *what got read* (a real difference in
+the parsed graph or the imported model) rather than only *how it was walked*
+in a way that happens to move sanitizer-coverage edges; question 3 answers
+that part on its own: for this specific input, it does not — the model and
+the `Ok`/`Err` result are identical across ten processes on the unmodified
+binary. 306.7's own leg (a)/(b)/(c) explanation of the file-count gap (a
+`MERGE-OUTER` pick that a later, differently-seeded process judges not to add
+a new feature) is unaffected either way; this row did not re-run a merge, only
+the single-file replay a merge's inner loop performs many times over.
