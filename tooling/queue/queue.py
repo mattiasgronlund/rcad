@@ -126,6 +126,7 @@ class Tree:
     def __init__(self, path):
         self.path = path
         self.branch = "(detached)"
+        self.head = None
         self.locked = None
         self.is_lane = False
 
@@ -142,6 +143,8 @@ def worktrees():
     for line in git("worktree", "list", "--porcelain").splitlines():
         if line.startswith("worktree "):
             trees.append(Tree(line[len("worktree "):]))
+        elif line.startswith("HEAD "):
+            trees[-1].head = line[len("HEAD "):]
         elif line.startswith("branch refs/heads/"):
             trees[-1].branch = line[len("branch refs/heads/"):]
         elif line == "locked":
@@ -469,6 +472,50 @@ def show(here, args):
             print(f"{theirs.state} in {tree.path}")
 
 
+def branch_tip(branch):
+    """The commit a branch points at, or None if no such branch exists here."""
+    found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                           capture_output=True, text=True)
+    return found.stdout.strip() if found.returncode == 0 else None
+
+
+def is_ancestor(maybe_ancestor, of):
+    return subprocess.run(["git", "merge-base", "--is-ancestor", maybe_ancestor, of],
+                          capture_output=True).returncode == 0
+
+
+def already_landed(sha):
+    for ref in ("origin/main", "main"):
+        exists = subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref],
+                                capture_output=True).returncode == 0
+        if exists and is_ancestor(sha, ref):
+            return True
+    return False
+
+
+def has_a_tree(branch, branches, trees):
+    """Whether some currently locked tree is this row's, once its own branch's tree is gone (§263.4, §299).
+
+    A verifier's tree is detached (§266.2), so it carries no branch to match; a
+    merger's carries `merge-<label>` instead of `lane-<label>` (§266.3). The
+    verifier's tree is checked out from the lane branch's tip and only ever
+    gains commits on top of it, so that tip stays an ancestor of its HEAD for as
+    long as the verifier runs. A tip already landed on main is excluded: a
+    landed branch still held is a release nobody wrote (a stale claim, §263.4),
+    not a live run, and attributing it to some unrelated detached tree would
+    hide that stale hold instead of counting it.
+    """
+    if branch in branches:
+        return True
+    if branch.startswith("lane-") and f"merge-{branch[len('lane-'):]}" in branches:
+        return True
+    tip = branch_tip(branch)
+    if tip is None or already_landed(tip):
+        return False
+    return any(tree.is_lane and tree.branch == "(detached)" and is_ancestor(tip, tree.head)
+               for tree in trees)
+
+
 def running(here, args):
     """What holds a slot on this machine: every lane tree an agent holds, and every hold with no tree yet.
 
@@ -478,7 +525,7 @@ def running(here, args):
     counted = [(tree.branch, tree.path) for tree in trees if tree.is_lane]
     branches = {branch for branch, _ in counted}
     for row_id, hold in sorted(Claims(here.claims).holds().items()):
-        if hold["branch"] not in branches:
+        if not has_a_tree(hold["branch"], branches, trees):
             counted.append((hold["branch"], f"{row_id} taken from {hold['tree']}, no tree yet"))
     if args == ["--count"]:
         print(len(counted))
