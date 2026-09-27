@@ -100,6 +100,7 @@ gate_steps := "check-plugins \
     check-queue-selftest \
     check-queue-api-selftest \
     check-queue-merge-driver \
+    check-queue-page-selftest \
     check-hub \
     check-hub-selftest \
     check-hub-align-selftest \
