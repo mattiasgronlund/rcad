@@ -13,12 +13,23 @@
 //! surfaces round it is re-derived, and a corner with fewer is read out of the
 //! model and moved.**
 //!
-//! Read and moved is not a retreat. `check_curved_face` has already certified
-//! that the stored corner is [`Decision::Zero`] on its surface, which is a
-//! stronger promise than the box a Cramer solve gives — and the moved corner
-//! becomes a box of its own, because `Isometry::apply_to_point` rounds and a
-//! moved corner handed on as an exact triple would certify a confident sign
-//! about a rounding (§34.6).
+//! **Read and moved, and not asked about.** With nothing to solve, the point
+//! handed on is the stored corner whatever its surfaces say, so asking them
+//! could only refuse. And the stored corner is the point `Model::validate` asks
+//! these same surfaces about, with the room `validate` grants. That room is not
+//! the room [`derive_a_corner`] asks a solved corner with: a flat face's corner
+//! may sit a modelling tolerance off its plane. Asking here the way
+//! [`derive_a_corner`] asks refuses a block `validate` accepts, and in the whole
+//! workspace refuses nothing else (§286). **It is not a certificate either.**
+//! This used to say `check_curved_face` had certified the corner
+//! [`Decision::Zero`] on its surface: `validate` asks for "not provably off,
+//! within its room", 305 corners the workspace bakes are proved off a surface
+//! until they are grown, and nothing runs `validate` before a fuse bakes
+//! (§75.6).
+//!
+//! The moved corner becomes a box of its own, because
+//! `Isometry::apply_to_point` rounds and a moved corner handed on as an exact
+//! triple would certify a confident sign about a rounding (§34.6).
 //!
 //! # A seam is not a boundary and is left out
 //!
@@ -483,7 +494,8 @@ fn faces_around_a_vertex(
 /// Three or more distinct surfaces round it and it is re-derived from the
 /// best-conditioned triple. Fewer, and the whole of the curve those surfaces
 /// share passes through it, so there is nothing to solve and it is read out of
-/// the model and moved.
+/// the model and moved. **Its surfaces are not asked about it**, and this
+/// module's header says why (§286).
 ///
 /// # Panics
 ///
