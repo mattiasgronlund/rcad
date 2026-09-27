@@ -4109,18 +4109,25 @@ fuzz-overnight window="28800":
     # It costs nothing: they were all given the same deadline, so the last wait
     # returns within seconds of the first however they are ordered, and reading
     # them in a fixed order keeps the summary's list stable night to night.
-    # **Under `-fork` the exit status says nothing about the night**, in either
-    # direction, and reading it as "crash" is how a night stops being believed.
+    # **`$status` here says nothing about the night**, in either direction, and
+    # reading it as "crash" is how a night stops being believed.
     #
-    # libFuzzer's fork parent keeps one `ExitCode`, overwrites it with each job it
-    # collects, never resets it, and exits with it — `FuzzerFork.cpp:400-461` and
-    # the `exit(ExitCode)` at 490, under the comment *"Use the exit code from the
-    # last child process"*. Every fate the night is built to survive leaves it
-    # non-zero, so **70 is a timeout in the last job of forty thousand** and not a
-    # crash; two runs of the same command on the same corpus exited 70 and 0,
-    # differing only in which job happened to land last (§133.7). And the other
-    # direction is worse: a crash in job 3 of 40 000 exits **0**, so a status
-    # mapping that trusted zero would call that night clean.
+    # `$status` is `cargo fuzz run`'s own exit code, not libFuzzer's. libFuzzer's
+    # fork parent keeps one `ExitCode`, overwrites it with each job it collects,
+    # never resets it, and exits with it — `FuzzerFork.cpp:400-461` and the
+    # `exit(ExitCode)` at 490, under the comment *"Use the exit code from the
+    # last child process"* — so a job that only timed out can leave the fuzz
+    # binary's own process exiting 70: non-zero, as a crash in that job would
+    # leave it too, with 77 or a signal (§134.2). But
+    # `cargo fuzz run`'s `exec_fuzz` never passes that 70 on: it turns any
+    # non-zero child status into a bail, and a plain `fn main() -> Result<()>`
+    # turns any bail into a flat process exit of 1 (§275.1). So a last job that
+    # only timed out reads here as 1, indistinguishable from a real crash in the
+    # last job — a status mapping that trusted 1 as "crash" would be wrong. And
+    # the other direction is still open: a crash in job 3 of 40 000, with the
+    # last job clean, exits the fuzz binary 0, which `cargo fuzz run` passes
+    # through unchanged, so a status mapping that trusted 0 as "clean" would be
+    # wrong too.
     #
     # What is left that the status can still answer is the one thing no child
     # decides: `timeout` killing the whole target from outside.
