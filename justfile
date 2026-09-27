@@ -4250,22 +4250,37 @@ fuzz-overnight window="28800":
         # `RCAD_FUZZ_MERGE_TIMEOUT` overrides it for
         # `check-fuzz-overnight-selftest` alone; nothing else sets it.
         merge_timeout="${RCAD_FUZZ_MERGE_TIMEOUT:-120}"
+
+        # `-merge=1` replays every file in `$reader_scratch` through the reader
+        # target's own binary, which calls `timed()` on every draw (Q263: `just
+        # src timed`, and the reader target's own `fuzz_target!` wraps its one
+        # call in it). `RCAD_FUZZ_TIMINGS` is still exported from the top of
+        # this recipe, so without this, each of tonight's replayed finds lands
+        # in `timings/no_step_file_makes_the_reader_panic` beside the real
+        # draws the five targets above just made — inputs Q174 compares a
+        # week of night to night are not draws. `env -u` scopes the unset to
+        # this one command; nothing after it should ever see the variable
+        # missing.
+        merge_started=$(date +%s)
         if (cd fuzz && CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
                 RUSTFLAGS="-C target-cpu=x86-64-v3" \
                 timeout --kill-after=10 "$merge_timeout" \
+                env -u RCAD_FUZZ_TIMINGS \
                 cargo +nightly fuzz run "$reader_target" -- \
                 -merge=1 -max_len=5110 "$merge_tmp" "$reader_scratch") \
                 >>"$night/reader-corpus-merge.log" 2>&1; then
+            merge_elapsed=$(( $(date +%s) - merge_started ))
             rm -rf "$reader_persistent"
             mv "$merge_tmp" "$reader_persistent"
             rm -rf "$reader_scratch"
             persistent_files_after=$(find "$reader_persistent" -type f | wc -l)
-            echo "reader corpus merge: persistent has $persistent_files_after files after merging" \
+            echo "reader corpus merge: persistent has $persistent_files_after files after merging, took ${merge_elapsed}s" \
                 >>"$night/reader-corpus-merge.log"
         else
+            merge_elapsed=$(( $(date +%s) - merge_started ))
             rm -rf "$merge_tmp"
             mv "$reader_scratch" "$reader_scratch-failed-$(date +%Y%m%d%H%M%S)"
-            echo "READER CORPUS MERGE FAILED — see $night/reader-corpus-merge.log; the persistent corpus was left as it was, and tonight's scratch directory was moved aside rather than merged or discarded" \
+            echo "READER CORPUS MERGE FAILED after ${merge_elapsed}s — see $night/reader-corpus-merge.log; the persistent corpus was left as it was, and tonight's scratch directory was moved aside rather than merged or discarded" \
                 >>"$night/reader-corpus-merge.log"
             echo "reader corpus merge FAILED — see $night/reader-corpus-merge.log"
             to_look_at+=("reader-merge:failed")
@@ -5445,13 +5460,20 @@ check-fuzz-overnight-selftest:
     # tonight's scratch corpus into the small persistent one at -max_len=5110,
     # persistent copy first and scratch second so libFuzzer never mutates the
     # real thing in place — runs exactly once, in that order, and the scratch
-    # directory is gone once it has succeeded.
+    # directory is gone once it has succeeded. It also runs with
+    # RCAD_FUZZ_TIMINGS unset (Q263, §295.6, §295.7), since it replays finds
+    # through timed() the same as any other draw, and it writes its own
+    # wall-clock seconds to reader-corpus-merge.log.
     : >"$dir/log"
     run 8 || fail "a night with the reader's STEP corpus seeded in failed: $(cat "$dir/out")"
     [ "$(grep -c -- '-merge=1' "$dir/log")" -eq 1 ] \
         || fail "the reader's nightly merge did not run exactly once: $(grep -- '-merge=1' "$dir/log" || true)"
     grep -q -- "run no_step_file_makes_the_reader_panic -- -merge=1 -max_len=5110 $dir/corpus/no_step_file_makes_the_reader_panic-merge-tmp\.[^ ]* $dir/corpus/no_step_file_makes_the_reader_panic-scratch " "$dir/log" \
         || fail "the merge did not run persistent-copy-first, scratch-second: $(grep -- '-merge=1' "$dir/log" || true)"
+    grep -q -- "run no_step_file_makes_the_reader_panic -- -merge=1 -max_len=5110 $dir/corpus/no_step_file_makes_the_reader_panic-merge-tmp\.[^ ]* $dir/corpus/no_step_file_makes_the_reader_panic-scratch \[timings=unset\]" "$dir/log" \
+        || fail "the reader-corpus merge ran with RCAD_FUZZ_TIMINGS still exported: $(grep -- '-merge=1' "$dir/log" || true)"
+    grep -qE 'took [0-9]+s' "$dir/logs/$(date +%Y-%m-%d)/reader-corpus-merge.log" \
+        || fail "the merge's wall-clock seconds were not written to reader-corpus-merge.log: $(cat "$dir/logs/$(date +%Y-%m-%d)/reader-corpus-merge.log" 2>/dev/null || true)"
     [ ! -d "$dir/corpus/no_step_file_makes_the_reader_panic-scratch" ] \
         || fail "the scratch directory survived a successful merge"
 
