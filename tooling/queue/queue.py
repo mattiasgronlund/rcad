@@ -17,6 +17,15 @@ branch. It is a log, one line per event, tab-separated:
 A row is held from its `take` until the `release` that `done`, `drop` or `park`
 writes. Two worktrees taking one row is refused at the second `take`, before
 either has committed the file, because the hold is written under the lock.
+
+`just queue apply <verb> <args...> + <verb> <args...> ...` runs several write
+verbs as one batch: every step lands on an in-memory copy of the queue, in
+order, each seeing the ones before it, and only once every step has succeeded
+is `check-queue` run, are the claims events appended, and is the file written
+-- once, not once per step (§309). A step whose verb refuses aborts the whole
+batch, named by its position and its own text, before anything is written.
+`@1`, `@2`, ... stand for the ids the batch's first, second, ... `add` hands
+out, since an `after` step often needs to name a row an `add` just added.
 """
 
 import fcntl
@@ -35,6 +44,7 @@ ID = re.compile(r"^[TDQ][0-9]+$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
 SECTION = re.compile(r"^§?([0-9]+(\.[0-9]+)?)$")
+AT_ID = re.compile(r"^@([0-9]+)$")
 
 USAGE = """\
 just queue                                 ready rows by tier, then running, waiting, parked
@@ -50,7 +60,10 @@ just queue drop <id> <§N>                  state dropped:§N, moved under ## Cl
 just queue park <id> <§N>                  state parked:§N, left in its tier
 just queue after <id> <id>[,<id>...]       state after:<ids>; each id must exist in some copy, branch or claim
 just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
-just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict"""
+just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
+just queue apply <verb> <args> [+ <verb> <args>]...   run several of the verbs above as one all-or-nothing
+                                            batch, under one hold of the claims lock; @1, @2, ... are the
+                                            ids the batch's own adds hand out"""
 
 
 class Refused(Exception):
@@ -63,16 +76,17 @@ def main(argv):
         return 2
     verb, args = argv[0], argv[1:]
     here = Here(os.environ.get("QUEUE_FILE", "docs/queue.md"))
-    verbs = {
-        "take": take, "add": add, "done": done, "drop": drop, "park": park,
-        "after": after, "rank": rank, "tier": move_to_tier, "pick": pick, "show": show, "running": running,
-        "elsewhere": elsewhere,
-    }
-    if verb not in verbs:
+    readers = {"show": show, "running": running, "elsewhere": elsewhere}
+    if verb in readers:
+        readers[verb](here, args)
+        return 0
+    # A plain verb is a batch of one step, run through `apply` itself (§309.3.5):
+    # one path writes the file, whether the call names one verb or several.
+    if verb != "apply" and verb not in STEP_FUNCS:
         print(f"queue: '{verb}' is not a verb\n{USAGE}", file=sys.stderr)
         return 2
     try:
-        verbs[verb](here, args)
+        apply(here, args if verb == "apply" else [verb, *args])
     except Refused as refusal:
         print(f"queue {verb}: {refusal}", file=sys.stderr)
         return 1
@@ -202,30 +216,106 @@ def now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def take(here, args):
+class Batch:
+    """The ids this batch's own `add` steps have handed out, for `@1`, `@2`, ... to resolve against."""
+
+    def __init__(self):
+        self.added_ids = []
+
+
+def apply(here, args):
+    steps = split_steps(args)
+    with Claims(here.claims) as claims:
+        queue = here.read()
+        batch = Batch()
+        messages = []
+        events = []
+        for number, (verb, raw_args) in enumerate(steps, start=1):
+            step_args = substitute_ids(raw_args, batch.added_ids)
+            try:
+                queue, message, event = STEP_FUNCS[verb](queue, claims, here, step_args, batch)
+            except Refused as refusal:
+                if len(steps) == 1:
+                    raise
+                text = " ".join([verb, *raw_args])
+                raise Refused(f"step {number} ({text}) is refused: {refusal}")
+            messages.append(message)
+            if event is not None:
+                events.append(event)
+        checked(here, queue)
+        for event in events:
+            claims.append(*event)
+        write(here, queue)
+    for message in messages:
+        print(message)
+
+
+def split_steps(args):
+    """`args` cut on a standalone `+`; each piece must start with a verb `apply` knows."""
+    steps, current = [], []
+    for token in args:
+        if token == "+":
+            steps.append(current)
+            current = []
+        else:
+            current.append(token)
+    steps.append(current)
+    if len(steps) == 1 and not steps[0]:
+        raise Refused("usage: apply <verb> <args...> [+ <verb> <args...> ...]")
+    parsed = []
+    for step in steps:
+        if not step:
+            raise Refused("a step between two '+'s is empty")
+        verb, step_args = step[0], step[1:]
+        if verb not in STEP_FUNCS:
+            raise Refused(f"'{verb}' is not a verb apply knows: {', '.join(STEP_FUNCS)}")
+        parsed.append((verb, step_args))
+    return parsed
+
+
+def substitute_ids(args, added_ids):
+    """`@1`, `@2`, ... replaced by the id the batch's first, second, ... `add` handed out."""
+    def one(part):
+        match = AT_ID.match(part)
+        if not match:
+            return part
+        n = int(match.group(1))
+        if n < 1 or n > len(added_ids):
+            raise Refused(f"'{part}' names the batch's {n}th add, and only {len(added_ids)} have run so far")
+        return added_ids[n - 1]
+    return [",".join(one(part) for part in token.split(",")) for token in args]
+
+
+def require_row(queue, here, row_id):
+    if not ID.match(row_id):
+        raise Refused(f"'{row_id}' is not an id: T, D or Q and then a number")
+    row = queue.find(row_id)
+    if row is None:
+        raise Refused(f"{row_id} is not a row in {here.relative}")
+    return row
+
+
+def take_step(queue, claims, here, args, batch):
     need(args, 2, "take <id> <branch>")
     row_id, branch = args
     if not BRANCH.match(branch):
         raise Refused(f"'{branch}' cannot be a branch in lane:<branch>; letters, digits and ._/- only")
-    with Claims(here.claims) as claims:
-        queue = open_row(here, row_id)
-        row = queue.find(row_id)
-        hold = claims.holds().get(row_id)
-        if hold and hold["tree"] != here.top:
-            raise Refused(f"{row_id} is held by {hold['branch']} from {hold['tree']} since {hold['time']}")
-        for tree, text in here.other_copies(lanes_too=False):
-            theirs = Queue(text).find(row_id) if row_id in text else None
-            if theirs and theirs.state.startswith("lane:") and theirs.state != row.state:
-                raise Refused(f"{row_id} is {theirs.state} in {tree.path}'s copy, which has not reached this one")
-        # A lane: row this worktree holds, or dispatched by hand here, may be
-        # taken again for a new branch: that is a failed lane re-dispatched.
-        if not row.state.startswith("lane:"):
-            refuse_unless_ready(queue, row)
-        queue.replace(row, row.with_state(f"lane:{branch}"))
-        checked(here, queue)
-        claims.append("take", row_id, now(), here.top, branch, row.write_set)
-        write(here, queue)
-    print(f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    hold = claims.holds().get(row_id)
+    if hold and hold["tree"] != here.top:
+        raise Refused(f"{row_id} is held by {hold['branch']} from {hold['tree']} since {hold['time']}")
+    for tree, text in here.other_copies(lanes_too=False):
+        theirs = Queue(text).find(row_id) if row_id in text else None
+        if theirs and theirs.state.startswith("lane:") and theirs.state != row.state:
+            raise Refused(f"{row_id} is {theirs.state} in {tree.path}'s copy, which has not reached this one")
+    # A lane: row this worktree holds, or dispatched by hand here, may be
+    # taken again for a new branch: that is a failed lane re-dispatched.
+    if not row.state.startswith("lane:"):
+        refuse_unless_ready(queue, row)
+    queue.replace(row, row.with_state(f"lane:{branch}"))
+    message = f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park"
+    return queue, message, ("take", row_id, now(), here.top, branch, row.write_set)
 
 
 def refuse_unless_ready(queue, row):
@@ -243,32 +333,28 @@ def refuse_unless_ready(queue, row):
     raise Refused(f"{row.id} is not ready: its state is {row.state}")
 
 
-def add(here, args):
+def add_step(queue, claims, here, args, batch):
     if len(args) < 4:
         raise Refused("usage: add <tier> <model> <write set> <what, ending in §N>")
     tier, model, write_set = args[:3]
     what = " ".join(args[3:])
     refuse_unless_a_tier(tier)
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        refuse_conflicted(here, queue)
-        block = queue.block_for_tier(tier)
-        if block is None:
-            raise Refused(f"there is no '## Tier {tier}' block, and no later heading to write one above")
-        top = highest_q(queue.text())
-        for _, text in here.other_copies(lanes_too=True):
-            top = max(top, highest_q(text))
-        for text in branch_copies(here.relative):
-            top = max(top, highest_q(text))
-        for claimed in claims.added():
-            top = max(top, int(claimed[1:]))
-        row_id = f"Q{top + 1}"
-        text = f"{row_id:<4} {tier:<4} todo    {model:<7} {write_set}   {what}"
-        queue.append_to_block(block, text)
-        checked(here, queue)
-        claims.append("add", row_id, now(), here.top, text)
-        write(here, queue)
-    print(row_id)
+    refuse_conflicted(here, queue)
+    block = queue.block_for_tier(tier)
+    if block is None:
+        raise Refused(f"there is no '## Tier {tier}' block, and no later heading to write one above")
+    top = highest_q(queue.text())
+    for _, text in here.other_copies(lanes_too=True):
+        top = max(top, highest_q(text))
+    for text in branch_copies(here.relative):
+        top = max(top, highest_q(text))
+    for claimed in claims.added():
+        top = max(top, int(claimed[1:]))
+    row_id = f"Q{top + 1}"
+    text = f"{row_id:<4} {tier:<4} todo    {model:<7} {write_set}   {what}"
+    queue.append_to_block(block, text)
+    batch.added_ids.append(row_id)
+    return queue, row_id, ("add", row_id, now(), here.top, text)
 
 
 def branch_copies(relative):
@@ -298,7 +384,7 @@ def branch_copies(relative):
     return texts
 
 
-def done(here, args):
+def done_step(queue, claims, here, args, batch):
     need(args, 2, "done <id> <merge sha>")
     row_id, sha = args
     if not SHA.match(sha):
@@ -306,69 +392,61 @@ def done(here, args):
     if subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
                       capture_output=True).returncode != 0:
         raise Refused(f"{sha} is not a commit in this repository")
-    close(here, row_id, f"done:{sha}", "done")
+    return close_step(queue, here, row_id, f"done:{sha}", "done")
 
 
-def drop(here, args):
+def drop_step(queue, claims, here, args, batch):
     need(args, 2, "drop <id> <§N>")
-    close(here, args[0], f"dropped:{section(args[1])}", "drop")
+    return close_step(queue, here, args[0], f"dropped:{section(args[1])}", "drop")
 
 
-def close(here, row_id, state, how):
-    with Claims(here.claims) as claims:
-        queue = open_row(here, row_id)
-        row = queue.find(row_id)
-        if row.is_closed():
-            raise Refused(f"{row_id} is closed already: {row.state}")
-        closed = queue.block_of_key("closed")
-        if closed is None:
-            raise Refused("there is no '## Closed' block to move the row under")
-        queue.remove(row)
-        queue.append_to_block(closed, row.with_state(state))
-        checked(here, queue)
-        claims.append("release", row_id, now(), here.top, how)
-        write(here, queue)
-    print(f"{row_id}: {row.state} -> {state}, moved under ## Closed")
+def close_step(queue, here, row_id, state, how):
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed():
+        raise Refused(f"{row_id} is closed already: {row.state}")
+    closed = queue.block_of_key("closed")
+    if closed is None:
+        raise Refused("there is no '## Closed' block to move the row under")
+    queue.remove(row)
+    queue.append_to_block(closed, row.with_state(state))
+    message = f"{row_id}: {row.state} -> {state}, moved under ## Closed"
+    return queue, message, ("release", row_id, now(), here.top, how)
 
 
-def park(here, args):
+def park_step(queue, claims, here, args, batch):
     need(args, 2, "park <id> <§N>")
     row_id, state = args[0], f"parked:{section(args[1])}"
-    with Claims(here.claims) as claims:
-        queue = open_row(here, row_id)
-        row = queue.find(row_id)
-        if row.is_closed():
-            raise Refused(f"{row_id} is closed: {row.state}")
-        queue.replace(row, row.with_state(state))
-        checked(here, queue)
-        claims.append("release", row_id, now(), here.top, "park")
-        write(here, queue)
-    print(f"{row_id}: {row.state} -> {state}")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed():
+        raise Refused(f"{row_id} is closed: {row.state}")
+    queue.replace(row, row.with_state(state))
+    message = f"{row_id}: {row.state} -> {state}"
+    return queue, message, ("release", row_id, now(), here.top, "park")
 
 
-def after(here, args):
+def after_step(queue, claims, here, args, batch):
     if len(args) < 2:
         raise Refused("usage: after <id> <id>[,<id>...]")
     row_id = args[0]
     waits = [w for arg in args[1:] for w in arg.split(",") if w]
-    with Claims(here.claims) as claims:
-        queue = open_row(here, row_id)
-        row = queue.find(row_id)
-        if row.is_closed() or row.state.startswith("lane:"):
-            raise Refused(f"{row_id} is {row.state}, and only a row nobody holds can wait")
-        for other in waits:
-            if not ID.match(other):
-                raise Refused(f"'{other}' is not an id")
-            if other == row_id:
-                raise Refused(f"{row_id} cannot wait on itself")
-            if queue.find(other) is None and not exists_elsewhere(here, claims, other):
-                raise Refused(f"{other} exists nowhere: not in this copy, not in any worktree's copy, "
-                              f"not on any branch, and never handed out by `just queue add`")
-        state = "after:" + ",".join(waits)
-        queue.replace(row, row.with_state(state))
-        checked(here, queue)
-        write(here, queue)
-    print(f"{row_id}: {row.state} -> {state}")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed() or row.state.startswith("lane:"):
+        raise Refused(f"{row_id} is {row.state}, and only a row nobody holds can wait")
+    for other in waits:
+        if not ID.match(other):
+            raise Refused(f"'{other}' is not an id")
+        if other == row_id:
+            raise Refused(f"{row_id} cannot wait on itself")
+        if queue.find(other) is None and not exists_elsewhere(here, claims, other):
+            raise Refused(f"{other} exists nowhere: not in this copy, not in any worktree's copy, "
+                          f"not on any branch, and never handed out by `just queue add`")
+    state = "after:" + ",".join(waits)
+    queue.replace(row, row.with_state(state))
+    message = f"{row_id}: {row.state} -> {state}"
+    return queue, message, None
 
 
 def exists_elsewhere(here, claims, row_id):
@@ -380,7 +458,7 @@ def exists_elsewhere(here, claims, row_id):
     return any(pattern.search(text) for text in branch_copies(here.relative))
 
 
-def rank(here, args):
+def rank_step(queue, claims, here, args, batch):
     """Move a row to sit just before another row in the same tier (§263.9).
 
     `add` always appends at its tier's foot, and the write guard refuses
@@ -390,27 +468,25 @@ def rank(here, args):
     need(args, 3, "rank <id> before <id>")
     row_id, keyword, other_id = args
     if keyword != "before":
-        raise Refused(f"usage: rank <id> before <id>")
+        raise Refused("usage: rank <id> before <id>")
     if row_id == other_id:
         raise Refused(f"{row_id} cannot rank before itself")
-    with Claims(here.claims):
-        queue = open_row(here, row_id)
-        row = queue.find(row_id)
-        other = queue.find(other_id)
-        if other is None:
-            raise Refused(f"{other_id} is not a row in {here.relative}")
-        if row.is_closed() or other.is_closed():
-            raise Refused("a closed row sits under ## Closed and is never ranked")
-        if row.block != other.block:
-            raise Refused(f"{row_id} is tier {row.tier}, {other_id} is tier {other.tier}; "
-                          f"rank only moves a row within its own tier")
-        queue.move_before(row, other)
-        checked(here, queue)
-        write(here, queue)
-    print(f"{row_id}: ranked before {other_id}")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    other = queue.find(other_id)
+    if other is None:
+        raise Refused(f"{other_id} is not a row in {here.relative}")
+    if row.is_closed() or other.is_closed():
+        raise Refused("a closed row sits under ## Closed and is never ranked")
+    if row.block != other.block:
+        raise Refused(f"{row_id} is tier {row.tier}, {other_id} is tier {other.tier}; "
+                      f"rank only moves a row within its own tier")
+    queue.move_before(row, other)
+    message = f"{row_id}: ranked before {other_id}"
+    return queue, message, None
 
 
-def move_to_tier(here, args):
+def tier_step(queue, claims, here, args, batch):
     """Move an open row to the foot of another tier, writing that tier's heading if the file has none (§307.5).
 
     The write guard refuses the hand edit, and a heading a hand edit would have
@@ -421,22 +497,19 @@ def move_to_tier(here, args):
     need(args, 2, "tier <id> <tier>")
     row_id, to = args
     refuse_unless_a_tier(to)
-    with Claims(here.claims):
-        queue = open_row(here, row_id)
-        row = queue.find(row_id)
-        if row.is_closed():
-            raise Refused(f"{row_id} is closed: {row.state}, and a closed row sits under ## Closed in no tier")
-        if row.tier == to:
-            raise Refused(f"{row_id} is tier {to} already")
-        block = queue.block_for_tier(to)
-        if block is None:
-            raise Refused(f"there is no '## Tier {to}' block, and no later heading to write one above")
-        moved = queue.find(row_id)
-        queue.remove(moved)
-        queue.append_to_block(block, moved.with_tier(to))
-        checked(here, queue)
-        write(here, queue)
-    print(f"{row_id}: tier {row.tier} -> {to}, at the foot of ## Tier {to}")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed():
+        raise Refused(f"{row_id} is closed: {row.state}, and a closed row sits under ## Closed in no tier")
+    if row.tier == to:
+        raise Refused(f"{row_id} is tier {to} already")
+    block = queue.block_for_tier(to)
+    if block is None:
+        raise Refused(f"there is no '## Tier {to}' block, and no later heading to write one above")
+    queue.remove(row)
+    queue.append_to_block(block, row.with_tier(to))
+    message = f"{row_id}: tier {row.tier} -> {to}, at the foot of ## Tier {to}"
+    return queue, message, None
 
 
 def refuse_unless_a_tier(tier):
@@ -444,34 +517,30 @@ def refuse_unless_a_tier(tier):
         raise Refused(f"'{tier}' is not a tier: {', '.join(TIERS_IN_ORDER)}")
 
 
-def pick(here, args):
+def pick_step(queue, claims, here, args, batch):
     need(args, 2, "pick <id> ours|theirs")
     row_id, side = args
     if side not in ("ours", "theirs"):
         raise Refused(f"'{side}' is not ours or theirs")
-    with Claims(here.claims):
-        queue = here.read()
-        lines = queue.lines
-        start = None
-        for index, line in enumerate(lines):
-            if line.startswith("<<<<<<<"):
-                start = index
-            elif line.startswith(">>>>>>>") and start is not None:
-                block = lines[start:index + 1]
-                middle = next(i for i, text in enumerate(block) if text.startswith("======="))
-                ours, theirs = block[1:middle], block[middle + 1:-1]
-                if any(text.split()[:1] == [row_id] for text in ours + theirs):
-                    kept = ours if side == "ours" else theirs
-                    queue.lines = lines[:start] + kept + lines[index + 1:]
-                    queue.parse()
-                    for text in kept:
-                        put_in_its_block(queue, queue.find(text.split()[0]))
-                    checked(here, queue)
-                    write(here, queue)
-                    print(f"{row_id}: kept {side}")
-                    return
-                start = None
-        raise Refused(f"no conflict in {here.relative} holds {row_id}")
+    lines = queue.lines
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith("<<<<<<<"):
+            start = index
+        elif line.startswith(">>>>>>>") and start is not None:
+            block = lines[start:index + 1]
+            middle = next(i for i, text in enumerate(block) if text.startswith("======="))
+            ours, theirs = block[1:middle], block[middle + 1:-1]
+            if any(text.split()[:1] == [row_id] for text in ours + theirs):
+                kept = ours if side == "ours" else theirs
+                queue.lines = lines[:start] + kept + lines[index + 1:]
+                queue.parse()
+                for text in kept:
+                    put_in_its_block(queue, queue.find(text.split()[0]))
+                message = f"{row_id}: kept {side}"
+                return queue, message, None
+            start = None
+    raise Refused(f"no conflict in {here.relative} holds {row_id}")
 
 
 def put_in_its_block(queue, row):
@@ -484,6 +553,12 @@ def put_in_its_block(queue, row):
         raise Refused(f"{row.id} belongs under the {home} heading, and the file has no block there")
     queue.remove(row)
     queue.append_to_block(block, row.text)
+
+
+STEP_FUNCS = {
+    "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
+    "after": after_step, "rank": rank_step, "tier": tier_step, "pick": pick_step,
+}
 
 
 def show(here, args):
@@ -638,16 +713,6 @@ def elsewhere(here, args):
             continue
         raw = f"{row_id}  -  {state}  -  -  (closed in {where})"
         print(sep.join(["R", "closedelsewhere", "", "6", row_id, "-", state, "-", "-", f"(closed in {where})", raw]))
-
-
-def open_row(here, row_id):
-    if not ID.match(row_id):
-        raise Refused(f"'{row_id}' is not an id: T, D or Q and then a number")
-    queue = here.read()
-    refuse_conflicted(here, queue)
-    if queue.find(row_id) is None:
-        raise Refused(f"{row_id} is not a row in {here.relative}")
-    return queue
 
 
 def refuse_conflicted(here, queue):
