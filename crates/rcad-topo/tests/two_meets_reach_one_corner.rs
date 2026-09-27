@@ -133,7 +133,11 @@ fn assert_the_one_refusal_is_the_piece(
         "{case:?}: one record, the refusal, under either policy: {records:#?}"
     );
     let refused = &records[0];
-    assert_eq!(refused.predicate(), INSIDE_A_PIECE, "{case:?}: {refused:#?}");
+    assert_eq!(
+        refused.predicate(),
+        INSIDE_A_PIECE,
+        "{case:?}: {refused:#?}"
+    );
     assert_eq!(refused.level(), Level::Interval, "{case:?}: {refused:#?}");
     assert!(
         matches!(refused.outcome(), Decision::Undecidable { enclosure } if enclosure == f64::INFINITY),
