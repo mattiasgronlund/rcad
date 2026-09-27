@@ -249,15 +249,79 @@ if let Surface::Cone(cone) = stored
 }
 ```
 
-**The prints** behind 285.2–285.4, gated by `PROBE_Q124`. The first goes after
-`along` in `cut_a_cap_up_to_its_pole`, and prints `face.key()`, `cap.climbed`,
-`way`, `quarters`, `along`, and each `cap.corners[i]` with `cap.points[i]`. The
-second goes in `hand_over`, in the `Err(why)` arm of `triangulate`, and prints
-`face.key()`, `stored`, `why`, and each `domain.outer().corners()[i]` with
-`corner_is[i]` and `self.points[corner_is[i]]`. The third goes in `finish`,
-before the fold is returned, and prints the folded side's two points and every
-triangle that uses the side, with its `face`. `probe` in the killed lane's
-commit `ecb07bb2` is the older form of the harness.
+**The prints** behind the corners, patches and triangles quoted in 285.2–285.4
+(`mesh.rs`, all under `PROBE_Q124` but the loops of every patch, under
+`PROBE_Q124_PATCHES`). After `along` in `cut_a_cap_up_to_its_pole`:
+
+```rust
+if std::env::var_os("PROBE_Q124").is_some() {
+    eprintln!(
+        "PROBE cap face {:?} climbed {} way {way} quarters {quarters:?} along {along:?}",
+        face.key(),
+        cap.climbed
+    );
+    for (at, corner) in cap.corners.iter().enumerate() {
+        eprintln!("PROBE   corner {at}: {corner:?} point {}", cap.points[at]);
+    }
+}
+```
+
+In `hand_over`, after `model_corners`, and in `triangulate`'s `Err(why)` arm
+before the `return`:
+
+```rust
+if std::env::var_os("PROBE_Q124_PATCHES").is_some() {
+    eprintln!("PROBE patch of face {:?} on {:?}", face.key(), stored);
+    for (which, one) in patch.iter().enumerate() {
+        for (at, corner) in one.corners.iter().enumerate() {
+            eprintln!(
+                "PROBE   loop {which} corner {at}: {corner:?} point {} at {:?}",
+                one.points[at], self.points[one.points[at] as usize]
+            );
+        }
+    }
+}
+// ...
+if std::env::var_os("PROBE_Q124").is_some() {
+    eprintln!("PROBE refused face {:?} on {:?}: {why:?}", face.key(), stored);
+    for (at, corner) in domain.outer().corners().iter().enumerate() {
+        eprintln!(
+            "PROBE   patch corner {at}: {corner:?} point {} at {:?}",
+            corner_is[at], self.points[corner_is[at] as usize]
+        );
+    }
+}
+```
+
+In `finish`, with the `folded` binding widened to
+`Some((side, drawn, used))`, before the fold is returned:
+
+```rust
+if std::env::var_os("PROBE_Q124").is_some() {
+    eprintln!(
+        "PROBE folded side {side:?}: {:?} to {:?}",
+        self.points[side.0 as usize], self.points[side.1 as usize]
+    );
+    for triangle in &self.triangles {
+        let [first, second, third] = triangle.corners;
+        let uses = [(first, second), (second, third), (third, first)]
+            .iter()
+            .any(|&(from, to)| a_side(from, to) == side);
+        if uses {
+            eprintln!(
+                "PROBE   triangle {:?} of face {:?}: {:?}",
+                triangle.corners,
+                triangle.face,
+                triangle.corners.map(|at| self.points[at as usize])
+            );
+        }
+    }
+}
+```
+
+The harness test prints all eighteen. The quoted cases are the pointed cone at
+lean 3/8, crossing 1/2, turn 0, and at crossing 0, turn 1, for both leans; and
+the frustum at turn 3.
 
 | experiment | right | the rest |
 |---|---|---|

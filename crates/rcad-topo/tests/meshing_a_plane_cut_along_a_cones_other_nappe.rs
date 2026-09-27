@@ -85,9 +85,9 @@ fn the_mesher_refuses_sixteen_caps_of_the_pointed_cone_and_two_folds_on_the_frus
 /// from the corner nearest its quarter, and a patch between two cuts that leave
 /// from one corner has no width.
 ///
-/// Two quarters pick one corner **exactly when `half` is under a third of a
-/// turn's half**, `π/3`: then the crossing is more than two thirds of the turn
-/// and holds two quarters with one corner between them. Lean three eighths
+/// Two quarters pick one corner **exactly when the kept rim, `2 · half`, is
+/// under a third of a turn**, so `half < π/3`: then the crossing is more than
+/// two thirds of the turn and holds two quarters with one corner between them. Lean three eighths
 /// keeps `half ≈ 0.74` and `0.79`, and every turn refuses; lean one quarter
 /// keeps `1.06` and `1.08`, and none does.
 #[test]
@@ -434,21 +434,13 @@ fn what_it_gives(cone: ConeShape, block: BoxShape, (rule, cone_first): (Rule, bo
     format!("right on the grid ({decided} points), and every measure refused: {refusals:?}")
 }
 
-/// A refusal by its name and, for a face that would not mesh, what the
+/// A refusal as it prints, but for a face that would not mesh only what the
 /// triangulator said, without the key of a face in a model that is gone.
-fn named(why: &Error) -> String {
-    match why {
-        Error::CannotMeshAFace { why, .. } => format!("CannotMeshAFace {why:?}"),
-        Error::Undecidable { records } => format!(
-            "Undecidable on {}",
-            records
-                .records()
-                .last()
-                .expect("a refusal names why")
-                .predicate()
-        ),
-        other => format!("{other:?}"),
+fn named(refusal: &Error) -> String {
+    if let Error::CannotMeshAFace { why, .. } = refusal {
+        return format!("CannotMeshAFace {why:?}");
     }
+    format!("{refusal:?}")
 }
 
 fn build(model: &mut Model, cone: ConeShape, block: BoxShape) -> (SolidKey, SolidKey) {
