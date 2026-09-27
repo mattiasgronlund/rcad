@@ -6135,7 +6135,27 @@ check-fuzz-unit-selftest:
 # `0`.** `just fuzz-triage` (Q147) is what writes that file, and a night it has
 # not reached yet has told this recipe nothing, which is a different answer
 # from "nothing here is still failing".
-[doc("Per night, per target: core-hours, runs, coverage's start/30m/end, when it last rose, new files by kind, and Q147's faults.")]
+#
+# **Whether a target's code changed since the night before** (Q232,
+# `docs/decisions.md` §298.2) is answered from the *build* worktree, not the
+# log directory: `fuzz-overnight` builds each night in
+# `/home/mattias/git/mattiasgronlund/rcad-nightly-fuzz` (overridable through
+# `RCAD_NIGHTLY_FUZZ_WORKTREE`, which is how `check-fuzz-yield-selftest`
+# points this at a fixture repo it builds itself), whose reflog carries one
+# `checkout` per night around 00:10-00:16 — the time window is what tells a
+# real nightly build apart from someone's daytime `git checkout` in that same
+# worktree, which the reflog also carries and which is not a night's build.
+# "Changed" is `git diff --name-only <prev-night> <this-night> -- crates
+# fuzz` touching the target's own `fuzz/fuzz_targets/<target>.rs`, the one
+# shared file it `#[path]`-includes, or `src/` of any crate in its
+# `docs/decisions.md` §298.1 row — that table is copied here as
+# `target_shared_file`/`target_crates` because this recipe cannot read a
+# decisions file at run time; a new target or a new crate dependency has to
+# be added to §298.1 *and* to these two tables, or this recipe silently keeps
+# reading the old shape. A night the reflog does not show a checkout for, or
+# whose night-before the reflog does not show, says `unknown` rather than
+# guessing.
+[doc("Per night, per target: core-hours, runs, coverage's start/30m/end, when it last rose, new files by kind, whether its code changed since the night before, and Q147's faults.")]
 fuzz-yield from="" to="":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -6144,6 +6164,97 @@ fuzz-yield from="" to="":
     from='{{ from }}'
     to='{{ to }}'
     stats='{{ justfile_directory() }}/tooling/fuzz-yield/log_stats.py'
+    nightly_worktree="${RCAD_NIGHTLY_FUZZ_WORKTREE:-/home/mattias/git/mattiasgronlund/rcad-nightly-fuzz}"
+
+    # `docs/decisions.md` §298.1's table, copied by hand: add a target or a new
+    # crate dependency there first, then here.
+    declare -A target_shared_file=(
+        [where_two_surfaces_cross]="crates/rcad-geom/tests/fuzzing/mod.rs"
+        [where_a_cone_or_a_torus_crosses]="crates/rcad-geom/tests/fuzzing/mod.rs"
+        [no_step_file_makes_the_reader_panic]="crates/rcad-step/tests/fuzzing/reader.rs"
+        [no_model_makes_the_writer_panic]="crates/rcad-step/tests/fuzzing/writer.rs"
+        [two_solids_fused_by_a_stranger]="crates/rcad-topo/tests/fuzzing/fuse.rs"
+    )
+    declare -A target_crates=(
+        [where_two_surfaces_cross]="rcad-geom rcad-predicates"
+        [where_a_cone_or_a_torus_crosses]="rcad-geom rcad-predicates"
+        [no_step_file_makes_the_reader_panic]="rcad-step rcad-topo rcad-mesh rcad-geom rcad-predicates"
+        [no_model_makes_the_writer_panic]="rcad-step rcad-topo rcad-mesh rcad-geom rcad-predicates"
+        [two_solids_fused_by_a_stranger]="rcad-topo rcad-mesh rcad-geom rcad-predicates"
+    )
+
+    # Memoizes one reflog walk per calendar date: `changed_status` asks for
+    # both a night and the night before it, and a night is asked about once
+    # per target.
+    declare -A nightly_commit_for=()
+    nightly_commit_for_night() {
+        local night="$1"
+        if [ -n "${nightly_commit_for[$night]+x}" ]; then
+            printf '%s' "${nightly_commit_for[$night]}"
+            return 0
+        fi
+        local line date hour minute sha found=""
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^[0-9a-f]+[[:space:]]HEAD@\{([0-9]{4}-[0-9]{2}-[0-9]{2})\ ([0-9]{2}):([0-9]{2})\}:\ checkout:\ moving\ from\ [^[:space:]]+\ to\ ([0-9a-f]+)$ ]]; then
+                date="${BASH_REMATCH[1]}"; hour="${BASH_REMATCH[2]}"; minute="${BASH_REMATCH[3]}"; sha="${BASH_REMATCH[4]}"
+                # The 00:10-00:16 window is what `docs/decisions.md` §298.2
+                # observed the nightly build's own checkout land in, as
+                # opposed to a same-day manual `git checkout` in that same
+                # worktree, which the reflog carries just as plainly.
+                if [ "$date" = "$night" ] && [ "$hour" = "00" ] && [ "$minute" -ge 10 ] && [ "$minute" -le 16 ]; then
+                    found="$sha"
+                    break
+                fi
+            fi
+        done < <(git -C "$nightly_worktree" reflog --date=format:'%Y-%m-%d %H:%M' 2>/dev/null)
+        nightly_commit_for["$night"]="$found"
+        printf '%s' "$found"
+    }
+
+    changed_status() {
+        local night="$1" target="$2"
+        local own_file="fuzz/fuzz_targets/$target.rs"
+        local shared="${target_shared_file[$target]:-}"
+        if [ -z "$shared" ]; then
+            echo "unknown (not a target docs/decisions.md §298.1 names)"
+            return
+        fi
+        if [ ! -e "$nightly_worktree/.git" ]; then
+            echo "unknown (no nightly-fuzz worktree at $nightly_worktree)"
+            return
+        fi
+        local this_sha prev_date prev_sha
+        this_sha=$(nightly_commit_for_night "$night")
+        if [ -z "$this_sha" ]; then
+            echo "unknown (reflog shows no 00:10-00:16 checkout for $night)"
+            return
+        fi
+        prev_date=$(date -d "$night -1 day" +%Y-%m-%d)
+        prev_sha=$(nightly_commit_for_night "$prev_date")
+        if [ -z "$prev_sha" ]; then
+            echo "unknown (reflog shows no checkout for the night before, $prev_date)"
+            return
+        fi
+        local diff f crate
+        diff=$(git -C "$nightly_worktree" diff --name-only "$prev_sha" "$this_sha" -- crates fuzz 2>/dev/null)
+        if [ -z "$diff" ]; then
+            echo "no"
+            return
+        fi
+        while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ "$f" = "$own_file" ] || [ "$f" = "$shared" ]; then
+                echo "yes"
+                return
+            fi
+            for crate in ${target_crates[$target]}; do
+                case "$f" in
+                    "crates/$crate/src/"*) echo "yes"; return ;;
+                esac
+            done
+        done <<<"$diff"
+        echo "no"
+    }
 
     nights=()
     while IFS= read -r d; do
@@ -6210,6 +6321,7 @@ fuzz-yield from="" to="":
                 NODATA)
                     echo "  $target"
                     echo "    status: launched, but no coverage line was ever printed"
+                    echo "    code changed since the previous night: $(changed_status "$night" "$target")"
                     continue
                     ;;
                 OK) ;;
@@ -6226,6 +6338,7 @@ fuzz-yield from="" to="":
             echo "    runs: $runs"
             echo "    coverage: $cov_start at start, $cov_30 at 30m, $cov_end at end"
             awk -v r="$rise_s" 'BEGIN { printf "    last rose: hour %.1f\n", r / 3600 }'
+            echo "    code changed since the previous night: $(changed_status "$night" "$target")"
 
             if artifacts=$(artifacts_dir "$night" "$target"); then
                 if prev=$(nearest_earlier "$night" "$target"); then
@@ -6315,12 +6428,62 @@ check-fuzz-yield-selftest:
     printf 'demo_target\t1\tno\tsample-b\tpanic-b\n' >>"$verdicts"
     printf 'ghost_target\t1\tyes\tsample-c\tpanic-c\n' >>"$verdicts"
 
+    # A small nightly-fuzz worktree of its own, standing in for
+    # /home/mattias/git/mattiasgronlund/rcad-nightly-fuzz: three commits, the
+    # middle one touching a real target's own crate (a changed night) and the
+    # last touching only an unrelated file (an unchanged night), each checked
+    # out in turn so the reflog carries a real `checkout` per commit — then
+    # nudged onto the fake dates below, since the reflog otherwise stamps a
+    # checkout with the moment it actually ran, not the night it stands for.
+    nightly_repo="$dir/nightly-fuzz-fixture"
+    mkdir -p "$nightly_repo"
+    git -C "$nightly_repo" init -q
+    git -C "$nightly_repo" config user.email test@test.test
+    git -C "$nightly_repo" config user.name test
+    mkdir -p "$nightly_repo/crates/rcad-geom/src" "$nightly_repo/crates/rcad-geom/tests/fuzzing" \
+        "$nightly_repo/crates/rcad-predicates/src"
+    printf 'one\n' >"$nightly_repo/crates/rcad-geom/src/lib.rs"
+    printf 'one\n' >"$nightly_repo/crates/rcad-geom/tests/fuzzing/mod.rs"
+    printf 'one\n' >"$nightly_repo/crates/rcad-predicates/src/lib.rs"
+    printf 'one\n' >"$nightly_repo/README.md"
+    git -C "$nightly_repo" add -A
+    git -C "$nightly_repo" commit -q -m baseline
+    nightly_base=$(git -C "$nightly_repo" rev-parse HEAD)
+    printf 'two\n' >"$nightly_repo/crates/rcad-geom/src/lib.rs"
+    git -C "$nightly_repo" commit -qam "touch rcad-geom src"
+    nightly_changed=$(git -C "$nightly_repo" rev-parse HEAD)
+    printf 'two\n' >"$nightly_repo/README.md"
+    git -C "$nightly_repo" commit -qam "touch an unrelated file"
+    nightly_unchanged=$(git -C "$nightly_repo" rev-parse HEAD)
+
+    nightly_reflog="$nightly_repo/.git/logs/HEAD"
+    nightly_tab=$'\t'
+    checkout_as_night() {
+        local sha="$1" fake_date="$2" fake_time="$3" epoch
+        git -C "$nightly_repo" checkout -q "$sha"
+        epoch=$(date -d "$fake_date $fake_time UTC" +%s)
+        sed -E -i "\$ s/^([0-9a-f]{40} [0-9a-f]{40} [^<]+<[^>]+>) [0-9]+ [+-][0-9]{4}${nightly_tab}/\\1 ${epoch} +0000${nightly_tab}/" \
+            "$nightly_reflog"
+    }
+    checkout_as_night "$nightly_base" 2026-09-11 00:12:00
+    checkout_as_night "$nightly_changed" 2026-09-12 00:13:00
+    checkout_as_night "$nightly_unchanged" 2026-09-13 00:14:00
+
+    night3="$logs/2026-09-12"
+    night4="$logs/2026-09-13"
+    mkdir -p "$night3" "$night4"
+    { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night3/fuzz-cross.log"
+    { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night4/fuzz-cross.log"
+
     fail() {
         echo "fuzz-yield drifted from its own fixtures: $1"
         echo "--- got ---"; echo "$got"
         exit 1
     }
-    yield() { RCAD_FUZZ_LOGS="$logs" {{ just_executable() }} fuzz-yield "$@" 2>&1; }
+    yield() {
+        RCAD_FUZZ_LOGS="$logs" RCAD_NIGHTLY_FUZZ_WORKTREE="$nightly_repo" \
+            {{ just_executable() }} fuzz-yield "$@" 2>&1
+    }
 
     got=$(yield 2026-09-10 2026-09-11) || fail "the recipe itself failed on two ordinary nights"
 
@@ -6367,7 +6530,18 @@ check-fuzz-yield-selftest:
     ! grep -q '^night: 2026-09-10$' <<<"$narrow" \
         || fail "a range naming only the second night still reported the first"
 
-    echo "fuzz-yield: coverage arithmetic, the artifact diff, and the fault count all match their fixtures"
+    grep -qF 'code changed since the previous night: unknown (not a target docs/decisions.md §298.1 names)' <<<"$got" \
+        || fail "demo_target is not a §298.1 target and should have said so, not guessed yes or no"
+
+    changed=$(yield 2026-09-12 2026-09-12) || fail "the changed-night range made the recipe fail"
+    grep -qF 'code changed since the previous night: yes' <<<"$changed" \
+        || fail "09-12 touches where_two_surfaces_cross's own crate and should read as changed"
+
+    unchanged=$(yield 2026-09-13 2026-09-13) || fail "the unchanged-night range made the recipe fail"
+    grep -qF 'code changed since the previous night: no' <<<"$unchanged" \
+        || fail "09-13 only touches an unrelated file and should read as unchanged"
+
+    echo "fuzz-yield: coverage arithmetic, the artifact diff, the fault count, and the changed-night check all match their fixtures"
 
 [doc("The benchmarks.")]
 bench:
