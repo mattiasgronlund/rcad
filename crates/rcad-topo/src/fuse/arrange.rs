@@ -5520,15 +5520,18 @@ mod tests {
         let bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
         let arrangement = drawn_up_to_its_corners(&bottom);
         let one_wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
-        let other_wall =
-            the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
+        let other_wall = the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
         assert!(
             is_a_corner_on_both(&arrangement, [0.0; 3], one_wall, other_wall),
             "the fold is only asked about a corner on both crossings"
         );
 
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
-        assert_eq!(room, f64::powi(2.0, -46), "the room at a corner no bigger than one");
+        assert_eq!(
+            room,
+            f64::powi(2.0, -46),
+            "the room at a corner no bigger than one"
+        );
         let reaching = |far: f64| {
             PredicatePoint::Constructed(
                 [Interval::new(-far, far).expect("a finite reach either side of zero"); 3],

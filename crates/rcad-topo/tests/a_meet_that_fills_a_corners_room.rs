@@ -42,7 +42,13 @@ fn a_thin_turned_wedge_whose_corners_are_meets_wider_than_the_room_is_still_unit
                 let (mut model, wedge, cube) = a_wedge_and_a_cube_clear_of_it(slope, turn, axis);
                 let mut log = ProvenanceLog::new();
                 let fused = model
-                    .fuse(&[wedge], &[cube], Rule::Union, &Policy::certified(), &mut log)
+                    .fuse(
+                        &[wedge],
+                        &[cube],
+                        Rule::Union,
+                        &Policy::certified(),
+                        &mut log,
+                    )
                     .unwrap_or_else(|why| {
                         panic!(
                             "a wedge climbing {slope} turned {turn} about {axis:?} was refused: \
