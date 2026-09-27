@@ -2255,13 +2255,25 @@ fn how_much_room_two_side_by_side_pipes_leave_exactly(
 ///
 /// A half-space's normal is whatever length its caller's was, so the reading is
 /// divided by that length to come back as a distance.
+///
+/// The reading is worked out exactly where the products allow. An interval dot
+/// brackets the true one between two `f64`, and when the offset is the nearer
+/// of them — which is how [`HalfSpace::through_a_point_facing`] rounds it — the
+/// interval's far end is at least **twice** the true rounding away, so a caller
+/// weighing this against a margin was refused for twice the distance the
+/// surface is really off (`docs/decisions.md` §314).
 fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Point) -> Interval {
-    let normal = exactly(picker.normal().components());
-    let off =
-        dot_enclosing(normal, exactly(through.coordinates())) - Interval::exactly(picker.offset());
+    let normal = picker.normal().components();
+    let off = Exact::dot_of(normal, through.coordinates()).map_or_else(
+        || {
+            dot_enclosing(exactly(normal), exactly(through.coordinates()))
+                - Interval::exactly(picker.offset())
+        },
+        |dot| dot.minus(&Exact::of(picker.offset())).enclosure(),
+    );
     quotient_or_everything(
         Interval::exactly(off.lo().abs().max(off.hi().abs())),
-        root_enclosing(squared_length_enclosing(normal)),
+        root_enclosing(squared_length_enclosing(exactly(normal))),
     )
 }
 
@@ -3331,22 +3343,46 @@ fn where_a_plane_and_a_torus_cross(
 /// The picking normal is `w × n`, written with both stored triples and
 /// **normalized nowhere**, which is the whole reason a picker is a
 /// [`HalfSpace`] and not a [`Plane`]. The two circles have their centres `R`
-/// either side of that flat surface and a radius of `r`, so the margin is
-/// `(R − r)·‖w × n‖` and it is strictly positive because a torus's tube is
-/// strictly narrower than its ring.
+/// either side of the flat surface through the centre square to the true
+/// `w × n`, and a radius of `r`, so each is `R − r` clear of it — a length, and
+/// strictly positive because a torus's tube is strictly narrower than its ring.
+///
+/// The picker is not quite that surface, and the margin is `R − r` less the two
+/// ways it differs, each in the same unit:
+///
+/// - **it sits off the centre** by the rounding in its offset, which
+///   [`how_far_a_picking_half_space_sits_off_a_point`] answers as a length
+///   because it divides the reading by `‖w × n‖` as stored;
+/// - **it is turned** by the rounding in `w × n` itself, and a surface through
+///   the centre turned by `θ` leaves each circle `R·cos θ − r` clear, so the
+///   loss is `R·(1 − cos θ)`, at most `R·sin²θ`.
+///
+/// `R − r` is enclosed and not rounded. The `f64` difference is exact only when
+/// `r ≥ R/2` and can round up by half an ulp otherwise. Against **one** `f64`
+/// bound on the losses that rounding could never matter, because no `f64` lies
+/// between `R − r` and its rounding; against two bounds added together it can,
+/// because their sum need not be an `f64` (`docs/decisions.md` §314).
 ///
 /// # Errors
 ///
 /// [`Error::ZeroLength`] never fires: this is only reached with `n × w` proved
 /// non-zero one function up. [`Error::NotFinite`] when the offset overflows,
-/// and [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the rounding in
-/// that offset is not provably smaller than the margin — which takes a torus
-/// whose two radii are within a rounding of each other, or a centre so far from
-/// the origin that the dot product loses the ring.
+/// and [`Error::CannotNameWhichPieceOfACrossingThisIs`] when those two losses
+/// are not provably smaller than `R − r` — which takes a torus whose two radii
+/// are within a rounding of each other, or a centre some `2⁵²` ring radii out
+/// across the plane so that the offset's rounding reaches the tube — or when a
+/// product of the axis's and the normal's components is too small to be worked
+/// out exactly, and the turn cannot be bounded at all.
 fn two_meridian_circles(flat: &Plane, ring: &Torus) -> Result<SurfaceMeet> {
-    let across = ring.axis().direction().cross(flat.normal());
+    let axis = ring.axis().direction();
+    let across = axis.cross(flat.normal());
     let between = HalfSpace::through_a_point_facing(ring.centre(), across)?;
-    let margin = Interval::exactly(ring.ring_radius() - ring.tube_radius())
+    let Some(turned) = how_far_a_rounded_cross_product_turns(axis, flat.normal(), across) else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
+    let ring_radius = Interval::exactly(ring.ring_radius());
+    let margin = ring_radius - Interval::exactly(ring.tube_radius())
+        - ring_radius * turned
         - how_far_a_picking_half_space_sits_off_a_point(&between, ring.centre());
     if margin.lo() <= 0.0 {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
@@ -3364,6 +3400,29 @@ fn two_meridian_circles(flat: &Plane, ring: &Torus) -> Result<SurfaceMeet> {
                 .expect("picked_by always holds the one half-space just built")
             })
             .collect(),
+    ))
+}
+
+/// An upper bound on `sin²θ`, where `θ` is the angle between `across`, the
+/// `f64` cross product of `axis` and `normal`, and their true cross product.
+///
+/// `across` is the true product plus a rounding `e`, and turning it by `θ`
+/// moves its tip at least `‖across‖·sin θ` off the true direction, so
+/// `sin θ ≤ ‖e‖ / ‖across‖`. Both `e` and its length are worked out from the
+/// exact product, and `None` is when that product cannot be: a product of two
+/// components landing among the subnormals.
+fn how_far_a_rounded_cross_product_turns(
+    axis: Vector,
+    normal: Vector,
+    across: Vector,
+) -> Option<Interval> {
+    let exact = Exact::cross_of(&Exact::of_each(axis.components()), normal.components())?;
+    let across = across.components();
+    let rounding: [Interval; 3] =
+        core::array::from_fn(|at| Exact::of(across[at]).minus(&exact[at]).enclosure());
+    Some(quotient_or_everything(
+        squared_length_enclosing(rounding),
+        squared_length_enclosing(exactly(across)),
     ))
 }
 
