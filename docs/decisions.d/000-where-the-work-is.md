@@ -25,8 +25,9 @@ an edge's length, a face measured; §242.8 two wrong fuse answers, and §48's
 trio with them.
 
 **What is next is `just queue`.** Every open item is a row of `docs/queue.md`,
-in §230.1's five tiers — finding defects better, defects, slow runs, corpus
-files, new functionality under §13 — and every free slot takes the highest
+in the tiers of §230.1, §307 and §311 — defects, finding defects better, how the
+work is done, slow runs, corpus files, new functionality under §13 — and every
+free slot takes the highest
 ready row that fits: `just queue next`. Parked and deferred items are rows
 there too, each on the section that parks it; *the hollow* is Q34, parked on
 §104.2. The "Next" line, the lane beside the unit, "Also open" and the deferred

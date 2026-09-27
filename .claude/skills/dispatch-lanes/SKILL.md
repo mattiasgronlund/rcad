@@ -15,10 +15,11 @@ included (§230.8).
 **`just queue` is what to dispatch next, and `just queue next` is what the free
 slots take.** Every open item is a row of `docs/queue.md` — id, tier, state,
 model, write set, and a line ending in the section behind it — in six tiers:
-1 finding defects better, 2 defects, 2.2 how the work is done, 2.5 slow runs,
-3 corpus files, 4 new functionality. A row about the queue and its verbs, the
-lanes workflow and its roles, hooks, skills, `CLAUDE.md`, or a recipe that is
-neither a test nor a fuzz night is tier 2.2, not tier 1 (§307.1); `just queue
+1 defects, 2 finding defects better, 2.2 how the work is done, 2.5 slow runs,
+3 corpus files, 4 new functionality (§311 put defects first). A row about the
+queue and its verbs, the lanes workflow and its roles, hooks, skills,
+`CLAUDE.md`, or a recipe that is neither a test nor a fuzz night is tier 2.2,
+not tier 1 or 2 (§307.1); `just queue
 tier <id> <tier>` moves one filed elsewhere. The dispatcher writes the file and
 a lane never does. `check-queue` holds every row to its shape in the gate.
 `docs/decisions.md` §230.
