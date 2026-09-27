@@ -4297,15 +4297,25 @@ fuzz duration="60" corpus_root="" fork="0": (fuzz-target "where_two_surfaces_cro
 # instead is `crates/rcad-step/tests/what_the_reader_refuses_and_by_what_name.rs`,
 # which covers the shapes somebody thought of; this covers the ones nobody did.
 #
-# No `-max_len`, unlike `fuzz`: the reader's promise is about any length of
-# anything, and the truncation cases live at every length there is.
+# No `-max_len` here, unlike `fuzz`: the reader's promise is about any length of
+# anything, and the truncation cases live at every length there is. When the
+# real STEP corpus below is actually seeded in, `fuzz-target` pins one of its
+# own (docs/decisions.md §264.7) — that pin lives in the branch that appends
+# the corpus, not in this recipe's arguments, so a night with nothing fetched
+# there still runs with no `-max_len` at all.
 #
 # `fuzz/step.dict` is the one dictionary any target here gets, because it is
 # the one target whose input is text with keywords in it — the other four
 # decode bytes into numbers and enum tags, where a STEP keyword splices in
 # nothing a Part 21 file would ever hold.
+#
+# The real STEP files under `RCAD_STEP_CORPUS` are the other target-specific
+# argument, and only the reader gets them: the tracked corpus started from
+# nothing and has only ever grown itself, so a night never once started from a
+# real file. `fuzz-target` passes the directory itself, read-only and last, and
+# skips it outright when nothing has been fetched there yet (§226.1).
 [doc("Fuzz the Part 21 reader over arbitrary bytes.")]
-fuzz-reader duration="60" corpus_root="" fork="0": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root "" fork "step.dict")
+fuzz-reader duration="60" corpus_root="" fork="0": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root "" fork "step.dict" RCAD_STEP_CORPUS)
 
 # The Part 21 writer, over an arbitrary `Model` (docs/decisions.md §42.12).
 #
@@ -4338,7 +4348,7 @@ fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a
 
 # The one place that knows how to start a fuzz target. The five recipes above
 # are its five call sites and differ only in the name, `-max_len`, and — for
-# the reader alone — a dictionary.
+# the reader alone — a dictionary and a read-only STEP corpus.
 #
 # RUSTFLAGS has to be repeated: cargo-fuzz sets it as an environment variable,
 # and that shadows the `.cargo/config.toml` entry `inari` needs to build at all.
@@ -4357,8 +4367,18 @@ fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a
 # has already `cd`'d there by the time it is used, and `fuzz-reader` passes
 # `step.dict` for exactly that reason. Empty, as the other four call sites leave
 # it, means no `-dict` flag at all rather than one pointed at nothing.
+#
+# `step_corpus`, when given, is an absolute path — `RCAD_STEP_CORPUS` itself,
+# not a path under `fuzz/` — and is always appended last, never first, so it is
+# always a read-only seed and libFuzzer never writes a mutated input under it
+# (§81 again, one directory further; §226.1 for why the reader wants it at
+# all). When `corpus_root` is empty this recipe would otherwise pass no corpus
+# argument at all and let cargo-fuzz default to the tracked one on its own —
+# so here it names that default explicitly, to keep it first. A `step_corpus`
+# that does not exist on this machine is left out rather than handed to
+# libFuzzer, so a night with no corpus fetched yet still fuzzes.
 [private]
-fuzz-target target duration corpus_root="" max_len="" fork="0" dict="":
+fuzz-target target duration corpus_root="" max_len="" fork="0" dict="" step_corpus="":
     #!/usr/bin/env bash
     set -euo pipefail
     cd fuzz
@@ -4366,6 +4386,25 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="":
     if [ -n "{{corpus_root}}" ]; then
         mkdir -p "{{corpus_root}}/{{target}}"
         corpus=("{{corpus_root}}/{{target}}" "corpus/{{target}}")
+    fi
+    max_len_flag=()
+    if [ -n "{{max_len}}" ]; then
+        max_len_flag=(-max_len={{max_len}})
+    fi
+    if [ -n "{{step_corpus}}" ] && [ -d "{{step_corpus}}" ]; then
+        if [ ${#corpus[@]} -eq 0 ]; then
+            corpus=("corpus/{{target}}")
+        fi
+        corpus+=("{{step_corpus}}")
+        # **Pinned here, in this branch, and not in `max_len` or in
+        # `fuzz-reader`'s own arguments** (docs/decisions.md §264.7): with the
+        # whole STEP corpus seeded in and no pin, libFuzzer derives its cap from
+        # the largest file there, about 1 MB, and runs at 0.3% to 0.8% of arm
+        # B's rate after a merge that times out on those files (§264.5). At
+        # 65536 it keeps 92% to 97.5% of those edges at a tenth of B's rate. A
+        # night with no STEP corpus fetched never takes this branch, so it
+        # still derives 5 110 on its own.
+        max_len_flag=(-max_len=65536)
     fi
 
     # `-ignore_crashes=1` is the flag that buys the night: without it the first
@@ -4406,7 +4445,7 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="":
     CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
         RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run {{target}} ${corpus[@]+"${corpus[@]}"} -- \
-        -max_total_time={{duration}} {{ if max_len == "" { "" } else { "-max_len=" + max_len } }} \
+        -max_total_time={{duration}} ${max_len_flag[@]+"${max_len_flag[@]}"} \
         ${fork_flags[@]+"${fork_flags[@]}"} \
         ${dict_flag[@]+"${dict_flag[@]}"}
 
@@ -4448,6 +4487,13 @@ check-fuzz-overnight-selftest:
     tag="overnight-selftest-$$-${RANDOM}"
     trap 'rm -rf "$dir"; rm -f fuzz/artifacts/*/crash-"$tag" fuzz/artifacts/*/slow-unit-"$tag"; rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-"$tag"' EXIT
     mkdir -p "$dir/bin"
+
+    # A fixture for `RCAD_STEP_CORPUS`, standing in for the 375 MiB the real
+    # one holds: what this arm needs is a directory that exists and is not
+    # empty, not the real files, since the question is where `fuzz-target`
+    # puts it on the command line and not what libFuzzer does with its bytes.
+    mkdir -p "$dir/step-corpus"
+    echo "ISO-10303-21;" >"$dir/step-corpus/seed.step"
 
     # Logs its whole command line, then sleeps **half** the slice it was given.
     #
@@ -4607,7 +4653,7 @@ check-fuzz-overnight-selftest:
     run() {
         STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" STUB_ARTIFACT_TAG="$tag" \
             RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
-            RCAD_FUZZ_ALREADY_ADVANCED=1 \
+            RCAD_FUZZ_ALREADY_ADVANCED=1 RCAD_STEP_CORPUS="$dir/step-corpus" \
             {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
     }
 
@@ -4746,6 +4792,48 @@ check-fuzz-overnight-selftest:
         || fail "the night's own corpus is not first, so libFuzzer would write into the tracked one"
     [ "$(grep -c 'max_len=71' "$dir/log")" -eq 1 ] \
         || fail "-max_len=71 belongs to where_two_surfaces_cross and to nothing else"
+
+    # And the reader's third corpus is the same read-only seed, one directory
+    # further: `$dir/step-corpus` stands in for `RCAD_STEP_CORPUS`, and this
+    # one line fails whether it is dropped (the tail of the match is gone) or
+    # moved first (the head of the match, the night's own writable directory
+    # in first place, is gone instead). Neither half alone would catch both.
+    grep -q "run no_step_file_makes_the_reader_panic $dir/corpus/no_step_file_makes_the_reader_panic corpus/no_step_file_makes_the_reader_panic $dir/step-corpus " "$dir/log" \
+        || fail "the reader's real STEP corpus is missing or not last: $(grep 'run no_step_file_makes_the_reader_panic' "$dir/log")"
+
+    # And with the STEP corpus actually seeded in, the reader's own `-max_len`
+    # is pinned to 65536 (docs/decisions.md §264.7) — belonging to no other
+    # target, the same way `max_len=71` above belongs only to
+    # `where_two_surfaces_cross`.
+    [ "$(grep -c 'max_len=65536' "$dir/log")" -eq 1 ] \
+        || fail "-max_len=65536 belongs to the reader's STEP-corpus branch and to nothing else"
+
+    # A machine with nothing fetched at `RCAD_STEP_CORPUS` yet still fuzzes the
+    # reader rather than failing on it: the directory is a bonus seed, not a
+    # dependency the night goes down with. `fuzz-target` is asked for one that
+    # does not exist, and the proof is negative — its path never reaches the
+    # command line at all, rather than reaching it and libFuzzer refusing it.
+    # And with it missing, the reader also carries neither corpus argument nor
+    # `-max_len=65536`: a night with nothing fetched stays arm B, at whatever
+    # libFuzzer derives on its own (§264.7's D1, 5 110).
+    #
+    # `STUB_ARTIFACT_TAG="$tag"`, the same as every other arm's, and not left
+    # unset: unset, the build stub writes its timing rlib fixture under a
+    # second, untagged `selftest-notag` directory, and the sancov guard a few
+    # arms down finds *that* rlib by name (`find | head -n1`) instead of this
+    # run's own — a stale, untagged fixture masking arm Sixteen's real one.
+    : >"$dir/log"
+    status=0
+    RCAD_STEP_CORPUS="$dir/no-such-step-corpus" STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        STUB_ARTIFACT_TAG="$tag" RCAD_FUZZ_ALREADY_ADVANCED=1 \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 8 >"$dir/out" 2>&1 || status=$?
+    [ "$status" -eq 0 ] \
+        || fail "a night with no STEP corpus fetched yet failed instead of fuzzing without it: $(cat "$dir/out")"
+    ! grep -q "no-such-step-corpus" "$dir/log" \
+        || fail "a missing STEP corpus directory was handed to libFuzzer anyway"
+    ! grep -q 'max_len=65536' "$dir/log" \
+        || fail "a night with no STEP corpus fetched yet still pinned -max_len=65536"
 
     # Three: a night with no crash-class artifacts exits 0, and the routine slow
     # unit every target leaves behind is named rather than folded into "nothing
