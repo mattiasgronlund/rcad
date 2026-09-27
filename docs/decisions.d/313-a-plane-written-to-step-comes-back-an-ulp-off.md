@@ -43,8 +43,8 @@ Q166's brief named four legs of a guess. Each was checked:
    normal half, §313.3.
 4. **The text is exact.** True: `real` writes Rust's shortest text that parses
    back to the same `f64`, which `every_number_this_writer_writes_reads_back_bit_for_bit`
-   checks, and every one of the 1 790 offset-only files comes back the same
-   once only the point changes, which it could not if the text rounded.
+   checks, and once only the point changes no file of the 22 528 stops at an
+   offset any more (§313.4), which could not happen if the text rounded.
 
 **What `write.rs` said, and why it was wrong.** It tried two points against 5 000
 planes — the foot of the perpendicular, and one coordinate along the normal's
