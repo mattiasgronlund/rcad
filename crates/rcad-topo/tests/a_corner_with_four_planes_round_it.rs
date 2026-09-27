@@ -59,7 +59,7 @@ const SPELLINGS: [Through; 2] = [Through::TheApex, Through::ABaseCorner];
 /// A pyramid of height one whose base is bent by a sixteenth at one corner is
 /// united with a cube clear of it, turned 18 ways and with each spelling of
 /// its planes, under a certified policy. Every one of the 36 answers with the
-/// two solids, their volumes, and an empty log.
+/// two solids, their volumes to a billionth, and an empty log.
 ///
 /// **Its apex meets stick out up to 0.875 of the room past the apex's box, and
 /// in 31 of the 36 more than half of it.** A meet the fold leaves standing
@@ -136,11 +136,18 @@ fn a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_refused_because_its_apex_
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 );
-                let Err(Error::Undecidable { records }) = &refused else {
-                    panic!(
+                let records = match refused {
+                    Err(Error::Undecidable { records }) => records,
+                    Ok(fused) => panic!(
                         "a pyramid folding {fold} with its planes through {through:?}, turned \
-                         {turn} about {axis:?}, came back {refused:?} and not a refusal"
-                    );
+                         {turn} about {axis:?}, was united into {} solids: the gap is closed, so \
+                         turn this test round",
+                        fused.solids().len()
+                    ),
+                    Err(why) => panic!(
+                        "a pyramid folding {fold} with its planes through {through:?}, turned \
+                         {turn} about {axis:?}, was refused for another reason: {why:?}"
+                    ),
                 };
                 assert!(
                     records
