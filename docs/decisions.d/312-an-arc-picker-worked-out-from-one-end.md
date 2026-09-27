@@ -49,9 +49,13 @@ in the two orders, with the facing vectors differing only in their last bits.
 ### 312.4 The fix, and the family it was picked from
 
 `Edge::the_way_across_the_chord_into_the_arc` works the facing out at **the end
-whose stored point comes first, compared as numbers**, and reads which way the
-arc leaves that end as a sign off the named direction — the same reading
-`walks_a_closed_up_run_the_way_it_is_stored` already makes.
+whose stored point comes first, compared as numbers**, from the crossing's
+direction there, and takes only a sign from the named direction: the old
+facing, squared off against its chord the old way, points to the arc's side,
+and the new one is turned to agree with it. Their dot is `±|a||b|` for two
+vectors square to one chord, so it is far from zero wherever the old facing
+was usable, and exactly zero where the old facing was — which the old code
+refused, and this refuses too.
 
 The family is "make the facing a function of the edge and not of which face
 named it". Two members were weighed:
@@ -84,6 +88,32 @@ no chord, which the old code refused and this refuses too.
   permission classifier, so that it fails without the fix is argued from
   §312.3 — every arc is named from opposite ends in the two orders — and not
   shown. The verifier's revert is what shows it.
+
+### 312.6 The first version read the sign off the tangent, and two suites caught it
+
+The first version of the fix took the sign as `towards · (∇S × ∇T)` at the
+named corner, the reading `walks_a_closed_up_run_the_way_it_is_stored` makes,
+and turned the crossing's direction at the chosen end by it. It cleared all 84
+files and failed two things in the gate:
+
+- **`fuse_laws_over_a_cone.rs`**, two tests: `(block ∪ frustum) ∪ cube` went
+  from answered to `CannotMeshAFace`. A probe showed one circle's two arcs
+  between `(3.5, 6.41, 0)` and `(3.5, 3.59, 0)` both given the `+x` side. The
+  second arc's `towards` came from `arc_of_a_joined_run`, which is the step
+  to a corner the joining dissolved, and a point far enough round an arc
+  leans back against the tangent — so its dot with the crossing's direction
+  had the wrong sign. The old facing from it was `(−4, 0, 0)`, the right side.
+- **`a_narrow_lune_from_a_pole_corner.rs`**, the 10 degree wedge at radius 1,
+  as an intersection: `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` became
+  `TwoPatchesOfTheMeshDrewTheSameSide`. The arc behind it runs from the pole
+  `(0, 0, 1)` to `(0, −1.28e−15, 1)`. Named from the pole the old facing was
+  exactly zero, and the first version, reading only a sign, went on from the
+  other end, where the facing is `(0, 0, 2.09e−45)` — the right side, and the
+  size an arc that short has — and was refused by the mesh one stage later.
+
+Taking the side from the old facing itself fixes both: it is right wherever
+the old code was, and it is zero exactly where the old code refused. Both
+suites pass unchanged, and the 84 and the 107 still replay clean.
 
 After the fix, all 102 of 2026-09-26's files and all 152 of 2026-09-27's replay
 without this panic. What still panics on both nights is a different fault, the

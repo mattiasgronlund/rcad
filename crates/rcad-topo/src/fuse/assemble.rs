@@ -2157,8 +2157,8 @@ impl Edge {
 
     /// The direction square to the chord, in the plane the arc lies in, that
     /// points from the chord into this arc — the `facing` of
-    /// [`the_half_space_both_ends_are_on`], and `None` when the arithmetic
-    /// cannot say which way the arc leaves the corner it was named from.
+    /// [`the_half_space_both_ends_are_on`] — or `None` when the arithmetic
+    /// cannot say which side of the chord the arc is on.
     ///
     /// **Worked out at the same end of the arc whichever face named it first.**
     /// `towards` comes from whichever of the two faces along this edge reached
@@ -2177,43 +2177,48 @@ impl Edge {
     /// lower index follows the order the pieces were walked in. Nothing is
     /// joined on the comparison; it only picks which end to start from.
     ///
-    /// **Which way the arc leaves that end is a sign, carried over from
-    /// `towards`**: `towards` reads positive against `∇S × ∇T` at its own corner
-    /// exactly when the arc leaves that corner along the crossing's forward
-    /// direction, and then it arrives at the far corner along it too, so it
-    /// leaves the far corner against it. The same reading
-    /// [`Assembly::walks_a_closed_up_run_the_way_it_is_stored`] makes. A
-    /// reading of exactly zero is a crossing whose direction rounds to nothing
-    /// at that corner, where `towards` itself had no length to give either.
+    /// **Which side of the chord is the one thing taken from `towards`.** The
+    /// named direction, squared off against the chord the same way, points to
+    /// the arc's side of it whether `towards` is a tangent or, for a run of
+    /// pieces joined into one ([`Assembly::arc_of_a_joined_run`]), the step to a
+    /// corner the joining dissolved — and the crossing's direction at the chosen
+    /// end, squared off, points to one side or the other. Their dot says which.
+    /// Reading the tangent's sign off `towards · (∇S × ∇T)` instead is wrong for
+    /// the joined case: the step to a point far round an arc leans back against
+    /// the tangent, and a frustum through a block got both arcs of one circle
+    /// the same picker that way (§312.6).
+    ///
+    /// A dot of exactly zero is `None`: either the named direction lay along
+    /// its chord, which the old code refused too, or the crossing's direction
+    /// at the chosen end does.
     fn the_way_across_the_chord_into_the_arc(
         &self,
         corners: &[Corner],
         named_from: usize,
         towards: Vector,
     ) -> Option<Vector> {
+        let squared_off_from = |corner: usize, direction: Vector| {
+            let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
+            direction * chord.dot(chord) - chord * chord.dot(direction)
+        };
         let [one, other] = self.ends;
         let from = if corners[one].point.coordinates() <= corners[other].point.coordinates() {
             one
         } else {
             other
         };
+        let at = corners[from].point;
         let [mine, partner] = self.carried_by;
-        let along_the_crossing_at = |corner: usize| {
-            let at = corners[corner].point;
-            gradient_of(&mine, at).cross(gradient_of(&partner, at))
-        };
-        let named = towards.dot(along_the_crossing_at(named_from));
-        if named == 0.0 {
-            return None;
-        }
-        let along = along_the_crossing_at(from);
-        let into_the_arc = if (named > 0.0) == (from == named_from) {
-            along
+        let across =
+            squared_off_from(from, gradient_of(&mine, at).cross(gradient_of(&partner, at)));
+        let agreement = across.dot(squared_off_from(named_from, towards));
+        if agreement > 0.0 {
+            Some(across)
+        } else if agreement < 0.0 {
+            Some(-across)
         } else {
-            -along
-        };
-        let chord = corners[self.other_end_than(from)].point - corners[from].point;
-        Some(into_the_arc * chord.dot(chord) - chord * chord.dot(into_the_arc))
+            None
+        }
     }
 
     /// The end of this edge that is not `corner`.
