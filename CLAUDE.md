@@ -114,7 +114,9 @@ you. The one case that can reach the nine minutes the recipe's `[doc]` names is
 a cold tree — a fresh worktree, or just after `just clean-targets`. There, pass
 `run_in_background: true` and let the harness wake you when it exits; that costs
 two calls instead of one, which is still fewer than polling. `docs/decisions.md`
-§147.
+§147. A lane, its verifier and its merger are carved out of this: they run
+everything in the foreground instead, and `.claude/agents/lane.md`,
+`verifier.md` and `merger.md` say why.
 
 **`just gate` is still what you run locally, and `gate-docs` is not a shortcut
 for it.** The steps it drops are the ones that cost money, not the ones that are

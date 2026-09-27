@@ -1510,6 +1510,14 @@ check-skills-selftest:
 # something to revert then; and the line in the verifier's own prompt that
 # tells it which lane this is, so it is never asked for a revert that has
 # nothing to revert (§287).
+#
+# **An eleventh arm holds the foreground rule in each agent file.** Q206's
+# first lane came back empty because the harness forced its report before a
+# backgrounded test run had printed anything, and Q148's merger reported three
+# steps into the gate and never pushed. The arm checks the same literal
+# sentence appears in `lane.md`, `verifier.md` and `merger.md`; it is not
+# shared through `CLAUDE.md` because that file's own cold-tree paragraph now
+# carves these three roles out of it (Q216).
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -1530,6 +1538,7 @@ check-lanes-workflow:
     pins_refusal='the lane declared no source directory to revert'
     pins_conflict='the lane is marked pinsOnly, but it declares a source directory to revert'
     pins_verify='  const pinsOnlyNote = lane.pinsOnly === true'
+    foreground_rule='Every command you run stays in the foreground, this role included.'
     scan() {
         local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -1628,6 +1637,12 @@ check-lanes-workflow:
             echo "$1 does not tell the verifier's own prompt that this lane is pinsOnly, so a verifier would still be asked for a revert that has nothing to revert (§287)"
             return 10
         fi
+        for t in lane verifier merger; do
+            if ! grep -qF -- "$foreground_rule" "$2/$t.md"; then
+                echo "$2/$t.md does not say every command stays in the foreground; a backgrounded gate or test run reports back before it finishes and nothing wakes this role for the result (Q216)"
+                return 11
+            fi
+        done
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -1675,7 +1690,9 @@ check-lanes-workflow:
     grep -vF -- "$pins_conflict" "$file" > "$dir/pins-no-conflict/lanes.js"
     fresh pins-verify-missing
     grep -vF -- "$pins_verify" "$file" > "$dir/pins-verify-missing/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10)
+    fresh no-foreground-rule
+    grep -vF -- "$foreground_rule" "$agents/lane.md" > "$dir/no-foreground-rule/agents/lane.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}

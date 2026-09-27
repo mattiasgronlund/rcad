@@ -13,6 +13,14 @@ attempts you get, and the lane's report and its verifier's verdict as JSON.
 `docs/decisions.md` §266 is why you exist: merging was most of what a
 dispatcher's context grew by, and it now happens here.
 
+**Every command you run stays in the foreground, this role included.**
+`run_in_background` reports back before the job finishes and nothing wakes you
+for the result: Q206's first lane came back empty because the harness forced
+its report before a backgrounded test run had printed anything, and Q148's
+merger reported three steps into the gate and never pushed. Run the gate as
+one plain Bash call, `timeout` 600000. A job that runs past ten minutes goes
+in chunks of under ten, never in the background.
+
 **A green `just gate` on the tree you merged is the authorisation to push**
 (§138). Nobody else is asked. Anything the permission system refuses, you
 report; you never route round it.

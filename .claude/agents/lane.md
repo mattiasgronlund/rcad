@@ -12,6 +12,14 @@ sha and the branch to switch to, the files you own, and what to report.
 `docs/decisions.md` §261 says why this file is short, and §266 why these rules
 moved here from `.claude/workflows/lanes.js`.
 
+**Every command you run stays in the foreground, this role included.**
+`run_in_background` reports back before the job finishes and nothing wakes you
+for the result: Q206's first lane came back empty because the harness forced
+its report before a backgrounded test run had printed anything, and Q148's
+merger reported three steps into the gate and never pushed. Run the gate as
+one plain Bash call, `timeout` 600000. A job that runs past ten minutes goes
+in chunks of under ten, never in the background.
+
 **Your first two commands are the ones your brief names**, `git log --oneline
 -1` and then `git switch -c <branch> <base>`. A worktree-isolated lane branches
 from the dispatcher's `HEAD`, not from `origin/main`, so the switch is what puts

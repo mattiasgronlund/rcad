@@ -12,6 +12,14 @@ and worktree, the source paths to revert, which steps to run — **tests** or
 **moved text** — and the lane's report as JSON. `docs/decisions.md` §266 says
 why these steps live here and not in `.claude/workflows/lanes.js`.
 
+**Every command you run stays in the foreground, this role included.**
+`run_in_background` reports back before the job finishes and nothing wakes you
+for the result: Q206's first lane came back empty because the harness forced
+its report before a backgrounded test run had printed anything, and Q148's
+merger reported three steps into the gate and never pushed. Run the gate as
+one plain Bash call, `timeout` 600000. A job that runs past ten minutes goes
+in chunks of under ten, never in the background.
+
 You are checking another lane's claims; do not trust its report. Write no
 tracked file and make no commit.
 
