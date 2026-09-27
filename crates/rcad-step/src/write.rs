@@ -672,10 +672,12 @@ fn a_point_this_reader_reads_back_as(flat: &Plane) -> Result<Point, CannotWrite>
         coordinates[next] = left_over / normal[next];
     }
     let point = Point::new(coordinates[0], coordinates[1], coordinates[2]);
-    match plane_through(point, flat.normal()) {
-        Ok(back) if back.offset().to_bits() == offset.to_bits() => Ok(point),
-        _ => Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { offset }),
+    let reads_back = plane_through(point, flat.normal())
+        .is_ok_and(|back| back.offset().to_bits() == offset.to_bits());
+    if !reads_back {
+        return Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { offset });
     }
+    Ok(point)
 }
 
 /// What a face sits on, for a refusal to name.
@@ -851,13 +853,10 @@ mod plane_round_trip_tests {
             Plane::from_point_and_normal(Point::new(1e308, 1e308, 0.0), Vector::new(1.0, 1.0, 0.0))
                 .expect("an offset of 1.41e308 is still finite");
         let refused = a_point_this_reader_reads_back_as(&plane);
-        assert!(
-            matches!(
-                refused,
-                Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { .. })
-            ),
-            "{refused:?}"
-        );
+        let Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { offset }) = refused else {
+            panic!("a plane this far out is refused by name, not {refused:?}");
+        };
+        assert_eq!(offset, plane.offset());
     }
 
     /// The normal the writer fuzzer's `crash-0ac3e625f698733b9b143d41eb65edbf7087b463`
@@ -876,9 +875,13 @@ mod plane_round_trip_tests {
     /// this normal, and the writer cannot choose its way round the reader.
     #[test]
     fn no_direction_reads_back_as_a_normal_a_turn_left_short_of_length_one() {
-        let short = 0.707_106_781_186_547_5_f64;
-        let long = 0.707_106_781_186_547_6_f64;
-        assert!(short < core::f64::consts::FRAC_1_SQRT_2 && short.next_up() == long);
+        let long = core::f64::consts::FRAC_1_SQRT_2;
+        let short = long.next_down();
+        assert_eq!(
+            format!("{short:?}"),
+            "0.7071067811865475",
+            "what the crash file held"
+        );
         let read = plane_through(Point::origin(), Vector::new(short, 0.0, short))
             .expect("a direction with a length")
             .normal();
