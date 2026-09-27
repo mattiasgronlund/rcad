@@ -76,16 +76,17 @@ def main(argv):
         return 2
     verb, args = argv[0], argv[1:]
     here = Here(os.environ.get("QUEUE_FILE", "docs/queue.md"))
-    verbs = {
-        "take": take, "add": add, "done": done, "drop": drop, "park": park,
-        "after": after, "rank": rank, "tier": move_to_tier, "pick": pick, "show": show, "running": running,
-        "elsewhere": elsewhere, "apply": apply,
-    }
-    if verb not in verbs:
+    readers = {"show": show, "running": running, "elsewhere": elsewhere}
+    if verb in readers:
+        readers[verb](here, args)
+        return 0
+    # A plain verb is a batch of one step, run through `apply` itself (§309.3.5):
+    # one path writes the file, whether the call names one verb or several.
+    if verb != "apply" and verb not in STEP_FUNCS:
         print(f"queue: '{verb}' is not a verb\n{USAGE}", file=sys.stderr)
         return 2
     try:
-        verbs[verb](here, args)
+        apply(here, args if verb == "apply" else [verb, *args])
     except Refused as refusal:
         print(f"queue {verb}: {refusal}", file=sys.stderr)
         return 1
@@ -234,6 +235,8 @@ def apply(here, args):
             try:
                 queue, message, event = STEP_FUNCS[verb](queue, claims, here, step_args, batch)
             except Refused as refusal:
+                if len(steps) == 1:
+                    raise
                 text = " ".join([verb, *raw_args])
                 raise Refused(f"step {number} ({text}) is refused: {refusal}")
             messages.append(message)
@@ -292,16 +295,6 @@ def require_row(queue, here, row_id):
     return row
 
 
-def take(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = take_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        claims.append(*event)
-        write(here, queue)
-    print(message)
-
-
 def take_step(queue, claims, here, args, batch):
     need(args, 2, "take <id> <branch>")
     row_id, branch = args
@@ -338,16 +331,6 @@ def refuse_unless_ready(queue, row):
             raise Refused(f"{row.id} is not ready: it waits on {', '.join(waiting)}")
         return
     raise Refused(f"{row.id} is not ready: its state is {row.state}")
-
-
-def add(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, row_id, event = add_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        claims.append(*event)
-        write(here, queue)
-    print(row_id)
 
 
 def add_step(queue, claims, here, args, batch):
@@ -401,16 +384,6 @@ def branch_copies(relative):
     return texts
 
 
-def done(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = done_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        claims.append(*event)
-        write(here, queue)
-    print(message)
-
-
 def done_step(queue, claims, here, args, batch):
     need(args, 2, "done <id> <merge sha>")
     row_id, sha = args
@@ -420,16 +393,6 @@ def done_step(queue, claims, here, args, batch):
                       capture_output=True).returncode != 0:
         raise Refused(f"{sha} is not a commit in this repository")
     return close_step(queue, here, row_id, f"done:{sha}", "done")
-
-
-def drop(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = drop_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        claims.append(*event)
-        write(here, queue)
-    print(message)
 
 
 def drop_step(queue, claims, here, args, batch):
@@ -451,16 +414,6 @@ def close_step(queue, here, row_id, state, how):
     return queue, message, ("release", row_id, now(), here.top, how)
 
 
-def park(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = park_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        claims.append(*event)
-        write(here, queue)
-    print(message)
-
-
 def park_step(queue, claims, here, args, batch):
     need(args, 2, "park <id> <§N>")
     row_id, state = args[0], f"parked:{section(args[1])}"
@@ -471,15 +424,6 @@ def park_step(queue, claims, here, args, batch):
     queue.replace(row, row.with_state(state))
     message = f"{row_id}: {row.state} -> {state}"
     return queue, message, ("release", row_id, now(), here.top, "park")
-
-
-def after(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = after_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        write(here, queue)
-    print(message)
 
 
 def after_step(queue, claims, here, args, batch):
@@ -514,15 +458,6 @@ def exists_elsewhere(here, claims, row_id):
     return any(pattern.search(text) for text in branch_copies(here.relative))
 
 
-def rank(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = rank_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        write(here, queue)
-    print(message)
-
-
 def rank_step(queue, claims, here, args, batch):
     """Move a row to sit just before another row in the same tier (§263.9).
 
@@ -549,15 +484,6 @@ def rank_step(queue, claims, here, args, batch):
     queue.move_before(row, other)
     message = f"{row_id}: ranked before {other_id}"
     return queue, message, None
-
-
-def move_to_tier(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = tier_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        write(here, queue)
-    print(message)
 
 
 def tier_step(queue, claims, here, args, batch):
@@ -589,15 +515,6 @@ def tier_step(queue, claims, here, args, batch):
 def refuse_unless_a_tier(tier):
     if tier not in TIERS_IN_ORDER:
         raise Refused(f"'{tier}' is not a tier: {', '.join(TIERS_IN_ORDER)}")
-
-
-def pick(here, args):
-    with Claims(here.claims) as claims:
-        queue = here.read()
-        queue, message, event = pick_step(queue, claims, here, args, Batch())
-        checked(here, queue)
-        write(here, queue)
-    print(message)
 
 
 def pick_step(queue, claims, here, args, batch):

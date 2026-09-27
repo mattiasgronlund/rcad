@@ -9203,6 +9203,69 @@ check-queue-api-selftest:
     grep -qxF "(detached)  $verify_gone4" <<<"$got" || fail "the second deleted-branch row's verifier tree dropped out of running"
     grep -q "^lane-gone-3  .*no tree yet" <<<"$got" && fail "the first deleted-branch row was still counted as treeless beside its verifier"
     grep -q "^lane-gone-4  .*no tree yet" <<<"$got" && fail "two deleted-branch rows collapsed onto one slot"
+
+    # §309.4: `apply`, all or nothing, and its own tests, last and in a fresh
+    # worktree off the script's own main -- everything above has already taken,
+    # closed or renumbered rows enough that reusing 'one' or 'two' here, or
+    # running any earlier, would make the ids and states below unpredictable.
+    # Q2 is the one row every case above leaves permanently held (by "two", as
+    # lane-q2, never done/dropped/parked), so it is what a batch's refused step
+    # names here.
+    batch_wt="$root/rcad-worktrees/batch"
+    g "$hub" worktree add -q -b apply-batch "$batch_wt" main
+    claims_file=$(g "$hub" rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims
+    row_a=$(q "$batch_wt" add 2 opus - "a row this batch takes in step 1 §230") || fail "add for row_a failed"
+    row_b=$(q "$batch_wt" add 2 opus - "a row this batch takes in step 2 §230") || fail "add for row_b failed"
+
+    before_queue=$(md5sum "$batch_wt/docs/queue.md" | cut -d' ' -f1)
+    before_claims=$(md5sum "$claims_file" | cut -d' ' -f1)
+    got=$(q "$batch_wt" apply take "$row_a" apply-a + take "$row_b" apply-b + take Q2 apply-c 2>&1) \
+        && fail "a batch whose third take names Q2, held by lane-q2, went through"
+    grep -qF "step 3 (take Q2 apply-c) is refused" <<<"$got" || fail "the refusal did not name step 3 and its own text"
+    grep -qF 'Q2 is held by lane-q2 from' <<<"$got" || fail "the refusal did not carry Q2's own reason"
+    after_queue=$(md5sum "$batch_wt/docs/queue.md" | cut -d' ' -f1)
+    after_claims=$(md5sum "$claims_file" | cut -d' ' -f1)
+    [ "$before_queue" = "$after_queue" ] || fail "a batch refused at its third step still changed docs/queue.md"
+    [ "$before_claims" = "$after_claims" ] || fail "a batch refused at its third step still appended to the claims file"
+
+    got=$(q "$batch_wt" apply add 2 opus - "a row an after step points at §230" + after @1 Q2 2>&1) \
+        || fail "add + after @1 was refused"
+    new_id=$(sed -n '1p' <<<"$got")
+    sed -n '2p' <<<"$got" | grep -qF "$new_id: todo -> after:Q2" || fail "after @1 did not print the new row waiting on Q2"
+    got=$(awk -v id="$new_id" '$1 == id { print $2, $3 }' "$batch_wt/docs/queue.md")
+    [ "$got" = "2 after:Q2" ] || fail "after @1 did not write tier 2, after:Q2 on the row the batch just added"
+
+    got=$(q "$batch_wt" apply add 2 opus - "the first of a pair §230" + add 2 opus - "the second of a pair §230" 2>&1) \
+        || fail "two adds in one batch were refused"
+    first_id=$(sed -n '1p' <<<"$got")
+    second_id=$(sed -n '2p' <<<"$got")
+    [ "$((${second_id#Q} - ${first_id#Q}))" = 1 ] || fail "two adds in one batch, $first_id and $second_id, are not consecutive"
+
+    # §309.3.2: one hold of the claims lock for the whole batch. A second
+    # worktree adds rows one at a time in a tight loop while this worktree runs
+    # a three-step add batch; if the batch let go of the lock between steps,
+    # the loop could append between the batch's own claims events. It cannot:
+    # they land as one contiguous run, regardless of how the loop and the batch
+    # interleave, because only one process ever holds the flock at a time and
+    # the batch does not release it until every step has run.
+    spam_wt="$root/rcad-worktrees/spam"
+    g "$hub" worktree add -q -b spam "$spam_wt" main
+    (for i in $(seq 1 40); do q "$spam_wt" add 2.5 opus - "a spammed row $i §230" >/dev/null 2>&1; done) &
+    spam_pid=$!
+    got=$(q "$batch_wt" apply add 2.5 opus - "a contiguous probe row 1 §230" \
+        + add 2.5 opus - "a contiguous probe row 2 §230" \
+        + add 2.5 opus - "a contiguous probe row 3 §230" 2>&1) \
+        || fail "the three-step probe batch was refused"
+    wait "$spam_pid"
+    lines=$(grep -n 'a contiguous probe row' "$claims_file" | cut -d: -f1)
+    n=$(wc -l <<<"$lines")
+    [ "$n" = 3 ] || fail "the probe batch's three add events do not all appear exactly once in the claims file"
+    first=$(sed -n '1p' <<<"$lines")
+    third=$(sed -n '3p' <<<"$lines")
+    [ "$((third - first))" = 2 ] || fail "another worktree's adds landed between this batch's own three claims events"
+    total_lines=$(wc -l < "$claims_file")
+    [ "$first" -gt 1 ] || fail "the probe batch ran before any spammed row landed, so this case raced against nothing"
+    [ "$third" -lt "$total_lines" ] || fail "the probe batch ran after every spammed row, so this case raced against nothing"
     exit 0
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it
