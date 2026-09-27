@@ -474,21 +474,36 @@ const TURNED_ROUND_REFUSALS_MUST_STAY_BELOW: f64 = 0.03;
 /// over it still compare anything.
 const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 
-/// How much of the lattice control comes back as something a `Model` cannot
-/// hold.
+/// How often the lattice control comes back as something a `Model` cannot
+/// hold, as a rate: the ends are judged with a draw's own spread, by
+/// [`Tally::rate_of_answers_that_were_not_solids_must_be_within`].
 ///
-/// Measured at 3.3% over the shipped corpus — 14 of 429 — and the band is two
-/// thirds to three times that, 2.2% to 9.8%, rounded to two figures. **That is
-/// the convention all six of these bands are derived to**, and each of the
-/// other five says so and shows its own arithmetic. Every one of the 14 is the
-/// case §17.7's catalogue records by hand: two solids meeting along a whole
-/// edge would put four faces along it, and an edge belongs to exactly two.
+/// Every one of them is the case §17.7's catalogue records by hand: two solids
+/// meeting along a whole edge would put four faces along it, and an edge
+/// belongs to exactly two.
 ///
-/// The band is a tripwire, not a confidence interval — there is no sampling
-/// noise to cover, because [`measured`] runs from a fixed seed and gives the
-/// same 429 fuses on every machine. Two thirds to three times is a judgement
-/// about how far a real change may move one of these counts before somebody
-/// should look at it. In fuses, this one fires under 10 and over 42.
+/// **The ends are two thirds to three times the measured rate, rounded to two
+/// figures. That is the convention all six of these bands are derived to**, and
+/// each of the other five says so and shows its own arithmetic. The rate is
+/// **2.23%** — 63 913 of 2 870 313 fuses, 113 fresh seeds at a [`SOAK_FACTOR`]
+/// of 66 — so the ends are 1.5% and 6.7%. §303.
+///
+/// **It was two thirds to three times one draw, and that draw was high.** The
+/// band was 2.2% to 9.8%, from the shipped corpus's 14 of 429, 3.3%, and read
+/// as a tripwire with no sampling noise to cover because [`measured`] runs from
+/// a fixed seed. A soak sets [`SOAK_SEED`], and then there is noise: at 25 401
+/// fuses a draw's share spreads by 0.08 points around 2.23%, so a floor at 2.2%
+/// failed **38 of those 113 seeds**, and §290.4's two failures were two of
+/// them. At the shipped 441 fuses the spread is 0.65 points and 112 of 400
+/// fresh seeds came in under it. The fixed seed's 14 is simply where one draw
+/// landed.
+///
+/// So the ends are moved out by the draw's spread at its own size. At the
+/// shipped 441 fuses that leaves a floor of one fuse and a ceiling of 45: no
+/// floor at that size can catch the rate halving without also failing a
+/// reshuffled corpus a few times in a hundred, which §303.3 measures. At a
+/// soak's 25 401 the floor is 323 fuses and the ceiling 1 821, and a halving
+/// fires 99 times in a hundred.
 ///
 /// **When one of them moves, re-derive its band from the new measurement**
 /// rather than widening an end to take it in. Widening is how these six came to
@@ -507,8 +522,9 @@ const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 ///
 /// The corpus going 423 to 429 is a **separate** move and a later one:
 /// `01e62c1` and `9b3a5fd` recorded a proptest seed each, and a replayed seed is
-/// three more fuses. Nothing since has moved any of the six.
-const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
+/// three more fuses. It is 441 now, nineteen replayed seeds, and this family
+/// still gives 14 of them.
+const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.067;
 
 /// The same for the family built to share coordinates, which is full of them.
 ///
@@ -544,23 +560,39 @@ const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
 /// higher one and reading either as the other's is what §17.7 forbids.
 const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.019..=0.084;
 
-/// The same for the turned family.
+/// The same for the turned family, a rate judged the same way.
 ///
-/// Measured at 3.3% — 14 of 429 — which is the lattice family's count exactly,
-/// and this family is a rotation of that one. It used to be the lower of the two
-/// and no longer is, even though getting on for a quarter of this family's fuses
-/// still refuse before they get far enough to find out whether the answer is a
-/// solid. Do not read the equality as anything: this is the one of the six that
-/// the two seeds after `b4890f1` also moved, 13 on 423 and 10 on 426 before it
-/// landed on 14 on 429, so it went past the lattice family's count rather than
-/// settling on it. [`A_LATTICE_PAIR_IS_NOT_A_SOLID`] has the attribution.
+/// The shipped corpus gives 14 of 441, the lattice family's count exactly, and
+/// this family is a rotation of that one. Do not read the equality as anything:
+/// this is the one of the six that the two seeds after `b4890f1` also moved, 13
+/// on 423 and 10 on 426 before it landed on 14 on 429, so it went past the
+/// lattice family's count rather than settling on it.
+/// [`A_LATTICE_PAIR_IS_NOT_A_SOLID`] has the attribution.
 ///
-/// Same count as the lattice family, so the convention gives the same band:
-/// 2.2% to 9.8%, 10 fuses to 42. It was 1.5% to 9%, a floor at under half the
-/// measurement and the loosest of the six. This family has been at 17 of 423,
-/// 13 of 423, 10 of 426 and now 14 of 429, and the old floor left room for all
-/// of them and half again.
-const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.022..=0.098;
+/// **The rate is 2.45%** — 29 847 of 1 219 248 fuses, 48 fresh seeds at a
+/// [`SOAK_FACTOR`] of 66 — so the convention gives 1.6% to 7.3%. It is a
+/// little *above* the lattice family's 2.23%, although getting on for a quarter
+/// of this family's fuses refuse before they get far enough to find out
+/// whether the answer is a solid; §303.4 has what that does and does not say.
+///
+/// It was 2.2% to 9.8%, the lattice band copied because the shipped counts
+/// matched, and it was exposed the same way. Its 48 soaked seeds all passed,
+/// but the lowest came in at 559 of 25 401, 2.2007%, one fuse over that floor,
+/// and at the shipped size 4 of 400 fresh seeds failed it. The shipped 14 is a
+/// low draw for this family rather than a high one: at 441 fuses a fresh seed
+/// gives 3.96% on average, because the nineteen replayed seeds give 8 of their
+/// 57 fuses not a solid, and in a small draw they weigh an eighth of it.
+const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.016..=0.073;
+
+/// How many of its own spreads a draw may land past an end of a not-a-solid
+/// rate band before [`Tally::rate_of_answers_that_were_not_solids_must_be_within`]
+/// calls it a move.
+///
+/// Three. The ends already sit at two thirds and three times the rate, so the
+/// spread only has to cover a draw straying past an end by chance, and at three
+/// the binomial puts that under one run in twenty thousand at every factor from
+/// 1 to 660 for both rows that use it. §303.3.
+const A_DRAW_STRAYS_THIS_MANY_SPREADS: f64 = 3.0;
 
 /// The same for the family whose outlines lean over.
 ///
@@ -1453,11 +1485,41 @@ fn every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing() {
         every_rule(tally, Coordinates::AreExactlyRepresentable, configuration)
     });
     tally.report("§17.7 control: lattice pairs, every rule");
-    tally.share_of_answers_that_were_not_solids_must_be_within(A_LATTICE_PAIR_IS_NOT_A_SOLID);
+    tally.rate_of_answers_that_were_not_solids_must_be_within(A_LATTICE_PAIR_IS_NOT_A_SOLID);
     assert_eq!(
         tally.refused.get(),
         0,
         "a lattice-aligned fuse that refuses is a bug in our filters, not a fact about geometry"
+    );
+}
+
+/// The lattice band at the two sizes §303 measured, without running a soak.
+///
+/// §290.4's two soak draws, 555 and 556 of 25 401, fell under the old fixed
+/// floor of 2.2% while the family's rate is 2.23%. Judged against the rate with
+/// the draw's own spread, they and the lowest and highest of §303's 113 soaked
+/// seeds are inside, and a draw at half the rate is not. At the shipped 441
+/// fuses, none at all still fires.
+#[test]
+fn the_lattice_band_takes_in_every_soaked_seed_and_still_fires_on_half_the_rate() {
+    let share = |not_a_solid: usize, fuses: usize| not_a_solid as f64 / fuses as f64;
+    let soak = band_for_a_draw_of(25_401, &A_LATTICE_PAIR_IS_NOT_A_SOLID);
+    for not_a_solid in [519, 555, 556, 615] {
+        assert!(
+            soak.contains(&share(not_a_solid, 25_401)),
+            "{not_a_solid} of 25 401 is a draw §303 measured, and it is outside {soak:?}"
+        );
+    }
+    assert!(
+        !soak.contains(&share(283, 25_401)),
+        "283 of 25 401 is half the lattice family's rate, and {soak:?} takes it in"
+    );
+    let shipped = band_for_a_draw_of(441, &A_LATTICE_PAIR_IS_NOT_A_SOLID);
+    assert!(shipped.contains(&share(14, 441)));
+    assert!(shipped.contains(&share(1, 441)));
+    assert!(
+        !shipped.contains(&share(0, 441)),
+        "a family that no longer reaches four faces along one edge at all has to fire"
     );
 }
 
@@ -1525,7 +1587,7 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
         every_rule(tally, Coordinates::AreUnderAGeneralRotation, configuration)
     });
     tally.report("§17.7 headline: turned pairs, every rule");
-    tally.share_of_answers_that_were_not_solids_must_be_within(A_TURNED_PAIR_IS_NOT_A_SOLID);
+    tally.rate_of_answers_that_were_not_solids_must_be_within(A_TURNED_PAIR_IS_NOT_A_SOLID);
 
     let refused = tally.refused.get() as f64 / tally.fuses.get() as f64;
     if this_is_the_shipped_corpus() {
@@ -4557,6 +4619,24 @@ impl Tally {
         self.the_cause_named_most_often_is(predicate);
     }
 
+    /// Insist the share of fuses whose answer was not a solid is one a draw of
+    /// this many fuses could give from a family whose rate is inside `rate`.
+    ///
+    /// A draw lands off its family's rate by chance, by a spread of
+    /// `sqrt(rate * (1 - rate) / fuses)`: about 0.65 points at the shipped 441
+    /// fuses and 0.08 at a soak's 25 401 (§303). Fixed ends are too tight for
+    /// the one or too loose for the other, so each end is moved out by
+    /// [`A_DRAW_STRAYS_THIS_MANY_SPREADS`] of its own spread at this draw's size.
+    ///
+    /// The floor never goes below one fuse. None at all is the family no longer
+    /// reaching the configuration it was built for, and that fires at any size.
+    fn rate_of_answers_that_were_not_solids_must_be_within(&self, rate: RangeInclusive<f64>) {
+        self.share_of_answers_that_were_not_solids_must_be_within(band_for_a_draw_of(
+            self.fuses.get(),
+            &rate,
+        ));
+    }
+
     /// Insist the share of fuses whose answer was not a solid this kernel can
     /// hold is still about what it has always been.
     ///
@@ -4576,7 +4656,7 @@ impl Tally {
         let share = self.not_a_solid.get() as f64 / self.fuses.get() as f64;
         assert!(
             band.contains(&share),
-            "{} of {} fuses came back not a solid ({:.1}%), outside the {:.2}%–{:.2}% \
+            "{} of {} fuses came back not a solid ({:.3}%), outside the {:.3}%–{:.3}% \
              this family has always given",
             self.not_a_solid.get(),
             self.fuses.get(),
@@ -4585,6 +4665,18 @@ impl Tally {
             100.0 * band.end()
         );
     }
+}
+
+/// The shares a draw of `fuses` fuses may give from a family whose not-a-solid
+/// rate is inside `rate`: each end moved out by
+/// [`A_DRAW_STRAYS_THIS_MANY_SPREADS`] of its own spread at that size, and the
+/// floor never under one fuse.
+fn band_for_a_draw_of(fuses: usize, rate: &RangeInclusive<f64>) -> RangeInclusive<f64> {
+    let fuses = fuses as f64;
+    let stray = |end: f64| A_DRAW_STRAYS_THIS_MANY_SPREADS * (end * (1.0 - end) / fuses).sqrt();
+    let floor = (rate.start() - stray(*rate.start())).max(1.0 / fuses);
+    let ceiling = rate.end() + stray(*rate.end());
+    floor..=ceiling
 }
 
 /// Run `property` over `cases` configurations from a fresh seed, and hand back
