@@ -500,6 +500,9 @@ fn grouped_write(why: &CannotWrite) -> String {
         CannotWrite::ALengthUnitThisWriterHasNoSpellingFor => {
             "a unit this writer has no spelling for".to_owned()
         }
+        CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { .. } => {
+            "a plane whose offset no written point carries".to_owned()
+        }
         // `CannotWrite` is `#[non_exhaustive]` and grows; a new variant that is
         // not named here would otherwise be counted under somebody else's name.
         _ => format!("unnamed: {why}"),
