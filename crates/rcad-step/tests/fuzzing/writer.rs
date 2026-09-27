@@ -247,6 +247,15 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// exactly (§249.2), so a difference is a defect in one of the two, not a
 /// frame the file cannot name.
 ///
+/// A plane is the one surface whose numbers are not written as they are
+/// stored. The writer picks the point it writes so that the reader's offset
+/// comes back the same bits (§313). The normal it writes as stored, and the
+/// reader scales it to length one again, so a normal a turn left an ulp off
+/// length one still comes back moved: 1 509 of the 2026-09-26 crash files
+/// stop here for that. It is a gap in the reader, not a limit — the file
+/// carries the bits — and this check keeps failing on it until `rcad-geom`
+/// gives the reader a way to keep them (§313.3).
+///
 /// # Panics
 ///
 /// If a face, a coedge, a corner or a run differs between `here` and `back`.
@@ -340,6 +349,25 @@ fn a_round_bar_turned_an_eighth_about_z_comes_back_from_its_own_file() {
     );
 }
 
+/// A cube of side two turned a tenth of a radian about `x` and moved by whole
+/// units. Three of its faces sit on planes whose offset the foot of the
+/// perpendicular, the point the writer used to write, reads back an ulp off,
+/// and all six keep their normals through the file (§313).
+#[test]
+fn a_cube_turned_a_tenth_of_a_radian_comes_back_on_the_same_planes() {
+    let turned = Isometry::translation(Vector::new(-13.0, 1.0, 8.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&Axis::x(), 0.1).expect("a finite angle about a unit axis"));
+    let bytes = postcard::to_allocvec(&one_solid_placed_by(a_cube, &turned))
+        .expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
 /// Moved along its own axis, so that the first face compared, the bottom cap,
 /// is on another plane.
 #[test]
@@ -381,6 +409,10 @@ fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
 
 fn a_ball(model: &mut Model) -> rcad_topo::Result<SolidKey> {
     model.add_ball(2.0, &Isometry::identity())
+}
+
+fn a_cube(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    model.add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
 /// A model holding one shape, built at the origin and then placed by

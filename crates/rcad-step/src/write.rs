@@ -28,8 +28,10 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{Point, Scale, Surface, Unit, Vector};
+use rcad_geom::{Plane, Point, Scale, Surface, Unit, Vector};
 use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
+
+use crate::geometry::plane_through;
 
 /// Write every solid in `model` as an ISO 10303-21 file called `called`.
 ///
@@ -170,6 +172,25 @@ pub enum CannotWrite {
     /// model.
     #[error("a face in this model sits on a surface kind this writer has no STEP entity for")]
     ASurfaceThisWriterHasNoEntityFor,
+
+    /// A plane whose offset no point this writer builds reads back as, bit for
+    /// bit.
+    ///
+    /// **Gap.** A point that carries it may well exist; the one
+    /// `a_point_this_reader_reads_back_as` builds divides the offset by the
+    /// normal's widest component, and past `f64::MAX` times that component the
+    /// division overflows. `a_plane_too_far_out_to_divide_is_refused_by_name`
+    /// reaches it at `1.4e308`. What closes it is building the point at a
+    /// power of two nearer the origin and scaling it back out, which no sound
+    /// model has yet asked for. Writing the foot of the perpendicular instead
+    /// would write a file that reads back as another plane.
+    #[error(
+        "a face in this model sits on a plane at {offset}, and this writer found no point that carries that offset exactly"
+    )]
+    APlaneWhoseOffsetNoWrittenPointCarries {
+        /// The plane's offset from the origin.
+        offset: f64,
+    },
 
     /// A [`Unit`] that has arrived since this writer was written.
     ///
@@ -502,39 +523,29 @@ impl Writing {
     /// two library functions. `a_cone_is_the_one_surface_whose_round_trip_goes_through_a_library_function`
     /// measures what that costs.
     ///
-    /// # A general-normal plane also rounds, by 1–4 ULPs, and no point choice
-    ///   here closes it
+    /// # A plane is written at a point its offset reads back from exactly
     ///
-    /// STEP has no way to write a plane except as a point plus a normal, and
-    /// [`Plane::from_point_and_normal`](rcad_geom::Plane::from_point_and_normal)
-    /// re-derives the offset by dotting them back together on the way in. For
-    /// a normal that is not axis-aligned that dot product has three nonzero
-    /// terms, and a three-term dot product is not, in general, the exact
-    /// inverse of the multiply that built the offset in the first place — a
-    /// plane with normal `(−9,−4,5)` and offset `0` reads a point that sits
-    /// exactly on it, `(0,−10,−8)`, back `4.44e-16` off itself.
+    /// STEP has no way to write a plane except as a point and a normal, and
+    /// the reader dots the two back together to get the offset
+    /// ([`plane_through`]), so the point decides the offset's last bit. The
+    /// foot of the perpendicular, which this writer used to send, rounds each
+    /// of its three coordinates and missed on 7 777 of 20 000 planes that face
+    /// no axis (`the_foot_of_the_perpendicular_misses_on_more_than_a_third_of_these_planes`).
+    /// [`a_point_this_reader_reads_back_as`] picks one that does not miss
+    /// (`docs/decisions.md` §313).
     ///
-    /// **Checked, not assumed, that a different point does not fix it**:
-    /// [`plane_round_trip_tests::choosing_a_different_point_does_not_fix_a_general_normal_plane`]
-    /// tries the obvious other candidate — a point with only one nonzero
-    /// coordinate, along the normal's largest component, rather than the
-    /// foot of the perpendicular this writer sends — against 5 000 random
-    /// general-normal planes. It differs about as often as the point this
-    /// writer already sends (in one run, 2 327 against 2 132 out of 5 000),
-    /// which is not an improvement; nothing in this family of fixes is. This
-    /// is a limit of STEP's own encoding of a plane, not a gap in this
-    /// writer.
-    ///
-    /// **It does not move [`Scale::nominal_size`]** — that is set from the
-    /// solid's own vertices (`Import::biggest_coordinate_in`), and a plane's
-    /// placement point is not one — so the rounding here changes no
-    /// published bound, only the plane's own stored coefficients by an
-    /// amount `Model::what_writing_a_plane_down_costs` (`rcad-topo`) already
-    /// prices in.
+    /// **The normal is written as the model stores it, and does not always
+    /// come back.** The reader scales a `DIRECTION` to length one, and a normal
+    /// a turn left an ulp or two off length one comes back moved. No point and
+    /// no direction this writer could choose fixes that:
+    /// `no_direction_reads_back_as_a_normal_a_turn_left_short_of_length_one`
+    /// shows one that no direction reads back as. The file carries the bits;
+    /// the reader has no way to keep them, and that is `rcad-geom`'s to give
+    /// (§313.3).
     fn surface(&mut self, surface: &Surface) -> Result<u64, CannotWrite> {
         Ok(match surface {
             Surface::Plane(flat) => {
-                let place = self.placement(flat.origin(), flat.normal());
+                let place = self.placement(a_point_this_reader_reads_back_as(flat)?, flat.normal());
                 self.entity(&format!("PLANE('',#{place})"))
             }
             Surface::Cylinder(pipe) => {
@@ -615,6 +626,55 @@ impl Writing {
     fn finished(mut self) -> String {
         self.text += "ENDSEC;\nEND-ISO-10303-21;\n";
         self.text
+    }
+}
+
+/// A point on `flat` from which this crate's reader works out `flat`'s own
+/// offset, bit for bit.
+///
+/// The reader scales the written normal to length one and dots the point with
+/// it, rounding once ([`plane_through`]). So the point is built against the
+/// normal the reader will use, and has at most two coordinates that are not
+/// zero:
+///
+/// - along the normal's widest component `nᵢ`, `offset / nᵢ`, which lands the
+///   point within about an ulp of the offset;
+/// - along its next widest `nⱼ`, what that left over, `r / nⱼ`, where
+///   `r = offset − nᵢ·(offset / nᵢ)` is worked out exactly with one fused
+///   multiply-add.
+///
+/// The second coordinate's own rounding moves the dot product by about `2⁻⁵³`
+/// of `r`, and `r` is about an ulp of the offset, so the sum lands far inside
+/// the offset's rounding interval. `nⱼ` is never so small that `r / nⱼ`
+/// grows: a unit normal whose widest component is not exactly ±1 has
+/// `|nⱼ| ≥ 2⁻²⁷`, and one whose widest component is ±1 leaves nothing over.
+///
+/// # Errors
+///
+/// [`CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries`] if the point does
+/// not read back as the offset after all — which is checked here, through the
+/// reader's own function, rather than trusted.
+fn a_point_this_reader_reads_back_as(flat: &Plane) -> Result<Point, CannotWrite> {
+    let offset = flat.offset();
+    let normal = plane_through(Point::origin(), flat.normal())
+        .expect("a stored plane's normal is finite and has a length")
+        .normal()
+        .components();
+    let mut widest_first = [0, 1, 2];
+    widest_first.sort_by(|&a, &b| normal[b].abs().total_cmp(&normal[a].abs()));
+    let [widest, next, _] = widest_first;
+
+    let mut coordinates = [0.0; 3];
+    coordinates[widest] = offset / normal[widest];
+    let product = normal[widest] * coordinates[widest];
+    let left_over = (offset - product) - normal[widest].mul_add(coordinates[widest], -product);
+    if left_over != 0.0 {
+        coordinates[next] = left_over / normal[next];
+    }
+    let point = Point::new(coordinates[0], coordinates[1], coordinates[2]);
+    match plane_through(point, flat.normal()) {
+        Ok(back) if back.offset().to_bits() == offset.to_bits() => Ok(point),
+        _ => Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { offset }),
     }
 }
 
@@ -719,102 +779,149 @@ fn text(string: &str) -> String {
 
 #[cfg(test)]
 mod plane_round_trip_tests {
-    use rcad_geom::{Plane, Point, Vector};
+    use core::f64::consts::TAU;
 
-    /// The demonstration behind `Writing::surface`'s doc comment: a
-    /// plane through the origin with normal `(−9,−4,5)` and offset `0` reads
-    /// back a point that is exactly on it, `(0,−10,−8)` — the dot product is
-    /// `0·(−9) + (−10)·(−4) + (−8)·5 = 0 + 40 − 40 = 0` on paper — off itself
-    /// by a few ULPs.
+    use rcad_geom::{Axis, Isometry, Plane, Point, Vector};
+
+    use super::{CannotWrite, a_point_this_reader_reads_back_as};
+    use crate::geometry::plane_through;
+
+    /// The point `Writing::surface` used to write, the foot of the
+    /// perpendicular, read back through the reader's own function, misses the
+    /// offset on many of these planes. This is what the planes below are for:
+    /// a population on which the old point fails often enough that a new one
+    /// passing is worth something.
     #[test]
-    fn a_plane_through_the_origin_still_rounds_reading_its_own_point_back() {
-        let normal = Vector::new(-9.0, -4.0, 5.0).normalized().unwrap();
-        let point = Point::new(0.0, -10.0, -8.0);
-        assert_eq!(normal.dot(point - Point::origin()), 0.0, "exact on paper");
-
-        let plane = Plane::from_point_and_normal(point, normal).unwrap();
-        assert_ne!(
-            plane.offset(),
-            0.0,
-            "a general-normal plane's own defining point should not read back exactly"
+    fn the_foot_of_the_perpendicular_misses_on_more_than_a_third_of_these_planes() {
+        let planes = planes_facing_no_axis();
+        let misses = planes
+            .iter()
+            .filter(|plane| {
+                plane_through(plane.origin(), plane.normal())
+                    .expect("a stored plane reads back as some plane")
+                    .offset()
+                    != plane.offset()
+            })
+            .count();
+        println!(
+            "the foot of the perpendicular misses {misses} of {} planes",
+            planes.len()
         );
         assert!(
-            plane.offset().abs() < 1e-14,
-            "the rounding should still be a few ULPs, not something bigger: {}",
-            plane.offset()
+            misses > planes.len() / 3,
+            "only {misses} of {} planes miss, so this population no longer shows \
+             what the point this writer chooses is for",
+            planes.len()
         );
     }
 
-    /// Whether writing a different point — one with only one nonzero
-    /// coordinate, along the normal's own largest component, rather than the
-    /// foot of the perpendicular `Writing::surface` sends — reads
-    /// back exactly more often. It does not: this is the evidence for "no
-    /// point choice closes it" in that doc comment.
+    /// Every plane on which the foot of the perpendicular misses, and every
+    /// other one here, reads back from the point this writer writes with the
+    /// offset it had, bit for bit.
     #[test]
-    fn choosing_a_different_point_does_not_fix_a_general_normal_plane() {
+    fn every_plane_is_written_at_a_point_its_offset_reads_back_from() {
+        let by_hand = [
+            (Vector::new(0.0, 0.0, 1.0), 5.0),
+            (Vector::new(0.0, -1.0, 0.0), 0.0),
+            (Vector::new(-9.0, -4.0, 5.0), 0.0),
+            (Vector::new(1.0, 1.0, 0.0), 1e-300),
+        ]
+        .map(|(normal, offset)| {
+            Plane::from_point_and_normal(Point::origin(), normal)
+                .and_then(|plane| plane.moved_to(offset))
+                .expect("a finite offset along a normal with a length")
+        });
+        for plane in planes_facing_no_axis().into_iter().chain(by_hand) {
+            let point = a_point_this_reader_reads_back_as(&plane)
+                .unwrap_or_else(|why| panic!("{plane:?}: {why}"));
+            let back = plane_through(point, plane.normal()).expect("a finite point");
+            assert_eq!(
+                back.offset().to_bits(),
+                plane.offset().to_bits(),
+                "{plane:?} read back from {point:?} as {back:?}"
+            );
+        }
+    }
+
+    /// The one plane the construction is known not to reach: dividing its
+    /// offset by its widest normal component, `1.41e308 / 0.707`, overflows.
+    #[test]
+    fn a_plane_too_far_out_to_divide_is_refused_by_name() {
+        let plane =
+            Plane::from_point_and_normal(Point::new(1e308, 1e308, 0.0), Vector::new(1.0, 1.0, 0.0))
+                .expect("an offset of 1.41e308 is still finite");
+        let refused = a_point_this_reader_reads_back_as(&plane);
+        assert!(
+            matches!(
+                refused,
+                Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { .. })
+            ),
+            "{refused:?}"
+        );
+    }
+
+    /// The normal the writer fuzzer's `crash-0ac3e625f698733b9b143d41eb65edbf7087b463`
+    /// (2026-09-26) held on a turned face: both components the `f64` just below
+    /// `1/√2`. The reader moves it to the `f64` just above, and **no
+    /// direction a file could hold reads back as it**.
+    ///
+    /// The reader's components are each the nearest `f64` to the exact unit
+    /// ratio (`rcad-geom`'s `a_unit_component_is_the_nearest_f64_to_the_exact_ratio`),
+    /// so a direction reads back as `(s, 0, s)` only if its unit vector is
+    /// within half an ulp, `h = 2⁻⁵⁴`, of `s` in `x` and `z` and rounds to zero
+    /// in `y`. The longest such vector is `(s + h, ≤2⁻¹⁰⁷⁵, s + h)`, and it is
+    /// shorter than one: with `s = m·2⁻⁵³`, `2·(s + h)² < 1` is
+    /// `2·(2m + 1)² < 2¹⁰⁸` in whole numbers, and the `y` term is far too
+    /// small to close a gap of at least `2⁻¹⁰⁸`. So no unit vector rounds to
+    /// this normal, and the writer cannot choose its way round the reader.
+    #[test]
+    fn no_direction_reads_back_as_a_normal_a_turn_left_short_of_length_one() {
+        let short = 0.707_106_781_186_547_5_f64;
+        let long = 0.707_106_781_186_547_6_f64;
+        assert!(short < core::f64::consts::FRAC_1_SQRT_2 && short.next_up() == long);
+        let read = plane_through(Point::origin(), Vector::new(short, 0.0, short))
+            .expect("a direction with a length")
+            .normal();
+        assert_eq!(read, Vector::new(long, 0.0, long));
+
+        let m = (short * 2_f64.powi(53)) as u128;
+        assert_eq!(m as f64 * 2_f64.powi(-53), short, "s is m·2⁻⁵³ exactly");
+        assert!(
+            2 * (2 * m + 1).pow(2) < 1_u128 << 108,
+            "the longest vector within half an ulp of (s, 0, s) reaches length one"
+        );
+    }
+
+    /// Twenty thousand planes facing no axis, at offsets from `1e-300` to
+    /// `1e300`: half straight from a constructor, and half turned afterwards,
+    /// the way a placed solid's faces are, so that their normals sit an ulp or
+    /// two off length one the way a turn leaves them.
+    fn planes_facing_no_axis() -> Vec<Plane> {
         let mut state: u64 = 0x2545_F491_4F6C_DD1D;
-        let mut next_u64 = || {
+        let mut next = move || {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            state
+            (state >> 11) as f64 / (1_u64 << 53) as f64
         };
-        let mut next_f64 = |lo: f64, hi: f64| {
-            let unit = (next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
-            lo + unit * (hi - lo)
-        };
-
-        let trials = 5000;
-        let mut foot_of_perpendicular_rounds = 0;
-        let mut single_coordinate_rounds = 0;
-        for _ in 0..trials {
-            let raw = Vector::new(
-                next_f64(-100.0, 100.0),
-                next_f64(-100.0, 100.0),
-                next_f64(-100.0, 100.0),
-            );
-            let Ok(normal) = raw.normalized() else {
-                continue;
-            };
-            let offset = next_f64(-1000.0, 1000.0);
-
-            let foot = Point::origin() + normal * offset;
-            if Plane::from_point_and_normal(foot, normal).unwrap().offset() != offset {
-                foot_of_perpendicular_rounds += 1;
-            }
-
-            let components = normal.components();
-            let (axis, &biggest) = components
-                .iter()
-                .enumerate()
-                .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap())
-                .unwrap();
-            let mut single = [0.0; 3];
-            single[axis] = offset / biggest;
-            let single = Point::new(single[0], single[1], single[2]);
-            if Plane::from_point_and_normal(single, normal)
-                .unwrap()
-                .offset()
-                != offset
-            {
-                single_coordinate_rounds += 1;
-            }
-        }
-        println!(
-            "{trials} random general-normal planes: foot-of-perpendicular rounds \
-             {foot_of_perpendicular_rounds} times, single-coordinate rounds \
-             {single_coordinate_rounds} times"
-        );
-        assert!(
-            foot_of_perpendicular_rounds > trials / 10,
-            "the writer's own point choice should round often enough that a fix would show up \
-             clearly: {foot_of_perpendicular_rounds}"
-        );
-        assert!(
-            single_coordinate_rounds > trials / 10,
-            "picking a different point should not make the rounding disappear: \
-             {single_coordinate_rounds}"
-        );
+        (0..20_000)
+            .map(|round| {
+                let normal =
+                    Vector::new(2.0 * next() - 1.0, 2.0 * next() - 1.0, 2.0 * next() - 1.0);
+                let offset = (2.0 * next() - 1.0) * 10_f64.powi((next() * 600.0) as i32 - 300);
+                let plane = Plane::from_point_and_normal(Point::origin(), normal)
+                    .and_then(|plane| plane.moved_to(offset))
+                    .expect("a finite offset along a normal with a length");
+                if round % 2 == 0 {
+                    return plane;
+                }
+                let axis = Axis::new(Point::origin(), Vector::new(next(), next(), 1.0))
+                    .expect("a direction whose last component is one");
+                let turn = Isometry::rotation(&axis, next() * TAU)
+                    .expect("a finite angle about a unit axis");
+                plane.transformed(&turn)
+            })
+            .collect()
     }
 }
 
