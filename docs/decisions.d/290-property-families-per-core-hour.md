@@ -11,6 +11,12 @@ was asked to run, `a_fuse_read_back_from_rounded_text.rs` (§191.3), turned out
 not to take a fresh seed at all: §290.2 proves it by running it twice with
 different seeds and getting byte-identical counts.*
 
+*Finished by Q227 (`lane-q227-soak-to-three-hours`, off `8a49bc9d`,
+2026-09-27): seven more chunks, seeds 118-124, reach 3.067 wall-hours and
+11.917 CPU-hours over all 24 chunks — the three hours asked for are reached.
+§290.3, §290.4, §290.5 and §290.6 carry the new rows, the recomputed totals
+and rates, and a third occurrence of finding A.*
+
   290.1   What "fresh seeds" actually reaches, file by file
   290.2   The step-rounding family does not soak — proof
   290.3   The chunks: seed, factor, wall time, CPU time, uptime
@@ -136,13 +142,39 @@ factor.
 | 16 | 116 | 66 | 451.33 | 1908.37 | 10:39:44, 13.46/15.37/15.81 | 10:47:16, 13.82/15.68/16.02 | pass |
 | 17 | 117 | 66 | 451.71 | 1913.04 | 10:47:37, 13.30/15.44/15.93 | 10:55:09, 13.68/15.46/15.96 | pass |
 
-Totals: wall 8038.43s (2.233 hours), CPU 31788.38s (8.830 CPU-hours)
-(`python3 -c "print(sum([...]))"` over the columns above).
+Totals for chunks 1-17 (Q149's own run): wall 8038.43s (2.233 hours), CPU
+31788.38s (8.830 CPU-hours) (`python3 -c "print(sum([...]))"` over the
+columns above).
 
 Chunk 12 ran under nextest's default fail-fast and was cut short at 29 of 90
 tests once two failed, so its CPU time (919.77s) is genuinely smaller work
 done, not a faster chunk — it is included in the totals as what actually ran,
 not padded to a full chunk's worth.
+
+Chunks 18-24 (seeds 118-124) were run by Q227 (`lane-q227-soak-to-three-hours`,
+off `8a49bc9d`) on 2026-09-27, 16:43-19:35 UTC, to close the shortfall §290.6
+named — same command line, same `RCAD_SOAK_FACTOR=66`, `taskset -c 0-5`,
+`--no-fail-fast` throughout. Other lanes and gates ran concurrently on cores
+6-23 for the whole stretch, which the recorded loads reflect.
+
+| # | seed | factor | wall (s) | CPU (s) | uptime start (1m,5m,15m load) | uptime end (1m,5m,15m load) | result |
+|---|---|---|---|---|---|---|---|
+| 18 | 118 | 66 | 345.75 | 1404.37 | 18:43:37, 9.86/9.91/12.59 | 18:49:23, 11.63/12.10/12.84 | pass |
+| 19 | 119 | 66 | 404.56 | 1514.46 | 18:49:34, 10.39/11.82/12.74 | 18:56:18, 20.44/19.09/15.98 | pass |
+| 20 | 120 | 66 | 463.38 | 1629.08 | 18:56:27, 21.61/19.40/16.12 | 19:04:10, 18.77/23.78/20.25 | **1 fail** (90/90 ran) |
+| 21 | 121 | 66 | 404.21 | 1615.36 | 19:05:08, 12.34/21.02/19.52 | 19:11:52, 12.75/19.34/19.86 | pass |
+| 22 | 122 | 66 | 391.18 | 1573.99 | 19:12:01, 12.02/18.96/19.73 | 19:18:32, 18.71/20.04/20.12 | pass |
+| 23 | 123 | 66 | 479.29 | 1657.44 | 19:18:41, 21.31/20.55/20.29 | 19:26:41, 15.84/27.24/24.90 | pass |
+| 24 | 124 | 66 | 514.64 | 1717.97 | 19:26:50, 14.86/26.65/24.73 | 19:35:25, 22.34/29.61/28.08 | **1 fail** (90/90 ran) |
+
+Totals for chunks 18-24: wall 3003.01s, CPU 11112.67s
+(`python3 -c "print(345.75+404.56+463.38+404.21+391.18+479.29+514.64); print(1404.37+1514.46+1629.08+1615.36+1573.99+1657.44+1717.97)"`).
+
+Grand totals, all 24 chunks: wall 11041.44s (3.067 hours), CPU 42901.05s
+(11.917 CPU-hours) (`python3 -c "print(8038.43+3003.01); print(31788.38+11112.67)"`)
+— the three wall-hours asked for are reached, with 241.44s (0.067 hours) to
+spare. §290.6 says so and carries the two new test failures; §290.5 carries
+the recomputed core-hours and rates.
 
 ### 290.4 The two findings
 
@@ -189,6 +221,39 @@ occurrences kept as evidence in §290.4 rather than folded away. B occurred
 once, in fifteen chunks that exercised it. Three occurrences, two distinct
 findings.
 
+**Q227's seven chunks (seeds 118-124, §290.3) add two more failures, both the
+same shape as A, one of them literally A.**
+
+Chunk 24 (seed 124) is a third occurrence of finding A itself, same test,
+same call site: `543 of 25401 fuses came back not a solid (2.1%), outside the
+2.20%-9.80%` — `543/25401 = 0.021377`
+(`python3 -c "print(543/25401)"`), again a hair under the 0.022 floor, at the
+same 25401 denominator as chunks 12 and 15. §290.6's own prediction — "a
+third would make 'the band's lower edge is too tight at this sample size' the
+better-supported reading over 'a rare fluke'" — is what this recurrence bears
+out; the test and the band are Q228's to change, not this row's.
+
+Chunk 20 (seed 120) is not finding A — it fails a different named test,
+`how_often_a_certified_fuse_of_a_turned_pair_refuses` — but the shape is
+identical down to the denominator. That test's band constant,
+`A_TURNED_PAIR_IS_NOT_A_SOLID` (`fuses_that_must_agree.rs:563`), is numerically
+the same range as A's, `0.022..=0.098`
+(`grep -n "A_LATTICE_PAIR_IS_NOT_A_SOLID\|A_TURNED_PAIR_IS_NOT_A_SOLID" crates/rcad-topo/tests/fuses_that_must_agree.rs`),
+and the panic comes from the same shared method,
+`share_of_answers_that_were_not_solids_must_be_within`
+(`fuses_that_must_agree.rs:4575`), just called from a different site
+(`fuses_that_must_agree.rs:1528` rather than `:1456`): `558 of 25401 fuses
+came back not a solid (2.2%)`, `558/25401 = 0.021968`
+(`python3 -c "print(558/25401)"`) — again just under the same 0.022 floor, at
+the same 25401 denominator. Whether this counts as a fourth occurrence of A,
+a new finding of its own, or evidence that the 0.022 floor is generally too
+tight rather than tight for the lattice-pair family specifically, is left to
+whoever next owns the test and the band (Q228) and the two core-hour measures
+(Q230); this row only reports the count and the reproducer
+(`RCAD_SOAK_SEED=120`, `RCAD_SOAK_FACTOR=66`).
+
+No occurrence of finding B in these seven chunks.
+
 ### 290.5 Core-hours two ways, and failures per core-hour
 
 Wall-time-based: `2.233 hours × 6 cores = 13.397 core-hours`
@@ -218,22 +283,87 @@ property that ran into the SLOW markers past 300s, dominating wall time alone
 while the other five threads sit idle). Both are live explanations; this
 measurement does not separate them.
 
+**Over all 24 chunks** (adding Q227's seven, seeds 118-124, §290.3): wall-based
+`11041.44s / 3600 × 6 = 18.402` core-hours
+(`python3 -c "print(11041.44/3600*6)"`), CPU-based `42901.05s / 3600 = 11.917`
+core-hours (`python3 -c "print(42901.05/3600)"`). The two now disagree by
+35.2% (`python3 -c "print((18.402-11.917)/18.402*100)"`), against 34% at 17
+chunks — a small further widening, not a reversal. This row does not chase why
+(Q230 owns that); it only adds the seven new chunks' own "Percent of CPU"
+figures — 406%, 374%, 351%, 399%, 402%, 345%, 333% — which widen the range
+already named above from 349-423% to 333-423%, still never near 600%, and do
+not by themselves separate the two live explanations already given.
+
+Findings over the full 24-chunk budget: three occurrences of finding A
+(chunks 12, 15, 24), one of finding B (chunk 12), and one occurrence of the
+same near-floor shape on a different test (chunk 20, turned-pair rather than
+lattice-pair; §290.4 has the detail and does not resolve how it groups).
+Counting that last one as its own third distinct finding (different named
+test, same shared assertion) gives three distinct findings and five
+occurrences:
+
+- wall-based: `3 / 18.402 = 0.1630` distinct failures per core-hour
+  (`python3 -c "print(3/18.402)"`)
+- CPU-based: `3 / 11.917 = 0.2517` distinct failures per core-hour
+  (`python3 -c "print(3/11.917)"`)
+- counting all five occurrences instead of three distinct findings:
+  `5 / 18.402 = 0.2717` wall-based, `5 / 11.917 = 0.4196` CPU-based
+  (`python3 -c "print(5/18.402); print(5/11.917)"`)
+- if chunk 20 is instead folded into finding A (same assertion, same band
+  value, only the family differs), two distinct findings and five occurrences
+  give `2 / 18.402 = 0.1087` wall-based, `2 / 11.917 = 0.1678` CPU-based
+  (`python3 -c "print(2/18.402); print(2/11.917)"`) — the occurrence-based
+  rates above are unchanged either way.
+
+Every one of these rates is higher than the 17-chunk numbers (0.1493/0.2265
+for two distinct findings, three occurrences), because the seven new chunks
+added a third distinct-or-folded finding and two more occurrences on only a
+37% increase in core-hours. Whether that means the rate is settling upward or
+is still noise from a small sample is not something seven more chunks
+settles either — it is the same open question §290.8 already named, now with
+one more data point on each side of it.
+
 ### 290.6 What is short of three hours, and how to finish it
 
-2.233 of the requested 3 wall-hours ran (74%), 17 chunks. The shortfall is
-this session's own time budget, not a limit in the method: chunk 1's
-calibration overshot to 617.62s deciding the factor, and running the
-remaining ~46 minutes (6-7 more chunks at the same settings) was not reached
-before this row had to close.
+2.233 of the requested 3 wall-hours ran in Q149's own session (74%), 17
+chunks. The shortfall was that session's own time budget, not a limit in the
+method: chunk 1's calibration overshot to 617.62s deciding the factor, and
+running the remaining ~46 minutes (6-7 more chunks at the same settings) was
+not reached before that row had to close.
 
-To finish it: run six or seven more chunks exactly as §290.3's command line,
-with `RCAD_SOAK_SEED`/`PROPTEST_RNG_SEED` continuing from 118, append their
-rows to the table, and recompute §290.5's totals and rates over all the
-chunks. Watching in particular whether finding A recurs a third time — at two
-for two of the runs that drew this many cases, a third would make "the band's
-lower edge is too tight at this sample size" the better-supported reading over
-"a rare fluke," and would turn finding A from a §290 row into its own
-follow-up.
+**Closed by Q227** (`lane-q227-soak-to-three-hours`, off `8a49bc9d`,
+2026-09-27 16:43-19:35 UTC): seven more chunks, seeds 118-124, run exactly to
+§290.3's command line — same `RCAD_SOAK_FACTOR=66`, same `taskset -c 0-5`,
+`--no-fail-fast` throughout. Wall total across all 24 chunks: 11041.44s =
+3.067 wall-hours (`python3 -c "print(11041.44/3600)"`) — **the three hours
+asked for are reached**, 0.067 hours (241.44s) past it. §290.3 carries the
+seven new rows; §290.5 carries the recomputed core-hours and rates.
+
+Finding A recurred a third time, in the last of these seven chunks (seed 124,
+chunk 24 in §290.3's table): `543 of 25401 fuses came back not a solid
+(2.1%), outside the 2.20%-9.80%` — `543/25401 = 0.021377`
+(`python3 -c "print(543/25401)"`), again a hair under the 0.022 floor, at the
+same 25401 denominator as both earlier occurrences. This row's own prediction
+— "a third would make 'the band's lower edge is too tight at this sample
+size' the better-supported reading over 'a rare fluke'" — is what this
+recurrence bears out: three for three of the chunks that have drawn this
+sample size and landed near the floor at all. Q228 owns the test and the
+band; this row only reports the count.
+
+One more data point outside what was asked for: chunk 20 (seed 120) produced
+the same near-floor shape, but on the *turned*-pair test
+(`how_often_a_certified_fuse_of_a_turned_pair_refuses`), whose band constant
+(`A_TURNED_PAIR_IS_NOT_A_SOLID`, `fuses_that_must_agree.rs:563`) is
+numerically the same range as A's, `0.022..=0.098`, and whose panic comes
+from the same shared method (`share_of_answers_that_were_not_solids_must_be_within`,
+`fuses_that_must_agree.rs:4575`) as A, just called from a different site:
+`558 of 25401 fuses came back not a solid (2.2%)`, `558/25401 = 0.021968`
+(`python3 -c "print(558/25401)"`). §290.4 has the full detail and does not
+decide how it groups with A; that is Q228's and Q230's to settle, not this
+row's.
+
+No new occurrence of finding B in these seven chunks, and no other test
+failed.
 
 ### 290.7 Set beside the fuzz targets (§265.6, §265.7, §226.3)
 
