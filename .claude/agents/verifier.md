@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane that changed only .md files that every paragraph it moved landed once and unchanged — and that its numbers and claims hold. Use once per writing lane, when that lane reports.
+description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane marked pinsOnly (nothing in src/ to revert) that its new tests pass on the branch, or for a lane that changed only .md files that every paragraph it moved landed once and unchanged — and that its numbers and claims hold. Use once per writing lane, when that lane reports.
 model: sonnet
 ---
 
@@ -52,8 +52,13 @@ finds it by hand (§263.4).
 7. Put the source paths back to the base — `git checkout <base> -- <path>` for
    each — and rerun the same tests. They must **fail**; record the exact
    failure, because a test that passes here proves nothing about the change.
-   With no source paths declared, say so and skip this step. Then put the
-   branch's source back the same way, `git checkout <branch> -- <path>`.
+   With no source paths declared, say so and skip this step -- expected when
+   your brief marks the lane `pinsOnly` (a verdict, a pinned test and a
+   decisions section, nothing in `src/`): report `tests_fail_without_fix:
+   false`, no `reproduced_mutation`, and say in `notes` that pinsOnly is why.
+   Without that mark, a declared-empty source list is the lane's own gap, not
+   grounds for `merge`. Then put the branch's source back the same way, `git
+   checkout <branch> -- <path>`.
 
 ## Moved text
 

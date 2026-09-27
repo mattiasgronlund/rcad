@@ -126,10 +126,10 @@ For each row the fill took:
    tree as it is when you call.
 
 The args are `{ base, lanes: [ { label, queueId, brief, writeSet, model,
-sourcePaths, report, verify } ] }`. The workflow appends the base, the `switch
--c` and its refusal to the brief itself, and sends each role with its type, so
-`.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the standing rules
-and a brief carries only what is this row's:
+sourcePaths, pinsOnly, report, verify } ] }`. The workflow appends the base,
+the `switch -c` and its refusal to the brief itself, and sends each role with
+its type, so `.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the
+standing rules and a brief carries only what is this row's:
 
 - the work, and anything to report beyond the standard record;
 - the write set, as `writeSet`. The branch defaults to `lane-<label>` and must
@@ -150,10 +150,16 @@ since it gated that tree. `sourcePaths` defaults to the `crates/<c>/src`
 directories in the write set; set it by hand when that is not what the verifier
 should revert — for a tooling row whose test is a recipe, the file the recipe
 checks. A row that changes only `.md` files names no failing test, and its
-verifier traces every paragraph it moved instead. An empty `writeSet` makes a
-read-only lane, which is neither verified nor merged, and its answer comes back
-whole. A test-only row gets no write access to `src/` and reports defects
-instead.
+verifier traces every paragraph it moved instead. A row that only pins a test
+and writes a decisions section, with no `src/` path anywhere in its work,
+needs `pinsOnly: true`: say so explicitly, never leave it to be inferred from
+an empty `sourcePaths`, because that emptiness is also what a tooling row shows
+when its dispatcher forgot to set `sourcePaths` by hand, and that must keep
+refusing. Give a `pinsOnly` row a `src/` path too — in `writeSet` or
+`sourcePaths` — and it is refused instead: there is something to revert then.
+An empty `writeSet` makes a read-only lane, which is neither verified nor
+merged, and its answer comes back whole. A test-only row gets no write access
+to `src/` and reports defects instead.
 
 Several rows off one base can share a run, and their merges then wait for one
 another. But a slot refills when its run returns (§230.4), so a shared run

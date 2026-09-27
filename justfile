@@ -1495,6 +1495,21 @@ check-skills-selftest:
 # `grep -c 'reproduced_mutation' .claude/workflows/lanes.js` shows 0 on main and
 # 4 here -- and fails under 3, which is what naming it in the readiness check,
 # `VERIFY`'s prompt and `verdictSchema` alone adds up to.
+#
+# **A tenth arm holds the pins-only case explicit.** Three test-only rows --
+# Q126, Q127 and Q203, each a verdict, a pinned test and a decisions section
+# with no `src/` path in the write set -- came back "verifier said merge" and
+# were merged by hand, because `unproven` demanded a revert that had nothing
+# to revert. `lane.pinsOnly` says so; it is never inferred from an empty
+# `sourcePaths`, because that emptiness is also what a tooling lane shows when
+# its dispatcher forgot to pass `sourcePaths` by hand, and that must keep
+# refusing. The arm checks four exact lines: the one that gates `pinsOnly` on
+# `sourcePathsOf(lane)` being empty, so the field cannot be swapped for that
+# inference; the refusal a lane with no field and no source still gets; the
+# refusal a `pinsOnly` lane with a declared source gets instead, since there is
+# something to revert then; and the line in the verifier's own prompt that
+# tells it which lane this is, so it is never asked for a revert that has
+# nothing to revert (§287).
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -1511,6 +1526,10 @@ check-lanes-workflow:
     shared_guard='no loop over a runtime value, and no `mise exec` inside a loop or compound.'
     rev_parse='git rev-parse --show-toplevel'
     mutation='reproduced_mutation'
+    pins_line='    const pinsOnly = lane.pinsOnly === true && !sources.length'
+    pins_refusal='the lane declared no source directory to revert'
+    pins_conflict='the lane is marked pinsOnly, but it declares a source directory to revert'
+    pins_verify='  const pinsOnlyNote = lane.pinsOnly === true'
     scan() {
         local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -1593,6 +1612,22 @@ check-lanes-workflow:
             echo "$1 does not give the verdict a way to report a '$mutation' that stands in for the revert, named in the readiness check, VERIFY's prompt and verdictSchema alike ('grep -c $mutation $1' shows $n, want at least 3; §266)"
             return 9
         fi
+        if ! grep -qF -- "$pins_line" "$1"; then
+            echo "$1 does not gate a pins-only merge on there being nothing to revert (\"$pins_line\"); without that exact line an empty sourcePaths on its own would read as pins-only, which §287 refuses to infer"
+            return 10
+        fi
+        if ! grep -qF -- "$pins_refusal" "$1"; then
+            echo "$1 no longer refuses a lane with no declared source and no pinsOnly flag; the field would then not be the only way past the check (§287)"
+            return 10
+        fi
+        if ! grep -qF -- "$pins_conflict" "$1"; then
+            echo "$1 no longer refuses a pinsOnly lane that also declares a source to revert; there is something to revert then, and it must stay refused (§287)"
+            return 10
+        fi
+        if ! grep -qF -- "$pins_verify" "$1"; then
+            echo "$1 does not tell the verifier's own prompt that this lane is pinsOnly, so a verifier would still be asked for a revert that has nothing to revert (§287)"
+            return 10
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -1632,7 +1667,15 @@ check-lanes-workflow:
     grep -vF -- "$rev_parse" "$agents/verifier.md" > "$dir/no-own-tree-doc/agents/verifier.md"
     fresh no-mutation-verdict
     grep -vF -- "$mutation" "$file" > "$dir/no-mutation-verdict/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9)
+    fresh pins-inferred
+    awk -v l="$pins_line" -v r='    const pinsOnly = !sources.length' '$0 == l { print r; next } { print }' "$file" > "$dir/pins-inferred/lanes.js"
+    fresh pins-no-refusal
+    grep -vF -- "$pins_refusal" "$file" > "$dir/pins-no-refusal/lanes.js"
+    fresh pins-no-conflict
+    grep -vF -- "$pins_conflict" "$file" > "$dir/pins-no-conflict/lanes.js"
+    fresh pins-verify-missing
+    grep -vF -- "$pins_verify" "$file" > "$dir/pins-verify-missing/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
