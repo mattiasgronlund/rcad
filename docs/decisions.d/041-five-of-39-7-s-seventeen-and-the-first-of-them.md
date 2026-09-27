@@ -549,7 +549,8 @@ floor these rows name by seventy-nine times.**
 
 The ball's two readings here are as of `fdf5e58`'s parent. Both have since
 halved, to `3.0716170347962663e-13` and `2.4244102800489844e-11`, because a ball
-is now charged from its centre rather than from its poles — §58.11. The
+is now charged from its centre rather than from its poles — the round-reach
+unit, merged as `fdf5e582`, which left no decisions section of its own. The
 seventy-nine did not move, and neither did the bar's pair, which is the point
 the sentence above is making.
 
