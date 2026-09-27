@@ -499,11 +499,11 @@ const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 /// landed.
 ///
 /// So the ends are moved out by the draw's spread at its own size. At the
-/// shipped 441 fuses that leaves a floor of one fuse and a ceiling of 45: no
-/// floor at that size can catch the rate halving without also failing a
-/// reshuffled corpus a few times in a hundred, which §303.3 measures. At a
-/// soak's 25 401 the floor is 323 fuses and the ceiling 1 821, and a halving
-/// fires 99 times in a hundred.
+/// shipped 441 fuses that leaves a floor of one fuse and a ceiling of 45. A
+/// floor at that size that caught the rate halving two times in three would
+/// also fail about 3 fresh seeds in 100, which §303.3 measures. At a soak's
+/// 25 401 the floor is 323 fuses and the ceiling 1 821, and a halving fires 99
+/// times in a hundred.
 ///
 /// **When one of them moves, re-derive its band from the new measurement**
 /// rather than widening an end to take it in. Widening is how these six came to
