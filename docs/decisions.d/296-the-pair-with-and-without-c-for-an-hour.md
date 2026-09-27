@@ -401,3 +401,7 @@ share, the mutation/retained gap, and the mean-mutations gap — are smaller at
 that a length far past 2700 s reverses that trend; what it can say is that
 nothing in three points spanning a nine-to-one range points toward growth,
 and the direction they do point is toward less divergence, not more.
+
+`mise exec -- just gate quiet` on this section's own commit (`eba0b15a`) was
+green: 2554 tests passed (3 slow), 12 skipped; 3 more tests and 25 doc tests
+passed; `gate: PASS`.
