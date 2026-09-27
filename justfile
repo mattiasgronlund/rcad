@@ -4250,22 +4250,37 @@ fuzz-overnight window="28800":
         # `RCAD_FUZZ_MERGE_TIMEOUT` overrides it for
         # `check-fuzz-overnight-selftest` alone; nothing else sets it.
         merge_timeout="${RCAD_FUZZ_MERGE_TIMEOUT:-120}"
+
+        # `-merge=1` replays every file in `$reader_scratch` through the reader
+        # target's own binary, which calls `timed()` on every draw (Q263: `just
+        # src timed`, and the reader target's own `fuzz_target!` wraps its one
+        # call in it). `RCAD_FUZZ_TIMINGS` is still exported from the top of
+        # this recipe, so without this, each of tonight's replayed finds lands
+        # in `timings/no_step_file_makes_the_reader_panic` beside the real
+        # draws the five targets above just made — inputs Q174 compares a
+        # week of night to night are not draws. `env -u` scopes the unset to
+        # this one command; nothing after it should ever see the variable
+        # missing.
+        merge_started=$(date +%s)
         if (cd fuzz && CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
                 RUSTFLAGS="-C target-cpu=x86-64-v3" \
                 timeout --kill-after=10 "$merge_timeout" \
+                env -u RCAD_FUZZ_TIMINGS \
                 cargo +nightly fuzz run "$reader_target" -- \
                 -merge=1 -max_len=5110 "$merge_tmp" "$reader_scratch") \
                 >>"$night/reader-corpus-merge.log" 2>&1; then
+            merge_elapsed=$(( $(date +%s) - merge_started ))
             rm -rf "$reader_persistent"
             mv "$merge_tmp" "$reader_persistent"
             rm -rf "$reader_scratch"
             persistent_files_after=$(find "$reader_persistent" -type f | wc -l)
-            echo "reader corpus merge: persistent has $persistent_files_after files after merging" \
+            echo "reader corpus merge: persistent has $persistent_files_after files after merging, took ${merge_elapsed}s" \
                 >>"$night/reader-corpus-merge.log"
         else
+            merge_elapsed=$(( $(date +%s) - merge_started ))
             rm -rf "$merge_tmp"
             mv "$reader_scratch" "$reader_scratch-failed-$(date +%Y%m%d%H%M%S)"
-            echo "READER CORPUS MERGE FAILED — see $night/reader-corpus-merge.log; the persistent corpus was left as it was, and tonight's scratch directory was moved aside rather than merged or discarded" \
+            echo "READER CORPUS MERGE FAILED after ${merge_elapsed}s — see $night/reader-corpus-merge.log; the persistent corpus was left as it was, and tonight's scratch directory was moved aside rather than merged or discarded" \
                 >>"$night/reader-corpus-merge.log"
             echo "reader corpus merge FAILED — see $night/reader-corpus-merge.log"
             to_look_at+=("reader-merge:failed")
