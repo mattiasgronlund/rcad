@@ -8106,6 +8106,14 @@ _queue-rows file:
 # usage of all of them. The logic is `tooling/queue/queue.py`; this only hands
 # it the arguments.
 #
+# **`apply` runs several of those verbs as one batch** (§309): `just queue
+# apply take Q241 lane-a + take Q270 lane-b + add 2 sonnet - 'what' + after @1
+# Q270`. A standalone `+` separates the steps, which land on the file in
+# order, each seeing the ones before it, under one hold of the claims lock; a
+# refused step names its own number and text and aborts the whole batch before
+# anything is written. `@1`, `@2`, ... stand for the ids the batch's own first,
+# second, ... `add` hands out.
+#
 # **`next` counts the machine, not this copy** (§263.4). A slot is held by every
 # worktree an agent has locked that is not a session's own tree — every lane and
 # every verifier, whichever dispatcher sent it — and by every row taken with no
@@ -8113,18 +8121,18 @@ _queue-rows file:
 # do rows another dispatcher holds, from its hold or its own copy.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `pick` — also runs `queue-page` after it**, so the page stays current
-# as a side effect instead of needing its own trigger (Q254). Its own exit code
-# is what this returns; a render that fails says so on stderr and fails
-# nothing, since a bad page is not a reason to lose a queue write that already
-# landed. `show` and `running` only read, so neither runs it.
+# `rank`, `tier`, `pick`, `apply` — also runs `queue-page` after it**, so the page
+# stays current as a side effect instead of needing its own trigger (Q254). Its
+# own exit code is what this returns; a render that fails says so on stderr and
+# fails nothing, since a bad page is not a reason to lose a queue write that
+# already landed. `show` and `running` only read, so neither runs it.
 [doc("What to dispatch from docs/queue.md, and the verbs that change it one row at a time: `just queue take` prints their usage.")]
 queue mode="" *args:
     #!/usr/bin/env bash
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|tier|pick)
+        take|add|done|drop|park|after|rank|tier|pick|apply)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
             status=$?
@@ -8134,7 +8142,7 @@ queue mode="" *args:
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, tier, pick, show, running" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, tier, pick, apply, show, running" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
