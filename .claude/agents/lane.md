@@ -18,7 +18,11 @@ for the result: Q206's first lane came back empty because the harness forced
 its report before a backgrounded test run had printed anything, and Q148's
 merger reported three steps into the gate and never pushed. Run the gate as
 one plain Bash call, `timeout` 600000. A job that runs past ten minutes goes
-in chunks of under ten, never in the background.
+in chunks of under ten, never in the background. A run that cannot be chunked
+starts detached with `setsid nohup ... &`, and you wait on it with `timeout 540
+tail --pid=<pid> -f /dev/null`, one foreground call at a time, until it returns
+0 rather than 124. The harness refuses a foreground `sleep`, and the background
+wait it offers instead ends your turn and forces your report (§302).
 
 **Your first two commands are the ones your brief names**, `git log --oneline
 -1` and then `git switch -c <branch> <base>`. A worktree-isolated lane branches
