@@ -7961,7 +7961,9 @@ _queue-rows file:
 #
 # **The order comes from the tier field, not from where a row sits.**
 # `check-queue` makes the two agree, but the fill does not lean on that having
-# run, and its fixtures put a Tier 3 block above Tier 2.5 to show it.
+# run, and its fixtures put a Tier 3 block above Tier 2.5, and Tier 2.2 above
+# Tier 2, to show it. The tiers go 1, 2, 2.2, 2.5, 3, 4 (§307), and a row whose
+# tier is none of them is refused rather than left out of the fill.
 #
 # **Two write sets meet** on the same path, unless both name items in it and the
 # items differ (§230.6); on a directory ending in `/` that holds the other path;
@@ -7972,8 +7974,9 @@ _queue-rows file:
 # it refuses rather than guesses at, and points at `check-queue` for the why.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after`, `rank` and `pick`, with `show` and `running`
-# to read.
+# `done`, `drop`, `park`, `after`, `rank`, `tier` and `pick`, with `show` and
+# `running` to read. `tier` moves an open row to another tier and, like `add`,
+# writes that tier's heading when the file has none (§307).
 # Each takes the lock on the claims file in the git common directory, checks the
 # file as it would be with `check-queue`, and writes only if that passes. `just
 # queue take` with no arguments, or any verb given the wrong ones, prints the
@@ -7987,7 +7990,7 @@ _queue-rows file:
 # do rows another dispatcher holds, from its hold or its own copy.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `pick` — also runs `queue-page` after it**, so the page stays current
+# `rank`, `tier`, `pick` — also runs `queue-page` after it**, so the page stays current
 # as a side effect instead of needing its own trigger (Q254). Its own exit code
 # is what this returns; a render that fails says so on stderr and fails
 # nothing, since a bad page is not a reason to lose a queue write that already
@@ -7998,7 +8001,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|pick)
+        take|add|done|drop|park|after|rank|tier|pick)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
             status=$?
@@ -8008,7 +8011,7 @@ queue mode="" *args:
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, pick, show, running" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, tier, pick, show, running" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
@@ -8027,12 +8030,17 @@ queue mode="" *args:
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" \
         -v slots='{{ queue_slots }}' -v file='{{ queue_file }}' '
-        BEGIN { FS = "\037"; nt = split("1 2 2.5 3 4", tiers, " ") }
+        BEGIN {
+            FS = "\037"
+            nt = split("1 2 2.2 2.5 3 4", tiers, " ")
+            for (t = 1; t <= nt; t++) known[tiers[t]] = 1
+        }
         $1 == "U" { refuse($2, "a fence is never closed"); next }
         $1 != "R" { next }
         $2 == "elsewhere" { e++; eid[e] = $5; est[e] = $7; ews[e] = $9; eraw[e] = $11; heldelse[$5] = e; next }
         $2 == "closedelsewhere" { c++; cst[c] = $7; craw[c] = $11; closedelse[$5] = c; next }
         $4 < 6 { refuse($2, "a row of " $4 " fields"); next }
+        !($6 in known) { refuse($2, "the tier \"" $6 "\""); next }
         {
             r++
             ln[r] = $2; id[r] = $5; tier[r] = $6; st[r] = $7; ws[r] = $9; raw[r] = $11
@@ -8349,9 +8357,11 @@ check-queue-page-selftest:
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
 #
-# **Headings**: the five tiers and `## Closed`, once each and in that order, and
-# no fenced block under anything else, since rows there would be rows nobody
-# ranked. **Rows**: a unique id, a real tier, a state from the grammar, a model,
+# **Headings**: the tiers 1, 2, 2.2, 2.5, 3 and 4 and then `## Closed`, each at
+# most once and in that order, and no fenced block under anything else, since
+# rows there would be rows nobody ranked. `## Closed` must be there; a tier with
+# no rows may leave its heading out, and `just queue add` or `tier` writes it
+# when a row first goes there (§307.3). **Rows**: a unique id, a real tier, a state from the grammar, a model,
 # a write set, and a description whose last word is the section that argues for
 # it. An `after:` names rows that can still finish. An open row sits under its
 # own tier, and a closed one under Closed.
@@ -8377,7 +8387,7 @@ check-queue-page-selftest:
 # Citations are checked against the concatenation of `docs/decisions.d`, the way
 # `check-where-the-work-is` reads it (§179). A file with no rows fails, because
 # it would pass having checked nothing.
-[doc("docs/queue.md is shaped as §230.2 says, and every section its rows cite exists.")]
+[doc("docs/queue.md is shaped as §230.2 and §307 say, and every section its rows cite exists.")]
 check-queue file=queue_file:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -8401,10 +8411,14 @@ _queue-check file decisions:
     } | LC_ALL=C awk -v file='{{ file }}' -v slots='{{ queue_slots }}' '
         BEGIN {
             FS = "\037"
-            split("1 2 2.5 3 4 closed", order, " ")
-            for (i = 1; i <= 6; i++) { rank[order[i]] = i; name[order[i]] = "## Tier " order[i] }
-            name["closed"] = "## Closed"
-            istier["1"] = istier["2"] = istier["2.5"] = istier["3"] = istier["4"] = 1
+            nt = split("1 2 2.2 2.5 3 4", tiers, " ")
+            for (i = 1; i <= nt; i++) {
+                rank[tiers[i]] = i; istier[tiers[i]] = 1
+                headings = headings "Tier " tiers[i] ", "
+                named = named (i == 1 ? "" : i == nt ? " or " : ", ") tiers[i]
+            }
+            rank["closed"] = nt + 1
+            headings = headings "Closed"
         }
         $1 == "P" {
             tracked[$2] = 1
@@ -8418,14 +8432,14 @@ _queue-check file decisions:
             if (k == "") next
             if (k in seen) err($2, "heading \"## " $3 "\" appears twice; the first is on line " seen[k])
             else {
-                if (rank[k] < last) err($2, "heading \"## " $3 "\" is out of order; the six go Tier 1, Tier 2, Tier 2.5, Tier 3, Tier 4, Closed")
+                if (rank[k] < last) err($2, "heading \"## " $3 "\" is out of order; they go " headings)
                 seen[k] = $2
             }
             if (rank[k] > last) last = rank[k]
             next
         }
         $1 == "F" && $3 == "open" && key($4) == "" {
-            err($2, "a fenced block under " ($4 == "" ? "no heading" : "\"## " $4 "\"") ", and only the five tiers and Closed may hold one")
+            err($2, "a fenced block under " ($4 == "" ? "no heading" : "\"## " $4 "\"") ", and only the " nt " tiers and Closed may hold one")
             next
         }
         $1 == "U" { err($2, "this fence is never closed, so every line after it reads as a row"); next }
@@ -8436,7 +8450,7 @@ _queue-check file decisions:
             if (id !~ /^[TDQ][0-9]+$/) err(line, id ": an id is T, D or Q and then a number")
             if (id in at) err(line, id ": the id is used on line " at[id] " too")
             else at[id] = line
-            if (!(tier in istier)) err(line, id ": tier \"" tier "\" is not 1, 2, 2.5, 3 or 4")
+            if (!(tier in istier)) err(line, id ": tier \"" tier "\" is not " named)
             kind = ""
             if (state == "todo") kind = "todo"
             else if (state ~ /^lane:[A-Za-z0-9._\/-]+$/) kind = "lane"
@@ -8485,7 +8499,7 @@ _queue-check file decisions:
                 if (ok) ready++
                 else waiting++
             }
-            for (i = 1; i <= 6; i++) if (!(order[i] in seen)) err("", "heading \"" name[order[i]] "\" is missing")
+            if (!("closed" in seen)) err("", "heading \"## Closed\" is missing")
             if (rows == 0) err("", "has no rows, so there was nothing to check")
             if (bad) { printf "%s: %d problem%s\n", file, bad, (bad == 1 ? "" : "s"); exit 1 }
             printf "%s: %d rows; %d ready, %d waiting, %d running in %d slots, %d parked, %d closed%s\n", file, rows, ready, waiting, running, slots, parked, closedrows, (notheld ? "; " notheld " wait on a Q row this copy does not hold yet" : "")
@@ -8496,7 +8510,7 @@ _queue-check file decisions:
             bad++
         }
         function key(h,    w) {
-            if (h ~ /^Tier (1|2|2\.5|3|4)( |$)/) { split(h, w, " "); return w[2] }
+            if (h ~ /^Tier (1|2|2\.2|2\.5|3|4)( |$)/) { split(h, w, " "); return w[2] }
             if (h ~ /^Closed( |$)/) return "closed"
             return ""
         }
@@ -8528,11 +8542,12 @@ _queue-check file decisions:
 # sound by construction and would pass a check that had stopped checking.
 #
 # The shape half is one good file, then one copy of it per defect `check-queue`
-# names. The fill half is §230.3 case by case: tier order against the order in
-# the file, a row a running lane blocks, two items of one fuse file taken
-# together while the same item twice is not, a directory blocking a file in both
-# directions, `-` fitting beside anything, and `after:` on a running row and on
-# a done one.
+# names, and one copy with an empty tier's heading left out, which passes
+# (§307.3). The fill half is §230.3 case by case: tier order against the order in
+# the file, tier 2.2 included, a row a running lane blocks, two items of one fuse
+# file taken together while the same item twice is not, a directory blocking a
+# file in both directions, `-` fitting beside anything, `after:` on a running row
+# and on a done one, and a tier the fill does not know refused.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -8567,6 +8582,12 @@ check-queue-selftest:
     Q3  2  after:T9  sonnet  docs/new.md  waits on a done row, so it is ready §226.3
     ```
 
+    ## Tier 2.2
+
+    ```
+    Q6  2.2  todo  sonnet  tooling/queue/  changes how the work is done §230
+    ```
+
     ## Tier 2.5
 
     ```
@@ -8594,10 +8615,14 @@ check-queue-selftest:
 
     got=$("$j" _queue-check "$dir/good.md" "$dir/decisions.md" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
-    grep -qF '7 rows; 2 ready, 1 waiting, 1 running in 6 slots, 1 parked, 2 closed' <<<"$got" \
+    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 6 slots, 1 parked, 2 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
     got=$("$j" check-queue "$dir/good.md" 2>&1) \
         || fail "check-queue rejected the good queue against the real decisions"
+    sed '/^## Tier 4$/,+4d' "$dir/good.md" > "$dir/no-tier-4.md"
+    grep -q '^## Tier 4' "$dir/no-tier-4.md" && fail "the fixture without Tier 4 still has its heading"
+    got=$("$j" _queue-check "$dir/no-tier-4.md" "$dir/decisions.md" 2>&1) \
+        || fail "a tier with no rows was refused for leaving its heading out"
 
     refused() {
         sed "$2" "$dir/good.md" > "$dir/$1.md"
@@ -8629,6 +8654,8 @@ check-queue-selftest:
     refused no-section  's/ §226.3$/ §226.9/'                       'cites §226.9'
     refused no-parked   's/parked:§13/parked:§14/'                  'cites §14'
     refused placed      's/^Q3  2 /Q3  3 /'                         'a tier 3 row sits under'
+    refused placed-2.2  's/^Q6  2.2 /Q6  2 /'                       'a tier 2 row sits under "## Tier 2.2"'
+    refused order-2.2   's/^## Tier 2$/X/; s/^## Tier 2.2$/## Tier 2/; s/^X$/## Tier 2.2/' '"## Tier 2" is out of order'
     refused closed-open 's/^Q4  2.5  parked:§13/Q4  2.5  done:abcdef0/' 'a done row sits under'
     refused fields      's/^Q4 .*/Q4  2.5  parked:§13  opus  docs\//' 'five fields and a description'
     refused empty       '/^[TDQ][0-9]/d'                            'has no rows'
@@ -8643,6 +8670,7 @@ check-queue-selftest:
     fence order <<'MD'
     Q30  3  todo  opus  docs/a.md  tier three, written first §230
     Q25  2.5  todo  opus  docs/b.md  tier two and a half §230
+    Q22  2.2  todo  opus  docs/f.md  tier two point two, written above tier two §230
     Q20  2  todo  opus  docs/c.md  tier two §230
     T11  1  todo  opus  docs/d.md  tier one §230
     T12  1  todo  opus  docs/e.md  tier one again §230
@@ -8651,8 +8679,19 @@ check-queue-selftest:
     [ "$(takes)" = "T11 T12 " ] || fail "two slots did not go to the two tier 1 rows"
     grep -qx 'took 2 of 2' <<<"$got" || fail "a full fill did not say it took all it was asked for"
     drive order next 4
-    [ "$(takes)" = "T11 T12 Q20 Q25 " ] \
-        || fail "tier 2.5 was not taken before tier 3, which is written above it in the file"
+    [ "$(takes)" = "T11 T12 Q20 Q22 " ] \
+        || fail "tier 2.2 was not taken after tier 2, which is written below it in the file"
+    drive order next 5
+    [ "$(takes)" = "T11 T12 Q20 Q22 Q25 " ] \
+        || fail "tier 2.5 was not taken after tier 2.2, and before tier 3, which is written above both"
+
+    fence badtier <<'MD'
+    Q1  1  todo  opus  docs/a.md  a row the fill knows §230
+    Q2  5  todo  opus  docs/b.md  a tier the fill does not know §230
+    MD
+    got=$("$j" --set queue_file "$dir/badtier.md" --set queue_running 1 queue next 2 2>&1) \
+        && fail "the fill took from a file holding a row of tier 5, rather than refuse it"
+    grep -qF 'cannot read the tier "5"' <<<"$got" || fail "the fill did not say which tier it could not read"
 
     fence lane <<'MD'
     Q1  1  lane:lane-q1  opus  justfile#queue  running §230

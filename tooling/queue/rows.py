@@ -10,12 +10,17 @@ something other than blanks, and a heading is `## ` outside a fence.
 
 import re
 
-TIERS = ["1", "2", "2.5", "3", "4"]
+TIERS_IN_ORDER = ["1", "2", "2.2", "2.5", "3", "4"]
+# The queue page's tiers. tooling/queue-page/render.py has a label and a colour
+# for five and fails on any sixth, so it is handed the five until it has one
+# for 2.2 too (§307.4).
+TIERS = [tier for tier in TIERS_IN_ORDER if tier != "2.2"]
 CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
+TIER_HEADING = re.compile(r"^Tier (" + "|".join(re.escape(tier) for tier in TIERS_IN_ORDER) + r")( |$)")
 
 
 def heading_key(heading):
-    tier = re.match(r"^Tier (1|2|2\.5|3|4)( |$)", heading)
+    tier = TIER_HEADING.match(heading)
     if tier:
         return tier.group(1)
     if re.match(r"^Closed( |$)", heading):
@@ -44,6 +49,13 @@ class Row:
         assert match, f"a row of fewer than three fields reached with_state: {self.text!r}"
         return match.group(1) + state + match.group(3)
 
+    def with_tier(self, tier):
+        """The row with its tier field replaced, the columns after it left where they stood."""
+        match = re.match(r"^(\s*\S+\s+)(\S+)(\s+)(.*)$", self.text)
+        assert match, f"a row of fewer than three fields reached with_tier: {self.text!r}"
+        gap = max(1, len(match.group(2)) + len(match.group(3)) - len(tier))
+        return match.group(1) + tier + " " * gap + match.group(4)
+
 
 class Queue:
     """The file as lines, with every row and fenced block located.
@@ -66,6 +78,7 @@ class Queue:
         self.block_order = []
         self.unclosed = None
         self.conflicted = []
+        self.headings = []
         head = ""
         opened_under = {}
         inside = None
@@ -91,6 +104,7 @@ class Queue:
                 continue
             if line.startswith("## "):
                 head = line[3:]
+                self.headings.append((index, heading_key(head)))
         if inside is not None:
             self.unclosed = self.blocks[inside][0]
 
@@ -107,6 +121,26 @@ class Queue:
             if block[0] == key:
                 return block
         return None
+
+    def block_for_tier(self, tier):
+        """The block under `## Tier <tier>`, written first, empty, if the file has none.
+
+        A tier with no rows may leave its heading out (§307.3), so a verb
+        putting a row in one writes it. It goes just above the first heading
+        that comes after it in TIERS_IN_ORDER, or above `## Closed`, which keeps
+        the order `check-queue` holds. None when the file has neither.
+        """
+        assert tier in TIERS_IN_ORDER, f"{tier!r} is not a tier; the verb checks that before asking"
+        block = self.block_of_key(tier)
+        if block is not None:
+            return block
+        later = set(TIERS_IN_ORDER[TIERS_IN_ORDER.index(tier) + 1:]) | {"closed"}
+        above = next((index for index, key in self.headings if key in later), None)
+        if above is None:
+            return None
+        self.lines[above:above] = [f"## Tier {tier}", "", "```", "```", ""]
+        self.parse()
+        return self.block_of_key(tier)
 
     def replace(self, row, text):
         self.lines[row.index] = text
