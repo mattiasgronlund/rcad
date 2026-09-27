@@ -4158,6 +4158,59 @@ fuzz-overnight window="28800":
     trap - EXIT
     copy_out
 
+    # The reader's STEP-corpus finds, merged out of tonight's scratch directory
+    # and into the small persistent corpus `fuzz-target` seeds the next night
+    # from, at a smaller `-max_len` (docs/decisions.md §295.6, §295.7). Gated on
+    # the scratch directory existing rather than on `RCAD_STEP_CORPUS` again:
+    # `fuzz-target` only ever creates it inside the branch that already checked
+    # `RCAD_STEP_CORPUS` is a real directory, so its absence already says a
+    # night with nothing fetched there took no scratch branch at all — the
+    # night that keeps today's behaviour, with neither a scratch directory nor
+    # a merge.
+    reader_target="no_step_file_makes_the_reader_panic"
+    reader_persistent="{{fuzz_corpus_root}}/$reader_target"
+    reader_scratch="{{fuzz_corpus_root}}/$reader_target-scratch"
+    if [ -d "$reader_scratch" ]; then
+        mkdir -p "$reader_persistent"
+        scratch_bytes=$(du -sb "$reader_scratch" 2>/dev/null | cut -f1)
+        persistent_files_before=$(find "$reader_persistent" -type f | wc -l)
+        {
+            echo "reader corpus merge: scratch is ${scratch_bytes:-0} bytes; persistent has $persistent_files_before files before merging"
+        } >"$night/reader-corpus-merge.log"
+
+        # Merged into a fresh copy of the persistent corpus, and only swapped
+        # in on success, so a merge that times out or crashes partway through
+        # never leaves the persistent corpus half-written — libFuzzer's merge
+        # mutates its first argument in place as it goes, and that argument
+        # must never be the real thing. A merge that fails this way is not
+        # retried: tonight's scratch directory is moved aside with a
+        # timestamp instead of being deleted, since `fuzz-target` always
+        # starts the next night from a fresh, empty scratch directory and
+        # would otherwise silently overwrite it — moving it aside is what
+        # keeps tonight's un-merged finds around for a person to look at.
+        merge_tmp=$(mktemp -d "{{fuzz_corpus_root}}/$reader_target-merge-tmp.XXXXXX")
+        cp -R "$reader_persistent/." "$merge_tmp/" 2>/dev/null || true
+        if (cd fuzz && CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
+                RUSTFLAGS="-C target-cpu=x86-64-v3" \
+                cargo +nightly fuzz run "$reader_target" -- \
+                -merge=1 -max_len=5110 "$merge_tmp" "$reader_scratch") \
+                >>"$night/reader-corpus-merge.log" 2>&1; then
+            rm -rf "$reader_persistent"
+            mv "$merge_tmp" "$reader_persistent"
+            rm -rf "$reader_scratch"
+            persistent_files_after=$(find "$reader_persistent" -type f | wc -l)
+            echo "reader corpus merge: persistent has $persistent_files_after files after merging" \
+                >>"$night/reader-corpus-merge.log"
+        else
+            rm -rf "$merge_tmp"
+            mv "$reader_scratch" "$reader_scratch-failed-$(date +%Y%m%d%H%M%S)"
+            echo "READER CORPUS MERGE FAILED — see $night/reader-corpus-merge.log; the persistent corpus was left as it was, and tonight's scratch directory was moved aside rather than merged or discarded" \
+                >>"$night/reader-corpus-merge.log"
+            echo "reader corpus merge FAILED — see $night/reader-corpus-merge.log"
+            to_look_at+=("reader-merge:failed")
+        fi
+    fi
+
     # Counted after the loop and named in the summary, because a copy nobody is
     # told about is very nearly as lost as the original was. A clean night writes
     # slow units too — the night of 2026-09-13 wrote three and said "nothing
@@ -4314,6 +4367,11 @@ fuzz duration="60" corpus_root="" fork="0": (fuzz-target "where_two_surfaces_cro
 # nothing and has only ever grown itself, so a night never once started from a
 # real file. `fuzz-target` passes the directory itself, read-only and last, and
 # skips it outright when nothing has been fetched there yet (§226.1).
+#
+# `corpus_root` is passed straight through unchanged; it is `fuzz-target`'s own
+# STEP-corpus branch that turns it into a scratch-plus-persistent pair rather
+# than the one growing writable directory it used to be (docs/decisions.md
+# §295.7) — this recipe does not need to know the difference.
 [doc("Fuzz the Part 21 reader over arbitrary bytes.")]
 fuzz-reader duration="60" corpus_root="" fork="0": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root "" fork "step.dict" RCAD_STEP_CORPUS)
 
@@ -4392,10 +4450,28 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="" step_corp
         max_len_flag=(-max_len={{max_len}})
     fi
     if [ -n "{{step_corpus}}" ] && [ -d "{{step_corpus}}" ]; then
-        if [ ${#corpus[@]} -eq 0 ]; then
-            corpus=("corpus/{{target}}")
+        # §295.7: this branch used to hand libFuzzer `{{corpus_root}}/{{target}}`
+        # itself as the writable directory — the same directory the *next*
+        # night starts from, and the one §291.3 measured growing ≈18.5 MB/h.
+        # Below, that directory goes back to being a read-only seed: libFuzzer
+        # writes into a scratch directory instead, fresh every night and never
+        # handed back, and `fuzz-overnight` folds its finds into
+        # `{{corpus_root}}/{{target}}` with `-merge=1 -max_len=5110` once this
+        # run is done, before throwing the scratch directory away
+        # (docs/decisions.md §295.6, §295.7). A hand run with no `corpus_root`
+        # has nowhere to put a scratch directory and keeps writing straight
+        # into the tracked corpus, as before.
+        if [ -n "{{corpus_root}}" ]; then
+            scratch="{{corpus_root}}/{{target}}-scratch"
+            rm -rf "$scratch"
+            mkdir -p "$scratch"
+            corpus=("$scratch" "{{corpus_root}}/{{target}}" "corpus/{{target}}" "{{step_corpus}}")
+        else
+            if [ ${#corpus[@]} -eq 0 ]; then
+                corpus=("corpus/{{target}}")
+            fi
+            corpus+=("{{step_corpus}}")
         fi
-        corpus+=("{{step_corpus}}")
         # **Pinned here, in this branch, and not in `max_len` or in
         # `fuzz-reader`'s own arguments** (docs/decisions.md §264.7): with the
         # whole STEP corpus seeded in and no pin, libFuzzer derives its cap from
