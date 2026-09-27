@@ -4818,13 +4818,16 @@ fn relation_of_two_lines(
 mod tests {
     use core::cmp::Ordering;
 
-    use rcad_geom::{Isometry, Plane, Point, Scale, Surface, Vector};
-    use rcad_predicates::{Decision, Policy, ProvenanceLog, orient3d};
+    use rcad_geom::{
+        Isometry, MeetOfThree, Plane, Point, Scale, Surface, Vector, meet_of_three_surfaces,
+    };
+    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, orient3d};
 
     use super::{
-        Piece, prove_the_hinted_order, split_a_face, the_other_way, where_the_crossing_starts,
+        Arrangement, Piece, as_exact_as_it_is, canonical_cut_surfaces, prove_the_hinted_order,
+        split_a_face, the_other_way, three_planes_faced_the_one_way, where_the_crossing_starts,
     };
-    use crate::fuse::bake::{BakedFace, bake};
+    use crate::fuse::bake::{BakedFace, BakedSolid, bake};
     use crate::fuse::{FaceMeet, MeetPoint};
     use crate::{Model, ProfileBuilder, SolidKey};
 
@@ -5385,6 +5388,255 @@ mod tests {
                 .expect("the z axis is a unit normal"),
         );
         where_the_crossing_starts(&flat, &flat, Point::new(f64::INFINITY, 0.0, 0.0));
+    }
+
+    /// A block whose side grazes a ball, with the block's corner on the ball.
+    /// The side `y = 2⁻²⁵` and the ball of radius `1 + 2⁻⁵¹` meet on the face
+    /// `x = −1` at `z = ±2⁻⁵¹`, `2⁻⁵⁰` apart, and the corner is the upper of the
+    /// two. Both lie inside the room writing the corner down cost, `2⁻⁴⁶`, so
+    /// nothing says which of them the corner is. Neither is folded into it: both
+    /// stay nodes, and whether they are one point is the policy's to say
+    /// (§248.6, §288.5).
+    ///
+    /// **No fuse sees this.** Every fuse of this block and ball refuses on the
+    /// piece of the ball between the two places, fold or no fold (§288.3), so
+    /// this test, and not a fuse, is what holds `count == 1` and the second
+    /// place's check in place (§288.4).
+    #[test]
+    fn two_places_of_one_meet_inside_a_corners_room_are_neither_folded_into_it() {
+        let place = f64::powi(2.0, -51);
+        let edge = f64::powi(2.0, -25);
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let square = ProfileBuilder::new(vec![
+            [-4.0, edge],
+            [-1.0, edge],
+            [-1.0, edge + 3.0],
+            [-4.0, edge + 3.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+        let block = model
+            .add_extrusion(
+                &square,
+                4.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, place)).expect("a finite shift"),
+            )
+            .expect("a positive height");
+        let ball = model
+            .add_ball(1.0 + place, &Isometry::identity())
+            .expect("a positive radius");
+        let [block, ball] = baked(&model, [block, ball]);
+        let face = cut_by_the_ball(the_face_facing(&block, [1.0, 0.0, 0.0]), &ball);
+
+        let arrangement = drawn_up_to_its_corners(&face);
+        let side = the_crossing_along(&arrangement, the_face_facing(&block, [0.0, -1.0, 0.0]));
+        let round = the_crossing_along(&arrangement, ball.faces[0].clone());
+
+        assert!(
+            is_a_corner_on_both(&arrangement, [-1.0, edge, place], side, round),
+            "the fold is only asked about a corner on both crossings"
+        );
+        assert_eq!(
+            what_the_fold_says(&arrangement, side, round),
+            [([-1.0, edge, -place], false), ([-1.0, edge, place], false)],
+            "the corner's own place has the other one inside its room, and the other \
+             one is not the corner at all"
+        );
+    }
+
+    /// A ball of radius `13s` at `(3s, 4s, 12s)` runs through the corner of a
+    /// unit cube at the origin, and the cube's edges there meet it again at
+    /// `6s`, `8s` and `24s`. At `s = 2⁻⁴⁸` the nearest of those is one and a
+    /// half times the room writing the corner down cost, `2⁻⁴⁶`, from the
+    /// corner. So the room holds the corner's own place alone, and the corner
+    /// is that place. A room grown one and a half times takes in the second
+    /// place as well, and then the corner's own place stays a node of its own
+    /// (§253, §288.4).
+    ///
+    /// **No fuse sees this either.** With the room grown a thousand times,
+    /// every fuse of this cube and ball refused the way it does without, and
+    /// it refuses on the ball's piece (§288.3).
+    #[test]
+    fn a_corner_is_its_own_place_when_the_second_place_is_outside_its_room() {
+        let s = f64::powi(2.0, -48);
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let cube = model
+            .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a unit cube");
+        let ball = model
+            .add_ball(
+                13.0 * s,
+                &Isometry::translation(Vector::new(3.0 * s, 4.0 * s, 12.0 * s))
+                    .expect("a finite shift"),
+            )
+            .expect("a positive radius");
+        let [cube, ball] = baked(&model, [cube, ball]);
+        let bottom = cut_by_the_ball(the_face_facing(&cube, [0.0, 0.0, -1.0]), &ball);
+
+        let arrangement = drawn_up_to_its_corners(&bottom);
+        let round = the_crossing_along(&arrangement, ball.faces[0].clone());
+
+        for (wall, second) in [
+            ([-1.0, 0.0, 0.0], [0.0, 8.0 * s, 0.0]),
+            ([0.0, -1.0, 0.0], [6.0 * s, 0.0, 0.0]),
+        ] {
+            let wall = the_crossing_along(&arrangement, the_face_facing(&cube, wall));
+            assert!(
+                is_a_corner_on_both(&arrangement, [0.0; 3], wall, round),
+                "the fold is only asked about a corner on both crossings"
+            );
+            assert_eq!(
+                what_the_fold_says(&arrangement, wall, round),
+                [([0.0; 3], true), (second, false)],
+                "the corner is its own place, and the second place is outside its room"
+            );
+        }
+    }
+
+    fn baked<const N: usize>(model: &Model, solids: [SolidKey; N]) -> [BakedSolid; N] {
+        bake(
+            model,
+            &solids,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("they bake")
+        .try_into()
+        .unwrap_or_else(|_| panic!("one baked solid for each solid handed in"))
+    }
+
+    /// The flat face of `solid` whose normal is `outward`.
+    fn the_face_facing(solid: &BakedSolid, outward: [f64; 3]) -> BakedFace {
+        solid
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface
+                    .as_plane()
+                    .is_some_and(|flat| flat.normal().components() == outward)
+            })
+            .unwrap_or_else(|| panic!("a face facing {outward:?}"))
+            .clone()
+    }
+
+    fn cut_by_the_ball(mut face: BakedFace, ball: &BakedSolid) -> BakedFace {
+        let [skin] = ball.faces.as_slice() else {
+            panic!("a ball is one face");
+        };
+        face.cuts = vec![skin.surface];
+        face
+    }
+
+    /// The arrangement as `place_the_meets` first sees it: every crossing
+    /// drawn, a node at each corner of the face and no meet placed yet.
+    /// Put together here rather than by `Arrangement::of`, because the steps
+    /// after `place_the_meets` fold nodes together, and it is the corners as
+    /// `a_corner_is_this_place` is asked about them that these tests read.
+    fn drawn_up_to_its_corners(face: &BakedFace) -> Arrangement<'_> {
+        let mut arrangement = Arrangement {
+            face,
+            surface: face.surface,
+            crossings: Vec::new(),
+            nodes: Vec::new(),
+            arcs: Vec::new(),
+            drawn_in_full: Vec::new(),
+            cut_crossings: Vec::new(),
+            crossing_of_edge: Vec::new(),
+            node_of_corner: Vec::new(),
+            node_of_the_end: Vec::new(),
+            leaving: Vec::new(),
+            cycle_of: Vec::new(),
+            cycles: Vec::new(),
+            winding_of_cycle: Vec::new(),
+            cell_of: Vec::new(),
+            cells: Vec::new(),
+            winding: Vec::new(),
+        };
+        let mut log = ProvenanceLog::new();
+        arrangement
+            .draw_the_crossings(
+                &canonical_cut_surfaces(face),
+                &Policy::certified(),
+                &mut log,
+            )
+            .expect("every crossing here is a line or a circle");
+        arrangement
+            .place_the_corners(&Policy::certified(), &mut log)
+            .expect("every corner here is exactly on or exactly off each surface");
+        assert!(
+            log.is_empty(),
+            "nothing here needed a policy, so what follows holds under any: {log:?}"
+        );
+        arrangement
+    }
+
+    fn the_crossing_along(arrangement: &Arrangement<'_>, neighbour: BakedFace) -> usize {
+        arrangement
+            .crossings
+            .iter()
+            .position(|crossing| crossing.partner == neighbour.surface)
+            .expect("the face meets that surface")
+    }
+
+    fn is_a_corner_on_both(
+        arrangement: &Arrangement<'_>,
+        corner: [f64; 3],
+        first: usize,
+        second: usize,
+    ) -> bool {
+        arrangement.nodes.iter().any(|node| {
+            node.vertex.is_some()
+                && node.point == PredicatePoint::from(corner)
+                && node.crossings.contains(&first)
+                && node.crossings.contains(&second)
+        })
+    }
+
+    /// What `a_corner_is_this_place` says of each place where the face's own
+    /// surface and the partners of `first` and `second` meet, worked out the
+    /// way `place_the_meets` works them out, in the order the places sort in.
+    fn what_the_fold_says(
+        arrangement: &Arrangement<'_>,
+        first: usize,
+        second: usize,
+    ) -> Vec<([f64; 3], bool)> {
+        assert!(
+            first < second,
+            "`place_the_meets` asks about each pair once, the lower crossing first"
+        );
+        let asked = three_planes_faced_the_one_way([
+            arrangement.surface,
+            arrangement.crossings[first].partner,
+            arrangement.crossings[second].partner,
+        ]);
+        let mut log = ProvenanceLog::new();
+        let MeetOfThree::At(places) = meet_of_three_surfaces(
+            [&asked[0], &asked[1], &asked[2]],
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("a plane, a plane and a ball meet where a certified policy can say") else {
+            panic!("the two crossings meet on the face's surface");
+        };
+        assert!(log.is_empty(), "no policy was asked: {log:?}");
+        let places: Vec<PredicatePoint> = places.into_iter().map(as_exact_as_it_is).collect();
+        let mut said: Vec<([f64; 3], bool)> = places
+            .iter()
+            .map(|&place| {
+                (
+                    place
+                        .exact_coordinates()
+                        .expect("every place here lands on an f64"),
+                    arrangement.a_corner_is_this_place(first, second, place, &places),
+                )
+            })
+            .collect();
+        said.sort_by(|one, other| {
+            one.0
+                .partial_cmp(&other.0)
+                .expect("a place is made of numbers")
+        });
+        said
     }
 }
 
