@@ -63,9 +63,15 @@ in `needs_judgement`.
    item of the "what this leaves" of a section the merge brings (§230.7). §N is
    that section, or the one the row cites. Skip what is already a row — `just
    queue` lists them — and use `mise exec -- just queue after <id> <id>` for
-   one that waits on another. Tiers are §230.1's. Opus for a numerical
-   refusal, a published bound or a claim of impossibility; Sonnet for a replay,
-   a fuzz artifact, a bisect or a sweep.
+   one that waits on another. Tiers are §230.1's, with §307's 2.2 between 2
+   and 2.5: a row that changes how the work is done — the queue and its verbs,
+   the lanes workflow and its roles, hooks, skills, `CLAUDE.md`, a recipe that
+   is neither a test nor a fuzz night — goes in 2.2, never in 1. Opus for a
+   numerical refusal, a published bound or a claim of impossibility; Sonnet for
+   a replay, a fuzz artifact, a bisect or a sweep. A row your brief or the
+   lane's report says belongs in another tier moves with `mise exec -- just
+   queue tier <id> <tier>`, which writes that tier's heading if the file has
+   none.
 5. If §0 names what this merge closes (`mise exec -- just decision 0`), edit
    §0 in this same commit (§172.5).
 6. `mise exec -- just check-queue`.

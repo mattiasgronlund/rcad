@@ -6,18 +6,22 @@ argument-hint: "A row id to take first, or nothing to take what `just queue next
 
 # Filling the lane slots from the queue
 
-`docs/queue.md` holds every open item as a row, in the five tiers of
-`docs/decisions.md` §230.1. **Every free slot takes the highest ready row that
+`docs/queue.md` holds every open item as a row, in the tiers of
+`docs/decisions.md` §230.1 and §307. **Every free slot takes the highest ready row that
 fits** (§230.3), and a slot is refilled when its own lane finishes, not when a
 batch does (§230.4). The cap is six slots, verifiers and read-only rows
 included (§230.8).
 
 **`just queue` is what to dispatch next, and `just queue next` is what the free
 slots take.** Every open item is a row of `docs/queue.md` — id, tier, state,
-model, write set, and a line ending in the section behind it — in five tiers:
-finding defects better, defects, slow runs, corpus files, new functionality.
-The dispatcher writes the file and a lane never does. `check-queue` holds every
-row to its shape in the gate. `docs/decisions.md` §230.
+model, write set, and a line ending in the section behind it — in six tiers:
+1 finding defects better, 2 defects, 2.2 how the work is done, 2.5 slow runs,
+3 corpus files, 4 new functionality. A row about the queue and its verbs, the
+lanes workflow and its roles, hooks, skills, `CLAUDE.md`, or a recipe that is
+neither a test nor a fuzz night is tier 2.2, not tier 1 (§307.1); `just queue
+tier <id> <tier>` moves one filed elsewhere. The dispatcher writes the file and
+a lane never does. `check-queue` holds every row to its shape in the gate.
+`docs/decisions.md` §230.
 
 The rules below step 8 are the rest of what only a dispatcher needs: the
 recipes the shared skills name, the plan, merging, CI and the Actions
