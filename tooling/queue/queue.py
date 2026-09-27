@@ -493,7 +493,7 @@ def already_landed(sha):
     return False
 
 
-def has_a_tree(branch, branches, trees):
+def has_a_tree(branch, branches, trees, claimed):
     """Whether some currently locked tree is this row's, once its own branch's tree is gone (§263.4, §299).
 
     A verifier's tree is detached (§266.2), so it carries no branch to match; a
@@ -504,29 +504,61 @@ def has_a_tree(branch, branches, trees):
     landed branch still held is a release nobody wrote (a stale claim, §263.4),
     not a live run, and attributing it to some unrelated detached tree would
     hide that stale hold instead of counting it.
+
+    `claimed` collects the path of every detached tree an ancestry match has
+    already used, so two rows checked in the same `running` call never both
+    claim the one tree.
+
+    Returns `None`, rather than `False`, when the branch has been deleted
+    outright: `git rev-parse` can no longer read a tip to test ancestry
+    against at all, which a merely-unstarted or merely-gone-worktree row never
+    hits (§299.3). `running` resolves that case itself, from what is left of
+    the detached trees once every row with a live branch has claimed its own.
     """
     if branch in branches:
         return True
     if branch.startswith("lane-") and f"merge-{branch[len('lane-'):]}" in branches:
         return True
     tip = branch_tip(branch)
-    if tip is None or already_landed(tip):
+    if tip is None:
+        return None
+    if already_landed(tip):
         return False
-    return any(tree.is_lane and tree.branch == "(detached)" and is_ancestor(tip, tree.head)
-               for tree in trees)
+    for tree in trees:
+        if tree.is_lane and tree.branch == "(detached)" and tree.path not in claimed \
+                and is_ancestor(tip, tree.head):
+            claimed.add(tree.path)
+            return True
+    return False
 
 
 def running(here, args):
     """What holds a slot on this machine: every lane tree an agent holds, and every hold with no tree yet.
+
+    A row whose lane branch is deleted outright (§299.3, Q234) leaves
+    `has_a_tree` nothing to test ancestry against, so those rows are set aside
+    and matched against whatever detached tree is left once every other row
+    has claimed its own -- one row to one tree, so a row that really has none
+    left still gets its fallback line, and two such rows never collapse onto
+    one slot.
 
     `--count` prints the number alone, for `queue next`.
     """
     trees = here.trees()
     counted = [(tree.branch, tree.path) for tree in trees if tree.is_lane]
     branches = {branch for branch, _ in counted}
+    claimed = set()
+    branch_gone = []
     for row_id, hold in sorted(Claims(here.claims).holds().items()):
-        if not has_a_tree(hold["branch"], branches, trees):
+        found = has_a_tree(hold["branch"], branches, trees, claimed)
+        if found is None:
+            branch_gone.append((row_id, hold))
+        elif not found:
             counted.append((hold["branch"], f"{row_id} taken from {hold['tree']}, no tree yet"))
+    spare = sum(1 for tree in trees
+                if tree.is_lane and tree.branch == "(detached)" and tree.path not in claimed)
+    for row_id, hold in branch_gone[spare:]:
+        counted.append((hold["branch"], f"{row_id} taken from {hold['tree']}, no tree yet"))
     if args == ["--count"]:
         print(len(counted))
         return

@@ -8430,6 +8430,43 @@ check-queue-api-selftest:
     grep -qxF "(detached)  $verify_gone2" <<<"$got" || fail "the second row's verifier tree dropped out of running"
     grep -q "^lane-gone  .*no tree yet" <<<"$got" && fail "the first held row was still counted as treeless beside its verifier"
     grep -q "^lane-gone-2  .*no tree yet" <<<"$got" && fail "two rows whose runs are each held collapsed onto one slot"
+
+    # §299.3's gap: the branch is deleted outright, not just its worktree
+    # removed, while its verifier's detached tree is still held. `has_a_tree`
+    # can no longer read a tip to test ancestry against, so `running` must
+    # still count this row's tree once -- not the tree, and again as "no tree
+    # yet" because the branch it was looking for is gone.
+    gone3="$lanes/gone-work-3"
+    g "$hub" worktree add -q -b lane-gone-3 "$gone3" main
+    g "$gone3" commit -q --allow-empty -m "lane-gone-3's own commit"
+    g "$hub" worktree remove --force "$gone3"
+    verify_gone3="$lanes/verify-gone-3"
+    g "$hub" worktree add -q --detach "$verify_gone3" lane-gone-3 && lock "$verify_gone3"
+    g "$hub" branch -D lane-gone-3 >/dev/null
+    got=$(q "$hub" add 3 opus - "a row whose lane branch is deleted outright §230" 2>&1) || fail "add for the deleted-branch row failed"
+    q_gone3=$got
+    got=$(q "$hub" take "$q_gone3" lane-gone-3 2>&1) || fail "take could not hold $q_gone3 on a branch that is about to be deleted"
+    got=$(q "$hub" running 2>&1) || fail "running failed with a lane branch deleted outright and its verifier held"
+    grep -qxF "(detached)  $verify_gone3" <<<"$got" || fail "the verifier's detached tree was not counted once its branch was deleted"
+    grep -q "^lane-gone-3  .*no tree yet" <<<"$got" && fail "a row whose branch is deleted outright was counted again as treeless"
+
+    # The reverse miscount, once more: two rows in this same state (branch
+    # gone outright) must not collapse onto one slot either.
+    gone4="$lanes/gone-work-4"
+    g "$hub" worktree add -q -b lane-gone-4 "$gone4" main
+    g "$gone4" commit -q --allow-empty -m "lane-gone-4's own commit"
+    g "$hub" worktree remove --force "$gone4"
+    verify_gone4="$lanes/verify-gone-4"
+    g "$hub" worktree add -q --detach "$verify_gone4" lane-gone-4 && lock "$verify_gone4"
+    g "$hub" branch -D lane-gone-4 >/dev/null
+    got=$(q "$hub" add 3 opus - "a second row whose lane branch is deleted outright §230" 2>&1) || fail "add for the second deleted-branch row failed"
+    q_gone4=$got
+    got=$(q "$hub" take "$q_gone4" lane-gone-4 2>&1) || fail "take could not hold $q_gone4 on a branch that is about to be deleted"
+    got=$(q "$hub" running 2>&1) || fail "running failed with two rows each deleted outright"
+    grep -qxF "(detached)  $verify_gone3" <<<"$got" || fail "the first deleted-branch row's verifier tree dropped out of running"
+    grep -qxF "(detached)  $verify_gone4" <<<"$got" || fail "the second deleted-branch row's verifier tree dropped out of running"
+    grep -q "^lane-gone-3  .*no tree yet" <<<"$got" && fail "the first deleted-branch row was still counted as treeless beside its verifier"
+    grep -q "^lane-gone-4  .*no tree yet" <<<"$got" && fail "two deleted-branch rows collapsed onto one slot"
     exit 0
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it
