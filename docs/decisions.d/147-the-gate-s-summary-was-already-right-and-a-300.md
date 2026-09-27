@@ -85,7 +85,8 @@ through `clean-targets`, where the nine minutes are real.
 
 **Foreground `sleep` is not blocked in this harness**, whatever the Bash tool's
 own description says — it was tested. So the sentence in `CLAUDE.md` is the only
-thing standing between a session and another `sleep 240; tail`.
+thing standing between a session and another `sleep 240; tail`. **No longer
+true since at least 2026-09-27: the harness refuses it now (§302).**
 
 ### 147.5 What the test had to be able to do
 

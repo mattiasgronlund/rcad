@@ -108,9 +108,9 @@ summary block useless. Never write down a gate you have not read.
 pipe's last command's, so a failed gate reads as 0.
 
 **Never write a wait loop around it** — no `until ! pgrep -f 'just gate'`, no
-`sleep 240; tail`. A foreground call already waits. Foreground `sleep` is
-**not** blocked in this harness, so this paragraph is the only thing stopping
-you. The one case that can reach the nine minutes the recipe's `[doc]` names is
+`sleep 240; tail`. A foreground call already waits. The harness refuses a
+foreground `sleep` now, but not a loop of anything else, so this paragraph is
+still what stops you (§302). The one case that can reach the nine minutes the recipe's `[doc]` names is
 a cold tree — a fresh worktree, or just after `just clean-targets`. There, pass
 `run_in_background: true` and let the harness wake you when it exits; that costs
 two calls instead of one, which is still fewer than polling. `docs/decisions.md`
