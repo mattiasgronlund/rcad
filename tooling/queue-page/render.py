@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """Render docs/queue.md's history and current state as one HTML page (Q254).
 
-`just queue-page [out-dir]` runs this after every queue verb that writes, and
-`just ff-main` runs it too, so the page stays current as a side effect of the
-queue work rather than needing its own trigger. It reads **main's** copy of
-`docs/queue.md` — never this worktree's own, which may sit on a lane branch —
-plus the claims file `tooling/queue/queue.py` also reads, and writes a
-self-contained page: two SVG charts of the queue's shape over every commit of
-`docs/queue.md` on main's first-parent line, then the current ready, running
-and lately-closed rows, and rows added against rows closed per day.
-`docs/decisions.md` §230, §263.
+`just queue-page` runs this, writing to `$RCAD_QUEUE_PAGE_DIR` (default
+`~/rcad-queue-page`). The `queue` recipe runs `just queue-page` after every
+verb that writes, and so does `ff-main`, so the page stays current as a side
+effect of the queue work rather than needing its own trigger. It reads
+**main's** copy of `docs/queue.md` — never this worktree's own, which may sit
+on a lane branch — plus the claims file `tooling/queue/queue.py` also reads,
+and writes a self-contained page: two SVG charts of the queue's shape over
+every commit of `docs/queue.md` on main's first-parent line, then the current
+ready, running and lately-closed rows, and rows added against rows closed per
+day. `docs/decisions.md` §230, §263.
 
 The only state this keeps across runs is `<out>/.history-cache.json`, one
 entry per commit sha already tallied. Recomputing every commit on every write
 would make the render the queue pays for grow with the queue's own history;
 a sha's tally never changes once it is written, so the cache never goes stale.
+Measured against the real history (166 first-parent commits touching
+docs/queue.md): 2.9s cold, 0.6s warm.
 
 A failure here — no `main` here, no commit ever touched the file — is said on
 stderr and returned as a nonzero exit, never raised past `main`: the caller
