@@ -51,8 +51,15 @@ fn the_intersection_is_a_piece_of_the_ball_cut_by_three_faces_along_arcs() {
     let [solid] = solids.as_slice() else {
         panic!("one piece of the ball, and not {solids:?}");
     };
-    let faces: Vec<_> = model.solid(*solid).expect("the fuse's own key").faces().collect();
-    let flat = faces.iter().filter(|face| face.surface().as_plane().is_some()).count();
+    let faces: Vec<_> = model
+        .solid(*solid)
+        .expect("the fuse's own key")
+        .faces()
+        .collect();
+    let flat = faces
+        .iter()
+        .filter(|face| face.surface().as_plane().is_some())
+        .count();
     assert!(
         flat == 3 && faces.len() > flat,
         "three of the block's faces and the ball's skin: {flat} flat of {}",
@@ -95,7 +102,9 @@ fn a_turned_block_and_a_ball_at_its_corner() -> (Model, SolidKey, SolidKey) {
     let block = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube");
-    model.place_solid(block, &turn).expect("this model made the key");
+    model
+        .place_solid(block, &turn)
+        .expect("this model made the key");
     let centre = turn.apply_to_point(Point::new(0.7, 0.65, 0.6));
     let ball = model
         .add_ball(
