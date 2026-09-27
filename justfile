@@ -4158,6 +4158,76 @@ fuzz-overnight window="28800":
     trap - EXIT
     copy_out
 
+    # The reader's STEP-corpus finds, merged out of tonight's scratch directory
+    # and into the small persistent corpus `fuzz-target` seeds the next night
+    # from, at a smaller `-max_len` (docs/decisions.md §295.6, §295.7). Gated on
+    # the scratch directory existing rather than on `RCAD_STEP_CORPUS` again:
+    # `fuzz-target` only ever creates it inside the branch that already checked
+    # `RCAD_STEP_CORPUS` is a real directory, so its absence already says a
+    # night with nothing fetched there took no scratch branch at all — the
+    # night that keeps today's behaviour, with neither a scratch directory nor
+    # a merge.
+    reader_target="no_step_file_makes_the_reader_panic"
+    reader_persistent="{{fuzz_corpus_root}}/$reader_target"
+    reader_scratch="{{fuzz_corpus_root}}/$reader_target-scratch"
+    if [ -d "$reader_scratch" ]; then
+        mkdir -p "$reader_persistent"
+        scratch_bytes=$(du -sb "$reader_scratch" 2>/dev/null | cut -f1)
+        persistent_files_before=$(find "$reader_persistent" -type f | wc -l)
+        {
+            echo "reader corpus merge: scratch is ${scratch_bytes:-0} bytes; persistent has $persistent_files_before files before merging"
+        } >"$night/reader-corpus-merge.log"
+
+        # Merged into a fresh copy of the persistent corpus, and only swapped
+        # in on success, so a merge that times out or crashes partway through
+        # never leaves the persistent corpus half-written — libFuzzer's merge
+        # mutates its first argument in place as it goes, and that argument
+        # must never be the real thing. A merge that fails this way is not
+        # retried: tonight's scratch directory is moved aside with a
+        # timestamp instead of being deleted, since `fuzz-target` always
+        # starts the next night from a fresh, empty scratch directory and
+        # would otherwise silently overwrite it — moving it aside is what
+        # keeps tonight's un-merged finds around for a person to look at.
+        merge_tmp=$(mktemp -d "{{fuzz_corpus_root}}/$reader_target-merge-tmp.XXXXXX")
+        cp -R "$reader_persistent/." "$merge_tmp/" 2>/dev/null || true
+
+        # Bounded, because libFuzzer's own `-merge=1` carries no deadline of
+        # its own and this runs after the window above is already spent —
+        # every second it takes is a second off `rcad-fuzz.service`'s outer
+        # grace (`TimeoutStartSec=29400`, 600 s past the 28800 s window this
+        # recipe divides among the five targets) before systemd kills the
+        # whole night from outside, merge and all. A merge that hits this
+        # bound is treated exactly like one that fails outright below: it has
+        # left the corpus in whatever state the kill caught it in, so that
+        # state is never swapped in. 120 s is two orders of magnitude over
+        # §295.6's own measured cost (about a second), with most of the 600 s
+        # still free for whichever target's own `timeout --kill-after=60`
+        # grace ran long, and for the summary this recipe still has to write.
+        # `RCAD_FUZZ_MERGE_TIMEOUT` overrides it for
+        # `check-fuzz-overnight-selftest` alone; nothing else sets it.
+        merge_timeout="${RCAD_FUZZ_MERGE_TIMEOUT:-120}"
+        if (cd fuzz && CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
+                RUSTFLAGS="-C target-cpu=x86-64-v3" \
+                timeout --kill-after=10 "$merge_timeout" \
+                cargo +nightly fuzz run "$reader_target" -- \
+                -merge=1 -max_len=5110 "$merge_tmp" "$reader_scratch") \
+                >>"$night/reader-corpus-merge.log" 2>&1; then
+            rm -rf "$reader_persistent"
+            mv "$merge_tmp" "$reader_persistent"
+            rm -rf "$reader_scratch"
+            persistent_files_after=$(find "$reader_persistent" -type f | wc -l)
+            echo "reader corpus merge: persistent has $persistent_files_after files after merging" \
+                >>"$night/reader-corpus-merge.log"
+        else
+            rm -rf "$merge_tmp"
+            mv "$reader_scratch" "$reader_scratch-failed-$(date +%Y%m%d%H%M%S)"
+            echo "READER CORPUS MERGE FAILED — see $night/reader-corpus-merge.log; the persistent corpus was left as it was, and tonight's scratch directory was moved aside rather than merged or discarded" \
+                >>"$night/reader-corpus-merge.log"
+            echo "reader corpus merge FAILED — see $night/reader-corpus-merge.log"
+            to_look_at+=("reader-merge:failed")
+        fi
+    fi
+
     # Counted after the loop and named in the summary, because a copy nobody is
     # told about is very nearly as lost as the original was. A clean night writes
     # slow units too — the night of 2026-09-13 wrote three and said "nothing
@@ -4314,6 +4384,11 @@ fuzz duration="60" corpus_root="" fork="0": (fuzz-target "where_two_surfaces_cro
 # nothing and has only ever grown itself, so a night never once started from a
 # real file. `fuzz-target` passes the directory itself, read-only and last, and
 # skips it outright when nothing has been fetched there yet (§226.1).
+#
+# `corpus_root` is passed straight through unchanged; it is `fuzz-target`'s own
+# STEP-corpus branch that turns it into a scratch-plus-persistent pair rather
+# than the one growing writable directory it used to be (docs/decisions.md
+# §295.7) — this recipe does not need to know the difference.
 [doc("Fuzz the Part 21 reader over arbitrary bytes.")]
 fuzz-reader duration="60" corpus_root="" fork="0": (fuzz-target "no_step_file_makes_the_reader_panic" duration corpus_root "" fork "step.dict" RCAD_STEP_CORPUS)
 
@@ -4392,10 +4467,38 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="" step_corp
         max_len_flag=(-max_len={{max_len}})
     fi
     if [ -n "{{step_corpus}}" ] && [ -d "{{step_corpus}}" ]; then
-        if [ ${#corpus[@]} -eq 0 ]; then
-            corpus=("corpus/{{target}}")
+        # §295.7: this branch used to hand libFuzzer `{{corpus_root}}/{{target}}`
+        # itself as the writable directory — the same directory the *next*
+        # night starts from, and the one §291.3 measured growing ≈18.5 MB/h.
+        # Below, that directory goes back to being a read-only seed: libFuzzer
+        # writes into a scratch directory instead — ordinarily fresh each
+        # night and never handed back as a seed — and `fuzz-overnight` folds
+        # its finds into `{{corpus_root}}/{{target}}` with `-merge=1
+        # -max_len=5110` once this run is done, before throwing the scratch
+        # directory away (docs/decisions.md §295.6, §295.7). Not fresh when
+        # last night never got to fold its own in: see the comment beside
+        # `mkdir -p "$scratch"` below. A hand run with no `corpus_root`
+        # has nowhere to put a scratch directory and keeps writing straight
+        # into the tracked corpus, as before.
+        if [ -n "{{corpus_root}}" ]; then
+            scratch="{{corpus_root}}/{{target}}-scratch"
+            # Never `rm -rf` here: a scratch directory already at this path is
+            # last night's, left behind because the whole run died somewhere
+            # between its targets finishing and its own merge running, and
+            # deleting it would throw those finds away unmerged. `mkdir -p` on
+            # an existing directory is a no-op, so tonight's run adds to
+            # whatever is already there, and it merges in with tonight's own
+            # finds at the usual point in `fuzz-overnight` — simpler than
+            # teaching this recipe, which has no `to_look_at` of its own, to
+            # name a leftover directory in the night's summary (Q237).
+            mkdir -p "$scratch"
+            corpus=("$scratch" "{{corpus_root}}/{{target}}" "corpus/{{target}}" "{{step_corpus}}")
+        else
+            if [ ${#corpus[@]} -eq 0 ]; then
+                corpus=("corpus/{{target}}")
+            fi
+            corpus+=("{{step_corpus}}")
         fi
-        corpus+=("{{step_corpus}}")
         # **Pinned here, in this branch, and not in `max_len` or in
         # `fuzz-reader`'s own arguments** (docs/decisions.md §264.7): with the
         # whole STEP corpus seeded in and no pin, libFuzzer derives its cap from
@@ -4548,6 +4651,21 @@ check-fuzz-overnight-selftest:
         fi
         prev="$arg"
     done
+
+    # The merge call's own three behaviors, checked before any of the
+    # per-target artifact/rendezvous/sleep logic below (a merge is not a fuzz
+    # run and none of that applies to it): fail on demand, hang on demand — so
+    # the recipe's own `timeout` around it can be tested without a real merge
+    # slow enough to hit it — or otherwise return in effectively no time, the
+    # way a merge with nothing to do behaves for real (§295.6, about a
+    # second).
+    for arg in "$@"; do
+        if [ "$arg" = "-merge=1" ]; then
+            [ -z "${STUB_MERGE_FAIL:-}" ] || exit 1
+            [ -z "${STUB_MERGE_HANG:-}" ] || sleep "$STUB_MERGE_HANG"
+            exit 0
+        fi
+    done
     #
     # **`slow-unit-` by default, and `crash-` only when an arm asks.** A clean
     # night writes slow units — the night of 2026-09-13 wrote three — so that is
@@ -4684,7 +4802,13 @@ check-fuzz-overnight-selftest:
     STUB_NO_EXITING_TARGET=no_step_file_makes_the_reader_panic run 12 || status=$?
     elapsed=$(( $(date +%s) - started ))
     [ "$status" -ne 0 ] || fail "a target never got fuzzing and the night reported success"
-    ran=$(grep -c 'fuzz run' "$dir/log" || true)
+    # `.*max_total_time` and not bare `'fuzz run'`: the reader's STEP corpus is
+    # seeded in for every arm using `run()`, so this night's own reader-corpus
+    # merge (Q237) is itself a `fuzz run … -merge=1 …` line, and it carries no
+    # `-max_total_time` — only a per-target run does. Counting it here would
+    # overcount by one and this exact-count check would fail on a correct
+    # recipe.
+    ran=$(grep -c 'fuzz run.*max_total_time' "$dir/log" || true)
     [ "$ran" -eq 5 ] || fail "a failure in the second target left $ran of 5 targets run"
     [ "$elapsed" -ge 4 ] || fail "a twelve-second window was over in $elapsed s, so nothing was fuzzed"
     [ "$elapsed" -le 16 ] || fail "a twelve-second window took $elapsed s, so the window is a budget and not a deadline"
@@ -4733,7 +4857,11 @@ check-fuzz-overnight-selftest:
     # this night's own directory. A target that was not told keeps nothing, and
     # the morning has libFuzzer's one ratcheted `Slowest unit:` line and no
     # spread — which is the state this replaced.
-    timed=$(grep -c "fuzz run.*\[timings=$dir/logs/$(date +%Y-%m-%d)/timings\]" "$dir/log" || true)
+    # `.*max_total_time.*` again excludes the reader's own merge line: it is
+    # exported the timings path too (it runs after `export RCAD_FUZZ_TIMINGS`
+    # like everything else in this recipe), so it would otherwise match this
+    # pattern as a sixth "target".
+    timed=$(grep -c "fuzz run.*max_total_time.*\[timings=$dir/logs/$(date +%Y-%m-%d)/timings\]" "$dir/log" || true)
     [ "$timed" -eq 5 ] \
         || fail "$timed of 5 targets were told where to write their timings"
 
@@ -4798,7 +4926,12 @@ check-fuzz-overnight-selftest:
     # one line fails whether it is dropped (the tail of the match is gone) or
     # moved first (the head of the match, the night's own writable directory
     # in first place, is gone instead). Neither half alone would catch both.
-    grep -q "run no_step_file_makes_the_reader_panic $dir/corpus/no_step_file_makes_the_reader_panic corpus/no_step_file_makes_the_reader_panic $dir/step-corpus " "$dir/log" \
+    #
+    # The night's own writable directory is the *scratch* one now, ahead of
+    # the persistent corpus it used to be (§295.7, Q237): libFuzzer still
+    # writes first and reads the rest read-only, so the order after it is
+    # unchanged — persistent, tracked, real STEP corpus.
+    grep -q "run no_step_file_makes_the_reader_panic $dir/corpus/no_step_file_makes_the_reader_panic-scratch $dir/corpus/no_step_file_makes_the_reader_panic corpus/no_step_file_makes_the_reader_panic $dir/step-corpus " "$dir/log" \
         || fail "the reader's real STEP corpus is missing or not last: $(grep 'run no_step_file_makes_the_reader_panic' "$dir/log")"
 
     # And with the STEP corpus actually seeded in, the reader's own `-max_len`
@@ -4834,6 +4967,13 @@ check-fuzz-overnight-selftest:
         || fail "a missing STEP corpus directory was handed to libFuzzer anyway"
     ! grep -q 'max_len=65536' "$dir/log" \
         || fail "a night with no STEP corpus fetched yet still pinned -max_len=65536"
+    # A night that never took the STEP-corpus branch never makes the scratch
+    # directory that branch is the only thing that creates, and so never runs
+    # the merge gated on that directory existing (Q237 item 4).
+    [ ! -d "$dir/corpus/no_step_file_makes_the_reader_panic-scratch" ] \
+        || fail "a night with no STEP corpus fetched yet still made a scratch directory for the reader"
+    ! grep -q -- '-merge=1' "$dir/log" \
+        || fail "a night with no STEP corpus fetched yet still ran the reader's nightly merge"
 
     # Three: a night with no crash-class artifacts exits 0, and the routine slow
     # unit every target leaves behind is named rather than folded into "nothing
@@ -4878,7 +5018,9 @@ check-fuzz-overnight-selftest:
     elapsed=$(( $(date +%s) - started ))
     [ "$status" -eq 0 ] \
         || fail "one target overran and the night reported $status for the other four"
-    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 5 ] \
+    # `.*max_total_time` again excludes the reader's own merge line (Q237),
+    # which this arm's STEP corpus fixture triggers same as every other.
+    [ "$(grep -c 'fuzz run.*max_total_time' "$dir/log")" -eq 5 ] \
         || fail "one target overran and took the rest of the window with it"
     # And all five were alive at one instant, which is the assertion the clock
     # cannot make. A night is as long as its slowest target however the rest are
@@ -5001,7 +5143,11 @@ check-fuzz-overnight-selftest:
     # when a target is added. One was, between this arm being written and the
     # branch it was written on reaching `main`.
     targets=$(wc -w <<<"{{ fuzz_all }}")
-    [ "$(grep -c 'fuzz run' "$dir/log")" -eq "$targets" ] \
+    # `.*max_total_time` again excludes the reader's own merge line (Q237).
+    # This arm's `night_repo` fixture carries no `RCAD_STEP_CORPUS`, so on its
+    # own the merge would not fire here — narrowed anyway, so this check keeps
+    # meaning "every target ran" if that ever changes.
+    [ "$(grep -c 'fuzz run.*max_total_time' "$dir/log")" -eq "$targets" ] \
         || fail "the night that took over did not go on to fuzz all $targets targets: $(cat "$dir/out")"
 
     # Eight: with no `cargo` on the PATH at all, the night says that and does not
@@ -5236,6 +5382,93 @@ check-fuzz-overnight-selftest:
     run 8 || fail "a night with a clean timing rlib failed: $(cat "$dir/out")"
     ! grep -q 'sancov reference' "$dir/out" \
         || fail "a clean timing rlib was still read as carrying a sancov reference"
+
+    # Eighteen: the reader's nightly merge itself (§295.7, Q237) — folding
+    # tonight's scratch corpus into the small persistent one at -max_len=5110,
+    # persistent copy first and scratch second so libFuzzer never mutates the
+    # real thing in place — runs exactly once, in that order, and the scratch
+    # directory is gone once it has succeeded.
+    : >"$dir/log"
+    run 8 || fail "a night with the reader's STEP corpus seeded in failed: $(cat "$dir/out")"
+    [ "$(grep -c -- '-merge=1' "$dir/log")" -eq 1 ] \
+        || fail "the reader's nightly merge did not run exactly once: $(grep -- '-merge=1' "$dir/log" || true)"
+    grep -q -- "run no_step_file_makes_the_reader_panic -- -merge=1 -max_len=5110 $dir/corpus/no_step_file_makes_the_reader_panic-merge-tmp\.[^ ]* $dir/corpus/no_step_file_makes_the_reader_panic-scratch " "$dir/log" \
+        || fail "the merge did not run persistent-copy-first, scratch-second: $(grep -- '-merge=1' "$dir/log" || true)"
+    [ ! -d "$dir/corpus/no_step_file_makes_the_reader_panic-scratch" ] \
+        || fail "the scratch directory survived a successful merge"
+
+    # Nineteen: a failing merge — anything that makes libFuzzer's own
+    # `-merge=1` exit non-zero — never touches the persistent corpus and never
+    # silently drops tonight's scratch directory: the scratch is moved aside
+    # with a timestamp, the persistent corpus is left exactly as it was, and
+    # the night names it under TO LOOK AT (Q237 item 5).
+    : >"$dir/log"
+    reader_persistent="$dir/corpus/no_step_file_makes_the_reader_panic"
+    rm -rf "$reader_persistent"
+    mkdir -p "$reader_persistent"
+    echo "an earlier night's minimized find" >"$reader_persistent/kept-from-before"
+    status=0
+    STUB_MERGE_FAIL=1 run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a failing reader-corpus merge did not fail the night"
+    [ "$(cat "$reader_persistent/kept-from-before")" = "an earlier night's minimized find" ] \
+        || fail "a failing merge changed a file in the persistent corpus it should have left alone"
+    [ "$(find "$reader_persistent" -type f | wc -l)" -eq 1 ] \
+        || fail "a failing merge added or removed files in the persistent corpus"
+    failed_scratch=$(find "$dir/corpus" -maxdepth 1 -name 'no_step_file_makes_the_reader_panic-scratch-failed-*' -type d)
+    [ -n "$failed_scratch" ] \
+        || fail "a failing merge did not move tonight's scratch directory aside"
+    grep -q 'TO LOOK AT.*reader-merge:failed' "$dir/logs/latest" \
+        || fail "a failing merge was not named in the summary: $(cat "$dir/logs/latest")"
+    rm -rf "$reader_persistent" "$failed_scratch"
+
+    # Twenty: a scratch directory left over from a night that died before its
+    # own merge — the whole `fuzz-overnight` process killed between its
+    # targets finishing and the merge running — survives tomorrow's
+    # `fuzz-target` call instead of being thrown away unmerged (Q237 item 6a).
+    # Folded into tonight's run rather than moved aside on its own: since
+    # `fuzz-target` no longer empties the scratch directory it is handed,
+    # whatever tonight's run adds joins what was already there, and both merge
+    # in together at the end of `fuzz-overnight` — simpler than teaching
+    # `fuzz-target`, which has no `to_look_at` of its own, to name a leftover
+    # directory in the night's summary.
+    : >"$dir/log"
+    scratch_dir="$dir/corpus/no_step_file_makes_the_reader_panic-scratch"
+    rm -rf "$scratch_dir"
+    mkdir -p "$scratch_dir"
+    echo "last night's unmerged find" >"$scratch_dir/leftover"
+    STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" STUB_ARTIFACT_TAG="$tag" \
+        {{just_executable()}} fuzz-target no_step_file_makes_the_reader_panic 2 "$dir/corpus" "" 0 step.dict "$dir/step-corpus" \
+        >"$dir/out" 2>&1 \
+        || fail "fuzz-target with a leftover scratch directory failed: $(cat "$dir/out")"
+    [ -f "$scratch_dir/leftover" ] \
+        || fail "a scratch directory left over from an unmerged night was thrown away instead of kept for tonight's merge"
+    rm -rf "$scratch_dir"
+
+    # Twenty-one: the merge itself is bounded, so a merge that hangs takes the
+    # failure path rather than running past the night's own outer deadline
+    # (`TimeoutStartSec=29400` in tooling/systemd/rcad-fuzz.service, 600 s past
+    # the 28800 s window `fuzz-overnight` divides on its own — Q237 item 6b).
+    # `RCAD_FUZZ_MERGE_TIMEOUT` overrides the real 120 s bound for exactly this
+    # arm; nothing else in this file sets it, so every other arm's merge keeps
+    # the real one.
+    : >"$dir/log"
+    reader_persistent="$dir/corpus/no_step_file_makes_the_reader_panic"
+    rm -rf "$reader_persistent"
+    mkdir -p "$reader_persistent"
+    echo "kept before the hang" >"$reader_persistent/kept-from-before"
+    status=0
+    RCAD_FUZZ_MERGE_TIMEOUT=1 STUB_MERGE_HANG=5 run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a merge that hung past its bound did not fail the night"
+    [ "$(cat "$reader_persistent/kept-from-before")" = "kept before the hang" ] \
+        || fail "a merge killed by its own timeout still touched the persistent corpus"
+    failed_scratch=$(find "$dir/corpus" -maxdepth 1 -name 'no_step_file_makes_the_reader_panic-scratch-failed-*' -type d)
+    [ -n "$failed_scratch" ] \
+        || fail "a merge killed by its own timeout did not move tonight's scratch directory aside"
+    grep -q 'TO LOOK AT.*reader-merge:failed' "$dir/logs/latest" \
+        || fail "a merge killed by its own timeout was not named in the summary: $(cat "$dir/logs/latest")"
+    rm -rf "$reader_persistent" "$failed_scratch"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
