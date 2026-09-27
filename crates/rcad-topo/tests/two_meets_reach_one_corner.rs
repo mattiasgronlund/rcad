@@ -13,8 +13,9 @@
 //!   corner is one of those two is exactly on the ball.
 //! - **A ball smaller than the room on a cube's corner.** A ball of radius `13s`
 //!   at `(3s, 4s, 12s)` goes through the origin, and each edge of the cube
-//!   there meets it a second time at `6s`, `8s` or `24s`. For `s ≤ 2⁻⁴⁸` some
-//!   of those are within `2⁻⁴⁶`.
+//!   there meets it a second time at `6s`, `8s` or `24s`. At `s = 2⁻⁵⁰` two of
+//!   those are within `2⁻⁴⁶`, and at `2⁻⁵²` all three. At `2⁻⁴⁸` none is,
+//!   and that fuse is the control: it refuses the same way.
 //!
 //! **Neither shows the branch.** Both places are on all three surfaces, so on
 //! the ball the other two crossings run through both of them and fence off a
