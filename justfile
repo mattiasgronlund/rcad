@@ -7572,6 +7572,12 @@ queue_slots := "6"
 # happens to run is §173's check that answers for its environment.
 queue_running := ""
 
+# Where `queue-page` writes, so a selftest can point it at a scratch directory
+# instead of Mattias's real page (§230, §263). `check-queue-page-selftest` and
+# `check-queue-api-selftest` both set `RCAD_QUEUE_PAGE_DIR`, and the gate must
+# never write `~/rcad-queue-page` — the two facts are the same one.
+queue_page_dir := env_var_or_default("RCAD_QUEUE_PAGE_DIR", env_var("HOME") / "rcad-queue-page")
+
 # **One parse, and both readers use it.** `queue` decides what to dispatch and
 # `check-queue` decides whether the file is sound. If each split a row its own
 # way, a row could pass the check and still be read differently by the fill. So
@@ -7641,13 +7647,26 @@ _queue-rows file:
 # every verifier, whichever dispatcher sent it — and by every row taken with no
 # tree yet. `lane:` rows in this copy still say which write sets are busy, and so
 # do rows another dispatcher holds, from its hold or its own copy.
+#
+# **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
+# `rank`, `pick` — also runs `queue-page` after it**, so the page stays current
+# as a side effect instead of needing its own trigger (Q254). Its own exit code
+# is what this returns; a render that fails says so on stderr and fails
+# nothing, since a bad page is not a reason to lose a queue write that already
+# landed. `show` and `running` only read, so neither runs it.
 [doc("What to dispatch from docs/queue.md, and the verbs that change it one row at a time: `just queue take` prints their usage.")]
 queue mode="" *args:
     #!/usr/bin/env bash
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|pick|show|running)
+        take|add|done|drop|park|after|rank|pick)
+            QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
+                python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
+            status=$?
+            {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" queue-page || true
+            exit "$status" ;;
+        show|running)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|next) ;;
@@ -7806,6 +7825,188 @@ queue mode="" *args:
             return 0
         }
     '
+
+# Renders `docs/queue.md`'s history and current state as one page (Q254),
+# writing to `{{ queue_page_dir }}` — `~/rcad-queue-page` unless
+# `RCAD_QUEUE_PAGE_DIR` overrides it, which the two selftests below do so the
+# gate never touches Mattias's real page. `queue` runs this after every verb
+# that writes, and so does `ff-main`; run by hand, it just re-renders now.
+#
+# The logic is `tooling/queue-page/render.py`; this only hands it the
+# directory to write. The renderer writes through a temporary file and a
+# rename on its own — see `write_atomically` there — so this recipe does not
+# repeat that.
+[doc("Render docs/queue.md's history and current state as one page, to RCAD_QUEUE_PAGE_DIR or ~/rcad-queue-page.")]
+queue-page:
+    @python3 '{{ justfile_directory() }}/tooling/queue-page/render.py' '{{ queue_page_dir }}'
+
+# Renders a scratch repository's `docs/queue.md` history into a scratch
+# directory and checks both charts' counts, by commit, against a count taken
+# by hand from the fixture's own rows — never from `render.py`'s own `tally()`,
+# since a check that asks the code under test for its expected answer cannot
+# fail (Q254).
+#
+# Three commits are enough to move every count `tally()` tracks at least once:
+# an open row closing, a row parking, and a tier gaining and losing a row. The
+# renderer's `.history-cache.json` holds one tally per commit sha verbatim, so
+# reading it back is reading the render's real output, not recomputing it.
+[private]
+[doc("queue-page's two charts, checked against a hand count of a scratch repository's own commits.")]
+check-queue-page-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p '{{ justfile_directory() }}/target'
+    root=$(mktemp -d '{{ justfile_directory() }}/target/queue-page-selftest.XXXXXX')
+    trap 'rm -rf "$root"' EXIT
+    j='{{ just_executable() }}'
+    hub="$root/rcad"
+    out="$root/out"
+    mkdir -p "$hub/docs"
+    fail() {
+        echo "check-queue-page-selftest: $1"
+        exit 1
+    }
+    g() { git -C "$hub" -c user.name=selftest -c user.email=selftest@invalid "$@"; }
+    g init -q -b main
+
+    cat > "$hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q1  1  todo  opus  docs/a.md  the first row §230
+    Q2  1  todo  opus  docs/b.md  the second row §230
+    ```
+
+    ## Tier 2
+
+    ```
+    ```
+
+    ## Tier 2.5
+
+    ```
+    ```
+
+    ## Tier 3
+
+    ```
+    ```
+
+    ## Tier 4
+
+    ```
+    ```
+
+    ## Closed
+
+    ```
+    ```
+    MD
+    g add docs/queue.md
+    g commit -q -m "commit A: two open tier-1 rows"
+    sha_a=$(g rev-parse HEAD)
+
+    cat > "$hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q2  1  todo  opus  docs/b.md  the second row §230
+    ```
+
+    ## Tier 2
+
+    ```
+    Q3  2  todo  opus  docs/c.md  the third row §230
+    ```
+
+    ## Tier 2.5
+
+    ```
+    ```
+
+    ## Tier 3
+
+    ```
+    ```
+
+    ## Tier 4
+
+    ```
+    ```
+
+    ## Closed
+
+    ```
+    Q1  1  done:abcdef0  -  -  a closed row §230
+    ```
+    MD
+    g add docs/queue.md
+    g commit -q -m "commit B: Q1 closes, Q3 opens in tier 2"
+    sha_b=$(g rev-parse HEAD)
+
+    cat > "$hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q2  1  todo  opus  docs/b.md  the second row §230
+    Q4  1  parked:§230  opus  -  a parked row §230
+    ```
+
+    ## Tier 2
+
+    ```
+    ```
+
+    ## Tier 2.5
+
+    ```
+    ```
+
+    ## Tier 3
+
+    ```
+    ```
+
+    ## Tier 4
+
+    ```
+    ```
+
+    ## Closed
+
+    ```
+    Q1  1  done:abcdef0  -  -  a closed row §230
+    Q3  2  done:abcdef1  -  -  the third row §230
+    ```
+    MD
+    g add docs/queue.md
+    g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1"
+    sha_c=$(g rev-parse HEAD)
+
+    RCAD_QUEUE_PAGE_DIR="$out" "$j" --justfile '{{ justfile() }}' --working-directory "$hub" queue-page \
+        || fail "queue-page failed to render the scratch history"
+    [ -f "$out/index.html" ] || fail "queue-page did not write index.html"
+    [ -f "$out/.history-cache.json" ] || fail "queue-page did not write .history-cache.json"
+
+    expect_tally() {
+        got=$(jq -cS --arg sha "$1" '.[$sha]' "$out/.history-cache.json")
+        canon=$(jq -cS -n "$2")
+        [ "$got" = "$canon" ] || fail "commit $1: tally is $got, expected $canon"
+    }
+    expect_tally "$sha_a" '{"by_tier":{"1":2,"2":0,"2.5":0,"3":0,"4":0},"parked":0,"closed":0}'
+    expect_tally "$sha_b" '{"by_tier":{"1":1,"2":1,"2.5":0,"3":0,"4":0},"parked":0,"closed":1}'
+    expect_tally "$sha_c" '{"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":1,"closed":2}'
+
+    grep -q '3 commits' "$out/index.html" || fail "the page does not say 3 commits, so it did not walk all three"
+    grep -q 'id="qp-by-tier"' "$out/index.html" || fail "the by-tier chart is missing from the page"
+    grep -q 'id="qp-progress"' "$out/index.html" || fail "the progress chart is missing from the page"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
