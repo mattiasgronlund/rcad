@@ -4080,9 +4080,15 @@ fuzz-overnight window="28800":
     # night from here on, which is the same "night nobody believes" §91 exists to
     # prevent, running the other way.
     #
-    # `-newer` against a file made now, rather than a listing taken now and
-    # diffed: libFuzzer writes an artifact once and never rewrites it, so mtime
-    # answers exactly this question and costs one `touch`.
+    # A marker of when tonight began, kept for whoever reads the directory by
+    # hand afterwards (docs/decisions.d/240's own reading of it against
+    # `build.log` and the "Running" line). §270.3 found the summary below
+    # cannot use it as `-newer` once did: a `-fork` worker rewrites a name
+    # already on disk, unchanged bytes and all, and that rewrite bumps the
+    # mtime exactly as a genuine new find would — on 2026-09-26, 71 timeouts
+    # and 42 slow units that were byte-identical copies of the previous
+    # night's own files got counted as new because `-newer "$since"` cannot
+    # tell the two apart. The listing below is what replaces it.
     since="$night/.started"
     : >"$since"
 
@@ -4127,6 +4133,24 @@ fuzz-overnight window="28800":
             : >"$night/corpus-names/$target"
         fi
     done
+
+    # Which artifact names `fuzz/artifacts/<target>/` already held, before any
+    # target is started tonight — what the summary below diffs against instead
+    # of trusting mtime. libFuzzer names every artifact its prefix plus the
+    # SHA-1 of the input's bytes (`WriteUnitToFileWithPrefix`,
+    # `FuzzerLoop.cpp:647`, hashed by `Hash()` in `FuzzerSHA1.cpp:218` — both
+    # in libfuzzer-sys's vendored copy under `~/.cargo/registry`), so a name
+    # already on this list is bytes a night has already seen, however many
+    # times a `-fork` worker rewrites it tonight.
+    mkdir -p "$night/artifact-names-before"
+    if [ -d fuzz/artifacts ]; then
+        for target_dir in fuzz/artifacts/*/; do
+            [ -d "$target_dir" ] || continue
+            target=$(basename "${target_dir%/}")
+            find "$target_dir" -maxdepth 1 -type f -printf '%f\n' | sort \
+                >"$night/artifact-names-before/$target"
+        done
+    fi
 
     for recipe in "${recipes[@]}"; do
         # No floor beyond "there is time left". A minimum worth starting would
@@ -4311,9 +4335,16 @@ fuzz-overnight window="28800":
     # population cannot be what fails a night — that is §91's failure reached by
     # crying wolf instead of by staying quiet.
     #
-    # Read out of the worktree rather than out of `$night/artifacts`, and against
-    # `$since`, because the copy is made with `cp -Rn` and carries no useful mtime
-    # while the original has libFuzzer's own.
+    # Read out of the worktree rather than out of `$night/artifacts`, because the
+    # copy is made with `cp -Rn` and a name it already held keeps its old mtime,
+    # which would make a carried-over find look older than it is read against —
+    # but named against `$night/artifact-names-before/<target>`, taken above, and
+    # not against `$since`'s mtime: §270.3 found a `-fork` worker rewrites a name
+    # already on disk, unchanged bytes and all, and that rewrite bumps the mtime
+    # exactly as a genuine new find would. A name already on that list is the
+    # same bytes libFuzzer already wrote once — its own naming, prefix plus the
+    # SHA-1 of the unit, makes that certain — so it is excluded by name and never
+    # miscounted by mtime.
     #
     # **Per target and per kind, not one cumulative pile.** The count used to be
     # everything `fuzz/artifacts/` had ever held, across every night since the
@@ -4334,9 +4365,13 @@ fuzz-overnight window="28800":
         for target_dir in fuzz/artifacts/*/; do
             [ -d "$target_dir" ] || continue
             target=$(basename "${target_dir%/}")
+            before="$night/artifact-names-before/$target"
+            [ -f "$before" ] || before=/dev/null
             target_new=""
             for kind in "${kinds[@]}"; do
-                n=$(find "$target_dir" -maxdepth 1 -type f -name "$kind-*" -newer "$since" | wc -l)
+                n=$(comm -13 "$before" \
+                    <(find "$target_dir" -maxdepth 1 -type f -name "$kind-*" -printf '%f\n' | sort) \
+                    | wc -l)
                 [ "$n" -gt 0 ] || continue
                 case "$kind" in
                     crash|oom|leak) crash_new=$(( crash_new + n )) ;;
@@ -5053,6 +5088,15 @@ check-fuzz-overnight-selftest:
     # found" — that wording is §226.3's bug, which hid three new timeouts behind
     # a pile it never said was old. No clock assertions here, so the window only
     # has to be wide enough that every target gets a slice worth having.
+    #
+    # Arms One and Two above already left `slow-unit-$tag` sitting in every
+    # target's real `fuzz/artifacts/` — the stub's default kind, rewritten
+    # unchanged by each of their own runs. §270.3's fix goes by name, so a name
+    # two arms have already written would no longer read as tonight's own find;
+    # clearing it here is what makes this arm's write the first this tag has
+    # made under these names, the freshness the old mtime check assumed for
+    # free.
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
     : >"$dir/log"
     run 8 || fail "a night with no crash-class artifacts exited non-zero"
     grep -q 'new tonight:.*where_two_surfaces_cross: 1 slow-unit' "$dir/logs/latest" \
@@ -5061,6 +5105,7 @@ check-fuzz-overnight-selftest:
         || fail "a night that wrote five new slow units still said nothing found"
     grep -q "$(git rev-parse --short HEAD) ([0-9]* days old, [0-9?]* behind main)" "$dir/logs/latest" \
         || fail "the summary line does not say which commit was fuzzed and how far behind main it is, so a timer left on a stale one reads as a good night"
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
 
     # The tree the gate ran in is where it was. `fuzz-watermark` is the only
     # thing here that can move a worktree, and it follows the tip — so a `run`
@@ -5596,6 +5641,48 @@ check-fuzz-overnight-selftest:
         || fail "STUB_CORPUS_ADD did not write into the target's own writable corpus, so the exclusion above proves nothing"
     ! grep -q '^found-tonight$' "$night/corpus-names/where_two_surfaces_cross" \
         || fail "the corpus-names list named a file this same run added, not just what was there before it started"
+
+    # Twenty-three: an artifact already sitting under `fuzz/artifacts/<target>/`
+    # before `.started` is written, and then rewritten under that same name
+    # during tonight's run — exactly what a `-fork` worker does to a name
+    # libFuzzer has already written once (§270.3) — must not count as new,
+    # while a name with nothing before it tonight still does.
+    #
+    # This is not Fourteen's stale-timeout fixture again: that file is dated a
+    # day back and never touched again, so its mtime was always older than
+    # `.started` and even the old `-newer "$since"` check excluded it. The bug
+    # this arm exists to catch only shows up when the *same name* is written a
+    # second time — its mtime lands *after* `.started`, indistinguishable by
+    # mtime alone from a genuine new find, which is exactly what the old check
+    # could not do and this one, going by name, does not need to.
+    # Every earlier arm's own `run` also rewrote `slow-unit-$tag` into every
+    # target's real `fuzz/artifacts/`, none of it cleared since: cleared here
+    # so `no_model_makes_the_writer_panic`'s write below is this tag's first
+    # under that name, and the "still counts as new" half of this arm proves
+    # what it claims to.
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    : >"$dir/log"
+    mkdir -p fuzz/artifacts/where_two_surfaces_cross
+    carried="fuzz/artifacts/where_two_surfaces_cross/timeout-$tag"
+    echo "last night's find" >"$carried"
+    status=0
+    STUB_ARTIFACT_KIND=timeout- STUB_ARTIFACT_KIND_TARGET=where_two_surfaces_cross \
+        run 8 || status=$?
+    [ "$status" -eq 0 ] \
+        || fail "a carried-over artifact rewritten tonight failed the night: $(cat "$dir/logs/latest")"
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    # The rewrite actually happened — the stub overwrites the same path every
+    # time its target runs, same as a `-fork` worker does — so a check that
+    # still trusted mtime would see this file as new. Without this, the two
+    # greps below would pass whether or not the fixture exercised anything.
+    [ "$carried" -nt "$night/.started" ] \
+        || fail "the fixture never rewrote the carried-over file after .started, so this arm proves nothing"
+    ! grep -q 'where_two_surfaces_cross:.*timeout' "$dir/logs/latest" \
+        || fail "a carried-over artifact rewritten unchanged tonight was counted as new: $(cat "$dir/logs/latest")"
+    line=$(grep -o 'no_model_makes_the_writer_panic: [0-9]* slow-unit' "$dir/logs/latest" || true)
+    [ "$line" = "no_model_makes_the_writer_panic: 1 slow-unit" ] \
+        || fail "a target with nothing before tonight was not counted as new: $(cat "$dir/logs/latest")"
+    rm -f "$carried"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
