@@ -6821,7 +6821,11 @@ fuzz-yield from="" to="":
 # ones (which must). A skipped log and a never-covered target are each other's
 # own fixture, and a canned `fuzz-triage-verdicts.tsv` with one matching row,
 # one non-matching row, and one row under a different target checks that the
-# fault count reads its own target's column and nothing else's.
+# fault count reads its own target's column and nothing else's. A fourth
+# fixture night has a fuzz log but no matching entry in the fake
+# nightly-fuzz reflog at all, checking the other way "unknown" can come back:
+# not just a target outside §298.1's table, but a real target whose build
+# night the reflog cannot place.
 [private]
 check-fuzz-yield-selftest:
     #!/usr/bin/env bash
@@ -6919,9 +6923,15 @@ check-fuzz-yield-selftest:
 
     night3="$logs/2026-09-12"
     night4="$logs/2026-09-13"
-    mkdir -p "$night3" "$night4"
+    night5="$logs/2026-09-14"
+    mkdir -p "$night3" "$night4" "$night5"
     { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night3/fuzz-cross.log"
     { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night4/fuzz-cross.log"
+    # No fourth `checkout_as_night` call happens for this date, so the
+    # nightly-fuzz fixture reflog carries no 00:10-00:16 checkout for
+    # 2026-09-14 itself — the arm Q232's lane hand-probed and no fixture
+    # exercised (§298.7, Q250).
+    { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night5/fuzz-cross.log"
 
     fail() {
         echo "fuzz-yield drifted from its own fixtures: $1"
@@ -6988,6 +6998,10 @@ check-fuzz-yield-selftest:
     unchanged=$(yield 2026-09-13 2026-09-13) || fail "the unchanged-night range made the recipe fail"
     grep -qF 'code changed since the previous night: no' <<<"$unchanged" \
         || fail "09-13 only touches an unrelated file and should read as unchanged"
+
+    no_checkout=$(yield 2026-09-14 2026-09-14) || fail "the no-checkout-night range made the recipe fail"
+    grep -qF 'code changed since the previous night: unknown (reflog shows no 00:10-00:16 checkout for 2026-09-14)' <<<"$no_checkout" \
+        || fail "09-14 has no checkout in the fixture reflog and should say unknown, not guess yes or no"
 
     echo "fuzz-yield: coverage arithmetic, the artifact diff, the fault count, and the changed-night check all match their fixtures"
 
