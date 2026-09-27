@@ -30,7 +30,7 @@ REASON = (
     "docs/queue.md is changed through `just queue` now, which checks the row before it writes "
     "and holds it against the other dispatcher (docs/decisions.md §263): "
     "`just queue take <id> <branch>`, `add <tier> <model> <write set> <what>`, `done <id> <sha>`, "
-    "`drop <id> §N`, `park <id> §N`, `after <id> <id>[,<id>]`, and `pick <id> ours|theirs` after a "
+    "`drop <id> §N`, `park <id> §N`, `after <id> <id>[,<id>]`, `tier <id> <tier>`, and `pick <id> ours|theirs` after a "
     "merge conflict. Reading it is fine: grep, git show, a read-only script. This call was refused because {why}."
 )
 
