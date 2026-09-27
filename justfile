@@ -8810,7 +8810,11 @@ check-queue-merge-driver:
 # another worktree holds, and on one that exists nowhere. §263.9's two gaps are
 # here too: `rank` moving a row within its tier, and a row another copy already
 # shows `done:` staying out of `next`'s offers and out of the write-set
-# meeting. The hook's cases are `check-hooks`'s. Without `tooling/queue/` the
+# meeting. §307's verb is here too: `tier` moving a row to tier 2.2, which the
+# fixture has no heading for, writing that heading in its place, and refusing a
+# move to the row's own tier, to a tier that does not exist, and of a closed
+# row; and `add` writing the heading the same way. The hook's cases are
+# `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
 # add at the foot of Tier 2.
@@ -8929,6 +8933,26 @@ check-queue-api-selftest:
     [ "$(awk 'NR == 1 { print $1 }' <<<"$got")" = Q3 ] || fail "ready did not take the ranked Q3 ahead of Q2"
     got=$(q "$lanes/idle" rank Q3 before Q4 2>&1) && fail "rank moved Q3 into tier 2"
     grep -qF 'rank only moves a row within its own tier' <<<"$got" || fail "rank did not say why it refused to move Q3 into tier 2"
+
+    got=$(q "$lanes/idle" tier Q4 2.2 2>&1) || fail "tier refused to move Q4 to tier 2.2, whose heading the file does not have yet"
+    got=$(awk '/^## / { h = $0 } /^Q4 / { print h ": " $2 " " $3 }' "$lanes/idle/docs/queue.md")
+    [ "$got" = "## Tier 2.2: 2.2 after:Q1" ] || fail "tier did not put Q4 under ## Tier 2.2 as tier 2.2 with its state kept"
+    got=$(awk '/^## / { printf "%s|", $0 }' "$lanes/idle/docs/queue.md")
+    [ "$got" = "## Tier 1|## Tier 2|## Tier 2.2|## Tier 2.5|## Tier 3|## Tier 4|## Closed|" ] \
+        || fail "tier did not write ## Tier 2.2 between ## Tier 2 and ## Tier 2.5"
+    got=$(check "$lanes/idle") || fail "the file tier wrote fails check-queue"
+    got=$(q "$lanes/idle" tier Q4 2.2 2>&1) && fail "tier moved Q4 to the tier it is in already"
+    grep -qF 'Q4 is tier 2.2 already' <<<"$got" || fail "tier did not say Q4 is in tier 2.2 already"
+    got=$(q "$lanes/idle" tier Q2 5 2>&1) && fail "tier moved Q2 to tier 5, which does not exist"
+    grep -qF "'5' is not a tier" <<<"$got" || fail "tier did not say 5 is not a tier"
+    got=$(q "$lanes/idle" tier T1 2 2>&1) && fail "tier moved T1, which is closed"
+    grep -qF 'T1 is closed' <<<"$got" || fail "tier did not say T1 is closed"
+    g "$hub" worktree add -q -b spare "$lanes/spare" main
+    got=$(q "$lanes/spare" add 2.2 sonnet - "a row for a tier with no heading yet §230" 2>&1) \
+        || fail "add refused tier 2.2, whose heading the file does not have yet"
+    got=$(awk -v id="$got" '/^## / { h = $0 } $1 == id { print h }' "$lanes/spare/docs/queue.md")
+    [ "$got" = "## Tier 2.2" ] || fail "add did not write ## Tier 2.2 over the row it added"
+
     got=$(q "$two" take Q2 lane-q2 2>&1) || fail "two could not take Q2"
     got=$(q "$one" running 2>&1) || fail "running failed"
     grep -qx '3 running' <<<"$got" \
