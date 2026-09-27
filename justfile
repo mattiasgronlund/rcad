@@ -3950,7 +3950,19 @@ fuzz-overnight window="28800":
 
     # Built once, before the window is divided, so that the compiler comes out
     # of the night as a whole and not out of whichever target went first.
-    if ! (cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
+    #
+    # `RUSTC` points at the stand-in (docs/decisions.d/267.4, §292): cargo-fuzz
+    # hands every crate the same coverage flags through `RUSTFLAGS`, with no
+    # allow-list, so the only working way to leave `rcad-fuzz-timing`
+    # uninstrumented is to catch its compile in a script that appends a second,
+    # overriding `-sanitizer-coverage-level` and let everything else through.
+    # `CI=1` keeps kache out of this build: the `cargo` on this PATH is mise's
+    # shim, and it puts `RUSTC_WRAPPER=kache` back on every call unless `CI` is
+    # set, which would run kache *around* the stand-in and risk a cache key
+    # computed before the flag is appended. §292 keeps kache out rather than
+    # answers whether it would in fact conflate the two builds.
+    if ! (cd fuzz && CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
+            RUSTFLAGS="-C target-cpu=x86-64-v3" \
             cargo +nightly fuzz build) >"$night/build.log" 2>&1; then
         tail -n 20 "$night/build.log"
         echo "the fuzz targets did not build, so nothing was fuzzed: $night/build.log"
@@ -3966,6 +3978,29 @@ fuzz-overnight window="28800":
             echo "  PATH=$PATH"
             echo "a systemd run gets no profile. rcad-fuzz.service sets PATH itself for this reason, and \`just check-fuzz-unit\` says whether the copy systemd runs is the one in the tree"
         fi
+        printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
+        exit 1
+    fi
+
+    # A stale build would pass silently: cargo's fingerprint cannot see a flag
+    # the stand-in adds on top of `RUSTFLAGS`, so a build made before the
+    # stand-in existed, or made with it broken, looks exactly as fresh as one
+    # made with it working, and `cargo fuzz run` below would not know to redo
+    # it. So the night checks the artifact rather than trusting the build that
+    # made it: `rcad-fuzz-timing`'s rlib lands under `build/<pkg>-<hash>/out/`
+    # on this nightly rather than under `deps/`, because that is the directory
+    # cargo passes as `--out-dir` for a lib crate here — found by name since the
+    # hash in the path is not otherwise known.
+    timing_rlib=$(find fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
+        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null | head -n 1)
+    if [ -z "$timing_rlib" ]; then
+        echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
+        printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
+        exit 1
+    fi
+    sancov_refs=$(nm "$timing_rlib" 2>/dev/null | grep -ic sancov || true)
+    if [ "$sancov_refs" -ne 0 ]; then
+        echo "rcad-fuzz-timing's rlib carries $sancov_refs sancov reference(s) ($timing_rlib): the stand-in did not keep it out of coverage"
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
     fi
@@ -4354,7 +4389,15 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="":
     if [ -n "{{dict}}" ]; then
         dict_flag=(-dict={{dict}})
     fi
-    RUSTFLAGS="-C target-cpu=x86-64-v3" \
+    # `RUSTC` and `CI=1` here for the same reason as `fuzz-overnight`'s build
+    # (docs/decisions.d/267.4, §292): a run started here without a build already
+    # done — a hand `just fuzz` or `just fuzz-target` on its own — does the real
+    # build itself, and it needs the same stand-in and the same kache bypass as
+    # that build does. When the night has already built, cargo's fingerprint
+    # sees no change and this run does not recompile, so setting it here again
+    # costs nothing.
+    CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
+        RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz run {{target}} ${corpus[@]+"${corpus[@]}"} -- \
         -max_total_time={{duration}} {{ if max_len == "" { "" } else { "-max_len=" + max_len } }} \
         ${fork_flags[@]+"${fork_flags[@]}"} \
@@ -4396,7 +4439,7 @@ check-fuzz-overnight-selftest:
     # is unique per run, two lanes can gate at once, and the trap takes away
     # exactly what this run put there and nothing a real night left.
     tag="overnight-selftest-$$-${RANDOM}"
-    trap 'rm -rf "$dir"; rm -f fuzz/artifacts/*/crash-"$tag" fuzz/artifacts/*/slow-unit-"$tag"' EXIT
+    trap 'rm -rf "$dir"; rm -f fuzz/artifacts/*/crash-"$tag" fuzz/artifacts/*/slow-unit-"$tag"; rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-"$tag"' EXIT
     mkdir -p "$dir/bin"
 
     # Logs its whole command line, then sleeps **half** the slice it was given.
@@ -4424,7 +4467,18 @@ check-fuzz-overnight-selftest:
     # would spend about what a correct one spends.
     printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$(date +%s)" >>"$STUB_LOG"
     case " $* " in
-        *" build "*) exit 0 ;;
+        *" build "*)
+            # The real build's rlib is what §292's guard reads back, so every
+            # arm needs one here too, real or not — clean unless
+            # `STUB_TIMING_SANCOV` asks for the kind that must fail the night.
+            timing_dir="target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-${STUB_ARTIFACT_TAG:-notag}/out"
+            mkdir -p "$timing_dir"
+            symbol="clean_selftest_symbol"
+            [ -z "${STUB_TIMING_SANCOV:-}" ] || symbol="__sancov_selftest_symbol"
+            printf '.globl %s\n%s:\n' "$symbol" "$symbol" >"$timing_dir/sym.s"
+            as "$timing_dir/sym.s" -o "$timing_dir/sym.o"
+            ar rcs "$timing_dir/librcad_fuzz_timing-selftest-${STUB_ARTIFACT_TAG:-notag}.rlib" "$timing_dir/sym.o"
+            exit 0 ;;
     esac
 
     # Writes what libFuzzer would write, where libFuzzer would write it: the real
@@ -5060,6 +5114,33 @@ check-fuzz-overnight-selftest:
         || fail "a hand run was given a per-input timeout, which without -fork kills it on its own corpus replay"
     ! grep -q 'fork=' "$dir/log" \
         || fail "a hand run was given -fork, so a crash no longer stops it and prints"
+
+    # Sixteen: the guard that reads `rcad-fuzz-timing`'s own rlib back after the
+    # build (docs/decisions.d/267.4, §292) fails the night loudly when that rlib
+    # carries a sancov reference, before any target is started — a stale build,
+    # one made before the stand-in existed or with it broken, must not pass
+    # silently. The stub `cargo` above writes this arm's fixture rlib itself
+    # (`STUB_TIMING_SANCOV=1`), so this is a test of the guard and not of the
+    # stand-in, which 267.5 already measured on a real build.
+    : >"$dir/log"
+    status=0
+    STUB_TIMING_SANCOV=1 run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "rcad-fuzz-timing's rlib carried a sancov reference and the night reported success"
+    grep -q 'sancov reference' "$dir/out" \
+        || fail "the night did not say why it failed: $(cat "$dir/out")"
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "an instrumented timing rlib did not read as a build failure in the summary: $(cat "$dir/logs/latest")"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "the night fuzzed targets after finding a sancov reference in rcad-fuzz-timing's rlib"
+
+    # Seventeen: the same guard passes a night whose rlib has none, which is the
+    # ordinary case — every arm above already relies on this, and this one says
+    # so directly rather than leaving it to be inferred from the rest passing.
+    : >"$dir/log"
+    run 8 || fail "a night with a clean timing rlib failed: $(cat "$dir/out")"
+    ! grep -q 'sancov reference' "$dir/out" \
+        || fail "a clean timing rlib was still read as carrying a sancov reference"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
