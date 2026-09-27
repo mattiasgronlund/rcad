@@ -3,8 +3,10 @@
 *Mattias asked on 09-27 whether `just queue` should take several verbs in one
 call, after a dispatcher took Q241, Q270 and Q283 in three calls. This section
 measures what the separate calls cost and what they risk, and sets the shape of
-the verb. Nothing is built here; the row that builds it cites this section, and
-sits first in tier 1 at his word.*
+the verb. Nothing is built here; the row that builds it, Q287, cites this
+section. §307.1 files a row about the queue's verbs in tier 2.2; Q287 sits first
+in tier 1 because Mattias asked for it there, and `just queue tier Q287 2.2`
+puts it back under the rule.*
 
 ### 309.1 What the transcripts show
 
@@ -76,9 +78,9 @@ just queue apply take Q241 lane-a + take Q270 lane-b + add 2 sonnet - 'what §N'
 4. **It prints what each verb prints alone**, in order, so `@n`'s id can be read
    off its `add`'s line.
 5. **One path, not two.** `just queue <verb> ...` becomes a batch of one step.
-   Every write verb there is when the lane runs goes through it, including the
-   ones Q249, Q252, Q255 and Q281 add: whichever of those lands second changes
-   its verbs to fit the other's shape.
+   Every write verb there is when the lane runs goes through it: `tier`, which
+   Q255 added, and the ones Q249, Q252 and Q281 add, where whichever of Q287
+   and that row lands second changes its verbs to fit the other's shape.
 
 ### 309.4 The tests it needs
 
