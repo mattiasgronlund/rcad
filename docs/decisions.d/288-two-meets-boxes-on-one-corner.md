@@ -10,10 +10,14 @@ room on a cube corner. **But no fuse of them shows which place is folded.**
 Both places lie on the ball, so the ball's other two crossings fence off a
 piece between them no wider than the room. A point on a curved face is a box
 four times wider than that, so `select` refuses on that piece. It is the only
-thing either policy is asked, with the fold or without it. So the three
-mutations the row names still pass every test, the two new ones included. The
-branch can be pinned from inside `arrange.rs` (288.5). No code changed. The
-shapes are pinned in `crates/rcad-topo/tests/two_meets_reach_one_corner.rs`.*
+thing either policy is asked, with the fold or without it. So no fuse catches
+the three mutations the row names. The shapes' refusals are pinned in
+`crates/rcad-topo/tests/two_meets_reach_one_corner.rs`. **The fold itself is
+pinned in `crates/rcad-topo/src/fuse/arrange.rs`'s `tests` module**, by two
+tests that call `a_corner_is_this_place` directly and catch all three
+mutations. They came from a second run, `lane-q110-two-meets-one-corner-2`
+(288.4, 288.5). No kernel code changed. The ball's piece is Q112's refusal,
+and it is a gap (288.5).*
 
   288.1   Two shapes that reach the branch
   288.2   What the fuse does with them
@@ -141,22 +145,69 @@ the base and the two new ones.
 **Why the new tests cannot catch them** is 288.3. The only thing either shape
 asks is the ball's piece, and the fold moves nodes on the block's faces.
 
+**The second run caught all three from inside `arrange.rs`** (288.5). Each
+edit was made twice. The first time was on `ff78f99f` itself, with the
+worktree detached there, and the command was `mise exec -- just t -p
+rcad-topo`. The second was on the branch at `1f525393`, which adds the two
+unit tests, and the command was `mise exec -- just t -p rcad-topo --lib -E
+'test(/two_places_of_one_meet_inside|a_corner_is_its_own_place/)'`. Each was
+undone with `git checkout -- crates/rcad-topo/src/fuse/arrange.rs`. (b) was
+the first run's edit, and (c) was `* 1000.0` on the same argument.
+
+| Edit | `ff78f99f`, all of `rcad-topo` | The branch, the two new tests |
+|---|---|---|
+| (a) `== 1` to `>= 1` | 1037 run, 1037 passed | the grazing one fails |
+| (b) uniqueness dropped | 1037 run, 1037 passed | the grazing one fails |
+| (c) room × 1000 | 1037 run, 1037 passed | the small-ball one fails |
+
+Under (a) and (b) the grazing test's fold answers `true` for the corner's own
+place, `(−1, 2⁻²⁵, 2⁻⁵¹)`. Under (c) the small-ball test's fold answers
+`false` for the corner itself. Two more edits bound the room from above.
+`* 1.5` makes the small-ball test fail, because the second place on the edge
+along `x`, `(6s, 0, 0)`, then touches the room, and a touch counts. `* 1.25`
+passes.
+
+**Reverting `arrange.rs` to the base proves nothing here.** The new tests
+live in that file, so the revert takes them out with it. The three mutations
+are the proof.
+
 ### 288.5 What this leaves
 
-- **The branch can be pinned from inside `arrange.rs`.** Its `tests` module
-  already builds a `BakedFace` with `bake` and an `Arrangement` from it. One
-  test there can take the grazing block's face `x = −1`, with the ball as a
-  cut, and call `a_corner_is_this_place` for each of the two places. It
-  should return `false` for both, which catches (a) and (b). A second test can
-  take the small ball at `s = 2⁻⁴⁸`, whose second places are `1.5` to `6` rooms
-  from the corner. There the call should return `true` for the corner's own
-  place, which catches (c). `crates/rcad-topo/src/fuse/arrange.rs` was outside
-  this lane's write set.
+- **The branch is pinned from inside `arrange.rs`.** The first run named the
+  two tests below and could not write them, because `arrange.rs` was outside
+  its write set. The second run wrote them in that file's `tests` module. Both
+  bake the two solids, cut the face by the ball, and draw the arrangement as
+  far as `place_the_corners`. That is the state `place_the_meets` calls
+  `a_corner_is_this_place` in. They do not use `Arrangement::of`, because the
+  steps after `place_the_meets` fold nodes together. Each works out the places
+  the way `place_the_meets` does, and asks about every one of them.
+  - `two_places_of_one_meet_inside_a_corners_room_are_neither_folded_into_it`
+    takes the grazing block's face `x = −1`, with the block above the corner
+    `(−1, 2⁻²⁵, 2⁻⁵¹)`. It asks about the block's side `y = 2⁻²⁵` and the
+    ball. The fold answers `false` for both places, so both stay nodes and
+    the policy is left to say whether they are one point. That catches (a)
+    and (b).
+  - `a_corner_is_its_own_place_when_the_second_place_is_outside_its_room`
+    takes the unit cube's face `z = 0` and the small ball at `s = 2⁻⁴⁸`. It
+    asks about the ball with the wall `x = 0`, and then with the wall
+    `y = 0`. The fold answers `true` for the corner `(0, 0, 0)` and `false`
+    for the second place, `(0, 8s, 0)` and then `(6s, 0, 0)`. That catches
+    (c), and it pins the room from above to less than `1.5` times its size.
+
+  Both shapes did what the first run said they would. Drawing the arrangement
+  asked no policy anything, and both tests check that the log stays empty, so
+  the answers hold under any policy.
 - **`select` refuses a piece narrower than its own round-trip box.** Every
   shape here has a right answer, so the refusal is a gap and not a limit. How
   to close it was not looked at. Until it is closed, no fuse of these shapes
-  can show which place `a_corner_is_this_place` folds. When it is, the two new
-  tests panic and say so.
+  can show which place `a_corner_is_this_place` folds. When it is, the two
+  tests in `two_meets_reach_one_corner.rs` panic and say so.
+- **That answers Q112.** Q112 asks whether §248.3's refusal is a limit or a
+  gap: `a point inside a piece of a face`, with an infinite enclosure, in
+  `a_block_edge_grazing_a_ball.rs` at `h = 0`. That record has the same two
+  inputs as the grazing fuses here, `(−1, 2⁻²⁵, ∓2⁻⁵¹)`, so it is the same
+  piece of the ball, the one between the two places. By the bullet above it
+  is a gap. The fix belongs in `select`, and Q112 holds it.
 
 ### 288.6 The probe
 

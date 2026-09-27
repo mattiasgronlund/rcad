@@ -5400,8 +5400,8 @@ mod tests {
     ///
     /// **No fuse sees this.** Every fuse of this block and ball refuses on the
     /// piece of the ball between the two places, fold or no fold (§288.3), so
-    /// this is the one test that holds `count == 1` and the second place's
-    /// check in place.
+    /// this test, and not a fuse, is what holds `count == 1` and the second
+    /// place's check in place (§288.4).
     #[test]
     fn two_places_of_one_meet_inside_a_corners_room_are_neither_folded_into_it() {
         let place = f64::powi(2.0, -51);
@@ -5451,11 +5451,11 @@ mod tests {
     /// corner. So the room holds the corner's own place alone, and the corner
     /// is that place. A room grown one and a half times takes in the second
     /// place as well, and then the corner's own place stays a node of its own
-    /// (§253, §288.5).
+    /// (§253, §288.4).
     ///
-    /// **No fuse sees this either**: the corner's own place is exact and equal
-    /// to the corner, so a node left beside it is merged back later, and every
-    /// fuse of this pair refuses on the ball's piece anyway (§288.3).
+    /// **No fuse sees this either.** With the room grown a thousand times,
+    /// every fuse of this cube and ball refused the way it does without, and
+    /// it refuses on the ball's piece (§288.3).
     #[test]
     fn a_corner_is_its_own_place_when_the_second_place_is_outside_its_room() {
         let s = f64::powi(2.0, -48);

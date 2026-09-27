@@ -22,7 +22,11 @@
 //! piece no wider than the room. A point on a curved face is a box `256 ε`
 //! wide, four times the room, so no point fits in that piece, and every fuse
 //! refuses on it by name with nothing else asked. It refuses the same with the
-//! fold made and without it. §288.2 has the mutations.
+//! fold made and without it. §288.4 has the mutations.
+//!
+//! **The fold itself is pinned in `src/fuse/arrange.rs`'s `tests` module**, by
+//! two tests that take these shapes' faces and call `a_corner_is_this_place`
+//! directly (§288.5).
 //!
 //! **When `select` learns to place a point in a piece this small, these pins
 //! move**, and these are the shapes that can then show the branch through a
@@ -113,7 +117,7 @@ fn what_it_refused_on(
         Ok(fused) => panic!(
             "{policy:?}: the fuse answered with {} solids, so `select` placed a point in the \
              piece between the two places. These shapes can now show which place \
-             `a_corner_is_this_place` folds (§288.4)",
+             `a_corner_is_this_place` folds (§288.3)",
             fused.solids().len()
         ),
         Err(other) => panic!("{policy:?}: {other:?}"),
