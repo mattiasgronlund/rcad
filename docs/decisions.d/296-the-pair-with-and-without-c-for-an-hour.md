@@ -316,3 +316,92 @@ size of that gap does not grow between a 5-minute and a 15-minute run. The
 arm-level total in §254.5 (C costs 1.4 to 1.7 times, depending on `-fork`) is
 still real and still unexplained by loading time alone (§254.4) — this
 section says the seed-level mechanism proposed for it is not the one running.
+
+### 296.7 A third point, nine times the first run's length, and the gap shrinks rather than grows
+
+*Runs queue row Q268: a third with-C-only single-process run, at
+`-max_total_time=2700` (45 minutes) — three times §296.6's longer run and
+nine times its shorter one — to say whether §296.6's no-growth finding still
+holds at a longer length. This lane only read and measured; nothing in the
+kernel, the nightly tree or the corpus was written. The run was pinned to
+cores 20-23 with `taskset`, started at 20:05:28Z and finished at 20:50:30Z,
+outside 21:50–06:00Z.*
+
+**Binary and corpus are the same pair §296.6 used, checked the same way.**
+§296.6's own build and corpus copy were themselves temporary (its own
+`target/q244/` scratch build); this lane repeated the same steps
+independently: `git archive 055aa4a9` into `target/q268/src-055aa4a9/`, then
+`cargo +nightly fuzz build two_solids_fused_by_a_stranger` there with
+`RUSTFLAGS="-C target-cpu=x86-64-v3"` set explicitly (`target/q268/build.sh`),
+which built in 55.4 s — close to §296.6's 57 s. The with-C corpus is Q175's
+own, at Q175's session scratchpad, read-only to this lane: `cp -al`'d into
+`target/q268/withC` (11 077 files, matching §296.6's count), and this run's
+own `INITED` line reads `cov: 17539 ft: 90696` — inside §254.5's `17539–17540`
+/ `90685–90697` range and inside §296.6's own two runs' figures — so this is
+the same binary-and-corpus pair, not a coincidentally similar one. Set C was
+recomputed independently too, not read from §296.6: sorting `withC`'s and
+`withoutC`'s file names and taking the with-only names (`target/q268/setc.sh`)
+gives **923 names**, the same count as §296.6.
+
+**What ran**, one process, pinned:
+
+```
+taskset -c 20-23 /usr/bin/time -v two_solids_fused_by_a_stranger \
+  -print_final_stats=1 -print_corpus_stats=1 -timeout=10 \
+  -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1 \
+  -max_total_time=2700 target/q268/withC
+```
+
+(the full command and environment are the first four lines of
+`target/q268/run3_withC.log`). It ran its full 2700 s and exited 0: `DONE` at
+`#930409` (344 exec/s), wall clock 45:01.66 per `/usr/bin/time -v`, `uptime`
+read load average 10.25 (5 min) before the run at 20:05:23Z and 11.70 after it
+at 20:50:43Z — this machine had other work on it throughout, as it did for
+§296.6's runs.
+
+**The comparison, alongside §296.6's two points** (`target/q268/analyze.py`,
+run against `run3_withC.log` and this lane's own `setC_names.txt`; it parses
+every `[ idx sha1] sz: … runs: … succ: … focus: …` corpus-stats line, matches
+`sha1` against the 923 set-C names, and sums the `runs` field — the same
+`NumExecutedMutations` reading §296.6 used):
+
+| | 300 s (§296.6) | 900 s (§296.6) | 2700 s (this run) |
+|--|---:|---:|---:|
+| C's share of the 11 077 raw files | 8.33% | 8.33% | 8.33% |
+| C's share of the retained corpus | 16.03% | 14.35% | **13.06%** |
+| C's share of executed mutations | 15.64% | 14.19% | **13.09%** |
+| gap (mutation share − retained share) | −0.39 pp | −0.16 pp | **+0.03 pp** |
+| mean mutations/input, C | 25.57 | 85.00 | **253.77** |
+| mean mutations/input, other | 26.32 | 86.15 | **253.16** |
+| relative difference | 2.85% | 1.34% | **0.24%** |
+| Welch's t | −1.46 | −1.21 | **0.34** |
+| n (C / other) | 561 / 2939 | 512 / 3055 | 474 / 3155 |
+
+**This backs §296.6's no-growth finding, and more strongly than its own two
+points did.** Every pattern §296.6 reported holds a third time: C's share of
+executed mutations tracks its share of the retained corpus almost exactly
+(13.09% against 13.06%, 0.03 percentage points apart — tighter than either of
+§296.6's own runs), the mean mutations per input for C and for the rest
+differ by a quarter of one percent, and Welch's t (0.34) is the smallest of
+the three, well inside the noise a sample this size would produce with no
+real difference at all. Nothing here shows entropic spending a growing share
+of effort on C's inputs as the run gets longer.
+
+**If anything, the numbers move the opposite way from what growth would
+predict.** C's share of the retained corpus falls monotonically as the run
+gets longer — 16.03% → 14.35% → 13.06% — and the size of the C-vs-other mean
+gap shrinks in the same order — 2.85% → 1.34% → 0.24%. §296.6 was careful to
+call its own two points "evidence against a growing effect, not proof there
+is none at any length," because two unpinned-seed one-shot snapshots
+agreeing could still be coincidence. A third point, at three times the
+longer run and in the same direction, is harder to read as coincidence: all
+three quantities that a growing preference would have to move — retained
+share, the mutation/retained gap, and the mean-mutations gap — are smaller at
+2700 s than at 900 s than at 300 s, not larger. This lane cannot rule out
+that a length far past 2700 s reverses that trend; what it can say is that
+nothing in three points spanning a nine-to-one range points toward growth,
+and the direction they do point is toward less divergence, not more.
+
+`mise exec -- just gate quiet` on this section's own commit (`eba0b15a`) was
+green: 2554 tests passed (3 slow), 12 skipped; 3 more tests and 25 doc tests
+passed; `gate: PASS`.
