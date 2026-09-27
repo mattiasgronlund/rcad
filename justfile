@@ -4685,12 +4685,18 @@ check-fuzz-overnight-selftest:
     # and this stub's cwd is that `fuzz/` directory, because `fuzz-target` cd's
     # into it. Named with a tag the arm picks, so the assertion is about this run's
     # own file and not about whatever a real session left lying there.
+    # `write_dir` is the argument right after `target` — libFuzzer's own
+    # writable corpus directory (`fuzz-target`'s `corpus[0]`, above) — kept
+    # alongside `target` for `STUB_CORPUS_ADD` below, which needs to know
+    # where a real fuzzer would drop a newly found input.
     target=""
+    write_dir=""
     prev=""
     for arg in "$@"; do
         if [ "$prev" = "run" ]; then
             target="$arg"
-            break
+        elif [ -n "$target" ] && [ "$prev" = "$target" ] && [ -z "$write_dir" ]; then
+            write_dir="$arg"
         fi
         prev="$arg"
     done
@@ -4722,6 +4728,14 @@ check-fuzz-overnight-selftest:
     if [ -n "$target" ] && [ -n "${STUB_ARTIFACT_TAG:-}" ]; then
         mkdir -p "artifacts/$target"
         echo "what a target found" >"artifacts/$target/$kind$STUB_ARTIFACT_TAG"
+    fi
+
+    # A real fuzzer's other kind of find: a new corpus file, dropped into the
+    # directory it was told to write into. `STUB_CORPUS_ADD` names it, so an
+    # arm can ask whether a list taken before this run started already knew
+    # about a file that only exists because of this run (Q53).
+    if [ -n "${STUB_CORPUS_ADD:-}" ] && [ -n "$write_dir" ] && [ -d "$write_dir" ]; then
+        echo "found during the run" >"$write_dir/$STUB_CORPUS_ADD"
     fi
 
     # **A barrier, and not a stopwatch** (§139). Armed only by `STUB_RENDEZVOUS`,
@@ -5512,6 +5526,53 @@ check-fuzz-overnight-selftest:
     grep -q 'TO LOOK AT.*reader-merge:failed' "$dir/logs/latest" \
         || fail "a merge killed by its own timeout was not named in the summary: $(cat "$dir/logs/latest")"
     rm -rf "$reader_persistent" "$failed_scratch"
+
+    # Twenty-two: the corpus-name lists (Q53) are written before any target
+    # starts, name exactly what was already in each target's writable corpus
+    # at that moment — sorted, one file per target — and are never touched by
+    # what a target goes on to find during the night. That is the whole point
+    # of taking the list first: §240.3's rewrite gives an old file a new mtime
+    # under its old name, so only a list written *before* the night's own
+    # merge runs can say a given name was already there.
+    : >"$dir/log"
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    rm -rf "$dir/corpus"
+    mkdir -p "$dir/corpus/where_two_surfaces_cross" \
+        "$dir/corpus/no_step_file_makes_the_reader_panic" \
+        "$dir/corpus/no_model_makes_the_writer_panic" \
+        "$dir/corpus/two_solids_fused_by_a_stranger"
+    echo "b" >"$dir/corpus/where_two_surfaces_cross/b-before"
+    echo "a" >"$dir/corpus/where_two_surfaces_cross/a-before"
+    echo "c" >"$dir/corpus/no_step_file_makes_the_reader_panic/c-before"
+    echo "d" >"$dir/corpus/no_model_makes_the_writer_panic/d-before"
+    echo "e" >"$dir/corpus/two_solids_fused_by_a_stranger/e-before"
+    # `where_a_cone_or_a_torus_crosses` is left with no directory at all — the
+    # "never listed" side of the row's own "no inputs" vs "never listed"
+    # distinction.
+
+    STUB_CORPUS_ADD="found-tonight" run 8 \
+        || fail "a night with corpus-name fixtures in place failed: $(cat "$dir/out")"
+
+    [ "$(cat "$night/corpus-names/where_two_surfaces_cross")" = "$(printf 'a-before\nb-before')" ] \
+        || fail "where_two_surfaces_cross's corpus-names list is wrong: $(cat "$night/corpus-names/where_two_surfaces_cross" 2>&1)"
+    [ "$(cat "$night/corpus-names/no_step_file_makes_the_reader_panic")" = "c-before" ] \
+        || fail "the reader's corpus-names list should name its persistent directory, not its scratch one: $(cat "$night/corpus-names/no_step_file_makes_the_reader_panic" 2>&1)"
+    [ "$(cat "$night/corpus-names/no_model_makes_the_writer_panic")" = "d-before" ] \
+        || fail "no_model_makes_the_writer_panic's corpus-names list is wrong: $(cat "$night/corpus-names/no_model_makes_the_writer_panic" 2>&1)"
+    [ "$(cat "$night/corpus-names/two_solids_fused_by_a_stranger")" = "e-before" ] \
+        || fail "two_solids_fused_by_a_stranger's corpus-names list is wrong: $(cat "$night/corpus-names/two_solids_fused_by_a_stranger" 2>&1)"
+    [ -f "$night/corpus-names/where_a_cone_or_a_torus_crosses" ] \
+        || fail "a target with no corpus directory yet got no list at all, instead of an empty one"
+    [ -z "$(cat "$night/corpus-names/where_a_cone_or_a_torus_crosses")" ] \
+        || fail "a target with no corpus directory yet got a non-empty list: $(cat "$night/corpus-names/where_a_cone_or_a_torus_crosses")"
+
+    # And the file this run itself found is real — `STUB_CORPUS_ADD` did land
+    # in the directory a real fuzzer would have used — so the checks above are
+    # not vacuously passing over a run that added nothing anywhere.
+    [ -f "$dir/corpus/where_two_surfaces_cross/found-tonight" ] \
+        || fail "STUB_CORPUS_ADD did not write into the target's own writable corpus, so the exclusion above proves nothing"
+    ! grep -q '^found-tonight$' "$night/corpus-names/where_two_surfaces_cross" \
+        || fail "the corpus-names list named a file this same run added, not just what was there before it started"
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
