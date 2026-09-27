@@ -16,6 +16,7 @@ tree or the corpus was written.*
   296.3   The table, this time for the whole hour
   296.4   Whether the mutant rate shifts toward C
   296.5   What this still doesn't show
+  296.6   Seed by seed: C gets more total effort, but not more per seed
 
 ### 296.1 What ran, and how it differs from §268
 
@@ -184,3 +185,134 @@ anything it eased slightly on every metric checked.
   does not approach). Whatever produces that 8× gap on a real night, an hour
   at `-fork=4` on two static corpora does not reproduce it, and this lane does
   not know what does.
+
+### 296.6 Seed by seed: C gets more total effort, but not more per seed
+
+*Runs queue row Q244, the seed-level question §296.5 left open: not whether
+the two arms' totals diverge, but whether, inside the with-C arm alone,
+entropic gives set C's inputs more mutations than their share of the corpus
+would predict. Only the with-C arm is run; the question is internal to it.
+This lane only read and measured; nothing in the kernel, the nightly tree or
+the corpus was written. Every run was pinned to cores 20-23 with `taskset`,
+started between 18:31Z and 18:38Z, well outside 21:50–06:00Z.*
+
+**Set C is confirmed the way the brief asked, not assumed.** libFuzzer names
+each corpus file after the SHA-1 hash of its contents, so two copies of the
+same input have the same name in both directories. Listing this lane's own
+`withC/` (11 077 names) and `withoutC/` (10 154 names) and taking the names in
+the first but not the second gives **923 names** — the same count §254.1 and
+§268.1 give for C, and, since these are hash names, exact proof that this is
+the same 923 files, not merely the same count.
+
+**The binary and the corpus §296 used are gone.** §296's own scratchpad
+(`/tmp/.../scratchpad/q175/`) still holds its `withC`/`withoutC` corpora and
+its logs, but the fuzz binary under `build-055aa4a9/fuzz/target/` had already
+been removed by the time this lane read it — nothing under that build tree's
+`fuzz/` has a `target/` directory at all, and no file named
+`two_solids_fused_by_a_stranger` exists anywhere under it. This lane copied
+the two corpora (read-only, `cp -al`) into its own `target/q244/`, confirmed
+the counts above against them, and rebuilt the binary itself: `git archive
+055aa4a9` extracted into `target/q244/src-055aa4a9/`, then `cargo +nightly
+fuzz build two_solids_fused_by_a_stranger` there, with `RUSTFLAGS="-C
+target-cpu=x86-64-v3"` set explicitly — the `fuzz-target` recipe's own comment
+says this has to be repeated because cargo-fuzz's own `RUSTFLAGS` otherwise
+shadows the `.cargo/config.toml` entry `inari` needs, and a first attempt
+without it failed to compile `inari` with exactly that symptom (`cannot find
+function sub1_ru`). The second attempt built cleanly in 57 s. Both runs below
+report `cov: 17539` / `cov: 17540` and `ft: 90695` / `ft: 90687` at `INITED` —
+against §254.5's `17539 – 17540` edges and `90685 – 90697` features for the
+with-C corpus — so this is the same binary-and-corpus pair those sections
+used, not a different build that happens to share a commit.
+
+**This measurement drops `-fork=4` for a single process, and says why.**
+Under `-fork`, each of the four children gets its own `Corpus` object seeded
+with a small subset of files (§296.2: `min(files, sqrt(files+2))`, about 59 to
+start) and its own entropic energy assignment over just that subset; the
+parent only merges coverage back in between jobs. Asking "does entropic favor
+C's inputs" is a question about *one* scheduler's energy assignment over the
+*whole* corpus, and `-fork` never runs one. A single process does: one
+`Corpus`, one entropic distribution, over every surviving input at once. The
+cost is throughput (300 – 350 execs/s on one core here, against the
+800 – 1 900/s the four-way split reached in §268/§296) and wall-clock reach —
+this is not a like-for-like replacement for the arm-level throughput
+comparison those sections ran, only for the seed-level question this one
+asks.
+
+**What ran.** Two independent runs, both from a fresh copy of the with-C
+corpus, both pinned with `taskset -c 20-23` (cores 0-19 were other lanes' and
+a concurrent `just gate`'s):
+
+```
+taskset -c 20-23 <binary> -print_final_stats=1 -print_corpus_stats=1 -timeout=10 \
+  -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1 -max_total_time=300 <copy>
+taskset -c 20-23 <binary> -print_final_stats=1 -print_corpus_stats=1 -timeout=10 \
+  -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1 -max_total_time=900 <copy>
+```
+
+`-print_corpus_stats=1` is libFuzzer's own per-input dump
+(`FuzzerCorpus.h:326`, `Corpus.PrintStats()`, called from
+`PrintFinalStats` when this flag is set): one line per surviving input, its
+SHA-1 name, size, and **`NumExecutedMutations`** — the count this section
+reads as "effort". Both runs replayed the full 11 077-file seed corpus before
+mutating (`#11078 INITED`), which is where the two corpora's edge and feature
+counts above come from, and both ended cleanly at their full duration (`DONE`
+at `#103084`/342 exec/s and `#318086`/353 exec/s — 301 s and 901 s).
+
+**Not every raw file becomes a seed entropic can pick.** Loading discards any
+file that adds no coverage beyond what an earlier one already gave; only the
+survivors get a `NumExecutedMutations` line at all. That reduction, not
+anything scheduled afterward, is most of C's over-representation:
+
+| | 300 s run | 900 s run |
+|--|---:|---:|
+| C's share of the 11 077 raw files (923 names) | 8.33% | 8.33% |
+| C's share of the retained corpus at exit (`grep -c '^\s*\['`) | 561/3500 = **16.03%** | 512/3567 = **14.35%** |
+| C's share of every executed mutation (`sum(runs)` over C ÷ over all) | 14 343/91 696 = **15.64%** | 43 518/306 702 = **14.19%** |
+| mean mutations per C input | 25.57 | 85.00 |
+| mean mutations per non-C input | 26.32 | 86.15 |
+| median, both groups | 25.0 | 85.0 |
+| Welch's t (C mean − non-C mean, in units of its own standard error) | −1.46 | −1.21 |
+
+(`target/q244/analyze.py`, run against `run1_withC.log` and `run2_withC.log`;
+the retained-corpus and per-input figures come from parsing every
+`[ idx sha1] sz: … runs: … succ: … focus: …` line and matching `sha1` against
+the 923 names in `setC_names.txt`.)
+
+**C's share of the raw files (923 of 11 077) roughly doubles by the time it
+reaches the retained corpus** — 16.03% and 14.35% against 8.33% — which is
+consistent with §254.5's own reading, that C carries coverage the rest of the
+corpus does not, so a much larger fraction of C's files survive the
+redundancy check that most of the corpus fails. **But C's share of executed
+mutations tracks its share of the retained corpus, not its share of the raw
+files**: 15.64% of effort against 16.03% retained (300 s), 14.19% against
+14.35% (900 s) — both within half a percentage point, both *slightly below*
+parity rather than above it. The mean mutations per input for C and for
+everything else differ by less than 5% in either run (25.57 vs 26.32; 85.00
+vs 86.15), and Welch's t stays under 1.5 in absolute value both times — far
+short of the roughly 2 a real difference would need to clear at these sample
+sizes (n = 561/2939 and 512/3055). **Once a C input is in the corpus at all,
+entropic gives it the same ration as everything else next to it, not more.**
+
+**Nor does the gap open up as the run goes on**, which is the part of
+§254.5's hypothesis this section can speak to that §296.4 could not: the
+300 s and 900 s runs (three times the length) give almost the same retained
+share (16.03% → 14.35%) and the same effort-tracks-retained pattern, not a
+widening one. The two runs used different random seeds (unpinned, as in every
+run in this file) and are two separate one-shot snapshots, not the same run
+sampled twice — libFuzzer's per-input counts only print at exit, so a single
+continuous run cannot be read at intermediate checkpoints without changing the
+binary. That is a real limit on how well "settled" can be shown here: two
+points, three-to-one in length, agreeing with each other is evidence against a
+growing effect, not proof there is none at any length.
+
+**This does not support §254.5's hypothesis as stated.** The hypothesis was
+that entropic spends a *growing* share of mutation effort on C's inputs
+*because* they carry rare features — an active preference, compounding with
+run length. What this section finds instead: C's inputs do end up with a
+larger share of total effort than their file count would suggest, but that
+gap is explained by which of C's files survive the initial coverage check,
+not by entropic favoring the survivors once they are in the corpus, and the
+size of that gap does not grow between a 5-minute and a 15-minute run. The
+arm-level total in §254.5 (C costs 1.4 to 1.7 times, depending on `-fork`) is
+still real and still unexplained by loading time alone (§254.4) — this
+section says the seed-level mechanism proposed for it is not the one running.
