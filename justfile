@@ -8046,6 +8046,40 @@ check-queue-api-selftest:
     awk '/^## Closed/ { c = 1 } c && /^Q3  1  dropped:§230 / { f = 1 } END { exit !f }' "$hub/docs/queue.md" \
         || fail "pick theirs did not keep four's drop under ## Closed"
     got=$(check "$hub") || fail "the file pick settled fails check-queue"
+
+    # §299: once a lane hands off, its own tree can be gone while its
+    # verifier's (detached, no branch) is still held; `running` must count
+    # that tree once for the row, not once for the tree and again as "no tree
+    # yet" (§263.4's fallback, meant for before any tree exists).
+    gone="$lanes/gone-work"
+    g "$hub" worktree add -q -b lane-gone "$gone" main
+    g "$gone" commit -q --allow-empty -m "lane-gone's own commit"
+    g "$hub" worktree remove --force "$gone"
+    verify_gone="$lanes/verify-gone"
+    g "$hub" worktree add -q --detach "$verify_gone" lane-gone && lock "$verify_gone"
+    got=$(q "$hub" add 3 opus - "a row whose lane tree is gone §230" 2>&1) || fail "add for the gone-lane row failed"
+    q_gone=$got
+    got=$(q "$hub" take "$q_gone" lane-gone 2>&1) || fail "take could not hold $q_gone on lane-gone"
+    got=$(q "$hub" running 2>&1) || fail "running failed with a lane tree gone and its verifier held"
+    grep -qxF "(detached)  $verify_gone" <<<"$got" || fail "the verifier's detached tree was not counted"
+    grep -q "^lane-gone  .*no tree yet" <<<"$got" && fail "a row whose verifier is still held was also counted as treeless"
+
+    # The reverse miscount: a second row in the same state is its own slot,
+    # not the first row's tree counted again.
+    gone2="$lanes/gone-work-2"
+    g "$hub" worktree add -q -b lane-gone-2 "$gone2" main
+    g "$gone2" commit -q --allow-empty -m "lane-gone-2's own commit"
+    g "$hub" worktree remove --force "$gone2"
+    verify_gone2="$lanes/verify-gone-2"
+    g "$hub" worktree add -q --detach "$verify_gone2" lane-gone-2 && lock "$verify_gone2"
+    got=$(q "$hub" add 3 opus - "a second row whose lane tree is gone §230" 2>&1) || fail "add for the second gone-lane row failed"
+    q_gone2=$got
+    got=$(q "$hub" take "$q_gone2" lane-gone-2 2>&1) || fail "take could not hold $q_gone2 on lane-gone-2"
+    got=$(q "$hub" running 2>&1) || fail "running failed with two rows each missing their lane tree"
+    grep -qxF "(detached)  $verify_gone" <<<"$got" || fail "the first row's verifier tree dropped out of running"
+    grep -qxF "(detached)  $verify_gone2" <<<"$got" || fail "the second row's verifier tree dropped out of running"
+    grep -q "^lane-gone  .*no tree yet" <<<"$got" && fail "the first held row was still counted as treeless beside its verifier"
+    grep -q "^lane-gone-2  .*no tree yet" <<<"$got" && fail "two rows whose runs are each held collapsed onto one slot"
     exit 0
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it
