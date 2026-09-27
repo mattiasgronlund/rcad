@@ -115,10 +115,11 @@ tree held `.claude/agents/lane.md`, `verifier.md` and `merger.md` cannot resolve
 them, and every stage of the run throws. Start a new session rather than run it
 (§266.6).
 
-For each row the fill took:
+For every row the fill took:
 
-1. `mise exec -- just queue take <id> <branch>`, commit that line, and push it
-   to `main` — a docs commit goes straight there. The merger reads the queue
+1. One `mise exec -- just queue apply take <id1> <branch1> + take <id2>
+   <branch2> ...` (§309), commit that line, and push it to `main` — a docs
+   commit goes straight there. The merger reads the queue
    from `origin/main`, so a `lane:` it finds there flips to `done:` on one side
    only. A take left on your branch meets that flip at your next merge of
    `main` as a row changed on both sides, and costs a `just queue pick`.

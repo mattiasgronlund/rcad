@@ -54,12 +54,14 @@ in `needs_judgement`.
    only by keeping one side's lines whole, inside the write set; otherwise
    `git merge --abort`, and do not merge.
 2. Make the fixes from step 2.
-3. `mise exec -- just queue done <row> <lane tip sha>`. The lane's tip, not
-   the merge commit: the merge commit carries the row and cannot name itself.
-   Q140, Q141 and Q145 were closed the same way.
-4. One `mise exec -- just queue add <tier> <model> <write set> <what, ending in
-   §N>` for each thing left behind: every item of the lane's `remaining` and
-   `out_of_write_set_needs`, every verifier finding you did not fix, and every
+3. One `mise exec -- just queue apply done <row> <lane tip sha> + add <tier>
+   <model> <write set> <what, ending in §N> + ...` (§309): the row's `done`
+   step and every `add` step below, in one call. The lane's tip, not the merge
+   commit: the merge commit carries the row and cannot name itself. Q140, Q141
+   and Q145 were closed the same way.
+4. The batch's `add` steps, one for each thing left behind: every item of the
+   lane's `remaining` and `out_of_write_set_needs`, every verifier finding you
+   did not fix, and every
    item of the "what this leaves" of a section the merge brings (§230.7). §N is
    that section, or the one the row cites. Skip what is already a row — `just
    queue` lists them — and use `mise exec -- just queue after <id> <id>` for
