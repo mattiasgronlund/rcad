@@ -94,7 +94,10 @@ fn a_picker_off_the_centre_by_all_of_the_room_is_refused_although_the_room_round
     let ring = a_torus_out_along_x(ring_radius, tube_radius);
 
     let (room, room_rounding) = two_sum(ring_radius, -tube_radius);
-    assert_eq!(room, rounded_room, "R − r rounds to the f64 just past the distance");
+    assert_eq!(
+        room, rounded_room,
+        "R − r rounds to the f64 just past the distance"
+    );
     assert!(room_rounding < 0.0, "and the true R − r is under that f64");
     assert!(
         off.lo - room_rounding > 2f64.powi(-90),
@@ -187,7 +190,11 @@ struct Wide {
 /// reading over `h·√2`.
 fn how_far_the_picker_misses_the_centre(ring: &Torus) -> Wide {
     let [h, also_h, zero] = ring.axis().direction().components();
-    assert_eq!((also_h, zero), (h, 0.0), "the axis is stored along (1, 1, 0)");
+    assert_eq!(
+        (also_h, zero),
+        (h, 0.0),
+        "the axis is stored along (1, 1, 0)"
+    );
     let [x, _, _] = ring.centre().coordinates();
     let reading = h.mul_add(x, -(h * x)).abs();
 

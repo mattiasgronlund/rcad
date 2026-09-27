@@ -3381,7 +3381,8 @@ fn two_meridian_circles(flat: &Plane, ring: &Torus) -> Result<SurfaceMeet> {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     };
     let ring_radius = Interval::exactly(ring.ring_radius());
-    let margin = ring_radius - Interval::exactly(ring.tube_radius())
+    let margin = ring_radius
+        - Interval::exactly(ring.tube_radius())
         - ring_radius * turned
         - how_far_a_picking_half_space_sits_off_a_point(&between, ring.centre());
     if margin.lo() <= 0.0 {
