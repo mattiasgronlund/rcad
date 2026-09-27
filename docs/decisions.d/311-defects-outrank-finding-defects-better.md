@@ -63,7 +63,9 @@ every fix.
 - `merger.md` step 4 and the `dispatch-lanes` skill name the new order. A
   merger started before this change still files by §230.1's, so a follow-up
   that measures the search can land in tier 1 until the running lanes are done.
-  Move it with `just queue tier <id> 2`.
+  Move it with `just queue tier <id> 2`. Q250's merger filed Q289, one more
+  arm for `check-fuzz-yield-selftest`, in tier 1 while this change was being
+  made, and it was moved to 2.
 - Follow-up rows about the fuzzer are still filed; now they wait in tier 2
   behind the defects. Filing them only when Mattias asks would mean changing
   §230.7's rule that everything a lane leaves becomes a row. That is not done
