@@ -4681,12 +4681,20 @@ fn band_for_a_draw_of(fuses: usize, rate: &RangeInclusive<f64>) -> RangeInclusiv
 
 /// Run `property` over `cases` configurations from a fresh seed, and hand back
 /// what its fuses did.
+///
+/// `cases` is scaled by [`SOAK_FACTOR`] the same way [`measured_cases`] scales
+/// [`MEASURED_CASES`], so a soak reaches these properties too instead of just
+/// moving their fixed-size draw around (§290.1).
 fn over<T: core::fmt::Debug>(
     cases: u32,
     strategy: impl Strategy<Value = T>,
     property: impl Fn(T, &Tally) -> Result<(), TestCaseError>,
 ) -> Tally {
-    run(TestRunner::new(configured(cases)), strategy, property)
+    run(
+        TestRunner::new(configured(scaled_by_soak_factor(cases, soak_factor()))),
+        strategy,
+        property,
+    )
 }
 
 /// `cases` configurations from the fixed seed, whatever [`SOAK_SEED`] says.
@@ -4729,25 +4737,58 @@ fn measured<T: core::fmt::Debug>(
 ///
 /// # Panics
 ///
-/// If the variable is set to something that is not a whole number above zero, or
-/// to one whose product is more than a run can count. A soak that silently ran
-/// the default corpus would be worse than one that stopped, and a product that
+/// Whatever [`soak_factor`] and [`scaled_by_soak_factor`] panic for: the
+/// variable set to something that is not a whole number above zero, or to one
+/// whose product is more than a run can count. A soak that silently ran the
+/// default corpus would be worse than one that stopped, and a product that
 /// wrapped runs **fewer** cases than the shipped corpus while the operator reads
 /// the number as the wide one (§48.2, §50.9). Measured: at a factor of
 /// 33 554 432 this used to hand proptest a corpus of nought, and the control row
 /// went green over the 15 replayed regression seeds — 45 fuses where the shipped
 /// corpus is 429.
 fn measured_cases() -> u32 {
+    scaled_by_soak_factor(MEASURED_CASES, soak_factor())
+}
+
+/// [`SOAK_FACTOR`], or one if it is not set.
+///
+/// # Panics
+///
+/// If the variable is set to something that is not a whole number above zero.
+fn soak_factor() -> u32 {
     let Ok(factor) = std::env::var(SOAK_FACTOR) else {
-        return MEASURED_CASES;
+        return 1;
     };
     let factor: u32 = factor
         .parse()
         .unwrap_or_else(|_| panic!("{SOAK_FACTOR} has to be a whole number, not {factor:?}"));
     assert!(factor > 0, "{SOAK_FACTOR} has to be at least one");
-    MEASURED_CASES.checked_mul(factor).unwrap_or_else(|| {
-        panic!("{MEASURED_CASES} cases times {factor} is more than one run can count")
-    })
+    factor
+}
+
+/// `cases`, multiplied by `factor`, with no environment read of its own — the
+/// callers that need [`SOAK_FACTOR`] itself go through [`soak_factor`] first.
+///
+/// # Panics
+///
+/// If the product is more than a run can count.
+fn scaled_by_soak_factor(cases: u32, factor: u32) -> u32 {
+    cases
+        .checked_mul(factor)
+        .unwrap_or_else(|| panic!("{cases} cases times {factor} is more than one run can count"))
+}
+
+#[test]
+fn scaled_by_soak_factor_gives_the_literal_back_at_one_and_sixty_six_times_it_at_sixty_six() {
+    assert_eq!(scaled_by_soak_factor(CASES, 1), CASES);
+    assert_eq!(scaled_by_soak_factor(CASES, 66), CASES * 66);
+    assert_eq!(scaled_by_soak_factor(LONGER_CASES, 1), LONGER_CASES);
+    assert_eq!(scaled_by_soak_factor(LONGER_CASES, 66), LONGER_CASES * 66);
+    assert_eq!(scaled_by_soak_factor(MEASURED_CASES, 1), MEASURED_CASES);
+    assert_eq!(
+        scaled_by_soak_factor(MEASURED_CASES, 66),
+        MEASURED_CASES * 66
+    );
 }
 
 /// The fixed seed, or the one [`SOAK_SEED`] names.
