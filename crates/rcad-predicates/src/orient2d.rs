@@ -1,6 +1,8 @@
 use crate::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use crate::power_of_two::{
-    exponent_that_brings_into_range, exponent_that_lifts_the_largest_to, scaled_by_a_power_of_two,
+    each_once_and_never_zero, exponent_that_brings_into_range,
+    exponent_that_lifts_every_product_to, exponent_that_lifts_the_largest_to,
+    scaled_by_a_power_of_two,
 };
 use crate::{
     Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN, Point, Policy, Predicate,
@@ -25,7 +27,8 @@ pub const ORIENT2D: &str = "orient2d";
 /// the determinant by a positive number and so leaves its sign alone
 /// ([`decided_after_normalising`]). So are points near the origin whose
 /// differences reach from ordinary sizes down to `1e-300`, lifted instead as
-/// high as the top of the range allows.
+/// high as the top of the range allows, and a spike at the origin under a unit
+/// square, down to a spike the smallest `f64` wide.
 ///
 /// What is left as [`Decision::Undecidable`] is a genuine *spread* — a model
 /// whose coordinates sit far from the origin while its differences are far
@@ -107,9 +110,9 @@ fn at_height_zero(point: [f64; 2]) -> Point {
     Point::from([point[0], point[1], 0.0])
 }
 
-/// One or two more runs of the whole cascade, on a copy of the input moved into
-/// range by an exact power of two. `None` when there is no such copy, or when
-/// no copy could be settled either.
+/// Up to three more runs of the whole cascade, on a copy of the input moved
+/// into range by an exact power of two. `None` when there is no such copy, or
+/// when no copy could be settled either.
 ///
 /// This determinant is homogeneous of degree two in the coordinates, so scaling
 /// all six by `s > 0` multiplies it by `s^2` and leaves its sign alone — and a
@@ -117,12 +120,14 @@ fn at_height_zero(point: [f64; 2]) -> Point {
 /// test next door already trusts; here it is used as a technique rather than as
 /// an oracle.
 ///
-/// The two exponents are `orient3d`'s, for the same reasons
+/// The first two exponents are `orient3d`'s, for the same reasons
 /// (`docs/decisions.md` §324): the largest difference into `[1, 2)` first, and
 /// then the largest coordinate into [`HIGHEST_BINADE_LEVEL_THREE_TAKES`], for
 /// three points near the origin whose differences reach down to `1e-300` —
 /// where the first exponent is zero and level 3 refuses products below
-/// [`product_is_exact`]'s floor.
+/// [`product_is_exact`]'s floor. The third lifts the products level 3 forms
+/// as high as they go, for a spike at the origin that the second leaves under
+/// that floor; [`exponents_to_try`] says why.
 ///
 /// Only reached from an [`Decision::Undecidable`], so the path that already
 /// works pays nothing. The retry re-enters at the top rather than inside
@@ -149,20 +154,64 @@ fn at_height_zero(point: [f64; 2]) -> Point {
 /// `ORIENT2D_ERROR_BOUND` is a relative bound that holds for any such input
 /// whose products stay normal, so it holds here on its own terms.
 fn decided_after_normalising(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<(Decision, Level)> {
-    let differences_into_one =
-        exponent_that_brings_into_range([a[0] - c[0], a[1] - c[1], b[0] - c[0], b[1] - c[1]]);
-    let coordinates_to_the_top = exponent_that_lifts_the_largest_to(
-        [a, b, c].into_iter().flatten(),
-        HIGHEST_BINADE_LEVEL_THREE_TAKES,
-    )
-    .filter(|&exponent| Some(exponent) != differences_into_one);
-
-    [differences_into_one, coordinates_to_the_top]
-        .into_iter()
-        .flatten()
-        .filter(|&exponent| exponent != 0)
+    each_once_and_never_zero(exponents_to_try(a, b, c))
         .find_map(|exponent| decided_at_scale(a, b, c, exponent))
 }
+
+/// The exponents [`decided_after_normalising`] tries, in the order it tries
+/// them.
+///
+/// The third is for a spike at the origin under a unit square
+/// (`docs/decisions.md` §324.7), whose determinants hold `tiny * tiny` and
+/// `tiny * 1` and never `1 * 1`. The second lifts the largest coordinate only
+/// as far as `1 * 1` could go, which leaves `tiny * tiny` under
+/// [`product_is_exact`]'s floor below `tiny = 2^-994`. The third reads the six
+/// products level 3 forms one by one and lifts until the one closest to the top
+/// reaches [`LARGEST_SUM_OF_FACTOR_BINADES`], which for a spike `2^-995` wide
+/// is `2^1007`. It never lands below the second, because no product is larger
+/// than the largest coordinate squared. It comes last so that nothing the first
+/// two settle can move.
+///
+/// Levels 1 and 2 multiply differences, and at the third exponent those can
+/// overflow. That costs them their answer and nothing else: an infinite level 1
+/// bound is not normal and [`decide`] skips it, and an interval that overflows
+/// widens to take in infinity.
+/// `levels_one_and_two_overflowing_at_the_third_exponent_still_agree_with_level_three`
+/// runs that.
+fn exponents_to_try(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> [Option<i32>; 3] {
+    let coordinates = [a, b, c].into_iter().flatten();
+    [
+        exponent_that_brings_into_range([a[0] - c[0], a[1] - c[1], b[0] - c[0], b[1] - c[1]]),
+        exponent_that_lifts_the_largest_to(coordinates.clone(), HIGHEST_BINADE_LEVEL_THREE_TAKES),
+        exponent_that_lifts_every_product_to(
+            coordinates,
+            [
+                [a[0], b[1]],
+                [a[1], b[0]],
+                [a[0], c[1]],
+                [a[1], c[0]],
+                [b[0], c[1]],
+                [b[1], c[0]],
+            ],
+            LARGEST_SUM_OF_FACTOR_BINADES,
+        ),
+    ]
+}
+
+/// How high the binades of a product's two factors may add up to at the third
+/// exponent, for level 3 to overflow nothing.
+///
+/// Each factor is then below `2^(binade + 1)`, so each of the six products
+/// [`exact_determinant`] forms is below `2^1022`. Measured rather than argued:
+/// with every x at the top of one binade and every y at the top of another,
+/// which makes all six products as large as this allows at once, none of the
+/// 64 ways to sign them overflows at `1020`, and 24 do at `1021`.
+/// `the_highest_sum_of_factor_binades_overflows_nothing_in_level_three` runs it.
+///
+/// Like [`HIGHEST_BINADE_LEVEL_THREE_TAKES`], this decides reach and not
+/// soundness: an overflowed product is refused by [`product_is_exact`], and an
+/// overflowed sum by [`expansion_sign`].
+const LARGEST_SUM_OF_FACTOR_BINADES: i32 = 1020;
 
 /// The binade [`decided_after_normalising`]'s second exponent lifts the largest
 /// coordinate into: `[2^509, 2^510)`, the highest in which no level of the
@@ -384,14 +433,16 @@ fn cross(u: [f64; 2], v: [f64; 2]) -> Option<([f64; 4], usize)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DETERMINANT_ENTRIES, HIGHEST_BINADE_LEVEL_THREE_TAKES, ORIENT2D, ORIENT2D_ERROR_BOUND,
-        Orient2d, exact_determinant, orient2d, orient2d_exactly, orient2d_reporting_level,
+        DETERMINANT_ENTRIES, HIGHEST_BINADE_LEVEL_THREE_TAKES, LARGEST_SUM_OF_FACTOR_BINADES,
+        ORIENT2D, ORIENT2D_ERROR_BOUND, Orient2d, decided_at_scale, each_once_and_never_zero,
+        exact_determinant, exponents_to_try, orient2d, orient2d_exactly, orient2d_reporting_level,
         orient2d_tolerantly, scaled_by_a_power_of_two,
     };
     use crate::expansion::{expansion_sum, two_diff};
     use crate::{
         Decision, Filtered, Level, Policy, Predicate, ProvenanceLog, decide, product_is_normal,
     };
+    use core::cmp::Ordering;
 
     /// The naive `f64` determinant. Exact when the coordinates are small
     /// integers, which is what makes it a usable oracle for the sign
@@ -618,6 +669,226 @@ mod tests {
                         .is_none_or(|length| !total[..length].iter().all(|e| e.is_finite()))
             })
             .count()
+    }
+
+    /// A spike at the origin under a unit square is decided on every turn it
+    /// has, with the sign whole-number arithmetic gives, from a spike `2^-995`
+    /// wide down to one the smallest `f64` wide (`docs/decisions.md` §324.7).
+    ///
+    /// Eight turns — the two tiny corners that are not the origin, in either
+    /// order, with each corner of the square — are refused by the cascade and
+    /// by the first two exponents alike: their determinants hold
+    /// `tiny * tiny`, which the second exponent leaves under level 3's floor.
+    /// The third exponent is what settles them, and this counts that it does,
+    /// so the test cannot pass by the first two settling everything.
+    #[test]
+    fn a_spike_at_the_origin_under_a_unit_square_is_decided_on_every_turn() {
+        let corners = a_spike_at_the_origin_under_a_unit_square();
+        for t in [2f64.powi(-995), 2f64.powi(-1000), f64::from_bits(1)] {
+            assert!(t > 0.0 && t <= 2f64.powi(-41), "{t:e}");
+            let mut only_the_third_exponent_settles = 0;
+            for (i, j, k) in every_turn(corners.len()) {
+                let (a, b, c) = (corners[i].at(t), corners[j].at(t), corners[k].at(t));
+                let (decision, level) = orient2d_reporting_level(a, b, c);
+                assert_eq!(
+                    decision,
+                    the_sign_at_a_tiny_t(corners[i], corners[j], corners[k]),
+                    "t = {t:e}, corners {i} {j} {k}"
+                );
+                if refused_before_the_third_exponent(a, b, c) {
+                    only_the_third_exponent_settles += 1;
+                    assert_eq!(level, Level::Exact, "t = {t:e}, corners {i} {j} {k}");
+                }
+            }
+            assert_eq!(only_the_third_exponent_settles, 8, "t = {t:e}");
+        }
+    }
+
+    fn every_turn(corners: usize) -> impl Iterator<Item = (usize, usize, usize)> {
+        (0..corners).flat_map(move |i| {
+            (0..corners).flat_map(move |j| {
+                (0..corners)
+                    .filter(move |&k| i != j && j != k && i != k)
+                    .map(move |k| (i, j, k))
+            })
+        })
+    }
+
+    fn refused_before_the_third_exponent(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool {
+        let [first, second, _] = exponents_to_try(a, b, c);
+        !decide(&Orient2d { a, b, c }).0.is_certified()
+            && each_once_and_never_zero([first, second])
+                .all(|exponent| decided_at_scale(a, b, c, exponent).is_none())
+    }
+
+    /// A corner whose coordinates are `unit + tiny * t`, as whole numbers, and
+    /// never both on one axis, so that each is an `f64` for every `t`.
+    #[derive(Clone, Copy)]
+    struct SpikeCorner {
+        unit: [i32; 2],
+        tiny: [i32; 2],
+    }
+
+    impl SpikeCorner {
+        fn at(self, t: f64) -> [f64; 2] {
+            [0, 1].map(|axis| {
+                let (unit, tiny) = (self.unit[axis], self.tiny[axis]);
+                assert!(unit == 0 || tiny == 0, "{unit} + {tiny} t is not an f64");
+                f64::from(unit) + f64::from(tiny) * t
+            })
+        }
+    }
+
+    /// The spike §324.7 measured, which `when_it_cannot_tell.rs` used to pin
+    /// as undecidable: the unit square with a spike `t` wide and `3t` tall at
+    /// the origin.
+    fn a_spike_at_the_origin_under_a_unit_square() -> [SpikeCorner; 7] {
+        let tiny = |tiny| SpikeCorner { unit: [0, 0], tiny };
+        let unit = |unit| SpikeCorner { unit, tiny: [0, 0] };
+        [
+            tiny([0, 0]),
+            tiny([1, 3]),
+            tiny([2, 0]),
+            unit([1, -1]),
+            unit([1, 1]),
+            unit([-1, 1]),
+            unit([-1, -1]),
+        ]
+    }
+
+    /// The sign of `det[a - c, b - c]` for a positive `t` too small to matter
+    /// against whole numbers.
+    ///
+    /// The determinant is `A + B t + C t^2` with whole `A`, `B` and `C`. The
+    /// first of them that is not zero is at least `1` times its power of `t`,
+    /// and while all three are below `2^40` the rest come to less than
+    /// `2^41` times the next power, so for `t <= 2^-41` the first one's sign is
+    /// the determinant's.
+    fn the_sign_at_a_tiny_t(a: SpikeCorner, b: SpikeCorner, c: SpikeCorner) -> Decision {
+        let difference = |p: SpikeCorner, q: SpikeCorner, axis: usize| {
+            [
+                i64::from(p.unit[axis] - q.unit[axis]),
+                i64::from(p.tiny[axis] - q.tiny[axis]),
+            ]
+        };
+        let times =
+            |u: [i64; 2], v: [i64; 2]| [u[0] * v[0], u[0] * v[1] + u[1] * v[0], u[1] * v[1]];
+        let forwards = times(difference(a, c, 0), difference(b, c, 1));
+        let backwards = times(difference(a, c, 1), difference(b, c, 0));
+        let coefficients = [0, 1, 2].map(|power| forwards[power] - backwards[power]);
+        assert!(
+            coefficients.iter().all(|c| c.abs() < 1 << 40),
+            "{coefficients:?} is too large for t to be negligible"
+        );
+        match coefficients
+            .into_iter()
+            .find(|&c| c != 0)
+            .unwrap_or(0)
+            .cmp(&0)
+        {
+            Ordering::Greater => Decision::Pos,
+            Ordering::Less => Decision::Neg,
+            Ordering::Equal => Decision::Zero,
+        }
+    }
+
+    /// `LARGEST_SUM_OF_FACTOR_BINADES`'s arithmetic, run rather than argued:
+    /// every x at the top of one binade and every y at the top of another, the
+    /// two adding up to the constant, under all 64 ways to sign the six, and
+    /// level 3 overflows nothing. One more and some of them do. The rule reads
+    /// only the sum, so the sum is split three ways, from lopsided to even.
+    #[test]
+    fn the_highest_sum_of_factor_binades_overflows_nothing_in_level_three() {
+        for sum in [
+            LARGEST_SUM_OF_FACTOR_BINADES,
+            LARGEST_SUM_OF_FACTOR_BINADES + 1,
+        ] {
+            for x_binade in [sum - 1023, sum / 2, 1023] {
+                let overflowed = sign_patterns_that_overflow_level_three(x_binade, sum - x_binade);
+                if sum == LARGEST_SUM_OF_FACTOR_BINADES {
+                    assert_eq!(overflowed, 0, "x in binade {x_binade}");
+                } else {
+                    assert!(overflowed > 0, "x in binade {x_binade}");
+                }
+            }
+        }
+    }
+
+    fn sign_patterns_that_overflow_level_three(x_binade: i32, y_binade: i32) -> usize {
+        (0..1u32 << 6)
+            .filter(|&signs| {
+                let [a, b, c] = signed_corners(signs, top_of(x_binade), top_of(y_binade));
+                let mut total = [0.0; DETERMINANT_ENTRIES];
+                exact_determinant(a, b, c, &mut total)
+                    .is_none_or(|length| !total[..length].iter().all(|e| e.is_finite()))
+            })
+            .count()
+    }
+
+    /// At the third exponent levels 1 and 2 can overflow, and that has to cost
+    /// them their answer and nothing else. Every turn of the spike above,
+    /// scaled by its own third exponent, gets level 3's answer from the whole
+    /// cascade, and that answer is the whole-number one — while level 1's
+    /// bound and level 2's interval run off the top on some of them.
+    #[test]
+    fn levels_one_and_two_overflowing_at_the_third_exponent_still_agree_with_level_three() {
+        let corners = a_spike_at_the_origin_under_a_unit_square();
+        let (mut level_one_overflowed, mut level_two_overflowed) = (0, 0);
+        for t in [2f64.powi(-995), 2f64.powi(-1000), f64::from_bits(1)] {
+            for (i, j, k) in every_turn(corners.len()) {
+                let [_, _, Some(third)] =
+                    exponents_to_try(corners[i].at(t), corners[j].at(t), corners[k].at(t))
+                else {
+                    panic!("no corner is far enough from zero to lift");
+                };
+                let [a, b, c] = [i, j, k].map(|corner| {
+                    scaled_by_a_power_of_two(corners[corner].at(t), third)
+                        .expect("the third exponent keeps every coordinate an f64")
+                });
+                let exactly = orient2d_exactly(a, b, c);
+                assert_eq!(
+                    exactly,
+                    the_sign_at_a_tiny_t(corners[i], corners[j], corners[k])
+                );
+                assert_eq!(
+                    decide(&Orient2d { a, b, c }).0,
+                    exactly,
+                    "corners {i} {j} {k}"
+                );
+
+                let predicate = Orient2d { a, b, c };
+                let level_one = predicate.on_floats().expect("level 1 always runs");
+                if !level_one.error_bound.is_finite() {
+                    level_one_overflowed += 1;
+                }
+                let level_two = predicate.on_intervals();
+                if !level_two.lo().is_finite() || !level_two.hi().is_finite() {
+                    level_two_overflowed += 1;
+                }
+            }
+        }
+        assert!(
+            level_one_overflowed > 0 && level_two_overflowed > 0,
+            "level 1 overflowed on {level_one_overflowed} and level 2 on {level_two_overflowed}, \
+             so this no longer shows an overflow costing nothing"
+        );
+    }
+
+    fn top_of(binade: i32) -> f64 {
+        2f64.powi(binade + 1).next_down()
+    }
+
+    /// Three corners with every x of magnitude `x` and every y of magnitude
+    /// `y`, signed by the six bits of `signs`.
+    fn signed_corners(signs: u32, x: f64, y: f64) -> [[f64; 2]; 3] {
+        let signed = |bit: u32, magnitude: f64| {
+            if signs & (1 << bit) == 0 {
+                magnitude
+            } else {
+                -magnitude
+            }
+        };
+        [0, 1, 2].map(|corner| [signed(2 * corner, x), signed(2 * corner + 1, y)])
     }
 
     /// The claim [`decided_after_normalising`] rests on, executed rather than
