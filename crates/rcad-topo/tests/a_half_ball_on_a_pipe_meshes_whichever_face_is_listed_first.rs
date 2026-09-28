@@ -141,23 +141,23 @@ fn the_rim_is_stored_the_way_the_ball_and_its_plane_say_whichever_face_is_listed
     let corner = Vector::new(RADIUS, 0.0, 0.0);
     let up = Vector::new(0.0, 1.0, 0.0);
     let crossing = corner.cross(up);
-    let stored_way =
-        match which_way_a_closed_crossing_turns([corner, up], corner, Vector::new(0.0, 0.0, 1.0)) {
-            Decision::Pos => crossing,
-            Decision::Neg => -crossing,
-            Decision::Zero | Decision::Undecidable { .. } | _ => {
-                panic!("the ball and the rim's plane cross at the corner")
-            }
-        };
+    let turns = which_way_a_closed_crossing_turns([corner, up], corner, Vector::new(0.0, 0.0, 1.0));
+    assert!(
+        matches!(turns, Decision::Pos | Decision::Neg),
+        "the ball and the rim's plane cross at the corner, and the rule said {turns:?}"
+    );
+    let stored_way = if turns == Decision::Pos {
+        crossing
+    } else {
+        -crossing
+    };
     for first in [FirstInTheShell::Ball, FirstInTheShell::Pipe] {
         let (model, key) = a_half_ball_on_a_pipe(first);
         for face in model.solid(key).expect("this model made the key").faces() {
-            let below = match face.surface() {
-                Surface::Sphere(_) => true,
-                Surface::Cylinder(_) => false,
-                Surface::Plane(_) => continue,
-                other => panic!("the solid has a face on {other:?}"),
-            };
+            if face.surface().as_plane().is_some() {
+                continue;
+            }
+            let below = matches!(face.surface(), Surface::Sphere(_));
             let [way] = face
                 .wires()
                 .flat_map(|wire| wire.coedges())
