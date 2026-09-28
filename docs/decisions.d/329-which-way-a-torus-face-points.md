@@ -2,7 +2,8 @@
 
 *Row Q339 (`lane-q339-which-way-a-torus-faces`, off `0a7142ff`). Diagnosis and
 pins; no `src/` changed. Q103 (validate refuses a three-quarter bend) and Q102
-(whose first lane turned `classify.rs`'s torus gradient round, §323.4) both
+(whose first lane turned `classify.rs`'s torus gradient round, in the section
+it writes as 323.4 on `lane-q102-a-point-a-ray-can-leave`) both
 rest on which way a torus's own normal points. It points **out of the tube**:
 the standard, the reader, `Model::validate` and `classify.rs` as `0a7142ff`
 has it all say so, and so do three files in the corpus. The mesher alone says
@@ -103,7 +104,7 @@ that got as far as classifying.
 
 The middle of the tube at `45°` is `CannotFireARayAtAFacesSurface` without Q102
 and `Inside` with it, whichever way the mesh turns — that is Q102's other
-change, the ray fired from an exact point beside a box (§323.2), and it is
+change, the ray fired from an exact point beside a box (its 323.2), and it is
 right in both.
 
 So there are two consistent end states and one of them is wrong about files.
