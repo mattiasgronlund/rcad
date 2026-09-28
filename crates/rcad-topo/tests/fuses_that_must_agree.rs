@@ -2466,23 +2466,27 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
 ///
 /// # It does not run today, and what stops it is not the trio
 ///
-/// **One of the four fuses this property runs per case refuses**, and that is
-/// enough to leave it comparing nothing, so this pins the refusal rather than
-/// reporting a green run over a property that compared nothing (§14.7).
-/// Measured: **39 of 156, exactly a quarter**, all naming
-/// [`CANNOT_TELL_THE_CELLS_OF_A_FACE_APART`]. That quartering is asserted below
-/// and not merely printed.
+/// **One of the four fuses this property runs per case does not answer**, and
+/// that is enough to leave it comparing nothing, so this pins it rather than
+/// reporting a green run over a property that compared nothing (§14.7). That
+/// quartering is asserted below and not merely printed.
 ///
 /// The one that stops is the **second** fuse of the grouping that sinks the ball
-/// into the block first. Its floor then has a round *hole* in it, so one of that
-/// face's rim wires is a single closed edge; `how_often_the_rim_winds_round` fans
-/// a rim wire's corners into a polygon, a one-corner wire fans into the segment
-/// from that corner to itself, and no turn off it is ever `Pos` or `Neg`. The
-/// bar's closed-cut lump then gets no winding at all, and a walk wound zero is
-/// joined to a walk whose winding is unknown. `a_ball_and_a_bar_in_one_block.rs`
-/// carries the measured cycle table.
+/// into the block first. Since §340 its floor's cells are told apart, and what
+/// stops it is no longer a refusal: the half ball hanging under the floor comes
+/// out of the arrangement inside out, and the fuse catches its own broken
+/// answer as `Invalid(FacesDoNotAgreeWhichWayTheyFace)`.
+/// [`the_ball_comes_back_inside_out`] lets exactly that through, for this
+/// property alone, and names the site; [`a_curved_refusal`] still calls it a
+/// bug everywhere else. `a_ball_and_a_bar_in_one_block.rs` has the measurement.
 ///
 /// # What this pin used to say, and why it changed
+///
+/// Until §340 the same fuse refused [`CANNOT_TELL_THE_CELLS_OF_A_FACE_APART`]:
+/// the bar's circle in a floor with a round hole agreed with the
+/// inside and the outside of the floor's square, and the old glue put both in
+/// one cell. Before that, as the next paragraphs say, it was the triple.
+///
 ///
 /// It used to refuse on [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`], at
 /// **half** the fuses rather than a quarter, and the doc here explained at length
@@ -2511,7 +2515,13 @@ fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first()
         // Both groupings are asked for, every case, and neither short-circuits
         // the other. What this pins is that *each* of them stops, so a run that
         // only ever tried the first would be pinning half the claim.
-        let left = united_in_turn(tally, coordinates, &model, &[block], &[ball], &[bar])?;
+        let left = match fused(tally, coordinates, &model, &[block], &[ball], Rule::Union)?.answer()
+        {
+            Some((sunk, first)) if !the_ball_comes_back_inside_out(tally, &sunk, &first, bar) => {
+                fused(tally, coordinates, &sunk, &first, &[bar], Rule::Union)?.answer()
+            }
+            Some(_) | None => None,
+        };
         let right = united_in_turn(tally, coordinates, &model, &[ball], &[bar], &[block])?;
         let (Some(left), Some(right)) = (left, right) else {
             return Ok(());
@@ -2526,18 +2536,62 @@ fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first()
         Ok(())
     });
     tally.nothing_was_compared_because_it_all_refused(
-        "associativity of union over a ball and a bar in a block, which refuses",
-        CANNOT_TELL_THE_CELLS_OF_A_FACE_APART,
+        "associativity of union over a ball and a bar in a block, which does not answer",
+        A_HALF_BALL_TURNED_INSIDE_OUT,
     );
     assert_eq!(
         4 * tally.refused.get(),
         tally.fuses.get(),
-        "the pin is that exactly one of the four fuses this property runs per case refuses — \
-         the second of the grouping that sinks the ball into the block first, which leaves a \
-         round hole in the floor for the bar to be cut against: {} of {} refused",
+        "the pin is that exactly one of the four fuses this property runs per case does not \
+         answer — the second of the grouping that sinks the ball into the block first, whose \
+         half ball comes out inside out: {} of {} did not",
         tally.refused.get(),
         tally.fuses.get()
     );
+}
+
+/// What stops [`uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`].
+const A_HALF_BALL_TURNED_INSIDE_OUT: &str =
+    "a half ball whose one corner is on the floor, turned inside out";
+
+/// Whether uniting `bar` with the block the ball was just sunk into builds the
+/// half ball inside out, counted as a fuse that did not answer when it does.
+///
+/// **An exemption for this configuration alone, and the site is known**
+/// (`docs/decisions.md` §340.5). The half ball's one wire is the circle where it
+/// meets the floor, whose one corner is on the floor, so
+/// `Arrangement::material_is_left_of_forward` in `arrange.rs` has no corner to
+/// read its side of the floor from and takes the circle's forward direction,
+/// which here is the upper half. The fuse catches it in `assemble.rs`'s
+/// `how_much_space_it_encloses`. Which way the wire walks that circle is in the
+/// model, and `bake.rs` does not hand it to the arrangement. Nothing but that
+/// exact `Invalid` is let through: any other outcome goes to [`fused`] and is
+/// judged there.
+fn the_ball_comes_back_inside_out(
+    tally: &Tally,
+    model: &Model,
+    block_and_ball: &[SolidKey],
+    bar: SolidKey,
+) -> bool {
+    let mut model = model.clone();
+    let answer = model.fuse(
+        block_and_ball,
+        &[bar],
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace)) = answer else {
+        return false;
+    };
+    tally.fuses.set(tally.fuses.get() + 1);
+    tally.refused.set(tally.refused.get() + 1);
+    *tally
+        .gave_up
+        .borrow_mut()
+        .entry(A_HALF_BALL_TURNED_INSIDE_OUT)
+        .or_default() += 1;
+    true
 }
 
 /// Every frustum the family draws really does have skin inside the block and

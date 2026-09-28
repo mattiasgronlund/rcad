@@ -1,5 +1,5 @@
-//! §282.4's probe, rebuilt, and the sweep §282.3 asked for before `arrange.rs`
-//! touches the glue.
+//! §282.4's probe, rebuilt: a flat face whose sign rule glued five cells into
+//! one, and what it answers now that it does not.
 //!
 //! A plate 10 × 10 × 2, a bar of radius 1 at `(3, 5)` through it (a hole with
 //! no wall of its own touching the plate's edge), and a block over
@@ -8,40 +8,33 @@
 //! each tool alone answering cleanly and both tools together refusing
 //! `ResultIsNotManifold`, then deleted the probe. It is rebuilt below as
 //! [`each_rule_alone_with_the_block_answers_one_solid`] and
-//! [`both_tools_together_refuse_on_the_same_glued_cells`], with the block
-//! standing in for "one tool alone" because it keeps every answer a single
-//! solid in both argument orders — the bar alone does not, since `bar \ plate`
-//! is two disjoint stubs, one above the plate and one below.
+//! [`both_tools_together_answer_the_volumes_worked_out_by_hand`], with the
+//! block standing in for "one tool alone" because it keeps every answer a
+//! single solid in both argument orders — the bar alone does not, since
+//! `bar \ plate` is two disjoint stubs, one above the plate and one below.
 //!
-//! # The sweep
+//! # The sweep, and what it did not see
 //!
-//! §282.3 says the arrange.rs row (Q204) needs to know, before it touches the
-//! glue, whether it can produce a **wrong answer that still validates** rather
-//! than only ever refusing. Swept: 0 to 3 holes (bars of radius 1, positioned
-//! clear of every block variant below and of each other), three ways the
-//! block's cut meets the plate's edge — one side (`x ∈ [6, 16]`, `y ∈ [2, 8]`,
-//! as above), a corner (`x ∈ [6, 16]`, `y ∈ [6, 16]`), and two opposite sides
-//! (`x ∈ [-5, 15]`, `y ∈ [4, 6]`, a slot straight through) — all three rules,
-//! and both argument orders: 72 cases. Each was checked against the volume
-//! worked out by hand and against the same tools fused one at a time (§282.4's
-//! two independent checks), under `catch_unwind` for a panic.
+//! Queue row Q203 swept this family before `arrange.rs` was touched: 0 to 3
+//! holes, three ways the block's cut meets the plate's edge, all three rules and
+//! both argument orders, 72 cases, under `catch_unwind`. Every case with a hole
+//! refused — `ResultIsNotManifold` (count 1 or 3) or, in a few, `Undecidable` on
+//! a `side of plane` predicate whose enclosure was `1.7e-13` wide — and every
+//! case without one answered right. This file used to say from that that **no
+//! panic turned up**, and that the glue was a refusal and never worse.
 //!
-//! **No wrong answer and no panic turned up.** Every case with at least one
-//! hole refused — always `ResultIsNotManifold` (count 1 or 3) or, in a few
-//! cases, `Undecidable` on a `side of plane` predicate whose enclosure was
-//! `1.7e-13` wide, a near-coincidence of the sweep's own numbers and not this
-//! glue. Every case with no hole (the block alone, on any of the three edges)
-//! answered and was right. So on this family of shapes the same-lump glue is
-//! a **refusal**, not a silent wrong answer, and Q204 can rely on that: fixing
-//! `group_the_cycles_into_cells` here is a correctness fix with no known case
-//! of a wrong answer to also chase down, not a bug hiding behind a refusal.
-//! This does not prove no shape anywhere gives a wrong answer — a family this
-//! size cannot — but it is the family §282.4 named and the one this row was
-//! asked to check first.
+//! **True of those 72 and false beyond them.** Queue row Q20 found the same
+//! glue making `Model::fuse` panic in `assemble.rs` ("a face joined out of
+//! coplanar pieces has one outline, and this one has two") wherever every
+//! region of the glued piece is kept: a block holding a bar and a small box
+//! whose walls cut its floor in nine, and a block round a lens of a cone whose
+//! floor a lid's plane cuts in two. The sweep never kept every region of a
+//! glued piece, so it could not see that. Those two are pinned in
+//! `a_floor_holding_a_circle_cut_in_two.rs`, and this family now answers.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 fn a_plate(model: &mut Model) -> SolidKey {
     let policy = Policy::certified();
@@ -144,17 +137,30 @@ fn each_rule_alone_with_the_block_answers_one_solid() {
 }
 
 /// The same two tools together: the bar's circle is one lump on the plate's
-/// top and bottom faces, the block's cut leaves the boundary lump in five
-/// walks (§282.4), and `group_the_cycles_into_cells` glues all five to the
-/// circle's outer walk into one piece with no point in it.
+/// top and bottom faces, and the block's cut leaves the boundary lump in five
+/// walks (§282.4). The circle's outer walk agrees with all five about every
+/// closed curve, and `group_the_cycles_into_cells` used to glue all five to it
+/// into one piece with no point in it, refusing `ResultIsNotManifold`. It is
+/// placed now by which of the five its corners wind once round, and every rule
+/// answers.
 ///
-/// `Union` and `Difference` (plate as the argument) refuse with three faces
-/// on the bad edge; `Intersection` and `Difference` (block and bar as the
-/// argument) refuse with one. Whichever tool the fuse builds the glued piece
-/// from names a different edge first, and the count follows.
+/// **The volumes, by hand.** The bar is `π · 1² · 4 = 4π` long and shares
+/// `2π` with the plate; the block is `240` and shares `48` (the test above).
+/// The two tools miss each other.
+///
+/// - `plate ∪ tools = 200 + 4π + 240 − 2π − 48 = 392 + 2π`, one solid.
+/// - `plate ∩ tools = 2π + 48`, two solids: the plug of bar and the block's
+///   bite.
+/// - `plate \ tools = 200 − 2π − 48 = 152 − 2π`, one solid.
+/// - `tools \ plate = 2π + 192`, three solids: the bar's two stubs and the
+///   bracket of block.
+///
+/// The bar's wall is meshed, so each is held to its volume within what the
+/// mesh says it may miss by.
 #[test]
-fn both_tools_together_refuse_on_the_same_glued_cells() {
+fn both_tools_together_answer_the_volumes_worked_out_by_hand() {
     let policy = Policy::certified();
+    let round = 2.0 * core::f64::consts::PI;
 
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let plate = a_plate(&mut model);
@@ -162,25 +168,56 @@ fn both_tools_together_refuse_on_the_same_glued_cells() {
     let block = a_block_through(&mut model, 6.0, 16.0, 2.0, 8.0);
 
     let cases = [
-        (Rule::Union, vec![plate], vec![bar, block], 3),
-        (Rule::Intersection, vec![plate], vec![bar, block], 1),
-        (Rule::Difference, vec![plate], vec![bar, block], 3),
-        (Rule::Difference, vec![bar, block], vec![plate], 1),
+        (Rule::Union, vec![plate], vec![bar, block], 1, 392.0 + round),
+        (
+            Rule::Intersection,
+            vec![plate],
+            vec![bar, block],
+            2,
+            48.0 + round,
+        ),
+        (
+            Rule::Difference,
+            vec![plate],
+            vec![bar, block],
+            1,
+            152.0 - round,
+        ),
+        (
+            Rule::Difference,
+            vec![bar, block],
+            vec![plate],
+            3,
+            192.0 + round,
+        ),
     ];
-    for (rule, arguments, tools, expected_count) in cases {
+    for (rule, arguments, tools, solids, by_hand) in cases {
         let mut model = model.clone();
-        let refused = model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new());
-        let Err(Error::ResultIsNotManifold { count }) = refused else {
-            panic!(
-                "{rule:?} of the plate, the bar and the block: expected ResultIsNotManifold, got {refused:?}"
-            );
-        };
-        assert_eq!(
-            count, expected_count,
-            "{rule:?}: how many faces the bad edge has"
-        );
+        let fused = model
+            .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|refused| panic!("{rule:?} of the plate and both tools: {refused:?}"));
         model
             .validate(&policy, &mut ProvenanceLog::new())
-            .expect("a refused fuse leaves the model exactly as it was");
+            .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
+        assert_eq!(fused.solids().len(), solids, "{rule:?}: how many solids");
+        let (mut volume, mut error) = (0.0, 0.0);
+        for &solid in fused.solids() {
+            let measured = model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid measures");
+            volume += measured.volume();
+            error += measured.volume_error();
+        }
+        assert!(
+            (volume - by_hand).abs() <= error,
+            "{rule:?} of the plate and both tools: measured {volume} against {by_hand} by hand, \
+             and the mesh may miss by {error}"
+        );
     }
 }

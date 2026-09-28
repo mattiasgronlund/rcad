@@ -9,9 +9,13 @@
 //! # Two kinds of answer: rows that miss, and rows that cut
 //!
 //! The family draws 16 rows and asks six fuses of each — union, intersection and
-//! difference, both ways round. It answers 66 of the 96: 24 from rows where the
-//! block misses the frustum altogether, and 42 — all six fuses of seven rows —
-//! where the block cuts a piece out of it.
+//! difference, both ways round. It answers all 96: 30 from the five rows where
+//! the block misses the frustum altogether, and 66 — all six fuses of eleven
+//! rows — where the block cuts a piece out of it.
+//!
+//! **Until §340 it was 66: 24 and 42.** The fifth clear row and four of the
+//! meeting rows stopped because `arrange.rs` glued two regions of one face into
+//! one cell through a curve that agreed with both (§340.1).
 //!
 //! **Until e2cd175d it was only the first 24.** A hyperbola arc the fuse writes
 //! used to be named by the half-space through its chord, which also holds the
@@ -30,7 +34,8 @@
 //!
 //! Over this grid — slope one of `1/8`, `1/4`, `1/2`, and `far` a whole number
 //! from 6 to 12 — that is `slope = 1/8` with `far ≤ 11`, and five of the sixteen
-//! rows land there. Four answer all six of their fuses; the fifth answers none.
+//! rows land there. All five answer all six of their fuses; until §340 the
+//! fifth, at `slope · far = 1.25`, answered none.
 //!
 //! **Three of those four used to answer only half their fuses**, and what filled
 //! them in was §215's same-surface arm in `walk`: the union both ways round and
@@ -305,18 +310,18 @@ fn every_block_and_frustum_fuse_that_answers_adds_up() {
         "every answer of a meeting row has to have been through the check"
     );
     assert!(
-        meeting_rows_checked >= 7,
+        meeting_rows_checked >= 11,
         "seven rows whose block cuts the frustum answered, and were checked, the day e2cd175d \
-         named a hyperbola arc by its nappe; {meeting_rows_checked} did here. Fewer is a \
-         regression and not a rate: re-derive it rather than relax it (§19.1)"
+         named a hyperbola arc by its nappe, and eleven the day §340 stopped gluing two walks \
+         of one lump into one cell; {meeting_rows_checked} did here. Fewer is a regression and \
+         not a rate: re-derive it rather than relax it (§19.1)"
     );
     assert_eq!(
-        answered_missing, 24,
+        answered_missing, 30,
         "the answers this family is pinned at are all fuses of its clear rows — all six from each \
-         of the four rows at slope · far = 0.75 and slope · far = 1, with the fifth clear row at \
-         slope · far = 1.25 answering none — and {answered_missing} of them came through. The \
-         rows that answered are printed above; re-derive from those rather than from this \
-         sentence"
+         of the four rows at slope · far = 0.75 and slope · far = 1 and of the fifth at \
+         slope · far = 1.25 — and {answered_missing} of them came through. The rows that \
+         answered are printed above; re-derive from those rather than from this sentence"
     );
 }
 

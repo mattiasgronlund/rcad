@@ -22,12 +22,11 @@
 //! # What is still refused, and it is no longer the triple
 //!
 //! The three fuse when they are handed over **together**. Fused a pair at a
-//! time, the ball goes in first and leaves the block's floor with a round hole,
-//! and the bar's circle is then a closed cut in a face one of whose rim wires is
-//! a single closed edge. That stops on `CannotTellTheCellsOfAFaceApart`, which
-//! §39.4 already lists as a gap and marks undemonstrated;
-//! [`the_same_three_one_pair_at_a_time_stop_somewhere_else`] is the
-//! demonstration and says what the fan cannot count.
+//! time, the ball goes in first and leaves the block's floor with a round hole
+//! and half a ball hanging under it. Uniting the bar with that then builds the
+//! half ball inside out and catches it: `Invalid(FacesDoNotAgreeWhichWayTheyFace)`.
+//! [`the_same_three_one_pair_at_a_time_stop_somewhere_else`] pins it and names
+//! where it goes wrong (`docs/decisions.md` §340.5).
 //!
 //! # And what a point inside the block still cannot be asked
 //!
@@ -42,7 +41,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Invalid, Model, Rule, SolidKey};
 
 /// How fine the meshes every volume here is read off are.
 const A_DEFLECTION: f64 = 0.02;
@@ -231,30 +230,37 @@ fn a_ball_driven_into_the_bar_is_refused_by_name() {
 }
 
 /// What stops the same three solids fused **one pair at a time**, now that the
-/// triple no longer does.
+/// triple no longer does: the second fuse builds the half ball inside out and
+/// catches it before writing anything.
 ///
-/// This is the refusal that was standing behind the one this file closed, and it
-/// is a different one: `CannotTellTheCellsOfAFaceApart`, §39.4's row already
-/// classified a **gap** and marked undemonstrated. Here is the demonstration.
+/// **This is a broken answer caught late, and not a refusal.** Fusing the ball
+/// in first leaves the block's floor with a round hole and the lower half of the
+/// ball hanging under it. Uniting the bar with that, every face's cells are
+/// told apart right since §340 — the floor with two round holes, the bar's disc,
+/// three tubes — but the half ball, which nothing cuts, comes out of
+/// `arrange.rs` as the *upper* half. Its one wire is the circle where it meets
+/// the floor, and that circle's one corner is on the floor, so
+/// `Arrangement::material_is_left_of_forward` finds no corner off the floor to
+/// read its side from and takes the circle's forward direction. For this half
+/// ball that is the wrong way round: it hangs on the floor plane's outer side.
+/// The floor and the half ball then walk their shared circle the same way, and
+/// `how_much_space_it_encloses` in `assemble.rs` refuses the answer.
 ///
-/// Fusing the ball in first leaves the block's floor with a round *hole* in it,
-/// and then the bar's circle is a closed cut in a face one of whose rim wires is
-/// a single closed edge. `arrange.rs`'s `how_often_the_rim_winds_round` fans a
-/// wire's corners into a polygon; a wire with one corner fans into the segment
-/// from that corner to itself, which no turn can be read off, and the whole
-/// count comes back `None`. So the bar's lump gets no winding, nothing tells the
-/// inside of the floor from the outside of it for that lump, and two walks that
-/// wind different numbers of times end up in one cell.
-///
-/// **Fixing that is a different lane.** A rim with a curved wire needs a winding
-/// count that is not a fan over corners, and skipping such a wire would answer
-/// wrongly for a cut inside the hole rather than refusing.
+/// Measured: with that one guess turned the other way for this face and nothing
+/// else changed, the same union answers, validates, has the eleven faces of
+/// [`a_ball_and_a_bar_that_miss_each_other_fuse_into_one_block`], and measures
+/// 357.594 against 357.661 worked out by hand. **The fix is not in `arrange.rs`
+/// alone**: which way a wire walks a closed edge is in the model, but `bake.rs`
+/// does not hand it to the arrangement (§340.5).
 #[test]
 fn the_same_three_one_pair_at_a_time_stop_somewhere_else() {
     let (_, answer) = united_one_at_a_time(2.0);
     assert!(
-        matches!(answer, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
-        "the triple is no longer what stops this, and what does is §39.4's own row: {answer:?}"
+        matches!(
+            answer,
+            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
+        ),
+        "the half ball comes out of the arrangement inside out, §340.5: {answer:?}"
     );
 }
 

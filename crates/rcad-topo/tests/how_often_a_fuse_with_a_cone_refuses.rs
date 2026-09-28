@@ -23,11 +23,9 @@
 //!   the block stands upright, cuts a **hyperbola**. `intersect` names it and
 //!   hands back one endless run per nappe. That branch still never closes, and
 //!   `arrange`'s `HowItRuns::AlongABend` orders points along it anyway, and
-//!   since e2cd175d the fuse names each arc of it by the nappe it is on, so most
-//!   of the block family's fuses across a hyperbola answer — the rest stop at the
-//!   one wall
-//!   `what_stops_a_block_and_a_cone_now_is_one_named_thing_and_not_the_ordering`
-//!   counts;
+//!   since e2cd175d the fuse names each arc of it by the nappe it is on. Since
+//!   §340 every one of the block family's fuses answers, which
+//!   `every_fuse_of_a_block_and_a_cone_now_answers` pins;
 //! - anything curved against a cone `intersect` does still refuse outright, and
 //!   **one cone twice is not that pair**: `intersect` has always answered it as
 //!   one surface, and since §214 `walk` does too. For a cone against a *different*
@@ -338,9 +336,9 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// one: `select.rs`'s *a point inside a piece of a face* 60, a corner too far out
 /// for the triangulator 14, a face whose boundary crosses itself 7, and four faces
 /// along one edge 9.
-/// [`what_stops_a_block_and_a_cone_now_is_one_named_thing_and_not_the_ordering`]
-/// is that breakdown pinned rather than printed, which is what §15.10 asks of a
-/// rate that stayed still while everything under it moved.
+/// [`every_fuse_of_a_block_and_a_cone_now_answers`] carries that breakdown's
+/// history to where it ended, which is what §15.10 asks of a rate that stayed
+/// still while everything under it moved.
 ///
 /// **A third time, and this time it moved: 15 of 96.** §206's bulge count in
 /// `select.rs` decides cap pieces that used to stop it, and nine more fuses come
@@ -376,6 +374,11 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// other branch too, so `walk` picked the wrong branch across the apex. The 15
 /// above and the 27 at the triangulator were all that, and all 42 answer — every
 /// fuse of the seven rows whose block reaches into the frustum. One wall is left.
+///
+/// **A seventh time, and the last wall: 96 of 96.** §340 stopped the arrangement
+/// gluing the patch a leaning wall cuts off the frustum's face to the rest of
+/// that face through the bottom rim, and the 30 that could not find a point
+/// inside a piece all answer.
 ///
 /// So the assertion here stays a **floor at what has been measured**, in the
 /// shape §19.1 asks for: this family may not answer fewer than it does today.
@@ -471,11 +474,12 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                 family.named()
             ),
             Family::AFrustumAgainstABlock => assert!(
-                answered >= 66,
+                answered >= 96,
                 "{}: this family was measured at 6 answered of 96 the day the hyperbola landed, \
                  at 15 the day §206's bulge count landed, at 24 the day `walk` learnt that \
-                 one cone twice is one surface (§214) and at 66 the day e2cd175d named a \
-                 hyperbola arc by its nappe, and it answered {answered} of {fuses} here. A cone that could be cut yesterday and cannot today is a regression, not \
+                 one cone twice is one surface (§214), at 66 the day e2cd175d named a \
+                 hyperbola arc by its nappe and at 96 the day §340 stopped gluing two walks \
+                 of one lump into one cell, and it answered {answered} of {fuses} here. A cone that could be cut yesterday and cannot today is a regression, not \
                  a rate: re-derive this number rather than relax it (§19.1)",
                 family.named()
             ),
@@ -1066,11 +1070,10 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
     );
 }
 
-/// What the block family's 30 refusals are, now that one wall is all that is
-/// left.
+/// Every fuse of a frustum against a block answers, and nothing is left to name.
 ///
 /// §15.10: a rate that moves is published with the list of what moved. It has
-/// moved five times. First the bend landed and the rate stood still — 6 of 96
+/// moved six times. First the bend landed and the rate stood still — 6 of 96
 /// either side — while all 90 refusals changed their name from *"nothing can put
 /// points in order along this curve"* to four different walls. Then §206's bulge
 /// count landed and the rate moved to 15 of 96, and the four walls moved under
@@ -1079,7 +1082,8 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 /// `walk` learnt the pair that is one cone twice, and the 9 that wall held became
 /// answers: **24 of 96**, and four walls again. Then e2cd175d named each
 /// hyperbola arc the fuse writes by the nappe it is on, and three of the four
-/// walls emptied at once: **66 of 96**, and one wall.
+/// walls emptied at once: **66 of 96**, and one wall. Then §340 emptied that
+/// one: **96 of 96**, and no wall at all.
 ///
 /// **The three that vanished were all misnamed hyperbola arcs.** The fuse used
 /// to name an arc of a plane-cone hyperbola by the half-space through its
@@ -1091,10 +1095,13 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 ///
 /// Measured over this family's own draws rather than taken from anywhere:
 ///
-/// - **a point inside a piece of a face**, 60 → 30 → **30**, the one wall left.
-///   `select.rs` could not say whether a piece it had cut was in or out. Halved
-///   by §206 teaching `in_the_bulge_of` to count the bulge of a cone whose
-///   crossing with the piece's plane is a circle.
+/// - **a point inside a piece of a face**, 60 → 30 → 30 → **gone** (§340).
+///   `select.rs` could not find a point inside a piece it had cut. Halved by
+///   §206 teaching `in_the_bulge_of` to count the bulge of a cone whose crossing
+///   with the piece's plane is a circle. §340.1 reads the last 30 as not
+///   `select.rs`'s at all: `arrange.rs` had glued the patch a leaning wall cuts
+///   off the frustum's face to the rest of that face, through the bottom rim,
+///   which agreed with both, and handed on one cell that was two regions.
 /// - **four faces along one edge**, 9 → 24 → **gone**. The answer was not
 ///   something a `Model` can hold, which is §17.7's catalogued case and not an
 ///   arithmetic refusal at all. It rose under §206 because fuses that used to
@@ -1128,42 +1135,19 @@ fn a_block_wall_beside_a_cone_still_cuts_a_hyperbola_that_never_closes() {
 ///   all, so it cannot have pinned rows of this family. §214 got the 24 by a
 ///   census of this family instead, and they are the same 24.
 ///
-/// Matched on what each message *is about* rather than on the whole string.
-/// Anything other than the one wall fails the test rather than being counted as
-/// an other, so a second wall cannot arrive unnoticed — including any of the
-/// four that have emptied coming back.
+/// Any refusal at all fails the test, so none of the five walls that have
+/// emptied can come back unnoticed, and neither can a new one. That the answers
+/// are the right solids is `what_the_answered_block_fuses_actually_say.rs`'s to
+/// check, not this count's.
 #[test]
-fn what_stops_a_block_and_a_cone_now_is_one_named_thing_and_not_the_ordering() {
+fn every_fuse_of_a_block_and_a_cone_now_answers() {
     let (fuses, answered, gave_up) = how_each_fuse_went(Family::AFrustumAgainstABlock);
-    let mut walls: BTreeMap<&'static str, usize> = BTreeMap::new();
-    for (named, how_many) in &gave_up {
-        *walls.entry(which_wall_it_stopped_at(named)).or_default() += how_many;
-    }
-    println!(
-        "a frustum against a block: {answered} of {fuses} answered, and the rest stopped at {walls:?}"
-    );
+    println!("a frustum against a block: {answered} of {fuses} answered, and the rest {gave_up:?}");
 
     assert_eq!(
-        (answered, walls),
-        (
-            66,
-            BTreeMap::from([("a point inside a piece of a face", 30)])
-        ),
-        "this is the one wall this family was measured against, and the count that got \
-         past it; re-derive them when they move rather than widening the test (§19.1)"
+        (answered, gave_up),
+        (96, BTreeMap::new()),
+        "this family was measured at every fuse answering; re-derive the count when it \
+         moves rather than widening the test (§19.1)"
     );
-}
-
-/// Which wall a refusal's message is about.
-///
-/// Panics on anything but the one wall left, so a second wall is a failure and
-/// not a silent bucket. The four that have emptied — *a cone crossing another
-/// curved surface*, the triangulator's two reasons and *a crossing in two
-/// pieces* — are left out rather than kept as empty buckets: this family coming
-/// back to any of them is the regression the panic is here to name.
-fn which_wall_it_stopped_at(named: &str) -> &'static str {
-    if named == "a point inside a piece of a face" {
-        return "a point inside a piece of a face";
-    }
-    panic!("a block against a cone stopped somewhere other than the one wall left: {named:?}")
 }
