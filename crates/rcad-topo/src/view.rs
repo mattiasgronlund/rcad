@@ -1494,6 +1494,17 @@ impl<'m> VertexView<'m> {
         self.loc
     }
 
+    /// Where the vertex is in the frame it is stored in, with this view's
+    /// location left off.
+    ///
+    /// Not public, for [`EdgeView::stored_run`]'s reason. The mesher wants it
+    /// because it works a placed face out in the frame that face is stored in,
+    /// and [`VertexView::point`] moved back there by the placement's inverse is
+    /// this point rounded twice.
+    pub(crate) fn stored_point(self) -> Point {
+        self.data().point
+    }
+
     /// How much slop a decision put into this vertex, if any.
     #[must_use]
     pub fn approximation(self) -> Option<Approximation> {
