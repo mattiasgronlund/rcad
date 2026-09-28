@@ -2261,21 +2261,25 @@ fn what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does() {
     );
 }
 
-/// Absorption, over a round solid: `A ∪ (A ∩ B)` is `A` — **and it cannot run
-/// today**.
+/// Absorption, over a round solid: `A ∪ (A ∩ B)` is `A` — asserted, **on the
+/// part of the family that answers**.
 ///
 /// The first fuse answers every time. The second is handed half a ball whose
 /// flat face lies exactly in the block's floor and whose skin lies exactly on a
-/// piece of the answer's own boundary, and that is §36.16's coincident-surface
-/// row: it refuses, naming [`A_POINT_EVERY_SOLID_COULD_PLACE`], on **61 of 61**
-/// of the shipped corpus.
+/// piece of the answer's own boundary. That second fuse refused on every draw,
+/// naming [`A_POINT_EVERY_SOLID_COULD_PLACE`], until §351 made selection ask
+/// whether a **flat** piece lies on a face before firing the ray, as it already
+/// did for a curved one: 67 of 67 on the shipped corpus before, 25 of 67 after,
+/// and the 42 that answer are the block, as the law says.
 ///
-/// So this pins the refusal over the whole family rather than reporting a green
-/// run over a property that compared nothing (§14.7) — see
-/// [`Tally::nothing_was_compared_because_it_all_refused`]. The control is the
-/// same law over the lattice family, which
-/// [`a_solid_united_with_what_it_shares_with_another_is_itself`] asserts for
-/// real, so the difference between the two rows is the curve and nothing else.
+/// **What still refuses has not been traced**, and names the same predicate.
+/// So the floor is [`A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`], which a halving
+/// of the 63% crosses, and the cause the remaining refusals name is pinned
+/// beside it. Twelve values of `RCAD_SOAK_SEED` all gave the same 42, as the
+/// seed does not reach this family. The control is the same law
+/// over the lattice family, which
+/// [`a_solid_united_with_what_it_shares_with_another_is_itself`] asserts in
+/// full, so the difference between the two rows is the curve and nothing else.
 #[test]
 fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
@@ -2315,10 +2319,11 @@ fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
         );
         Ok(())
     });
-    tally.nothing_was_compared_because_it_all_refused(
-        "absorption over a ball, which refuses",
-        A_POINT_EVERY_SOLID_COULD_PLACE,
+    tally.report_what_it_compared_at_least(
+        "absorption over a ball",
+        A_THINNER_LAW_STILL_COMPARES_THIS_MUCH,
     );
+    tally.the_cause_named_most_often_is(A_POINT_EVERY_SOLID_COULD_PLACE);
 }
 
 /// `A \ (A \ B)` is `A ∩ B`, over a round solid — **and it cannot run today**

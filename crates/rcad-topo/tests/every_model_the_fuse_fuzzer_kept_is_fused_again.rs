@@ -126,11 +126,20 @@
 //! commutativity is (`tests/fuzzing/fuse.rs` says how, and why it is a copy).
 //! Measured 2026-09-25 on `0c1346f9` plus this change: `asked_both_ways_round:
 //! 106, the_same_both_ways_round: 19, a_solid_one_way_round_only: 3`, and no
-//! disagreement. The floors are three quarters of the first two. The three are
-//! counted and not failed, as that file counts them on flat solids: seeds
-//! `2e9c4138…`, `65452b22…` and `1422656e…`, header `0x94`, whose second half
-//! is a certified intersection of two six-faced solids that answers one way
-//! round and is `ResultIsNotManifold` the other — §48.2 item 5's class.
+//! disagreement. The floors are three quarters of the first two.
+//!
+//! **The three were one defect, not a class to count** (`docs/decisions.md`
+//! §316). They were the second halves of `2e9c4138…` and `65452b22…`, header
+//! `0x49`, each a certified intersection, and the *first* half of
+//! `1422656e…`, header `0x94`, a tolerant union. Each holds two cubes on the
+//! same six planes, one with a stored corner moved by an amount no plane can
+//! see, and selection read a face through triangles fanned from its stored
+//! corners. §351 fixed that: on `665d42d2` the replay read
+//! `asked_both_ways_round: 108, the_same_both_ways_round: 20,
+//! a_solid_one_way_round_only: 3`, and with the fix `108, 24, 0`. The harness
+//! still counts a flat pair that is a solid one way round only rather than
+//! failing it, as `fuses_that_must_agree.rs` does on its flat families, but
+//! this replay holds that count at zero.
 
 #![forbid(unsafe_code)]
 
@@ -245,6 +254,12 @@ fn every_seed_in_the_checked_in_corpus_is_fused_without_panicking() {
          comparison is passing for free",
         reached.the_same_both_ways_round
     );
+    assert_eq!(
+        reached.a_solid_one_way_round_only, 0,
+        "a union or intersection of flat solids answered one way round and was \
+         not a solid the other. The three the corpus held were one defect in \
+         selection (§316, §351), so a fourth is a defect too"
+    );
     assert!(
         reached.one_sided * 2 > reached.fused,
         "fewer than half of {} fuses had a side with nothing in it, which \
@@ -325,6 +340,33 @@ fn a_ball_cut_by_the_plane_of_a_block_clear_of_it_is_fused_and_written_down() {
         reached.solids_made, 2,
         "the block and the ball do not touch, so their union is two solids: {reached:?}"
     );
+}
+
+/// **The three seeds that answered one way round only answer both ways now,
+/// and with the same cube.**
+///
+/// Each holds two cubes on the same six planes, one with a stored corner moved
+/// by an amount no plane can see. `docs/decisions.md` §316 traced them to
+/// selection reading a face through triangles fanned from its stored corners,
+/// and §351 fixed that. Every half of the three that decodes is asked here,
+/// `2e9c4138`'s first half among them, which refused both ways round before and
+/// so was never counted.
+#[test]
+fn the_three_seeds_that_answered_one_way_round_only_answer_both_ways() {
+    for (name, halves_that_decode) in [
+        ("2e9c4138d49472eaa947d5b75e38557823efa072", 2),
+        ("65452b22c98030899498f124502a4f41d1659162", 1),
+        ("1422656e67fcad8172a7e15528cf7ed5ace87f81", 2),
+    ] {
+        let reached = control_seed(name);
+        assert_eq!(reached.fused, halves_that_decode, "{name}: {reached:?}");
+        assert_eq!(reached.ok, halves_that_decode, "{name}: {reached:?}");
+        assert_eq!(
+            reached.the_same_both_ways_round, halves_that_decode,
+            "{name}: {reached:?}"
+        );
+        assert_eq!(reached.a_solid_one_way_round_only, 0, "{name}: {reached:?}");
+    }
 }
 
 /// One named seed, replayed.
