@@ -1355,7 +1355,7 @@ impl<'f> Arrangement<'f> {
             return;
         }
         let mut named = [Surface::Plane(*flat), Surface::Cone(*cone), Surface::Cone(*cone)];
-        named.sort_by(|one, other| name_of_surface_bits(one).cmp(&name_of_surface_bits(other)));
+        named.sort_by_key(name_of_surface_bits);
         self.nodes.push(Node {
             point: apex,
             vertex: None,
@@ -2110,7 +2110,9 @@ impl<'f> Arrangement<'f> {
                 Decision::Zero => continue,
                 Decision::Pos => false,
                 Decision::Neg => true,
-                other => unreachable!("must_decide hands back a sign, not {other:?}"),
+                Decision::Undecidable { .. } | _ => {
+                    unreachable!("must_decide hands an undecided sign back as an error")
+                }
             };
             if behind.is_some_and(|already| already != this_one_is_behind) {
                 return Err(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn {
@@ -2688,15 +2690,18 @@ impl<'f> Arrangement<'f> {
         other: [Interval; 3],
     ) -> Result<[Interval; 3]> {
         let axis = cone.axis().direction().components().map(Interval::exactly);
-        match (dot_of(one, axis).sign(), dot_of(other, axis).sign()) {
-            (Decision::Pos, Decision::Pos) => {
-                Ok(axis.map(|component| Interval::exactly(0.0) - component))
-            }
-            (Decision::Neg, Decision::Neg) => Ok(axis),
-            _ => Err(Error::TwoCurvesTouchWithoutCrossing {
-                face: self.face.keys[0],
-            }),
+        // Compared rather than matched, so that `Decision`'s wildcard arm is
+        // not written once more (§40).
+        let [mine, theirs] = [one, other].map(|way| dot_of(way, axis).sign());
+        if mine == Decision::Pos && theirs == Decision::Pos {
+            return Ok(axis.map(|component| Interval::exactly(0.0) - component));
         }
+        if mine == Decision::Neg && theirs == Decision::Neg {
+            return Ok(axis);
+        }
+        Err(Error::TwoCurvesTouchWithoutCrossing {
+            face: self.face.keys[0],
+        })
     }
 
     /// [`Arrangement::turns_anticlockwise`], and where that says the two lie on
@@ -4861,7 +4866,7 @@ fn a_ruling_through_an_apex(
         // Nothing in the reals only for a plane resting along the cone, which
         // cuts one ruling and not two. A tolerant policy can still read a
         // narrow box as nothing, and then no way along is known.
-        _ => {
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
             return Err(gave_up(
                 WHICH_WAY_A_CROSSING_RUNS,
                 &[apex, a_step_out],
