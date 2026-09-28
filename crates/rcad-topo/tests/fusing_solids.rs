@@ -8,7 +8,9 @@
 //! the numbers can be compared with `==`.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
+use rcad_predicates::{
+    Approximation, Cause, Level, Point as PredicatePoint, Policy, ProvenanceLog,
+};
 use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
 
 fn a_model() -> Model {
@@ -537,10 +539,20 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
     );
 }
 
-/// The other half of criterion 7. Two towers `1e308` tall overlap, `orient3d`
-/// cannot multiply coordinates that far apart without overflowing, so a decision
-/// the answer depends on cannot be proved — and a certified policy refuses
-/// rather than guessing.
+/// The other half of criterion 7. Two towers `1e308` tall overlap, a decision
+/// the answer depends on is not proved, and a certified policy refuses rather
+/// than guessing.
+///
+/// **Which decision that is moved in §324, and whether it can be proved is not
+/// yet traced.** This used to refuse on `orient3d`, whose products overflowed
+/// and which the retry of the day could not bring into range. `orient3d` now
+/// tries a second power of two, which takes `1e308` down to `2^338`, and
+/// decides it. What is left is one record from a different predicate, "a point
+/// inside a piece of a face", at `Level::Interval` with an infinite enclosure,
+/// on the quarter of the first tower's top that the second tower's wall cuts
+/// off. That predicate is in `rcad-topo`'s source, and whether this refusal is
+/// a limit or a gap (§16.10) has not been looked at, so the name of this test
+/// is a claim nobody has checked for this record yet.
 ///
 /// **This test asked the same question at `1e200` and got the right answer for
 /// the wrong reason.** What refused there was not the arithmetic: it was
@@ -567,13 +579,22 @@ fn a_fuse_that_needs_a_decision_nothing_can_prove_refuses() {
 
     match refused {
         Err(Error::Undecidable { records }) => {
-            assert!(
-                records
-                    .records()
-                    .iter()
-                    .any(|record| record.predicate() == "orient3d"),
-                "the records name the predicate that could not be settled, and it is the \
-                 one whose products overflow: {records:?}"
+            let [record] = records.records() else {
+                panic!("the fuse stops at one undecided decision: {records:?}");
+            };
+            assert_eq!(record.predicate(), "a point inside a piece of a face");
+            assert_eq!(record.level(), Level::Interval);
+            assert_eq!(record.enclosure(), f64::INFINITY);
+            assert_eq!(
+                record.inputs(),
+                [
+                    [0.5, -0.0, 1e308],
+                    [1.0, -0.0, 1e308],
+                    [1.0, 0.5, 1e308],
+                    [0.5, 0.5, 1e308],
+                ]
+                .map(PredicatePoint::Exact),
+                "the quarter of the first tower's top that the second tower's wall cuts off"
             );
             assert!(
                 records
