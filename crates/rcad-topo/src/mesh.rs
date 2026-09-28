@@ -2247,8 +2247,8 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
     }
 }
 
-/// One loop moved by whole turns of its second coordinate, so that the middle
-/// of the span it covers is within half a turn of the middle of `frame`'s.
+/// One loop moved by whole turns of its second coordinate into the turn the
+/// face puts it in against `frame`.
 ///
 /// **Each loop of a torus face is unwrapped round the ring from its own first
 /// corner**, so two loops of one face can come out a whole turn apart, which in
@@ -2262,11 +2262,21 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
 /// [`WalkingAWire::goes_right_round_the_second_way`]. A loop already in that
 /// turn keeps its numbers bit for bit.
 ///
-/// **What this does not settle is two loops side by side**, neither inside the
-/// other, such as two circles round the tube. They bound two bands round the
-/// ring, and this puts them the nearer way round, which is only the right band
-/// when the face is the narrower one. The loops' directions say which it is,
-/// and nothing here reads them.
+/// **Two loops side by side are placed by which way `frame` runs, and never by
+/// which way round is nearer.** Two loops that each go right round the tube,
+/// neither inside the other, bound two bands round the ring. The nearer way
+/// round is the right band only when the face is the narrower one, and a face
+/// between two circles half a turn apart is a tie: the nearer way broke it
+/// towards the lower half whichever half the face was, and the builder refused
+/// the upper half `FacesDoNotAgreeWhichWayTheyFace`
+/// (`two_loops_side_by_side_on_a_torus.rs`, `docs/decisions.md` §343).
+///
+/// The side is read off a quarter band that validates and measures what Pappus
+/// gives: the loop that runs down the tube angle is the lower one in ring
+/// angle. So the face lies above a loop running down and below one running up,
+/// and the other loop goes in the nearest turn on that side. A face used the
+/// other way round with every coedge turned over is walked the same way here,
+/// because a view walks a reversed face's wires backwards.
 fn with_its_second_coordinate_in_the_turn_of(
     chain: &WalkedLoop,
     frame: &WalkedLoop,
@@ -2281,7 +2291,16 @@ fn with_its_second_coordinate_in_the_turn_of(
             });
         (least + most) / 2.0
     };
-    let by = whole_turns_between(middle(chain), middle(frame), whole);
+    let turns = (middle(chain) - middle(frame)) / whole;
+    let by = if chain.goes_right_round && frame.goes_right_round {
+        if runs_up(frame) {
+            turns.ceil() * whole
+        } else {
+            turns.floor() * whole
+        }
+    } else {
+        whole_turns_between(middle(chain), middle(frame), whole)
+    };
     WalkedLoop {
         corners: chain
             .corners
@@ -6528,5 +6547,128 @@ mod tests {
                 "the mesher and the sweep have to spell one question one way (§23.8)"
             );
         }
+    }
+
+    /// Of the two bands of a ring between two circles a quarter turn apart, the
+    /// short one meshes to a quarter of the ring and the long one to three
+    /// quarters, each at three deflections.
+    ///
+    /// **Built without the sweep, because the sweep refuses the long one.**
+    /// `Model::validate` reads which side of a cap's plane the wall keeps off
+    /// the other circle's corner, and for a band wider than half the ring that
+    /// corner is on the other side (§243.3, Q103). [`SolidView::mesh`] is public
+    /// in its own right, so a model read from a file reaches the mesher without
+    /// the sweep. Before §343 the long band was meshed as the short one, with
+    /// its own two caps, and measured `2π²` where Pappus gives `6π²`: each cap
+    /// is on a plane through the axis, so it adds nothing to the volume
+    /// whichever way it faces, and nothing in the mesh was folded.
+    #[test]
+    fn a_band_between_two_circles_meshes_the_way_round_its_circles_are_walked() {
+        let (ring, tube) = (4.0, 1.0);
+        for (quarters, the_way_round) in [(1.0, Orientation::Forward), (3.0, Orientation::Reversed)]
+        {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let band = a_band_between_two_circles(&mut model, ring, tube, the_way_round);
+            let pappus = quarters
+                * core::f64::consts::FRAC_PI_2
+                * ring
+                * core::f64::consts::PI
+                * tube
+                * tube;
+            for length in [0.1, 0.03, 0.01] {
+                let measured = model
+                    .solid(band)
+                    .expect("this model made the key")
+                    .measure(
+                        Deflection::of(length).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("a band between two circles measures");
+                assert!(
+                    (measured.volume() - pappus).abs() <= measured.volume_error(),
+                    "{quarters} quarters at {length}: {} where Pappus gives {pappus}, allowed {}",
+                    measured.volume(),
+                    measured.volume_error()
+                );
+            }
+        }
+    }
+
+    /// The band of the ring about `+z` between the circles the planes `y = 0`
+    /// and `x = 0` cut round `(ring, 0, 0)` and `(0, ring, 0)`, capped flat on
+    /// both planes.
+    ///
+    /// `Forward` is the quarter from the first circle anticlockwise to the
+    /// second, built as `tests/rings/mod.rs` builds a bend with its seam left
+    /// out: caps facing `(0, −1, 0)` and `(−1, 0, 0)`, the wall used reversed.
+    /// `Reversed` is the rest of the ring between the same two circles: every
+    /// closed-edge coedge and both cap normals are turned over, and the shell
+    /// is the same.
+    fn a_band_between_two_circles(
+        model: &mut Model,
+        ring: f64,
+        tube: f64,
+        the_way_round: Orientation,
+    ) -> crate::SolidKey {
+        let inner = ring - tube;
+        let facing = the_way_round.sign();
+        let first_corner = model.add_vertex(Point::new(inner, 0.0, 0.0));
+        let second_corner = model.add_vertex(Point::new(0.0, inner, 0.0));
+        let first_circle = model.add_closed_edge(first_corner);
+        let second_circle = model.add_closed_edge(second_corner);
+
+        let cap = |model: &mut Model, facing: Vector, circle, turn| {
+            let plane = Plane::from_point_and_normal(Point::origin(), facing)
+                .expect("a coordinate direction is a unit normal");
+            let round_it = model.add_coedge(circle, turn);
+            let wire = model.add_wire(smallvec::smallvec![round_it]);
+            model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
+        };
+        let first_cap = cap(
+            model,
+            Vector::new(0.0, -facing, 0.0),
+            first_circle,
+            the_way_round.reversed(),
+        );
+        let second_cap = cap(
+            model,
+            Vector::new(-facing, 0.0, 0.0),
+            second_circle,
+            the_way_round,
+        );
+        let wires = [
+            (first_circle, the_way_round),
+            (second_circle, the_way_round.reversed()),
+        ]
+        .map(|(circle, turn)| {
+            let round_it = model.add_coedge(circle, turn);
+            model.add_wire(smallvec::smallvec![round_it])
+        });
+        let wall = model.add_face(
+            Surface::Torus(rcad_geom::Torus::new(Axis::z(), ring, tube).expect("a ring")),
+            wires.into_iter().collect(),
+        );
+
+        let shell = model.add_shell(
+            [
+                (first_cap, Orientation::Forward),
+                (second_cap, Orientation::Forward),
+                (wall, Orientation::Reversed),
+            ]
+            .into_iter()
+            .map(|(face, orient)| crate::model::FaceUse {
+                face,
+                loc: Isometry::identity(),
+                orient,
+            })
+            .collect(),
+        );
+        let solid = model.add_solid(smallvec::smallvec![crate::model::ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]);
+        model.key_for_solid(solid)
     }
 }
