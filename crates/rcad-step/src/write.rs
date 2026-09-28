@@ -29,6 +29,7 @@
 use std::collections::HashMap;
 
 use rcad_geom::{Plane, Point, Scale, Surface, Unit, Vector};
+use rcad_predicates::expansion::two_product;
 use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
 
 use crate::geometry::plane_through;
@@ -176,14 +177,16 @@ pub enum CannotWrite {
     /// A plane whose offset no point this writer builds reads back as, bit for
     /// bit.
     ///
-    /// **Gap.** A point that carries it may well exist; the one
-    /// `a_point_this_reader_reads_back_as` builds divides the offset by the
-    /// normal's widest component, and past `f64::MAX` times that component the
-    /// division overflows. `a_plane_too_far_out_to_divide_is_refused_by_name`
-    /// reaches it at `1.4e308`. What closes it is building the point at a
-    /// power of two nearer the origin and scaling it back out, which no sound
-    /// model has yet asked for. Writing the foot of the perpendicular instead
-    /// would write a file that reads back as another plane.
+    /// **Gap, reached only just above the subnormals.** Where the offset is
+    /// below `2⁻⁹⁶⁹` and not subnormal, the reader rounds each product of the
+    /// dot and drops what it lost (`product_is_exact`), and
+    /// `divided_along_the_widest` still counts that loss, so on some normals
+    /// the point misses (`some_planes_just_above_the_subnormals_are_still_refused_by_name`).
+    /// What closes it is counting the loss only where the reader keeps it.
+    /// Planes too far out to divide by the widest component are no longer
+    /// refused (`a_plane_too_far_out_to_divide_is_written_at_a_point_it_reads_back_from`).
+    /// Writing the foot of the perpendicular instead would write a file that
+    /// reads back as another plane.
     #[error(
         "a face in this model sits on a plane at {offset}, and this writer found no point that carries that offset exactly"
     )]
@@ -649,6 +652,18 @@ impl Writing {
 /// grows: a unit normal whose widest component is not exactly ±1 has
 /// `|nⱼ| ≥ 2⁻²⁷`, and one whose widest component is ±1 leaves nothing over.
 ///
+/// **Where `offset / nᵢ` overflows**, the point is `±offset` along the widest
+/// and `offset·(1 − |nᵢ|) / nⱼ` along the next. Scaling the first point by a
+/// power of two cannot help there: scaled back it is `offset / nᵢ` again, which
+/// no `f64` holds. The new one is always finite, since `(1 − |nᵢ|)/|nⱼ| ≤ 0.74`
+/// for a unit normal. `1 − |nᵢ|` is exact and so is its product with the
+/// offset, so the only rounding is of the second coordinate, which moves the
+/// dot by at most `|nⱼ|·ulp/2 ≤ 0.354` ulp of the offset. The division only
+/// overflows when `|offset| > f64::MAX/√3 > 2¹⁰²³`, the top binade, where the
+/// offset's rounding interval is a full ulp wide, so the dot lands inside it;
+/// and at `±f64::MAX` itself the reader's own partial sum stays finite, because
+/// `nᵢ·f64::MAX` rounds down by `(1 − nᵢ)` ulp.
+///
 /// # Errors
 ///
 /// [`CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries`] if the point does
@@ -664,13 +679,11 @@ fn a_point_this_reader_reads_back_as(flat: &Plane) -> Result<Point, CannotWrite>
     widest_first.sort_by(|&a, &b| normal[b].abs().total_cmp(&normal[a].abs()));
     let [widest, next, _] = widest_first;
 
-    let mut coordinates = [0.0; 3];
-    coordinates[widest] = offset / normal[widest];
-    let product = normal[widest] * coordinates[widest];
-    let left_over = (offset - product) - normal[widest].mul_add(coordinates[widest], -product);
-    if left_over != 0.0 {
-        coordinates[next] = left_over / normal[next];
-    }
+    let coordinates = if (offset / normal[widest]).is_finite() {
+        divided_along_the_widest(offset, normal, widest, next)
+    } else {
+        the_offset_itself_along_the_widest(offset, normal, widest, next)
+    };
     let point = Point::new(coordinates[0], coordinates[1], coordinates[2]);
     let reads_back = plane_through(point, flat.normal())
         .is_ok_and(|back| back.offset().to_bits() == offset.to_bits());
@@ -678,6 +691,36 @@ fn a_point_this_reader_reads_back_as(flat: &Plane) -> Result<Point, CannotWrite>
         return Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { offset });
     }
     Ok(point)
+}
+
+fn divided_along_the_widest(offset: f64, normal: [f64; 3], widest: usize, next: usize) -> [f64; 3] {
+    let mut coordinates = [0.0; 3];
+    coordinates[widest] = offset / normal[widest];
+    let product = normal[widest] * coordinates[widest];
+    let left_over = (offset - product) - normal[widest].mul_add(coordinates[widest], -product);
+    if left_over != 0.0 {
+        coordinates[next] = left_over / normal[next];
+    }
+    coordinates
+}
+
+fn the_offset_itself_along_the_widest(
+    offset: f64,
+    normal: [f64; 3],
+    widest: usize,
+    next: usize,
+) -> [f64; 3] {
+    let mut coordinates = [0.0; 3];
+    coordinates[widest] = if normal[widest] < 0.0 {
+        -offset
+    } else {
+        offset
+    };
+    let (high, low) = two_product(offset, 1.0 - normal[widest].abs());
+    let quotient = high / normal[next];
+    let remainder = (-quotient).mul_add(normal[next], high) + low;
+    coordinates[next] = quotient + remainder / normal[next];
+    coordinates
 }
 
 /// What a face sits on, for a refusal to name.
@@ -845,18 +888,86 @@ mod plane_round_trip_tests {
         }
     }
 
-    /// The one plane the construction is known not to reach: dividing its
-    /// offset by its widest normal component, `1.41e308 / 0.707`, overflows.
+    /// Planes so far out that `offset / nᵢ` overflows — `1.41e308 / 0.707` is
+    /// the first — read back from the point this writer writes, bit for bit.
+    /// Before `the_offset_itself_along_the_widest` these were refused by name.
     #[test]
-    fn a_plane_too_far_out_to_divide_is_refused_by_name() {
-        let plane =
+    fn a_plane_too_far_out_to_divide_is_written_at_a_point_it_reads_back_from() {
+        let first =
             Plane::from_point_and_normal(Point::new(1e308, 1e308, 0.0), Vector::new(1.0, 1.0, 0.0))
                 .expect("an offset of 1.41e308 is still finite");
-        let refused = a_point_this_reader_reads_back_as(&plane);
-        let Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { offset }) = refused else {
-            panic!("a plane this far out is refused by name, not {refused:?}");
+        let along = |normal: Vector, offset: f64| {
+            Plane::from_point_and_normal(Point::origin(), normal)
+                .and_then(|plane| plane.moved_to(offset))
+                .expect("a finite offset along a normal with a length")
         };
-        assert_eq!(offset, plane.offset());
+        let others = [
+            (Vector::new(1.0, 1.0, 1.0), f64::MAX),
+            (Vector::new(-1.0, 1.0, 1.0), -f64::MAX),
+            (Vector::new(0.6, 0.55, 0.58), f64::MAX),
+            (Vector::new(1.0, 2e-8, 0.0), f64::MAX),
+            (Vector::new(-3.0, 2.0, -1.0), 1.7e308),
+        ]
+        .map(|(normal, offset)| along(normal, offset));
+        for plane in core::iter::once(first).chain(others) {
+            let normal = plane_through(Point::origin(), plane.normal())
+                .expect("a normal with a length")
+                .normal()
+                .components();
+            let widest = normal.iter().map(|n| n.abs()).fold(0.0, f64::max);
+            assert!(
+                (plane.offset() / widest).is_infinite(),
+                "{plane:?} is not one the division overflows on"
+            );
+            let point = a_point_this_reader_reads_back_as(&plane)
+                .unwrap_or_else(|why| panic!("{plane:?}: {why}"));
+            let back = plane_through(point, plane.normal()).expect("a finite point");
+            assert_eq!(
+                back.offset().to_bits(),
+                plane.offset().to_bits(),
+                "{plane:?} read back from {point:?} as {back:?}"
+            );
+        }
+    }
+
+    /// Planes whose offset is below `2⁻⁹⁶⁹` but not subnormal are still
+    /// refused by name on some normals: there the reader rounds each product
+    /// and drops what it lost (`product_is_exact`), and
+    /// `divided_along_the_widest` still counts that loss. Pinned so the
+    /// variant is not removed while it is reached.
+    #[test]
+    fn some_planes_just_above_the_subnormals_are_still_refused_by_name() {
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut refused = 0;
+        for _ in 0..20_000 {
+            let normal = Vector::new(
+                (next() >> 11) as f64 / (1_u64 << 53) as f64 - 0.5,
+                (next() >> 11) as f64 / (1_u64 << 53) as f64 - 0.5,
+                (next() >> 11) as f64 / (1_u64 << 53) as f64 - 0.5,
+            );
+            let offset = f64::from_bits(next() % (50 << 52) + (1 << 52));
+            let Ok(plane) = Plane::from_point_and_normal(Point::origin(), normal)
+                .and_then(|plane| plane.moved_to(offset))
+            else {
+                continue;
+            };
+            match a_point_this_reader_reads_back_as(&plane) {
+                Ok(_) => {}
+                Err(CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries { offset: named }) => {
+                    assert_eq!(named.to_bits(), plane.offset().to_bits());
+                    refused += 1;
+                }
+                Err(other) => panic!("{plane:?} refused as {other}"),
+            }
+        }
+        println!("{refused} of 20000 planes just above the subnormals are refused");
+        assert!(refused > 0, "none refused: the bottom gap may be closed");
     }
 
     /// The normal the writer fuzzer's `crash-0ac3e625f698733b9b143d41eb65edbf7087b463`
