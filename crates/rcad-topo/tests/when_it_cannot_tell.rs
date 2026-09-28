@@ -117,9 +117,11 @@ fn no_power_of_two_lets_f64_see_which_way_the_cut_bends() {
             record
                 .inputs()
                 .iter()
-                .map(|point| match point {
-                    PredicatePoint::Exact([x, y, _]) => [*x, *y],
-                    other => panic!("a profile's corners are exact: {other:?}"),
+                .map(|point| {
+                    let PredicatePoint::Exact([x, y, _]) = point else {
+                        panic!("a profile's corners are exact: {point:?}");
+                    };
+                    [*x, *y]
                 })
                 .collect::<Vec<_>>(),
         )
