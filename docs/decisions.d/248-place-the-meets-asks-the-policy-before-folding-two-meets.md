@@ -95,6 +95,12 @@ the kept meet's box, `x ∈ [−1.78e-15, 0]`, touches that plane, and a predica
 refuses on it whether the fold is made or not. An edge along `y` grazes it on the seam plane `y = 0`.
 An edge along `z` at `x = −1` grazes it at the equator, a unit from both.
 
+*Corrected by §317: this `orient3d` is not asked against the seam's picker.
+It is `Arrangement::turns_anticlockwise`'s determinant at the kept meet, and
+its two exact rows are the block's own two normals. They lie in `x = 0` because
+the edge runs along `x`. The edge along `z` asks the same turn and cannot tell
+it either, but `order along a crossing` refuses first there (§317.5).*
+
 So `crates/rcad-topo/tests/a_block_edge_grazing_a_ball.rs` uses §244.2's
 numbers turned onto `z`. It has a ball of radius `1 + 2⁻⁵¹` at `(0, 0, h)` and a
 block whose edge is `x = −1, y = 2⁻²⁵`, which meet at `z = h ± 2⁻⁵¹`. At
@@ -194,7 +200,8 @@ far, and no other family was tried.
 - `crates/rcad-topo/tests/a_block_edge_grazing_a_ball.rs`: §244.3's edge along
   `x` refuses on an `orient3d` against the plane of the ball's seam picker, with
   the fix or without it. The call site was not found, and whether that refusal
-  is a limit or a gap was not looked at.
+  is a limit or a gap was not looked at. §317 found it,
+  `Arrangement::turns_anticlockwise`, not the seam picker, and filed it as a gap.
 
 ### 248.6 The drop it keeps is not a proof
 
