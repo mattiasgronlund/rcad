@@ -636,6 +636,43 @@ impl BuildingAMesh {
     /// its points**, whether or not the walk would have landed there — see
     /// [`put_in_the_poles_a_closed_crossing_passes`].
     ///
+    /// # The corners it starts from are the ones the arena stores
+    ///
+    /// For a placed face, the frame this walks in is the placement's own
+    /// inverse, and the edge's two ends used to arrive as the located corners
+    /// moved back into it: the placement and then its inverse, rounded twice.
+    /// `(3, 0, 0)` turned an eighth about `z` and back is `(3, −4.4e−16, 0)`, and
+    /// a walk that starts from a different corner puts its points somewhere else
+    /// — 75 of the 252 points of a bar turned that way were not the unplaced
+    /// bar's points moved out (`docs/decisions.md` §249.3). The surface was
+    /// already read out of the arena for this reason
+    /// ([`the_surface_this_face_is_meshed_on`]), and now the corners are too
+    /// ([`where_this_corner_is_in_the_frame_it_is_meshed_in`]). Every point of a
+    /// placed bar is then the unplaced bar's point moved out, bit for bit, under
+    /// twelve placements with and without a shift;
+    /// `a_placed_bar_is_meshed_from_the_corners_it_stores.rs` is the
+    /// demonstration.
+    ///
+    /// **It is right because the corner is looked at through the face's own
+    /// placement.** A view hands its location down unchanged to every wire,
+    /// coedge, edge and vertex under it, and `edge` came out of `face`'s own
+    /// wires, so the stored corner is exactly the point the located one stands
+    /// for. A corner looked at through any other location would need the move
+    /// back, and is a panic in the helper rather than a silent wrong corner.
+    ///
+    /// **It frees nothing in [`how_far_moving_this_face_rounds`].** That charge
+    /// is one [`Isometry::POINT_ROUNDOFF`] for carrying a mesh point *out*, which
+    /// every point below still does, plus what shifting the surfaces round a face
+    /// costs, which is zero for a placed face by its first line. The move of the
+    /// corners back in was never charged, so there is nothing to take off.
+    ///
+    /// **What it does not reach.** [`BuildingAMesh::cut_up`] still reads each
+    /// point of a wire moved out and back, so a placed bar's *triangles* are not
+    /// yet the unplaced bar's (`docs/decisions.md` §333.3, and §333.6 for why the
+    /// obvious fix there is not taken); and a solid read back from a file is
+    /// meshed in the world, not in its stored frame, so this does not make a STEP
+    /// round trip measure the same (§249.5).
+    ///
     /// # What a refusal from here is in, and why it is not what was walked
     ///
     /// The points ride back out of [`the_frame_this_face_is_meshed_in`] and so
@@ -676,11 +713,12 @@ impl BuildingAMesh {
         let back = the_frame_this_face_is_meshed_in(face);
         let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let (from, to) = ends_in_the_stored_order(edge);
+        let ends =
+            [from, to].map(|end| where_this_corner_is_in_the_frame_it_is_meshed_in(end, face));
         let run = NamedRun::new(
             edge.stored_run()
                 .shifted(the_shift_this_face_is_meshed_with(face))?,
-            [from, to]
-                .map(|end| PredicatePoint::from(back.apply_to_point(end.point()).coordinates())),
+            ends.map(|end| PredicatePoint::from(end.coordinates())),
         )?;
         let along = the_two_surfaces_either_side(edge, &self.along_each_edge, &back)?;
         if nothing_curved_says_where_it_bends(run.run(), along) {
@@ -727,7 +765,7 @@ impl BuildingAMesh {
         // ball come out walked backwards — a mesh that is wrong rather than one
         // that was refused.
         if edge.is_closed()? {
-            let corner = back.apply_to_point(from.point());
+            let corner = ends[0];
             if let Some(first) = points.first()
                 && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)
                     .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner))
@@ -745,7 +783,6 @@ impl BuildingAMesh {
         // below is the one `rcad_geom::walk` read off the same run to draw the
         // circle with (`which_two_surfaces_a_run_is_between`), so the poles are
         // put in on the curve that was actually walked.
-        let ends = [from, to].map(|end| back.apply_to_point(end.point()));
         let moved = match run.run() {
             EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
                 put_in_the_poles_a_closed_crossing_passes(
@@ -3051,6 +3088,41 @@ fn ends_in_the_stored_order<'m>(edge: EdgeView<'m>) -> (VertexView<'m>, VertexVi
     } else {
         (edge.start(), edge.end())
     }
+}
+
+/// Where a corner of `face` sits in the frame the face is meshed in.
+///
+/// **Read out of the arena for a placed face**, for
+/// [`the_surface_this_face_is_meshed_on`]'s reason: that frame is the
+/// placement's own inverse, so moving [`VertexView::point`] into it is the
+/// placement composed with its own inverse, and the stored corner rounded twice.
+/// `(3, 0, 0)` turned an eighth about `z` and back is `(3, −4.4e−16, 0)`.
+///
+/// That holds only while the corner is looked at through the same placement as
+/// the face, and it always is: a view hands its own location down unchanged to
+/// every wire, coedge, edge and vertex under it, and every corner here is
+/// reached through the face's own wires. A corner through any other location
+/// would be a view built somewhere else and handed in by mistake, and reading
+/// its stored point would put it where the face is not.
+///
+/// A face at no placement at all is moved by [`a_shift_that_loses_nothing`],
+/// which is exact, and its corner is its stored point to begin with — so that
+/// face keeps the movement it always had.
+fn where_this_corner_is_in_the_frame_it_is_meshed_in(
+    corner: VertexView<'_>,
+    face: FaceView<'_>,
+) -> Point {
+    if face.location() != Isometry::identity() {
+        assert!(
+            corner.location() == face.location(),
+            "a corner of {:?} looked at through {:?} rather than the face's own {:?}",
+            face.key(),
+            corner.location(),
+            face.location(),
+        );
+        return corner.stored_point();
+    }
+    the_frame_this_face_is_meshed_in(face).apply_to_point(corner.point())
 }
 
 /// The corners `wire` itself calls poles, by taking a step that goes nowhere.
