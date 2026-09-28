@@ -323,12 +323,13 @@ cases turns into an audit by chance. It checks that:
 - a reusable step failing on recorded code is reported, written down, and its
   record deleted, and the summary block is still the last thing printed;
 - a run that left out a reusable step records nothing;
-- a served summary carries the recorded counts, marked `(served from <sha>)`.
+- a served summary carries the recorded counts, marked `(served from <sha>)`,
+  and says so if the record it was served from is gone.
 
 `check-gate-runs-every-check` expects 52 `check-*` recipes, up from 51.
 
-**Every mutant was killed: 17 of 17.** Each mutant changed one thing in the
-`justfile`, and the selftest failed on every one:
+**Every mutant was killed: 19 of 19.** Each mutant changed one thing in the
+`justfile`, and a selftest failed on every one:
 
 - the `docs/` filter taken out, unanchored, or the `.md` filter taken out;
 - `RCAD_STEP_CORPUS` put back into the environment, or the environment dropped;
@@ -337,9 +338,10 @@ cases turns into an audit by chance. It checks that:
 - the skip of served steps taken out;
 - a violation keeping its record, or any failed step counting as a violation;
 - a run with a reusable step left out recording anyway;
-- the served summary printing `not reached`, or dropping its `(served from …)`
-  mark;
-- `check-hooks` put on the reusable list, or a name that is no step put on it.
+- the served summary printing `not reached`, dropping its `(served from …)`
+  mark, or printing nothing when its record is gone;
+- `check-hooks` put on the reusable list, or a name that is no step put on it;
+- `gate-docs` not passing its `gate_log` on (`check-gate-docs-selftest`).
 
 **The real runs**, on this machine on 2026-09-28, with a load average between
 32 and 37 from other sessions' lanes:
@@ -348,3 +350,21 @@ cases turns into an audit by chance. It checks that:
    every step: `gate: PASS`, 2675 tests run, 2675 passed, 11 skipped, and 25
    doc tests passed. It printed `· verdicts: this code's green is recorded as
    6cd9f337e69d`.
+2. `just gate quiet` on `dd531c7e`, a commit on top that touched only this
+   file, was served. It took 1m08s. **But its summary had no counts**, only two
+   errors saying `target/last-gate.log.served` could not be read.
+
+The cause was older than the cache. `check-gate-docs-selftest` runs
+`gate-docs` with `--set gate_log` pointing into its scratch directory, but
+`gate-docs` re-entered `gate` with only `--set gate_steps`. So the nested run
+wrote to the default `target/last-gate.log`, which is the real gate's log. It
+emptied that log, and now also deleted the copy of the record next to it.
+After run 2, `target/last-gate.log` began with the nested run's ``Error:
+Justfile does not contain recipe `no-such-step` ``. Every real gate's log has
+been cut at that step since `11142675` added it, on 2026-09-20. The counts the
+summary reads are written after that step, which is why nobody noticed.
+
+The fix is one `--set gate_log` in `gate-docs`. `check-gate-docs-selftest` now
+reads the log it gave the nested run, and `_gate-summary` prints `tests:
+served, but the record it was served from is gone` instead of printing
+nothing. Both new checks fail without their fix, as the mutants above show.

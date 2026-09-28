@@ -216,7 +216,7 @@ gate-docs mode="loud":
         exit 2
     fi
     echo "gate-docs: dropped${dropped:- nothing}"
-    exec {{ just_executable() }} --set gate_steps "${steps# }" gate '{{ mode }}'
+    exec {{ just_executable() }} --set gate_steps "${steps# }" --set gate_log '{{ gate_log }}' gate '{{ mode }}'
 
 # The gate with what this machine supplies taken away, which is the one thing a
 # local run cannot otherwise be: a fresh clone, in a container, with no `HOME`
@@ -668,7 +668,8 @@ _code-fingerprint:
 # **A served run prints the counts of the gate that served it**, marked as such.
 # `test` did not run, so the log has no counts, and `tests: not reached` would
 # describe a pass as a gate that died early. `served` is that gate's record
-# (§337).
+# (§337). If that record is gone by the end, the summary says so. The first real
+# served gate printed no counts at all, because a nested run had deleted it.
 [private]
 _gate-summary log status failed="" served="":
     #!/usr/bin/env bash
@@ -687,7 +688,9 @@ _gate-summary log status failed="" served="":
         first=$(grep -m1 -E '^ *FAIL \[' <<<"$plain" | sed 's/^ *//')
         [ -z "$first" ] || echo "first failing test: $first"
     fi
-    if [ -n '{{ served }}' ]; then
+    if [ -n '{{ served }}' ] && [ ! -r '{{ served }}' ]; then
+        echo "tests: served, but the record it was served from is gone: {{ served }}"
+    elif [ -n '{{ served }}' ]; then
         from=$(sed -n 's/^commit //p' '{{ served }}')
         grep -E '^(tests|doc tests): ' '{{ served }}' | sed "s/\$/ (served from ${from:0:8})/"
     else
@@ -967,6 +970,11 @@ check-gate-docs-selftest:
         || fail "the docs arm dropped something other than the one step it was told to"
     grep -q '^gate: FAIL  first failure: no-such-step' <<<"$got" \
         || fail "the step the docs arm was told to keep never ran"
+    # The log it was given, not the default. The default is the log of the real
+    # gate this selftest runs inside, and writing there empties it and deletes
+    # the record a served gate is still holding (§337.8).
+    grep -q '^gate: FAIL  first failure: no-such-step' "$dir/keep.log" \
+        || fail "the docs arm wrote its log to the default path, which is the real gate's, instead of the gate_log it was given"
 
     # Every step excluded. Running no steps exits 0 through the loop in `gate`,
     # prints a passing summary block, and has checked nothing whatsoever.
@@ -1172,6 +1180,9 @@ check-gate-verdicts-selftest:
     grep -qxF "doc tests: 25 passed, 0 failed, across 9 crate(s) (served from ${base:0:8})" <<<"$got" \
         || fail "a served summary did not carry the doc tests of the gate that served it"
     grep -q 'not reached' <<<"$got" && fail "a served summary said the tests were not reached"
+    got=$("$j" _gate-summary "$dir/empty.log" 0 "" "$dir/gone" 2>&1)
+    grep -qxF "tests: served, but the record it was served from is gone: $dir/gone" <<<"$got" \
+        || fail "a served summary whose record had gone said nothing about the counts"
     exit 0
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
