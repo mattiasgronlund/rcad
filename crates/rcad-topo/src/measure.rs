@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rcad_geom::{Cone, Deflection, Point, Surface, Vector};
-use rcad_predicates::expansion::{expansion_sum, scale_expansion, two_diff};
+use rcad_predicates::expansion::{compress, expansion_sum, scale_expansion, two_diff, two_product};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::mesh::{Mesh, MeshTriangle};
@@ -362,16 +362,18 @@ impl SolidView<'_> {
     fn measured_over_its_own_fan(self) -> Result<Measurement> {
         let hub = self.hub();
         let shifts = self.axis_shifts(hub);
-        let (six_volumes, moment) = self.volume_and_moment(hub, shifts);
+        let (six_volumes, moment, fan) = self.volume_and_moment(hub, shifts);
 
-        let volume = shift(six_volumes / 6.0, shifts.iter().sum());
+        let whole_shift = shifts.iter().sum();
+        let sixth = six_volumes / 6.0;
+        let volume = shift(sixth, whole_shift);
         if !volume.is_finite() {
             return Err(Error::VolumeTooLargeToMeasure);
         }
         if volume <= 0.0 {
             return Err(Invalid::VolumeIsNotPositive { volume }.into());
         }
-        let surface_area = self.surface_area();
+        let (surface_area, area_error) = self.surface_area();
         if !surface_area.is_finite() {
             return Err(Error::SurfaceAreaTooLargeToMeasure);
         }
@@ -379,9 +381,9 @@ impl SolidView<'_> {
         let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
         Ok(Measurement {
             volume,
-            volume_error: 0.0,
+            volume_error: how_far_the_volume_rounded(&fan, sixth, volume, whole_shift),
             surface_area,
-            area_error: 0.0,
+            area_error,
             centroid: hub + Vector::from(balance),
             centroid_wobble: 0.0,
         })
@@ -467,7 +469,7 @@ impl SolidView<'_> {
     pub(crate) fn signed_volume(self) -> f64 {
         let hub = self.hub();
         let shifts = self.axis_shifts(hub);
-        let (six_volumes, _) = self.volume_and_moment(hub, shifts);
+        let (six_volumes, _, _) = self.volume_and_moment(hub, shifts);
         shift(six_volumes / 6.0, shifts.iter().sum())
     }
 
@@ -529,7 +531,11 @@ impl SolidView<'_> {
     ///
     /// The moment is left rounded. It is a position, and where a solid
     /// balances is [`Measurement::centroid`], which nothing branches on.
-    fn volume_and_moment(self, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3]) {
+    ///
+    /// The third thing handed back is every triangle's offsets, exactly, which
+    /// is what [`how_far_the_volume_rounded`] needs to say how far the rounded
+    /// sum landed from the exact one.
+    fn volume_and_moment(self, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3], ExactFan) {
         let mut fan: Vec<[[f64; 2]; 9]> = Vec::new();
         let mut six_volumes = 0.0;
         let mut how_big_the_terms_are = 0.0;
@@ -557,12 +563,13 @@ impl SolidView<'_> {
         // costs the exact pass being run when it need not have been.
         let slack = (fan.len() as f64 + 8.0) * f64::EPSILON * how_big_the_terms_are;
         if six_volumes.abs() > slack || !how_big_the_terms_are.is_finite() {
-            return (six_volumes, moment);
+            return (six_volumes, moment, fan);
         }
-        (six_volumes_exactly(&fan), moment)
+        (six_volumes_exactly(&fan), moment, fan)
     }
 
-    /// The total area of the faces, each measured in a scale of its own.
+    /// The total area of the faces, each measured in a scale of its own, and
+    /// how far that total can be from the area the faces' fans really have.
     ///
     /// **A different scaling from the one the volume uses, because a different
     /// thing is being measured.** A determinant scales by the product of its
@@ -576,16 +583,24 @@ impl SolidView<'_> {
     /// would push its top and bottom to `1e-400`, which is zero, and the two
     /// units of area they carry would vanish. Measured in its own scale, each
     /// face keeps every bit it had.
-    fn surface_area(self) -> f64 {
+    ///
+    /// **The error is each face's own rounding and the rounding of adding them
+    /// up**, both worked out rather than bounded in advance: the faces' areas
+    /// are added again exactly, and what the running `f64` total dropped is the
+    /// difference. So a solid whose faces all come out exact, and whose total
+    /// is exact, owes exactly `0.0`.
+    fn surface_area(self) -> (f64, f64) {
         let mut total = 0.0;
+        let mut exactly = Vec::new();
+        let mut error = 0.0;
         for face in self.faces() {
-            let across = shift_for(largest_edge_component(&face));
-            total += shift(
-                which_way_its_own_fan_faces(face, across).length(),
-                2 * across,
-            );
+            let fan = OwnFan::of(face);
+            total += fan.area;
+            exactly = added(&exactly, &[fan.area]);
+            error = upward(error + fan.area_error);
         }
-        total
+        let dropped = added(&exactly, &[-total]);
+        (total, upward(error + at_most(&dropped)))
     }
 
     /// One power of two per axis, so the widest corner offset along each lands
@@ -804,9 +819,12 @@ enum OneFace {
 /// notch or a hole come back wound the other way, face against the face's own
 /// direction, and take back the area and the moment they wrongly added.
 fn one_face_measured_over_its_own_fan(face: FaceView<'_>) -> OneFace {
-    let across = shift_for(largest_edge_component(&face));
-    let facing = which_way_its_own_fan_faces(face, across);
-    let area = shift(facing.length(), 2 * across);
+    let OwnFan {
+        across,
+        facing,
+        area,
+        area_error,
+    } = OwnFan::of(face);
     if !area.is_finite() {
         return OneFace::TooLargeToMeasure;
     }
@@ -828,11 +846,115 @@ fn one_face_measured_over_its_own_fan(face: FaceView<'_>) -> OneFace {
     let apex = apex.expect("a face with area has a triangle");
     OneFace::Measured(FaceMeasurement {
         area,
-        area_error: 0.0,
+        area_error,
         centroid: apex + shrink(divided(moment, 3.0 * weight), -across),
         centroid_wobble: 0.0,
     })
 }
+
+/// One face's own fan, measured: the power of two its sides were shrunk by,
+/// the way it faces in those units, its area, and how far that area can be
+/// from the area the fan really has.
+///
+/// The one copy of the arithmetic, so a face measured alone and the same face
+/// summed into [`SolidView::surface_area`] are the same numbers bit for bit.
+struct OwnFan {
+    across: i32,
+    facing: Vector,
+    area: f64,
+    area_error: f64,
+}
+
+impl OwnFan {
+    fn of(face: FaceView<'_>) -> Self {
+        let across = shift_for(largest_edge_component(&face));
+        let facing = which_way_its_own_fan_faces(face, across);
+        let length = facing.length();
+        Self {
+            across,
+            facing,
+            area: shift(length, 2 * across),
+            area_error: shift_up(how_far_the_area_rounded(face, across, length), 2 * across),
+        }
+    }
+}
+
+/// How far `length` — the rounded length of a face's vector area, in the units
+/// `across` picked — is from the exact length of the same vector, rounded up.
+///
+/// **The truth is worked out, not bounded in advance.** Each side of each
+/// triangle is taken exactly with [`two_diff`], the cross products are
+/// multiplied out in [`rcad_predicates::expansion`], so `twice` below is the
+/// fan's vector area doubled with nothing lost, and `S = |twice|²` is exact
+/// too. The area is `√S / 2`, which no `f64` need hold, so the distance is
+/// taken without a square root:
+///
+/// ```text
+///     |√S/2 − length| = |S − 4·length²| / (2·(√S + 2·length)) ≤ |S − 4·length²| / (4·length)
+/// ```
+///
+/// and `S − 4·length²` is exact as well. A face whose rounded length came out
+/// on the nose owes exactly nothing, which is every face with corners on whole
+/// numbers.
+///
+/// A rounded length of nothing leaves nothing to divide by, and then the whole
+/// of `√S / 2` is the distance.
+fn how_far_the_area_rounded(face: FaceView<'_>, across: i32, length: f64) -> f64 {
+    let mut twice: [Vec<f64>; 3] = Default::default();
+    face.for_each_triangle(|[a, b, c]| {
+        let along = exactly_along(a, b, across);
+        let down = exactly_along(a, c, across);
+        for (axis, (second, third)) in [(1, 2), (2, 0), (0, 1)].into_iter().enumerate() {
+            let turning = multiplied(&along[second], &down[third]);
+            let against = multiplied(&along[third], &down[second]);
+            twice[axis] = packed(&added(&twice[axis], &added(&turning, &negated(&against))));
+        }
+    });
+    let squared = twice
+        .iter()
+        .fold(Vec::new(), |total, part| packed(&added(&total, &multiplied(part, part))));
+    if length == 0.0 {
+        return divided_up(upward(at_most(&squared).sqrt()), 2.0);
+    }
+    let (four_squared, lost) = two_product(2.0 * length, 2.0 * length);
+    let off = added(&squared, &[-lost, -four_squared]);
+    divided_up(at_most(&off), 4.0 * length)
+}
+
+/// How far `volume` is from a sixth of what `fan` adds up to exactly, rounded
+/// up: the rounding of the sum, of the division by six, and of the shift back
+/// to the model's own units, all three.
+///
+/// `sixth` is the volume still in the units the shifts picked. The exact six
+/// volumes less six times it is exact in [`rcad_predicates::expansion`], and a
+/// sixth of that is the distance there; [`shift_up`] carries it back without
+/// rounding it down. Shifting `sixth` itself back is exact unless the volume
+/// lands among the subnormals, and then it is off by less than their spacing,
+/// which is charged.
+fn how_far_the_volume_rounded(fan: &ExactFan, sixth: f64, volume: f64, whole_shift: i32) -> f64 {
+    let (six_sixths, lost) = two_product(sixth, 6.0);
+    let off = added(&six_volumes_as_an_expansion(fan), &[-lost, -six_sixths]);
+    let error = shift_up(divided_up(at_most(&off), 6.0), whole_shift);
+    if shift(volume, -whole_shift) == sixth {
+        return error;
+    }
+    upward(error + f64::from_bits(1))
+}
+
+/// `b − a` along each axis, exactly, with both parts shrunk by `2^across`: the
+/// side [`which_way_its_own_fan_faces`] rounds, before it rounded.
+fn exactly_along(a: Point, b: Point, across: i32) -> [[f64; 2]; 3] {
+    let from = a.coordinates();
+    let to = b.coordinates();
+    [0, 1, 2].map(|axis| {
+        let (near, lost) = two_diff(to[axis], from[axis]);
+        [shift(lost, -across), shift(near, -across)]
+    })
+}
+
+/// Every triangle of a fan as nine exact offsets — three corners of three
+/// axes, each the two `f64` [`exactly_how_far_from`] splits it into.
+type ExactFan = Vec<[[f64; 2]; 9]>;
 
 /// How far `corner` is from `hub` along each axis, exactly, in the units
 /// `shifts` picked: the `f64` difference the rounded sum uses, and the bit of
@@ -893,6 +1015,21 @@ fn six_volumes_exactly(fan: &[[[f64; 2]; 9]]) -> f64 {
     total.iter().sum()
 }
 
+/// The same exact sum as [`six_volumes_exactly`], kept as an expansion and
+/// packed after every triangle.
+///
+/// **Packed, because this one runs on every flat solid measured** and not
+/// only on one whose sign is in doubt: an expansion that is only ever added to
+/// grows by every entry of every determinant, and adding to it costs its
+/// length each time. [`compress`] keeps it as short as the value needs.
+fn six_volumes_as_an_expansion(fan: &[[[f64; 2]; 9]]) -> Vec<f64> {
+    let mut total: Vec<f64> = Vec::new();
+    for triangle in fan {
+        total = packed(&added(&total, &determinant_of(triangle)));
+    }
+    total
+}
+
 /// The exact determinant of one triangle's three offsets.
 ///
 /// The six terms of a `3 × 3` determinant: three that take the axes in an even
@@ -932,6 +1069,49 @@ fn added(left: &[f64], right: &[f64]) -> Vec<f64> {
     let used = expansion_sum(left, right, &mut sum);
     sum.truncate(used);
     sum
+}
+
+fn packed(expansion: &[f64]) -> Vec<f64> {
+    let mut out = vec![0.0; expansion.len()];
+    let used = compress(expansion, &mut out);
+    out.truncate(used);
+    out
+}
+
+fn negated(expansion: &[f64]) -> Vec<f64> {
+    expansion.iter().map(|entry| -entry).collect()
+}
+
+/// No less than the size of the value `expansion` stands for: every entry's
+/// size added up, each addition rounded up.
+fn at_most(expansion: &[f64]) -> f64 {
+    expansion
+        .iter()
+        .fold(0.0, |total, entry| upward(total + entry.abs()))
+}
+
+/// The next `f64` up from a sum of sizes, which may have rounded down, so a
+/// bound built out of roundings is never smaller than what it stands for.
+///
+/// One step is enough: a correctly rounded sum is less than one spacing from
+/// the exact one, and the next `f64` up is a whole spacing above it. **Zero
+/// stays zero**, because a sum of sizes is zero only when every size was, and
+/// then nothing rounded — which is what keeps a cube on whole numbers owing
+/// exactly nothing.
+fn upward(sum: f64) -> f64 {
+    if sum == 0.0 { 0.0 } else { sum.next_up() }
+}
+
+/// `size / by`, rounded up.
+///
+/// Not [`upward`] of the quotient: a size that is not zero can be divided all
+/// the way down to zero among the subnormals, and that zero would stay. This
+/// steps off it whenever `size` is not zero.
+fn divided_up(size: f64, by: f64) -> f64 {
+    if size == 0.0 {
+        return 0.0;
+    }
+    (size / by).next_up()
 }
 
 /// The widest component of any edge of any of `face`'s triangles.
@@ -1603,6 +1783,20 @@ fn shift(value: f64, exponent: i32) -> f64 {
         let step = left.clamp(-512, 512);
         shifted *= two_to_the(step);
         left -= step;
+    }
+    shifted
+}
+
+/// [`shift`] for a bound, which must not come out smaller than it went in.
+///
+/// Shifting up is exact until it overflows, and infinity is no smaller than
+/// anything. Shifting down is exact until it reaches the subnormals, where it
+/// can round down; shifting the answer back up, which is exact, is what says
+/// whether it did.
+fn shift_up(size: f64, exponent: i32) -> f64 {
+    let shifted = shift(size, exponent);
+    if shift(shifted, -exponent) < size {
+        return shifted.next_up();
     }
     shifted
 }
