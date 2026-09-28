@@ -575,8 +575,8 @@ fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
 /// become answers — a bar cut by one plane off its axis, the control of the
 /// tangent-wall row, and two tools meeting on a plane that cuts a round wall —
 /// and `fusing_two_bars_side_by_side.rs`'s two orders, which used to give out in
-/// different searches, now give out in the same one. Two side-by-side bars still
-/// do not fuse; they die at the next rule, which is what §218.5 predicted.
+/// different searches, now give out in the same one. Two side-by-side bars now
+/// fuse by every rule, both ways round.
 ///
 /// **A cone is counted where the plane cuts it in a curve that closes**, which
 /// is a circle for a cap's own plane and an ellipse for every plane leaned off
