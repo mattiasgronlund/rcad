@@ -2176,4 +2176,133 @@ mod tests {
              {HOW_FAR_THE_EVALUATOR_ROUNDS}, which is not a bound on anything"
         );
     }
+
+    /// A measurement, for `docs/decisions.md` §324: of the turns the flush
+    /// check asks, how many `which_way_three_points_turn`'s lift decides and
+    /// `orient2d` alone does not. It prints its counts.
+    #[test]
+    fn what_the_lift_decides_that_orient2d_alone_does_not() {
+        let scales = [-140, -70, 0, 70, 140, 196];
+        let along = [8.012_115_492_376_656, 15.391_695_551_144_624, 15.602_540_695_680_851];
+
+        let example = [[along[1], 0.0], [along[2], 0.0], [along[0], f64::from_bits(1)]];
+        for [a, b, c] in every_order(example) {
+            println!(
+                "example {a:?} {b:?} {c:?}: alone {:?}, lifted {:?}",
+                orient2d(a, b, c),
+                which_way_three_points_turn(a, b, c)
+            );
+        }
+
+        for &s in &scales {
+            let mut tally = Tally::default();
+            for e in 143..=1074 {
+                for mantissa in [1.0, 3.0] {
+                    for sign in [1.0, -1.0] {
+                        let tiny = sign * mantissa * two_to(-e);
+                        for ends_moved in [false, true] {
+                            for corner_at in [along[0], 15.5] {
+                                let ends = if ends_moved { [tiny, 2.0 * tiny] } else { [0.0; 2] };
+                                let triple = [
+                                    [along[1] * two_to(s), ends[0]],
+                                    [along[2] * two_to(s), ends[1]],
+                                    [corner_at * two_to(s), tiny],
+                                ];
+                                for swapped in [false, true] {
+                                    let triple = if swapped {
+                                        triple.map(|[u, v]| [v, u])
+                                    } else {
+                                        triple
+                                    };
+                                    for order in every_order(triple) {
+                                        tally.count(order);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            println!("inside a straight side, ends at 2^{s}: {tally:?}");
+        }
+
+        for &s in &scales {
+            let mut tally = Tally::default();
+            let mut by_exponent = Vec::new();
+            for e in 144..=1074 {
+                let mut here = Tally::default();
+                let t = two_to(-e);
+                let big = two_to(s);
+                let corners = [
+                    [0.0, 0.0],
+                    [t, 3.0 * t],
+                    [2.0 * t, 0.0],
+                    [big, -big],
+                    [big, big],
+                    [-big, big],
+                    [-big, -big],
+                ];
+                for first in 0..7 {
+                    for second in 0..7 {
+                        for third in 0..7 {
+                            if first == second || second == third || first == third {
+                                continue;
+                            }
+                            let triple = [corners[first], corners[second], corners[third]];
+                            tally.count(triple);
+                            here.count(triple);
+                        }
+                    }
+                }
+                by_exponent.push((e, here));
+            }
+            println!("a spike at the origin under a square of side 2^{s}: {tally:?}");
+            for (e, here) in by_exponent {
+                if here.alone < here.total || here.lifted < here.total {
+                    println!("  spike at 2^-{e}: {here:?}");
+                }
+            }
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct Tally {
+        total: usize,
+        alone: usize,
+        lifted: usize,
+        only_lifted: usize,
+        only_alone: usize,
+    }
+
+    impl Tally {
+        fn count(&mut self, [a, b, c]: [[f64; 2]; 3]) {
+            let alone = orient2d(a, b, c);
+            let lifted = which_way_three_points_turn(a, b, c);
+            let (alone_decided, lifted_decided) = (decided(alone), decided(lifted));
+            if alone_decided && lifted_decided {
+                assert_eq!(alone, lifted, "{a:?} {b:?} {c:?}");
+            }
+            self.total += 1;
+            self.alone += usize::from(alone_decided);
+            self.lifted += usize::from(lifted_decided);
+            self.only_lifted += usize::from(lifted_decided && !alone_decided);
+            self.only_alone += usize::from(alone_decided && !lifted_decided);
+        }
+    }
+
+    fn decided(decision: Decision) -> bool {
+        match decision {
+            Decision::Pos | Decision::Neg | Decision::Zero => true,
+            Decision::Undecidable { .. } => false,
+            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+
+    fn every_order([p, q, r]: [[f64; 2]; 3]) -> [[[f64; 2]; 3]; 6] {
+        [[p, q, r], [q, r, p], [r, p, q], [q, p, r], [p, r, q], [r, q, p]]
+    }
+
+    fn two_to(exponent: i32) -> f64 {
+        2f64.powi(exponent / 2) * 2f64.powi(exponent - exponent / 2)
+    }
 }
