@@ -91,7 +91,10 @@ fn two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_t
             assert_eq!(share, half < PI / 3.0, "half the kept rim is {half}");
             for turn in [0.0, 1.0, 3.0] {
                 let said = what_it_gives(cone, a_leaning_block(lean, crossing, turn), INTERSECTION);
-                assert_eq!(said, "right", "lean {lean}, crossing {crossing}, turn {turn}");
+                assert_eq!(
+                    said, "right",
+                    "lean {lean}, crossing {crossing}, turn {turn}"
+                );
             }
             seen.push((lean, crossing, share));
         }
