@@ -3,3 +3,12 @@
 # See decisions.md §2.4.
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+# Every run of the same code draws the same cases (decisions §339). A test that
+# builds its runner from proptest's `Config::default()` — every `proptest!`
+# block, and every `over()` in `rcad-topo`'s tests — takes its seed from this,
+# and without it takes a fresh one from the operating system on every run. It is
+# not forced, so a soak that sets `PROPTEST_RNG_SEED` in its own shell still
+# searches from the seed it names.
+[env]
+PROPTEST_RNG_SEED = "0"

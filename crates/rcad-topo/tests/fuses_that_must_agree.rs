@@ -298,7 +298,7 @@ const SKEW_REFUSALS_MUST_STAY_BELOW: f64 = 0.18;
 /// compared.
 ///
 /// Six tenths, from every one of the twenty-four call sites of
-/// [`Tally::report_what_it_compared`] that run from a fresh seed (`over`),
+/// [`Tally::report_what_it_compared`] that run through [`over`],
 /// each over `PROPTEST_RNG_SEED` 1 through 20 — twenty-five series, because
 /// [`a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all`] reports two,
 /// a lattice one and a turned one. The number that matters is each series'
@@ -1567,9 +1567,10 @@ fn every_certified_fuse_of_a_pair_somewhere_else_in_f64_is_decided() {
 /// rather than a check.
 ///
 /// It runs on a fixed seed so that the number is the same every time it is
-/// asked for and the figure written into §17.7 reproduces; the properties above
-/// run on a fresh seed every time, because their job is to find inputs nobody
-/// has thought of and a frozen seed would stop them finding any.
+/// asked for and the figure written into §17.7 reproduces. The properties above
+/// run on a fixed seed too, since §339: finding inputs nobody has thought of is
+/// the soak's job, and a property that goes red or green by the draw cannot say
+/// which commit broke it.
 ///
 /// The refusals are broken down by which predicate gave up, because the rate on
 /// its own cannot tell a timid filter from genuine undecidability (§14.7), and
@@ -4026,6 +4027,32 @@ fn the_second_call_asks_the_pair_the_other_way_round() {
     }
 }
 
+/// **Every run of the same code draws the same configurations** (§339).
+///
+/// [`over`] builds its runner with `TestRunner::new`, which takes its seed from
+/// proptest's `Config::default()`: whatever `PROPTEST_RNG_SEED` names, and a
+/// fresh one from the operating system when it names none. So two runners built
+/// one after the other draw the same values exactly when the seed is fixed, and
+/// what fixes it is one line of `.cargo/config.toml`.
+#[test]
+fn two_runs_of_a_property_draw_the_same_values() {
+    let drawn = || {
+        let seen = RefCell::new(Vec::new());
+        over(8, any::<u64>(), |value, _| {
+            seen.borrow_mut().push(value);
+            Ok(())
+        });
+        seen.into_inner()
+    };
+    assert_eq!(
+        drawn(),
+        drawn(),
+        "two runners built the way `over` builds them drew different values, so every \
+         run of the suite tests different cases: `.cargo/config.toml` should set \
+         `PROPTEST_RNG_SEED`"
+    );
+}
+
 /// Ask all three rules of one configuration and keep nothing but the tally.
 fn every_rule(
     tally: &Tally,
@@ -4679,8 +4706,11 @@ fn band_for_a_draw_of(fuses: usize, rate: &RangeInclusive<f64>) -> RangeInclusiv
     floor..=ceiling
 }
 
-/// Run `property` over `cases` configurations from a fresh seed, and hand back
-/// what its fuses did.
+/// Run `property` over `cases` configurations from the seed `PROPTEST_RNG_SEED`
+/// names, and hand back what its fuses did.
+///
+/// `.cargo/config.toml` names one, so every run of the same code draws the same
+/// configurations, and a soak names its own in the shell (§339).
 ///
 /// `cases` is scaled by [`SOAK_FACTOR`] the same way [`measured_cases`] scales
 /// [`MEASURED_CASES`], so a soak reaches these properties too instead of just
