@@ -17,9 +17,11 @@ use crate::{Error, FaceKey, Invalid, Result, SolidView};
 /// [`Approximation`](rcad_predicates::Approximation), which is a length by
 /// §15.2, is the units mistake §12.4 says this kernel loses money on.
 ///
-/// All three errors are exactly `0.0` for a solid whose faces are all flat: the
-/// divergence-theorem sum over a polyhedron's own triangles is the answer and
-/// not a picture of it.
+/// For a solid whose faces are all flat, the divergence-theorem sum over its
+/// own triangles is the answer and not a picture of it, so all that the volume
+/// and area errors carry is the rounding of those sums — exactly `0.0` where
+/// nothing rounded, as on a cube with whole-number corners, and a rounding or
+/// so where something did, as on a turned one (`docs/decisions.md` §338).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Measurement {
     volume: f64,
@@ -58,7 +60,11 @@ impl Measurement {
     /// between them and the surface — same shell, same thickness, opposite sign
     /// — and [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
     ///
-    /// Exactly `0.0` for a wholly flat solid, and never negative.
+    /// For a wholly flat solid there is no such shell, and this is how far the
+    /// rounded sum landed from the exact volume of the solid's own triangles,
+    /// worked out rather than bounded in advance: `0.0` exactly when the sum
+    /// is exact. `a_flat_solid_publishes_the_rounding_of_its_measure.rs` holds
+    /// it against that volume worked out exactly. Never negative.
     #[must_use]
     pub fn volume_error(self) -> f64 {
         self.volume_error
@@ -91,7 +97,9 @@ impl Measurement {
     /// **over**. `a_thin_plate_with_a_hole_measures_more_skin_than_it_has` is
     /// both of those measured.
     ///
-    /// Exactly `0.0` for a wholly flat solid, and never negative.
+    /// For a wholly flat solid, how far each face's rounded area and their
+    /// rounded total landed from the exact areas of the faces' own fans:
+    /// `0.0` exactly when every one of those came out exact. Never negative.
     #[must_use]
     pub fn area_error(self) -> f64 {
         self.area_error
@@ -116,7 +124,10 @@ impl Measurement {
     /// to the far side shifts the balance point by at most
     /// `volume_error / volume` of that reach.
     ///
-    /// Exactly `0.0` for a wholly flat solid.
+    /// `0.0` for a wholly flat solid. **That does not yet count the rounding
+    /// of the centroid's own sums**, which the volume and area errors now do;
+    /// a turned polyhedron's centroid is a few roundings off the exact middle
+    /// of its triangles and this says nothing. `docs/decisions.md` §338.3.
     #[must_use]
     pub fn centroid_wobble(self) -> f64 {
         self.centroid_wobble
@@ -137,13 +148,13 @@ impl Measurement {
 /// from `0.0`. `the_faces_of_a_solid_add_up_to_its_skin_bit_for_bit` is that
 /// law over cubes, bars, balls, cones, a bend and a fuse.
 ///
-/// All errors are exactly `0.0` for a face of a solid whose faces are all
-/// flat, for the reason [`Measurement`] gives — and with the same fine print:
-/// what is exact is the sum over the corners the solid *holds*. A cube turned
-/// and put a million units out holds corners the turn rounded, and its faces
-/// measure within a few roundings of `side²` rather than on it;
-/// `a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_squared`
-/// pins how many.
+/// For a face of a solid whose faces are all flat, the area error is the
+/// rounding of the face's own fan and nothing else, for the reason
+/// [`Measurement`] gives — and what the truth is, is the area of the corners
+/// the solid *holds*. A cube turned and put a million units out holds corners
+/// the turn rounded, so its faces are `1.25e-10` off `side²`, which is where
+/// the corners are; the area error is how far the measured area is from the
+/// area those corners really bound, a rounding or so.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaceMeasurement {
     area: f64,
@@ -182,7 +193,9 @@ impl FaceMeasurement {
     /// `what_a_faces_area_error_is_against_its_area` pins each to half a
     /// percent.
     ///
-    /// Exactly `0.0` for a face of a wholly flat solid, and never negative.
+    /// For a face of a wholly flat solid, how far the rounded area landed from
+    /// the exact area of the face's own fan: `0.0` exactly when it did not
+    /// round. Never negative.
     #[must_use]
     pub fn area_error(self) -> f64 {
         self.area_error
@@ -253,7 +266,8 @@ impl FaceMeasurement {
     /// what dominates. A bound on how lopsided a face's triangles can be would
     /// tighten it; nothing here has one.
     ///
-    /// Exactly `0.0` for a face of a wholly flat solid.
+    /// `0.0` for a face of a wholly flat solid, which does not yet count the
+    /// rounding of the centroid's own sums (`docs/decisions.md` §338.3).
     #[must_use]
     pub fn centroid_wobble(self) -> f64 {
         self.centroid_wobble
@@ -274,8 +288,10 @@ impl SolidView<'_> {
     ///
     /// A solid whose faces are **all flat** is measured over the triangles
     /// [`FaceView::for_each_triangle`] hands out, exactly as it was in M0:
-    /// `deflection` is ignored, no mesh is built, nothing is logged, and all
-    /// three error terms come back exactly `0.0`. That is not an optimisation.
+    /// `deflection` is ignored, no mesh is built, nothing is logged, and the
+    /// value of every answer is bit for bit what M0 gave. The volume and area
+    /// errors are then only the rounding of those sums, worked out exactly,
+    /// so `0.0` wherever nothing rounded (§338). That is not an optimisation.
     /// Every metamorphic property in the fuse suite — inclusion–exclusion,
     /// idempotence, absorption — reads these numbers, and putting them
     /// downstream of a triangulator is the schedule risk §23.7 named before this
@@ -354,8 +370,8 @@ impl SolidView<'_> {
         self.measured_over(&mesh)
     }
 
-    /// The exact answer for a polyhedron, summed over the triangles its faces
-    /// fan into.
+    /// The answer for a polyhedron, summed over the triangles its faces fan
+    /// into, with how far the rounded sums landed from the exact ones.
     ///
     /// No quadrature. Planar faces do not need any (decisions.md §3.1). The
     /// triangles come in a fixed order, so the sums are bit for bit repeatable.
@@ -910,9 +926,9 @@ fn how_far_the_area_rounded(face: FaceView<'_>, across: i32, length: f64) -> f64
             twice[axis] = packed(&added(&twice[axis], &added(&turning, &negated(&against))));
         }
     });
-    let squared = twice
-        .iter()
-        .fold(Vec::new(), |total, part| packed(&added(&total, &multiplied(part, part))));
+    let squared = twice.iter().fold(Vec::new(), |total, part| {
+        packed(&added(&total, &multiplied(part, part)))
+    });
     if length == 0.0 {
         return divided_up(upward(at_most(&squared).sqrt()), 2.0);
     }

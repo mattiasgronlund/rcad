@@ -34,7 +34,11 @@ fn a_turned_cube_less_the_cube_it_touches_owns_up_to_its_rounding() {
         let measured = model
             .solid(solid)
             .expect("the fuse made the key")
-            .measure(any_deflection(), &Policy::certified(), &mut ProvenanceLog::new())
+            .measure(
+                any_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
             .expect("a turned cube measures");
         let exact = six_times_the_volume(&model, solid);
         println!(
@@ -99,7 +103,11 @@ fn a_cube_turned_and_far_away_owns_up_to_what_each_face_rounds_to() {
     }
 
     let measured = solid
-        .measure(any_deflection(), &Policy::certified(), &mut ProvenanceLog::new())
+        .measure(
+            any_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a turned cube measures");
     let exact = six_times_the_volume(&model, cube);
     println!(
@@ -121,8 +129,13 @@ fn a_cube_turned_and_far_away_owns_up_to_what_each_face_rounds_to() {
     let skin = measured.surface_area();
     let error = measured.area_error();
     assert!(
-        at_least_zero(&plus(&skin_at_least, &negated(&exactly(two_diff(skin, error)))))
-            && at_least_zero(&plus(&exactly(two_sum(skin, error)), &negated(&skin_at_most))),
+        at_least_zero(&plus(
+            &skin_at_least,
+            &negated(&exactly(two_diff(skin, error)))
+        )) && at_least_zero(&plus(
+            &exactly(two_sum(skin, error)),
+            &negated(&skin_at_most)
+        )),
         "the cube's skin measures {skin} ± {error:e}, and the faces it holds add up to {} \
          give or take {:e}",
         roughly(&skin_at_least),
@@ -142,7 +155,11 @@ fn a_cube_on_whole_numbers_still_owes_nothing() {
         .expect("a cube of side two");
     let solid = model.solid(cube).expect("this model made the key");
     let measured = solid
-        .measure(any_deflection(), &Policy::certified(), &mut ProvenanceLog::new())
+        .measure(
+            any_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
         .expect("a cube measures");
     assert_eq!(
         [
@@ -181,7 +198,9 @@ fn two_turned_cubes_each_less_the_other() -> (Model, Vec<(&'static str, SolidKey
         0.7,
     )
     .expect("a rotation");
-    model.place_solid(a, &turn).expect("this model made the key");
+    model
+        .place_solid(a, &turn)
+        .expect("this model made the key");
     model
         .place_solid(
             b,
@@ -192,10 +211,19 @@ fn two_turned_cubes_each_less_the_other() -> (Model, Vec<(&'static str, SolidKey
     let mut answers = Vec::new();
     for (what, left, right) in [("a less b", a, b), ("b less a", b, a)] {
         let fused = model
-            .fuse(&[left], &[right], Rule::Difference, &policy, &mut ProvenanceLog::new())
+            .fuse(
+                &[left],
+                &[right],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
             .unwrap_or_else(|why| panic!("{what} fuses: {why}"));
         let [only] = fused.solids() else {
-            panic!("{what} is one solid, and came back {}", fused.solids().len());
+            panic!(
+                "{what} is one solid, and came back {}",
+                fused.solids().len()
+            );
         };
         answers.push((what, *only));
     }
@@ -267,7 +295,8 @@ fn four_times_the_area_squared(face: FaceView<'_>) -> Vec<f64> {
 fn the_volume_is_inside(value: f64, error: f64, six_volumes: &[f64]) -> bool {
     let low = times(&exactly(two_diff(value, error)), &[6.0]);
     let high = times(&exactly(two_sum(value, error)), &[6.0]);
-    at_least_zero(&plus(six_volumes, &negated(&low))) && at_least_zero(&plus(&high, &negated(six_volumes)))
+    at_least_zero(&plus(six_volumes, &negated(&low)))
+        && at_least_zero(&plus(&high, &negated(six_volumes)))
 }
 
 /// Whether `value ± error` holds half the square root of `four_areas_squared`.
@@ -275,8 +304,15 @@ fn the_area_is_inside(value: f64, error: f64, four_areas_squared: &[f64]) -> boo
     let low = exactly(two_diff(value, error));
     let high = exactly(two_sum(value, error));
     let low_enough = !at_least_zero(&low)
-        || at_least_zero(&plus(four_areas_squared, &negated(&times(&times(&low, &low), &[4.0]))));
-    low_enough && at_least_zero(&plus(&times(&times(&high, &high), &[4.0]), &negated(four_areas_squared)))
+        || at_least_zero(&plus(
+            four_areas_squared,
+            &negated(&times(&times(&low, &low), &[4.0])),
+        ));
+    low_enough
+        && at_least_zero(&plus(
+            &times(&times(&high, &high), &[4.0]),
+            &negated(four_areas_squared),
+        ))
 }
 
 /// Two numbers either side of half the square root of `four_areas_squared`,
@@ -295,11 +331,17 @@ fn the_area_between(four_areas_squared: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let square_of = |side: &[f64]| times(side, side);
 
     let mut low = nudge;
-    while !at_least_zero(&plus(&squared, &negated(&square_of(&plus(&[low], &[root]))))) {
+    while !at_least_zero(&plus(
+        &squared,
+        &negated(&square_of(&plus(&[low], &[root]))),
+    )) {
         low = low.next_down();
     }
     let mut high = nudge;
-    while !at_least_zero(&plus(&square_of(&plus(&[high], &[root])), &negated(&squared))) {
+    while !at_least_zero(&plus(
+        &square_of(&plus(&[high], &[root])),
+        &negated(&squared),
+    )) {
         high = high.next_up();
     }
     (plus(&[low], &[root]), plus(&[high], &[root]))
