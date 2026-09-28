@@ -1216,6 +1216,7 @@ impl<'f> Arrangement<'f> {
         for first in 0..self.crossings.len() {
             for second in (first + 1)..self.crossings.len() {
                 if self.crossings[first].partner == self.crossings[second].partner {
+                    self.place_where_two_rulings_cross(first, second);
                     continue;
                 }
                 let surfaces = [
@@ -1271,6 +1272,55 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(())
+    }
+
+    /// The node where two curves of one pair cross, for the one pair here that
+    /// names two curves crossing at a point it stores exactly: a plane through
+    /// a cone's apex, whose two rulings cross there (§347).
+    ///
+    /// No third surface passes through that point, so
+    /// [`meet_of_three_surfaces`] has nothing to solve, and none is needed: the
+    /// apex is [`Cone::apex`], stored, and [`a_plane_cuts_a_cone_in_rulings`]
+    /// has proved it on the plane. Every other pair that names two curves is
+    /// left without a node here, and §347 says which of them can have two
+    /// curves that cross.
+    ///
+    /// The node is named by the plane and the cone, whichever of the two the
+    /// face is, so that the face on the plane and the face on the cone name
+    /// the apex alike.
+    ///
+    /// # Panics
+    ///
+    /// If a picker of either ruling rules the apex out. Each ruling is picked
+    /// by a pair of opposite half-spaces whose flat surface holds the ruling
+    /// and passes exactly through the apex, which `rcad-geom` proves before it
+    /// names the pair; a `Neg` there is that proof broken.
+    fn place_where_two_rulings_cross(&mut self, first: usize, second: usize) {
+        let partner = self.crossings[first].partner;
+        let Some((flat, cone)) = a_plane_and_a_cone(&self.surface, &partner) else {
+            return;
+        };
+        if a_plane_cuts_a_cone_in_rulings(flat, cone) != Some(true) {
+            return;
+        }
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        assert!(
+            nothing_rules_the_point_out(self.crossings[first].picked_by(), apex)
+                && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
+            "each of the two rulings a plane cuts through a cone's apex holds the apex"
+        );
+        if self.a_corner_is_this_place(first, second, apex, &[apex]) {
+            return;
+        }
+        let mut named = [Surface::Plane(*flat), Surface::Cone(*cone), Surface::Cone(*cone)];
+        named.sort_by(|one, other| name_of_surface_bits(one).cmp(&name_of_surface_bits(other)));
+        self.nodes.push(Node {
+            point: apex,
+            vertex: None,
+            made_of: Some((named, 0)),
+            half_way_round: false,
+            crossings: vec![first, second],
+        });
     }
 
     /// Whether the two crossings can be shown to have no point in common.
