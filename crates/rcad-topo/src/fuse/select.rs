@@ -967,15 +967,37 @@ fn do_they_face_the_same_way(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<bool>> {
-    if let (Some(mine), Some(theirs)) = (mine, outward_plane_of_face(face)) {
-        return Ok(match agreement_of_two_planes(&mine, &theirs, log)? {
-            PlaneAgreement::SameWay => Some(true),
-            PlaneAgreement::OppositeWay => Some(false),
-            PlaneAgreement::Different => None,
-            other => {
-                panic!("plane agreement came back with an answer nothing here knows: {other:?}")
-            }
-        });
+    match (mine, outward_plane_of_face(face)) {
+        (Some(mine), Some(theirs)) => {
+            return Ok(match agreement_of_two_planes(&mine, &theirs, log)? {
+                PlaneAgreement::SameWay => Some(true),
+                PlaneAgreement::OppositeWay => Some(false),
+                PlaneAgreement::Different => None,
+                other => {
+                    panic!("plane agreement came back with an answer nothing here knows: {other:?}")
+                }
+            });
+        }
+        // A plane and a curved surface are never one surface, so their whole
+        // crossing is not asked for. `intersect` refuses a plane against a ring
+        // as a quartic however far apart the two are, and that refused the
+        // fuse (`docs/decisions.md` §322.7, Q326).
+        //
+        // No curved surface rcad-geom builds is a plane. A ball's radius and a
+        // ring's two radii are finite and above zero, so a ball and a ring are
+        // bounded and a plane is not. A pipe's radius is finite and above zero,
+        // so every point of it is that far from its axis, and a plane runs
+        // further than that from any line. A cone's slope is finite and above
+        // zero, so on the plane square to its axis through its apex the cone
+        // has one point, the apex, and a plane meets that plane in a line, in
+        // the whole of it, or nowhere. The cone that is a plane, a half-angle
+        // of a right angle, is refused by `Cone::from_half_angle`, and its
+        // infinite slope by `Cone::new`. Each type checks again when it is read
+        // from bytes. `intersect` never answered `SameSurface` for such a pair
+        // either, so what skipping it drops is a refusal, or the records of a
+        // crossing nothing here used.
+        (Some(_), None) | (None, Some(_)) => return Ok(None),
+        (None, None) => (),
     }
     if !matches!(
         intersect(&piece.surface, &face.surface, policy, log)?,
