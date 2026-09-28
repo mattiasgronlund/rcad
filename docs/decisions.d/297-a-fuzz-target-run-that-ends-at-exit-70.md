@@ -158,3 +158,79 @@ Measured: `taskset -c 0-5 /usr/bin/time -v cargo +nightly fuzz run
 where_two_surfaces_cross target/q239/merge-out <q180-corpus-root> --
 -merge=1 -timeout=10`, log at this lane's `target/q239/run-merge.log`
 (gitignored, not part of this commit).
+
+### 297.2 Splitting §297's 580 kept seeds by source
+
+*Queue row Q270, off `6f3c62e0` (`main` at
+`6f3c62e09f8625023ca129b2c0105b25da6defc3`). Lane
+`lane-q270-two-source-split`. `where_two_surfaces_cross` was rebuilt the way
+`fuzz-target` builds it (`CI=1 RUSTC=fuzz/rustc-stand-in.sh
+RUSTFLAGS="-C target-cpu=x86-64-v3" cargo +nightly fuzz run`, checked against
+`just recipe fuzz-target` rather than copied from §297.1). At this lane's
+base the tracked corpus still holds 834 files (`ls
+fuzz/corpus/where_two_surfaces_cross | wc -l`) — unchanged from §297 and
+§297.1, so the split below compares against the same two source sizes §297's
+580 came from, with nothing to correct for. Q180's corpus root, copied into
+this lane's own `target/q270/root-copy` rather than read from the scratchpad
+directly, is still 388 files, 322 of them `timeout-*`
+(`find ... -name 'timeout-*' | wc -l`).*
+
+**One run, as asked.** §297's own two-source `-merge=1 -timeout=10` pass was
+rerun once, of a copy of the tracked corpus plus a copy of Q180's root, into
+a fresh empty `target/q270/merge-out`, pinned to cores 16-19, launched
+detached and waited out in `timeout 540 tail --pid` segments. `uptime`
+before: `load average: 7.78, 6.09, 8.58`; after: `load average: 9.56, 8.21,
+10.33`. No `-max_len` flag was passed (matching §297.1's own direct-merge
+command); the log says why the truncation step of §306.7's leg (b) never
+fires here: `-max_len is not provided; libFuzzer will not generate inputs
+larger than 1048576 bytes`. Checked, not assumed: every one of the 1222
+input files, in both sources, is at most 71 bytes
+(`find ... -printf '%s\n' | sort -n | tail -1`), so hashing each one whole
+(`sha1sum`) and cut to 1,048,576 bytes (`head -c 1048576 | sha1sum`) landed
+on identical digests for all 1222 — the two hash sets this section needed are
+one set.
+
+**The run took 54:30.10** (`/usr/bin/time -v`'s `Elapsed (wall clock) time`;
+user 3201.61s, sys 37.81s, 99% CPU, exit status 0) — 3270.10 s, close to
+§297.1's 3290.76 s for the *single*-source root-alone merge, despite this
+merge walking 1222 candidates against that run's 388: the extra 834 tracked
+files are cheap next to the root's `timeout-*` files, which is also where
+this run's cost concentrates. 71 of this run's 72 `MERGE-OUTER` attempts
+crashed on the per-input alarm (`grep -c 'ERROR: libFuzzer: timeout'`), and
+every one of the 71 distinct failing paths is a `root-copy/timeout-*` file
+(`grep -o "...' caused a failure" | sed ... | sort -u`, cross-checked
+against `^timeout-`); none is from the tracked copy. Same shape as §297.1's
+leg (b), one source further in.
+
+**MERGE-OUTER: 586 new files with 9152 new features added; 3121 new
+coverage edges** (`successful in 72 attempt(s)`) — the kept directory count
+(`find target/q270/merge-out -type f | wc -l`) is also 586, an exact match
+this run rather than the 2-4 file gap §306.7 measured elsewhere: this run's
+kept set and its reported count happen to agree. 586 against §297's 580 is 6
+more, on the identical two source directories and the same flags; §306.7
+already found a two-source merge's kept set moves by a few files between
+runs of identical bytes, and this section runs it once rather than a second
+time to explain the 6.
+
+**The split, by hashing every kept name against both sources'
+SHA-1s** (`comm -12` of the sorted kept-name list against each source's
+sorted digest list): **454 of the 586 kept files came from the tracked
+corpus, 132 from Q180's root** — 454 + 132 = 586 exactly, with no kept name
+matching both sources' digests and none matching neither (`comm` on the two
+splits, and on the kept list against the union of both digest lists, are all
+empty). Mapping the 132 root-sourced digests back to the root's own
+filenames (`sha1sum` over `root-copy`, joined on digest, since the root's
+388 files hash to 388 distinct digests — `sort -u | wc -l` — so the join is
+unambiguous): **70 of the 132 are `timeout-*` files, 62 are not.**
+
+So of the 580-590-ish seeds a two-source merge of this pair keeps, most are
+the tracked corpus's own (454, 78%), the root contributes about a fifth
+(132), and only a little over half of what the root contributes is itself
+one of its slow files (70 of 132) — the root's other 62 kept files survived
+the merge on coverage that had nothing to do with being slow. §297.1's 193
+(root merged alone) was already flagged as a proxy and not this count; this
+row is the count itself, not a proxy for it.
+
+Scripted at this lane's `target/q270/run-merge.sh`
+(`/usr/bin/time -v` into `target/q270/run-merge.log`, both gitignored, not
+part of this commit).
