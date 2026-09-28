@@ -314,9 +314,7 @@ fn the_same_surface_slid_by(surface: &Surface, exponent: i32) -> Option<Surface>
         ),
         Surface::Cone(cone) => Surface::Cone(
             Cone::new(
-                cone.axis()
-                    .moved_to(slid_point(cone.apex())?)
-                    .expect(BUILT),
+                cone.axis().moved_to(slid_point(cone.apex())?).expect(BUILT),
                 cone.slope(),
             )
             .expect(BUILT),

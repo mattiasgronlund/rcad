@@ -525,9 +525,9 @@ fn slid(surface: &Surface, exponent: i32) -> Surface {
         Surface::Plane(flat) => {
             Surface::Plane(flat.moved_to(by(flat.offset())).expect("a finite offset"))
         }
-        Surface::Sphere(ball) => Surface::Sphere(
-            Sphere::new(place(ball.centre()), by(ball.radius())).expect("a radius"),
-        ),
+        Surface::Sphere(ball) => {
+            Surface::Sphere(Sphere::new(place(ball.centre()), by(ball.radius())).expect("a radius"))
+        }
         Surface::Cylinder(pipe) => Surface::Cylinder(
             Cylinder::new(
                 pipe.axis()
