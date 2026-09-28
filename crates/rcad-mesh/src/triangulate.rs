@@ -305,22 +305,29 @@ fn the_refusal_the_flush_replaced(position: usize) -> CannotTriangulate {
 ///   hole turned inside out, whose own triangle is not kept but is still what
 ///   stops the kept ones overlapping
 ///   (`a_hole_the_flush_turns_inside_out_is_refused`).
-/// - **Every point is on or inside every side of the hull**, read the same way.
+/// - **The hull's outline does not cross or touch itself**, read the same way.
+///   It need not stay convex: a corner flushed onto a straight side of the
+///   hull dents it by less than `2⁻¹⁴²` read where it really is, and the
+///   triangles still tile the patch
+///   (`a_corner_flushed_onto_a_straight_side_of_the_hull_is_meshed`).
 ///
 /// Why those three are enough: with every triangle anticlockwise, how many of
-/// them cover a point is the number of times the hull's own outline winds round
-/// it; an outline that keeps every point on or to its left is convex and winds
-/// once. So the triangles tile the hull without overlapping, as they did
-/// before the flush. The loops are sides of that tiling, so which triangles
-/// are inside them is the same count of crossings it always was.
+/// them cover a point is the number of times the hull's outline winds round
+/// it, and an outline that does not cross itself winds round a point once or
+/// not at all. So the triangles tile the inside of that outline without
+/// overlapping, as they did before the flush. The loops are sides of that
+/// tiling, so which triangles are inside them is the same count of crossings
+/// it always was. **The third check is there because the argument needs it.**
+/// No test here is built to fail it and pass the other two; that it cannot
+/// happen is not claimed.
 ///
 /// Two corners in different places flushed onto one vertex are refused before
 /// this runs, where [`triangulate`] inserts them.
 ///
-/// Only what the flush moved is looked at: a triangle, or a side of the hull
-/// and a point, none of whose corners moved, is exactly what spade drew and
-/// spade's own predicates are exact. A comparison the exact predicate cannot
-/// settle counts as a failure, since then nothing shows the patch unchanged.
+/// Only what the flush moved is looked at: a triangle, or a side of the hull,
+/// none of whose corners moved, is exactly what spade drew, and spade's own
+/// predicates are exact. A turn that cannot be settled counts as a failure,
+/// since then nothing shows the patch unchanged.
 ///
 /// # Panics
 ///
@@ -342,37 +349,113 @@ fn the_flush_moved_nothing_the_patch_rests_on(
         let at = mesh.vertex(vertex).position();
         [at.x, at.y] != unflushed(vertex)
     };
-    let turns_left = |corners: [FixedVertexHandle; 3], or_is_straight: bool| {
-        let [a, b, c] = corners.map(&unflushed);
-        match orient2d(a, b, c) {
-            Decision::Pos => true,
-            Decision::Zero => or_is_straight,
-            Decision::Neg | Decision::Undecidable { .. } => false,
-            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
-        }
-    };
 
     for face in mesh.inner_faces() {
         let corners = face.vertices().map(|vertex| vertex.fix());
-        if corners.iter().any(|&vertex| moved(vertex)) && !turns_left(corners, false) {
-            return false;
+        if !corners.iter().any(|&vertex| moved(vertex)) {
+            continue;
+        }
+        let [a, b, c] = corners.map(&unflushed);
+        match which_way_three_points_turn(a, b, c) {
+            Decision::Pos => {}
+            Decision::Neg | Decision::Zero | Decision::Undecidable { .. } => return false,
+            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
         }
     }
 
-    let moved_points: Vec<FixedVertexHandle> =
-        mesh.fixed_vertices().filter(|&point| moved(point)).collect();
-    mesh.convex_hull().all(|outward| {
-        let side = outward.rev();
-        let (from, to) = (side.from().fix(), side.to().fix());
-        if moved(from) || moved(to) {
-            mesh.fixed_vertices()
-                .all(|point| turns_left([from, to, point], true))
-        } else {
-            moved_points
-                .iter()
-                .all(|&point| turns_left([from, to, point], true))
-        }
+    let hull: Vec<([[f64; 2]; 2], bool)> = mesh
+        .convex_hull()
+        .map(|outward| {
+            let ends = [outward.from().fix(), outward.to().fix()];
+            (ends.map(&unflushed), ends.iter().any(|&end| moved(end)))
+        })
+        .collect();
+    hull.iter().enumerate().all(|(which, &(side, side_moved))| {
+        !side_moved
+            || hull.iter().enumerate().all(|(other, &(beside, _))| {
+                other == which || !two_sides_of_an_outline_meet(side, beside)
+            })
     })
+}
+
+/// [`orient2d`], asked of the three points moved up by one exact power of two
+/// when they are small enough to need it.
+///
+/// A corner the flush moved has a coordinate under `2⁻¹⁴²` and its neighbours
+/// usually have ones near one, so the determinant is a product of the two:
+/// `0.2 · 2⁻¹⁰⁷⁴` for a side along `v = 0` and a corner a subnormal above it.
+/// That product is under the smallest `f64` and `orient2d` refuses it.
+/// `orient2d` does retry at a power of two, but it chooses the power from the
+/// largest difference between the points, which here is about one, so it
+/// retries at the scale it started at (`docs/decisions.md` §321). Moving every
+/// coordinate up until the largest is near `2⁵⁰⁰` lifts every product of a
+/// small coordinate with a large one into range and takes none of them past
+/// the top, and multiplying by a power of two that stays in range is exact, so
+/// the sign is the sign of the points as they were.
+///
+/// Only upwards: a coordinate the triangulation took is under `2²⁰¹`, so the
+/// power is always at least `2²⁹⁹`. A product of two coordinates that are both
+/// small is still out of reach, and that comes back undecided as it did.
+fn which_way_three_points_turn(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Decision {
+    let largest = [a, b, c]
+        .iter()
+        .flatten()
+        .fold(0.0_f64, |largest, value| largest.max(value.abs()));
+    if largest == 0.0 || !largest.is_finite() {
+        return orient2d(a, b, c);
+    }
+    let up = (500 - largest.log2().floor() as i32).clamp(0, 1000);
+    let [first, second] = [up / 2, up - up / 2].map(|half| 2f64.powi(half));
+    let lifted = |point: [f64; 2]| point.map(|value| value * first * second);
+    orient2d(lifted(a), lifted(b), lifted(c))
+}
+
+/// Whether two sides of the hull's outline share a point they should not.
+///
+/// Two sides that follow one another share their one corner, and that is all
+/// they may share: they meet wrongly only when the second turns straight back
+/// along the first. Any other two may share nothing at all. Exact, from
+/// [`which_way_three_points_turn`] and comparisons; a turn it cannot settle
+/// counts as meeting, since then nothing shows they do not.
+///
+/// # Panics
+///
+/// On a [`Decision`] this file has not been taught.
+fn two_sides_of_an_outline_meet(one: [[f64; 2]; 2], other: [[f64; 2]; 2]) -> bool {
+    let turn = |a, b, c| match which_way_three_points_turn(a, b, c) {
+        Decision::Pos => Some(1),
+        Decision::Neg => Some(-1),
+        Decision::Zero => Some(0),
+        Decision::Undecidable { .. } => None,
+        other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+    };
+    if one[1] == other[0] || one[0] == other[1] {
+        let (before, shared, after) = if one[1] == other[0] {
+            (one[0], one[1], other[1])
+        } else {
+            (other[0], other[1], one[1])
+        };
+        return match turn(before, shared, after) {
+            Some(0) => !lies_between(shared, before, after),
+            Some(_) => false,
+            None => true,
+        };
+    }
+    let (Some(one_from), Some(one_to), Some(other_from), Some(other_to)) = (
+        turn(other[0], other[1], one[0]),
+        turn(other[0], other[1], one[1]),
+        turn(one[0], one[1], other[0]),
+        turn(one[0], one[1], other[1]),
+    ) else {
+        return true;
+    };
+    if one_from * one_to < 0 && other_from * other_to < 0 {
+        return true;
+    }
+    (one_from == 0 && lies_between(one[0], other[0], other[1]))
+        || (one_to == 0 && lies_between(one[1], other[0], other[1]))
+        || (other_from == 0 && lies_between(other[0], one[0], one[1]))
+        || (other_to == 0 && lies_between(other[1], one[0], one[1]))
 }
 
 /// Refuse a domain where one loop lands on the *inside* of another loop's side.
