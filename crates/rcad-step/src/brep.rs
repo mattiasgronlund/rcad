@@ -1189,7 +1189,11 @@ impl Walk {
                 // A plane along the pipe's axis cuts it in two lines, which
                 // gives an infinite size; and `largest_of` takes the sizes in,
                 // so one infinite size makes the allowance infinite too.
-                if !from_the_pipe.iter().chain(&written).all(|size| size.is_finite()) {
+                if !from_the_pipe
+                    .iter()
+                    .chain(&written)
+                    .all(|size| size.is_finite())
+                {
                     return Ok(false);
                 }
                 let an_ellipse = |semi_axes| Ellipse {

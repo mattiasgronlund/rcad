@@ -104,9 +104,9 @@ fn the_mitre_is_named_by_its_plane(reference: &str, sizes: &str) {
     let mut log = ProvenanceLog::new();
     let import = match Import::read(&file, &policy, &mut log) {
         Ok(import) => import,
-        Err(refused) => panic!(
-            "an elbow of two pipes with its mitre written {sizes} is refused: {refused:?}"
-        ),
+        Err(refused) => {
+            panic!("an elbow of two pipes with its mitre written {sizes} is refused: {refused:?}")
+        }
     };
     let [(_, elbow)] = import.solids() else {
         panic!("one MANIFOLD_SOLID_BREP is one solid");
@@ -258,11 +258,21 @@ fn an_elbow(reference: &str, sizes: &str, level_pipe: [&str; 2]) -> String {
     let faces: [(&str, &[(&str, &str)]); 4] = [
         (
             "#160",
-            &[("#150", ".T."), ("#153", ".T."), ("#151", ".F."), ("#153", ".F.")],
+            &[
+                ("#150", ".T."),
+                ("#153", ".T."),
+                ("#151", ".F."),
+                ("#153", ".F."),
+            ],
         ),
         (
             "#161",
-            &[("#151", ".T."), ("#154", ".T."), ("#152", ".F."), ("#154", ".F.")],
+            &[
+                ("#151", ".T."),
+                ("#154", ".T."),
+                ("#152", ".F."),
+                ("#154", ".F."),
+            ],
         ),
         ("#162", &[("#150", ".F.")]),
         ("#163", &[("#152", ".T.")]),
