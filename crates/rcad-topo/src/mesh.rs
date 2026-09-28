@@ -364,7 +364,7 @@ impl SolidView<'_> {
     /// rather than asserts precisely because
     /// [`Model::validate`](crate::Model::validate) is a separate call this
     /// does not require first, `Model` derives `Deserialize`, and a caller's
-    /// bytes may not panic (CLAUDE.md, §4.1). Whatever [`rcad_geom::walk`]
+    /// bytes may not panic (`docs/decisions.md` §4.1). Whatever [`rcad_geom::walk`]
     /// makes of an edge it cannot follow, which includes a seam whose
     /// half-spaces pick both halves of its meridian or neither.
     /// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] for an edge that is not
