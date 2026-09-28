@@ -7,6 +7,7 @@ use rcad_predicates::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::exact::Exact;
 use crate::isometry::Isometry;
 use crate::point::{Point, Vector, a_hundred_bit_number_divided_by, product_to_a_hundred_bits};
 use crate::{Error, Result};
@@ -16,11 +17,14 @@ pub const SIDE_OF_PLANE: &str = "side of plane";
 
 /// A flat surface: every point `p` on it satisfies `normal · p = offset`.
 ///
-/// Every constructor scales the normal to length one, so
+/// Every constructor stores a normal of length one, so
 /// [`Plane::signed_distance_to`] is a real distance and not a scaled one.
 /// [`Plane::transformed`] turns a normal without scaling it again — a read of a
 /// plane has to give back the plane that was stored — so a moved plane's normal
-/// has length one to within the rounding of the turn.
+/// has length one to within the rounding of the turn,
+/// [`Plane::NORMAL_LENGTH_ROUNDOFF`], and
+/// [`Plane::from_point_and_normal_as_written`] keeps a normal that is that
+/// close rather than scale it again.
 ///
 /// This is the only surface that takes part in topology in M0
 /// (`docs/decisions.md` §3.1): a real cube, with volume, area and centroid
@@ -107,6 +111,46 @@ impl Plane {
     /// reason (`docs/decisions.md` §15.6).
     pub const SIGNED_DISTANCE_ROUNDOFF: f64 = 4.0 * f64::EPSILON;
 
+    /// How far from one a stored normal's squared length `n·n` can sit once a
+    /// turn has moved it, and so how far [`Plane::from_point_and_normal_as_written`]
+    /// lets a normal sit and still keeps its bits.
+    ///
+    /// # Where the 64 comes from
+    ///
+    /// Write `ε = f64::EPSILON`. Two roundings reach a moved plane's normal.
+    ///
+    /// - **The constructor's.** Each component is the nearest `f64` to the
+    ///   exact ratio, a relative slip of at most `ε/2`, so `n·n` is within
+    ///   `ε + ε²/4` of one.
+    /// - **The turn's.** [`Isometry::POINT_ROUNDOFF`] puts each turned
+    ///   component within `18ε` times the largest component of where the turn's
+    ///   own arithmetic, done exactly, puts it; a vector has no shift, and its
+    ///   largest component is at most its length, one. So the turned vector is
+    ///   `m + δ` with `|δ| ≤ √3·18ε`, and `|m + δ|² − |m|² = 2m·δ + |δ|²`, which
+    ///   is at most `2√3·18ε ≈ 62.35ε` and a term of order `ε²`.
+    ///
+    /// Together `63.4ε`, under `64ε`.
+    ///
+    /// **One share is not derived, and is measured instead.** The turn's own
+    /// arithmetic done exactly keeps a length only when its quaternion has
+    /// length exactly one, and a stored quaternion comes from `sin` and `cos`,
+    /// which Rust does not bound. So the sum above is not a proof that every
+    /// turned normal is inside, and
+    /// `every_normal_a_turn_leaves_sits_well_inside_the_bound` is the evidence
+    /// that the share that was left out fits in the room the worst case
+    /// leaves. Over 20 000 normals the worst `|n·n − 1|` it finds is `10.8ε`
+    /// turned once and `17.7ε` through four composed turns.
+    ///
+    /// **A placement composed of many turns drifts further**, because
+    /// composing two quaternions rounds and nothing scales the product back:
+    /// through sixteen the same test finds `42.9ε`. A normal moved so far that
+    /// it leaves the bound is scaled, which is what every normal was before
+    /// the bound existed.
+    ///
+    /// A normal outside it is not refused, only scaled; see
+    /// [`Plane::from_point_and_normal_as_written`] for why.
+    pub const NORMAL_LENGTH_ROUNDOFF: f64 = 64.0 * f64::EPSILON;
+
     /// The plane through `point` at right angles to `normal`.
     ///
     /// Only the direction of `normal` is read. Two vectors along the same line
@@ -122,12 +166,72 @@ impl Plane {
     /// plane would sit so far from the origin that its offset overflows, and
     /// [`Error::ZeroLength`] if `normal` has no length to point along.
     pub fn from_point_and_normal(point: Point, normal: Vector) -> Result<Self> {
+        Self::through(
+            point,
+            normal.scaled_to_length_one_from_anywhere("plane normal"),
+        )
+    }
+
+    /// The plane through `point` at right angles to `normal`, **storing
+    /// `normal`'s own bits** when its squared length is within
+    /// [`Plane::NORMAL_LENGTH_ROUNDOFF`] of one, and scaling it as
+    /// [`Plane::from_point_and_normal`] does when it is not.
+    ///
+    /// This is for a normal somebody already wrote down as a direction — a
+    /// STEP file's `PLANE`, which carries the normal its writer's model
+    /// stored. A moved plane's normal is a turn of a unit one and sits an ulp
+    /// or two off length one, which [`Plane::transformed`] keeps rather than
+    /// scale again. [`Plane::from_point_and_normal`] scales every vector it is
+    /// handed, and for most such normals no vector of length exactly one lies
+    /// within half an ulp of each component, so no direction a file could hold
+    /// reads back as them. The file carries the bits exactly and this keeps
+    /// them (`docs/decisions.md` §313.3).
+    ///
+    /// `n·n − 1` is worked out exactly, and a normal is kept only when it is
+    /// proved inside. A component so small that its square cannot be formed
+    /// exactly, below about `2⁻⁴⁸⁴`, is charged at the most its square could
+    /// be, `2⁻⁹⁶⁸`, which moves the edge by nothing a normal near one can
+    /// show.
+    ///
+    /// **A normal outside the bound is scaled and not refused.** STEP does not
+    /// ask for a `DIRECTION` of length one — `(0, 0, 2)` is a correct way to
+    /// write "up", and so is a direction written to twelve digits — so a
+    /// reader that refused one would refuse correct files, and the only thing
+    /// a caller could do with the refusal is ask
+    /// [`Plane::from_point_and_normal`] instead. Both answers are the plane
+    /// the caller named; which one is stored is a choice about bits, not a
+    /// mistake in the input.
+    ///
+    /// **Two lengths of one direction are not one plane here**, where
+    /// [`Plane::from_point_and_normal`] makes them one (§22.6): `(s, 0, s)`
+    /// for the `f64` just below `1/√2` is kept, and `(1, 0, 1)` is scaled to
+    /// the `f64` just above. Keeping the bits the file wrote is what this is
+    /// for, so two faces a file writes along one wall with two different
+    /// spellings of its normal come back as two planes an ulp apart.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Plane::from_point_and_normal`]'s.
+    pub fn from_point_and_normal_as_written(point: Point, normal: Vector) -> Result<Self> {
+        if !has_length_one_to_within_a_turn(normal) {
+            return Self::from_point_and_normal(point, normal);
+        }
+        Self::through(point, Ok(normal))
+    }
+
+    /// The plane through `point` along `normal`, which is already of length
+    /// one to within [`Plane::NORMAL_LENGTH_ROUNDOFF`].
+    ///
+    /// `normal` arrives as the `Result` of scaling it, so that a point that is
+    /// not a point is named before a normal that is not a direction, whichever
+    /// constructor asked.
+    fn through(point: Point, normal: Result<Vector>) -> Result<Self> {
         if !point.is_finite() {
             return Err(Error::NotFinite {
                 what: "point on a plane",
             });
         }
-        let normal = normal.scaled_to_length_one_from_anywhere("plane normal")?;
+        let normal = normal?;
         let offset = normal.dot_rounded_once(point - Point::origin());
         if !offset.is_finite() {
             return Err(Error::NotFinite {
@@ -284,10 +388,12 @@ impl Plane {
     ///
     /// # Panics
     ///
-    /// If the stored normal has no length. That never happens: both public
-    /// constructors, [`Plane::from_point_and_normal`] and
-    /// [`Plane::from_coefficients`], check it, and `Deserialize` goes through
-    /// the second one — `#[serde(try_from = "[f64; 4]")]` makes it the only
+    /// If the stored normal has no length. That never happens: every public
+    /// constructor, [`Plane::from_point_and_normal`],
+    /// [`Plane::from_point_and_normal_as_written`] and
+    /// [`Plane::from_coefficients`], checks it — the second keeps only a
+    /// normal whose squared length it measured within a hair of one — and
+    /// `Deserialize` goes through the last one — `#[serde(try_from = "[f64; 4]")]` makes it the only
     /// route in on the wire. `a_plane_stored_with_no_normal_is_refused_on_the_way_in`
     /// (`crates/rcad-geom/tests/serialization.rs`) shows the bytes refused
     /// before a `Plane` exists to ask.
@@ -626,6 +732,52 @@ pub enum PlaneAgreement {
     CannotTell,
 }
 
+/// Whether `normal · normal` is within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of
+/// one, **proved** rather than estimated.
+///
+/// Every square is formed exactly except one too small for its low half to
+/// be a normal number, which [`product_is_exact`] turns away. Such a square is
+/// below `2⁻⁹⁶⁸`, so it is not added and `2⁻⁹⁶⁸` is charged against the top
+/// of the bound instead: the answer is `true` only when the length is inside
+/// whatever those squares were. A turned face's normal can carry one —
+/// `4.1e-304` in `y` on four of the writer fuzzer's crash files — and was
+/// scaled before this was counted.
+///
+/// `false` for a normal that is not made of finite numbers, and for one with
+/// a square past the top of the range: neither is a turned unit vector, and
+/// [`Plane::from_point_and_normal`] is what answers for them.
+fn has_length_one_to_within_a_turn(normal: Vector) -> bool {
+    const EVERY_SQUARE_TOO_SMALL_TO_FORM_IS_BELOW: f64 =
+        f64::MIN_POSITIVE * 9_007_199_254_740_992.0 * 2.0;
+    if !normal.is_finite() {
+        return false;
+    }
+    let mut squared_length = Exact::of(0.0);
+    let mut left_out = 0.0;
+    for component in normal.components() {
+        match Exact::product_of(component, component) {
+            Some(square) => squared_length = squared_length.plus(&square),
+            None if (component * component).is_finite() => {
+                left_out += EVERY_SQUARE_TOO_SMALL_TO_FORM_IS_BELOW;
+            }
+            None => return false,
+        }
+    }
+    let off_one = squared_length.minus(&Exact::of(1.0));
+    let room = Exact::of(Plane::NORMAL_LENGTH_ROUNDOFF);
+    let not_above = match off_one.plus(&Exact::of(left_out)).minus(&room).sign() {
+        Decision::Neg | Decision::Zero => true,
+        Decision::Pos | Decision::Undecidable { .. } => false,
+        other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    };
+    let not_below = match off_one.plus(&room).sign() {
+        Decision::Pos | Decision::Zero => true,
+        Decision::Neg | Decision::Undecidable { .. } => false,
+        other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    };
+    not_above && not_below
+}
+
 /// Which side of `normal · p = offset` the point is on, for any `normal` at all.
 ///
 /// [`Plane`] hands over a normal scaled to length one and
@@ -770,7 +922,7 @@ impl From<Plane> for [f64; 4] {
 
 #[cfg(test)]
 mod tests {
-    use core::f64::consts::{FRAC_PI_2, TAU};
+    use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, TAU};
 
     use rcad_predicates::{Level, orient3d};
 
@@ -812,6 +964,162 @@ mod tests {
             Err(Error::ZeroLength {
                 what: "plane normal"
             })
+        );
+    }
+
+    /// [`Plane::NORMAL_LENGTH_ROUNDOFF`] is where
+    /// [`Plane::from_point_and_normal_as_written`] stops keeping a normal's
+    /// bits, on both sides of one, between two neighbouring `f64`.
+    ///
+    /// Along an axis `n·n − 1` is `(1 + kε)² − 1 = 2kε + k²ε²`. Above one the
+    /// `f64` are `ε` apart: `1 + 31ε` gives `62ε` and a hair, inside, and
+    /// `1 + 32ε` gives `64ε + 1024ε²`, just outside. Below one they are `ε/2`
+    /// apart: `1 − 32ε` gives `−64ε + 1024ε²`, just inside, and `1 − 32.5ε`
+    /// gives `−65ε` and a hair, outside. No `f64` lies between either pair, so
+    /// this is the edge as sharp as a normal along an axis can draw it.
+    #[test]
+    fn a_normal_is_kept_up_to_the_published_bound_and_scaled_past_it() {
+        let epsilon = f64::EPSILON;
+        let above = [1.0 + 31.0 * epsilon, 1.0 + 32.0 * epsilon];
+        let below = [1.0 - 32.0 * epsilon, 1.0 - 32.5 * epsilon];
+        for [inside, outside] in [above, below] {
+            assert!(
+                inside.next_up() == outside || inside.next_down() == outside,
+                "{inside} and {outside} are neighbours"
+            );
+            for (length, kept) in [(inside, true), (outside, false)] {
+                let off_one = Exact::product_of(length, length)
+                    .expect("a square near one is exact")
+                    .minus(&Exact::of(1.0));
+                let past_the_bound = off_one.nearest_f64().abs() > Plane::NORMAL_LENGTH_ROUNDOFF;
+                assert_eq!(past_the_bound, !kept, "n·n − 1 is {off_one:?} for {length}");
+
+                let written = Vector::new(0.0, length, 0.0);
+                let stored =
+                    Plane::from_point_and_normal_as_written(Point::new(0.0, 3.0, 0.0), written)
+                        .expect("a finite normal with a length")
+                        .normal();
+                let expected = if kept {
+                    written
+                } else {
+                    Vector::new(0.0, 1.0, 0.0)
+                };
+                assert_eq!(
+                    stored.components().map(f64::to_bits),
+                    expected.components().map(f64::to_bits),
+                    "a normal {length} long"
+                );
+            }
+        }
+    }
+
+    /// The normal of the writer fuzzer's `crash-0ac3e625f698733b9b143d41eb65edbf7087b463`
+    /// (2026-09-26, `docs/decisions.md` §313.3): both components the `f64`
+    /// just below `1/√2`. Scaling moves it to the `f64` just above, and no
+    /// vector of length one rounds to it; keeping it is the only way to store
+    /// it.
+    #[test]
+    fn a_normal_a_turn_left_short_of_length_one_is_kept_as_it_was_written() {
+        let short = FRAC_1_SQRT_2.next_down();
+        let written = Vector::new(short, 0.0, short);
+        let kept = Plane::from_point_and_normal_as_written(Point::origin(), written)
+            .expect("a finite normal with a length");
+        assert_eq!(
+            kept.normal().components().map(f64::to_bits),
+            written.components().map(f64::to_bits)
+        );
+        let scaled = Plane::from_point_and_normal(Point::origin(), written)
+            .expect("a finite normal with a length");
+        assert_eq!(
+            scaled.normal(),
+            Vector::new(FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2),
+            "and scaling it moves both components"
+        );
+    }
+
+    /// A turned face's normal from four of the writer fuzzer's 2026-09-26
+    /// crash files (`crash-024b8e42c5fdb3502f2dbeecc351d9b3cd58dcd0` is one),
+    /// whose `x` is too small for its square to be formed exactly. Its square
+    /// is charged at the most it could be rather than left unmeasured, so the
+    /// normal is kept; scaling it moves `y` down an ulp.
+    #[test]
+    fn a_normal_with_a_component_too_small_to_square_is_still_kept() {
+        let written = Vector::new(
+            4.101_256_136_000_473_6e-304,
+            -0.825_562_457_895_251_8,
+            0.564_310_754_916_075_2,
+        );
+        assert!(
+            !product_is_exact(written.x(), written.x()),
+            "the rest of this test rests on this"
+        );
+        let kept = Plane::from_point_and_normal_as_written(Point::origin(), written)
+            .expect("a finite normal with a length")
+            .normal();
+        assert_eq!(
+            kept.components().map(f64::to_bits),
+            written.components().map(f64::to_bits),
+            "{kept:?}"
+        );
+        let scaled = Plane::from_point_and_normal(Point::origin(), written)
+            .expect("a finite normal with a length")
+            .normal();
+        assert_ne!(scaled, written, "and scaling it would have moved it");
+    }
+
+    /// The evidence behind the share of [`Plane::NORMAL_LENGTH_ROUNDOFF`] that
+    /// is measured rather than derived: every normal a turn leaves, turned
+    /// once or through four composed placements, sits well inside it.
+    #[test]
+    fn every_normal_a_turn_leaves_sits_well_inside_the_bound() {
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let mut a_turn = || {
+            let axis = Axis::new(
+                Point::origin(),
+                Vector::new(2.0 * next() - 1.0, 2.0 * next() - 1.0, 2.0 * next() - 1.0),
+            )
+            .expect("a direction with a length");
+            Isometry::rotation(&axis, next() * TAU).expect("a finite angle")
+        };
+        let off_one_in_epsilons = |normal: Vector| {
+            let components = normal.components();
+            Exact::dot_of(components, components)
+                .expect("a unit normal squares exactly")
+                .minus(&Exact::of(1.0))
+                .nearest_f64()
+                / f64::EPSILON
+        };
+
+        let mut worst = [0.0_f64; 3];
+        for _ in 0..20_000 {
+            let written = a_turn().apply_to_vector(Vector::new(1.0, 2.0, 3.0));
+            let plane = Plane::from_point_and_normal(Point::origin(), written)
+                .expect("a direction with a length");
+            for (slot, depth) in [1, 4, 16].into_iter().enumerate() {
+                let mut placed = a_turn();
+                for _ in 1..depth {
+                    placed = placed.compose(&a_turn());
+                }
+                let moved = plane.transformed(&placed);
+                worst[slot] = worst[slot].max(off_one_in_epsilons(moved.normal()).abs());
+            }
+        }
+        let [once, four, sixteen] = worst;
+        println!(
+            "worst |n·n − 1|: {once:.2}ε turned once, {four:.2}ε through four composed turns, \
+             {sixteen:.2}ε through sixteen, against a bound of 64ε"
+        );
+        let bound = Plane::NORMAL_LENGTH_ROUNDOFF / f64::EPSILON;
+        assert!(
+            once.max(four) < bound / 2.0,
+            "a turned normal reached {once}ε or {four}ε, more than half the bound, so the share \
+             it leaves out may not fit"
         );
     }
 
