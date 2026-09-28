@@ -13,20 +13,25 @@
 //! # The oracle is the same surface written twice bit for bit
 //!
 //! Two runs that must agree, and they must agree **exactly**, not within a
-//! tolerance. Every arm of [`which_two_surfaces_a_run_is_between`] that fires hands
-//! back `[along[0], and]`: the seam arm does, the two flat faces arm does, the
-//! curved-face-and-plane arm does (it takes the ball if there is one and
-//! `along[0]` otherwise, and here both faces are the same kind), and the
-//! third-surface arm does. So a pair that reaches any of them is
-//! handed to `what_a_run_between_these_two_lies_on` as the *same two surfaces*
-//! the bit-identical pair is handed, and the answer is bit for bit the same
-//! point and the same list of points. A tolerance here would be admitting a
-//! difference that cannot exist unless an arm was missed, which is the whole
-//! thing being tested (`testing` skill, "a tolerance is not an oracle").
+//! tolerance. Every arm of [`which_two_surfaces_a_run_is_between`] that fires
+//! hands back one of the two faces and `and`: the first face listed where the
+//! faces are flat, and where they are curved the one
+//! [`Surface::how_it_sorts_against`] puts first, so that the answer does not
+//! depend on which face is listed first (`docs/decisions.md` §336). So a pair
+//! that reaches any of them is handed to `what_a_run_between_these_two_lies_on`
+//! as the *same two surfaces* that one spelling written twice bit for bit is
+//! handed, and the answer is bit for bit the same point and the same list of
+//! points. A tolerance here would be admitting a difference that cannot exist
+//! unless an arm was missed, which is the whole thing being tested (`testing`
+//! skill, "a tolerance is not an oracle").
 //!
-//! The control is the pair written **once** — `[&s, &s]` — which always reaches
-//! the seam arm or the closed-run arm and so always names `[s, and]`. That is
-//! what the run means, and it is what the re-spelt pair has to agree with.
+//! The control is that spelling written **once** — `[&s, &s]`, with `s` the
+//! first spelling or the second, whichever the answer was read with — which
+//! always reaches the seam arm or the closed-run arm and so always names
+//! `[s, and]`. That is what the run means, and it is what the re-spelt pair has
+//! to agree with. That the answer was read with one of the two spellings is
+//! asserted, not assumed, and where the faces are curved so is that listing
+//! them the other way round gives the same answer.
 //!
 //! # What "a few ulps" means here, and why
 //!
@@ -249,11 +254,12 @@ enum Arm {
     /// `both_flat && and.as_plane().is_none()`. §176.2's two planes 1.2e-15
     /// apart with a curved `and`.
     TwoFlatFacesAndACurvedSecond,
-    /// `both_curved && and.as_plane().is_some()`. §189.3's ball and curved face
-    /// naming a plane, widened to every curved face by §220.4.
+    /// A piece of a run between two curved faces that names a plane. §189.3's
+    /// ball and curved face naming a plane, widened to every curved face by
+    /// §220.4.
     ACurvedFaceAndAPlane,
-    /// `both_curved && and.as_plane().is_none() && and != along[0] && and !=
-    /// along[1]`. §219.1's third-surface arm.
+    /// A piece of a run between two curved faces that names a curved surface
+    /// that is neither of them. §219.1's third-surface arm.
     TwoCurvedFacesAndAThirdCurvedOne,
     /// No arm catches it, so the pair either side stands — which for a pair that
     /// is one surface written twice is the wrong answer.
@@ -268,8 +274,8 @@ const EVERY_ARM: [Arm; 5] = [
     Arm::NoArmCatchesIt,
 ];
 
-/// The four arms that hand back `[along[0], and]` and so have to agree with the
-/// control.
+/// The four arms that hand back one of the two faces and `and`, and so have to
+/// agree with the control.
 const EVERY_CLOSED_ARM: [Arm; 4] = [
     Arm::AClosedRunCarriesItsSecondSurface,
     Arm::TwoFlatFacesAndACurvedSecond,
@@ -314,18 +320,15 @@ impl Tally {
         }
 
         let run = a_run(drawn.said, and, a_point(drawn.and_at));
-        let control = what_the_kernel_says(&run, [&once, &once]);
+        let arm = which_arm_the_respelt_pair_reaches(run.run(), drawn.said, &once, &twice, &and);
+        let written_once = if EVERY_CLOSED_ARM.contains(&arm) {
+            the_spelling_the_pair_is_read_with(arm, &run, &once, &twice)
+        } else {
+            once
+        };
+        let control = what_the_kernel_says(&run, [&written_once, &written_once]);
         let respelt = what_the_kernel_says(&run, [&once, &twice]);
 
-        let arm = which_arm_the_respelt_pair_reaches(run.run(), drawn.said, &once, &twice, &and);
-        if EVERY_CLOSED_ARM.contains(&arm) {
-            assert_eq!(
-                which_two_surfaces_a_run_is_between(run.run(), [&once, &twice]),
-                which_two_surfaces_a_run_is_between(run.run(), [&once, &once]),
-                "{arm:?}: one surface written twice was read as a different pair from the one \
-                 written once.\n  the face: {once:?}\n  written again: {twice:?}\n  run: {run:?}"
-            );
-        }
         let mut arms = self.arms.borrow_mut();
         let saw = arms.entry(arm).or_default();
         saw.reached += 1;
@@ -370,8 +373,8 @@ impl Tally {
             let saw = self.arms.borrow().get(&arm).copied().unwrap_or_default();
             assert_eq!(
                 saw.disagreed, 0,
-                "{arm:?} hands back [along[0], and] exactly as the seam arm does, so it cannot \
-                 disagree with the control: {saw:?}"
+                "{arm:?} hands back a face and `and` exactly as the seam arm does for that face, \
+                 so it cannot disagree with the control: {saw:?}"
             );
         }
     }
@@ -440,7 +443,7 @@ impl Tally {
 
 /// What each arm was measured at, and the floor under it.
 ///
-/// Measured on this tree, on 2026-09-24, by
+/// Measured on this tree, on 2026-09-28, by
 ///
 /// ```text
 /// mise exec -- just t a_surface_written_twice_a_few_ulps_apart --no-capture
@@ -448,15 +451,20 @@ impl Tally {
 ///
 /// | arm | reached | the control named a start |
 /// |---|---|---|
-/// | a closed run carries its second surface | 4048 | 899 |
+/// | a closed run carries its second surface | 4048 | 915 |
 /// | two flat faces and a curved second | 606 | 293 |
-/// | a curved face and a plane | 591 | 250 |
-/// | two curved faces and a third curved one | 2706 | 128 |
+/// | a curved face and a plane | 591 | 256 |
+/// | two curved faces and a third curved one | 2706 | 125 |
 /// | no arm catches it | 132 | 0 |
 ///
 /// The third row was a ball and a plane, at 131 and 41, until §220.4 widened
 /// the arm to every curved face; the 460 draws it gained are the ones the last
 /// row lost, which fell through before.
+///
+/// The second column moved from 899, 250 and 128 on 2026-09-24 when §336 made
+/// the control the spelling the answer is read with: for curved faces that is
+/// sometimes the second spelling, a few ulps from the first, and whether a
+/// crossing has a start to name can turn on those ulps. The draws did not move.
 ///
 /// Each floor is roughly three quarters of the second column, so it catches a
 /// family that stopped drawing an arm without failing on ordinary drift — the
@@ -480,7 +488,7 @@ const EVERY_ARM_AND_ITS_FLOOR: [(Arm, usize); 4] = [
 /// How many draws have to walk a crossing that has points on it, across the four
 /// arms that are closed.
 ///
-/// Measured at 790 + 323 + 274 + 128 = 1515, floored at three quarters. Without
+/// Measured at 789 + 323 + 280 + 125 = 1517, floored at three quarters. Without
 /// it the walking half of every comparison could fall to nothing behind the
 /// naming half, which answers for a conic the walk then refuses to step along.
 const A_WALK_WITH_POINTS_IN_IT: usize = 1136;
@@ -521,10 +529,11 @@ fn what_the_kernel_says(run: &NamedRun, along: [&Surface; 2]) -> WhatTheKernelSa
 /// Whether an arm caught the pair, as the public answer says, and which one, as
 /// the draw's shape says.
 ///
-/// An arm that catches a pair hands back `[once, and]`; none catching it hands
-/// back `[once, twice]`, and `and` is never `twice` here — the caller has put
-/// those draws in [`Tally::and_repeated_the_face`] and returned, and a draw
-/// whose nudge folded never gets this far either. Past that, `once` and `twice`
+/// An arm that catches a pair hands back `[once, and]` or `[twice, and]`; none
+/// catching it hands back `[once, twice]`, and `and` is never `twice` here —
+/// the caller has put those draws in [`Tally::and_repeated_the_face`] and
+/// returned, and a draw whose nudge folded never gets this far either. Past
+/// that, `once` and `twice`
 /// are one kind of surface, so which arm caught it is only whether the faces
 /// are flat, whether `and` is, and how the run is said.
 fn which_arm_the_respelt_pair_reaches(
@@ -545,6 +554,40 @@ fn which_arm_the_respelt_pair_reaches(
         (false, true) => Arm::ACurvedFaceAndAPlane,
         (false, false) => Arm::TwoCurvedFacesAndAThirdCurvedOne,
     }
+}
+
+/// Which of the two spellings an arm read the re-spelt pair with.
+///
+/// Asserted to be one of them — the pair has to be what that spelling written
+/// twice bit for bit is read as — and, where the faces are curved, the same one
+/// whichever face is listed first (`docs/decisions.md` §336). Two flat faces
+/// are still read with the first face listed, so that half is not asked of them.
+fn the_spelling_the_pair_is_read_with(
+    arm: Arm,
+    run: &NamedRun,
+    once: &Surface,
+    twice: &Surface,
+) -> Surface {
+    let read = which_two_surfaces_a_run_is_between(run.run(), [once, twice]);
+    let Some(written_once) = [*once, *twice].into_iter().find(|spelling| {
+        which_two_surfaces_a_run_is_between(run.run(), [spelling, spelling]) == read
+    }) else {
+        panic!(
+            "{arm:?}: one surface written twice was read as {read:?}, which neither spelling \
+             written once is read as.\n  the face: {once:?}\n  written again: {twice:?}\n  run: \
+             {run:?}"
+        );
+    };
+    if once.as_plane().is_none() {
+        assert_eq!(
+            read,
+            which_two_surfaces_a_run_is_between(run.run(), [twice, once]),
+            "{arm:?}: one curved surface written twice was read as a different pair with its \
+             two spellings listed the other way round.\n  the face: {once:?}\n  written again: \
+             {twice:?}\n  run: {run:?}"
+        );
+    }
+    written_once
 }
 
 fn a_run(said: HowTheRunIsSaid, and: Surface, near: Point) -> NamedRun {
