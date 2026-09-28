@@ -132,7 +132,7 @@ pub enum MeetOfThree {
 /// §322.4). The same three multiplied by a power of two are the same geometry at
 /// another size, and multiplying by a power of two is exact while every number
 /// stays normal. So a refusal where they stand is asked again of the triple slid
-/// until its largest length is about one, and a corner found there is slid
+/// until its lengths sit either side of one, and a corner found there is slid
 /// back. §349 says what the slide does to each kind of surface and where it
 /// cannot go.
 pub fn meet_of_three_surfaces(
@@ -195,10 +195,21 @@ fn the_meet_where_they_stand(
     )
 }
 
-/// The meet of the same three surfaces slid along the range by the power of two
-/// that brings the largest length among them to about one, slid back — or
-/// `None` where no slide is needed, none is exact, or the slid triple refuses
-/// too.
+/// The meet of the same three surfaces slid along the range by a power of two,
+/// slid back — or `None` where no slide moves anything, the slide is not
+/// exact, or the slid triple refuses too.
+///
+/// **The slide centres the binades the lengths span on one**, rather than
+/// bringing the largest to one. What runs out is a product of two small
+/// lengths falling off the bottom or of two large ones running off the top,
+/// and centring leaves the two ends the same room. For a triple of one size
+/// the two choices are the same slide. For one whose places sit `2¹²` out and
+/// whose ball is `2⁻⁶⁰⁰` across they are not: the largest brought to one leaves
+/// the radius squared at `2⁻¹²²⁴`, and centred it is `2⁻⁶¹²`. Measured on the
+/// `somewhere else` row of
+/// `every_point_where_three_surfaces_meet_is_on_all_three_of_them.rs`: 180 of
+/// 2051 triples refused with no slide, 52 with the largest brought to one, and
+/// none centred — every one of the 52 a place moved out by `2^shift`.
 ///
 /// **Asked under a certified policy whatever the caller's was**, because a
 /// tolerant budget is a length at the size the caller wrote, and at another
@@ -207,15 +218,16 @@ fn the_meet_where_they_stand(
 /// not given, never one given wrongly. And a certified answer logs nothing,
 /// which is the truth about it.
 fn the_meet_slid_into_range(surfaces: [&Surface; 3]) -> Option<MeetOfThree> {
-    let largest = surfaces
+    let binades: SmallVec<[i32; 15]> = surfaces
         .iter()
         .flat_map(|surface| the_lengths_of(surface))
-        .map(f64::abs)
-        .fold(0.0, f64::max);
-    if largest == 0.0 {
+        .filter(|length| *length != 0.0)
+        .map(binary_exponent)
+        .collect();
+    let (Some(lowest), Some(highest)) = (binades.iter().min(), binades.iter().max()) else {
         return None;
-    }
-    let up = -binary_exponent(largest);
+    };
+    let up = -(lowest + highest) / 2;
     if up == 0 {
         return None;
     }

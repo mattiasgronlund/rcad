@@ -109,11 +109,22 @@ fn every_point_where_three_turned_surfaces_meet_is_on_all_three_of_them() {
 }
 
 /// The control written somewhere else in `f64`, where the exact arithmetic runs
-/// out of range and the refusal is a **gap** rather than a limit.
+/// out of range where the triple stands and the refusal is a **gap** rather
+/// than a limit.
+///
+/// **So none of them is refused**, and that is pinned rather than printed. The
+/// same triple slid by a power of two is answered (§349): 180 of these 2051
+/// were refused before the slide, and 52 while it brought the largest length
+/// to one instead of centring them all on it.
 #[test]
 fn every_point_where_three_surfaces_meet_somewhere_else_in_f64_is_on_all_three_of_them() {
     let measured = meet_every_triple(a_corner_somewhere_else(), "somewhere else");
     assert!(measured.worst_box < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+    assert_eq!(
+        measured.refused, 0,
+        "{} of {} triples written somewhere else were refused",
+        measured.refused, measured.drawn
+    );
 }
 
 /// The triple the proptest seed `e0a2a205` shrank to, by name: the planes
