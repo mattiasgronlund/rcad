@@ -32,36 +32,44 @@
 //! - **Floor at `z = 2`, clear of the apex.** All six fuses answer, one solid
 //!   each, the model validates, and every volume matches the closed form.
 //!   [`a_block_clear_of_the_apex_cuts_the_frustum_in_half_under_every_rule`].
+//! - **Floor at `z = −2`, the apex inside the block's face.** All six answer
+//!   as they do clear of the apex.
+//!   [`a_block_face_with_the_apex_inside_it_cuts_the_frustum_in_half_under_every_rule`].
+//!   This is `a_block_face_through_a_cones_apex.rs`'s shape with a frustum in
+//!   place of a pointed cone. This comment said before §347 that it refused
+//!   `CannotTellTheCellsOfAFaceApart` on that face, as the pointed cone did;
+//!   that was never pinned, and Q457 did not measure it again (§347.8).
 //! - **Floor at `z = 0`, through the apex.** The apex is then a point on the
-//!   block's own bottom edge, where both rulings meet that edge, and all six
-//!   fuses refuse `Undecidable` naming *which way a crossing runs*.
-//!   [`a_block_whose_floor_runs_through_the_apex_is_refused_there`].
-//! - **Floor at `z = −2`, the apex inside the block's face.** All six refuse
-//!   `CannotTellTheCellsOfAFaceApart` on that face. That is queue row Q207's
-//!   shape — `a_block_face_through_a_cones_apex.rs` — with a frustum in place of
-//!   a pointed cone, and it is not pinned again here.
+//!   block's own bottom edge. The three fuses that keep none of the block's
+//!   floor answer, right:
+//!   [`a_floor_through_the_apex_still_gives_the_half_frustum_under_intersection_and_difference`].
+//!   The three that keep it, both unions and the block less the frustum, are
+//!   refused `ResultIsNotManifold { count: 1 }`:
+//!   [`a_floor_through_the_apex_is_not_a_manifold_under_the_fuses_that_keep_the_floor`].
 //!
-//! # Why the floor through the apex refuses, and why it is Q207's
+//! # Why the floor through the apex is not a manifold
 //!
-//! The arrangement reads which way a crossing runs as `∇S × ∇Q`, the plane's
-//! gradient crossed with the cone's, at the first node on the crossing. For
-//! each ruling on the block's face that first node is the apex, and the cone's
-//! gradient is nothing there, so the direction is the zero vector.
+//! Before §347 all six fuses on this floor refused `Undecidable` naming *which
+//! way a crossing runs*. Each ruling's direction was read as `∇S × ∇Q` at its
+//! first node, which was the apex, and the cone has no gradient there. §347
+//! reads a ruling's direction off its own line, and the fuses now get as far
+//! as putting the answer's faces together.
+//!
+//! There the block's face `x = 0` and its floor `z = 0` disagree about the
+//! edge they share. On `x = 0` the two rulings meet the bottom edge at the
+//! apex, so that face has a node there and walks the bottom edge as two sides.
+//! The floor is never cut by the cone: `intersect` says the plane `z = 0`
+//! touches the cone at the apex and nowhere else, and `cuts.rs` reads a touch
+//! at one point as two faces that meet nowhere. So the floor has no node at the
+//! apex and walks the bottom edge as one side. A probe printed both faces'
+//! corners and showed this (§347.8). It did not print which edge `assemble.rs`
+//! finds claimed by one face. So the disagreement is the likely cause of the
+//! refusal, but that has not been shown. Every fuse that keeps the floor next
+//! to the pieces of `x = 0` on either side of the apex is refused, and every
+//! fuse that keeps neither answers.
 //!
 //! **This is a gap and not a limit**: every answer exists and is written in the
-//! test's messages. But it is not a gap in where the direction is read.
-//! Reading it at the last node on the crossing instead, which is off the apex,
-//! gets one step further and then refuses `TwoCurvesTouchWithoutCrossing` on the
-//! same face in all six. The apex node still has to put its ways out in order,
-//! and each way out along a ruling is `∇S × ∇Q` read at the apex, which is
-//! nothing. The same change turns the floor at `z = 2` from six answers into six
-//! refusals, because `∇S × ∇Q` points the opposite way on the far side of the
-//! apex and the last node on a ruling can be there. So the fix needs a
-//! direction for a ruling that holds at the apex and on both sides of it, and a
-//! way to put ways out in order at a point where the cone has no gradient.
-//! That is the fix Q207 needs as well. Q207 also needs a node where the two
-//! rulings cross, which this shape already has, because the block's bottom edge
-//! crosses each ruling at the apex.
+//! refusals' messages.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation, Picker, Plane,
@@ -100,83 +108,60 @@ const CORNERS_DOWN_THE_AXIS: [[f64; 3]; 4] = [
 /// what §215.2 said the arrangement folded together.
 #[test]
 fn a_block_clear_of_the_apex_cuts_the_frustum_in_half_under_every_rule() {
-    let half = half_the_frustum();
-    let block = 10.0 * 20.0 * 10.0;
-    let policy = Policy::certified();
     for (rule, frustum_first) in six_fuses() {
-        let want = match (rule, frustum_first) {
-            (Rule::Union, _) => block + half,
-            (Rule::Intersection, _) | (Rule::Difference, true) => half,
-            (Rule::Difference, false) => block - half,
-            (other, _) => panic!("{other:?} is not one of the six"),
-        };
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let frustum = cones::a_frustum(&mut model, SLOPE, LOW, HIGH);
-        let cutter = a_block(&mut model, [-10.0, -10.0, 2.0], [0.0, 10.0, 12.0]);
-        let answer = fuse(&mut model, frustum, cutter, rule, frustum_first).unwrap_or_else(|why| {
-            panic!("{rule:?} (frustum first: {frustum_first}) was refused: {why:?}")
-        });
-        model
-            .validate(&policy, &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| {
-                panic!("{rule:?} (frustum first: {frustum_first}) does not validate: {why:?}")
-            });
-        let [solid] = answer[..] else {
-            panic!("{rule:?} (frustum first: {frustum_first}) is one solid: {answer:?}")
-        };
-        let view = model.solid(solid).expect("a solid the fuse made");
-        let corners = corners_of(&model, solid);
-        for corner in CORNERS_DOWN_THE_AXIS {
-            assert!(
-                corners.contains(&corner),
-                "{rule:?} (frustum first: {frustum_first}) has no corner at {corner:?}: {corners:?}"
-            );
-        }
-        let measured = view
-            .measure(
-                Deflection::of(0.001).expect("a positive length"),
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .expect("the answer measures");
-        assert!(
-            (measured.volume() - want).abs() <= measured.volume_error(),
-            "{rule:?} (frustum first: {frustum_first}) is {} against {want}, and the mesh may \
-             miss by {}",
-            measured.volume(),
-            measured.volume_error()
-        );
+        is_one_solid_of_the_right_volume(2.0, rule, frustum_first);
     }
 }
 
-/// The same frustum against the block `[−10, 0] × [−10, 10] × [0, 12]`, whose
-/// floor runs through the apex, refuses all six fuses on the block's face
-/// `x = 0`, where the apex is a node of the block's own bottom edge.
-///
-/// The module doc says why, and why the fix is queue row Q207's. Every answer
-/// exists: the block is `10 · 20 · 12 = 2400` and holds the frustum's `x ≤ 0`
-/// half, `56π/3`, whole. The message of each assertion is the answer the
-/// refusal stands in for.
+/// The block's floor lowered to `z = −2`, so the apex is inside its face
+/// `x = 0`, where the two rulings cross. All six fuses answer as they do clear
+/// of the apex. The block is `10 · 20 · 14 = 2800`.
 #[test]
-fn a_block_whose_floor_runs_through_the_apex_is_refused_there() {
-    let half = half_the_frustum();
-    let block = 10.0 * 20.0 * 12.0;
+fn a_block_face_with_the_apex_inside_it_cuts_the_frustum_in_half_under_every_rule() {
     for (rule, frustum_first) in six_fuses() {
-        let want = match (rule, frustum_first) {
-            (Rule::Union, _) => block + half,
-            (Rule::Intersection, _) | (Rule::Difference, true) => half,
-            (Rule::Difference, false) => block - half,
-            (other, _) => panic!("{other:?} is not one of the six"),
-        };
+        is_one_solid_of_the_right_volume(-2.0, rule, frustum_first);
+    }
+}
+
+/// The block's floor at `z = 0`, through the apex, so the apex is a point on
+/// the block's bottom edge. The intersection, either order, and the frustum
+/// less the block keep nothing of the block's floor, and each answers the half
+/// frustum, `56π/3`.
+#[test]
+fn a_floor_through_the_apex_still_gives_the_half_frustum_under_intersection_and_difference() {
+    for (rule, frustum_first) in [
+        (Rule::Intersection, true),
+        (Rule::Intersection, false),
+        (Rule::Difference, true),
+    ] {
+        is_one_solid_of_the_right_volume(0.0, rule, frustum_first);
+    }
+}
+
+/// The same floor under the three fuses that keep it: the union, either order,
+/// and the block less the frustum. Each is refused
+/// `ResultIsNotManifold { count: 1 }`, an edge of the answer claimed by one
+/// face. The module doc says what a probe showed of why.
+///
+/// Every answer exists: the block is `10 · 20 · 12 = 2400` and holds the
+/// frustum's `x ≤ 0` half whole. The message of each assertion is the answer
+/// the refusal stands in for.
+#[test]
+fn a_floor_through_the_apex_is_not_a_manifold_under_the_fuses_that_keep_the_floor() {
+    for (rule, frustum_first) in [
+        (Rule::Union, true),
+        (Rule::Union, false),
+        (Rule::Difference, false),
+    ] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let frustum = cones::a_frustum(&mut model, SLOPE, LOW, HIGH);
         let cutter = a_block(&mut model, [-10.0, -10.0, 0.0], [0.0, 10.0, 12.0]);
-        let refused = fuse(&mut model, frustum, cutter, rule, frustum_first);
-        assert_eq!(
-            the_predicate_that_gave_up(&refused),
-            Some("which way a crossing runs"),
-            "{rule:?} (frustum first: {frustum_first}) should be one solid of volume {want}; \
-             today the direction of a ruling is read at the apex and is nothing. Got {refused:?}"
+        let said = fuse(&mut model, frustum, cutter, rule, frustum_first);
+        assert!(
+            matches!(said, Err(Error::ResultIsNotManifold { count: 1 })),
+            "{rule:?} (frustum first: {frustum_first}) should be one solid of volume {}; today \
+             the floor has no corner at the apex where the face x = 0 has one. Got {said:?}",
+            the_right_volume(0.0, rule, frustum_first)
         );
     }
 }
@@ -221,6 +206,63 @@ fn a_half_frustums_corners_on_two_rulings_stay_two_corners() {
              today it gets through the arrangement and stops at the half frustum's flat face. \
              Got {refused:?}"
         );
+    }
+}
+
+/// Fuse the frustum with the block `[−10, 0] × [−10, 10] × [floor, 12]` under
+/// `rule`, and assert that the answer is one solid, that the model validates,
+/// that the solid has a corner at each of the four points where `x = 0` meets
+/// the rims, and that its volume is the closed form within what the mesh says
+/// it may miss by.
+fn is_one_solid_of_the_right_volume(floor: f64, rule: Rule, frustum_first: bool) {
+    let policy = Policy::certified();
+    let want = the_right_volume(floor, rule, frustum_first);
+    let what = format!("{rule:?} (frustum first: {frustum_first}, floor at z = {floor})");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let frustum = cones::a_frustum(&mut model, SLOPE, LOW, HIGH);
+    let cutter = a_block(&mut model, [-10.0, -10.0, floor], [0.0, 10.0, 12.0]);
+    let answer = fuse(&mut model, frustum, cutter, rule, frustum_first)
+        .unwrap_or_else(|why| panic!("{what} should be one solid of volume {want}: {why:?}"));
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what} does not validate: {why:?}"));
+    let [solid] = answer[..] else {
+        panic!("{what} is one solid: {answer:?}")
+    };
+    let corners = corners_of(&model, solid);
+    for corner in CORNERS_DOWN_THE_AXIS {
+        assert!(
+            corners.contains(&corner),
+            "{what} has no corner at {corner:?}: {corners:?}"
+        );
+    }
+    let measured = model
+        .solid(solid)
+        .expect("a solid the fuse made")
+        .measure(
+            Deflection::of(0.001).expect("a positive length"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the answer measures");
+    assert!(
+        (measured.volume() - want).abs() <= measured.volume_error(),
+        "{what} is {} against {want}, and the mesh may miss by {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+/// The volume of the fuse of the frustum with the block
+/// `[−10, 0] × [−10, 10] × [floor, 12]`. Every such block holds the frustum's
+/// `x ≤ 0` half whole, so what the two share is half the frustum.
+fn the_right_volume(floor: f64, rule: Rule, frustum_first: bool) -> f64 {
+    let (half, block) = (half_the_frustum(), 10.0 * 20.0 * (12.0 - floor));
+    match (rule, frustum_first) {
+        (Rule::Union, _) => block + half,
+        (Rule::Intersection, _) | (Rule::Difference, true) => half,
+        (Rule::Difference, false) => block - half,
+        (other, _) => panic!("{other:?} is not one of the six"),
     }
 }
 
