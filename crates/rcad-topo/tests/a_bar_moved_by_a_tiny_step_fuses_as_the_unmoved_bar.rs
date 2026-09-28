@@ -22,16 +22,18 @@
 //! a product that falls off the bottom of the range and carries a box round
 //! what it lost.
 //!
-//! **The union far away still does not come back.** Past the predicates it
-//! reaches the triangulator, which refuses the bar's cap corner at
-//! `y = 2⁻¹⁰⁰⁷` as too small for spade: §246.5's refusal, whose flush is queue
-//! row Q79's. So the union's test here says only what this fix changed — that no
-//! predicate refuses it — and the tighter claim, that it comes back and
-//! validates, is left to be written once that flush is in.
+//! **The union far away now comes back.** Past the predicates it used to reach
+//! the triangulator, which refused the bar's cap corner at `y = 2⁻¹⁰⁰⁷` as too
+//! small for spade: §246.5's refusal. Queue row Q79's flush stops that refusal,
+//! and queue row Q325 found it: the union now validates, and comes back bit
+//! for bit the same — same face, edge and vertex counts, same volumes — as the
+//! unmoved pair's.
+//! `a_bar_moved_by_a_speck_united_with_a_cube_far_away_holds_what_the_unmoved_one_does`
+//! checks that.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
 /// `2⁻¹⁰⁰⁷`, from its bits (§246.3 says why not `powi`).
 const SPECK: f64 = f64::from_bits(0x0100_0000_0000_0000);
@@ -112,39 +114,69 @@ fn a_bar_moved_by_a_speck_less_a_cube_through_its_wall_holds_what_the_unmoved_on
     );
 }
 
-/// The cube ten along `x` touches nothing, and its wall `y = 2` lies flat
-/// against where the unmoved bar's wall reaches.
-#[test]
-fn no_predicate_refuses_a_bar_moved_by_a_speck_united_with_a_cube_far_away() {
-    let (mut model, bar, cube) = bar_and_cube(SPECK, Vector::new(10.0, 0.0, 0.0));
-    let fused = model.fuse(
-        &[bar],
-        &[cube],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+/// The bar and the cube ten along `x`, united: each answer solid's own face,
+/// edge and vertex count and volume, smaller solid first. The cube touches
+/// nothing, so the union keeps them as two solids, not one.
+fn union_far_away(step: f64) -> Vec<(usize, usize, usize, f64)> {
+    let (mut model, bar, cube) = bar_and_cube(step, Vector::new(10.0, 0.0, 0.0));
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(&[bar], &[cube], Rule::Union, &Policy::certified(), &mut log)
+        .unwrap_or_else(|refusal| panic!("moved by {step:e}, the union refused: {refusal:?}"));
     assert!(
-        !matches!(fused, Err(Error::Undecidable { .. })),
-        "{:?}",
-        fused.map(|_| ())
+        log.is_empty(),
+        "a certified fuse writes nothing down: {log:?}"
     );
-}
-
-/// The control for both: unmoved, the union goes through and validates.
-#[test]
-fn a_bar_that_has_not_moved_united_with_a_cube_far_away_fuses_and_validates() {
-    let (mut model, bar, cube) = bar_and_cube(0.0, Vector::new(10.0, 0.0, 0.0));
-    model
-        .fuse(
-            &[bar],
-            &[cube],
-            Rule::Union,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .expect("the unmoved union goes through");
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("and validates");
+        .expect("the union validates");
+    let mut shapes: Vec<_> = fused
+        .solids()
+        .iter()
+        .map(|&key| {
+            let solid = model.solid(key).expect("the answer is in this model");
+            let (edges, vertices) = edges_and_vertices(solid);
+            let volume = solid
+                .measure(
+                    Deflection::of(0.01).expect("a hundredth is a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("the answer measures")
+                .volume();
+            (solid.faces().count(), edges, vertices, volume)
+        })
+        .collect();
+    shapes.sort_by_key(|&(faces, ..)| faces);
+    shapes
+}
+
+/// The edges and vertices a solid's faces reach, each counted once no matter
+/// how many of the solid's faces share it.
+fn edges_and_vertices(solid: rcad_topo::SolidView) -> (usize, usize) {
+    let mut edges = std::collections::HashSet::new();
+    let mut vertices = std::collections::HashSet::new();
+    for face in solid.faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                edges.insert(coedge.edge().key());
+                vertices.insert(coedge.start().key());
+                vertices.insert(coedge.end().key());
+            }
+        }
+    }
+    (edges.len(), vertices.len())
+}
+
+/// The cube ten along `x` touches nothing, and its wall `y = 2` lies flat
+/// against where the unmoved bar's wall reaches. Since Q79's flush, the union
+/// comes back and validates, bit for bit the same as the unmoved pair's.
+#[test]
+fn a_bar_moved_by_a_speck_united_with_a_cube_far_away_holds_what_the_unmoved_one_does() {
+    let moved = union_far_away(SPECK);
+    let unmoved = union_far_away(0.0);
+    assert_eq!(
+        moved, unmoved,
+        "a move of 2^-1007 moves no mesh point by a bit"
+    );
 }

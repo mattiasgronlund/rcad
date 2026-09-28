@@ -422,6 +422,11 @@ fn the_piece_holds(
         return Some(true);
     }
     let Some(in_plane) = in_plane else {
+        if let Surface::Cone(cone) = &piece.surface
+            && !is_on_the_nappe_the_piece_is_on(piece, cone, point)?
+        {
+            return Some(false);
+        }
         return Some(
             piece
                 .wires
@@ -477,6 +482,59 @@ fn the_piece_holds(
         }
     }
     Some(winding == 1)
+}
+
+/// Whether `point`, taken as being on `cone`, is on the half of it `piece` is
+/// on, or `None` when nothing here can say.
+///
+/// **A cone's surface is both its halves**, meeting at the apex, and a piece
+/// lies on one of them. Its sides do not say which. A pointed cone's face is
+/// trimmed by its cap alone, and the whole of the other half is on the side of
+/// the cap the face keeps, so a point there passes every side of the piece.
+/// [`candidate_points`] makes such points: a step of one radius towards the
+/// apex goes past it wherever the cone's radius is more than its height, and a
+/// cone whose radius is twice its height, swallowed by a block, had its face
+/// placed by a point under the apex and every rule refused
+/// (`docs/decisions.md` §350).
+///
+/// Which half is read off the piece's corners, as `holds.rs` reads a face's:
+/// the sign of `(corner − apex) · w`. A point at the apex is on both halves, so
+/// it is `None`, and so is one too near the apex's plane to tell.
+fn is_on_the_nappe_the_piece_is_on(
+    piece: &Piece,
+    cone: &Cone,
+    point: PredicatePoint,
+) -> Option<bool> {
+    let mut pieces_half = None;
+    for side in piece.wires.iter().flatten() {
+        // A corner at the apex, or too near its plane to tell, says nothing
+        // about which half the piece is on; its other corners say.
+        let found @ (Decision::Pos | Decision::Neg) =
+            how_far_up_the_axis(cone, side.ends[0].point())
+        else {
+            continue;
+        };
+        if pieces_half.is_some_and(|already| already != found) {
+            return None;
+        }
+        pieces_half = Some(found);
+    }
+    let found @ (Decision::Pos | Decision::Neg) = how_far_up_the_axis(cone, point) else {
+        return None;
+    };
+    Some(found == pieces_half?)
+}
+
+/// Which side of the plane through the apex square to the axis `point` is on:
+/// the sign of `(point − apex) · w`, over the point's box.
+fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
+    let apex = cone.apex().coordinates();
+    let up = cone.axis().direction().components();
+    let at = point.enclosure();
+    (0..3)
+        .map(|axis| (at[axis] - Interval::exactly(apex[axis])) * Interval::exactly(up[axis]))
+        .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
+        .sign()
 }
 
 /// One when `point` is between a curved side of a flat piece and the chord
@@ -729,21 +787,27 @@ fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool>
 /// Where one point sits relative to each solid in the set, or `None` when this
 /// point cannot say.
 ///
-/// A point that lands exactly on an edge or a corner of one of the solids is a
-/// point that says nothing about the piece around it: the piece is on that
-/// solid's skin only if it is coincident with a whole face of it. So a boundary
-/// answer with no coincident face to go with it abandons this candidate rather
-/// than being read as `ON`.
+/// **Whether the piece lies on a face of the solid is asked first, and the ray
+/// only after it**, for every piece. The ray was never what settles `ON`. §17.1
+/// makes the stored plane authoritative, [`coincident_face`] proves two planes
+/// are the same plane from their coefficients alone, and the winding proves the
+/// point is within the face's outline through the corners the planes meet at —
+/// none of which cares how wide a box is or where a stored corner was left.
 ///
-/// An undecided answer asks the same question rather than giving up on the
-/// spot, and that is what settles `A \ A` on a turned solid. Every corner there
-/// is a box, so a candidate inside a piece is a box too, and a box sitting on
-/// the very plane it was solved from straddles that plane: no ray can be
-/// trusted and classification honestly says so. The ray was never what settles
-/// `ON`. §17.1 makes the stored plane authoritative, [`coincident_face`] proves
-/// two planes are the same plane from their coefficients alone, and the winding
-/// proves the point is within the face's outline — neither of which cares how
-/// wide the box is.
+/// The ray reads a face as triangles fanned from its **stored** corners, and a
+/// valid solid may store a corner a hair off where its planes meet (§75.6). A
+/// box with its corner `(0, 0, 0)` stored as `(0, 1e-30, 0)` tilts both
+/// triangles of its `y = 0` face, and the ray certified a point lying on that
+/// face as `Outside`: the same two boxes fused one way round and were not a
+/// solid the other (§316.3, §351). A candidate on a *sphere* is worked out
+/// through the surface's own two coordinates and lands a rounding off it, and
+/// the ray is as confident and as wrong about it.
+///
+/// So what reaches the ray lies on no face of the solid. A point that lands
+/// exactly on an edge or a corner of one of the solids says nothing about the
+/// piece around it, and an undecided answer is a box straddling a plane — every
+/// corner of a turned solid is one, which is why `A \ A` there needs coincidence
+/// asked at all. Either abandons this candidate rather than being read as `ON`.
 #[expect(
     clippy::too_many_arguments,
     reason = "same list as `place_the_piece`, one point further in"
@@ -754,25 +818,13 @@ fn settle_against_each(
     against: &[usize],
     point: PredicatePoint,
     piece: &Piece,
-    in_plane: Option<&InPlane>,
+    _in_plane: Option<&InPlane>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Placement>> {
     let mut lying_on = LyingOn::default();
     for &index in against {
-        // A **curved** piece is asked about coincidence before the ray and not
-        // after it. A candidate on a plane is exactly on it and a ray fired at a
-        // solid whose face is that plane comes back `OnBoundary`; a candidate on
-        // a *sphere* is worked out through the surface's own two coordinates and
-        // lands a rounding off it, so the same ray comes back confidently Inside
-        // or Outside about a face the piece is lying on. Coincidence is settled
-        // by the surfaces and the outlines and never by the ray (§17.1), so
-        // asking it first costs nothing and reaching for it afterwards would be
-        // too late.
-        if in_plane.is_none()
-            && let Some(same_way) =
-                coincident_face(model, solids[index], piece, point, policy, log)?
-        {
+        if let Some(same_way) = coincident_face(model, solids[index], piece, point, policy, log)? {
             lying_on.add(index, same_way);
             continue;
         }
@@ -802,14 +854,8 @@ fn settle_against_each(
             // about a caller's solid rather than a panic.
             Containment::CannotFollowAFacesTrimming { .. }
             | Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(None),
-            Containment::OnBoundary | Containment::Undecidable { .. } => {
-                let Some(same_way) =
-                    coincident_face(model, solids[index], piece, point, policy, log)?
-                else {
-                    return Ok(None);
-                };
-                lying_on.add(index, same_way);
-            }
+            // Coincidence was asked above and found no face the piece lies on.
+            Containment::OnBoundary | Containment::Undecidable { .. } => return Ok(None),
         }
     }
     Ok(Some(lying_on.placement()))
@@ -882,8 +928,17 @@ impl LyingOn {
 /// the ray cannot honestly place, and the next is tried. Nothing here is a
 /// tolerance: both sides are signs, and a candidate is dropped only when two
 /// signs that were both decided say opposite things. A sign that could not be
-/// decided, or a point on the plane, is left to the ray's own answer, which
-/// already says `OnBoundary` or `Undecidable` wherever it cannot tell.
+/// decided is left to the ray's own answer.
+///
+/// **A point on the plane is not this check's to catch.** The ray does not say
+/// `OnBoundary` there whenever it cannot tell: a face whose stored corner sits
+/// `1e-30` off its planes has triangles that put a point on the face certainly
+/// off it (§316.3). Counting that as a disagreement was measured and drops
+/// every candidate of a piece lying on such a face, since every one of them is
+/// on the plane: the two boxes of `tests/three_flat_seeds_that_fuse_one_way_round.rs`
+/// then refuse both ways round, by union, intersection and difference alike
+/// (§351). What catches it is [`settle_against_each`] asking whether the piece
+/// lies on a face before the ray is fired at all.
 fn the_ray_and_the_stored_planes_disagree_about(
     solid: SolidView<'_>,
     point: PredicatePoint,
@@ -1331,6 +1386,17 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
     if let Some(towards) = towards_every_flat_sides_material(piece) {
         candidates.push(PredicatePoint::from(
             (middle + towards * reach).coordinates(),
+        ));
+    }
+    // **A step of one radius towards a cone's apex goes past it** wherever the
+    // cone's radius is more than its height, and lands on the other half of
+    // the cone, where the piece is not (§350). Half way from the corners'
+    // middle to the apex is on the corners' own half, whatever the slope: the
+    // corners are on it, and so is the apex.
+    if let Surface::Cone(cone) = &piece.surface {
+        candidates.push(midway_between(
+            PredicatePoint::from(middle.coordinates()),
+            PredicatePoint::from(cone.apex().coordinates()),
         ));
     }
     candidates
