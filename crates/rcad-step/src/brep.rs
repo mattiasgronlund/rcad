@@ -1125,6 +1125,27 @@ impl Walk {
     /// An `ELLIPSE` whose placement leaves out its reference direction holds
     /// nothing: which way its long axis runs is then a default the schema
     /// chooses, and nothing here reads that default.
+    ///
+    /// **An `ELLIPSE`'s two sizes are worked out from the first face's pipe,
+    /// not read from the file**, and that one ellipse is held against every
+    /// face. A plane cuts a pipe of radius `R` about the unit axis `d` in the
+    /// ellipse whose size along each of its two ways `w` is `R / |w × d|`, and
+    /// that is the curve the walk will draw: the sizes never reach the model,
+    /// which reads only the plane. So what has to hold is that this one ellipse
+    /// lies on every face, which also holds one pipe's radius and lean against
+    /// the other's. The file's own sizes cannot be held to that: KiCad writes
+    /// twelve digits, and the `0.141421356237` its exporter writes for `0.1·√2`
+    /// is `3.1e-13` short, which puts the Fujitsu `FTR-F1` relays' mitres 61
+    /// to 66 roundings off each pipe (`docs/decisions.md` §229.5 blamed the
+    /// axis miss, which is 5.26).
+    ///
+    /// **The file's sizes are still checked**, so a file whose sizes are
+    /// plainly wrong is named by its faces, as before, and not read as the
+    /// curve the plane cuts. Its ellipse is held against every face to the
+    /// same allowance plus what writing a size in twelve significant digits
+    /// costs — half a unit in the twelfth digit is at most five parts in
+    /// `10¹²` of the size — which is the fewest digits any writer in either
+    /// corpus writes an ellipse's size in.
     fn every_face_holds_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1133,6 +1154,7 @@ impl Walk {
         keyword: Keyword,
         place: &crate::geometry::Placement,
     ) -> Result<bool, Refusal> {
+        const A_SIZE_WRITTEN_IN_TWELVE_DIGITS_MAY_BE_OFF_BY: f64 = 5e-12;
         let Some(faces) = self.surfaces_along_each_edge.get(&edge_curve) else {
             return Ok(false);
         };
@@ -1155,18 +1177,42 @@ impl Walk {
                 else {
                     return Ok(false);
                 };
-                let ellipse = Ellipse {
+                let second_way = normal.cross(first_way);
+                let Some(Surface::Cylinder(pipe)) = faces.first() else {
+                    return Ok(false);
+                };
+                let from_the_pipe = [first_way, second_way]
+                    .map(|way| pipe.radius() / way.cross(pipe.axis().direction()).length());
+                let written = [
+                    reading.real_at(curve, ELLIPSE, 2)?,
+                    reading.real_at(curve, ELLIPSE, 3)?,
+                ];
+                // A plane along the pipe's axis cuts it in two lines, which
+                // gives an infinite size; and `largest_of` takes the sizes in,
+                // so one infinite size makes the allowance infinite too.
+                if !from_the_pipe.iter().chain(&written).all(|size| size.is_finite()) {
+                    return Ok(false);
+                }
+                let an_ellipse = |semi_axes| Ellipse {
                     centre: place.origin,
                     first_way,
-                    second_way: normal.cross(first_way),
-                    semi_axes: [
-                        reading.real_at(curve, ELLIPSE, 2)?,
-                        reading.real_at(curve, ELLIPSE, 3)?,
-                    ],
+                    second_way,
+                    semi_axes,
                 };
-                Ok(faces
-                    .iter()
-                    .all(|face| a_surface_holds_the_ellipse(face, &ellipse)))
+                let (drawn, as_written) = (an_ellipse(from_the_pipe), an_ellipse(written));
+                let writing_the_sizes = A_SIZE_WRITTEN_IN_TWELVE_DIGITS_MAY_BE_OFF_BY
+                    * from_the_pipe[0].max(from_the_pipe[1]);
+                Ok(faces.iter().all(|face| {
+                    a_surface_holds_the_ellipse(face, &drawn)
+                        && how_far_off_the_ellipse_can_be(face, &as_written).is_some_and(
+                            |(off, largest)| {
+                                off <= A_CIRCLE_MAY_MISS_ITS_FACE_BY
+                                    * NEAREST_F64_POINT_ROUNDOFF
+                                    * largest
+                                    + writing_the_sizes
+                            },
+                        )
+                }))
             }
             other => unreachable!(
                 "round_run is only handed a CIRCLE or an ELLIPSE, not {}",
