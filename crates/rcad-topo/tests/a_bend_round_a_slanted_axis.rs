@@ -167,10 +167,16 @@ fn described(model: &mut Model) -> Result<SolidKey> {
             ],
         },
     )?;
-    let near_circle =
-        builder.add_edge(near_corner, near_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
-    let far_circle =
-        builder.add_edge(far_corner, far_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let near_circle = builder.add_edge(
+        near_corner,
+        near_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let far_circle = builder.add_edge(
+        far_corner,
+        far_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
 
     let cap = |builder: &mut SolidBuilder, facing: Vector, edge, turn| -> Result<_> {
         let coedge = builder.add_coedge(edge, turn)?;

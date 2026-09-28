@@ -786,7 +786,9 @@ impl Predicate for SquareToTheAxis {
             // The sum overflowed. Exact arithmetic that is not exact has
             // nothing to offer, so this level cannot run.
             Decision::Undecidable { .. } => None,
-            other => panic!("exact arithmetic came back with a decision nothing here knows: {other:?}"),
+            other => {
+                panic!("exact arithmetic came back with a decision nothing here knows: {other:?}")
+            }
         }
     }
 }
@@ -3476,10 +3478,12 @@ mod tests {
                 Vector::new(along[0], along[1], along[2]),
             )
             .expect("a direction with a length");
-            let ring = rcad_geom::Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring");
+            let ring =
+                rcad_geom::Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring");
             let [x, y, z] = square(axis.direction().components());
-            let flat = Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(x, y, z))
-                .expect("a normal with a length");
+            let flat =
+                Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(x, y, z))
+                    .expect("a normal with a length");
             let straddles = matches!(
                 SquareToTheAxis {
                     normal: flat.normal().components(),
@@ -3530,11 +3534,15 @@ mod tests {
             .expect("a direction with a length");
         let [w0, w1, w2] = axis.direction().components();
         let cap_square_to = |[x, y, z]: [f64; 3]| {
-            let plane = Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(x, y, z))
-                .expect("a normal with a length");
+            let plane =
+                Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(x, y, z))
+                    .expect("a normal with a length");
             let [n0, n1, n2] = plane.normal().components();
             let corner = [w1 * n2 - w2 * n1, w2 * n0 - w0 * n2, w0 * n1 - w1 * n0].map(|c| 3.0 * c);
-            (plane, rcad_geom::Point::new(corner[0], corner[1], corner[2]))
+            (
+                plane,
+                rcad_geom::Point::new(corner[0], corner[1], corner[2]),
+            )
         };
         let (leaning, near_corner) = cap_square_to([w2, 0.0, -w0]);
         let (holding, far_corner) = cap_square_to([0.0, w2, -w1]);
@@ -3600,7 +3608,11 @@ mod tests {
         )
         .expect("a normal with a length");
         assert_eq!(flat.normal().components(), normal, "stored as written");
-        assert_eq!(axis.direction().components(), [0.6, 0.0, 0.8], "stored as written");
+        assert_eq!(
+            axis.direction().components(),
+            [0.6, 0.0, 0.8],
+            "stored as written"
+        );
         let ring = rcad_geom::Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring");
         let lies = how_the_axis_lies_on(&flat, &ring);
         assert!(matches!(lies, Decision::Undecidable { .. }), "{lies:?}");
@@ -3619,7 +3631,11 @@ mod tests {
         let settled = how_the_axis_lies_on(
             &Plane::from_point_and_normal(
                 rcad_geom::Point::origin(),
-                Vector::new(-(a_tiny_power_of_two * a_tiny_power_of_two), 1.0, a_tiny_power_of_two),
+                Vector::new(
+                    -(a_tiny_power_of_two * a_tiny_power_of_two),
+                    1.0,
+                    a_tiny_power_of_two,
+                ),
             )
             .expect("a normal with a length"),
             &rcad_geom::Torus::new(
