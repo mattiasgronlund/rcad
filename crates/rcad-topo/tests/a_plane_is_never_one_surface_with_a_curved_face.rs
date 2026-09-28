@@ -72,7 +72,12 @@ fn three_of_the_cubes_planes_cross_the_bends_ring_in_a_quartic(
         let Surface::Plane(plane) = flat else {
             panic!("a cube is all planes: {flat:?}");
         };
-        match intersect(&flat, &ring, &Policy::certified(), &mut ProvenanceLog::new()) {
+        match intersect(
+            &flat,
+            &ring,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
             Ok(_) => (),
             Err(rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic) => {
                 refused.push((plane.normal().components(), plane.offset()));
@@ -136,7 +141,10 @@ fn a_bend_and_a_cube_far_away_share_nothing_either_way_round() {
         let fused = model
             .fuse(&[argument], &[tool], Rule::Intersection, &policy, &mut log)
             .expect("a cube and a bend that do not touch, shared");
-        assert!(fused.solids().is_empty(), "bend first {bend_first}: {fused:?}");
+        assert!(
+            fused.solids().is_empty(),
+            "bend first {bend_first}: {fused:?}"
+        );
         assert!(log.is_empty(), "a certified fuse logs nothing: {log:?}");
         model
             .validate(&policy, &mut ProvenanceLog::new())
@@ -195,13 +203,28 @@ fn no_curved_surface_can_be_built_flat() {
         bytes.unwrap_or_else(|why| panic!("{what} writes out: {why}"))
     };
     let cone = written("a cone", postcard::to_allocvec(&(Axis::z(), infinite)));
-    assert!(postcard::from_bytes::<Cone>(&cone).is_err(), "a cone of infinite slope, read");
-    let ball = written("a ball", postcard::to_allocvec(&(Point::origin(), infinite)));
-    assert!(postcard::from_bytes::<Sphere>(&ball).is_err(), "a ball of infinite radius, read");
+    assert!(
+        postcard::from_bytes::<Cone>(&cone).is_err(),
+        "a cone of infinite slope, read"
+    );
+    let ball = written(
+        "a ball",
+        postcard::to_allocvec(&(Point::origin(), infinite)),
+    );
+    assert!(
+        postcard::from_bytes::<Sphere>(&ball).is_err(),
+        "a ball of infinite radius, read"
+    );
     let pipe = written("a pipe", postcard::to_allocvec(&(Axis::z(), infinite)));
-    assert!(postcard::from_bytes::<Cylinder>(&pipe).is_err(), "a pipe of infinite radius, read");
+    assert!(
+        postcard::from_bytes::<Cylinder>(&pipe).is_err(),
+        "a pipe of infinite radius, read"
+    );
     let ring = written("a ring", postcard::to_allocvec(&(Axis::z(), infinite, 1.0)));
-    assert!(postcard::from_bytes::<Torus>(&ring).is_err(), "a ring of infinite ring radius, read");
+    assert!(
+        postcard::from_bytes::<Torus>(&ring).is_err(),
+        "a ring of infinite ring radius, read"
+    );
 }
 
 /// **Two curved surfaces of different kinds still go to `intersect`**, and a
