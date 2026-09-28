@@ -215,3 +215,7 @@ of the stored numbers is exactly zero and only the enclosure could not say so,
 this is a gap: the exact sign of three products of `f64`s is always within
 reach. Either way `holds_the_axis_of` returns a `bool`, so "no" and "cannot
 tell" come out as the same refusal, and nothing records which it was.
+
+*Looked at in §328: every plane `intersect` named two circles for is exactly
+square to the stored axis, so those refusals were a gap and are answered now;
+the one it refused leans off it, and "no" stays.*
