@@ -883,25 +883,21 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 ///
 /// **The control halves the cone's slope and nothing else.** The same wedge
 /// against a cone of slope a sixteenth: the slanted face no longer rests on the
-/// side, it leans across it and meets the cone at the apex alone, and the
-/// refusal changes to a different one by name. Two named outcomes either side of
-/// one number is what says this row is about what it claims.
+/// side, it leans across it and meets the cone at the apex alone, and the union
+/// is answered. A refusal on one side of one number and an answer on the other
+/// is what says this row is about what it claims.
 ///
-/// **The control's name is `ResultIsNotManifold { count: 4 }` since §251**, and
-/// it has nothing to do with tangency either. It was `Undecidable` over a point
-/// inside a piece of a face, §36.28's chord-and-arc gap: the wedge's two faces
-/// `(−8, ±16, ·)` each cut the cone in an ellipse, both ellipses pass through the
-/// two points where the edge those faces share pierces the cone, and each face's
-/// piece inside the cone is one ellipse arc and that edge as its chord. §251's
-/// candidate square off the chord gets a point in both, and the union then
-/// reaches `assemble`, where the arc on one plane and the arc on the other run
-/// between the same two corners along the same cone and are named as one edge —
-/// four faces along it. Printed while §251 was written: the two arcs' sides
-/// carry the planes with normals `(−0.43, −0.86, 0.27)` and
-/// `(−0.44, 0.88, 0.17)`, and `which_arc_of_a_circle_this_is` gives both the
-/// cone's name and the same sign. That is §245.4's two-crossings-through-one-
-/// corner-pair gap on two planes rather than one, and `assemble.rs` is where it
-/// closes.
+/// **The control answers since §330**, and what stood in its way on the road
+/// had nothing to do with tangency either. It was `Undecidable` over a point
+/// inside a piece of a face, §36.28's chord-and-arc gap, until §251: the wedge's
+/// two faces `(−8, ±16, ·)` each cut the cone in an ellipse, both ellipses pass
+/// through the two points where the edge those faces share pierces the cone, and
+/// each face's piece inside the cone is one ellipse arc and that edge as its
+/// chord. Then it was `ResultIsNotManifold { count: 4 }`, because the arc on one
+/// plane and the arc on the other run between the same two corners along the
+/// same cone and were named as one edge. An arc's name holds its plane now, and
+/// the answer is held to the frustum, the wedge's 96, and what the two share
+/// worked out level by level without the kernel.
 ///
 /// A tolerant policy makes no difference, which is the other half: this is a
 /// statement about the shape and not about a budget.
@@ -935,17 +931,93 @@ fn a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction() {
         A_CONES_FAR_END,
     );
     let wedge = a_wedge_resting_on_a_cones_side(&mut model);
-    let why = refusal(
-        &mut model,
-        &Pair::of(cone, wedge),
-        Rule::Union,
-        &Policy::certified(),
+    let united = fused(&mut model, &Pair::of(cone, wedge), Rule::Union);
+    assert_eq!(united.solids().len(), 1);
+    let halved = A_CONES_SLOPE / 2.0;
+    let frustum = PI * halved * halved * (A_CONES_FAR_END.powi(3) - A_CONES_NEAR_END.powi(3)) / 3.0;
+    measures(
+        volume_of(&model, united.solids()),
+        frustum + 96.0 - what_the_wedge_shares_with_a_cone_of_slope(halved),
+        Side::Under,
     );
-    assert!(
-        matches!(why, Error::ResultIsNotManifold { count: 4 }),
-        "taking the wedge's face off the cone's side changes which refusal this is, and it is \
-         two ellipse arcs on two planes named as one edge: {why:?}"
-    );
+}
+
+/// How much space the wedge shares with the cone of `slope` about `+z`, worked
+/// out without the kernel: the area of each level's disc of radius `slope · z`
+/// that lies inside the wedge's triangle there, added up from the wedge's floor
+/// at `z = 8` to its tip at `z = 24`.
+///
+/// The disc is a polygon of [`SIDES`] corners on its rim, which is short of the
+/// disc by a share of `(2π/SIDES)²/6`, under a millionth; the levels are added
+/// by Simpson's rule. Neither comes near what a mesh at [`A_DEFLECTION`] is
+/// allowed.
+fn what_the_wedge_shares_with_a_cone_of_slope(slope: f64) -> f64 {
+    const SIDES: u32 = 4096;
+    const LEVELS: u32 = 4000;
+    // Each slanted face as `n` and a point on it, with `n` pointing out of the
+    // wedge, as `a_wedge_resting_on_a_cones_side` writes them.
+    let faces = [
+        ([1.0, 0.0, -A_CONES_SLOPE], [0.0, 0.0, 0.0]),
+        ([-8.0, 16.0, 3.0], [1.0, 3.0, 8.0]),
+        ([-8.0, -16.0, 5.0], [-5.0, 0.0, 8.0]),
+    ];
+    let area_at = |z: f64| {
+        let radius = slope * z;
+        let mut ring: Vec<[f64; 2]> = (0..SIDES)
+            .map(|corner| {
+                let turned = 2.0 * PI * f64::from(corner) / f64::from(SIDES);
+                [radius * turned.cos(), radius * turned.sin()]
+            })
+            .collect();
+        for ([nx, ny, nz], [qx, qy, qz]) in faces {
+            let most = nx * qx + ny * qy + nz * qz - nz * z;
+            ring = inside_of_a_line(&ring, |[x, y]| nx * x + ny * y - most);
+        }
+        (0..ring.len())
+            .map(|corner| {
+                let [ax, ay] = ring[corner];
+                let [bx, by] = ring[(corner + 1) % ring.len()];
+                ax * by - bx * ay
+            })
+            .sum::<f64>()
+            / 2.0
+    };
+    let (floor, tip) = (8.0, 24.0);
+    let step = (tip - floor) / f64::from(LEVELS);
+    (0..=LEVELS)
+        .map(|level| {
+            let weight = match level {
+                0 => 1.0,
+                _ if level == LEVELS => 1.0,
+                _ if level % 2 == 1 => 4.0,
+                _ => 2.0,
+            };
+            weight * area_at(floor + step * f64::from(level))
+        })
+        .sum::<f64>()
+        * step
+        / 3.0
+}
+
+/// The part of a polygon where `past` is not above zero: one pass of clipping
+/// against a line.
+fn inside_of_a_line(ring: &[[f64; 2]], past: impl Fn([f64; 2]) -> f64) -> Vec<[f64; 2]> {
+    let mut kept = Vec::with_capacity(ring.len() + 1);
+    for corner in 0..ring.len() {
+        let (here, next) = (ring[corner], ring[(corner + 1) % ring.len()]);
+        let (at_here, at_next) = (past(here), past(next));
+        if at_here <= 0.0 {
+            kept.push(here);
+        }
+        if (at_here <= 0.0) != (at_next <= 0.0) {
+            let share = at_here / (at_here - at_next);
+            kept.push([
+                here[0] + share * (next[0] - here[0]),
+                here[1] + share * (next[1] - here[1]),
+            ]);
+        }
+    }
+    kept
 }
 
 /// The direction `dominant_axis_of_a_direction` was handed and could not name,
