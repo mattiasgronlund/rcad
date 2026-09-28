@@ -60,6 +60,15 @@
 //! the way back; a solid that does not measure has no answer to compare.
 //! Everything else that differs panics, because it is a sound model this
 //! writer and this reader disagree about.
+//!
+//! **A sound model is one whose every solid also passes
+//! `Model::validate_solid`**, because that is the question the reader asks.
+//! It builds each solid through `SolidBuilder::build`, which judges the solid
+//! in a model of its own. `validate` can pass a model whose solid is refused
+//! alone: a corner may sit off its plane by up to about `1e-9` times the
+//! largest coordinate, and a far neighbour makes that room wider
+//! (`docs/decisions.md` §242.6). Twelve of the 2026-09-26 crash files were
+//! that, and nothing else (§326).
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -96,6 +105,11 @@ pub struct Reached {
     /// Written models that do not pass `Model::validate`, so there is no solid
     /// to compare the file against.
     pub written_but_unsound: usize,
+    /// Written models that pass `Model::validate` but hold a solid that
+    /// `Model::validate_solid` refuses. The reader builds each solid through
+    /// `SolidBuilder::build`, which judges it alone, and a neighbour can widen
+    /// the room `validate` gives a corner (`docs/decisions.md` §242.6).
+    pub written_but_a_solid_unsound_alone: usize,
     /// Written files the reader turned back into a model.
     pub read_back: usize,
     /// Read-back models not compared because a solid of the model that went in
@@ -121,6 +135,8 @@ impl Reached {
             written: self.written + other.written,
             refused: self.refused + other.refused,
             written_but_unsound: self.written_but_unsound + other.written_but_unsound,
+            written_but_a_solid_unsound_alone: self.written_but_a_solid_unsound_alone
+                + other.written_but_a_solid_unsound_alone,
             read_back: self.read_back + other.read_back,
             did_not_measure: self.did_not_measure + other.did_not_measure,
             solids_the_same: self.solids_the_same + other.solids_the_same,
@@ -180,6 +196,13 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
     let mut log = ProvenanceLog::new();
     if source.validate(&policy, &mut log).is_err() {
         reached.written_but_unsound = 1;
+        return reached;
+    }
+    if source
+        .solids()
+        .any(|solid| source.validate_solid(solid.key(), &policy, &mut log).is_err())
+    {
+        reached.written_but_a_solid_unsound_alone = 1;
         return reached;
     }
     let import = Import::read(&file, &policy, &mut log).unwrap_or_else(|why| {
