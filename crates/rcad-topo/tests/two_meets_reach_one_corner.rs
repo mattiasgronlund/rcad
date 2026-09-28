@@ -1,5 +1,6 @@
 //! Two places of one meet that both lie within a corner's room, and why no fuse
-//! shows which of them `a_corner_is_this_place` folds (`docs/decisions.md` §288).
+//! shows which of them `a_corner_is_this_place` folds (`docs/decisions.md` §288,
+//! §346).
 //!
 //! `place_the_meets` folds a meet of three surfaces into a corner of the face
 //! only when no *other* place of the same meet reaches the corner's box grown by
@@ -15,22 +16,25 @@
 //!   at `(3s, 4s, 12s)` goes through the origin, and each edge of the cube
 //!   there meets it a second time at `6s`, `8s` or `24s`. At `s = 2⁻⁵⁰` two of
 //!   those are within `2⁻⁴⁶`, and at `2⁻⁵²` all three. At `2⁻⁴⁸` none is,
-//!   and that fuse is the control: it refuses the same way.
+//!   and that fuse is the control.
 //!
-//! **Neither shows the branch.** Both places are on all three surfaces, so on
-//! the ball the other two crossings run through both of them and fence off a
-//! piece no wider than the room. A point on a curved face is a box `256 ε`
-//! wide, four times the room, so no point fits in that piece, and every fuse
-//! refuses on it by name with nothing else asked. It refuses the same with the
-//! fold made and without it. §288.4 has the mutations.
+//! **Neither shows the branch yet, for two different reasons.**
+//!
+//! - The grazing block's two places fence off three pieces — the ball's skin
+//!   inside the block and two slivers of the block's faces inside the ball —
+//!   and **no point with `f64` coordinates is inside any of them**
+//!   (`a_block_edge_grazing_a_ball.rs` shows it). `select` places a piece by a
+//!   point inside it, so it refuses there under any policy, and no better
+//!   point can be built (§346).
+//! - The small ball's piece inside the cube used to be refused the same way,
+//!   because `select` gave a point on a curved face a box floored at one unit
+//!   wide. That box is sized by the ball now, and the fuse gets past `select`.
+//!   What stops it is the check of the answer, which cannot mesh the ball's
+//!   faces, just as it cannot at `s = 2⁻⁴⁰` where `select` never refused.
 //!
 //! **The fold itself is pinned in `src/fuse/arrange.rs`'s `tests` module**, by
 //! two tests that take these shapes' faces and call `a_corner_is_this_place`
 //! directly (§288.5).
-//!
-//! **When `select` learns to place a point in a piece this small, these pins
-//! move**, and these are the shapes that can then show the branch through a
-//! fuse.
 
 use rcad_geom::{Isometry, Scale, Vector};
 use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
@@ -68,59 +72,68 @@ fn a_block_corner_where_its_edge_grazes_a_ball_refuses_on_the_piece_between_the_
     for corner in EVERY_CORNER {
         for policy in [Policy::certified(), Policy::tolerant(25.0)] {
             for rule in EVERY_RULE {
-                let records = what_it_refused_on(&policy, |model, log| {
-                    fuse_a_block_whose_corner_is_on_a_ball(model, corner, rule, &policy, log)
-                });
+                let mut model =
+                    Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+                let mut log = ProvenanceLog::new();
+                let records = match fuse_a_block_whose_corner_is_on_a_ball(
+                    &mut model, corner, rule, &policy, &mut log,
+                ) {
+                    Err(Error::Undecidable { records }) => records.records().to_vec(),
+                    Ok(fused) => panic!(
+                        "{policy:?}: the fuse answered with {} solids, so `select` placed \
+                         a point in a piece §346 says holds no point with f64 coordinates. \
+                         These shapes can now show which place `a_corner_is_this_place` \
+                         folds (§288.3)",
+                        fused.solids().len()
+                    ),
+                    Err(other) => panic!("{policy:?}: {other:?}"),
+                };
                 assert_the_one_refusal_is_the_piece(&records, &the_two_places, (corner, rule));
             }
         }
     }
 }
 
+/// The small ball's piece inside the cube is placed now, and the answer's own
+/// check is what refuses the fuse.
+///
+/// Before §346 every one of these refused in `select`, on
+/// `a point inside a piece of a face` with an infinite enclosure, because the
+/// box a point on the ball was given reached `5.7e-14` from its middle, and the
+/// ball is `2.9e-15` to `4.6e-14` in radius.
 #[test]
-fn a_ball_smaller_than_the_room_on_a_cube_corner_refuses_on_its_own_face() {
+fn a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed() {
     for exponent in [-48, -50, -52] {
         let s = f64::powi(2.0, exponent);
-        let the_three_second_places = [
-            PredicatePoint::Exact([0.0, 8.0 * s, 0.0]),
-            PredicatePoint::Exact([0.0, 0.0, 24.0 * s]),
-            PredicatePoint::Exact([6.0 * s, 0.0, 0.0]),
-        ];
         for policy in [Policy::certified(), Policy::tolerant(25.0)] {
             for rule in EVERY_RULE {
-                let records = what_it_refused_on(&policy, |model, log| {
-                    fuse_a_cube_and_a_ball_on_its_corner(model, s, rule, &policy, log)
-                });
-                assert_the_one_refusal_is_the_piece(
-                    &records,
-                    &the_three_second_places,
-                    (exponent, rule),
+                let case = (exponent, policy.strictness(), rule);
+                let mut model =
+                    Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+                let mut log = ProvenanceLog::new();
+                match fuse_a_cube_and_a_ball_on_its_corner(&mut model, s, rule, &policy, &mut log) {
+                    Err(
+                        Error::CannotMeshAFace { .. }
+                        | Error::AWireWillNotLieFlatOnItsFace { .. }
+                        | Error::ACurvedFaceGoesRightRoundWithNoSeam { .. },
+                    ) => (),
+                    Err(Error::Undecidable { records }) => {
+                        panic!("{case:?}: `select` refused the ball again: {records:#?}")
+                    }
+                    Ok(fused) => panic!(
+                        "{case:?}: the fuse answered with {} solids. These shapes can now show \
+                         which place `a_corner_is_this_place` folds (§288.3, §346)",
+                        fused.solids().len()
+                    ),
+                    Err(other) => panic!("{case:?}: {other:?}"),
+                }
+                assert!(
+                    log.records().is_empty(),
+                    "{case:?}: nothing was asked of the policy: {:#?}",
+                    log.records()
                 );
             }
         }
-    }
-}
-
-/// The records a fuse that is expected to refuse hands back.
-///
-/// # Panics
-///
-/// If the fuse answers, or fails with anything but a refusal.
-fn what_it_refused_on(
-    policy: &Policy,
-    fuse: impl FnOnce(&mut Model, &mut ProvenanceLog) -> rcad_topo::Result<Fused>,
-) -> Vec<Record> {
-    let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
-    let mut log = ProvenanceLog::new();
-    match fuse(&mut model, &mut log) {
-        Err(Error::Undecidable { records }) => records.records().to_vec(),
-        Ok(fused) => panic!(
-            "{policy:?}: the fuse answered with {} solids, so `select` placed a point in the \
-             piece between the two places. These shapes can now show which place \
-             `a_corner_is_this_place` folds (§288.3)",
-            fused.solids().len()
-        ),
-        Err(other) => panic!("{policy:?}: {other:?}"),
     }
 }
 
