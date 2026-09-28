@@ -138,7 +138,7 @@ refusals is lifted, the classification in 250.1 is what a fuse would get.
 ### 250.5 What this leaves
 
 - `select.rs` and `holds.rs` each have their own copy of the meridian-circle
-  lookup (250.2). One of them should call the other.
+  lookup (250.2). One of them should call the other. **Done, Q117 (250.8).**
 - A quarter bend turned half a turn is refused by the builder's mesh check
   (250.4). Not traced.
 - A puck's lid is now refused where it was wrong (250.1). Answering it needs
@@ -246,3 +246,57 @@ chart point twice. That fits, but it was not traced. A half-ring is a sound
 solid, so this refusal is a gap (§16.10). It is wider than 280.6's fix, which
 refuses a torus face that goes right round the ring on purpose. `Deserialize`
 does not call `validate`, so it may be a door to this face. It was not tried.
+
+### 250.8 One lookup, one rule, in `holds.rs` (Q117, Q118, Q199)
+
+*Row Q117 (`lane-q117-one-meridian-rule`, merged at `c82e02f2`).* 250.5's first
+bullet is done. `holds.rs` keeps one copy of the meridian-circle lookup,
+`the_half_space_naming_the_meridian_circle_through` (`23d3df1a`), now
+`pub(crate)` and returning one `Picker` rather than a list. The rule that reads
+it, `the_meridian_half_space_keeps`, is a second `pub(crate)` function beside
+it. `fuse/select.rs` calls both; its own copy of the lookup is gone.
+
+The rule's argument, from its own doc comment
+(`mise exec -- just src the_meridian_half_space_keeps`):
+
+- **A point on the half-space's own plane is kept**, because that is what a
+  `Picker::InFrontOf` is: everything on or in front of a flat surface. It is
+  the reading the circle's own edge is picked by, and `fuse/select.rs` asks
+  through this function too, so the two files cannot disagree about it again.
+- **No point on the face's plane gets that far.** `intersect` names meridian
+  circles only for a plane that holds the ring's axis exactly, and only once
+  it has proved the half-space's plane clears both circles. So the tube's
+  inside on the face's plane is the two disks, each strictly on one side of
+  the half-space's plane, and a point on the half-space's plane that the tube
+  holds is off the face's plane. `SolidView::face_holds_the_point` does not
+  ask whether its point is on the face, so it can be handed one; a refusal
+  here would be a check for that made in this one place and nowhere else.
+
+**The Zero-arm panic probe.** *Row Q118 (`lane-q118-half-space-arms`, merged at
+`c3920eb3`)* mutation-tested this same arm at the time: with the Zero case
+folded into the arm that returns `false`, a workspace run of 2523 tests had
+exactly one failure, `a_point_in_the_tube_on_the_plane_between_the_two_disks_is_kept`
+— Q118's own off-plane pin, the only test that reached `Zero` before Q199.
+
+This lane re-ran that probe itself, at the scope this row named:
+`crates/rcad-topo/src/holds.rs`'s `Zero` arm was replaced with a temporary
+`panic!`, and `mise exec -- just t -p rcad-topo --no-fail-fast` gave **1114
+tests run, 2 failed**:
+
+- `a_bends_cap_holds_one_of_the_two_disks::a_point_in_the_tube_on_the_plane_between_the_two_disks_is_kept`
+  — Q118's pin, unchanged.
+- `fuse::select::tests::every_picker_keeps_a_point_on_the_half_spaces_own_plane`
+  — new since Q199, and reaching the same arm only because `select.rs` now
+  calls through to it (this section's first paragraph), not because a second
+  rule exists to disagree with the first.
+
+The `panic!` was reverted before this file was written; `git diff` on
+`holds.rs` is empty. This lane's own count (1114, `-p rcad-topo`) is a
+different scope from Q118's (2523, the whole workspace), so the two are not
+the same measurement re-run — only the "how many tests reach `Zero`" answer
+is comparable, and it went from one to two once Q199 landed.
+
+**Q199's pin** (`lane-q199-picker-pin`, merged at `1a3fd648`) is that second
+test: a unit test in `select.rs`, `every_picker_keeps_a_point_on_the_half_spaces_own_plane`
+(`1c300b27`), pinning `every_picker_keeps` keeping a point on the meridian
+half-space's own plane — the same `Zero` case this section's rule argues for.
