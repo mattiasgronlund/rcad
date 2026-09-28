@@ -307,6 +307,26 @@ fn the_check_both_ways_round_refuses_two_different_answers() {
     );
 }
 
+/// **A union whose answer carries a rim that names the plane that cut it is
+/// written down, not panicked on.**
+///
+/// The smallest of the 24 crash files of 2026-09-26 and 2026-09-27, all one
+/// shape: a block and a ball clear of each other, the ball cut in two by one of
+/// the block's planes (`a_rim_that_names_its_cutting_surface.rs`). Its first
+/// half is that union under a certified policy and its second half does not
+/// decode. Until the comparison had a shape for the rim it panicked writing the
+/// answer down.
+#[test]
+fn a_ball_cut_by_the_plane_of_a_block_clear_of_it_is_fused_and_written_down() {
+    let reached = control_seed("a_ball_cut_by_the_plane_of_a_block_clear_of_it");
+    assert_eq!(reached.decoded, 1, "{reached:?}");
+    assert_eq!(reached.ok, 1, "{reached:?}");
+    assert_eq!(
+        reached.solids_made, 2,
+        "the block and the ball do not touch, so their union is two solids: {reached:?}"
+    );
+}
+
 /// One named seed, replayed.
 fn control_seed(name: &str) -> Reached {
     let bytes = std::fs::read(corpus().join(name)).expect("the control seed is checked in");
