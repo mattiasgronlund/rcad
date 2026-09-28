@@ -9,7 +9,7 @@
 //! twice. Every test here aims at that lune.
 //!
 //! Since §200 some wedges are answered, and each of those is measured against
-//! its closed form: 17 cut by two knives, 13 intersections and 4 unions, and 9
+//! its closed form: 17 cut by two knives, 13 intersections and 4 unions, and 10
 //! by one prism, all intersections. The rest are still refused by name, most
 //! now at the flat pieces or in assembly rather than at the curved pieces. A
 //! case that moves either way fails, naming itself.
@@ -302,11 +302,13 @@ fn a_quarter_wedge_stops_after_a_point_is_found_inside_the_piece_and_not_before(
 /// This is not the lune §195.1 is about: the poles sit on the knife's edge
 /// rather than on its face, which the fuse sees before it sees any lune. The
 /// cases in `answered` answer and measure since §200; the rest are refused by
-/// name.
+/// name. The quarter wedge of the ball of radius 1000 answers since the
+/// triangulator takes a corner under spade's floor as zero (§321.6).
 #[test]
 fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
         (90.0, 1.0, "Intersection"),
+        (90.0, 1000.0, "Intersection"),
         (45.0, 1.0, "Intersection"),
         (45.0, 1000.0, "Intersection"),
         (45.0, 3.0, "Intersection"),
