@@ -110,6 +110,12 @@ fn pushing_a_turn_up_towards_infinity_does_not_change_its_sign() {
 
 /// The known wrong answer, drawn straight from the family this search covers,
 /// so a search that stopped finding anything would still have this to fail on.
+///
+/// Level 1 once certified the scaled run as [`Decision::Pos`]. It used to be
+/// refused instead, and now the retry's third exponent lifts it by `2^23` and
+/// decides it, so it has to agree with the middle run (`docs/decisions.md`
+/// §324.7). A level 1 that certified the wrong sign again would answer before
+/// any retry ran, and fail here.
 #[test]
 fn the_determinant_this_search_was_written_for_is_in_the_family_it_covers() {
     let s = 2f64.powi(-538);
@@ -126,13 +132,10 @@ fn the_determinant_this_search_was_written_for_is_in_the_family_it_covers() {
         [0.0, 0.0, 0.0],
     );
     assert_eq!(middle, Decision::Neg);
-    match scaled {
-        Decision::Neg | Decision::Zero | Decision::Pos => {
-            panic!("the scaled run certified {scaled:?} where the middle run says {middle:?}")
-        }
-        Decision::Undecidable { .. } => (),
-        other => panic!("unhandled decision: {other:?}"),
-    }
+    assert_eq!(
+        scaled, middle,
+        "the two runs describe the same geometry up to a positive factor"
+    );
 }
 
 /// Print what a run found, then insist that it found no disagreement, that it
