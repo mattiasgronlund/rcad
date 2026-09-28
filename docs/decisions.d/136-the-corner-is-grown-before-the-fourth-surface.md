@@ -199,7 +199,8 @@ that is recorded rather than acted on.
 
 ### 136.6 What is left
 
-- **§136.4**, above.
+- **§136.4**, above, and **§136.8**, below: the same rule broken at ordinary
+  size, by a term §136.4's named fix does not reach.
 - **The other five not-a-solid bands are still single-draw derivations**,
   §136.5's last paragraph. Not known to be wrong; the method behind them has a
   floor it does not survive.
@@ -240,4 +241,54 @@ exit code echoed after it and read back.
 **The loop went in a script because the worktree guard refused it inline.** A
 `for` loop naming a path with `git` in it is "too complex to verify"; a script
 in the scratchpad taking the worktree as its first argument is not.
+
+### 136.8 A three-plane corner a nanometre off one plane: the same gap, a different missing term
+
+§286.4 worked this case out from the code and did not run it. Q219 ran it, and
+`a_block_with_a_corner_off_one_of_its_three_planes_by_less_than_validate_allows_is_refused`
+in `crates/rcad-topo/tests/a_corner_with_fewer_than_three_surfaces_round_it.rs`
+pins it as it is. The block is `[0, 2]³` at a 100 mm scale, built face by face,
+with its top front left corner stored at `(0, 1e-9, 2)`: on the top and left
+planes, a nanometre off the front one. `Model::validate` accepts it. Its
+difference with the unit cube from `(-0.5, -0.5, -0.5)` is `Error::Undecidable`,
+and the record is `WHERE_THREE_SURFACES_MEET`: `the_place_the_model_points_at`
+picked no crossing, so `derive_a_corner` gave up. The test's `eprintln!` line:
+
+| | |
+|---|---|
+| the miss | `1e-9` |
+| what `validate` allows there | `2.0000284217094305e-9` |
+| what the selector grows the stored corner by | `2.842170943040401e-14` |
+
+Its control is the same block with the corner off by exactly that room, and the
+fuse cuts it.
+
+- **§136.4's broken rule, a different missing term.** §75.6: a solid `validate`
+  accepts is one the fuse has to be able to bake. §136.4's named fix changes
+  what the rounding is multiplied by, the model's largest coordinate for the
+  corner's. Here the corner, the block and the model all measure two, so that
+  fix grows this corner by the same `2.84e-14`. What is missing is `validate`'s
+  modelling half, `min(scale.default_linear_tolerance(),
+  Scale::RELATIVE_LINEAR_TOLERANCE × largest)`. The selector's doc comment turns
+  that half down on purpose, as what "would swallow corners somebody *placed*
+  off their planes", and `validate` accepts exactly such corners. The same doc
+  comment calls its room the allowance `check_flat_face` grants; that is true
+  of the rounding half only.
+- **A gap, not a limit** (§16.10). The three planes cross exactly at
+  `(0, 0, 2)`, and the control shows the fuse cuts the block once the corner is
+  within its room.
+- **At ordinary size**: a 2 mm block and a nanometre miss, where §136.4's repro
+  needs a reach of `1e5`.
+- **Where the refusal starts is the lane's probe, not reproduced.** A throwaway
+  test, removed before commit and run against the far-corner cube `[1.5, 2.5]³`,
+  found a miss equal to the room cut, one ulp past it (`2.8421709430404014e-14`)
+  refused, every miss it tried up to `2.0000284217094305e-9` refused, and two
+  ulps past that `validate` refusing the block itself
+  (`VertexOffItsFacePlane`). The verifier could not rerun those rows; the
+  committed test checks the room (cut) and `1e-9` (refused).
+
+The fix is Q414: grant the selector and `derive_a_corner`'s re-check
+`validate`'s whole allowance, and show §136.3's grazing corner, 1.414 from
+where its planes cross, is still refused. It replaces Q27, which carried
+§136.4's narrower fix.
 
