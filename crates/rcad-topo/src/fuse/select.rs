@@ -1620,6 +1620,22 @@ fn where_the_ring_crosses_the_plane(normal: Vector, offset: f64, ring: &Torus) -
 /// rounding off a curved face would be classified confidently against a solid
 /// whose own face it is lying on, and `ON` is the one column a ray was never
 /// what settled (§17.1).
+///
+/// **The box is sized by the numbers the round trip goes through, and by
+/// nothing else** — [`Surface::ROUND_TRIP_ROUNDOFF`]'s own size: the point, the
+/// numbers that place the surface, and its radius. It used to be the point's
+/// size floored at one, which is wrong both ways. A ball of radius `4.6e-14` on
+/// a cube's corner got a box `1.1e-13` wide, so no box fitted in the piece of
+/// it inside the cube and every fuse of the two refused
+/// (`tests/two_meets_reach_one_corner.rs`, `docs/decisions.md` §346). And a
+/// pipe placed from an axis origin far from the point got a box sized by the
+/// point alone.
+///
+/// Scaling a surface and a point by a power of two scales every step of the
+/// round trip exactly, as long as nothing in it is subnormal, so the bound
+/// holds at any size the way it holds at the sizes it was measured at. The
+/// floor is where that stops: below [`SMALLEST_SIZE_A_ROUND_TRIP_SCALES_FROM`]
+/// a rounding can cost an absolute `2⁻¹⁰⁷⁵` instead of a fraction of the number.
 fn back_onto_the_surface(surface: &Surface, candidate: PredicatePoint) -> Option<PredicatePoint> {
     let at = middle_of(candidate);
     let (u, v) = surface.coordinates_of(at);
@@ -1627,13 +1643,53 @@ fn back_onto_the_surface(surface: &Surface, candidate: PredicatePoint) -> Option
     if !there.is_finite() {
         return None;
     }
-    let reach = Surface::ROUND_TRIP_ROUNDOFF * there.largest_coordinate_magnitude().max(1.0);
+    let size = the_largest_number_placing(surface)?
+        .max(at.largest_coordinate_magnitude())
+        .max(there.largest_coordinate_magnitude())
+        .max(SMALLEST_SIZE_A_ROUND_TRIP_SCALES_FROM);
+    let reach = Surface::ROUND_TRIP_ROUNDOFF * size;
     Some(PredicatePoint::Constructed(there.coordinates().map(
         |coordinate| {
             Interval::around(coordinate, reach)
                 .expect("the check just above sent every point that is not a place back as None")
         },
     )))
+}
+
+/// The size below which [`back_onto_the_surface`] stops shrinking its box.
+///
+/// `2⁻⁹⁷⁰`. At that size the box reaches `2⁻¹⁰¹⁴`, which is `2⁶¹` times the most
+/// one rounding of a subnormal number can cost, and a round trip is a few dozen
+/// roundings.
+const SMALLEST_SIZE_A_ROUND_TRIP_SCALES_FROM: f64 = f64::MIN_POSITIVE / f64::EPSILON;
+
+/// The largest of the numbers a curved surface is placed and sized with, which
+/// is what [`Surface::ROUND_TRIP_ROUNDOFF`] is stated against together with
+/// the point. The same list
+/// `rcad-geom/tests/a_round_trip_through_a_surfaces_own_two_coordinates.rs`
+/// measures the bound against. `None` for a plane, which is never put back
+/// onto itself here.
+fn the_largest_number_placing(surface: &Surface) -> Option<f64> {
+    match surface {
+        Surface::Sphere(ball) => Some(
+            ball.centre()
+                .largest_coordinate_magnitude()
+                .max(ball.radius()),
+        ),
+        Surface::Cylinder(pipe) => Some(
+            pipe.axis()
+                .origin()
+                .largest_coordinate_magnitude()
+                .max(pipe.radius()),
+        ),
+        Surface::Cone(cone) => Some(cone.apex().largest_coordinate_magnitude().max(cone.slope())),
+        Surface::Torus(ring) => Some(
+            ring.centre()
+                .largest_coordinate_magnitude()
+                .max(ring.ring_radius() + ring.tube_radius()),
+        ),
+        Surface::Plane(_) | _ => None,
+    }
 }
 
 /// Halfway between two points, which is exact whenever both ends are.
