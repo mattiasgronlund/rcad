@@ -188,6 +188,10 @@ in the throwaway tree):
 - `a_bend_built_the_kernels_way_validates_and_puts_a_point_past_its_cap_inside`
   — asserts both points past a cap `Inside`, which is wrong; with step 1 alone
   it panics in `rings::a_quarter_bend`, and with step 2 it is the standard's
-  bend and moves to `Outside`.
+  bend and moves to `Outside`. **Q102 landed after this section and moved it
+  already**, to 329.3's third row: every point as the shape says, both past a
+  cap `Outside`. It is now
+  `a_bend_built_the_kernels_way_validates_and_places_every_point_as_the_shape_does`,
+  right because two turns cancel, and it moves again with step 3.
 - `three_relays_in_the_corpus_are_refused_by_the_mesh_today` — moves to
   "imports".

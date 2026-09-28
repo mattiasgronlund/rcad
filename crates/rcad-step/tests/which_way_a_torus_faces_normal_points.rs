@@ -28,24 +28,26 @@
 //!
 //! # What this kernel says today, and which pin moves
 //!
-//! `Model::validate`'s closed-edge rule, `classify_point` and the file reader
-//! all take a torus's own normal **out of the tube**. The mesher alone takes it
-//! **into** the tube, because `Torus::point_at` puts the tube angle first and
-//! `hand_over` turns a face's triangles by the chart's own `∂first × ∂second`.
-//! So:
+//! `Model::validate`'s closed-edge rule and the file reader take a torus's own
+//! normal **out of the tube**. The mesher takes it **into** the tube, because
+//! `Torus::point_at` puts the tube angle first and `hand_over` turns a face's
+//! triangles by the chart's own `∂first × ∂second`; and since Q102 so does
+//! `classify_point`, whose torus arm Q102 turned round to fit the kernel's
+//! bends. So:
 //!
 //! - the bend written as the standard says passes the closed-edge rule and is
 //!   refused by the mesh, `FacesDoNotAgreeWhichWayTheyFace`, and so are three
 //!   KiCad relays in the corpus;
 //! - the bend built the kernel's way passes the mesh, because its wall is
 //!   turned round, and passes the closed-edge rule, because its loops are
-//!   turned round too; it measures `2π²`, and `classify_point` puts a point
-//!   past either cap **inside** it.
+//!   turned round too; it measures `2π²`, and `classify_point`, turned round
+//!   the same way, places every point as the shape does.
 //!
-//! When `mesh.rs` turns a torus face's triangles against its chart, the pins
-//! marked *today* in the first and last tests move to what the shape says, and
-//! the kernel-built bend is refused until `tests/rings/mod.rs` builds it the
-//! standard way — at which point the middle test's wrong placements move too.
+//! When `mesh.rs` turns a torus face's triangles against its chart,
+//! `classify.rs`'s torus arm is turned back, and `tests/rings/mod.rs` builds
+//! its bends the standard way — one change, since no part of it lands alone —
+//! the pins marked *today* in the first and last tests move to what the shape
+//! says, and the middle test's file written the kernel's way is refused.
 //! §329.5 lists the rows.
 
 mod written_by_hand;
@@ -66,9 +68,11 @@ use written_by_hand::a_header;
 ///
 /// **Today's pin, and the one a fix to `mesh.rs` moves.** What the shape says
 /// is that it validates, encloses `2π²`, and places every point in [`POINTS`]
-/// as listed there. With the mesher turning a torus face's
-/// triangles against its chart, this very file validates, measures `19.706`
-/// give or take `0.392`, and places all eight exact points right (§329.3).
+/// as listed there. With the mesher turning a torus face's triangles against
+/// its chart and `classify.rs`'s torus arm turned back from Q102's, this very
+/// file validates, measures `19.706` give or take `0.392`, and places all eight
+/// exact points right (§329.3's second row); with Q102's arm kept, it places
+/// the two past a cap inside (the fourth row).
 #[test]
 fn a_bend_written_as_the_standard_says_is_refused_by_the_mesh_today() {
     let text = a_quarter_bend_written(Written::AsTheStandardSays);
@@ -84,15 +88,16 @@ fn a_bend_written_as_the_standard_says_is_refused_by_the_mesh_today() {
 }
 
 /// The bend built the way this kernel builds one, and the same bend written as
-/// a file the kernel's way, validate and enclose `2π²` — and put a point past
-/// either cap inside.
+/// a file the kernel's way, validate, enclose `2π²`, and place every point as
+/// the shape does.
 ///
-/// **The two placements past the caps are today's pins and are wrong.** A ray
-/// from `(−1, 3.5, 0)` goes in through the cap on `x = 0` and out through the
-/// wall; the cap counts `−1` and the turned-round wall counts its leaving
-/// `−1`, and `−2` is read as inside. Everything else here matches the shape.
+/// **Right because two turns cancel.** The wall is turned round against the
+/// standard, and since Q102 so is `classify.rs`'s torus arm. Before Q102 the
+/// two points past a cap came back inside (§329.3's first row); with it every
+/// point matches the shape (its third row). Undoing either turn alone puts the
+/// two back inside or refuses the bend, so this pin moves with Q346.
 #[test]
-fn a_bend_built_the_kernels_way_validates_and_puts_a_point_past_its_cap_inside() {
+fn a_bend_built_the_kernels_way_validates_and_places_every_point_as_the_shape_does() {
     let policy = Policy::certified();
     let mut built = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let key = rings::a_quarter_bend(&mut built, 4.0, 1.0);
@@ -116,12 +121,7 @@ fn a_bend_built_the_kernels_way_validates_and_puts_a_point_past_its_cap_inside()
         encloses_what_the_shape_does(model, key, spelling);
         for (at, the_shape_says) in POINTS {
             let placed = solid.classify_point(Point::from(at), &policy, &mut ProvenanceLog::new());
-            let today = if at == PAST_THE_FAR_CAP || at == PAST_THE_NEAR_CAP {
-                Containment::Inside
-            } else {
-                the_shape_says
-            };
-            assert_eq!(placed, today, "{at:?} against the bend {spelling}");
+            assert_eq!(placed, the_shape_says, "{at:?} against the bend {spelling}");
         }
     }
 }

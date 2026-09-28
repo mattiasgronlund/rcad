@@ -103,7 +103,10 @@ pub enum Containment {
     /// gives it one — "a corner on the lattice", in that function's own words —
     /// only when the point being classified and the ray built from it both land
     /// on numbers a line can be written out of exactly. Most rays do not, and
-    /// this is what they get instead.
+    /// then an exact point beside the point is fired from instead, once no face
+    /// of the solid is shown to meet the box round both (`docs/decisions.md`
+    /// §323). This is what is left: a point a face meets, or one whose every
+    /// such ray grazes something.
     ///
     /// Deliberately its own answer and not
     /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*
@@ -219,6 +222,11 @@ impl SolidView<'_> {
         for target in ray_targets(low, high) {
             let pass = match self.count_crossings(point, target, policy, log) {
                 Ok(pass) => pass,
+                Err(no_ray @ Containment::CannotFireARayAtAFacesSurface { .. }) => {
+                    return self
+                        .what_a_point_beside_it_says(point, low, high, policy, log)
+                        .unwrap_or(no_ray);
+                }
                 Err(no_ray) => return no_ray,
             };
             if pass.on_boundary {
@@ -236,6 +244,100 @@ impl SolidView<'_> {
         Containment::Undecidable {
             enclosure: worst_enclosure,
         }
+    }
+
+    /// What every point of `point`'s box is, read off one exact point beside
+    /// it, or `None` when that cannot be shown.
+    ///
+    /// **A ring needs its ray's line exact**, and a ray's line is exact only
+    /// where the point is exact *and* so is its step to the target. A box has
+    /// no exact line at all, and most exact points have none either, so a point
+    /// against a solid with a torus face was refused whatever the solid was
+    /// (`docs/decisions.md` §243.5). The answer exists: the point is somewhere,
+    /// and wherever it is it is inside the solid or outside it.
+    ///
+    /// **One point speaks for a box only when no face meets the box.** A box is
+    /// convex, so any two of its points are joined by a segment inside it; a
+    /// segment that crosses no face does not go in or out of the solid, so both
+    /// its ends are inside or both are outside. [`SolidView::no_face_meets`] is
+    /// that proof, made of signs decided about the box — and a sign decided
+    /// about a box holds for every point in it, which is the contract the ray's
+    /// own roots are asked under already.
+    ///
+    /// So for each target an exact point whose step to it is exact is built
+    /// beside the box ([`a_point_an_exact_ray_leaves_for`]), the box is grown
+    /// to take that point in, and if no face meets the grown box the point is
+    /// classified with an ordinary ray: what it gets, every point of the box
+    /// gets. A target whose grown box a face meets, or whose ray grazes
+    /// something, hands over to the next.
+    fn what_a_point_beside_it_says(
+        self,
+        point: PredicatePoint,
+        low: Point,
+        high: Point,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<Containment> {
+        let mut trial = ProvenanceLog::new();
+        for target in ray_targets(low, high) {
+            let Some(beside) = a_point_an_exact_ray_leaves_for(point, target) else {
+                continue;
+            };
+            if !self.no_face_meets(the_box_round_both(point, beside), policy, &mut trial) {
+                continue;
+            }
+            let Ok(pass) = self.count_crossings(beside, target, policy, &mut trial) else {
+                continue;
+            };
+            assert!(
+                !pass.on_boundary,
+                "{beside:?} is in a box round {point:?} that no face of the solid meets, and a \
+                 ray from it says it is on the solid's skin"
+            );
+            if !pass.grazed_something {
+                trial.drain_into(log);
+                return Some(if pass.winding == 0 {
+                    Containment::Outside
+                } else {
+                    Containment::Inside
+                });
+            }
+        }
+        None
+    }
+
+    /// Whether no face of this solid holds any point of `point`'s box.
+    ///
+    /// A face is kept clear of the box by the same description the ray counts
+    /// it by. A flat face with straight sides is its fanned triangles, so the
+    /// box has to be off the plane through every one of them. Every other face
+    /// is the part of its surface it holds, so the box has to be off the
+    /// surface, or the face has to hold none of the box.
+    fn no_face_meets(
+        self,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        self.faces().all(|face| {
+            if face.surface().as_plane().is_some() && every_side_of_it_is_straight(face) {
+                let mut clear = true;
+                face.for_each_triangle(|[a, b, c]| {
+                    clear &= matches!(
+                        decide(a, b, c, point, policy, log),
+                        Decision::Pos | Decision::Neg
+                    );
+                });
+                return clear;
+            }
+            match side_of_surface(&face.surface(), point) {
+                Decision::Pos | Decision::Neg => true,
+                Decision::Zero | Decision::Undecidable { .. } | _ => matches!(
+                    self.what_this_face_holds(face, point, policy, log),
+                    Ok(OnAFace::NotHeld)
+                ),
+            }
+        })
     }
 
     /// One ray's tally, or which face's trimming stopped it being counted.
@@ -506,6 +608,47 @@ fn ray_targets(low: Point, high: Point) -> [Point; 3] {
     ]
 }
 
+/// A point with exact coordinates, next to the middle of `point`'s box, whose
+/// step to `target` is exact too — or `None` when the one this builds is not.
+///
+/// **The step is rounded first and the point is read back off it**: `d` is the
+/// step from the box's middle `m` to the target `t`, rounded, and the point is
+/// `t − d`. Where `|t| ≥ |m|` that subtraction is exact (Dekker's), so the step
+/// from the point to the target is `d` itself, and the point is within half an
+/// ulp of `d` of the middle. The step is checked rather than trusted, because a
+/// middle further out than the target need not give one.
+fn a_point_an_exact_ray_leaves_for(point: PredicatePoint, target: Point) -> Option<PredicatePoint> {
+    let enclosure = point.enclosure();
+    let target = target.coordinates();
+    let mut beside = [0.0; 3];
+    for axis in 0..3 {
+        let span = enclosure[axis];
+        let middle = span.lo() + (span.hi() - span.lo()) / 2.0;
+        let there = target[axis] - (target[axis] - middle);
+        let step = Interval::exactly(target[axis]) - Interval::exactly(there);
+        if !there.is_finite() || step.lo() != step.hi() {
+            return None;
+        }
+        beside[axis] = there;
+    }
+    Some(PredicatePoint::from(beside))
+}
+
+/// The smallest box holding both `point`'s box and `beside`.
+///
+/// Both have finite ends by the time this is asked: a box with an infinite end
+/// has no finite middle, and [`a_point_an_exact_ray_leaves_for`] turns it away.
+fn the_box_round_both(point: PredicatePoint, beside: PredicatePoint) -> PredicatePoint {
+    let [one, other] = [point.enclosure(), beside.enclosure()];
+    PredicatePoint::Constructed(core::array::from_fn(|axis| {
+        Interval::new(
+            one[axis].lo().min(other[axis].lo()),
+            one[axis].hi().max(other[axis].hi()),
+        )
+        .expect("two boxes with finite ends span a box")
+    }))
+}
+
 /// What one triangle had to say about the ray.
 enum Hit {
     /// The ray does not pass through this triangle.
@@ -709,11 +852,17 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
             let squared = dot_enclosing(direction, direction);
             core::array::from_fn(|axis| squared * out[axis] - up * direction[axis])
         }
-        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`: the
-        // quartic's own gradient, divided by four so nothing is normalized.
-        // Reached for a corner sitting exactly on the lattice, where
-        // `rcad_geom::where_a_line_meets_a_surface` can answer a torus rather
-        // than refuse it.
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre` is
+        // the quartic's own gradient, divided by four so nothing is normalized,
+        // and it points out of the tube. **This is that turned round**, because
+        // a face's orientation is read against the surface's own normal, and a
+        // ring's points *into* its tube: `Torus::point_at` takes the tube angle
+        // first, and at the outer equator `∂/∂tube × ∂/∂ring` is
+        // `r·w × (R + r)·u`, towards the axis. A bend's wall is stored reversed
+        // for exactly that reason (`tests/rings/mod.rs`). Read the other way, a
+        // ray out of a bend through its wall counted `−1` and one in through a
+        // cap and out through the wall `−2`, which no solid can give
+        // (`docs/decisions.md` §323).
         Surface::Torus(ring) => {
             let direction = exactly(ring.axis().direction().components());
             let out = negated(gap_enclosing(at, ring.centre()));
@@ -723,8 +872,8 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
             let small = Interval::exactly(ring.tube_radius());
             let bulge = dot_enclosing(out, out) - big * big - small * small;
             core::array::from_fn(|axis| {
-                squared * bulge * out[axis]
-                    + Interval::exactly(2.0) * big * big * up * direction[axis]
+                -(squared * bulge * out[axis]
+                    + Interval::exactly(2.0) * big * big * up * direction[axis])
             })
         }
         other => panic!("this crate cannot say which way {other:?} faces"),

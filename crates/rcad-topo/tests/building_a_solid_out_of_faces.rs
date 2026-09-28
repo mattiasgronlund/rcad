@@ -197,14 +197,28 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// (§243): that cap is placed outside the turned bend, which starts an eighth
 /// of a turn further round, and the cap on `x = 0` inside it.
 ///
-/// **Both descriptions now stop on the first bend's wall**, at the piece of it
-/// between `y = 0` and the turned bend's cap: corners `(3, 0, 0)` and where
-/// that cap's circle crosses the outer equator, `(5/√2, 5/√2, 0)`. Every point
-/// selection tries in a curved piece is built from its corners, so it is a
-/// box and not a point, and a ray from a box cannot be put to a torus —
-/// `CannotFireARayAtAFacesSurface` on the turned bend's torus face. Both
-/// descriptions refuse it word for word alike, which is what this half of the
-/// oracle compares.
+/// **Then both descriptions stopped on the first bend's wall**, at the piece
+/// of it between `y = 0` and the turned bend's cap: corners `(3, 0, 0)` and
+/// where that cap's circle crosses the outer equator, `(5/√2, 5/√2, 0)`. Every
+/// point selection tries in a curved piece is built from its corners, so it is
+/// a box and not a point, and a ray from a box could not be put to a torus. A
+/// ray leaves from an exact point beside a box no face meets now (§323), and
+/// the piece is placed.
+///
+/// **Both descriptions now stop writing the answer out**, and refuse it word
+/// for word alike: `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`, the
+/// stop a bend and a bit-for-bit copy of itself reach too. The answer exists —
+/// the first bend from `y = 0` to the turned bend's first cap, an eighth of the
+/// ring, `π²` by Pappus — so this is a gap, and when it closes this half of the
+/// oracle becomes `the_same_numbers`.
+///
+/// **Every place asked about here is answered from the shape**, not from what
+/// the kernel says. The turned bend runs from `45°` round the ring to `135°`.
+/// The middle of the end cap on `y = 0`, `(4, 0, 0)`, is at `0°`: outside. The
+/// blend of the wall piece's two corners, `((3 + 5/√2)/2, 5/(2√2), 0)`, is
+/// `3.72` from the axis, so in the tube, but only `28°` round the ring, short
+/// of the turned bend's first cap: outside too. `5/√2` goes in as a range
+/// checked to hold it by squaring its ends.
 #[test]
 fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     let policy = Policy::certified();
@@ -255,31 +269,15 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
         refused_fusing_a_third_solid(&model, built, &a_turned_bend_of_the_same_ring_and_tube);
     let refusal_of_rebuilt =
         refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
-    let Error::Undecidable { records } = &refusal_of_built else {
-        panic!("expected the piece of the wall not to be placed, got {refusal_of_built:?}");
-    };
-    let record = records.records().last().expect("a refusal names why");
-    assert_eq!(
-        record.predicate(),
-        "a point in a piece that every solid could place",
-        "{refusal_of_built:?}"
+    assert!(
+        matches!(
+            refusal_of_built,
+            Error::TheFuseWroteABrokenAnswer {
+                broken: Invalid::CoedgesRunTheSameWay
+            }
+        ),
+        "expected the eighth of the bend to be refused writing it out, got {refusal_of_built:?}"
     );
-    let [near, far] = record.inputs() else {
-        panic!("the piece of the wall has two corners: {refusal_of_built:?}");
-    };
-    assert_eq!(
-        near.enclosure().map(|axis| [axis.lo(), axis.hi()]),
-        [[3.0, 3.0], [0.0, 0.0], [0.0, 0.0]],
-        "the near corner of the first bend's wall: {refusal_of_built:?}"
-    );
-    let on_the_outer_equator = 5.0 * core::f64::consts::FRAC_1_SQRT_2;
-    let where_it_should_be = [on_the_outer_equator, on_the_outer_equator, 0.0];
-    for (axis, should) in far.enclosure().iter().zip(where_it_should_be) {
-        assert!(
-            axis.lo() <= should && should <= axis.hi(),
-            "the turned cap's circle crosses the outer equator at (5/√2, 5/√2, 0): {far:?}"
-        );
-    }
     assert_eq!(
         format!("{refusal_of_built}"),
         format!("{refusal_of_rebuilt}"),
@@ -299,23 +297,35 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
         Containment::Outside,
         "the middle of the end cap on y = 0 is an eighth of a turn short of the turned bend"
     );
-    let between_the_corners = PredicatePoint::Constructed(core::array::from_fn(|axis| {
-        (near.enclosure()[axis] + far.enclosure()[axis]) * Interval::exactly(0.5)
-    }));
+    let on_the_outer_equator = five_over_the_root_of_two();
+    let between_the_corners = PredicatePoint::Constructed([
+        (Interval::exactly(3.0) + on_the_outer_equator) * Interval::exactly(0.5),
+        on_the_outer_equator * Interval::exactly(0.5),
+        Interval::exactly(0.0),
+    ]);
     let placed =
         turned.classify_uncertain_point(between_the_corners, &policy, &mut ProvenanceLog::new());
-    let Containment::CannotFireARayAtAFacesSurface { face } = placed else {
-        panic!("a ray from a blend of the wall piece's corners: {placed:?}");
-    };
-    let surface = turned
-        .faces()
-        .find(|each| each.key() == face)
-        .expect("the ray names a face of the solid it was fired at")
-        .surface();
-    assert!(
-        matches!(surface, Surface::Torus(_)),
-        "the face the ray cannot be fired at: {surface:?}"
+    assert_eq!(
+        placed,
+        Containment::Outside,
+        "the blend of the wall piece's corners is 28° round the ring, and the turned bend starts \
+         at 45°"
     );
+}
+
+/// `5/√2`, where the turned bend's first cap crosses the outer equator, as a
+/// range shown to hold it: `2x²` comes to no more than `25` at its low end and
+/// no less at its high end.
+fn five_over_the_root_of_two() -> Interval {
+    let range = Interval::around(5.0 * core::f64::consts::FRAC_1_SQRT_2, 16.0 * f64::EPSILON)
+        .expect("a finite place");
+    let twice_the_square =
+        |end: f64| Interval::exactly(2.0) * Interval::exactly(end) * Interval::exactly(end);
+    assert!(
+        twice_the_square(range.lo()).hi() <= 25.0 && 25.0 <= twice_the_square(range.hi()).lo(),
+        "{range:?} does not hold 5/√2"
+    );
+    range
 }
 
 /// A quarter bend written out where it sits after half a turn round its own
