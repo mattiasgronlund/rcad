@@ -2309,7 +2309,9 @@ mod tests {
         assert!(
             matches!(
                 Model::from_parts(model.data().clone()).check_shape_is_possible(),
-                Err(Error::Invalid(Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells))
+                Err(Error::Invalid(
+                    Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells
+                ))
             ),
             "the door's own check names the cut"
         );

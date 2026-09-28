@@ -164,7 +164,11 @@ fn with_the_faces_shared_out(bytes: &[u8], groups: &[&[usize]]) -> Vec<u8> {
     let solids_len = 1 + 2 + 1 + 1 + ONE_USE + 1;
     let (head, tail) = bytes.split_at(bytes.len() - shells_len - solids_len);
     let (shells, solids) = tail.split_at(shells_len);
-    assert_eq!(&shells[..5], &[2, 0, 0, 1, faces as u8], "one shell of every face");
+    assert_eq!(
+        &shells[..5],
+        &[2, 0, 0, 1, faces as u8],
+        "one shell of every face"
+    );
     assert_eq!(shells[shells_len - 1], 1, "the shell's version");
     let face_uses: Vec<&[u8]> = (0..faces)
         .map(|at| &shells[5 + at * ONE_USE..5 + (at + 1) * ONE_USE])

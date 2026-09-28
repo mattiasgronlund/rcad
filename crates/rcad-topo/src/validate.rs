@@ -3782,7 +3782,9 @@ mod tests {
                 assert!(
                     matches!(
                         model.check_shape_is_possible(),
-                        Err(Error::Invalid(Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells))
+                        Err(Error::Invalid(
+                            Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells
+                        ))
                     ),
                     "the door let {first:?} of {faces} faces in"
                 );
