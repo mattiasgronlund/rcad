@@ -19,10 +19,12 @@
 //!
 //! The edge runs along `z` rather than §244.2's `x` for the ball's sake. A ball
 //! here is one face whose seam is the half of `y = 0` with `x ≥ 0`, and an edge
-//! along `x` grazes it at `x = 0`, on the plane that seam is picked out by, and
-//! an `orient3d` against that plane refuses on the kept meet whether or not the
-//! other one is folded into it (§248.3). An edge along `z` at `x = −1` grazes it
-//! at the equator, a whole unit from the seam.
+//! along `x` grazes it at `x = 0`, on the plane that seam is picked out by,
+//! where `Arrangement::turns_anticlockwise` refuses on the kept meet whether or
+//! not the other one is folded into it (§248.3, §317.1). An edge along `z` at
+//! `x = −1` grazes it at the equator, a whole unit from the seam, and is kept
+//! because order along a crossing refuses first there, before that turn is ever
+//! asked (§317.5).
 //!
 //! At `h = 0` both places are exact, `z = ±2⁻⁵¹`, and their boxes do not
 //! touch. At `h = 16` the last place of `16` is `2⁻⁴⁸` wide, so neither place is
