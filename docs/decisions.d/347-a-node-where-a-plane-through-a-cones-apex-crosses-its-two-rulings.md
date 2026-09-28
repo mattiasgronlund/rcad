@@ -212,8 +212,9 @@ saying the fix for this cause is "a point inside each".
 - What each part is for, 347.2: temporary `eprintln!`s in `arrange.rs`, run
   through the same file and through `a_frustum_cut_in_half_down_its_axis`,
   all removed.
-- The suite: `mise exec -- just t -p rcad-topo --no-fail-fast` after the last
-  change, `1133 tests run: 1130 passed, 3 failed` — the two pins here, before
-  they were moved, and the frustum floor of 347.4.
+- The suite: `mise exec -- just t --workspace --no-fail-fast` on the branch's
+  last code, `2695 tests run: 2694 passed (1 slow), 1 failed, 11 skipped`. The
+  one is the frustum floor of 347.4. `mise exec -- just gate quiet` fails on
+  that same test and on nothing before it.
 - By hand: `64π/3 = 67.0206`, `511π/24 = 66.8894`, `513π/24 = 67.1512`,
   `648 − 511π/24 = 581.1106`, `56π/3 = 58.6431` (the last from `python3 -c`).
