@@ -296,7 +296,6 @@ fn the_side_of_the_cut_this_face_is_on(
     let walked = match coedge.orientation_on_its_edge() {
         Orientation::Forward => rim.stored_way,
         Orientation::Reversed => -rim.stored_way,
-        other => panic!("{what}: a coedge turned {other:?}"),
     };
     let left = (rim.corner - rim.centre).cross(walked);
     let side = left.dot(rim.cut.normal());
