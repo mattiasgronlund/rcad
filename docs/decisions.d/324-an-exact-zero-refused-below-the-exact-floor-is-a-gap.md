@@ -105,3 +105,50 @@ open, not ruled out.
 - `a_determinant_whose_products_fall_off_the_bottom_of_the_range_is_not_certified`
   still refuses. Both exponents scale its `2^1000` coordinate down, and both
   push `2^-538` out of the normal range. Its doc now names both exponents.
+
+### 324.6 Eight pins outside `rcad-predicates` that this falsifies
+
+`just t --workspace --no-fail-fast` on this lane's tip: 2590 tests run, 2582
+passed, 8 failed. None of the eight is in this lane's write set, so none is
+edited here. Each one pinned a refusal that §324 shows was a gap.
+
+**Seven use one shape, the square with a spike at `1e-150`.** That shape is
+`a_square_with_a_spike_f64_cannot_place` in `when_it_cannot_tell.rs`, and the
+same seven corners appear in `what_the_facade_calls_a_failure.rs` and in
+`whether_a_tolerant_policy_buys_anything_a_certified_one_does_not.rs`. Its doc
+says level 3 declines because `1e-150 * 1e-150` is below the exact floor. True,
+but the largest coordinate is `1`. The second exponent multiplies all of them
+by `2^509`, the spike comes up to about `2^11`, and level 3 runs. Measured on
+this tip: the certified `ProfileBuilder::build` returns the profile with
+`approximation: None` and an empty log, and so does the tolerant one. Extruded,
+it is refused by `Model::validate` with `DynamicRangeTooWide { ratio:
+3.162277660168379e149 }`, which is §3.5's check. That is a different refusal,
+and a deliberate one. The failing tests:
+
+- `rcad::what_the_facade_calls_a_failure::a_tolerant_build_hands_back_both_the_shape_and_what_it_cost`
+- `rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not::a_shape_whose_corners_f64_cannot_place`
+- `rcad-topo::when_it_cannot_tell`:
+  `a_corner_f64_cannot_place_stops_a_certified_build`,
+  `a_tolerant_policy_with_too_small_a_budget_still_refuses`,
+  `a_tolerant_policy_says_in_the_log_what_it_had_to_approximate`,
+  `extruding_an_approximated_profile_twice_does_not_inflate_the_slop`,
+  `slop_a_tolerant_profile_carried_lands_on_the_solid_built_from_it`
+
+These tests need a spike that is a real limit. Level 3 needs `tiny²` above
+the floor of `2^-969` and `far²` below the top, about `2^1020`, *after the
+same scaling*. So the spread `far / tiny` has to exceed about `2^994`, a
+factor of about `1e299`. The spike at `1e-150` under a unit square is only
+`2^498`. A shape that is past `2^994` is also near the edge of `f64` itself,
+so it has to be measured before it is written down (§16.10), not taken from
+this paragraph. `orient2d.rs`'s `no_power_of_two_at_all_rescues_that_spread`
+shows how to measure it: try every exponent.
+
+**The eighth is `rcad-topo::fusing_solids::a_fuse_that_needs_a_decision_nothing_can_prove_refuses`**:
+two towers `1e308` tall. The certified fuse still refuses `Undecidable`. But
+its `orient3d`, whose products used to overflow, is now decided: the second
+exponent takes `1e308` down to `2^338`, where the first exponent had pushed
+the `0.5` corners out of range. The record that is left is a different
+predicate, `"a point inside a piece of a face"`, at `Level::Interval` with an
+infinite enclosure, on `(0.5, −0, 1e308)`, `(1, −0, 1e308)`,
+`(1, 0.5, 1e308)`, `(0.5, 0.5, 1e308)`. That predicate is in `rcad-topo`'s
+source. This lane did not trace whether it is a limit or a gap.
