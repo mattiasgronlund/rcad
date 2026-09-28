@@ -5,8 +5,11 @@ the job queue grow with about twice the amount of new items as we are able to
 close." And then: "I would expect that most activities on rows would create
 less then one new row so that unless new rows where added from something else
 than an activity on a row, the number of rows should fade out relatively
-fast." This section is the answer, measured on `origin/main` up to 8d72498c
-(21:03 that day).*
+fast." And last: "isn't it on purpose we have to find and fix all these edge
+cases BEFORE we run into customer bugs … how do we differentiate between the
+ones that could potentially be customer issues and the ones which can not
+become customer issues?" This section is the answer, measured on
+`origin/main` up to 8d72498c (21:03 that day); §348.7 answers the last.*
 
 ### 348.1 The numbers
 
@@ -144,10 +147,28 @@ Every path a finding can take ends in the queue:
   of those were a row replaced by a wider copy of itself.
 - Nothing ranks a finding by what it is worth. §13's "no named consumer, no
   build" governs features and exempts correctness gaps, and §16.10 says a gap
-  is fixed, not deferred. In a certified kernel the refusals that have an
-  answer run out only where the inputs do: every scale from 2^-1074 to 1e308,
-  every placement, every family. So every one a lane sees becomes a row it
-  owes.
+  is fixed, not deferred. Nothing bounds the refusals that have an answer:
+  they cover every input an `f64` can spell. So every one a lane sees becomes
+  a row it owes.
+
+Extreme scale is the smaller part of that. Of the 201 open rows at a8473224,
+sorted by what their text names:
+
+| the input the row is about | open rows |
+|---|---|
+| a shape a test or a lane's probe built, at ordinary sizes | 166 |
+| a fuzz find | 15, two of them also extreme scale |
+| an extreme scale: Q325's bar moved by 2^-1007, Q335's towers 1e308 tall, Q301's plane 1.41e308 out, Q336, Q337 | 15 |
+| a real STEP file | 7 |
+
+The bulk is shapes that are nearly degenerate at ordinary sizes: surfaces
+that touch, are tangent or coincide, a plane through a cone's apex, one surface
+written two ways, turned copies a rounding apart. That is the tail every B-rep
+boolean spends years on. OCCT found its tail through users' models: a case
+was fixed when someone's part broke. Here the tail is hunted before a
+customer meets it, and that is the point. What the queue lacks is a test of
+which findings a customer's model could reach at all, so a refusal at 2^-1007
+is owed as much as one on a flush pair of blocks.
 
 And each row is cut small. A lane has about 45 minutes, a strict write set and
 one deliverable. A file it needs but does not own is `out_of_write_set_needs`,
@@ -181,9 +202,33 @@ The change this points at is to §230.7 and `merger.md` step 4. §311.4 set it
 aside for Mattias to decide, so it is written here as a proposal and is not
 adopted:
 
-- **A leftover becomes a row only when it is new kernel work**: a wrong answer,
-  a panic, or a refusal of an input that has an answer. **Or when it is the
-  next step of the row's own problem**: a trace's fix, a replacement.
+- **A leftover becomes a row when a customer's model could reach it, or when
+  it is the next step of the row's own problem** (a trace's fix, a
+  replacement). Which models a customer's could be is already written down,
+  in §3.5 and `crates/rcad-geom/src/scale.rs`. A model has a `Scale`. A length
+  below `RELATIVE_LINEAR_TOLERANCE`, 1e-9 of the nominal size, is nothing. A
+  spread of coordinates past `LARGEST_SUPPORTED_RATIO`, 1e11 times the
+  smallest feature, fails `Policy::certified()`'s dynamic range check. So:
+  - **A wrong answer or a panic is always a row.** Nothing outside the kernel
+    can tell a wrong answer from a right one, and any bytes are a file
+    someone can open.
+  - **A refusal is a row when the shape is inside that envelope.** Any gap
+    smaller than the tolerance must be one that rounding leaves on the
+    model's own coordinates: a turn, a placement, or a STEP file written to
+    11 to 13 digits. That keeps every shape designed tangent, flush or
+    coaxial, and every such shape rounded apart, which is where §191.1 found
+    the KiCad corpus's findings. Inside the envelope, a shape designed that
+    way or read from a file ranks above one only a probe would build.
+  - **A refusal outside the envelope is not a row.** Examples are Q325's bar
+    moved by 2^-1007, where its coordinates round at about 2^-52, and Q335's
+    towers 1e308 tall. No customer's model means such a shape. What the kernel
+    owes there is what it already does: refuse by name, never answer wrongly,
+    never panic. The finding goes into its section with the number that puts
+    it outside, which is the demonstration §16.10 asks for.
+
+  That removes little. About 15 of the 201 open rows are extreme scale, and
+  the rest could be customer issues. The rows that change the rate are the
+  ones below.
 - **A stale claim or a missing test that the lane's own change causes is the
   lane's work**, inside its write set, and not a row for someone else. Its
   brief names the files that pin and document what it changes.
