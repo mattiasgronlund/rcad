@@ -368,3 +368,8 @@ The fix is one `--set gate_log` in `gate-docs`. `check-gate-docs-selftest` now
 reads the log it gave the nested run, and `_gate-summary` prints `tests:
 served, but the record it was served from is gone` instead of printing
 nothing. Both new checks fail without their fix, as the mutants above show.
+
+3. `just gate quiet` on `b2c83780`, the fix merged with `origin/main`, ran
+   every step in **5m50s**, with the load average at 33: `gate: PASS`, 2681
+   tests run, 2681 passed, 11 skipped, and 25 doc tests passed. It recorded
+   `c7091797ee87`. Its log now begins with `check-plugins`' own output.
