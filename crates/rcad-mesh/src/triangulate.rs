@@ -338,9 +338,10 @@ fn the_flush_moved_nothing_the_patch_rests_on(
     handles: &[FixedVertexHandle],
     unflushed: impl Fn(FixedVertexHandle) -> [f64; 2],
 ) -> bool {
-    let every_side_is_there = every_side(domain)
-        .into_iter()
-        .all(|(from, to)| mesh.get_edge_from_neighbors(handles[from], handles[to]).is_some());
+    let every_side_is_there = every_side(domain).into_iter().all(|(from, to)| {
+        mesh.get_edge_from_neighbors(handles[from], handles[to])
+            .is_some()
+    });
     if !every_side_is_there {
         return false;
     }

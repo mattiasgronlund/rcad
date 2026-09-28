@@ -135,7 +135,9 @@ fn a_moved_bar_comes_back_the_same(moved_by: f64, policy: &Policy, log: &mut Pro
         .add_round_bar(2.0, 8.0, &Isometry::identity())
         .expect("a bar of radius two");
     let move_it = Isometry::translation(Vector::new(0.0, moved_by, 0.0)).expect("a move");
-    model.place_solid(bar, &move_it).expect("a bar can be moved");
+    model
+        .place_solid(bar, &move_it)
+        .expect("a bar can be moved");
     model
         .validate(policy, log)
         .unwrap_or_else(|why| panic!("the bar moved by {moved_by:e} is not sound: {why}"));
@@ -173,7 +175,11 @@ fn a_moved_bar_comes_back_the_same(moved_by: f64, policy: &Policy, log: &mut Pro
     let back = came.measure(deflection, policy, log).unwrap_or_else(|why| {
         panic!("the bar moved by {moved_by:e} does not measure after the round trip: {why}")
     });
-    assert_eq!(here.volume(), back.volume(), "volume, moved by {moved_by:e}");
+    assert_eq!(
+        here.volume(),
+        back.volume(),
+        "volume, moved by {moved_by:e}"
+    );
     assert_eq!(
         here.surface_area(),
         back.surface_area(),
