@@ -62,7 +62,10 @@
 //! cleanly and then panicked whichever public method next assumed the shape,
 //! so `Model::check_shape_is_possible` asks the questions that cost no
 //! arithmetic either — a corner is at a point, a face has a wire, a wire
-//! closes, an edge is walked twice the opposite ways round. What *belongs* in
+//! closes, an edge is walked twice the opposite ways round from the one shell.
+//! That last clause is what refuses a skin shared out between two solids,
+//! which read back and then panicked a fuse (`docs/decisions.md` §342). What
+//! *belongs* in
 //! that list is settled: **no [`Policy`](rcad_predicates::Policy), no
 //! arithmetic beyond `is_finite`, and no sweep over pairs**
 //! (`docs/decisions.md` §44.5). Everything that needs a policy or a predicate

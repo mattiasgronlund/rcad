@@ -1175,6 +1175,21 @@ pub enum Invalid {
     #[error("both coedges of an edge run the same way round")]
     CoedgesRunTheSameWay,
 
+    /// An edge is walked once from each of two shells, so neither shell
+    /// closes on its own.
+    ///
+    /// A shell is a closed skin, and along every edge of a closed skin both
+    /// faces meeting there are in it. Counted over the whole model, an edge
+    /// along a cut through a skin still has its two coedges running opposite
+    /// ways, one from each side of the cut. So a cube's six faces shared out
+    /// between two solids passed every other check at the door, and each half
+    /// was then measured, meshed and asked which side a point is on as if it
+    /// were closed. A fuse of a round bar's half panicked looking for the face
+    /// across the cut among the faces of its own half (`docs/decisions.md`
+    /// §342).
+    #[error("an edge is walked once from each of two shells; a shell must close on its own")]
+    AnEdgeIsWalkedOnceFromEachOfTwoShells,
+
     /// A face that sits on a plane is used reversed.
     ///
     /// A plane welds "which surface" to "which way", so a plane that faces the

@@ -392,14 +392,20 @@ impl Model {
     /// [`Model::which_model_this_is`] does not change: this is the same model
     /// with one more solid in it.
     ///
+    /// **Every edge the solid reaches is walked from inside it alone**, so the
+    /// copy's edges are each walked twice. Both coedges of an edge are in one
+    /// shell ([`Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells`]) and a shell
+    /// is in one solid. A file whose skin closes only together with another
+    /// solid's is refused at the door, which
+    /// `a_solid_whose_skin_only_closes_with_another_never_reaches_a_copy`
+    /// shows on the model that used to reach a refusal here
+    /// (`docs/decisions.md` §342).
+    ///
     /// # Errors
     ///
-    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
-    /// [`Invalid::EdgeCoedgeCount`] if an edge of this solid is also walked by
-    /// something outside it — a solid whose skin only closes together with
-    /// another solid's, which a file can hold and which would copy into an
-    /// edge walked once. Both are answered before anything is written, so the
-    /// model is left as it was (`docs/decisions.md` §86).
+    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model,
+    /// answered before anything is written, so the model is left as it was
+    /// (`docs/decisions.md` §86).
     ///
     /// # Panics
     ///
@@ -437,17 +443,6 @@ impl Model {
             .map(|&coedge| self.data.coedges[coedge].edge)
             .collect();
         for &edge in &edges {
-            let walked_by = self.index.coedges_of_edge(edge);
-            let walked_from_inside = walked_by
-                .iter()
-                .filter(|coedge| coedges.binary_search(coedge).is_ok())
-                .count();
-            if walked_from_inside != walked_by.len() {
-                return Err(Invalid::EdgeCoedgeCount {
-                    count: walked_from_inside,
-                }
-                .into());
-            }
             let edge = &self.data.edges[edge];
             vertices.extend([edge.start, edge.end]);
         }
@@ -730,7 +725,11 @@ impl Model {
     }
 
     pub(crate) fn add_shell(&mut self, faces: Vec<FaceUse>) -> ShellSlot {
-        self.data.shells.insert(ShellData { faces })
+        let slot = self.data.shells.insert(ShellData { faces });
+        for used in &self.data.shells[slot].faces {
+            self.index.shell_of_face.insert(used.face, slot);
+        }
+        slot
     }
 
     pub(crate) fn add_solid(&mut self, shells: SmallVec<[ShellUse; 1]>) -> SolidSlot {
@@ -1371,6 +1370,7 @@ pub(crate) struct Index {
     coedges_of_edge: SecondaryMap<EdgeSlot, SmallVec<[CoedgeSlot; 2]>>,
     wire_of_coedge: SecondaryMap<CoedgeSlot, WireSlot>,
     face_of_wire: SecondaryMap<WireSlot, FaceSlot>,
+    shell_of_face: SecondaryMap<FaceSlot, ShellSlot>,
 }
 
 impl Index {
@@ -1390,9 +1390,13 @@ impl Index {
         self.face_of_wire.get(wire).copied()
     }
 
+    pub(crate) fn shell_of_face(&self, face: FaceSlot) -> Option<ShellSlot> {
+        self.shell_of_face.get(face).copied()
+    }
+
     /// The upward links read back off the downward ones.
     ///
-    /// **The two single-valued links assert rather than overwrite, and the
+    /// **The three single-valued links assert rather than overwrite, and the
     /// assert is unconditional.** A wire named by two faces has two candidate
     /// owners and `insert` would keep whichever face was written last, leaving
     /// an index that disagrees with the data it was derived from — a model that
@@ -1407,7 +1411,8 @@ impl Index {
     /// `debug_assert!` would be the wrong half of that rule. The build a user
     /// reads a stranger's file in is the release build, and a check that is
     /// absent exactly there is not a check. The cost is one `Option::is_none`
-    /// per wire and per coedge, beside an insert that already writes a word.
+    /// per coedge, per wire and per face, beside an insert that already writes
+    /// a word.
     fn rebuilt_from(data: &ModelData) -> Self {
         let mut index = Self::default();
         for vertex in data.vertices.keys() {
@@ -1443,6 +1448,15 @@ impl Index {
                 assert!(
                     already.is_none(),
                     "one wire bounds two faces, {already:?} and {slot:?}"
+                );
+            }
+        }
+        for (slot, shell) in &data.shells {
+            for used in &shell.faces {
+                let already = index.shell_of_face.insert(used.face, slot);
+                assert!(
+                    already.is_none(),
+                    "one face is in two shells, {already:?} and {slot:?}"
                 );
             }
         }
@@ -2267,11 +2281,15 @@ mod tests {
 
     /// A cube's six faces split three and three between two solids: each
     /// skin is open, and the edges round the cut are walked once from each
-    /// side. The door lets that in, because every edge in the file still has
-    /// two coedges running opposite ways — so a copy of one half has to refuse
-    /// rather than write an edge walked once and trip its own check.
+    /// side. The door used to let that in, because every edge in the file
+    /// still has two coedges running opposite ways, and a copy of one half
+    /// refused with `EdgeCoedgeCount { count: 1 }` rather than write an edge
+    /// walked once. This is the model that reached that refusal. The door
+    /// refuses its bytes now, so no caller holds a model to copy a half out
+    /// of, and `copy_solid` asks nothing before it writes (`docs/decisions.md`
+    /// §342).
     #[test]
-    fn a_solid_whose_skin_only_closes_with_another_is_refused_a_copy() {
+    fn a_solid_whose_skin_only_closes_with_another_never_reaches_a_copy() {
         let (mut model, cube) = a_cube();
         let shell = model.data().solids[cube.slot_in(model.id())].shells[0].shell;
         let other_half = model.data_mut().shells[shell].faces.split_off(3);
@@ -2282,27 +2300,18 @@ mod tests {
             orient: Orientation::Forward,
         }]);
         let bytes = postcard::to_allocvec(&model).expect("a model writes out");
-        let mut read_back: Model = postcard::from_bytes(&bytes).expect("the door lets it in");
-        let half = read_back
-            .solids()
-            .next()
-            .expect("two halves were written")
-            .key();
-        let counts = counts_of(&read_back);
 
-        let refused = read_back.copy_solid(half);
-
+        assert_eq!(
+            postcard::from_bytes::<Model>(&bytes).err(),
+            Some(postcard::Error::SerdeDeCustom),
+            "the two halves read back"
+        );
         assert!(
             matches!(
-                refused,
-                Err(Error::Invalid(Invalid::EdgeCoedgeCount { count: 1 }))
+                Model::from_parts(model.data().clone()).check_shape_is_possible(),
+                Err(Error::Invalid(Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells))
             ),
-            "expected the copy's edges round the cut to be walked once, got {refused:?}"
-        );
-        assert_eq!(
-            counts_of(&read_back),
-            counts,
-            "a refused copy wrote something"
+            "the door's own check names the cut"
         );
     }
 
