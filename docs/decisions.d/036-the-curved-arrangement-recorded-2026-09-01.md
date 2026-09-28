@@ -79,7 +79,12 @@ in the file and still work; what had to be rewritten around them is what decides
 *which walks bound one region*, which the prediction does not mention and which
 is a third of `arrange.rs`.
 
-### 36.3 Two walks bound one cell exactly when they agree about every closed curve
+### 36.3 Two walks that disagree about a closed curve bound different cells
+
+*Corrected by §340. This heading said "exactly when they agree about every
+closed curve", and the paragraph below said it again. Agreeing is not enough:
+§282 found a frustum's face where it glued two cells into one, and queue row
+Q20 found the same glue making a fuse panic. §340 says what is asked as well.*
 
 This is the new idea and it is worth stating on its own, because it is what
 replaces the ray for everything a ray cannot reach.
@@ -88,8 +93,9 @@ A curve drawn on a face is **drawn in full** when it closes and none of its arcs
 was thrown away. Such a curve cuts the surface into exactly two, so *which side
 of it* is a sign — read off the half-edge where a walk uses it, and off any of
 the walk's own nodes where it does not. Two walks in different lumps of the
-drawing bound the same cell exactly when they agree about every curve drawn in
-full.
+drawing that disagree about a curve drawn in full bound different cells. Two
+that agree about every one may still not share a cell, when a curve that runs
+on for ever is what tells them apart (§340.1).
 
 A curve that runs on for ever is never drawn in full, and that is the load-
 bearing word rather than a caveat: the stretch of a line past its outermost node
