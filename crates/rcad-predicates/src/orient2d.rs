@@ -591,7 +591,10 @@ mod tests {
     /// higher, some of them do, so the constant is the highest that holds.
     #[test]
     fn the_highest_binade_the_retry_lifts_into_overflows_nothing() {
-        assert_eq!(sign_patterns_that_overflow(HIGHEST_BINADE_LEVEL_THREE_TAKES), 0);
+        assert_eq!(
+            sign_patterns_that_overflow(HIGHEST_BINADE_LEVEL_THREE_TAKES),
+            0
+        );
         assert!(sign_patterns_that_overflow(HIGHEST_BINADE_LEVEL_THREE_TAKES + 1) > 0);
     }
 
@@ -611,7 +614,8 @@ mod tests {
                 let level_three = exact_determinant(a, b, c, &mut total);
                 !level_one.value.is_finite()
                     || !level_one.error_bound.is_finite()
-                    || level_three.is_none_or(|length| !total[..length].iter().all(|e| e.is_finite()))
+                    || level_three
+                        .is_none_or(|length| !total[..length].iter().all(|e| e.is_finite()))
             })
             .count()
     }

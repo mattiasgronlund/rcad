@@ -58,7 +58,14 @@ fn every_order_of_four() -> impl Iterator<Item = [usize; 4]> {
 #[test]
 fn three_points_on_a_line_through_the_origin_a_1e_300_step_off_the_x_axis() {
     let points = [[0.0, 0.0], [3.0, 1e-300], [6.0, 2e-300]];
-    for [a, b, c] in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+    for [a, b, c] in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
         assert_eq!(
             orient2d_reporting_level(points[a], points[b], points[c]).0,
             Decision::Zero,

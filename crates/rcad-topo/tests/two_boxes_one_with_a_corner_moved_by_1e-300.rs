@@ -105,7 +105,11 @@ fn a_box(model: &mut Model, corner: Point) -> SolidKey {
                 } else {
                     Orientation::Reversed
                 };
-                DraftStep::Along(builder.add_coedge(edge, way).expect("an edge of this build"))
+                DraftStep::Along(
+                    builder
+                        .add_coedge(edge, way)
+                        .expect("an edge of this build"),
+                )
             })
             .collect();
         let wire = builder.add_wire(&steps).expect("four steps round a square");
