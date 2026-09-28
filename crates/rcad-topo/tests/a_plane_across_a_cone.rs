@@ -21,9 +21,9 @@
 //! [`where_the_axis_crosses_a_leaning_face_is_inside_the_cone_and_outside_the_frustum`].
 //! A ball's inside on a plane is one disk, and the bulge argument leans on that.
 
-use rcad_geom::{Axis, Cone, Isometry, Plane, Point, Scale, Vector};
+use rcad_geom::{Axis, Cone, Deflection, Isometry, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
-use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Model, ProfileBuilder, Rule, SolidKey, WireStepView};
 
 mod cones;
 
@@ -98,27 +98,29 @@ fn a_leaning_block(model: &mut Model) -> SolidKey {
 /// arc's own nappe, and aims a candidate square off the chord at the cone, so
 /// the wall's piece gets a point: outside the frustum, kept in the union.
 ///
-/// **What is refused now is a piece of the frustum's own face**, one step on,
-/// and it is **two pieces glued into one** (§282). The block's low-`x` face
-/// cuts the frustum's face in an arc of the upper branch, from `(3.375, −2.147,
-/// 8)` on the top rim down to `(1.5, 0, 3)` and back up to `(3.375, 2.147, 8)`.
-/// That leaves two pieces: the patch inside the block, between the arc and the
-/// top rim through `(4, 0, 8)`, and the rest, between the bottom rim and the
-/// arc with the far side of the top rim. The piece refused has **three wires**
-/// — the bottom rim; the rim through `(4, 0, 8)` and the arc; the far rim and
-/// the arc again, run the other way — so it holds the arc with the block's
-/// material on one side of it and the outside on the other, and no point is on
-/// both sides of one plane. Every candidate was asked, and each failed exactly
-/// one of the arc's two sides.
+/// **What was refused next was a piece of the frustum's own face**, and it was
+/// **two pieces glued into one** (§282). The block's low-`x` face cuts the
+/// frustum's face in an arc of the upper branch, from `(3.375, −2.147, 8)` on
+/// the top rim down to `(1.5, 0, 3)` and back up to `(3.375, 2.147, 8)`. That
+/// leaves two pieces: the patch inside the block, between the arc and the top
+/// rim through `(4, 0, 8)`, and the rest, between the bottom rim and the arc
+/// with the far side of the top rim. `arrange.rs` joined the bottom rim's upper
+/// walk to both, since it agrees with both about both rims and what tells them
+/// apart is the arc, which runs on past the rim and is never drawn in full.
 ///
-/// **The glue is `arrange.rs`'s `group_the_cycles_into_cells`.** §36.3 joins
-/// two walks in different lumps when they agree about every closed curve. The
-/// bottom rim's upper walk agrees about both rims with the inside patch *and*
-/// with the rest, since what tells those two apart is the arc, which runs on
-/// past the rim and is never drawn in full; so it is joined to both, and they to
-/// each other through it. Selection is right to refuse: a point held for the
-/// glued piece would keep or drop both halves as one, and in the union one half
-/// is dropped and the other kept.
+/// **It answers since the rim is placed by what goes round the axis** (§36.3):
+/// the bottom rim goes round the cone's axis, the patch goes round nothing, and
+/// the rest goes round once, so the rim belongs with the rest. The union keeps
+/// the rest and drops the patch, which is inside the block: one face of cone,
+/// holed by the bottom rim and bounded by the far side of the top rim and the
+/// arc.
+///
+/// **The volume, by hand.** Within the frustum's reach the block is only the
+/// half-space `x ≥ c = 3/8 · (z + 1)`: its other five faces are all further off
+/// than the top rim. So what the two share is, level by level, the segment of
+/// the disc `r = z/2` beyond the chord `x = c`, which is there from `z = 3`,
+/// where `c = r`, up to the top cap: `∫ r² acos(c/r) − c √(r² − c²) dz`. The
+/// frustum is `π/12 · (8³ − 2³) = 42π` and the block `20 · 20 · 40`.
 #[test]
 fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_face() {
     let policy = Policy::certified();
@@ -126,51 +128,74 @@ fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_
     let cone = the_frustum(&mut model);
     let block = a_leaning_block(&mut model);
 
-    let refused = model.fuse(
-        &[block],
-        &[cone],
-        Rule::Union,
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
-    let Err(Error::Undecidable { records }) = refused else {
-        panic!("the union was expected to refuse, and gave {refused:?}");
+    let fused = model
+        .fuse(
+            &[block],
+            &[cone],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("the union refused: {refused:?}"));
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("the union is a sound model");
+    let [united] = fused.solids() else {
+        panic!("one solid: {:?}", fused.solids())
     };
-    let record = records.records().last().expect("a refusal names why");
-    assert_eq!(record.predicate(), "a point inside a piece of a face");
-    let corners = record.inputs();
-    assert_eq!(
-        corners.len(),
-        6,
-        "the piece's corners, wire by wire: {corners:?}"
+    let united = model.solid(*united).expect("a solid the fuse made");
+
+    let mut skins = united
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Cone(_)));
+    let skin = skins
+        .next()
+        .expect("the rest of the frustum's face is kept");
+    assert!(
+        skins.next().is_none(),
+        "the patch inside the block is dropped"
     );
-    let where_they_are: Vec<[i64; 3]> = corners
-        .iter()
-        .map(|corner| {
-            let [x, y, z] = corner.enclosure();
-            assert!(
-                (2.0..=8.0).contains(&z.lo()) && (2.0..=8.0).contains(&z.hi()),
-                "on the frustum's own face, between its caps: {corner:?}"
-            );
-            // On the cone, `x² + y² = (z/2)²`, to a rounding.
-            let across = (x.lo() * x.lo() + y.lo() * y.lo()).sqrt();
-            assert!((across - 0.5 * z.lo()).abs() < 1e-9, "{corner:?}");
-            [x.lo(), y.lo(), z.lo()].map(|along| (along * 1000.0).round() as i64)
+    let mut corners_per_wire: Vec<Vec<[i64; 3]>> = skin
+        .wires()
+        .map(|wire| {
+            wire.steps()
+                .map(|step| {
+                    let WireStepView::Along(coedge) = step else {
+                        panic!("a frustum's face has no pole: {step:?}")
+                    };
+                    coedge
+                        .start()
+                        .point()
+                        .coordinates()
+                        .map(|along| (along * 1000.0).round() as i64)
+                })
+                .collect()
         })
         .collect();
+    corners_per_wire.sort();
     assert_eq!(
-        where_they_are,
+        corners_per_wire,
         [
-            [1000, 0, 2000],
-            [3375, 2147, 8000],
-            [4000, 0, 8000],
-            [3375, -2147, 8000],
-            [3375, -2147, 8000],
-            [3375, 2147, 8000],
+            vec![[1000, 0, 2000]],
+            vec![[3375, -2147, 8000], [3375, 2147, 8000]],
         ],
-        "wire by wire: the bottom rim's seam; the patch inside the block, round the \
-         top rim's seam and back down the arc; and the rest of the top rim, back \
-         along the same arc the other way"
+        "the bottom rim, and the far side of the top rim with the arc"
+    );
+
+    let shared = what_the_leaning_block_and_the_frustum_share();
+    let by_hand = 42.0 * core::f64::consts::PI + 20.0 * 20.0 * 40.0 - shared;
+    let measured = united
+        .measure(
+            Deflection::of(0.002).expect("a positive length"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the union measures");
+    assert!(
+        (measured.volume() - by_hand).abs() <= measured.volume_error() + 1e-9,
+        "the union measures {} against {by_hand} by hand, and the mesh may miss by {}",
+        measured.volume(),
+        measured.volume_error()
     );
 
     let skin = Cone::new(Axis::z(), 0.5).expect("a positive slope");
@@ -185,6 +210,45 @@ fn a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_
         skin.is_cut_in_a_closed_curve_by(&top),
         Some(true),
         "the block's top face leans the other way and cuts an ellipse, which closes"
+    );
+}
+
+/// `∫₃⁸ r² acos(c/r) − c √(r² − c²) dz` with `r = z/2` and `c = 3/8 · (z + 1)`,
+/// by Simpson's rule on twenty thousand panels.
+///
+/// The integrand is smooth on `(3, 8]` and goes to zero like `(z − 3)^{3/2}` at
+/// the bottom, so the rule loses order there; twenty thousand panels still put
+/// it within `1e-9` of itself on forty thousand, which is what
+/// `the_segments_sum_the_same_on_twice_as_many_panels` holds it to.
+fn what_the_leaning_block_and_the_frustum_share() -> f64 {
+    segments_summed_over(20_000)
+}
+
+fn segments_summed_over(panels: usize) -> f64 {
+    let segment = |z: f64| {
+        let (r, c) = (z / 2.0, 0.375 * (z + 1.0));
+        if c >= r {
+            return 0.0;
+        }
+        r * r * (c / r).acos() - c * (r * r - c * c).sqrt()
+    };
+    let (from, to) = (3.0, 8.0);
+    let step = (to - from) / panels as f64;
+    let inner: f64 = (1..panels)
+        .map(|index| {
+            let weight = if index % 2 == 1 { 4.0 } else { 2.0 };
+            weight * segment(from + index as f64 * step)
+        })
+        .sum();
+    (segment(from) + inner + segment(to)) * step / 3.0
+}
+
+#[test]
+fn the_segments_sum_the_same_on_twice_as_many_panels() {
+    let (coarse, fine) = (segments_summed_over(20_000), segments_summed_over(40_000));
+    assert!(
+        (coarse - fine).abs() < 1e-9,
+        "{coarse} on twenty thousand panels and {fine} on forty"
     );
 }
 

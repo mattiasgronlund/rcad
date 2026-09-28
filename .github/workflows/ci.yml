@@ -165,7 +165,10 @@
 # include_str!("../README.md")]` in this workspace, so no prose file is an input
 # to a build. Check that before widening either list — `grep -rn 'include_str!'
 # --include=*.rs crates/` — because the idiom is common and would make a
-# README a compile input overnight.
+# README a compile input overnight. `just gate` makes the same claim on the
+# laptop: `_code-fingerprint` leaves out these two patterns, so a commit that
+# only moves prose is served the green of the code under it (`docs/decisions.md`
+# §337), and `check-gate-verdicts-selftest` fails if the lists here change.
 #
 # A push touching prose *and* source matches neither filter's exclusion and runs
 # **both** arms. That is a deliberate ~1 minute of overlap rather than a third
