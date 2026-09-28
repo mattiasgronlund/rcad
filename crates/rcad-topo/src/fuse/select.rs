@@ -422,6 +422,11 @@ fn the_piece_holds(
         return Some(true);
     }
     let Some(in_plane) = in_plane else {
+        if let Surface::Cone(cone) = &piece.surface
+            && !is_on_the_nappe_the_piece_is_on(piece, cone, point)?
+        {
+            return Some(false);
+        }
         return Some(
             piece
                 .wires
@@ -477,6 +482,58 @@ fn the_piece_holds(
         }
     }
     Some(winding == 1)
+}
+
+/// Whether `point`, taken as being on `cone`, is on the half of it `piece` is
+/// on, or `None` when nothing here can say.
+///
+/// **A cone's surface is both its halves**, meeting at the apex, and a piece
+/// lies on one of them. Its sides do not say which. A pointed cone's face is
+/// trimmed by its cap alone, and the whole of the other half is on the side of
+/// the cap the face keeps, so a point there passes every side of the piece.
+/// [`candidate_points`] makes such points: a step of one radius towards the
+/// apex goes past it wherever the cone is wider than it is tall, and a cone
+/// twice as wide as tall, swallowed by a block, had its face placed by a point
+/// under the apex and every rule refused (`docs/decisions.md` §350).
+///
+/// Which half is read off the piece's corners, as `holds.rs` reads a face's:
+/// the sign of `(corner − apex) · w`. A point at the apex is on both halves, so
+/// it is `None`, and so is one too near the apex's plane to tell.
+fn is_on_the_nappe_the_piece_is_on(
+    piece: &Piece,
+    cone: &Cone,
+    point: PredicatePoint,
+) -> Option<bool> {
+    let mut pieces_half = None;
+    for side in piece.wires.iter().flatten() {
+        // A corner at the apex, or too near its plane to tell, says nothing
+        // about which half the piece is on; its other corners say.
+        let found @ (Decision::Pos | Decision::Neg) =
+            how_far_up_the_axis(cone, side.ends[0].point())
+        else {
+            continue;
+        };
+        if pieces_half.is_some_and(|already| already != found) {
+            return None;
+        }
+        pieces_half = Some(found);
+    }
+    let found @ (Decision::Pos | Decision::Neg) = how_far_up_the_axis(cone, point) else {
+        return None;
+    };
+    Some(found == pieces_half?)
+}
+
+/// Which side of the plane through the apex square to the axis `point` is on:
+/// the sign of `(point − apex) · w`, over the point's box.
+fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
+    let apex = cone.apex().coordinates();
+    let up = cone.axis().direction().components();
+    let at = point.enclosure();
+    (0..3)
+        .map(|axis| (at[axis] - Interval::exactly(apex[axis])) * Interval::exactly(up[axis]))
+        .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
+        .sign()
 }
 
 /// One when `point` is between a curved side of a flat piece and the chord
@@ -1331,6 +1388,17 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
     if let Some(towards) = towards_every_flat_sides_material(piece) {
         candidates.push(PredicatePoint::from(
             (middle + towards * reach).coordinates(),
+        ));
+    }
+    // **A step of one radius towards a cone's apex goes past it** wherever the
+    // cone is wider than it is tall, and lands on the other half of the cone,
+    // which no piece holds (§350). Half way from the corners' middle to the
+    // apex is on the corners' own half, whatever the slope: the corners are on
+    // it, and so is the apex.
+    if let Surface::Cone(cone) = &piece.surface {
+        candidates.push(midway_between(
+            PredicatePoint::from(middle.coordinates()),
+            PredicatePoint::from(cone.apex().coordinates()),
         ));
     }
     candidates
