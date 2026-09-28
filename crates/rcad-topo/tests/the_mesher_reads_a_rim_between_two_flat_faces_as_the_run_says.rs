@@ -187,7 +187,11 @@ struct Rim {
 
 fn the_rim_between_the_halves(model: &Model, ball: SolidKey, what: &str) -> Rim {
     let view = model.solid(ball).expect("this model made the key");
-    assert_eq!(view.faces().count(), 2, "{what}: the ball comes back in two halves");
+    assert_eq!(
+        view.faces().count(),
+        2,
+        "{what}: the ball comes back in two halves"
+    );
     let face = view.faces().next().expect("two faces");
     let Surface::Sphere(skin) = face.surface() else {
         panic!("{what}: a face of the ball is on the ball");
@@ -202,7 +206,10 @@ fn the_rim_between_the_halves(model: &Model, ball: SolidKey, what: &str) -> Rim 
         and: Surface::Plane(cut),
     } = edge.run()
     else {
-        panic!("{what}: the rim names the plane that cut it, and was {:?}", edge.run());
+        panic!(
+            "{what}: the rim names the plane that cut it, and was {:?}",
+            edge.run()
+        );
     };
 
     let corner = edge.start().point();
@@ -293,18 +300,32 @@ fn the_side_of_the_cut_this_face_is_on(
     };
     let left = (rim.corner - rim.centre).cross(walked);
     let side = left.dot(rim.cut.normal());
-    assert_ne!(side, 0.0, "{what}: the wire leaves the corner off the plane");
+    assert_ne!(
+        side, 0.0,
+        "{what}: the wire leaves the corner off the plane"
+    );
     side.signum()
 }
 
 /// How much area the triangles of `face` cover, and how far on its own side of
 /// the cut its worst point is: negative where a point is on the wrong side.
-fn what_this_face_was_meshed_as(mesh: &Mesh, face: FaceView<'_>, rim: &Rim, side: f64) -> (f64, f64) {
+fn what_this_face_was_meshed_as(
+    mesh: &Mesh,
+    face: FaceView<'_>,
+    rim: &Rim,
+    side: f64,
+) -> (f64, f64) {
     let [a, b, c, d] = rim.cut.coefficients();
     let mut area = 0.0;
     let mut worst = f64::INFINITY;
-    for triangle in mesh.triangles().iter().filter(|each| each.face() == face.key()) {
-        let [p, q, r] = triangle.corners().map(|index| mesh.points()[index as usize]);
+    for triangle in mesh
+        .triangles()
+        .iter()
+        .filter(|each| each.face() == face.key())
+    {
+        let [p, q, r] = triangle
+            .corners()
+            .map(|index| mesh.points()[index as usize]);
         area += (q - p).cross(r - p).length() / 2.0;
         for at in [p, q, r] {
             worst = worst.min(side * (a * at.x() + b * at.y() + c * at.z() + d));
