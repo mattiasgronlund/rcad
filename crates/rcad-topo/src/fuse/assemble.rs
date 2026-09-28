@@ -3849,17 +3849,19 @@ mod tests {
         Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Scale, Sphere, Surface,
         SurfaceMeet, Torus,
     };
-    use rcad_predicates::{Policy, ProvenanceLog};
+    use std::collections::BTreeSet;
+
+    use rcad_predicates::{Decision, Policy, ProvenanceLog};
 
     use crate::{DraftStep, Invalid, Rule, SolidBuilder};
 
     use super::super::Scratch;
     use super::super::select::choose;
     use super::{
-        Assembly, Corner, Corners, Edge, Error, Face, Lump, MeetPoint, Model, Point,
-        PredicatePoint, Side, Vector, WhichArc, WireStep, Written, assemble,
+        Assembly, Corner, Corners, Edge, EdgeKey, Error, Face, FaceMeet, Lump, MeetPoint, Model,
+        Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep, Written, assemble,
         names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on,
+        the_half_space_both_ends_are_on, vertices_that_only_start_a_closed_edge,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -4920,5 +4922,209 @@ mod tests {
             shape_of(&busy, &into_busy),
             "the two writes wrote different answers"
         );
+    }
+
+    /// Where a round bar started its cap circle is dropped when all a kept
+    /// piece does there is pass along the circle.
+    ///
+    /// §252's case, on sides built by hand. The next two tests expect the
+    /// vertex kept, so this is the one that shows it is kept for what they
+    /// change and not because nothing is ever dropped.
+    #[test]
+    fn where_a_bar_started_its_cap_circle_is_dropped_when_the_kept_arc_only_passes_it() {
+        let (model, vertex, circle) = a_cap_circle_started_at_five();
+        assert_eq!(
+            vertices_that_only_start_a_closed_edge(
+                &model,
+                [the_arc_through(vertex, &[circle])].iter()
+            ),
+            BTreeSet::from([vertex.slot_in(model.id())]),
+        );
+    }
+
+    /// A vertex the kept sides pass along anything but the one closed edge
+    /// that starts and ends there stays a corner, even where each wire passes
+    /// straight through it.
+    ///
+    /// `vertices_that_only_start_a_closed_edge` reads the input's edges and
+    /// nothing about the geometry, so every row walks the arc of the test
+    /// above and changes only the edges its two halves run along. The halves
+    /// still pass straight through the vertex, so the pairing test lets every
+    /// row through, and each row fails one clause of the first test and no
+    /// other. No fuse in the suites builds any of these, which is why §252.8
+    /// could delete the first test with every suite still passing.
+    #[test]
+    fn a_vertex_passed_along_anything_but_the_closed_edge_that_starts_there_stays_a_corner() {
+        let (mut model, vertex, circle) = a_cap_circle_started_at_five();
+        let id = model.id();
+        let here = vertex.slot_in(id);
+        let elsewhere = model.add_vertex(Point::new(-5.0, 0.0, 0.0));
+        let started_elsewhere = EdgeKey::new(model.add_closed_edge(elsewhere), id);
+        let started_here_too = EdgeKey::new(model.add_closed_edge(here), id);
+        let leaving = EdgeKey::new(model.add_edge(here, elsewhere), id);
+        let arriving = EdgeKey::new(model.add_edge(elsewhere, here), id);
+
+        for (named, wires) in [
+            (
+                "along no input edge, as two rulings cut through a cone's apex would be",
+                vec![the_arc_through(vertex, &[])],
+            ),
+            (
+                "along two input edges at once, as joining two faces on one plane makes",
+                vec![the_arc_through(vertex, &[circle, leaving])],
+            ),
+            (
+                "along two closed edges that both start here, one wire along each",
+                vec![
+                    the_arc_through(vertex, &[circle]),
+                    the_arc_through(vertex, &[started_here_too]),
+                ],
+            ),
+            (
+                "along a closed edge that starts somewhere else",
+                vec![the_arc_through(vertex, &[started_elsewhere])],
+            ),
+            (
+                "along an edge that starts here and ends somewhere else",
+                vec![the_arc_through(vertex, &[leaving])],
+            ),
+            (
+                "along an edge that ends here and starts somewhere else",
+                vec![the_arc_through(vertex, &[arriving])],
+            ),
+        ] {
+            assert_eq!(
+                vertices_that_only_start_a_closed_edge(&model, wires.iter()),
+                BTreeSet::new(),
+                "a vertex passed {named} was dropped"
+            );
+        }
+    }
+
+    /// A side that closes on itself keeps its one corner.
+    ///
+    /// §252.8 found the second test could be deleted with every suite
+    /// passing, because the pairing test keeps the first row's vertex as well:
+    /// a side that is a whole wire on its own is its own next side, and it
+    /// comes back to where it started. The pairing test compares the two ends
+    /// as points, though, and the second test compares the vertices they name.
+    /// The two part where a closed side's two ends are one vertex at two
+    /// roundings, and where a closed side's neighbours run along the same edge
+    /// without ending where it starts. The arrangement builds neither today,
+    /// which is why no suite noticed the second test gone.
+    #[test]
+    fn a_side_that_closes_on_itself_keeps_its_one_corner() {
+        let (model, vertex, circle) = a_cap_circle_started_at_five();
+        let at = |x: f64| MeetPoint::Existing {
+            vertex,
+            point: PredicatePoint::from([x, 0.0, 0.0]),
+        };
+        let round_the_cap = |ends| side([cap(), pipe()], ends, &[circle]);
+        let half_way = MeetPoint::HalfWayRoundAClosedCurve {
+            carried_by: [cap(), pipe()],
+            point: PredicatePoint::from([-5.0, 0.0, 0.0]),
+        };
+
+        for (named, wire) in [
+            (
+                "the whole circle as the wire's one side",
+                vec![round_the_cap([at(5.0), at(5.0)])],
+            ),
+            (
+                "the whole circle with its two ends a rounding apart",
+                vec![round_the_cap([at(5.0), at(5.0_f64.next_up())])],
+            ),
+            (
+                "the whole circle, then round it again in two halves",
+                vec![
+                    round_the_cap([at(5.0), at(5.0)]),
+                    round_the_cap([at(5.0), half_way.clone()]),
+                    round_the_cap([half_way, at(5.0)]),
+                ],
+            ),
+        ] {
+            assert_eq!(
+                vertices_that_only_start_a_closed_edge(&model, [wire].iter()),
+                BTreeSet::new(),
+                "{named} lost its one corner"
+            );
+        }
+    }
+
+    /// A model holding a round bar's cap circle the way `add_round_bar` builds
+    /// it: one closed edge, starting and ending at the vertex `(5, 0, 0)`.
+    fn a_cap_circle_started_at_five() -> (Model, VertexKey, EdgeKey) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let vertex = model.add_vertex(Point::new(5.0, 0.0, 0.0));
+        let circle = model.add_closed_edge(vertex);
+        let id = model.id();
+        (model, VertexKey::new(vertex, id), EdgeKey::new(circle, id))
+    }
+
+    /// The wire of the piece of the cap inside a second bar standing beside
+    /// the first: the arc of the cap circle from `(4, −3, 0)` through `vertex`
+    /// to `(4, 3, 0)`, both halves running along `along`, and a cut back along
+    /// the second bar's pipe.
+    fn the_arc_through(vertex: VertexKey, along: &[EdgeKey]) -> Vec<FaceMeet> {
+        let where_the_pipes_cross = |y: f64, which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [cap(), pipe(), the_other_pipe()],
+            which,
+            point: PredicatePoint::from([4.0, y, 0.0]),
+        };
+        let at_five = MeetPoint::Existing {
+            vertex,
+            point: PredicatePoint::from([5.0, 0.0, 0.0]),
+        };
+        vec![
+            side(
+                [cap(), pipe()],
+                [where_the_pipes_cross(-3.0, 0), at_five.clone()],
+                along,
+            ),
+            side(
+                [cap(), pipe()],
+                [at_five, where_the_pipes_cross(3.0, 1)],
+                along,
+            ),
+            side(
+                [cap(), the_other_pipe()],
+                [
+                    where_the_pipes_cross(3.0, 1),
+                    where_the_pipes_cross(-3.0, 0),
+                ],
+                &[],
+            ),
+        ]
+    }
+
+    fn side(carried_by: [Surface; 2], ends: [MeetPoint; 2], along: &[EdgeKey]) -> FaceMeet {
+        FaceMeet {
+            carried_by,
+            ends,
+            material_side: Decision::Neg,
+            along: along.iter().copied().collect(),
+            approximation: None,
+        }
+    }
+
+    /// The plane `z = 0`, facing out of a bar that stands on it.
+    fn cap() -> Surface {
+        Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                .expect("a normal with length"),
+        )
+    }
+
+    /// The pipe of radius five round the `z` axis.
+    fn pipe() -> Surface {
+        Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe of radius five"))
+    }
+
+    /// The same pipe moved eight along `x`, which crosses the first at
+    /// `(4, ±3, ·)`.
+    fn the_other_pipe() -> Surface {
+        let up = Axis::new(Point::new(8.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length");
+        Surface::Cylinder(Cylinder::new(up, 5.0).expect("a pipe of radius five"))
     }
 }
