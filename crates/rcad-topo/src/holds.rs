@@ -50,12 +50,13 @@
 //! rather than off a corner, because every corner sits on every cut.
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet, intersect,
-    which_two_surfaces_a_run_is_between,
+    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet,
+    WHERE_A_PLANE_AND_A_TORUS_CROSS, intersect, which_two_surfaces_a_run_is_between,
 };
+use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
-    Decision, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog,
-    Record,
+    Decision, Filtered, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy,
+    Predicate, ProvenanceLog, Record,
 };
 
 use crate::classify::decide;
@@ -618,7 +619,8 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 /// the ring's axis or a circle is not in front of the other plane, which is
 /// what the general rule gave every face of this shape.
 /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
-/// cannot, and [`Error::Undecidable`] when a side could not be settled.
+/// cannot, and [`Error::Undecidable`] when a side, or whether a plane holds the
+/// axis, could not be settled.
 fn what_a_ring_face_between_two_planes_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -642,8 +644,13 @@ fn what_a_ring_face_between_two_planes_holds(
         let Some(flat) = cap.as_plane() else {
             panic!("a face this was sent is trimmed by planes only, and this one by {cap:?}");
         };
-        if !holds_the_axis_of(flat, &torus) {
-            return Err(refuse());
+        match how_the_axis_lies_on(flat, &torus) {
+            Decision::Zero => (),
+            Decision::Pos | Decision::Neg => return Err(refuse()),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_the_axis(flat, &torus, enclosure));
+            }
+            other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
         }
         let corner = edge.start().key();
         let at = where_it_is_stored(solid, corner);
@@ -702,20 +709,88 @@ fn what_a_ring_face_between_two_planes_holds(
     held_in_front_of_all(&cuts, point)
 }
 
-/// Whether `flat` holds the whole of `torus`'s axis: its normal square to the
-/// axis direction and the ring's centre on it, both exactly.
+/// Whether the whole of `torus`'s axis lies on `flat`: [`Decision::Zero`] when
+/// it does — the plane's normal square to the axis direction and the ring's
+/// centre on the plane, both exactly — [`Decision::Pos`] or [`Decision::Neg`]
+/// when it does not, and [`Decision::Undecidable`] when neither question says
+/// no and one of them could not say.
 ///
 /// The same two questions [`intersect`] asks before it names the two circles
-/// round the tube, asked here of the numbers as stored. Anything short of
-/// exactly is `false`, and the face is refused rather than read as something
-/// it may not be.
-fn holds_the_axis_of(flat: &Plane, torus: &rcad_geom::Torus) -> bool {
-    let square_to_the_axis = dot(
-        exactly(flat.normal().components()),
-        exactly(torus.axis().direction().components()),
-    );
-    square_to_the_axis.sign() == Decision::Zero
-        && flat.side_of_point(PredicatePoint::from(torus.centre().coordinates())) == Decision::Zero
+/// round the tube, asked of the numbers as stored and settled the same way:
+/// where the enclosure straddles zero, in exact arithmetic. A normal worked out
+/// square to a slanted axis straddles zero every time, whether or not its
+/// rounding left it square, and reading that as "no" refused every bend whose
+/// axis is not along a coordinate axis (`docs/decisions.md` §243.7, §328).
+///
+/// A sign other than zero is the true answer and not a refusal of one: that
+/// plane cuts the ring in a quartic, and [`intersect`] says so too. Which of
+/// the two signs it is says nothing more.
+fn how_the_axis_lies_on(flat: &Plane, torus: &rcad_geom::Torus) -> Decision {
+    let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
+        normal: flat.normal().components(),
+        along: torus.axis().direction().components(),
+    });
+    let centre = flat.side_of_point(PredicatePoint::from(torus.centre().coordinates()));
+    match (leans, centre) {
+        (Decision::Pos | Decision::Neg, _) => leans,
+        (_, Decision::Pos | Decision::Neg) => centre,
+        (Decision::Undecidable { .. }, _) => leans,
+        (_, Decision::Undecidable { .. }) => centre,
+        (Decision::Zero, Decision::Zero) => Decision::Zero,
+        other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// Whether a plane's normal is square to a ring's axis: the sign of the dot of
+/// the two as stored.
+///
+/// A sum of three products of `f64`s, so level 3 settles it exactly — unless
+/// one of those products is not zero and is below `2^-969`, where
+/// [`product_is_exact`] says its rounding can no longer be held. `intersect`
+/// stops at the same place (`docs/decisions.md` §328).
+struct SquareToTheAxis {
+    normal: [f64; 3],
+    along: [f64; 3],
+}
+
+impl Predicate for SquareToTheAxis {
+    fn name(&self) -> &'static str {
+        WHERE_A_PLANE_AND_A_TORUS_CROSS
+    }
+
+    fn on_floats(&self) -> Option<Filtered> {
+        None
+    }
+
+    fn on_intervals(&self) -> Interval {
+        dot(exactly(self.normal), exactly(self.along))
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let mut total = [0.0; 6];
+        let mut used = 0;
+        for axis in 0..3 {
+            let (one, other) = (self.normal[axis], self.along[axis]);
+            if !product_is_exact(one, other) {
+                return None;
+            }
+            let (product, roundoff) = two_product(one, other);
+            let mut sum = [0.0; 6];
+            used = expansion_sum(&total[..used], &[roundoff, product], &mut sum);
+            total = sum;
+        }
+        match expansion_sign(&total[..used]) {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            // The sum overflowed. Exact arithmetic that is not exact has
+            // nothing to offer, so this level cannot run.
+            Decision::Undecidable { .. } => None,
+            other => {
+                panic!("exact arithmetic came back with a decision nothing here knows: {other:?}")
+            }
+        }
+    }
 }
 
 /// Whether `point`, taken as being on `cone`, is on the half of it `face` is on:
@@ -2184,6 +2259,23 @@ fn gave_up_on_a_side(surface: &Surface, point: PredicatePoint, enclosure: f64) -
     )
 }
 
+/// The same, for whether a cap's plane holds a ring's axis, filed under the
+/// question [`intersect`] asks of the same two surfaces.
+fn gave_up_on_the_axis(flat: &Plane, ring: &rcad_geom::Torus, enclosure: f64) -> Error {
+    let mut records = ProvenanceLog::new();
+    records.push(Record::new(
+        WHERE_A_PLANE_AND_A_TORUS_CROSS,
+        &[
+            PredicatePoint::from(flat.origin().coordinates()),
+            PredicatePoint::from(ring.centre().coordinates()),
+        ],
+        Level::Exact,
+        enclosure,
+        Measures::Length,
+    ));
+    Error::Undecidable { records }
+}
+
 /// The same, for an `orient3d` in the outline walk.
 ///
 /// The predicate has already put its own record in the caller's log on the way
@@ -3352,5 +3444,211 @@ mod tests {
                 "{point:?}: {answer:?}"
             );
         }
+    }
+
+    /// A plane through a slanted axis holds it exactly where [`intersect`] cuts
+    /// the ring in two circles, and nowhere else (§243.7, §328).
+    ///
+    /// Ring four and tube one round each of four slanted axes, cut by planes
+    /// through the ring's centre whose normals are worked out square to the
+    /// axis's stored direction `w`. For every one the interval dot of the
+    /// stored normal and axis straddles zero, and for every one but the last
+    /// the exact dot is zero: the normal's two slanted components are two of
+    /// `w`'s swapped and one negated, and rescaling to length one rounds them
+    /// the way it rounded `w`'s. `(w₂, 0, −w₀)` round `(1, 2, 3)` rescales to
+    /// numbers whose products do not cancel, so that plane really does lean
+    /// off the stored axis, and cuts the ring in a quartic.
+    #[test]
+    fn a_plane_through_a_slanted_axis_holds_it_exactly_where_intersect_names_two_circles() {
+        type Square = fn([f64; 3]) -> [f64; 3];
+        let across: Square = |w| [w[1], -w[0], 0.0];
+        let round_x: Square = |w| [0.0, w[2], -w[1]];
+        let round_y: Square = |w| [w[2], 0.0, -w[0]];
+        let mut wrong = Vec::new();
+        for (along, square, holds) in [
+            ([0.6, 0.8, 0.0], across, Decision::Zero),
+            ([1.0, 1.0, 0.0], across, Decision::Zero),
+            ([0.0, 1.0, 1.0], round_x, Decision::Zero),
+            ([1.0, 2.0, 3.0], across, Decision::Zero),
+            ([1.0, 2.0, 3.0], round_x, Decision::Zero),
+            ([1.0, 2.0, 3.0], round_y, Decision::Neg),
+        ] {
+            let axis = Axis::new(
+                rcad_geom::Point::origin(),
+                Vector::new(along[0], along[1], along[2]),
+            )
+            .expect("a direction with a length");
+            let ring =
+                rcad_geom::Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring");
+            let [x, y, z] = square(axis.direction().components());
+            let flat =
+                Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(x, y, z))
+                    .expect("a normal with a length");
+            let straddles = matches!(
+                SquareToTheAxis {
+                    normal: flat.normal().components(),
+                    along: axis.direction().components(),
+                }
+                .on_intervals()
+                .sign(),
+                Decision::Undecidable { .. }
+            );
+            let lies = how_the_axis_lies_on(&flat, &ring);
+            let crossed = intersect(
+                &Surface::Plane(flat),
+                &Surface::Torus(ring),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let agrees = if holds == Decision::Zero {
+                matches!(&crossed, Ok(SurfaceMeet::Curves(runs)) if runs.len() == 2)
+            } else {
+                matches!(
+                    &crossed,
+                    Err(rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic)
+                )
+            };
+            if !straddles || lies != holds || !agrees {
+                wrong.push(format!(
+                    "axis {along:?}, normal {:?}: straddles {straddles}, lies {lies:?}, \
+                     intersect {crossed:?}",
+                    flat.normal().components()
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// A bend's wall whose cap's plane is not exactly square to the ring's
+    /// slanted axis is still refused, and there "no" is the true answer: that
+    /// plane cuts the stored ring in a quartic, so the cap's circle is not one
+    /// of its crossings (§328).
+    ///
+    /// The near cap is the leaning plane of the test above; the far one is a
+    /// plane that does hold the axis. The corners are where the inner equator
+    /// would cross each plane, to rounding, and nothing reads them before the
+    /// near cap is turned away.
+    #[test]
+    fn a_wall_whose_cap_leans_off_a_slanted_axis_by_its_rounding_is_refused() {
+        let axis = Axis::new(rcad_geom::Point::origin(), Vector::new(1.0, 2.0, 3.0))
+            .expect("a direction with a length");
+        let [w0, w1, w2] = axis.direction().components();
+        let cap_square_to = |[x, y, z]: [f64; 3]| {
+            let plane =
+                Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(x, y, z))
+                    .expect("a normal with a length");
+            let [n0, n1, n2] = plane.normal().components();
+            let corner = [w1 * n2 - w2 * n1, w2 * n0 - w0 * n2, w0 * n1 - w1 * n0].map(|c| 3.0 * c);
+            (
+                plane,
+                rcad_geom::Point::new(corner[0], corner[1], corner[2]),
+            )
+        };
+        let (leaning, near_corner) = cap_square_to([w2, 0.0, -w0]);
+        let (holding, far_corner) = cap_square_to([0.0, w2, -w1]);
+        let ring = rcad_geom::Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring");
+        assert_eq!(how_the_axis_lies_on(&leaning, &ring), Decision::Neg);
+        assert_eq!(how_the_axis_lies_on(&holding, &ring), Decision::Zero);
+        let (model, solid, wall) = a_piece_of_pipe(
+            ring,
+            End {
+                corner: near_corner,
+                cap: leaning,
+                used: Orientation::Forward,
+            },
+            End {
+                corner: far_corner,
+                cap: holding,
+                used: Orientation::Forward,
+            },
+            None,
+        );
+        let answer = model
+            .solid(solid)
+            .expect("this model made the key")
+            .face_holds_the_point(
+                wall,
+                PredicatePoint::from(near_corner.coordinates()),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+        assert!(
+            matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
+            "{answer:?}"
+        );
+    }
+
+    /// A normal exactly square to the axis through products below `2^-969` is
+    /// refused as undecidable, where the answer is that the plane holds the
+    /// axis: row Q328's family (§328).
+    ///
+    /// The normal is `(−0.8·2^-969, 1, 0.6·2^-969)` and the axis `(0.6, 0,
+    /// 0.8)`, so the dot is `−0.8·0.6·2^-969 + 0.6·0.8·2^-969`, zero exactly.
+    /// Neither product is an `f64`, so the interval straddles, and both are
+    /// below `2^-969`, where [`product_is_exact`] turns them away although
+    /// [`two_product`] holds each exactly: the lowest set bits of each pair of
+    /// factors sit at `2^-1021` and `2^-53`, or `2^-1022` and `2^-52`, and add
+    /// up to `2^-1074`. [`intersect`] refuses the same plane the same way,
+    /// through `Exact::product_of`. When Q328 teaches `rcad-geom` that test,
+    /// [`SquareToTheAxis`] wants it too, and this comes back
+    /// [`Decision::Zero`].
+    ///
+    /// A tiny product that is an `f64` is no trouble: `(−2^-1000, 1, 2^-500)`
+    /// against `(1, 0, 2^-500)` is settled by the interval, which rounds
+    /// nothing, and never reaches the exact level.
+    #[test]
+    fn a_normal_square_to_the_axis_through_products_below_two_to_the_minus_969_is_refused() {
+        let tiny = 2f64.powi(-969);
+        let normal = [-0.8 * tiny, 1.0, 0.6 * tiny];
+        let axis = Axis::new(rcad_geom::Point::origin(), Vector::new(0.6, 0.0, 0.8))
+            .expect("a direction with a length");
+        let flat = Plane::from_point_and_normal(
+            rcad_geom::Point::origin(),
+            Vector::new(normal[0], normal[1], normal[2]),
+        )
+        .expect("a normal with a length");
+        assert_eq!(flat.normal().components(), normal, "stored as written");
+        assert_eq!(
+            axis.direction().components(),
+            [0.6, 0.0, 0.8],
+            "stored as written"
+        );
+        let ring = rcad_geom::Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring");
+        let lies = how_the_axis_lies_on(&flat, &ring);
+        assert!(matches!(lies, Decision::Undecidable { .. }), "{lies:?}");
+        let crossed = intersect(
+            &Surface::Plane(flat),
+            &Surface::Torus(ring),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(crossed, Err(rcad_geom::Error::Undecidable { .. })),
+            "{crossed:?}"
+        );
+
+        let a_tiny_power_of_two = 2f64.powi(-500);
+        let settled = how_the_axis_lies_on(
+            &Plane::from_point_and_normal(
+                rcad_geom::Point::origin(),
+                Vector::new(
+                    -(a_tiny_power_of_two * a_tiny_power_of_two),
+                    1.0,
+                    a_tiny_power_of_two,
+                ),
+            )
+            .expect("a normal with a length"),
+            &rcad_geom::Torus::new(
+                Axis::new(
+                    rcad_geom::Point::origin(),
+                    Vector::new(1.0, 0.0, a_tiny_power_of_two),
+                )
+                .expect("a direction with a length"),
+                4.0,
+                1.0,
+            )
+            .expect("a tube narrower than its ring"),
+        );
+        assert_eq!(settled, Decision::Zero);
     }
 }
