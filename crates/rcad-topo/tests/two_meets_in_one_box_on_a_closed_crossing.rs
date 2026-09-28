@@ -108,7 +108,10 @@ fn every_fuse_refuses_on_the_turn_where_the_two_circles_cross() {
             let mut log = ProvenanceLog::new();
             let fused = model.fuse(&[ball], &[block], rule, &policy, &mut log);
             let Err(Error::Undecidable { records }) = fused else {
-                panic!("{rule:?} {policy:?}: {:?}", fused.map(|_: Fused| "an answer"));
+                panic!(
+                    "{rule:?} {policy:?}: {:?}",
+                    fused.map(|_: Fused| "an answer")
+                );
             };
             let records = records.records().to_vec();
             assert_eq!(records.len(), 1, "{rule:?} {policy:?}: {records:#?}");
@@ -122,7 +125,11 @@ fn every_fuse_refuses_on_the_turn_where_the_two_circles_cross() {
 
 /// Whether a refusal is `orient3d` on a box and the two planes' normals, which
 /// is the turn between the two circles those planes cut on the ball.
-fn is_the_turn_between_the_top_and_the_wall(record: &Record, top: &Surface, wall: &Surface) -> bool {
+fn is_the_turn_between_the_top_and_the_wall(
+    record: &Record,
+    top: &Surface,
+    wall: &Surface,
+) -> bool {
     let normal = |surface: &Surface| {
         let Surface::Plane(flat) = surface else {
             panic!("a plane: {surface:?}");
@@ -153,7 +160,8 @@ fn a_block_with_a_leaning_wall(model: &mut Model) -> SolidKey {
         .add_extrusion(
             &square,
             1.0,
-            &Isometry::translation(Vector::new(0.0, 0.0, FAR + 0.25 - 1.0)).expect("a finite shift"),
+            &Isometry::translation(Vector::new(0.0, 0.0, FAR + 0.25 - 1.0))
+                .expect("a finite shift"),
         )
         .expect("a positive height")
 }
