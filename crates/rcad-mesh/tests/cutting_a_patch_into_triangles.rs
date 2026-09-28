@@ -744,8 +744,8 @@ fn two_corners_the_flush_puts_in_one_place_are_refused() {
 /// the patch that was asked for, so it is meshed.
 ///
 /// The first version of the check asked for the hull to stay convex and
-/// refused this, and that refused 95 of the writer fuzzer's 2026-09-26 files a
-/// bare flush meshes (`docs/decisions.md` §321).
+/// refused this, and with it 95 of the writer fuzzer's 2026-09-26 files that
+/// the check as it stands meshes (`docs/decisions.md` §321.3).
 #[test]
 fn a_corner_flushed_onto_a_straight_side_of_the_hull_is_meshed() {
     check_everything(
