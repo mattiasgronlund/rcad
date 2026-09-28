@@ -17,17 +17,21 @@
 //! cannot be put in order from that box, although the exact answer is a sweep
 //! of `−1.26e-14` and a box one ulp wide decides it. A **gap**.
 //!
-//! **A plane exactly on `z = y` is ordered, and meets another wall.** Built
+//! **A plane exactly on `z = y` is ordered, and all six fuses answer.** Built
 //! face by face so its face is `z = y` to the bit, the meet is `(5, 0, 0)`
-//! exactly, both intersections answer right, and the union and both
-//! differences refuse `ResultIsNotManifold { count: 4 }`: an arc of the cap
-//! circle and an arc of the ellipse join the same two corners on the one wall,
-//! and come out as one edge.
+//! exactly. The union and both differences then keep an arc of the cap circle
+//! and an arc of the ellipse that join the same two corners on the one wall.
+//! Until §330 named such an arc by its plane as well as by the wall, the two
+//! came out as one edge with four faces along it, and those four fuses refused
+//! `ResultIsNotManifold { count: 4 }`. All six are measured now.
 //!
-//! Each assertion's message carries the volume by hand that the refusal stands
-//! in for. The bar is `π·5²·10`. The plane cuts it into a wedge, the part with
-//! `0 ≤ z ≤ y`, whose volume is `∫∫ y dA` over the half disc `y ≥ 0`, which is
-//! `2·5³/3 = 250/3`. The top cap plays no part, because `z ≤ y ≤ 5 < 10`.
+//! Every fuse here has its volume worked out by hand: measured against it where
+//! the fuse answers, and carried in the message where it refuses. The bar is
+//! `π·5²·10`. The plane cuts it into a wedge, the part with `0 ≤ z ≤ y`, whose
+//! volume is `∫∫ y dA` over the half disc `y ≥ 0`, which is `2·5³/3 = 250/3`.
+//! The top cap plays no part, because `z ≤ y ≤ 5 < 10`. The block is a cube
+//! forty on a side, and the prism is the half of one that `z = y` leaves, with
+//! the whole bar inside it.
 
 use std::f64::consts::PI;
 
@@ -43,9 +47,10 @@ const HEIGHT: f64 = 10.0;
 /// their only face near the bar is the leaning one.
 const REACH: f64 = 20.0;
 const THE_WEDGE: f64 = 2.0 * RADIUS * RADIUS * RADIUS / 3.0;
-const A_CUBE_FORTY_ON_A_SIDE: f64 = 64_000.0;
-/// A right triangle with legs of 40, forty long.
-const A_PRISM_UNDER_Z_EQUALS_Y: f64 = 32_000.0;
+const A_CUBE_FORTY_ON_A_SIDE: f64 = (2.0 * REACH) * (2.0 * REACH) * (2.0 * REACH);
+/// A right triangle with legs of 40, forty long: `z = y` through the cube's
+/// middle cuts it in half.
+const A_PRISM_UNDER_Z_EQUALS_Y: f64 = A_CUBE_FORTY_ON_A_SIDE / 2.0;
 
 /// **The six fuses of §252.8, all refused on the order of two points round the
 /// bar's cap circle.**
@@ -108,17 +113,25 @@ fn a_block_turned_to_lean_through_a_bars_rim_start_cannot_order_two_points_round
 /// 100 is `3.55e-18`, against a budget of `64·ε·100 = 1.42e-12`. The policy
 /// reads it as zero, and the meet is folded into the rim start on the cap and
 /// on the wall. The turned face keeps the meet as a corner of its own, so the
-/// faces no longer agree where their edges end.
+/// faces no longer agree where their edges end, and every fuse is refused on an
+/// edge with one face along it.
+///
+/// A print of every edge not claimed by two faces (§330.5) showed that, in all
+/// six: four edges with one face each, the diameter on `z = 0` and the half
+/// ellipse on the wall, each once from the rim start `(5, 0, 0)` for the cap
+/// and the wall and once from the meet `(5, 2.5e-15, 0)` for the turned face,
+/// all to `(−5, 2.5e-15, 0)`. The union with the bar first and the bar less the
+/// block refused `count: 3` before §330, on the cap circle's arc: the ellipse's
+/// arc on the wall ran between the same two corners and got the same name, so
+/// the wall claimed that edge twice. With the plane in the name those are two
+/// edges, the cap's arc claimed by the cap and the wall, and the ellipse's by
+/// the wall alone.
 #[test]
 fn under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner() {
     let (model, bar, block) = a_bar_and(a_block_turned_to_lean_along_z_equals_y);
     let policy = Policy::tolerant(model.scale().nominal_size());
 
-    for ((rule, arguments, tools, by_hand), count) in
-        the_six_fuses(bar, block, A_CUBE_FORTY_ON_A_SIDE)
-            .into_iter()
-            .zip([3, 1, 1, 1, 3, 1])
-    {
+    for (rule, arguments, tools, by_hand) in the_six_fuses(bar, block, A_CUBE_FORTY_ON_A_SIDE) {
         let mut model = model.clone();
         let refused = model.fuse(
             &[arguments],
@@ -128,23 +141,26 @@ fn under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on
             &mut ProvenanceLog::new(),
         );
         assert!(
-            matches!(refused, Err(Error::ResultIsNotManifold { count: got }) if got == count),
-            "{rule:?}: expected Error::ResultIsNotManifold {{ count: {count} }}, which stands in \
-             for one solid of volume {by_hand} (§284); got {refused:?}"
+            matches!(refused, Err(Error::ResultIsNotManifold { count: 1 })),
+            "{rule:?}: expected Error::ResultIsNotManifold {{ count: 1 }}, which stands in for \
+             one solid of volume {by_hand} (§284); got {refused:?}"
         );
     }
 }
 
-/// **A plane exactly on `z = y` puts the two points in order, and two arcs on
-/// the wall then get one name.**
+/// **A plane exactly on `z = y` puts the two points in order, and all six
+/// fuses answer and measure right under both policies.**
 ///
-/// Both policies alike. The meet is the rim start to the bit, so nothing is
-/// left to order. The cap circle and the ellipse both run from `(5, 0, 0)` to
-/// `(−5, 0, 0)` along the wall, and an arc of each comes out as one edge with
-/// four faces along it. The intersections keep only one of those arcs, so they
-/// answer, and right.
+/// The meet is the rim start to the bit, so nothing is left to order. The cap
+/// circle and the ellipse both run from `(5, 0, 0)` to `(−5, 0, 0)` along the
+/// wall, and the union and both differences keep an arc of each. The two arcs
+/// share their corners and their wall, and only their planes, `z = 0` and
+/// `z = y`, tell them apart. Since §330 an arc's name carries its plane, so
+/// they are two edges; before, they were one with four faces along it, and
+/// those four fuses refused `ResultIsNotManifold { count: 4 }`. The
+/// intersections keep only one of the arcs, and answered before too.
 #[test]
-fn a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_get_one_name() {
+fn a_plane_exactly_through_a_bars_rim_start_answers_all_six_fuses_right_under_both_policies() {
     let (model, bar, prism) = a_bar_and(a_prism_under_z_equals_y);
 
     for policy in [
@@ -154,27 +170,22 @@ fn a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_
         for (rule, arguments, tools, by_hand) in the_six_fuses(bar, prism, A_PRISM_UNDER_Z_EQUALS_Y)
         {
             let mut model = model.clone();
-            let fused = model.fuse(
-                &[arguments],
-                &[tools],
-                rule,
-                &policy,
-                &mut ProvenanceLog::new(),
-            );
-            if rule != Rule::Intersection {
-                assert!(
-                    matches!(fused, Err(Error::ResultIsNotManifold { count: 4 })),
-                    "{rule:?}: expected Error::ResultIsNotManifold {{ count: 4 }}, which stands \
-                     in for one solid of volume {by_hand} (§284); got {fused:?}"
-                );
-                continue;
-            }
-            let fused = fused.unwrap_or_else(|refused| panic!("{rule:?}: {refused:?}"));
+            let fused = model
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| {
+                    panic!("{rule:?} is one solid of volume {by_hand}: {refused:?}")
+                });
             model
                 .validate(&policy, &mut ProvenanceLog::new())
                 .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
             let [solid] = fused.solids() else {
-                panic!("{rule:?} is one wedge: {:?}", fused.solids());
+                panic!("{rule:?} is one solid: {:?}", fused.solids());
             };
             let measured = model
                 .solid(*solid)
