@@ -180,7 +180,8 @@ fn exactly_scaled(point: [f64; 2], exponent: i32) -> Option<[f64; 2]> {
 fn a_corner_f64_cannot_place_stops_a_certified_build() {
     let mut log = ProvenanceLog::new();
 
-    let refused = a_square_whose_cut_corner_bends_too_little_for_f64_to_see().build(&Policy::certified(), &mut log);
+    let refused = a_square_whose_cut_corner_bends_too_little_for_f64_to_see()
+        .build(&Policy::certified(), &mut log);
 
     match refused {
         Err(Error::Undecidable { records }) => {
@@ -243,7 +244,8 @@ fn a_tolerant_policy_says_in_the_log_what_it_had_to_approximate() {
 fn a_tolerant_policy_with_too_small_a_budget_still_refuses() {
     let mut log = ProvenanceLog::new();
 
-    let refused = a_square_whose_cut_corner_bends_too_little_for_f64_to_see().build(&Policy::tolerant(1e-6), &mut log);
+    let refused = a_square_whose_cut_corner_bends_too_little_for_f64_to_see()
+        .build(&Policy::tolerant(1e-6), &mut log);
 
     match refused {
         Err(Error::Undecidable { records }) => {
