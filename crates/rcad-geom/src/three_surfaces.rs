@@ -63,12 +63,13 @@ use rcad_predicates::{
 use smallvec::{SmallVec, smallvec};
 
 use crate::enclosure::{quotient_or_everything, root_enclosing};
-use crate::exact::{Exact, Nearly};
+use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two, slid_exactly};
 use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
 use crate::plane::which_side_of_a_flat_surface;
 use crate::real_roots::where_a_polynomial_is_zero;
 use crate::{
-    Cone, Cylinder, Error, Plane, PlaneAgreement, Result, Sphere, Surface, SurfaceMeet, Torus,
+    Cone, Cylinder, Error, Plane, PlaneAgreement, Point, Result, Sphere, Surface, SurfaceMeet,
+    Torus,
 };
 
 /// The name the three-surface meet goes by in provenance records.
@@ -115,13 +116,47 @@ pub enum MeetOfThree {
 ///
 /// [`Error::Undecidable`] when a sign the answer depends on could not be
 /// settled, or when a product the exact arithmetic needs falls out of `f64`'s
-/// range. Both carry the records.
+/// range, both where the three stand and slid into the middle of the range.
+/// Both carry the records of where they stand.
 ///
 /// [`Error::Predicate`] wrapping
 /// [`PlanesDoNotMeetInAPoint`](rcad_predicates::Error::PlanesDoNotMeetInAPoint)
 /// when three planes do meet at one point and neither route below can put a box
 /// round it.
+///
+/// # Three surfaces written far down the range are slid up it first
+///
+/// Three surfaces about `1e-159` across multiply out to terms near `1e-318`,
+/// where every product loses bits, and what is kept of them is too loose to
+/// place a corner by (`Nearly::is_within_a_rounding`, `docs/decisions.md`
+/// §322.4). The same three multiplied by a power of two are the same geometry at
+/// another size, and multiplying by a power of two is exact while every number
+/// stays normal. So a refusal where they stand is asked again of the triple slid
+/// until its lengths sit either side of one, and a corner found there is slid
+/// back. §349 says what the slide does to each kind of surface and where it
+/// cannot go.
 pub fn meet_of_three_surfaces(
+    surfaces: [&Surface; 3],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let mut records = ProvenanceLog::new();
+    let refused = match the_meet_where_they_stand(surfaces, policy, &mut records) {
+        Err(refused @ Error::Undecidable { .. }) => refused,
+        answered => {
+            records.drain_into(log);
+            return answered;
+        }
+    };
+    if let Some(answer) = the_meet_slid_into_range(surfaces) {
+        return Ok(answer);
+    }
+    records.drain_into(log);
+    Err(refused)
+}
+
+/// Where three surfaces meet, worked out at the size they are written.
+fn the_meet_where_they_stand(
     surfaces: [&Surface; 3],
     policy: &Policy,
     log: &mut ProvenanceLog,
@@ -158,6 +193,173 @@ pub fn meet_of_three_surfaces(
         log,
         || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, &at),
     )
+}
+
+/// The meet of the same three surfaces slid along the range by a power of two,
+/// slid back — or `None` where no slide moves anything, the slide is not
+/// exact, or the slid triple refuses too.
+///
+/// **The slide centres the binades the lengths span on one**, rather than
+/// bringing the largest to one. What runs out is a product of two small
+/// lengths falling off the bottom or of two large ones running off the top,
+/// and centring leaves the two ends the same room. For a triple of one size
+/// the two choices are the same slide. For one whose places sit `2¹²` out and
+/// whose ball is `2⁻⁶⁰⁰` across they are not: the largest brought to one leaves
+/// the radius squared at `2⁻¹²²⁴`, and centred it is `2⁻⁶¹²`. Measured on the
+/// `somewhere else` row of
+/// `every_point_where_three_surfaces_meet_is_on_all_three_of_them.rs`: 180 of
+/// 2051 triples refused with no slide, 52 with the largest brought to one, and
+/// none centred — every one of the 52 a place moved out by `2^shift`.
+///
+/// **Asked under a certified policy whatever the caller's was**, because a
+/// tolerant budget is a length at the size the caller wrote, and at another
+/// size it would be a different budget. Refusing is the conservative half of
+/// that: a tolerant policy only accepts more, so what this refuses is an answer
+/// not given, never one given wrongly. And a certified answer logs nothing,
+/// which is the truth about it.
+fn the_meet_slid_into_range(surfaces: [&Surface; 3]) -> Option<MeetOfThree> {
+    let binades: SmallVec<[i32; 15]> = surfaces
+        .iter()
+        .flat_map(|surface| the_lengths_of(surface))
+        .filter(|length| *length != 0.0)
+        .map(binary_exponent)
+        .collect();
+    let (Some(lowest), Some(highest)) = (binades.iter().min(), binades.iter().max()) else {
+        return None;
+    };
+    let up = -(lowest + highest) / 2;
+    if up == 0 {
+        return None;
+    }
+    let [first, second, third] = surfaces.map(|surface| the_same_surface_slid_by(surface, up));
+    let (first, second, third) = (first?, second?, third?);
+    match the_meet_where_they_stand(
+        [&first, &second, &third],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .ok()?
+    {
+        MeetOfThree::At(points) => {
+            let back: SmallVec<[PredicatePoint; 2]> = points
+                .iter()
+                .map(|point| the_point_slid_back(*point, -up))
+                .collect();
+            back.iter()
+                .all(|point| point.uncertainty().is_finite())
+                .then_some(MeetOfThree::At(back))
+        }
+        MeetOfThree::Nowhere => Some(MeetOfThree::Nowhere),
+        MeetOfThree::MoreThanAPoint => Some(MeetOfThree::MoreThanAPoint),
+    }
+}
+
+/// The numbers a surface stores that are lengths, and so move when space is
+/// scaled. A direction, a normal and a cone's slope are not among them: the
+/// first two say which way and the third is one length over another.
+fn the_lengths_of(surface: &Surface) -> SmallVec<[f64; 5]> {
+    match surface {
+        Surface::Plane(flat) => smallvec![flat.offset()],
+        Surface::Sphere(ball) => {
+            let [x, y, z] = ball.centre().coordinates();
+            smallvec![x, y, z, ball.radius()]
+        }
+        Surface::Cylinder(pipe) => {
+            let [x, y, z] = pipe.axis().origin().coordinates();
+            smallvec![x, y, z, pipe.radius()]
+        }
+        Surface::Cone(cone) => SmallVec::from_slice(&cone.apex().coordinates()),
+        Surface::Torus(ring) => {
+            let [x, y, z] = ring.centre().coordinates();
+            smallvec![x, y, z, ring.ring_radius(), ring.tube_radius()]
+        }
+    }
+}
+
+/// The same surface with space scaled by `2^exponent`, or `None` where one of
+/// its lengths would not stay a normal number and so would not be exactly that
+/// length moved.
+///
+/// Every length is multiplied and nothing else is touched. A plane keeps its
+/// normal and an axis its direction through `moved_to`, which keeps the stored
+/// bits: going back through [`Axis::new`](crate::Axis::new) would scale a unit
+/// direction to length one a second time and can move its last bit, which
+/// would be another surface.
+///
+/// # Panics
+///
+/// If a constructor refuses what an exact slide of a surface it built hands
+/// back. Every length that comes through is finite, a radius above zero is
+/// still above zero, and a tube thinner than its ring is still thinner.
+fn the_same_surface_slid_by(surface: &Surface, exponent: i32) -> Option<Surface> {
+    const BUILT: &str = "an exact slide of a surface is a surface";
+    let slid = |value: f64| slid_exactly(value, exponent);
+    let slid_point = |place: Point| -> Option<Point> {
+        let [x, y, z] = place.coordinates();
+        Some(Point::new(slid(x)?, slid(y)?, slid(z)?))
+    };
+    let moved = match surface {
+        Surface::Plane(flat) => Surface::Plane(flat.moved_to(slid(flat.offset())?).expect(BUILT)),
+        Surface::Sphere(ball) => Surface::Sphere(
+            Sphere::new(slid_point(ball.centre())?, slid(ball.radius())?).expect(BUILT),
+        ),
+        Surface::Cylinder(pipe) => Surface::Cylinder(
+            Cylinder::new(
+                pipe.axis()
+                    .moved_to(slid_point(pipe.axis().origin())?)
+                    .expect(BUILT),
+                slid(pipe.radius())?,
+            )
+            .expect(BUILT),
+        ),
+        Surface::Cone(cone) => Surface::Cone(
+            Cone::new(
+                cone.axis().moved_to(slid_point(cone.apex())?).expect(BUILT),
+                cone.slope(),
+            )
+            .expect(BUILT),
+        ),
+        Surface::Torus(ring) => Surface::Torus(
+            Torus::new(
+                ring.axis()
+                    .moved_to(slid_point(ring.centre())?)
+                    .expect(BUILT),
+                slid(ring.ring_radius())?,
+                slid(ring.tube_radius())?,
+            )
+            .expect(BUILT),
+        ),
+    };
+    Some(moved)
+}
+
+/// A corner found in the slid triple, slid back by `2^exponent`.
+///
+/// An end that comes back unchanged when it is slid up again was moved
+/// exactly. One that does not landed among the subnormals and was rounded to
+/// the nearest of them, less than one subnormal off, so it is stepped one
+/// subnormal further out and the box still holds the corner. One that runs off
+/// the top is infinite, and the caller reads that as the refusal it is.
+fn the_point_slid_back(point: PredicatePoint, exponent: i32) -> PredicatePoint {
+    let exactly = |value: f64| {
+        let moved = multiplied_by_a_power_of_two(value, exponent);
+        (multiplied_by_a_power_of_two(moved, -exponent) == value).then_some(moved)
+    };
+    if let PredicatePoint::Exact(place) = point
+        && let [Some(x), Some(y), Some(z)] = place.map(exactly)
+    {
+        return PredicatePoint::Exact([x, y, z]);
+    }
+    let outward = |end: f64, step: fn(f64) -> f64| {
+        exactly(end).unwrap_or_else(|| step(multiplied_by_a_power_of_two(end, exponent)))
+    };
+    PredicatePoint::Constructed(point.enclosure().map(|side| {
+        Interval::new(
+            outward(side.lo(), f64::next_down),
+            outward(side.hi(), f64::next_up),
+        )
+        .expect("both ends moved the same way, and outward where they rounded")
+    }))
 }
 
 /// The steps a line meets a surface at, turned into the points they name.

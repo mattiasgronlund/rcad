@@ -258,18 +258,12 @@ impl Exact {
         if exponent == 0 {
             return Some(self.clone());
         }
-        let mut slid = self.0.clone();
-        for entry in &mut slid {
-            if *entry == 0.0 {
-                continue;
-            }
-            let moved = multiplied_by_a_power_of_two(*entry, exponent);
-            if !moved.is_normal() {
-                return None;
-            }
-            *entry = moved;
-        }
-        Some(Exact(slid))
+        let slid: Option<Vec<f64>> = self
+            .0
+            .iter()
+            .map(|entry| slid_exactly(*entry, exponent))
+            .collect();
+        Some(Exact(slid?))
     }
 
     /// This times `other`, exactly, or `None` when one of the products it needs
@@ -482,6 +476,21 @@ pub(crate) fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
     value * 2f64.powi(half) * 2f64.powi(exponent - half)
 }
 
+/// `value * 2^exponent`, or `None` where that is not exactly `value` moved.
+///
+/// A power of two only changes the exponent field while the answer is a normal
+/// number. Past the top it is infinity, and below the bottom it is rounded onto
+/// the subnormal grid, and either way it stands for a different number. So an
+/// answer that is not normal is refused, and a zero, which slides to itself, is
+/// not.
+pub(crate) fn slid_exactly(value: f64, exponent: i32) -> Option<f64> {
+    if value == 0.0 {
+        return Some(value);
+    }
+    let moved = multiplied_by_a_power_of_two(value, exponent);
+    moved.is_normal().then_some(moved)
+}
+
 /// A number worked out from stored `f64` the way [`Exact`] works one out, and a
 /// box round how far the true number can be from it.
 ///
@@ -586,8 +595,9 @@ impl Nearly {
     /// millionth of the answer: a box that wide is sound, and too loose for the
     /// corner it bounds to be told from a surface moved well clear of it
     /// (`every_point_where_three_surfaces_meet_somewhere_else_in_f64_is_on_all_three_of_them`).
-    /// That case is the scaling family's to answer (§16.10) and it is refused
-    /// as it was. A number of order one that lost `2⁻²⁰¹⁴` passes.
+    /// That case is the scaling family's to answer (§16.10): refused here, and
+    /// `meet_of_three_surfaces` then asks the triple again slid up the range by
+    /// a power of two (§349). A number of order one that lost `2⁻²⁰¹⁴` passes.
     pub(crate) fn is_within_a_rounding(&self) -> bool {
         let lost = self.off_by.lo().abs().max(self.off_by.hi().abs());
         lost <= self.held.nearest_f64().abs() * f64::EPSILON
