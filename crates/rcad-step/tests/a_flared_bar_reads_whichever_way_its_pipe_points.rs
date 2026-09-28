@@ -356,24 +356,35 @@ fn a_round_bar(base: usize, (bottom, top): (f64, f64), axis: PipeAxis) -> String
         n(75)
     );
     text += &format!("#{}=FACE_OUTER_BOUND('',#{},.T.);\n", n(77), n(76));
-    text += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", n(78), n(77), n(71));
+    text += &format!(
+        "#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n",
+        n(78),
+        n(77),
+        n(71)
+    );
 
     text += &format!("#{}=PLANE('',#{});\n", n(80), n(31));
     text += &format!("#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n", n(81), n(51));
     text += &format!("#{}=EDGE_LOOP('',(#{}));\n", n(82), n(81));
     text += &format!("#{}=FACE_OUTER_BOUND('',#{},.T.);\n", n(83), n(82));
-    text += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", n(84), n(83), n(80));
-
     text += &format!(
-        "#{}=AXIS2_PLACEMENT_3D('',#{},#22,#21);\n",
-        n(85),
-        n(20)
+        "#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n",
+        n(84),
+        n(83),
+        n(80)
     );
+
+    text += &format!("#{}=AXIS2_PLACEMENT_3D('',#{},#22,#21);\n", n(85), n(20));
     text += &format!("#{}=PLANE('',#{});\n", n(86), n(85));
     text += &format!("#{}=ORIENTED_EDGE('',*,*,#{},.F.);\n", n(87), n(50));
     text += &format!("#{}=EDGE_LOOP('',(#{}));\n", n(88), n(87));
     text += &format!("#{}=FACE_OUTER_BOUND('',#{},.T.);\n", n(89), n(88));
-    text += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", n(90), n(89), n(86));
+    text += &format!(
+        "#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n",
+        n(90),
+        n(89),
+        n(86)
+    );
     text += &format!(
         "#{}=CLOSED_SHELL('',(#{},#{},#{}));\n",
         n(91),

@@ -142,7 +142,11 @@ fn a_half_ball_on_a_pipe(first: FirstInTheShell) -> (Model, SolidKey) {
         )
         .expect("a rim is a whole closed curve, so one corner twice is an edge");
     let round_the_lid = builder
-        .add_edge(on_the_lid, on_the_lid, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(
+            on_the_lid,
+            on_the_lid,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
         .expect("a closed edge");
     let seam = builder
         .add_edge(on_the_rim, on_the_lid, EdgeRun::Straight)
