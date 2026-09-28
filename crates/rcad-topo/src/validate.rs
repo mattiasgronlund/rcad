@@ -905,24 +905,10 @@ impl Model {
                     };
                     (outward(across), turned_by(material, across.orientation()))
                 } else {
-                    let mut corners_on_it = Vec::new();
-                    for along in face.wires().flat_map(WireView::coedges) {
-                        let along = along.edge();
-                        let beyond = the_face_across(solid, face, along)?.unwrap_or(face);
-                        if which_two_surfaces_a_run_is_between(
-                            &along.run(),
-                            [&face.surface(), &beyond.surface()],
-                        )
-                        .contains(&partner)
-                        {
-                            corners_on_it.extend([along.start().key(), along.end().key()]);
-                        }
-                    }
-                    let trimming = Trimming {
-                        surface: partner,
-                        corners_on_it,
-                    };
-                    let Some(material) = the_side_this_face_lies_on(face, &trimming)? else {
+                    let Some(material) = which_side_of_a_surface_a_run_names_this_face_lies_on(
+                        solid, face, partner,
+                    )?
+                    else {
                         continue;
                     };
                     (gradient_of(&partner, at), material)
@@ -2286,8 +2272,10 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// This one *is* a broken internal invariant and not caller input: the only
 /// caller, [`Model::validate`](crate::Model::validate)'s own
 /// `check_closed_edges_are_walked_the_way_their_surfaces_wind`, only ever
-/// passes a value [`which_side_of_it_this_face_lies_on`] read off a real
-/// corner, and that function's own `Ok(Some(_))` is never anything but
+/// passes a value [`which_side_of_it_this_face_lies_on`] or
+/// [`which_side_of_a_surface_a_run_names_this_face_lies_on`] read off a real
+/// corner, and both hand back [`the_side_this_face_lies_on`], whose own
+/// `Ok(Some(_))` is never anything but
 /// [`Decision::Pos`] or [`Decision::Neg`] — it filters `Zero` out and turns
 /// `Undecidable` into an `Err` before it can reach here.
 ///
@@ -2365,6 +2353,41 @@ fn which_side_of_it_this_face_lies_on(
         face,
         &Trimming {
             surface,
+            corners_on_it,
+        },
+    )
+}
+
+/// Which side of a surface that a run names, and that no face of the solid
+/// sits on, this face lies on, as its own corners say.
+///
+/// The corners on it are the ends of every edge of this face whose run is
+/// between something and that surface. They are on it because the run says
+/// so, which no rounding can take away ([`Trimming`]). Every other corner is
+/// read.
+///
+/// `None` when every corner of the face is on it, as
+/// [`which_side_of_it_this_face_lies_on`] gives for a face across.
+fn which_side_of_a_surface_a_run_names_this_face_lies_on(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    named: Surface,
+) -> Result<Option<Decision>> {
+    let mut corners_on_it = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let beyond = the_face_across(solid, face, edge)?.unwrap_or(face);
+        if which_two_surfaces_a_run_is_between(&edge.run(), [&face.surface(), &beyond.surface()])
+            .contains(&named)
+        {
+            corners_on_it.push(edge.start().key());
+            corners_on_it.push(edge.end().key());
+        }
+    }
+    the_side_this_face_lies_on(
+        face,
+        &Trimming {
+            surface: named,
             corners_on_it,
         },
     )
@@ -3245,7 +3268,7 @@ fn magnitude_of(tag: Option<Approximation>) -> f64 {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
+        Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
         Vector,
     };
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
@@ -3258,7 +3281,7 @@ mod tests {
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
     use crate::model::{FaceUse, ModelData, ShellData, ShellUse, SolidData, VertexData, WireStep};
-    use crate::{Error, FaceView, Invalid, Model, SolidView, WireView};
+    use crate::{DraftStep, Error, FaceView, Invalid, Model, SolidBuilder, SolidView, WireView};
 
     fn an_empty_model() -> Model {
         Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -4414,6 +4437,156 @@ mod tests {
         // `data_mut` only touches the downward links; the reverse index that
         // `faces_along_edge` reads is derived and stays stale until rebuilt.
         Model::from_parts(model.data().clone())
+    }
+
+    /// A frustum cut into two bands by a closed circle, each band on its own
+    /// spelling of one cone, is sound walked the way its cone winds: with the
+    /// two spellings equal to the bit or one ulp apart, and whichever way the
+    /// circle's own plane faces.
+    ///
+    /// The two bands are one cone, so they cross nowhere near the circle, and
+    /// the circle names its plane. That plane is what each band's use of the
+    /// circle is read against (§229.4). Read against the other band's cone
+    /// instead, the one-ulp spelling was refused: the two gradients at the
+    /// corner cross to `(0, 1.07e-14, 0)`, the lower band's far corner is
+    /// `-7.1e-15` inside the upper cone, and both of those are rounding.
+    #[test]
+    fn a_frustum_in_two_bands_walked_the_way_its_cone_winds_is_sound() {
+        for upper_radius in [6.0, 6.0_f64.next_up()] {
+            for facing in [1.0, -1.0] {
+                let (model, built) =
+                    a_frustum_in_two_bands(upper_radius, facing, Orientation::Reversed);
+                built.unwrap_or_else(|why| {
+                    panic!("upper radius {upper_radius}, plane facing {facing} z: {why:?}")
+                });
+                a_clean_sweep(&model);
+            }
+        }
+    }
+
+    /// The same frustum with the middle circle walked the other way by both
+    /// bands is refused by the closed-edge check, by name.
+    ///
+    /// The two uses still run opposite ways, so no older check has anything to
+    /// say. Read against the other band's cone, this check had nothing to say
+    /// either: two cones equal to the bit cross to the zero vector, and one ulp
+    /// apart the rounding read the lower band's use as right. Only the mesh
+    /// refused it then, under another name.
+    #[test]
+    fn a_frustum_in_two_bands_walked_against_its_cone_is_caught() {
+        for upper_radius in [6.0, 6.0_f64.next_up()] {
+            for facing in [1.0, -1.0] {
+                let (_, built) = a_frustum_in_two_bands(upper_radius, facing, Orientation::Forward);
+                assert!(
+                    matches!(
+                        built,
+                        Err(Error::Invalid(
+                            Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                        ))
+                    ),
+                    "upper radius {upper_radius}, plane facing {facing} z: {built:?}"
+                );
+            }
+        }
+    }
+
+    /// The frustum of the cone with its apex at the origin and a slope of three
+    /// in four, from `z = 4` to `z = 12`, cut into two bands by the circle of
+    /// radius six at `z = 8`. Each band is on its own cone, placed by its radius
+    /// at that circle the way a file places one: six for the lower band and
+    /// `upper_radius` for the upper. The circle names its own plane, facing
+    /// `facing` along `z`. The lower band walks the circle `lower_band_walks_it`
+    /// and the upper band walks it back.
+    ///
+    /// The rule stores the circle running the way the cone's longitude `ẑ × ∇C`
+    /// goes, which is `+y` at the corner `(6, 0, 8)`. The lower band keeps its
+    /// material below the circle, so it walks it `-y`: [`Orientation::Reversed`].
+    fn a_frustum_in_two_bands(
+        upper_radius: f64,
+        facing: f64,
+        lower_band_walks_it: Orientation,
+    ) -> (Model, crate::Result<crate::SolidKey>) {
+        let up = Vector::new(0.0, 0.0, 1.0);
+        let placed_at_the_middle_circle = |radius: f64| {
+            let apex = Point::new(0.0, 0.0, 8.0 - radius / 0.75);
+            Surface::Cone(
+                Cone::new(Axis::new(apex, up).expect("z has a length"), 0.75)
+                    .expect("a positive slope"),
+            )
+        };
+        let flat = |height: f64, facing: f64| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, height), up * facing)
+                    .expect("z has a length"),
+            )
+        };
+
+        let mut builder = SolidBuilder::new();
+        let [bottom, middle, top] = [(3.0, 4.0), (6.0, 8.0), (9.0, 12.0)].map(|(radius, z)| {
+            builder
+                .add_vertex(Point::new(radius, 0.0, z))
+                .expect("a corner")
+        });
+        let mut an_edge = |from, to, run| builder.add_edge(from, to, run).expect("an edge");
+        let round_the_bottom = an_edge(bottom, bottom, EdgeRun::RightRoundWhereItsFacesCross);
+        let round_the_middle = an_edge(
+            middle,
+            middle,
+            EdgeRun::RightRoundWhereItCrosses {
+                and: flat(8.0, facing),
+            },
+        );
+        let round_the_top = an_edge(top, top, EdgeRun::RightRoundWhereItsFacesCross);
+        let up_the_lower_band = an_edge(bottom, middle, EdgeRun::Straight);
+        let up_the_upper_band = an_edge(middle, top, EdgeRun::Straight);
+
+        let upper_band_walks_it = lower_band_walks_it.reversed();
+        let faces = [
+            (
+                placed_at_the_middle_circle(6.0),
+                &[
+                    (round_the_bottom, Orientation::Forward),
+                    (up_the_lower_band, Orientation::Forward),
+                    (round_the_middle, lower_band_walks_it),
+                    (up_the_lower_band, Orientation::Reversed),
+                ][..],
+            ),
+            (
+                placed_at_the_middle_circle(upper_radius),
+                &[
+                    (round_the_middle, upper_band_walks_it),
+                    (up_the_upper_band, Orientation::Forward),
+                    (round_the_top, Orientation::Reversed),
+                    (up_the_upper_band, Orientation::Reversed),
+                ][..],
+            ),
+            (
+                flat(4.0, -1.0),
+                &[(round_the_bottom, Orientation::Reversed)][..],
+            ),
+            (
+                flat(12.0, 1.0),
+                &[(round_the_top, Orientation::Forward)][..],
+            ),
+        ]
+        .map(|(surface, walked)| {
+            let steps: Vec<DraftStep> = walked
+                .iter()
+                .map(|&(edge, way)| {
+                    DraftStep::Along(builder.add_coedge(edge, way).expect("an edge"))
+                })
+                .collect();
+            let wire = builder.add_wire(&steps).expect("a closed wire");
+            (
+                builder.add_face(surface, &[wire]).expect("a face"),
+                Orientation::Forward,
+            )
+        });
+        builder.add_shell(&faces).expect("the four faces close up");
+
+        let mut model = an_empty_model();
+        let built = builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new());
+        (model, built)
     }
 
     /// The two faces along a closed crossing must disagree about which way it

@@ -12,6 +12,18 @@
 //!
 //! The bit-identical spelling is the oracle: it already carried the circle's
 //! plane, so the hair-apart one must come out with the same run.
+//!
+//! **Then the model has to validate, and one ulp apart it did not.**
+//! `Model::validate` read each band's use of the middle circle against the
+//! other band's cone rather than against the plane the run names. The two
+//! cones' gradients at the corner cross to `(0, 1.07e-14, 0)` and the lower
+//! band's far corner is `-7.1e-15` inside the upper cone, both rounding, and
+//! together they refused a sound frustum as
+//! `AClosedEdgeIsWalkedAgainstItsSurface` (`docs/decisions.md` §229.4).
+//!
+//! The middle circle is written running both ways round, its `CIRCLE`'s axis up
+//! the cone's or down it, which turns the plane that names it round as well.
+//! Which way that plane faces may not change the answer.
 
 mod written_by_hand;
 
@@ -26,18 +38,40 @@ use written_by_hand::{a_header, real};
 const CIRCLES: [(f64, f64); 3] = [(4.0, 3.0), (8.0, 6.0), (12.0, 9.0)];
 const MIDDLE: (f64, f64) = CIRCLES[1];
 
+/// Which way the middle circle's `CIRCLE` turns about the cone's axis.
+#[derive(Debug, Clone, Copy)]
+enum MiddleCircleRuns {
+    RoundTheAxis,
+    BackRoundTheAxis,
+}
+
 #[test]
 fn a_cone_written_twice_bit_for_bit_names_the_middle_circle_by_its_plane() {
-    the_middle_circle_is_named_by_its_plane_and_meshed_round(MIDDLE.1);
+    for runs in [
+        MiddleCircleRuns::RoundTheAxis,
+        MiddleCircleRuns::BackRoundTheAxis,
+    ] {
+        the_middle_circle_is_named_by_its_plane_and_meshed_round(MIDDLE.1, runs);
+    }
 }
 
+/// Fails where `Model::validate` reads the middle circle against the other
+/// band's cone: the model is refused `AClosedEdgeIsWalkedAgainstItsSurface`.
 #[test]
 fn a_cone_written_twice_one_ulp_apart_names_the_middle_circle_by_its_plane() {
-    the_middle_circle_is_named_by_its_plane_and_meshed_round(MIDDLE.1.next_up());
+    for runs in [
+        MiddleCircleRuns::RoundTheAxis,
+        MiddleCircleRuns::BackRoundTheAxis,
+    ] {
+        the_middle_circle_is_named_by_its_plane_and_meshed_round(MIDDLE.1.next_up(), runs);
+    }
 }
 
-fn the_middle_circle_is_named_by_its_plane_and_meshed_round(upper_radius: f64) {
-    let text = a_frustum_in_two_bands(upper_radius);
+fn the_middle_circle_is_named_by_its_plane_and_meshed_round(
+    upper_radius: f64,
+    runs: MiddleCircleRuns,
+) {
+    let text = a_frustum_in_two_bands(upper_radius, runs);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
@@ -76,6 +110,14 @@ fn the_middle_circle_is_named_by_its_plane_and_meshed_round(upper_radius: f64) {
                     "the plane is square to the cone's axis, not to {:?}",
                     flat.normal()
                 );
+                let faces_up = flat.normal().dot(Vector::new(0.0, 0.0, 1.0)) > 0.0;
+                assert_eq!(
+                    faces_up,
+                    matches!(runs, MiddleCircleRuns::RoundTheAxis),
+                    "the plane faces the way the circle's axis points, and with the circle \
+                     written {runs:?} it faces {:?}",
+                    flat.normal()
+                );
                 assert_eq!(
                     flat.signed_distance_to(Point::new(0.0, 0.0, level)),
                     0.0,
@@ -110,6 +152,21 @@ fn the_middle_circle_is_named_by_its_plane_and_meshed_round(upper_radius: f64) {
             [x, y, z]
         );
     }
+
+    let (bottom, top) = (CIRCLES[0].1, CIRCLES[2].1);
+    let tall = CIRCLES[2].0 - CIRCLES[0].0;
+    let closed_form =
+        core::f64::consts::PI * tall / 3.0 * (bottom * bottom + bottom * top + top * top);
+    let measured = solid
+        .measure(Deflection::of(0.01).expect("a length"), &policy, &mut log)
+        .expect("the frustum measures");
+    assert!(
+        (measured.volume() - closed_form).abs() <= measured.volume_error(),
+        "measured {} ± {}, and a frustum from radius three to nine eight tall is 312π, \
+         {closed_form}",
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 /// A frustum of the cone with its apex at the origin, opening up the `z` axis
@@ -121,13 +178,19 @@ fn the_middle_circle_is_named_by_its_plane_and_meshed_round(upper_radius: f64) {
 /// Each band's loop runs as a pipe's does: round the bottom circle, up the
 /// seam, back round the top circle and down the seam again, which keeps the
 /// side of the cone facing away from its axis on the left.
-fn a_frustum_in_two_bands(upper_radius: f64) -> String {
+///
+/// Written [`MiddleCircleRuns::BackRoundTheAxis`], the middle circle's axis
+/// points down the cone's and both loops use it the other way, so each band
+/// still goes round it the same way in space.
+fn a_frustum_in_two_bands(upper_radius: f64, runs: MiddleCircleRuns) -> String {
     let mut text = a_header(".MILLI.");
     text += "#20=DIRECTION('',(0.,0.,1.));\n";
     text += "#21=DIRECTION('',(1.,0.,0.));\n";
     text += "#22=DIRECTION('',(0.,0.,-1.));\n";
     text += "#24=DIRECTION('',(3.,0.,4.));\n";
     text += &format!("#23=VECTOR('',#24,{});\n", real(1.0));
+    let middle_turned = matches!(runs, MiddleCircleRuns::BackRoundTheAxis);
+    text += "#136=AXIS2_PLACEMENT_3D('',#121,#22,#21);\n";
     for (which, (level, radius)) in CIRCLES.iter().enumerate() {
         text += &format!(
             "#{}=CARTESIAN_POINT('',({},0.,{}));\n",
@@ -146,12 +209,12 @@ fn a_frustum_in_two_bands(upper_radius: f64) -> String {
             130 + which,
             120 + which
         );
-        text += &format!(
-            "#{}=CIRCLE('',#{},{});\n",
-            140 + which,
-            130 + which,
-            real(*radius)
-        );
+        let placed = if which == 1 && middle_turned {
+            136
+        } else {
+            130 + which
+        };
+        text += &format!("#{}=CIRCLE('',#{placed},{});\n", 140 + which, real(*radius));
         text += &format!(
             "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
             150 + which,
@@ -180,10 +243,24 @@ fn a_frustum_in_two_bands(upper_radius: f64) -> String {
             real(half_angle)
         );
         let (below, above, seam) = (150 + band, 151 + band, 170 + band);
+        let along_its_curve = |edge: usize, along: bool| {
+            if along != (middle_turned && edge == 151) {
+                ".T."
+            } else {
+                ".F."
+            }
+        };
         let first = 220 + band * 4;
-        text += &format!("#{first}=ORIENTED_EDGE('',*,*,#{below},.T.);\n");
+        text += &format!(
+            "#{first}=ORIENTED_EDGE('',*,*,#{below},{});\n",
+            along_its_curve(below, true)
+        );
         text += &format!("#{}=ORIENTED_EDGE('',*,*,#{seam},.T.);\n", first + 1);
-        text += &format!("#{}=ORIENTED_EDGE('',*,*,#{above},.F.);\n", first + 2);
+        text += &format!(
+            "#{}=ORIENTED_EDGE('',*,*,#{above},{});\n",
+            first + 2,
+            along_its_curve(above, false)
+        );
         text += &format!("#{}=ORIENTED_EDGE('',*,*,#{seam},.F.);\n", first + 3);
         text += &format!(
             "#{}=EDGE_LOOP('',(#{first},#{},#{},#{}));\n",
