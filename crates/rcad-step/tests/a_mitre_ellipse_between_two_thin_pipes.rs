@@ -30,6 +30,9 @@ const DOWN_THE_LONG_AXIS: &str = "(0.707106781187,-2.590652556828E-015,-0.707106
 /// Where the mitre, both seams and nothing else meet.
 const CORNER: [f64; 3] = [-0.95, 1.9, 16.05];
 
+/// The level pipe's placement origin and radius, as the relay writes them.
+const THE_RELAYS_LEVEL_PIPE: [&str; 2] = ["(4.125,1.9,16.15)", "0.1"];
+
 #[test]
 fn a_mitre_written_in_twelve_digits_is_named_by_its_plane() {
     the_mitre_is_named_by_its_plane(DOWN_THE_LONG_AXIS, "0.141421356237,0.1");
@@ -56,6 +59,7 @@ fn a_mitre_whose_reference_is_turned_a_millionth_of_a_radian_is_named_by_its_pip
     the_mitre_is_named_by_its_pipes(
         "(0.707106781187,1.E-006,-0.707106781187)",
         "0.141421356237,0.1",
+        THE_RELAYS_LEVEL_PIPE,
     );
 }
 
@@ -63,7 +67,7 @@ fn a_mitre_whose_reference_is_turned_a_millionth_of_a_radian_is_named_by_its_pip
 /// cuts, though the plane would cut the pipes in the right one.
 #[test]
 fn a_mitre_whose_size_is_wrong_in_its_fourth_digit_is_named_by_its_pipes() {
-    the_mitre_is_named_by_its_pipes(DOWN_THE_LONG_AXIS, "0.1415,0.1");
+    the_mitre_is_named_by_its_pipes(DOWN_THE_LONG_AXIS, "0.1415,0.1", THE_RELAYS_LEVEL_PIPE);
 }
 
 /// The edge of the allowance for the file's sizes (`docs/decisions.md`
@@ -71,11 +75,30 @@ fn a_mitre_whose_size_is_wrong_in_its_fourth_digit_is_named_by_its_pipes() {
 /// long, which is past five parts in `10¹²` of the size.
 #[test]
 fn a_mitre_whose_size_is_written_in_eleven_digits_is_named_by_its_pipes() {
-    the_mitre_is_named_by_its_pipes(DOWN_THE_LONG_AXIS, "0.14142135624,0.1");
+    the_mitre_is_named_by_its_pipes(
+        DOWN_THE_LONG_AXIS,
+        "0.14142135624,0.1",
+        THE_RELAYS_LEVEL_PIPE,
+    );
+}
+
+/// The level pipe `1e-13` wider and `1e-13` higher, so its underside, both
+/// seams and every corner stay where they were, and the plane cuts it `2e-13`
+/// above the upright pipe's cut at the mitre's top. The file's ellipse is
+/// inside what its twelve-digit size is allowed of both pipes; the ellipse
+/// the upright pipe gives is not on the level one, and that is what keeps
+/// the run named by its pipes.
+#[test]
+fn a_mitre_between_pipes_a_hair_apart_is_named_by_its_pipes() {
+    the_mitre_is_named_by_its_pipes(
+        DOWN_THE_LONG_AXIS,
+        "0.141421356237,0.1",
+        ["(4.125,1.9,16.1500000000001)", "0.1000000000001"],
+    );
 }
 
 fn the_mitre_is_named_by_its_plane(reference: &str, sizes: &str) {
-    let text = an_elbow(reference, sizes);
+    let text = an_elbow(reference, sizes, THE_RELAYS_LEVEL_PIPE);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
@@ -157,13 +180,14 @@ fn the_mitre_is_named_by_its_plane(reference: &str, sizes: &str) {
 /// a band's wire does not come back to where it set off in the band's own two
 /// coordinates. That is the refusal the reader gave the twelve-digit mitre
 /// before `docs/decisions.md` §335.
-fn the_mitre_is_named_by_its_pipes(reference: &str, sizes: &str) {
-    let text = an_elbow(reference, sizes);
+fn the_mitre_is_named_by_its_pipes(reference: &str, sizes: &str, level_pipe: [&str; 2]) {
+    let text = an_elbow(reference, sizes, level_pipe);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let refused = match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
         Ok(_) => panic!(
-            "a mitre written with reference {reference} and sizes {sizes} is not on both \
-             pipes, and was read as the curve its plane cuts"
+            "a mitre written with reference {reference} and sizes {sizes}, beside a level \
+             pipe at {level_pipe:?}, is not on both pipes, and was read as the curve its \
+             plane cuts"
         ),
         Err(refused) => refused,
     };
@@ -184,9 +208,10 @@ fn the_mitre_is_named_by_its_pipes(reference: &str, sizes: &str) {
 /// `(−1.05, 1.9, 16.15)` square to `(1, 0, 1)`, with one corner at
 /// `(−0.95, 1.9, 16.05)` where both seams end.
 ///
-/// Every number but the mitre's reference direction and sizes is the relay's
-/// own text.
-fn an_elbow(reference: &str, sizes: &str) -> String {
+/// Every number but the mitre's reference direction and sizes, and the level
+/// pipe's placement origin and radius, is the relay's own text.
+fn an_elbow(reference: &str, sizes: &str, level_pipe: [&str; 2]) -> String {
+    let [level_origin, level_radius] = level_pipe;
     let mut text = a_header(".MILLI.");
     text += "#20=DIRECTION('',(0.E+000,0.E+000,1.));\n";
     text += "#21=DIRECTION('',(1.,0.E+000,0.E+000));\n";
@@ -206,10 +231,12 @@ fn an_elbow(reference: &str, sizes: &str) -> String {
     text += "#120=CARTESIAN_POINT('',(-1.05,1.9,15.15));\n";
     text += "#121=CARTESIAN_POINT('',(-1.05,1.9,16.15));\n";
     text += "#122=CARTESIAN_POINT('',(4.125,1.9,16.15));\n";
+    text += &format!("#123=CARTESIAN_POINT('',{level_origin});\n");
 
     text += "#130=AXIS2_PLACEMENT_3D('',#120,#20,#21);\n";
     text += "#131=AXIS2_PLACEMENT_3D('',#121,#24,#25);\n";
     text += "#132=AXIS2_PLACEMENT_3D('',#122,#23,#22);\n";
+    text += "#133=AXIS2_PLACEMENT_3D('',#123,#23,#22);\n";
     text += "#135=AXIS2_PLACEMENT_3D('',#120,#22,#21);\n";
 
     text += "#140=CIRCLE('',#130,0.1);\n";
@@ -224,7 +251,7 @@ fn an_elbow(reference: &str, sizes: &str) -> String {
     text += "#154=EDGE_CURVE('',#111,#112,#144,.T.);\n";
 
     text += "#160=CYLINDRICAL_SURFACE('',#130,0.1);\n";
-    text += "#161=CYLINDRICAL_SURFACE('',#132,0.1);\n";
+    text += &format!("#161=CYLINDRICAL_SURFACE('',#133,{level_radius});\n");
     text += "#162=PLANE('',#135);\n";
     text += "#163=PLANE('',#132);\n";
 
