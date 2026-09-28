@@ -843,6 +843,29 @@ impl Model {
         Ok(())
     }
 
+    /// One solid's closed edges, each read against the second surface its run
+    /// is between.
+    ///
+    /// **That surface is the partner, and it is not always the face across.**
+    /// Where the two faces really do cross in the edge the run names the face
+    /// across and the two are one. Where both faces sit on one surface, or on
+    /// two spellings of it, the run names a third surface, and the face across
+    /// says nothing about where the edge goes. §229.4's cone written twice, one
+    /// ulp apart, is that: two bands with a closed circle between them, named
+    /// by the circle's own plane. Read against the other band's cone, the two
+    /// gradients at the corner cross to `(0, 1.07e-14, 0)` and the band's far
+    /// corner is `-7.1e-15` inside that cone. Both signs are rounding, and
+    /// together they said the lower band walks the circle the way it does not.
+    /// Read against the plane, the answer is the band's.
+    ///
+    /// A partner that is no face of this solid has no use to turn it round, so
+    /// its own gradient goes in and the face's side is read against that same
+    /// surface, off the corners of the face that are not on it.
+    ///
+    /// **The run is the located one**, [`EdgeView::run`], because the faces'
+    /// surfaces and the corner are read through the view too. A partner read in
+    /// the stored frame beside them would be a surface somewhere else once the
+    /// solid has been moved.
     fn check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
         &self,
         slot: SolidSlot,
@@ -866,23 +889,49 @@ impl Model {
                 let Some(across) = the_face_across(solid, face, edge)? else {
                     continue;
                 };
-                let Some(material) = which_side_of_it_this_face_lies_on(solid, face, across)?
-                else {
-                    continue;
-                };
                 let at = edge.start().point();
                 let outward = |used: FaceView<'_>| {
                     gradient_of(&used.surface(), at) * used.orientation().sign()
                 };
                 let names_it = which_two_surfaces_a_run_is_between(
-                    edge.stored_run(),
+                    &edge.run(),
                     [&face.surface(), &across.surface()],
                 );
+                let partner = names_it[1];
+                let (partner_outward, material) = if partner == across.surface() {
+                    let Some(material) = which_side_of_it_this_face_lies_on(solid, face, across)?
+                    else {
+                        continue;
+                    };
+                    (outward(across), turned_by(material, across.orientation()))
+                } else {
+                    let mut corners_on_it = Vec::new();
+                    for along in face.wires().flat_map(WireView::coedges) {
+                        let along = along.edge();
+                        let beyond = the_face_across(solid, face, along)?.unwrap_or(face);
+                        if which_two_surfaces_a_run_is_between(
+                            &along.run(),
+                            [&face.surface(), &beyond.surface()],
+                        )
+                        .contains(&partner)
+                        {
+                            corners_on_it.extend([along.start().key(), along.end().key()]);
+                        }
+                    }
+                    let trimming = Trimming {
+                        surface: partner,
+                        corners_on_it,
+                    };
+                    let Some(material) = the_side_this_face_lies_on(face, &trimming)? else {
+                        continue;
+                    };
+                    (gradient_of(&partner, at), material)
+                };
                 let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
                     [&names_it[0], &names_it[1]],
-                    [outward(face), outward(across)],
+                    [outward(face), partner_outward],
                     at,
-                    turned_by(material, across.orientation()),
+                    material,
                 )?
                 else {
                     continue;
