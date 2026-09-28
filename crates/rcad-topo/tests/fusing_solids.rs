@@ -569,7 +569,13 @@ fn two_towers_1e308_tall_are_united_by_proof_alone() {
 
     let mut log = ProvenanceLog::new();
     let united = model
-        .fuse(&[one], &[other], Rule::Union, &Policy::certified(), &mut log)
+        .fuse(
+            &[one],
+            &[other],
+            Rule::Union,
+            &Policy::certified(),
+            &mut log,
+        )
         .expect("every decision the union of two towers needs is one f64 can prove");
 
     assert!(
