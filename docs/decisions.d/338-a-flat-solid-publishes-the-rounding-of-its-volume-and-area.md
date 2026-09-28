@@ -106,3 +106,13 @@ solid owes `0.0`, which is the claim this section withdraws:
 `rcad` and `rcad-step` (`just t -p rcad -p rcad-step`) pass, 258 of 258, and so
 do the doc tests of `rcad-topo` and `rcad`, 4 and 2. Every pin they hold is on
 an unturned cube.
+
+**Both were re-pinned at the merge, by the dispatcher.** The frozen-shape test
+now carries each shape's two errors beside its five bit patterns: `0.0` for the
+four whose corners are whole numbers, and for the two turned shapes what the
+fix publishes — the cube `6.66e-16` and `1.30e-14`, the plate with a hole
+(never seen before, since the loop stopped on the cube) `1.75e-14` and
+`6.53e-14`, each under two spacings of `f64` at its value. The far cube's faces
+now say their wobble is `0.0` and their area error is above zero and at most
+two spacings at `4`; the doc comment says the error covers the adding up and
+not the placing, which still puts every face `1.25e-10` off `side²`.

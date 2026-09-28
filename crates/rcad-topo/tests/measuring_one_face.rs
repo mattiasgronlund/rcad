@@ -155,8 +155,8 @@ fn a_flat_face_measures_exactly_the_textbooks_area_and_middle() {
 }
 
 /// The same cube turned and put a million units out is measured within a few
-/// roundings of `side²` — and not on it, although its errors are still exactly
-/// zero.
+/// roundings of `side²` — and not on it, by far more than the area error it
+/// publishes.
 ///
 /// That is `Measurement`'s own convention, followed rather than reinvented: what
 /// is exact is the sum over the corners the solid holds, and placing the cube
@@ -169,10 +169,13 @@ fn a_flat_face_measures_exactly_the_textbooks_area_and_middle() {
 /// the area came out `1.25e-10` off `4` and the middle `1.16e-10` off, which
 /// is a rounding's worth of placement and nothing of the fan's own.
 ///
-/// **So "the bound contains the truth" does not hold for a flat face placed
-/// where its corners round**, and does not for the solid either. What would
-/// make it hold is an error that charges the corners' own rounding — for the
-/// solid and every face at once, since the faces add up to the solid.
+/// **The area error covers the adding up and not the placing.** Since §338 it
+/// is how far the face's `f64` sum landed from the exact area of the corners
+/// the solid holds, which is under two spacings of `f64` at `4`; the corners
+/// the placement rounded are those corners, so `side²` itself stays outside
+/// it. What would cover that too is an error that charges the corners' own
+/// rounding — for the solid and every face at once, since the faces add up to
+/// the solid.
 #[test]
 fn a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_squared() {
     let mut model = a_model();
@@ -187,7 +190,12 @@ fn a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_square
     let mut worst: (f64, f64) = (0.0, 0.0);
     for face in faces_of(&model, cube) {
         let measured = one_face(&model, cube, face, 0.1);
-        assert_eq!([measured.area_error, measured.wobble], [0.0, 0.0]);
+        assert_eq!(measured.wobble, 0.0);
+        assert!(
+            measured.area_error > 0.0 && measured.area_error <= 2.0 * 4.0 * f64::EPSILON,
+            "a face's sum rounded by {}",
+            measured.area_error
+        );
         let middles = [
             [0.0, 1.0, 1.0],
             [1.0, 0.0, 1.0],
