@@ -1,58 +1,57 @@
-//! Two overlapping parallel bars, united — and what still stops it.
+//! Two overlapping parallel bars, fused by every rule and both ways round.
 //!
 //! Ordinary mechanical CAD: two round bars that run the same way and share some
-//! material. §48 pinned one reason the fuse could not do it — `arrange.rs`'s
-//! straight gate swept the whole cylinder-cylinder row into `false`, so a
-//! crossing that `rcad-geom` builds exactly as two endless lines fell past the
-//! straight gate, past the conic gate, and out as
-//! `ACrossingThisCannotBeOrderedAlong` with nothing having run out of
-//! arithmetic. That gap is closed, and
-//! `two_pipes_side_by_side_run_up_their_common_axis` in `arrange.rs` measures
-//! the crossing being ordered up `z` where it used to be refused.
+//! material. **Every fuse of the pair answers**, and
+//! [`two_overlapping_parallel_bars_fuse_by_every_rule_whichever_way_round`]
+//! checks all six — three rules, each in both orders — against what the shape
+//! says: the volume, the corners and the faces, all worked out by hand.
 //!
-//! **The second reason is closed too, and this file moved with it.** A corner of
-//! the answer is where a bar's flat cap meets *both* pipes, which is one plane
-//! and two quadrics, and `meet_of_three_surfaces` used to want two of its three
-//! flat. It now answers this triple exactly: two pipes running the same way
-//! square `p` the same way, so their difference is a flat surface and the triple
-//! is two planes and a quadric after all. The corners come back as `(3, ±4, 0)`,
-//! whole numbers in boxes of no width, and
-//! `a_cap_plane_against_two_side_by_side_pipes_meets_them_at_three_and_four`
-//! below is where that is checked.
+//! The pair used to refuse, and in this order, each refusal closed in a
+//! different place. A closed one coming back is a regression, and the six fuses
+//! would name it:
 //!
-//! **So the fuse now stops one gate further in, and this file's job is to say
-//! which one.** It is no longer geometry at all: with the corners placed, the
-//! cap disc is cut into pieces by the other pipe's wall, and `select.rs` gives
-//! up on one of those pieces, undecided with an unbounded enclosure.
+//! 1. **The straight gate** (§48). `arrange.rs` swept the whole
+//!    cylinder-cylinder row into `false`, so a crossing `rcad-geom` builds
+//!    exactly as two endless lines fell out as
+//!    `ACrossingThisCannotBeOrderedAlong` with nothing having run out of
+//!    arithmetic. `two_pipes_side_by_side_run_up_their_common_axis` in
+//!    `arrange.rs` measures the crossing being ordered up `z`.
+//! 2. **The three-surface meet.** A corner of the answer is where a bar's flat
+//!    cap meets *both* pipes, one plane and two quadrics, and
+//!    `meet_of_three_surfaces` used to want two of the three flat. Two pipes
+//!    running the same way square `p` the same way, so their difference is flat
+//!    and the triple is two planes and a quadric after all.
+//!    [`a_cap_plane_against_two_side_by_side_pipes_meets_them_at_three_and_four`]
+//!    checks the corners it places.
+//! 3. **`select.rs`, on a cap piece bounded by an arc.** The same region of the
+//!    same plane had three corners as one bar's cap piece and two as the
+//!    other's, and two corners is no polygon, so the two orders gave out in
+//!    different searches until a pipe's bulge was counted (§218.5). Both then
+//!    gave out placing the piece against the other solid, until a flat face
+//!    with a curved side was asked what it holds rather than wound by its
+//!    corners (`13d5abaa`, §224.4, §231.4).
+//! 4. **Two arcs of two circles named as one edge** (§245.4, hole B), in
+//!    `assemble.rs`. Both cap circles pass through `(3, ±4, ·)`, so two good
+//!    edges came out as one with four faces along it:
+//!    [`an_arc_of_each_bar_between_the_same_two_corners_is_an_edge_of_its_own`].
+//! 5. **A bar's rim start taken for a corner** (§245.3, hole A; §252), in
+//!    `assemble.rs`. `add_round_bar` starts each cap circle at `(5, 0, ·)`, and
+//!    one bar's pieces walked their arc through that point as two sides where
+//!    the other bar's walked it as one:
+//!    [`where_a_bar_started_its_cap_circle_is_not_a_corner_of_the_answer`].
 //!
-//! **Which way it gave up used to depend on which bar was the tool, and that is
-//! closed.** `place_the_piece` raised one name for two different searches
-//! (§216.4), so both orders read *"a point inside a piece of a face"* and the
-//! pair looked symmetric; §217 split the names and they were not. §218.5 found
-//! the cause and it was a gap, not the draw: the same region of the same plane
-//! has three corners as one bar's cap piece and two as the other's, because a
-//! bar's own rim start vertex is a corner of its own cap pieces and the other
-//! bar's is not. Two corners is no polygon, so the winding count threw away
-//! `(4, 0, 0)` — strictly inside both circles on whole numbers. Counting a
-//! pipe's bulge closes it, and both orders now stop at the same next search.
+//! Selection kept the right pieces for the last two (§245.2); both holes were in
+//! how the kept pieces were named, and both refused `ResultIsNotManifold`.
 //!
-//! **Closing it does not make the bars fuse**, and nobody expected it to. A
-//! piece bounded partly by an arc being hard to walk is still the missing
-//! capability §48 names in `ACrossingThisCannotBeOrderedAlong`'s conic half and
-//! not the quartic one.
-//!
-//! Three refusals, in order, each one closed by a different unit: the straight
-//! gate, then the three-surface meet, then `select.rs` on a curved piece.
-//! The first two are behind us and both regressions would show up here by name.
-
-use std::collections::BTreeMap;
+//! **Fusing any of the six answers once more still refuses**
+//! `AFaceTrimmedByACurveThisCannotFollow` (§252.8). Nothing here asks that yet.
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, Error as GeomError, Isometry, MeetOfThree, Plane, Point, Scale,
-    Surface, Vector, meet_of_three_surfaces,
+    Axis, Cylinder, Deflection, Isometry, MeetOfThree, Plane, Point, Scale, Surface, Vector,
+    meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
 const RADIUS: f64 = 5.0;
 const HEIGHT: f64 = 10.0;
@@ -62,8 +61,8 @@ const APART: f64 = 6.0;
 
 /// `radius = 5` and `apart = 6` is a 3-4-5 either side of the plane of the two
 /// axes, so the two lines the pipes cut run through `(3, ±4, z)` and land on
-/// coordinates an `f64` holds exactly. Nothing that refuses below is refusing
-/// because a number would not fit.
+/// coordinates an `f64` holds exactly. No fuse below can refuse because a
+/// number would not fit, and every corner is compared as the exact number it is.
 fn two_bars_side_by_side() -> (Model, SolidKey, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let here = model
@@ -79,106 +78,121 @@ fn two_bars_side_by_side() -> (Model, SolidKey, SolidKey) {
     (model, here, there)
 }
 
-/// **Where the union of two overlapping parallel bars stops today, by name.**
+/// **Every fuse of two overlapping parallel bars answers, whichever bar is the
+/// tool.**
 ///
-/// Not `.is_err()`: the whole worth of this test is *which* refusal it is. Two
-/// of them are behind us and both are named below, because either coming back is
-/// a regression rather than a curiosity — `ACrossingThisCannotBeOrderedAlong`
-/// was the answer before §48's gate flip, and
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` was the answer until the
-/// three-surface meet learned one plane and two quadrics.
+/// The three rules and both orders of the pair, each fuse on its own copy of the
+/// model. A union or an intersection is one solid whichever way round it is
+/// asked for, and the two differences are mirror images of each other in the
+/// plane `x = 3`, so each rule has one answer by hand for both orders. A fuse
+/// whose answer depended on which solid was the tool fails here.
 ///
-/// What is left is `select.rs`, and since §217 the record says **which** of its
-/// two searches gave out. It is not the same one both ways round, which is what
-/// the single name was hiding; [`the_walls_measured_when_217_split_them`] is the
-/// pin and says what was found.
+/// Each answer is checked against the shape, worked out without the kernel:
 ///
-/// All three rules and both orders of the pair, because a refusal that depended
-/// on which solid was the tool would be a different bug.
+/// - **Its volume.** A bar is `π·5²·10`, and the two share a lens of two discs
+///   of radius 5 whose centres are 6 apart, ten tall. The lens's half-angle is
+///   `acos(3/5)` and its chord is 8 long, so its area is `2·5²·acos(3/5) − 3·8`.
+///   The union is two bars less the lens, the intersection is the lens, and a
+///   difference is one bar less it.
+/// - **Its corners**, `(3, ±4, 0)` and `(3, ±4, 10)`: where the two pipes cross
+///   each other, on the two cap planes. Both ends of every edge are read, so a
+///   bar's rim start at `(5, 0, ·)` or `(11, 0, ·)` left in as a corner fails.
+/// - **Its faces: two flat and two round.** Every answer is one piece of each
+///   cap plane and one piece of each pipe. The two pipes cut each other along
+///   the lines through `(3, ±4, ·)`, so each pipe's wall is two pieces, the part
+///   inside the other bar and the part outside, and every rule keeps exactly one
+///   of the two. What a rule keeps of one cap plane is one region, and pieces of
+///   it that lie side by side are joined into one face (§17.4).
 #[test]
-#[ignore = "since 13d5abaa the union refuses ResultIsNotManifold { count: 1 } instead, undiagnosed, §231"]
-fn two_overlapping_parallel_bars_stop_in_select_whichever_way_round() {
+fn two_overlapping_parallel_bars_fuse_by_every_rule_whichever_way_round() {
     let policy = Policy::certified();
-    let (mut model, here, there) = two_bars_side_by_side();
-    let mut stopped_at: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    let (model, here, there) = two_bars_side_by_side();
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let shared = lens * HEIGHT;
+    let four_corners = vec![
+        [3.0, -4.0, 0.0],
+        [3.0, -4.0, HEIGHT],
+        [3.0, 4.0, 0.0],
+        [3.0, 4.0, HEIGHT],
+    ];
 
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-        for (which, (arguments, tools)) in [
-            ("here on there", ([here], [there])),
-            ("there on here", ([there], [here])),
+    for (rule, by_hand) in [
+        (Rule::Union, 2.0 * one_bar - shared),
+        (Rule::Intersection, shared),
+        (Rule::Difference, one_bar - shared),
+    ] {
+        for (which, arguments, tools) in [
+            ("here on there", here, there),
+            ("there on here", there, here),
         ] {
-            let mut log = ProvenanceLog::new();
-            let refused = model.fuse(&arguments, &tools, rule, &policy, &mut log);
-            assert!(
-                !matches!(
-                    refused,
-                    Err(Error::Geometry(
-                        GeomError::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                    )) | Err(Error::ACrossingThisCannotBeOrderedAlong)
-                ),
-                "{rule:?} on two side-by-side bars went back to a refusal that is closed: \
-                 {refused:?}"
-            );
-            let Err(Error::Undecidable { records }) = &refused else {
-                panic!("{rule:?} on two side-by-side bars answered {refused:?}");
+            let mut model = model.clone();
+            let fused = model
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{rule:?} {which}: {refused:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{rule:?} {which} came back broken: {broken:?}"));
+            let [solid] = fused.solids() else {
+                panic!(
+                    "{rule:?} {which} of two overlapping bars is one solid: {:?}",
+                    fused.solids()
+                );
             };
-            for record in records.records() {
-                *stopped_at
-                    .entry(format!("{rule:?} {which}"))
-                    .or_default()
-                    .entry(record.predicate().to_owned())
-                    .or_default() += 1;
-            }
+            let solid = model.solid(*solid).expect("this model made the key");
+
+            let surfaces: Vec<Surface> = solid.faces().map(|face| face.surface()).collect();
+            let flat = surfaces
+                .iter()
+                .filter(|surface| matches!(surface, Surface::Plane(_)))
+                .count();
+            let round = surfaces
+                .iter()
+                .filter(|surface| matches!(surface, Surface::Cylinder(_)))
+                .count();
+            assert_eq!(
+                (surfaces.len(), flat, round),
+                (4, 2, 2),
+                "{rule:?} {which}: the faces of the answer lie on {surfaces:?}"
+            );
+
+            let mut corners: Vec<[f64; 3]> = solid
+                .faces()
+                .flat_map(|face| face.wires().collect::<Vec<_>>())
+                .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+                .flat_map(|coedge| [coedge.edge().start(), coedge.edge().end()])
+                .map(|corner| corner.point().coordinates())
+                .collect();
+            corners.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+            corners.dedup();
+            assert_eq!(
+                corners, four_corners,
+                "{rule:?} {which}: the corners of the answer"
+            );
+
+            let measured = solid
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid measures");
+            assert!(
+                (measured.volume() - by_hand).abs() <= measured.volume_error(),
+                "{rule:?} {which}: measured {} ± {} against {by_hand} by hand",
+                measured.volume(),
+                measured.volume_error()
+            );
         }
     }
-    assert_eq!(
-        stopped_at,
-        the_wall_both_orders_stop_at(),
-        "the side-by-side bars stopped somewhere else; re-derive this rather than widening it \
-         to hold both names (§19.1)"
-    );
-
-    model
-        .validate(&policy, &mut ProvenanceLog::new())
-        .expect("a refused fuse leaves the model exactly as it was");
-}
-
-/// Which of `select.rs`'s two searches gave out, per rule and per order.
-///
-/// §216.4 found `place_the_piece` raising one name for both searches and §217
-/// split them. The pin is a map rather than a string because it was written
-/// while this pair reached **both** halves.
-///
-/// **It reaches one half now, and that is what the asymmetry being closed looks
-/// like from here.** §218.5 measured why the two orders differed: the refusing
-/// cap piece is `disc@0 ∩ disc@6` on the same plane `z = 0` either way round,
-/// but a bar's own rim start vertex is a corner of its own cap pieces and the
-/// other bar's is not — three corners one way, two the other. Two corners is no
-/// polygon, so the winding was 0 for every candidate and `(4, 0, 0)` was thrown
-/// away although `16 < 25` and `4 < 25` put it strictly inside both circles.
-/// Counting a pipe's bulge gives that piece an inside, and both orders now walk
-/// on to the same next search and give out there.
-///
-/// **What is left is one wall, not the missing one.** Every rule and both orders
-/// stop at "a point in a piece that every solid could place" — a different
-/// search from the one they used to split on, and a separate piece of work. The
-/// assertion above about a closed refusal coming back is untouched.
-fn the_wall_both_orders_stop_at() -> BTreeMap<String, BTreeMap<String, usize>> {
-    let every_solid_could_place = || {
-        BTreeMap::from([(
-            "a point in a piece that every solid could place".to_owned(),
-            1,
-        )])
-    };
-    ["Union", "Intersection", "Difference"]
-        .into_iter()
-        .flat_map(|rule| {
-            [
-                (format!("{rule} here on there"), every_solid_could_place()),
-                (format!("{rule} there on here"), every_solid_could_place()),
-            ]
-        })
-        .collect()
 }
 
 /// **An arc of one bar's circle and an arc of the other's are two edges, even
