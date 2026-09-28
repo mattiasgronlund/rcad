@@ -5,37 +5,46 @@
 //! of its four triples. `place_the_meets` asks each side face where its *own*
 //! triple meets: the face and its two neighbours. At a pyramid's apex the four
 //! triples are the four faces' own, so one face asks about the triple `bake`
-//! used and three ask about another. The fold takes a face's meet as the
-//! corner only when every point of the meet's box lies inside the corner's box
-//! grown by the room writing the corner down cost (§253).
+//! used and three ask about another.
 //!
 //! **Bend the pyramid's base at one corner, and the two side faces there fold
 //! by only a little.** Both triples holding those two faces are then three
 //! planes nearly through one line, so the solve gives a wide box, while `bake`
 //! picks one of the other two triples and its box stays narrow. So those two
 //! faces' meets stick out past the apex's box, by roughly the inverse of the
-//! fold. Measured with §301.6's probe, a scratch edit to `a_corner_is_this_place`,
-//! over 108 certified unions per fold, each pyramid with a cube clear of it:
-//! heights `1/4`, `1` and `4`, each side plane written through the apex or
-//! through a base corner, and the 18 turns below.
+//! fold — and not only their boxes: the point the three stored planes meet at,
+//! worked out exactly, sticks out too, because a plane rounded by an ulp moves
+//! the line two nearly-flat faces cross in by about an ulp over the fold.
 //!
-//! | Fold | Furthest an apex meet sticks out, in rooms | Answered | Room ×0.5 | Room ×1000 |
-//! |---|---|---|---|---|
-//! | 1 | 0.12 | 108 | 108 | 108 |
-//! | 1/4 | 0.24 | 103 | 103 | 103 |
-//! | 1/16 | 1.17 | 99 | 31 | 103 |
-//! | 1/64 | 4.7 | 0 | 0 | 107 |
-//! | 1/256 | 21 | 0 | 0 | 105 |
-//! | 1/4096 | 290 | 0 | 0 | 97 |
+//! Measured over 108 certified unions per fold, each pyramid with a cube clear
+//! of it: heights `1/4`, `1` and `4`, each side plane written through the apex
+//! or through a base corner, and the 18 turns below. The two "sticks out"
+//! columns are over every meet the fold was asked about, in rooms past the
+//! corner's own box; "before" is the fold of §253 alone, which takes a meet
+//! only when its whole box lies inside the corner's box grown by the room, and
+//! "after" adds §356's rule, which takes a meet of three planes `bake` solved
+//! the corner among however far it reaches.
 //!
-//! The apex's own box stayed under 0.18 rooms wide at every fold. The few
-//! refused at ×1000, and at a fold of `1/4`, had every apex meet folded, so
-//! they are refused somewhere else, and they were not traced.
+//! | Fold | Meet's box sticks out | Exact meet sticks out | Answered before | Before, room ×0.5 | Before, room ×1000 | Answered after |
+//! |---|---|---|---|---|---|---|
+//! | 1 | 0.12 | 0.04 | 108 | 108 | 108 | 108 |
+//! | 1/4 | 0.24 | 0.12 | 103 | 103 | 103 | 103 |
+//! | 1/16 | 1.17 | 0.46 | 99 | 31 | 103 | 103 |
+//! | 1/64 | 4.7 | 1.6 | 0 | 0 | 107 | 107 |
+//! | 1/256 | 21 | 6.9 | 0 | 0 | 105 | 105 |
+//! | 1/4096 | 290 | 108 | 0 | 0 | 97 | 97 |
 //!
-//! **So a four-plane corner does fill the room**, which none of §301's shapes
-//! did. The first test is the pin between the thin wedges' hundredth and the
-//! turned-pair rate test at zero: a room of half fails it. The second is where
-//! the room runs out, and is a gap rather than a limit.
+//! After, the room no longer moves any of the six counts: the same numbers
+//! came back with it scaled by 0, 0.5 and 1000 (§356.3). The refusals left —
+//! 5, 5, 1, 3 and 11 — are "could not settle 1 decisions" or "two regions of
+//! one face could not be told apart", with every meet the fold was asked
+//! about folded, and are §310.5's second bullet.
+//!
+//! **So a four-plane corner does fill the room, and the room is not what it
+//! should be measured in.** Every plane round the apex passes through the
+//! apex's box grown by the room, which `bake` checks; carried through a triple
+//! of nearly-flat planes, that room grows by about one over the fold. The
+//! sixty-fourth was a gap, not a limit, and is closed.
 //!
 //! Not reached here: a corner with five or more planes round it, a side face
 //! whose own angle at the apex is a sliver, and an apex far enough from the
@@ -45,7 +54,7 @@ use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftEdge, DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftEdge, DraftStep, Model, Rule, SolidBuilder, SolidKey};
 
 const TURNS: [f64; 6] = [0.1, 0.3, 0.7, 1.1, 1.9, 2.5];
 
@@ -65,12 +74,41 @@ const SPELLINGS: [Through; 2] = [Through::TheApex, Through::ABaseCorner];
 /// in 31 of the 36 more than half of it.** A meet the fold leaves standing
 /// overlaps the apex, and a certified policy refuses to say whether two
 /// overlapping points are one, so an answer here means every apex meet was
-/// folded. With the room ×0.5 in a scratch edit to `a_corner_is_this_place`, 31
-/// of the 36 are refused.
+/// folded. Before §356, a room ×0.5 in a scratch edit to
+/// `a_corner_is_this_place` refused 31 of the 36. Now every apex meet is a
+/// meet of three planes `bake` solved the apex among, which folds whatever the
+/// room, so this no longer holds the room from below; the hand-written test
+/// beside `a_corner_is_this_place` does (§301.5).
 #[test]
 fn a_pyramid_whose_two_faces_fold_by_a_sixteenth_is_united_though_its_apex_meets_stick_out_past_half_the_room()
  {
-    let (fold, height) = (1.0 / 16.0, 1.0);
+    every_turn_and_spelling_is_united(1.0 / 16.0, 1.0);
+}
+
+/// The same pyramid bent by a sixty-fourth, and by a two hundred and
+/// fifty-sixth, is united at every one of the 36 turns and spellings of each.
+///
+/// At a sixty-fourth the folding faces' meets' boxes stick out up to 4.7 rooms
+/// past the apex's box, and the point the three stored planes meet at, worked
+/// out exactly, up to 1.6 rooms (the module table). Before §356 the fold did
+/// not take them, the meet stayed a node beside the apex, and the certified
+/// policy could not order the two along the face's edge: all 36 were refused
+/// on "order along a crossing". **That was a gap, not a limit** (§16.10,
+/// §310.3): every one of the four planes passes through the apex's box grown
+/// by the room, which is what `bake` checks, and only the nearly-flat triple
+/// carries that room out further in space.
+#[test]
+fn a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_united_though_its_apex_meets_stick_out_past_the_room()
+ {
+    for fold in [1.0 / 64.0, 1.0 / 256.0] {
+        every_turn_and_spelling_is_united(fold, 1.0);
+    }
+}
+
+/// A pyramid bent by `fold`, `height` high, is united with a cube clear of it
+/// at every turn and spelling, under a certified policy, into the two of them
+/// with their volumes to a billionth and an empty log.
+fn every_turn_and_spelling_is_united(fold: f64, height: f64) {
     for through in SPELLINGS {
         for turn in TURNS {
             for axis in AXES {
@@ -103,59 +141,6 @@ fn a_pyramid_whose_two_faces_fold_by_a_sixteenth_is_united_though_its_apex_meets
                 assert!(
                     (united - (pyramid_volume + 1.0)).abs() <= 1e-9,
                     "a pyramid of {pyramid_volume} and a unit cube united to {united}"
-                );
-            }
-        }
-    }
-}
-
-/// The same pyramid bent by a sixty-fourth is refused at every one of the 36,
-/// because its apex meets stick out 1.6 to 3.7 rooms past the apex's box and
-/// the fold does not take them. The meet stays a node beside the apex,
-/// overlapping it, and the certified policy cannot order the two along the
-/// face's edge.
-///
-/// **This is a gap, not a limit** (§16.10). The answer exists — two solids that
-/// do not touch — and with the room ×1000 in a scratch edit all 36 give it.
-/// What stops them is that the corner's box and the meet's box come from two
-/// different triples of the corner's own planes. This pins today's refusal, so
-/// the change that closes the gap has to turn this test round.
-#[test]
-fn a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_refused_because_its_apex_meets_stick_out_past_the_room()
- {
-    let (fold, height) = (1.0 / 64.0, 1.0);
-    for through in SPELLINGS {
-        for turn in TURNS {
-            for axis in AXES {
-                let (mut model, pyramid, cube) =
-                    a_pyramid_and_a_cube_clear_of_it(fold, height, through, turn, axis);
-                let refused = model.fuse(
-                    &[pyramid],
-                    &[cube],
-                    Rule::Union,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                let records = match refused {
-                    Err(Error::Undecidable { records }) => records,
-                    Ok(fused) => panic!(
-                        "a pyramid folding {fold} with its planes through {through:?}, turned \
-                         {turn} about {axis:?}, was united into {} solids: the gap is closed, so \
-                         turn this test round",
-                        fused.solids().len()
-                    ),
-                    Err(why) => panic!(
-                        "a pyramid folding {fold} with its planes through {through:?}, turned \
-                         {turn} about {axis:?}, was refused for another reason: {why:?}"
-                    ),
-                };
-                assert!(
-                    records
-                        .records()
-                        .iter()
-                        .any(|record| record.predicate() == "order along a crossing"),
-                    "a meet left beside its corner is refused as two points along an edge that \
-                     cannot be ordered, and this refusal named {records:?}"
                 );
             }
         }
