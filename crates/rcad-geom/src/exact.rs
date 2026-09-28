@@ -1256,6 +1256,9 @@ mod a_nearly_exact_number {
                 }
             }
         }
-        assert!(rounded > 1000, "the sweep has to reach the products that round: {rounded}");
+        assert!(
+            rounded > 1000,
+            "the sweep has to reach the products that round: {rounded}"
+        );
     }
 }

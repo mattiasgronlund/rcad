@@ -19,8 +19,8 @@
 //! answered before the fix and after it.
 
 use rcad_geom::{
-    Axis, Cylinder, MeetOfThree, Plane, Point, Surface, SurfaceMeet, Vector,
-    intersect, meet_of_three_surfaces,
+    Axis, Cylinder, MeetOfThree, Plane, Point, Surface, SurfaceMeet, Vector, intersect,
+    meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -56,7 +56,11 @@ fn the_wall_the_pipe_leans_on() -> Surface {
 #[test]
 fn the_speck_is_the_number_the_fuzzer_found() {
     assert_eq!(SPECK, 7.291122019556398e-304);
-    assert_eq!(SPECK * SPECK, 0.0, "its square is below the smallest subnormal");
+    assert_eq!(
+        SPECK * SPECK,
+        0.0,
+        "its square is below the smallest subnormal"
+    );
 }
 
 /// Moved `2⁻¹⁰⁰⁷` towards the plane, the pipe pokes through it by that much, so
@@ -75,8 +79,15 @@ fn a_plane_a_speck_inside_a_pipes_wall_cuts_it_in_two_lines() {
     let Ok(SurfaceMeet::Curves(runs)) = &meet else {
         panic!("expected two lines, got {meet:?}");
     };
-    assert_eq!(runs.len(), 2, "two lines, one either side of the touch: {runs:?}");
-    assert!(log.is_empty(), "a certified answer writes nothing down: {log:?}");
+    assert_eq!(
+        runs.len(),
+        2,
+        "two lines, one either side of the touch: {runs:?}"
+    );
+    assert!(
+        log.is_empty(),
+        "a certified answer writes nothing down: {log:?}"
+    );
 }
 
 /// The control: unmoved, the plane touches the pipe along one line.

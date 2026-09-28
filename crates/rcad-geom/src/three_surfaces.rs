@@ -1519,7 +1519,10 @@ fn how_a_quadric_cuts_the_line(line: &ALine, quadric: &Surface) -> Option<Quadra
         &quadratic.half_linear,
         &quadratic.constant,
     ];
-    (!coefficients.iter().any(|term| term.lost_more_than_a_rounding())).then_some(quadratic)
+    (!coefficients
+        .iter()
+        .any(|term| term.lost_more_than_a_rounding()))
+    .then_some(quadratic)
 }
 
 /// `‖V + s·D‖² − m²R²` where `V` is the line's point offset to the ball's

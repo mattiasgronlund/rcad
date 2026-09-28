@@ -53,7 +53,10 @@ fn bar_and_cube(step: f64, cube_at: Vector) -> (Model, SolidKey, SolidKey) {
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side two");
     model
-        .place_solid(cube, &Isometry::translation(cube_at).expect("a finite move"))
+        .place_solid(
+            cube,
+            &Isometry::translation(cube_at).expect("a finite move"),
+        )
         .expect("this model made the key");
     (model, bar, cube)
 }
@@ -69,9 +72,18 @@ fn the_bar_less_the_cube(step: f64) -> f64 {
     let (mut model, bar, cube) = bar_and_cube(step, through_the_wall());
     let mut log = ProvenanceLog::new();
     let fused = model
-        .fuse(&[bar], &[cube], Rule::Difference, &Policy::certified(), &mut log)
+        .fuse(
+            &[bar],
+            &[cube],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut log,
+        )
         .unwrap_or_else(|refusal| panic!("moved by {step:e}, the difference refused: {refusal:?}"));
-    assert!(log.is_empty(), "a certified fuse writes nothing down: {log:?}");
+    assert!(
+        log.is_empty(),
+        "a certified fuse writes nothing down: {log:?}"
+    );
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the difference validates");
@@ -94,7 +106,10 @@ fn the_bar_less_the_cube(step: f64) -> f64 {
 fn a_bar_moved_by_a_speck_less_a_cube_through_its_wall_holds_what_the_unmoved_one_does() {
     let moved = the_bar_less_the_cube(SPECK);
     let unmoved = the_bar_less_the_cube(0.0);
-    assert_eq!(moved, unmoved, "a move of 2^-1007 moves no mesh point by a bit");
+    assert_eq!(
+        moved, unmoved,
+        "a move of 2^-1007 moves no mesh point by a bit"
+    );
 }
 
 /// The cube ten along `x` touches nothing, and its wall `y = 2` lies flat
