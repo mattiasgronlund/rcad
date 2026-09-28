@@ -269,10 +269,9 @@ fn fuse(
 /// `None` for any other outcome.
 fn the_predicate_that_gave_up(said: &rcad_topo::Result<Vec<SolidKey>>) -> Option<&'static str> {
     match said {
-        Err(Error::Undecidable { records }) => records
-            .records()
-            .last()
-            .map(|record| record.predicate()),
+        Err(Error::Undecidable { records }) => {
+            records.records().last().map(|record| record.predicate())
+        }
         _ => None,
     }
 }
@@ -281,10 +280,12 @@ fn the_predicate_that_gave_up(said: &rcad_topo::Result<Vec<SolidKey>>) -> Option
 /// grid.
 fn a_block(model: &mut Model, from: [f64; 3], to: [f64; 3]) -> SolidKey {
     let (across, deep) = (to[0] - from[0], to[1] - from[1]);
-    let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [across, 0.0], [across, deep], [0.0, deep]])
-        .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a rectangle is a profile");
-    let placed = Isometry::translation(Vector::new(from[0], from[1], from[2])).expect("a finite move");
+    let rectangle =
+        ProfileBuilder::new(vec![[0.0, 0.0], [across, 0.0], [across, deep], [0.0, deep]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a rectangle is a profile");
+    let placed =
+        Isometry::translation(Vector::new(from[0], from[1], from[2])).expect("a finite move");
     model
         .add_extrusion(&rectangle, to[2] - from[2], &placed)
         .expect("a rectangle extrudes")
