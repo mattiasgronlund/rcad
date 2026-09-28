@@ -73,9 +73,9 @@ use written_by_hand::a_header;
 fn a_bend_written_as_the_standard_says_is_refused_by_the_mesh_today() {
     let text = a_quarter_bend_written(Written::AsTheStandardSays);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-        .err()
-        .expect("today the mesh refuses the bend a file writes");
+    let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) else {
+        panic!("today the mesh refuses the bend a file writes");
+    };
     assert!(
         is_faces_do_not_agree(&refused),
         "the mesh takes a torus's own normal into the tube and the file out of it, and the \
@@ -146,9 +146,10 @@ fn three_relays_in_the_corpus_are_refused_by_the_mesh_today() {
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|why| panic!("{} is in the corpus: {why}", path.display()));
         let file = StepFile::read(&bytes).expect("a corpus file reads");
-        let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-            .err()
-            .unwrap_or_else(|| panic!("today the mesh refuses {name}"));
+        let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+        else {
+            panic!("today the mesh refuses {name}");
+        };
         assert!(is_faces_do_not_agree(&refused), "{name}: {refused:?}");
     }
 }
