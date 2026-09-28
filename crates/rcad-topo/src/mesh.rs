@@ -6558,10 +6558,11 @@ mod tests {
     /// the other circle's corner, and for a band wider than half the ring that
     /// corner is on the other side (§243.3, Q103). [`SolidView::mesh`] is public
     /// in its own right, so a model read from a file reaches the mesher without
-    /// the sweep. Before §343 the long band was meshed as the short one, with
-    /// its own two caps, and measured `2π²` where Pappus gives `6π²`: each cap
-    /// is on a plane through the axis, so it adds nothing to the volume
-    /// whichever way it faces, and nothing in the mesh was folded.
+    /// the sweep. Before §343 the long band's wall was meshed as the short
+    /// band's, between its own two caps facing away from it, and at the
+    /// coarsest deflection the solid measured `13.07` where Pappus gives
+    /// `6π² = 59.22`, allowed `4.07`. Nothing in that mesh was folded, so
+    /// nothing refused it.
     #[test]
     fn a_band_between_two_circles_meshes_the_way_round_its_circles_are_walked() {
         let (ring, tube) = (4.0, 1.0);

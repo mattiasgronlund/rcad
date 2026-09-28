@@ -234,7 +234,8 @@ this name.
 and neither inside the other, bound two bands. The move puts the later loop
 the nearer way round, which is the wrong band when the face is the wider one.
 Only the loops' directions can tell the two apart. The base chose by position
-too, so this is not new. It is reasoned, not run, and is Q196.
+too, so this is not new. It is reasoned, not run, and is Q196. §343 ran it: it
+was wrong, and the later loop is now placed by which way the first one runs.
 
 **How it was checked.** The run's verifier read the diff and found the pin
 above, but it ran out of room before its gate finished, and said fix first.
