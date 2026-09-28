@@ -9,10 +9,12 @@
 //! twice. Every test here aims at that lune.
 //!
 //! Since §200 some wedges are answered, and each of those is measured against
-//! its closed form: 17 cut by two knives, 13 intersections and 4 unions, and 10
-//! by one prism, all intersections. The rest are still refused by name, most
-//! now at the flat pieces or in assembly rather than at the curved pieces. A
-//! case that moves either way fails, naming itself.
+//! its closed form: 29 cut by two knives, 11 intersections, 12 unions and 6
+//! differences, and 30 by one prism, 10 of each rule. 32 of them, all unions
+//! and differences, answer since §330 names an arc of a closed crossing by its
+//! plane as well as by the ball. The rest are still refused by name, most now
+//! at the flat pieces or in assembly rather than at the curved pieces. A case
+//! that moves either way fails, naming itself.
 //!
 //! The ball's seam is the `+x` half of the meridian in `y = 0`, so a knife
 //! turned a quarter turn about the axis lies along the seam.
@@ -72,9 +74,11 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 ///
 /// Since the fuse steps a curved piece's point towards every cut's material
 /// (§200), the cases in `answered` get past the curved pieces and answer, and
-/// each is measured against its closed form. Most of the rest now reach the
-/// flat pieces and assembly and are refused there instead. A case that moves
-/// either way fails, naming itself.
+/// each is measured against its closed form. Since §330, the 170 degree
+/// wedge's difference and union answer at every size, and so do the 10 degree
+/// wedge's at radii 1 and 3. Most of the rest
+/// now reach the flat pieces and assembly and are refused there instead. A case
+/// that moves either way fails, naming itself.
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
@@ -86,15 +90,27 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
         (90.0, 1000.0, "Union"),
         (90.0, 3.0, "Intersection"),
         (90.0, 3.0, "Union"),
+        (10.0, 1.0, "Difference"),
+        (10.0, 1.0, "Union"),
         (10.0, 0.001, "Intersection"),
         (10.0, 0.001, "Union"),
         (10.0, 1000.0, "Intersection"),
         (10.0, 1000.0, "Union"),
         (10.0, 3.0, "Intersection"),
+        (10.0, 3.0, "Difference"),
+        (10.0, 3.0, "Union"),
         (170.0, 1.0, "Intersection"),
+        (170.0, 1.0, "Difference"),
+        (170.0, 1.0, "Union"),
         (170.0, 0.001, "Intersection"),
+        (170.0, 0.001, "Difference"),
+        (170.0, 0.001, "Union"),
         (170.0, 1000.0, "Intersection"),
+        (170.0, 1000.0, "Difference"),
+        (170.0, 1000.0, "Union"),
         (170.0, 3.0, "Intersection"),
+        (170.0, 3.0, "Difference"),
+        (170.0, 3.0, "Union"),
     ];
     let mut moved = Vec::new();
     let rules: [(Rule, ClosedForm); 3] = [
@@ -301,22 +317,45 @@ fn a_quarter_wedge_stops_after_a_point_is_found_inside_the_piece_and_not_before(
 ///
 /// This is not the lune §195.1 is about: the poles sit on the knife's edge
 /// rather than on its face, which the fuse sees before it sees any lune. The
-/// cases in `answered` answer and measure since §200; the rest are refused by
-/// name. The quarter wedge of the ball of radius 1000 answers since the
-/// triangulator takes a corner under spade's floor as zero (§321.6).
+/// intersections in `answered` answer and measure since §200; the rest are
+/// refused by name. The quarter wedge of the ball of radius 1000 answers since
+/// the triangulator takes a corner under spade's floor as zero (§321.6). The
+/// difference and union answer wherever the intersection does since §330,
+/// which names an arc of the ball's crossing with a prism face by that face's
+/// plane as well.
 #[test]
 fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
         (90.0, 1.0, "Intersection"),
+        (90.0, 1.0, "Difference"),
+        (90.0, 1.0, "Union"),
         (90.0, 1000.0, "Intersection"),
+        (90.0, 1000.0, "Difference"),
+        (90.0, 1000.0, "Union"),
         (45.0, 1.0, "Intersection"),
+        (45.0, 1.0, "Difference"),
+        (45.0, 1.0, "Union"),
         (45.0, 1000.0, "Intersection"),
+        (45.0, 1000.0, "Difference"),
+        (45.0, 1000.0, "Union"),
         (45.0, 3.0, "Intersection"),
+        (45.0, 3.0, "Difference"),
+        (45.0, 3.0, "Union"),
         (10.0, 1.0, "Intersection"),
+        (10.0, 1.0, "Difference"),
+        (10.0, 1.0, "Union"),
         (10.0, 0.001, "Intersection"),
+        (10.0, 0.001, "Difference"),
+        (10.0, 0.001, "Union"),
         (10.0, 1000.0, "Intersection"),
+        (10.0, 1000.0, "Difference"),
+        (10.0, 1000.0, "Union"),
         (10.0, 3.0, "Intersection"),
+        (10.0, 3.0, "Difference"),
+        (10.0, 3.0, "Union"),
         (170.0, 1.0, "Intersection"),
+        (170.0, 1.0, "Difference"),
+        (170.0, 1.0, "Union"),
     ];
     let mut moved = Vec::new();
     let rules: [(Rule, ClosedForm); 3] = [
