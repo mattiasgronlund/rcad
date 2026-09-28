@@ -1564,8 +1564,9 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// §176.2). Two planes cross in a straight line or nowhere, so a run between
 /// them that names a curved surface can only mean that surface.
 ///
-/// **Two curved faces that name a plane are a face and that plane** — the ball
-/// if one of them is a ball, and otherwise the first face. Where a ball meets a
+/// **Two curved faces that name a plane are a face and that plane** — the face
+/// [`Surface`]'s own fixed order puts first, which is the ball if one of them is
+/// a ball (see below for why that order). Where a ball meets a
 /// pipe of its own radius centred on its axis the two touch all the way round a
 /// circle and never cross, so the marcher has no crossing to follow, and as
 /// written down the ball's centre is `2.1e-16` off the pipe's axis, so no closed
@@ -1618,6 +1619,33 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// only a surface that is neither face — so this is the answer for a model
 /// built by hand or read back from bytes.
 ///
+/// # Which of two curved faces goes with a third surface
+///
+/// **The one [`Surface::how_it_sorts_against`] puts first, so the answer does
+/// not depend on which face is listed first.** It used to be the first face
+/// listed, or the ball, and callers list the two faces in the order they meet
+/// them: `Model::validate` puts first the face whose coedge it is checking. So
+/// the two coedges of one rim between a pipe and a cone were checked against
+/// two different curves, and a bar that flares out into a cone, with its pipe's
+/// axis written pointing down, was refused whichever way round its file listed
+/// the faces; the same rim measured `6π` from one face and was refused a length
+/// from the other; and a half ball on a pipe of its own radius meshed from one
+/// face and not the other (`docs/decisions.md` §222.1 item 3, §336).
+///
+/// That order puts a ball before a pipe, a pipe before a cone and a cone before
+/// a torus. The ball first is what gets its poles into the rim, because the
+/// mesher reads this pair to find them; the pipe before a cone or a torus is
+/// the pair `rcad-topo`'s edge length has a circle for; and it is the surface
+/// `rcad-topo`'s and `rcad-step`'s `the_curved_one_of` pick to say which way a
+/// closed edge runs, so the curve an edge is walked along and the surface that
+/// says which way it goes are one surface.
+///
+/// **Where a face is flat, the first face listed still stands.** Two flat faces
+/// a hair apart with a curved `and` are one plane written twice, and
+/// `one_answer_for_which_two_surfaces_a_run_is_between.rs` pins the first of
+/// them; a flat and a curved face beside a third surface are something nothing
+/// in the kernel or the reader writes. Both still depend on the order.
+///
 /// # One answer, read by everyone who asks
 ///
 /// [`walk`] and [`where_a_closed_crossing_starts`] read the pair off this, and
@@ -1632,15 +1660,21 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 pub fn which_two_surfaces_a_run_is_between(run: &EdgeRun, along: [&Surface; 2]) -> [Surface; 2] {
     let both_flat = along.iter().all(|side| side.as_plane().is_some());
     let both_curved = along.iter().all(|side| side.as_plane().is_none());
-    let a_ball = along
-        .iter()
-        .find(|side| matches!(side, Surface::Sphere(_)))
-        .copied();
     match run {
         EdgeRun::RightRoundWhereItCrosses { and } | EdgeRun::PartOfWhereItCrosses { and, .. }
             if and == along[0] || and == along[1] =>
         {
             [*along[0], *along[1]]
+        }
+        // Two curved faces and an `and` that is neither of them — the arm above
+        // took the ones that repeat a face — whether `and` is the circle's own
+        // plane or a third curved surface, and whether the two faces are one
+        // surface or two: the run names a third surface, which is what a reader
+        // writes only when the pair either side names nothing.
+        EdgeRun::RightRoundWhereItCrosses { and } | EdgeRun::PartOfWhereItCrosses { and, .. }
+            if both_curved =>
+        {
+            [the_face_that_sorts_first(along), *and]
         }
         // A closed run whose two faces are one surface names its second surface
         // the same way a ball's seam does, and for the same reason: the pair
@@ -1652,19 +1686,22 @@ pub fn which_two_surfaces_a_run_is_between(run: &EdgeRun, along: [&Surface; 2]) 
         EdgeRun::PartOfWhereItCrosses { and, .. } if both_flat && and.as_plane().is_none() => {
             [*along[0], *and]
         }
-        EdgeRun::PartOfWhereItCrosses { and, .. } if both_curved && and.as_plane().is_some() => {
-            [*a_ball.unwrap_or(along[0]), *and]
-        }
-        // Two curved faces and a curved `and` that is neither of them — the
-        // first arm took the ones that repeat a face: the second surface the run
-        // carries is a third surface, which is what a reader writes only when
-        // the pair either side names nothing.
-        EdgeRun::PartOfWhereItCrosses { and, .. } if both_curved && and.as_plane().is_none() => {
-            [*along[0], *and]
-        }
         EdgeRun::Straight
         | EdgeRun::RightRoundWhereItsFacesCross
         | EdgeRun::PartOfWhereItCrosses { .. } => [*along[0], *along[1]],
+    }
+}
+
+/// Whichever of the two faces [`Surface::how_it_sorts_against`] puts first.
+///
+/// That order depends on nothing but the numbers each surface stores, so two
+/// callers that list the same two faces either way round get the same face
+/// back. [`which_two_surfaces_a_run_is_between`] says why it is this order.
+fn the_face_that_sorts_first(along: [&Surface; 2]) -> Surface {
+    let [one, other] = along;
+    match other.how_it_sorts_against(one) {
+        Ordering::Less => *other,
+        Ordering::Equal | Ordering::Greater => *one,
     }
 }
 
