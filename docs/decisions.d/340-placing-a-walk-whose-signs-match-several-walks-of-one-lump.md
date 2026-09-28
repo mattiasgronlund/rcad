@@ -96,6 +96,7 @@ not measured one by one.
   refuses its own answer `Invalid(FacesDoNotAgreeWhichWayTheyFace)`: its
   coarsest mesh uses a side more often one way than the other. That is after
   `arrange.rs`, and where is not found. The same pair fused all at once answers.
+  §340.5 found it, and it is in `arrange.rs` after all.
 - **Two answers do not measure.** The union and a difference of the block that
   reaches into the frustum keep a piece of the cone bounded by an arc of the
   parabola the block's steep face cuts; they hold every grid point asked (7327)
@@ -105,3 +106,63 @@ not measured one by one.
 - **The refusal of §340.2 has no shape that reaches it** in the suites. It is
   what a walk that goes round nothing, a ball, or a curved side on a plane would
   get.
+
+### 340.5 The half ball the second fuse turns inside out
+
+*Queue row Q412, which replaced Q204 to land this section's fix with the four
+pins of §340.4 in its files. Lane `lane-q412-two-walks-of-one-lump-in-one-cell`,
+off `e5a7d95a` with `83b8511e` merged.*
+
+The ball-then-bar union of `a_ball_and_a_bar_in_one_block.rs` refuses because
+**the half ball hanging under the floor comes out of the arrangement as the
+upper half**. Nothing cuts it in the second fuse. Its one wire is the circle
+where it meets the floor, and that circle's one corner is on the floor, so
+`Arrangement::material_is_left_of_forward` finds no corner off the floor to read
+its side from and takes the circle's forward direction. That is §197's guess,
+which §197 named and closed for an edge with two ends and left standing for a
+whole circle. The lower half lies on the floor plane's outer side, so forward
+is the wrong way for it.
+
+Traced with printed probes on this branch, now removed:
+
+- The first fuse's answer has the floor walking the circle forward and the half
+  ball walking it backward. The second fuse's pieces have both walking it
+  forward. The floor's piece reads `material_side: Pos` off its square's
+  corners; the half ball's reads `Neg`, from the guess.
+- The four sides the coarsest mesh uses one way only are the four chords of
+  that circle, each used once by the floor and once by the half ball.
+- **Turning that one guess round for that one face, and nothing else**, the
+  union answers, validates, has 11 faces, and measures `357.594` at deflection
+  `0.02`. The shape worked out by hand is the block, the lower half ball and
+  two bar stubs of two units: `343 + 2π/3 + 4π = 357.661`. The all-at-once
+  union measures the same `357.59`.
+
+**This is a gap, and the fix is not in `arrange.rs` alone.** Which way a face's
+wire walks a closed edge is in the model: the coedge's direction on the edge,
+read with `a_closed_crossing_is_walked_the_way_it_is_stored`, as `holds.rs`
+already does for a ring's face. `bake.rs`'s `BakedEdge` does not carry it, and
+`split_a_face` gets nothing but the baked face. So the fix is `bake.rs`
+carrying that direction and `material_is_left_of_forward` reading it before
+it falls back on a corner. Refusing where it now guesses was not taken, because
+the guess is also where every round cap goes and it is right for them: a flat
+disk lies inside the round surface that cuts it. The bar's two caps reached it
+in this very fuse, and with only the half ball turned round the answer
+validated.
+
+Until then the union is pinned at that exact `Invalid`. `a_curved_refusal`
+still calls it a bug. The one property that meets this configuration,
+`uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`,
+lets that one `Invalid` through for that one fuse and names it
+`A_HALF_BALL_TURNED_INSIDE_OUT`. Its quarter of fuses that do not answer is
+unchanged. Q316's block and ball, clear of each other, were not looked at.
+
+### 340.6 The two counts, measured on this branch
+
+Each by `mise exec -- just t -p rcad-topo --test <file>`, and the whole crate
+by `mise exec -- just t -p rcad-topo --no-fail-fast`: 1117 run, 1117 passed.
+
+| where | before | now |
+|---|---|---|
+| `how_often_a_fuse_with_a_cone_refuses.rs`, a frustum against a block | 66 of 96, 30 no point | 96 of 96, nothing refused; its floor is 96 |
+| `what_the_answered_block_fuses_actually_say.rs`, rows that miss | 24, four rows | 30, all five |
+| the same, rows that meet | 7 checked | 11 checked, 66 answers; its floor is 11 |
