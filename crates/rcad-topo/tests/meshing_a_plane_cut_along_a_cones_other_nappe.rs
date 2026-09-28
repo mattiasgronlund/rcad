@@ -1,7 +1,7 @@
 //! Why the mesher refuses the fuses of `a_plane_cut_along_a_cones_other_nappe.rs`
 //! that get past selection and no further (`docs/decisions.md` §285).
 //!
-//! Eighteen of them, and every one refuses in the check the fuse makes before it
+//! Eighteen of them, and every one refused in the check the fuse makes before it
 //! writes a curved answer: the answer meshed as coarsely as a mesh gets, for the
 //! sign of the space it encloses. Two causes:
 //!
@@ -10,15 +10,15 @@
 //!   up to the apex, each cut leaving from the rim corner nearest its quarter.
 //!   The coarsest walk gives that rim four corners, and when the rim the block
 //!   keeps is under a third of a turn two quarters pick the same corner. The
-//!   patch between them is that corner and the apex twice, and the
-//!   triangulator refuses it: `CornersCoincide { position: 2 }`.
+//!   patch between them was that corner and the apex twice, and the
+//!   triangulator refused it: `CornersCoincide { position: 2 }`. The cuts leave
+//!   from four different corners now (§354): twelve answer right, and the four
+//!   whose steep face misses the apex by a rounding answer and do not measure.
 //! - **Two folds on the frustum.** The block's steep face and the frustum's
 //!   face share the two arcs they cross in, each walked as two chords, and both
 //!   faces draw the side between the two arcs' middles:
-//!   `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
-//!
-//! Both are gaps: the mesh.rs and validate.rs experiments §285 carries answer
-//! them right under the same four checks the family holds an answer to.
+//!   `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. Still refused;
+//!   §285.6's experiment B is the retry that answers them.
 
 use core::f64::consts::{FRAC_PI_2, PI};
 use std::collections::BTreeMap;
@@ -36,29 +36,14 @@ use cones::{a_frustum, a_pointed_cone};
 /// `a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses`
 /// and the 32 of `a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses`.
 ///
-/// The row that asked (Q124) said twelve `CannotMeshAFace`; §282.5 brought four
-/// of the old point-in-piece refusals this far, so it is sixteen. Only the
-/// intersection and the block less the cone refuse, and those are the two rules
-/// that keep the piece of the cone **inside** the block.
+/// There were eighteen (§285.1). Sixteen were caps of the pointed cone refused
+/// `CornersCoincide { position: 2 }`, and none is refused there since the
+/// quarter cuts leave from four different corners (§354). The two folds on the
+/// frustum are left, for the coarsest mesh's retry (§285.4).
 #[test]
-fn the_mesher_refuses_sixteen_caps_of_the_pointed_cone_and_two_folds_on_the_frustum() {
-    let cap = "CornersCoincide { position: 2 }";
+fn the_mesher_refuses_two_folds_on_the_frustum_and_no_cap_of_the_pointed_cone() {
     let fold = "TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }";
     let mut want = Vec::new();
-    for (lean, crossing, turn) in [
-        (0.25, 0.0, 1.0),
-        (0.375, 0.0, 1.0),
-        (0.375, 0.125, 0.0),
-        (0.375, 0.125, 1.0),
-        (0.375, 0.125, 3.0),
-        (0.375, 0.5, 0.0),
-        (0.375, 0.5, 1.0),
-        (0.375, 0.5, 3.0),
-    ] {
-        for rule in ["intersection", "block less cone"] {
-            want.push(("pointed", lean, crossing, turn, rule, cap.to_owned()));
-        }
-    }
     for turn in [3.0, 3.5] {
         want.push((
             "frustum",
@@ -85,13 +70,18 @@ fn the_mesher_refuses_sixteen_caps_of_the_pointed_cone_and_two_folds_on_the_frus
 /// from the corner nearest its quarter, and a patch between two cuts that leave
 /// from one corner has no width.
 ///
-/// Two quarters pick one corner **exactly when the kept rim, `2 · half`, is
-/// under a third of a turn**, so `half < π/3`: then the crossing is more than
-/// two thirds of the turn and holds two quarters with one corner between them. Lean three eighths
-/// keeps `half ≈ 0.74` and `0.79`, and every turn refuses; lean one quarter
-/// keeps `1.06` and `1.08`, and none does.
+/// Two quarters are nearest one corner **exactly when the kept rim, `2 · half`,
+/// is under a third of a turn**, so `half < π/3`: then the crossing is more than
+/// two thirds of the turn and holds two quarters with one corner between them.
+/// Lean three eighths keeps `half ≈ 0.74` and `0.79`; lean one quarter keeps
+/// `1.06` and `1.08`.
+///
+/// Every turn of lean three eighths refused `CornersCoincide { position: 2 }`
+/// for it until the cuts were made to leave from four different corners
+/// (§354), and now every one of the twelve answers right.
 #[test]
-fn two_quarter_cuts_share_a_corner_exactly_when_the_kept_rim_is_under_a_third_of_a_turn() {
+fn two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_turn_and_every_cap_answers()
+ {
     let cone = THE_POINTED_CONE;
     let mut seen = Vec::new();
     for lean in [0.25, 0.375] {
@@ -100,14 +90,9 @@ fn two_quarter_cuts_share_a_corner_exactly_when_the_kept_rim_is_under_a_third_of
             let share = two_quarters_share_a_corner(half);
             assert_eq!(share, half < PI / 3.0, "half the kept rim is {half}");
             for turn in [0.0, 1.0, 3.0] {
-                let refused = what_the_mesher_refused(
-                    cone,
-                    a_leaning_block(lean, crossing, turn),
-                    INTERSECTION,
-                );
+                let said = what_it_gives(cone, a_leaning_block(lean, crossing, turn), INTERSECTION);
                 assert_eq!(
-                    refused,
-                    share.then(|| "CornersCoincide { position: 2 }".to_owned()),
+                    said, "right",
                     "lean {lean}, crossing {crossing}, turn {turn}"
                 );
             }
@@ -125,19 +110,21 @@ fn two_quarter_cuts_share_a_corner_exactly_when_the_kept_rim_is_under_a_third_of
     );
 }
 
-/// The four caps whose steep face is meant to run through the apex, crossing
-/// zero, refuse at turn one and at no other turn, and which side of that face
-/// the apex really is on does not say which.
+/// The intersections whose steep face is meant to run through the apex,
+/// crossing zero, do not measure at `0.002` at turn one and at no other turn,
+/// and which side of that face the apex really is on does not say which.
 ///
 /// The block's placement is rounded, so its steep face misses the apex by a
 /// rounding. The block itself puts the apex inside it at three of the six,
-/// outside at two, and on its boundary at one, and of the two that refuse one
-/// has it outside and one inside.
+/// outside at two, and on its boundary at one, and of the two that do not
+/// measure one has it outside and one inside.
 /// So the cap round the apex these two make is not the apex's own side of the
 /// face: it is where the fuse's crossing of the face and the cone came out, a
-/// few `1e-16` above the apex (§285.3).
+/// few `1e-16` above the apex (§285.3). They refused in the mesher before the
+/// quarter cuts left from four different corners, and refuse measuring now
+/// (§354).
 #[test]
-fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_refuse() {
+fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_do_not_measure() {
     let policy = Policy::certified();
     let mut seen = Vec::new();
     for lean in [0.25, 0.375] {
@@ -150,8 +137,9 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_ref
                 .solid(block_key)
                 .expect("this model made the key")
                 .classify_point(Point::origin(), &policy, &mut ProvenanceLog::new());
-            let refused = what_the_mesher_refused(THE_POINTED_CONE, block, INTERSECTION).is_some();
-            seen.push((lean, turn, apex, refused));
+            let does_not_measure = what_it_gives(THE_POINTED_CONE, block, INTERSECTION)
+                .starts_with("right on the grid");
+            seen.push((lean, turn, apex, does_not_measure));
         }
     }
     assert_eq!(
@@ -170,10 +158,13 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_ref
 /// The eighteen, each held to the family's four checks, with the measure asked
 /// down a ladder of five deflections instead of at the finest alone.
 ///
-/// On this tree every one refuses before there is an answer to check. It is the
-/// harness for §285's experiments: with those applied and their variables set,
-/// the same test prints how many answer right and how the rest refuse, and its
-/// assertion fails on purpose.
+/// All eighteen refused before there was an answer to check until the quarter
+/// cuts left from four different corners (§354). Now twelve answer right; the
+/// four whose steep face misses the apex by a rounding hold every grid point and
+/// measure at `0.02` and no finer (lean one quarter) or at no rung (lean three
+/// eighths); and the frustum's two folds are refused as they were. It is the
+/// harness for §285's and §354's experiments: with one applied, the same test
+/// prints how many answer right and how the rest refuse.
 #[test]
 fn the_eighteen_held_to_the_familys_four_checks() {
     let mut cases = Vec::new();
@@ -205,13 +196,25 @@ fn the_eighteen_held_to_the_familys_four_checks() {
         *tally.entry(said).or_default() += 1;
     }
     println!("{tally:#?}");
+    let cuts_off_a_corner = |points: usize| {
+        format!(
+            "right on the grid ({points} points), and every measure refused: {:?}",
+            [1541, 1014, 747, 535, 348].map(|corner| format!(
+                "CannotMeshAFace ASideCutsOffOneCornerOfACurvedPatch {{ corner: {corner} }}"
+            ))
+        )
+    };
+    let crosses_itself = format!(
+        "right on the grid, measured right at 0.02, refused finer: {:?}",
+        [2011, 1273, 901].map(|at| format!("CannotMeshAFace BoundaryCrossesItself {{ at: {at} }}"))
+    );
     assert_eq!(
         tally,
         [
-            (
-                "the fuse refused CannotMeshAFace CornersCoincide { position: 2 }".to_owned(),
-                16
-            ),
+            ("right".to_owned(), 12),
+            (cuts_off_a_corner(21_610), 1),
+            (cuts_off_a_corner(27_214), 1),
+            (crosses_itself, 2),
             (
                 "the fuse refused TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }"
                     .to_owned(),
