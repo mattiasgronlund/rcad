@@ -713,8 +713,16 @@ impl BuildingAMesh {
     /// the fallback then read nothing but how the circle curves: the rim kept
     /// whichever way the walker drew it, and five of eight such unions put each
     /// face's triangles on the other face's side of the plane
-    /// (`the_mesher_reads_a_rim_between_two_flat_faces_as_the_run_says.rs`).
+    /// (`a_ball_cut_through_its_equator_meshes_each_half_on_its_own_side.rs`).
     /// The ball and the plane read the latitude there, as the fuse does.
+    ///
+    /// **A rim where a ball rests on a pipe of its radius reads the same pair**,
+    /// the ball and the rim's plane, and so is walked the way the ball's latitude
+    /// runs where its longitude is square to the rim. The copy read the ball and
+    /// the pipe, which only touch, so no rule answered and the rim kept the
+    /// walker's way round; a solid built to that way is walked against the rule
+    /// now and refused by `AWireWillNotLieFlatOnItsFace`
+    /// (`a_half_ball_on_a_pipe_meshes_whichever_face_is_listed_first.rs`).
     fn walk(
         &mut self,
         edge: EdgeView<'_>,

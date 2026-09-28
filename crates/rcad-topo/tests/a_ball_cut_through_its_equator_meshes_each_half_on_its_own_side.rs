@@ -1,8 +1,8 @@
 //! A ball cut in two by a plane it does not share a face with, and which half
 //! of the ball each face's triangles land on.
 //!
-//! The file's name is the queue row's (§222.1 item 1). The mesher kept its own
-//! narrower copy of `rcad_geom::which_two_surfaces_a_run_is_between`, which
+//! The mesher kept its own narrower copy of
+//! `rcad_geom::which_two_surfaces_a_run_is_between` (§222.1 item 1), which
 //! swapped the run's curved surface in only where both faces are flat. For two
 //! flat faces the copy and the shared function agree on every run that gets
 //! past `nothing_curved_says_where_it_bends`, so no draw of that kind can tell
@@ -27,18 +27,20 @@
 //! # What that cost, measured
 //!
 //! `tests/a_rim_that_names_its_cutting_surface.rs`'s draw — a block and a ball
-//! clear of it, united — with the ball half a unit to one side of the block's
-//! plane `y = 0`, and the whole draw turned about `z`. Turning it puts the
-//! rim's corner on the ball's equator (`Plane::basis` gives an upright plane a
-//! level first direction). Of the eight draws below, the five with the ball on
-//! the far side of the plane came back from the narrow copy with **the two
-//! faces' triangles swapped**: the cap's face carried the rest of the ball,
-//! about `9.406` of area where the cap is `π = 3.142`, and the rest's face
-//! carried the cap, `3.131` where the rest is `3π = 9.425`, every point of each
-//! on the wrong side of the plane. The three with the ball on the near side came
-//! out right by the same luck the other way. The union of the two faces is
-//! still the ball, so the volume and the closed-ness of the mesh did not move,
-//! and nothing in the suite read which face a triangle belongs to.
+//! beside it, united — with the ball half a unit to one side of the block's
+//! plane `y = 0`, moved half a unit further from the block so that it touches
+//! none of the block's faces, and the whole draw turned about `z`. Turning it
+//! puts the rim's corner on the ball's equator (`Plane::basis` gives an upright
+//! plane a level first direction). Of the eight draws below, the five with the
+//! ball on the far side of the plane came back from the narrow copy with **the
+//! two faces' triangles swapped**: the cap's face carried the rest of the ball,
+//! `9.4057` to `9.4062` of area where the cap is `π = 3.1416`, and the rest's
+//! face carried the cap, `3.1310` where the rest is `3π = 9.4248`, a point of
+//! each on the wrong side of the plane by the depth of the other half. The three
+//! with the ball on the near side came out right by the same luck the other
+//! way. The union of the two faces is still the ball, so the volume and the
+//! closed-ness of the mesh did not move, and nothing in the suite read which
+//! face a triangle belongs to.
 //!
 //! # The oracle
 //!
@@ -66,26 +68,33 @@ const DEFLECTION: f64 = 0.01;
 /// The draw turned about `z`, so the plane that cuts the ball stands upright
 /// with a normal along no axis, and the rim's corner sits on the equator.
 ///
-/// Turned and off to either side as listed: not every turn leaves the ball cut
-/// at all (`a_rim_that_names_its_cutting_surface.rs` names that and does not
-/// answer it), and these are the ones that do.
+/// The ball's centre is `1.5` out from the block's plane `x = 0`, half a unit
+/// more than its radius, so the ball stands clear of the block on either side of
+/// `y = 0`. Turned and off to either side as listed: not every turn leaves the
+/// ball cut at all (`a_rim_that_names_its_cutting_surface.rs` names that and
+/// does not answer it), and these are the ones that do.
 #[test]
 fn each_half_of_a_ball_cut_upright_through_its_equator_is_meshed_on_its_own_side() {
     let draws = [
         (0.3, 1.0),
+        (3.5, 1.0),
+        (5.0, 1.0),
         (0.3, -1.0),
-        (0.5, 1.0),
         (0.5, -1.0),
-        (2.0, 1.0),
         (2.0, -1.0),
         (4.0, -1.0),
         (5.5, -1.0),
     ];
+    let across = 1.5;
     let wrong: Vec<String> = draws
         .into_iter()
         .flat_map(|(turned, side)| {
             let what = format!("turned {turned} about z, the ball {side} × {OFF} off y = 0");
-            let (model, ball) = a_block_and_a_ball_clear_of_it_united(turned, side * OFF);
+            assert!(
+                how_far_the_ball_stands_off_the_block(across, side * OFF) > 0.0,
+                "{what}: the ball is meant to be clear of the block"
+            );
+            let (model, ball) = a_block_and_a_ball_beside_it_united(turned, across, side * OFF);
             let rim = the_rim_between_the_halves(&model, ball, &what);
             assert_eq!(
                 rim.along_the_longitude, 0.0,
@@ -102,11 +111,25 @@ fn each_half_of_a_ball_cut_upright_through_its_equator_is_meshed_on_its_own_side
 ///
 /// Both readings of the pair always agreed here, so this is the check on the
 /// oracle rather than on the mesher.
+///
+/// **The ball is one unit out from `x = 0` here, not one and a half**, because
+/// unturned the block's plane `y = 0` cuts the ball only when the ball rests on
+/// the plane `x = 0`: at each of ten distances from `1.01` to `1.9` out it came
+/// back whole, on both sides of `y = 0`. On the near side
+/// that rests the ball on the plane outside the block. On the far side it
+/// **touches the block** at the one point `(0, −0.5, 1)` of its face `x = 0`, and
+/// the union still answers the block and the ball apart.
 #[test]
 fn each_half_of_a_ball_cut_where_its_longitude_says_which_way_is_meshed_on_its_own_side() {
-    for side in [1.0, -1.0] {
+    let across = 1.0;
+    for (side, touches) in [(1.0, false), (-1.0, true)] {
         let what = format!("unturned, the ball {side} × {OFF} off y = 0");
-        let (model, ball) = a_block_and_a_ball_clear_of_it_united(0.0, side * OFF);
+        assert_eq!(
+            how_far_the_ball_stands_off_the_block(across, side * OFF) == 0.0,
+            touches,
+            "{what}: whether the ball touches the block"
+        );
+        let (model, ball) = a_block_and_a_ball_beside_it_united(0.0, across, side * OFF);
         let rim = the_rim_between_the_halves(&model, ball, &what);
         assert_ne!(
             rim.along_the_longitude, 0.0,
@@ -117,10 +140,21 @@ fn each_half_of_a_ball_cut_where_its_longitude_says_which_way_is_meshed_on_its_o
     }
 }
 
+/// How far the surface of a ball of `RADIUS` at `(across, off, 1)` stands off
+/// the block `[−2, 0] × [−2, 0] × [0, 2]`: zero where the two touch.
+fn how_far_the_ball_stands_off_the_block(across: f64, off: f64) -> f64 {
+    let centre = [across, off, 1.0];
+    let block = [[-2.0, 0.0], [-2.0, 0.0], [0.0, 2.0]];
+    let nearest = core::array::from_fn::<f64, 3, _>(|axis| {
+        centre[axis].clamp(block[axis][0], block[axis][1]) - centre[axis]
+    });
+    nearest.iter().map(|each| each * each).sum::<f64>().sqrt() - RADIUS
+}
+
 /// A cube of side 2 from `(-2, -2, 0)` and a ball of `RADIUS` at
-/// `(1, off, 1)`, both turned `turned` about `z`, united; and the solid of the
-/// answer that is the ball.
-fn a_block_and_a_ball_clear_of_it_united(turned: f64, off: f64) -> (Model, SolidKey) {
+/// `(across, off, 1)`, both turned `turned` about `z`, united; and the solid of
+/// the answer that is the ball.
+fn a_block_and_a_ball_beside_it_united(turned: f64, across: f64, off: f64) -> (Model, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let policy = Policy::certified();
     let everything = Isometry::rotation(&rcad_geom::Axis::z(), turned).expect("a finite turn");
@@ -139,7 +173,7 @@ fn a_block_and_a_ball_clear_of_it_united(turned: f64, off: f64) -> (Model, Solid
         .add_ball(
             RADIUS,
             &everything.compose(
-                &Isometry::translation(Vector::new(1.0, off, 1.0)).expect("a finite shift"),
+                &Isometry::translation(Vector::new(across, off, 1.0)).expect("a finite shift"),
             ),
         )
         .expect("a ball");
@@ -151,7 +185,7 @@ fn a_block_and_a_ball_clear_of_it_united(turned: f64, off: f64) -> (Model, Solid
             &policy,
             &mut ProvenanceLog::new(),
         )
-        .expect("a block and a ball that miss each other unite");
+        .expect("a block and a ball that meet in at most a point unite");
     model
         .validate(&policy, &mut ProvenanceLog::new())
         .expect("the answer is a sound model");
