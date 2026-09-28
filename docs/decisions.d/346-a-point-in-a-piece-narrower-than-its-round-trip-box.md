@@ -47,7 +47,8 @@ taken out.
 surface's own two coordinates, and gives the result a box of
 `Surface::ROUND_TRIP_ROUNDOFF` times a size. That constant's own doc names the
 size: the largest of the point's coordinates, the numbers the surface is
-placed with, and its radius. `rcad-geom`'s
+placed with, and its radius. The point is the one on the surface, after the
+trip, and not the candidate before it (346.4 has what that cost). `rcad-geom`'s
 `a_round_trip_through_a_surfaces_own_two_coordinates.rs` measures the bound
 against exactly that. `select` used the point's coordinates alone and floored
 them at one. That is wrong both ways:
@@ -64,9 +65,13 @@ which fails only for subnormal numbers, where a rounding can cost an absolute
 `2⁻⁹⁷⁰`, where the box reaches `2⁻¹⁰¹⁴`, `2⁶¹` times one such rounding.
 
 **Measured, three rules and both policies at each size.** The same probe
-fused the small ball at seven sizes, once with the old box and once with the
+fused the small ball at six sizes, once with the old box and once with the
 new one (`two_meets_reach_one_corner.rs`, a throwaway `q430_probe` test and an
-environment switch between the two boxes, both taken out):
+environment switch between the two boxes, both taken out). The new box here is
+`52eb56fb`'s, which also sized by the candidate before its trip (346.4). On
+`3e0abbe7`, the committed test below sees one of the same three refusals at
+`2⁻⁴⁸`, `2⁻⁵⁰` and `2⁻⁵²` for every rule and policy; the other rows were not
+run again.
 
 | `s` | old box | new box |
 |---|---|---|
@@ -145,11 +150,32 @@ exists. It is deferred to a row that owns 5 or decides 6.
 
 ### 346.4 The pins
 
-The row named nine more test files that name this refusal. Whether any pin in
-them moved is below, from `mise exec -- just t -p rcad-topo --no-fail-fast` on
-the fix commit.
+The row named nine more test files that name this refusal. **No pin in any of
+them moved.** `mise exec -- just t -p rcad-topo --no-fail-fast` on `3e0abbe7`:
+1129 tests run, 1129 passed, 11 skipped.
 
-PENDING
+**One did move on the way, and it was the fix's own mistake.** The first
+version sized the box by the candidate before its trip as well as by the point
+after it. On `52eb56fb` the same command ran 1129 and failed one:
+`the_named_control_seeds_still_land_either_side_of_the_fuse` in
+`every_model_the_fuse_fuzzer_kept_is_fused_again.rs`, where the seed
+`a_curved_face_with_a_hole_that_goes_too_far_round` refused on both halves
+instead of one. A probe showed why. A candidate is a step of one radius from
+the middle of the corners, so before its trip it can be three units out where
+the point it comes back as is two. That grew one ball's box from `1.14e-13` to
+`1.71e-13`, and it lost the only candidate inside a cap near the ball's top.
+The candidate before its trip is off the surface, and the box only has to hold
+the true point at the two coordinates the trip came back with, so it is not
+one of the numbers the bound is about. `3e0abbe7` takes it out.
+
+**Q335 does not move, and it is not this piece.**
+`a_fuse_that_needs_a_decision_nothing_can_prove_refuses` in `fusing_solids.rs`
+passes on `3e0abbe7` as it did on the base (`mise exec -- just t -p rcad-topo
+--test fusing_solids a_fuse_that_needs_a_decision_nothing_can_prove_refuses`).
+Its piece is flat, the quarter of a tower's top at `z = 1e308`, half a unit
+across, with four exact corners. A flat piece's candidates are exact and never
+go through `back_onto_the_surface`, and a square half a unit wide holds plenty
+of doubles. So it gives up for another reason, which was not traced here.
 
 ### 346.5 What this leaves
 
@@ -159,6 +185,7 @@ PENDING
   `1e-14` across in a unit model or signs of a wrong answer is the next
   question. `s = 2⁻⁴⁰` shows it without this fix.
 - **The grazing block needs family 5 or 6 of 346.3.**
+- **Q335's refusal is a different one** (346.4), still untraced.
 - **The fold is still shown only by `arrange.rs`'s two unit tests** (§288.5).
   Neither test in `two_meets_reach_one_corner.rs` can show it through a fuse
   yet, and each panics, saying so, on the day its fuse answers.
