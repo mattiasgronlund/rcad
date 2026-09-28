@@ -14,8 +14,9 @@
 //! surface of a face cutting it. §17.4 said "pair of planes" and §31.3 changes
 //! the one word. So:
 //!
-//! - every node of the arrangement is [`meet_of_three_surfaces`], which for
-//!   three planes is bit-for-bit the Cramer solve that used to be here (§34.9);
+//! - every node of the arrangement is [`MeetOfThree::boxed_tight`], which for
+//!   three planes is the Cramer solve that used to be here (§34.9) narrowed by
+//!   one checked step (§345);
 //! - the anticlockwise order of two curves round a node is one exact
 //!   determinant of the three surfaces' **gradients** there — §17.4's
 //!   determinant of three normals, with `∇S` in each normal's place, which is
@@ -72,8 +73,8 @@ use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
-    intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
-    where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
+    intersect, where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
+    which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
@@ -563,7 +564,8 @@ fn written_the_one_way<const N: usize>(written: [f64; N]) -> [f64; N] {
 /// §48, W5. Two solids flush against each other work the plane they share out
 /// separately and one of them holds it reversed, so a corner on that plane is
 /// asked for as `P, Q, R` by a face of one and as `−P, Q, R` by a face of the
-/// other. [`meet_of_three_surfaces`] sorts its three on the numbers they store,
+/// other. [`meet_of_three_surfaces`](rcad_geom::meet_of_three_surfaces) sorts
+/// its three on the numbers they store,
 /// a reversed plane sorts to a different row, and a solve with its rows
 /// permuted rounds a bit or two elsewhere. Which face happened to ask then
 /// decided where the corner went, and a `fuse(A, B)` and a `fuse(B, A)` that
@@ -824,8 +826,9 @@ struct Node {
     point: PredicatePoint,
     /// The input corner this is, when it is one.
     vertex: Option<VertexKey>,
-    /// The three surfaces that placed it, in [`meet_of_three_surfaces`]'s own
-    /// fixed order, and which of their meeting points this is. `None` for a
+    /// The three surfaces that placed it, in
+    /// [`meet_of_three_surfaces`](rcad_geom::meet_of_three_surfaces)'s own fixed
+    /// order, and which of their meeting points this is. `None` for a
     /// corner the input already had.
     made_of: Option<([Surface; 3], u8)>,
     /// Whether this is the second place a closed crossing is cut, across the
@@ -1280,7 +1283,7 @@ impl<'f> Arrangement<'f> {
     /// # Not every pair is worth asking about
     ///
     /// A pair of crossings whose two partners share no point at all has no node
-    /// between them, and [`meet_of_three_surfaces`] is not the way to find that
+    /// between them, and [`MeetOfThree::boxed_tight`] is not the way to find that
     /// out: a plane cut by a ball and by a pipe is one plane short of what it can
     /// solve, so it refuses by name whether or not the ball and the pipe are
     /// anywhere near each other. So when it gives up, ask the cheaper question
@@ -1299,17 +1302,19 @@ impl<'f> Arrangement<'f> {
                     self.crossings[second].partner,
                 ];
                 let asked = three_planes_faced_the_one_way(surfaces);
-                let meet =
-                    match meet_of_three_surfaces([&asked[0], &asked[1], &asked[2]], policy, log) {
-                        Ok(meet) => meet,
-                        Err(gave_up_on_it) => {
-                            if self.two_crossings_provably_share_nothing(first, second, policy, log)
-                            {
-                                continue;
-                            }
-                            return Err(gave_up_on_it.into());
+                let meet = match MeetOfThree::boxed_tight(
+                    [&asked[0], &asked[1], &asked[2]],
+                    policy,
+                    log,
+                ) {
+                    Ok(meet) => meet,
+                    Err(gave_up_on_it) => {
+                        if self.two_crossings_provably_share_nothing(first, second, policy, log) {
+                            continue;
                         }
-                    };
+                        return Err(gave_up_on_it.into());
+                    }
+                };
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
@@ -1353,7 +1358,7 @@ impl<'f> Arrangement<'f> {
     /// a cone's apex, whose two rulings cross there (§347).
     ///
     /// No third surface passes through that point, so
-    /// [`meet_of_three_surfaces`] has nothing to solve, and none is needed: the
+    /// [`MeetOfThree::boxed_tight`] has nothing to solve, and none is needed: the
     /// apex is [`Cone::apex`], stored, and [`a_plane_cuts_a_cone_in_rulings`]
     /// has proved it on the plane. Every other pair that names two curves is
     /// left without a node here, and §347 says which of them can have two
