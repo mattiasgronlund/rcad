@@ -52,6 +52,62 @@ pub(crate) fn exponent_that_lifts_the_largest_to(
     Some(top - binary_exponent(largest))
 }
 
+/// The largest `k` for which multiplying every coordinate by `2^k` leaves the
+/// binades of each product's factors adding up to no more than `top`, and every
+/// coordinate still an `f64`.
+///
+/// This is the third exponent a predicate tries.
+/// [`exponent_that_lifts_the_largest_to`] assumes the largest product level 3
+/// forms is the largest coordinate times itself, and for a spike at the origin
+/// under a unit square that is false: its determinants hold `tiny * tiny` and
+/// `tiny * 1` and never `1 * 1`, so the second exponent stops far below where
+/// anything would overflow and leaves `tiny * tiny` under
+/// [`product_is_exact`](crate::expansion::product_is_exact)'s floor
+/// (`docs/decisions.md` §324.7). Here the products are read one by one instead,
+/// and the one closest to the top is what stops `k`.
+///
+/// A product of `D` factors in binades `e_1 ... e_D` is below
+/// `2^(e_1 + ... + e_D + D)`, and scaling moves each factor up by `k`, so the
+/// sum moves up by `D * k`. A product with a zero factor is zero at every scale
+/// and sets no limit. The largest coordinate goes no higher than the top binade
+/// `f64` has, whatever the products allow.
+///
+/// `None` when every coordinate is zero.
+pub(crate) fn exponent_that_lifts_every_product_to<const D: usize>(
+    coordinates: impl IntoIterator<Item = f64>,
+    products: impl IntoIterator<Item = [f64; D]>,
+    top: i32,
+) -> Option<i32> {
+    let as_high_as_f64_goes = exponent_that_lifts_the_largest_to(coordinates, f64::MAX_EXP - 1)?;
+    let degree = i32::try_from(D).expect("a product has a handful of factors");
+    let as_high_as_the_products_go = products
+        .into_iter()
+        .filter(|factors| factors.iter().all(|&factor| factor != 0.0))
+        .map(|factors| {
+            let binades: i32 = factors.into_iter().map(binary_exponent).sum();
+            (top - binades).div_euclid(degree)
+        })
+        .min();
+    Some(as_high_as_the_products_go.map_or(as_high_as_f64_goes, |k| k.min(as_high_as_f64_goes)))
+}
+
+/// `exponents` in the order given, each once, leaving out zero and the missing
+/// ones.
+///
+/// Zero is the input as it came, which has already been refused, and an
+/// exponent already tried has already given its answer.
+pub(crate) fn each_once_and_never_zero<const N: usize>(
+    exponents: [Option<i32>; N],
+) -> impl Iterator<Item = i32> {
+    exponents
+        .into_iter()
+        .enumerate()
+        .filter_map(move |(place, exponent)| {
+            let exponent = exponent?;
+            (exponent != 0 && !exponents[..place].contains(&Some(exponent))).then_some(exponent)
+        })
+}
+
 /// `coordinates`, each multiplied by `2^exponent` — or `None` when that
 /// multiplication is not exact for one of them.
 ///
@@ -127,7 +183,8 @@ fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        binary_exponent, exponent_that_brings_into_range, exponent_that_lifts_the_largest_to,
+        binary_exponent, each_once_and_never_zero, exponent_that_brings_into_range,
+        exponent_that_lifts_every_product_to, exponent_that_lifts_the_largest_to,
         multiplied_by_a_power_of_two, scaled_by_a_power_of_two,
     };
 
@@ -175,6 +232,50 @@ mod tests {
         let lifted = multiplied_by_a_power_of_two(-2.0, exponent);
         assert_eq!(lifted, -(2f64.powi(338)));
         assert_eq!(exponent_that_lifts_the_largest_to([0.0, -0.0], 338), None);
+    }
+
+    /// `2^-10 * 2^-20` has binades adding up to `-30`, so `k = 20` takes the sum
+    /// to `10`, and `2^-10 * 2^-20` is the product closest to the top. The
+    /// product with a zero factor sets nothing.
+    #[test]
+    fn the_product_closest_to_the_top_is_what_stops_the_lift() {
+        let tiny = [2f64.powi(-10), -(2f64.powi(-20)), 0.0];
+        let products = [[tiny[0], tiny[1]], [tiny[1], tiny[1]], [tiny[0], tiny[2]]];
+        assert_eq!(
+            exponent_that_lifts_every_product_to(tiny, products, 10),
+            Some(20)
+        );
+        assert_eq!(
+            exponent_that_lifts_every_product_to(tiny, products, 11),
+            Some(20),
+            "a sum that is odd rounds down, never up past the top"
+        );
+    }
+
+    /// With no product to stop it, the largest coordinate is lifted into the
+    /// top binade `f64` has, and no further.
+    #[test]
+    fn with_every_product_zero_the_lift_stops_at_the_top_of_f64() {
+        let coordinates = [0.5, 0.0];
+        let exponent =
+            exponent_that_lifts_every_product_to(coordinates, [[0.5, 0.0]], 1000).unwrap();
+        assert_eq!(multiplied_by_a_power_of_two(0.5, exponent), 2f64.powi(1023));
+        assert_eq!(
+            exponent_that_lifts_every_product_to(coordinates, [[0.5, 0.5]], 5000),
+            Some(exponent)
+        );
+        assert_eq!(
+            exponent_that_lifts_every_product_to([0.0, -0.0], [[0.0, 0.0]], 1000),
+            None
+        );
+    }
+
+    #[test]
+    fn each_exponent_is_tried_once_in_order_and_zero_never() {
+        let tried: Vec<i32> =
+            each_once_and_never_zero([Some(3), None, Some(0), Some(3), Some(-7), Some(3)])
+                .collect();
+        assert_eq!(tried, [3, -7]);
     }
 
     #[test]
