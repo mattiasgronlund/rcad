@@ -341,4 +341,10 @@ cases turns into an audit by chance. It checks that:
   mark;
 - `check-hooks` put on the reusable list, or a name that is no step put on it.
 
-**The real runs** are below.
+**The real runs**, on this machine on 2026-09-28, with a load average between
+32 and 37 from other sessions' lanes:
+
+1. `just gate quiet` on `44d54b8e`, the commit that added this section, ran
+   every step: `gate: PASS`, 2675 tests run, 2675 passed, 11 skipped, and 25
+   doc tests passed. It printed `· verdicts: this code's green is recorded as
+   6cd9f337e69d`.
