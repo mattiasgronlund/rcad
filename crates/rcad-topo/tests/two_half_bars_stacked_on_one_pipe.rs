@@ -27,9 +27,7 @@ use rcad_geom::{
     Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{
-    Containment, DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
-};
+use rcad_topo::{Containment, DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 2.0;
 
@@ -62,7 +60,13 @@ fn cutting_the_block_off_after_fusing_the_whole_bars_answers_what_the_half_bars_
                 [upper, lower]
             };
             let whole = model
-                .fuse(&[argument], &[tool], rule, &policy, &mut ProvenanceLog::new())
+                .fuse(
+                    &[argument],
+                    &[tool],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
                 .unwrap_or_else(|refused| panic!("{rule:?} of the whole bars: {refused:?}"));
 
             let mut halves = Vec::new();
@@ -119,16 +123,14 @@ fn a_point_a_half_bar_cannot_place_is_inside_the_bar_and_outside_the_block() {
     let block = a_block_over_negative_x(&mut model);
     let point = Point::new(1.0, 0.5, 0.5);
 
-    let in_the_bar = model.solid(bar).expect("this model made the key").classify_point(
-        point,
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
-    let in_the_block = model.solid(block).expect("this model made the key").classify_point(
-        point,
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
+    let in_the_bar = model
+        .solid(bar)
+        .expect("this model made the key")
+        .classify_point(point, &policy, &mut ProvenanceLog::new());
+    let in_the_block = model
+        .solid(block)
+        .expect("this model made the key")
+        .classify_point(point, &policy, &mut ProvenanceLog::new());
     assert_eq!(in_the_bar, Containment::Inside);
     assert_eq!(in_the_block, Containment::Outside);
 }
@@ -207,7 +209,11 @@ fn a_bar_on_the_one_pipe(model: &mut Model, bottom: f64) -> SolidKey {
         (seam, Orientation::Reversed),
     ]
     .map(|(edge, turn)| {
-        DraftStep::Along(builder.add_coedge(edge, turn).expect("a step round the wall"))
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, turn)
+                .expect("a step round the wall"),
+        )
     });
     let wire = builder
         .add_wire(&round_the_wall)
