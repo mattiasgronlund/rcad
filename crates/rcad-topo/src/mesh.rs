@@ -3700,9 +3700,8 @@ fn how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it(
     (missed_by <= rounding).then_some(missed_by + rounding)
 }
 
-/// The latitude of the pole of a ball, or of the apex of a cone, that `at` sits
-/// within one rounding of, or `None` when it sits near none or the surface
-/// pinches nowhere.
+/// The latitude of the pole of a ball that `at` sits within one rounding of,
+/// or `None` when it sits near neither or the surface is not a ball.
 ///
 /// **A corner can be that close to a pole and still read a longitude of its
 /// own.** A plane through a ball's axis turned a quarter turn about `y` starts
@@ -3714,26 +3713,21 @@ fn how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it(
 /// cannot be put in beside it instead: the two are one rounding apart and the
 /// flat face across the edge reads them as one corner.
 ///
-/// **A cone's apex is the same case.** A block face meant to pass through a
-/// pointed cone's apex misses it by its placement's rounding, and the fuse's
-/// crossing of the two passes `2.7e-16` above it. Walked as an ordinary
-/// stretch, that crossing is most of a turn of longitude a few `1e-16` tall,
-/// and the patch between it and the apex is a strip with no height the
-/// triangulator can see (§285.3).
+/// **Not a cone's apex, and that was measured.** The same rule for an apex
+/// answers the two blocks less the cone whose steep face misses the apex by a
+/// rounding, and takes two cones less the block that answered right without
+/// it: the cone's face and the steep face then both draw the same sides across
+/// the strip between the crossing's two arms just above the apex (§354).
 fn the_pole_a_point_sits_within_a_rounding_of(stored: &Surface, at: Point) -> Option<f64> {
-    let pinch = where_this_surface_pinches(stored)?;
-    match stored {
-        Surface::Sphere(sphere) => [1.0, -1.0].into_iter().find_map(|up| {
-            let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
-            ((at - pole).length() <= one_rounding_among([at, pole, sphere.centre()]))
-                .then_some(up * pinch)
-        }),
-        Surface::Cone(cone) => {
-            let apex = cone.apex();
-            ((at - apex).length() <= one_rounding_among([at, apex, apex])).then_some(pinch)
-        }
-        other => panic!("{other:?} pinches, and this crate knows only a ball and a cone that do"),
-    }
+    let Surface::Sphere(sphere) = stored else {
+        return None;
+    };
+    let pinch = where_this_surface_pinches(stored).expect("a ball pinches at its poles");
+    [1.0, -1.0].into_iter().find_map(|up| {
+        let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
+        ((at - pole).length() <= one_rounding_among([at, pole, sphere.centre()]))
+            .then_some(up * pinch)
+    })
 }
 
 /// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of the largest coordinate of `points`,
