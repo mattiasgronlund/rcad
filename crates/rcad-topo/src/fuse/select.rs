@@ -492,9 +492,10 @@ fn the_piece_holds(
 /// trimmed by its cap alone, and the whole of the other half is on the side of
 /// the cap the face keeps, so a point there passes every side of the piece.
 /// [`candidate_points`] makes such points: a step of one radius towards the
-/// apex goes past it wherever the cone is wider than it is tall, and a cone
-/// twice as wide as tall, swallowed by a block, had its face placed by a point
-/// under the apex and every rule refused (`docs/decisions.md` §350).
+/// apex goes past it wherever the cone's radius is more than its height, and a
+/// cone whose radius is twice its height, swallowed by a block, had its face
+/// placed by a point under the apex and every rule refused
+/// (`docs/decisions.md` §350).
 ///
 /// Which half is read off the piece's corners, as `holds.rs` reads a face's:
 /// the sign of `(corner − apex) · w`. A point at the apex is on both halves, so
@@ -1391,10 +1392,10 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         ));
     }
     // **A step of one radius towards a cone's apex goes past it** wherever the
-    // cone is wider than it is tall, and lands on the other half of the cone,
-    // which no piece holds (§350). Half way from the corners' middle to the
-    // apex is on the corners' own half, whatever the slope: the corners are on
-    // it, and so is the apex.
+    // cone's radius is more than its height, and lands on the other half of
+    // the cone, where the piece is not (§350). Half way from the corners'
+    // middle to the apex is on the corners' own half, whatever the slope: the
+    // corners are on it, and so is the apex.
     if let Surface::Cone(cone) = &piece.surface {
         candidates.push(midway_between(
             PredicatePoint::from(middle.coordinates()),
