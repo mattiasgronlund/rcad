@@ -700,6 +700,33 @@ struct Crossing {
     /// Whether any of it is inside the box round the face. A curve wholly
     /// outside cuts nothing off it and is left undrawn.
     reaches_the_face: bool,
+    /// Where it runs through a cone's apex, for one of the two rulings a plane
+    /// through the apex cuts, and `None` for every other crossing (§347).
+    through_an_apex: Option<ThroughAnApex>,
+}
+
+/// A ruling that runs through a cone's apex, and the one direction it runs
+/// along.
+///
+/// **`∇S × ∇Q` is how every other crossing says which way it runs, and on a
+/// ruling through the apex it fails twice.** The cone's gradient is
+/// `|w|²x − (1 + slope²)(x·w)w` for `x = at − apex`, which is nothing at the
+/// apex, so no way out of a node there has a direction. And it is linear in
+/// `x`, so along the ruling `apex + t·d` it is `t` times one vector and
+/// `∇S × ∇Q` turns round as `t` passes nothing: the ruling's two halves run
+/// opposite ways by it. So such a crossing runs along `along` everywhere,
+/// which is the line's own direction, and the sign `∇S × ∇Q` has against it is
+/// then a question of which side of the apex a point is on.
+#[derive(Clone, Copy)]
+struct ThroughAnApex {
+    /// The apex, exactly as the cone stores it.
+    apex: PredicatePoint,
+    /// `n × p` for the plane's normal `n` and the normal `p` of the half-space
+    /// that picks the ruling out. Both are square to the ruling and `p` is not
+    /// along `n`, since `p`'s flat surface meets the other ruling at the apex
+    /// alone, so this is along the ruling. Turned to point where `∇S × ∇Q` does
+    /// on the side of the apex it points to.
+    along: [Interval; 3],
 }
 
 impl Crossing {
@@ -787,6 +814,11 @@ struct Arc {
     ends: [usize; 2],
     /// Which wire of the face walks along here, and which way.
     boundary: Option<Boundary>,
+    /// Whether the crossing's forward direction runs against `∇S × ∇Q` along
+    /// this arc, which only a ruling does, and only on the far side of the
+    /// apex it runs through ([`ThroughAnApex`]). Left of `∇S × ∇Q` is the
+    /// partner's negative side, so left of forward is its positive side here.
+    against_its_gradients: bool,
 }
 
 /// How the face's own boundary uses an arc.
@@ -1050,8 +1082,11 @@ impl<'f> Arrangement<'f> {
                     already
                 }
                 None => {
+                    let through_an_apex =
+                        a_ruling_through_an_apex(&self.surface, &partner, &run, policy, log)?;
                     self.crossings.push(Crossing {
                         partner,
+                        through_an_apex,
                         run,
                         // Filled in once there is a node to read it at.
                         order: HowItRuns::AlongAnAxis {
@@ -1553,6 +1588,14 @@ impl<'f> Arrangement<'f> {
             else {
                 continue;
             };
+            if let Some(line) = self.crossings[crossing].through_an_apex {
+                let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(line.along, log)?;
+                self.crossings[crossing].order = HowItRuns::AlongAnAxis {
+                    axis,
+                    forward_climbs_the_axis,
+                };
+                continue;
+            }
             let partner = self.crossings[crossing].partner;
             let run = self.crossings[crossing].run.clone();
             self.crossings[crossing].order =
@@ -1906,19 +1949,167 @@ impl<'f> Arrangement<'f> {
 
             for step in 0..steps {
                 if present[step] {
+                    let ends = [order[step], order[(step + 1) % order.len()]];
+                    let against_its_gradients =
+                        self.runs_against_its_gradients(crossing, ends, policy, log)?;
                     self.arcs.push(Arc {
                         crossing,
-                        ends: [order[step], order[(step + 1) % order.len()]],
+                        ends,
                         boundary: boundary[step],
+                        against_its_gradients,
                     });
                 } else {
                     self.drawn_in_full[crossing] = false;
                 }
             }
         }
+        self.part_the_two_nappes_at_the_apex()?;
         self.drop_the_lumps_of_straight_cuts_alone();
         self.join_arcs_that_meet_at_nothing();
         Ok(())
+    }
+
+    /// On a face on a cone, make the node at the apex two: one for the arcs
+    /// that leave it into each nappe (§347).
+    ///
+    /// **The apex is where the cone's two nappes touch**, and a ruling through
+    /// it runs on from one into the other, so a cut through the apex draws
+    /// arcs into both. A face lies on one nappe, and round the apex on that
+    /// nappe its ways out go round in an order; ways out into the other nappe
+    /// are on another sheet and are not anywhere in that order. Two nodes at
+    /// one point keep the sheets apart. The other nappe's arcs are then a lump
+    /// of straight cuts with no boundary in it, which
+    /// [`Arrangement::drop_the_lumps_of_straight_cuts_alone`] throws away: the
+    /// two nappes meet nowhere else, so nothing joins that lump to the face.
+    ///
+    /// The node keeps the nappe the face's own boundary leaves it into, and
+    /// the new one takes the other.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::TwoCurvesTouchWithoutCrossing`] when the face's boundary leaves
+    /// the apex into both nappes, which is a face through the point where two
+    /// sheets touch, or when a way out's nappe cannot be told.
+    fn part_the_two_nappes_at_the_apex(&mut self) -> Result<()> {
+        let Surface::Cone(cone) = self.surface else {
+            return Ok(());
+        };
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        let Some(node) = (0..self.nodes.len()).find(|&node| self.nodes[node].point == apex) else {
+            return Ok(());
+        };
+        let axis = cone.axis().direction().components().map(Interval::exactly);
+        let mut leaving = Vec::new();
+        for half_edge in 0..2 * self.arcs.len() {
+            if self.from(half_edge) != node {
+                continue;
+            }
+            let way = self.way_out_of(node, self.direction(half_edge));
+            let up = match dot_of(way, axis).sign() {
+                Decision::Pos => true,
+                Decision::Neg => false,
+                Decision::Zero | Decision::Undecidable { .. } | _ => {
+                    return Err(Error::TwoCurvesTouchWithoutCrossing {
+                        face: self.face.keys[0],
+                    });
+                }
+            };
+            leaving.push((half_edge, up));
+        }
+        let boundary_goes = |up: bool| {
+            leaving
+                .iter()
+                .any(|&(half_edge, its)| its == up && self.arcs[half_edge / 2].boundary.is_some())
+        };
+        let moved = match (boundary_goes(true), boundary_goes(false)) {
+            (true, true) => {
+                return Err(Error::TwoCurvesTouchWithoutCrossing {
+                    face: self.face.keys[0],
+                });
+            }
+            (true, false) | (false, false) => false,
+            (false, true) => true,
+        };
+        if leaving.iter().all(|&(_, up)| up != moved) {
+            return Ok(());
+        }
+        let twin = self.nodes.len();
+        self.nodes.push(Node {
+            point: self.nodes[node].point,
+            vertex: None,
+            made_of: self.nodes[node].made_of,
+            half_way_round: false,
+            crossings: self.nodes[node].crossings.clone(),
+        });
+        for (half_edge, up) in leaving {
+            if up == moved {
+                self.arcs[half_edge / 2].ends[half_edge % 2] = twin;
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether an arc between `ends` lies on the far side of the apex its
+    /// crossing runs through, where the crossing's forward direction runs
+    /// against `∇S × ∇Q` ([`ThroughAnApex`]). `false` for every crossing that
+    /// runs through no apex.
+    ///
+    /// Each end is placed against the apex by the very comparison the order
+    /// along the crossing is proved with, so the answer agrees with the order.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] for an arc with
+    /// an end on each side of the apex. That arc lies on the partner's inside
+    /// on one side of the apex and on its outside on the other, so no one side
+    /// is the face's. It takes a ruling through the apex with no node there,
+    /// which is one whose partner names only that ruling on this face: an edge
+    /// running along one ruling from one nappe to the other (§347).
+    fn runs_against_its_gradients(
+        &self,
+        crossing: usize,
+        ends: [usize; 2],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<bool> {
+        let Some(line) = self.crossings[crossing].through_an_apex else {
+            return Ok(false);
+        };
+        let HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        } = self.crossings[crossing].order
+        else {
+            unreachable!("a ruling through an apex is ordered along an axis");
+        };
+        let mut behind = None;
+        for end in ends {
+            let point = self.nodes[end].point;
+            let mut apart = point.enclosure()[axis] - line.apex.enclosure()[axis];
+            if !forward_climbs_the_axis {
+                apart = -apart;
+            }
+            let this_one_is_behind = match must_decide(
+                apart.sign(),
+                ALONG_A_CROSSING,
+                &[line.apex, point],
+                Measures::Length,
+                policy,
+                log,
+            )? {
+                Decision::Zero => continue,
+                Decision::Pos => false,
+                Decision::Neg => true,
+                other => unreachable!("must_decide hands back a sign, not {other:?}"),
+            };
+            if behind.is_some_and(|already| already != this_one_is_behind) {
+                return Err(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn {
+                    face: self.face.keys[0],
+                });
+            }
+            behind = Some(this_one_is_behind);
+        }
+        Ok(behind.expect("an arc has two different ends, and only one of them is the apex"))
     }
 
     /// Throw away lumps of the drawing made of straight cut arcs alone.
@@ -2165,9 +2356,12 @@ impl<'f> Arrangement<'f> {
             let (first, second) = (&self.arcs[touching[0]], &self.arcs[touching[1]]);
             // A closed crossing with one node is one arc that starts and ends
             // there, and joining it to itself would leave a curve with no point
-            // on it at all.
+            // on it at all. And a ruling's two arcs either side of the apex
+            // have the partner's inside on opposite sides, so one arc across
+            // the apex would have no one side (§347).
             if first.crossing == second.crossing
                 && first.boundary == second.boundary
+                && first.against_its_gradients == second.against_its_gradients
                 && !self.crossings[first.crossing].order.closes()
             {
                 return Some((node, touching[0], touching[1]));
@@ -2384,6 +2578,11 @@ impl<'f> Arrangement<'f> {
         if first.crossing == second.crossing {
             return Ok(Decision::Zero);
         }
+        if self.crossings[first.crossing].through_an_apex.is_some()
+            || self.crossings[second.crossing].through_an_apex.is_some()
+        {
+            return self.turn_between_two_ways_out(node, first, second, policy, log);
+        }
         let at = self.nodes[node].point;
         let mine = gradient_at(&self.surface, at);
         let one = gradient_at(&self.crossings[first.crossing].partner, at);
@@ -2401,6 +2600,91 @@ impl<'f> Arrangement<'f> {
         } else {
             the_other_way(decision)
         })
+    }
+
+    /// [`Arrangement::turns_anticlockwise`] for a pair one of which is a ruling
+    /// through a cone's apex: `N · (t₁ × t₂)` for the two ways out themselves,
+    /// which is the determinant above before `(a×b)×(a×c) = a·((a×b)·c)` took
+    /// it apart. A ruling's way out is its own line ([`ThroughAnApex`]), so
+    /// there is no partner gradient to put in a row of that determinant.
+    ///
+    /// `N` is the face's gradient, except where there is none: at the apex of
+    /// a face on the cone itself ([`Arrangement::what_a_turn_at_the_apex_is_about`]).
+    ///
+    /// **Five lengths**: each way out is two, as a cross product of two
+    /// gradients or of two normals, and `N` is one.
+    fn turn_between_two_ways_out(
+        &self,
+        node: usize,
+        first: Direction,
+        second: Direction,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Decision> {
+        let at = self.nodes[node].point;
+        let (one, other) = (self.way_out_of(node, first), self.way_out_of(node, second));
+        let about = match self.the_cone_whose_apex_the_face_pinches_at(node) {
+            Some(cone) => self.what_a_turn_at_the_apex_is_about(&cone, one, other)?,
+            None => gradient_at(&self.surface, at).enclosure(),
+        };
+        must_decide(
+            dot_of(about, cross_of_intervals(one, other)).sign(),
+            TWO_WAYS_OUT_OF_A_NODE,
+            &[
+                at,
+                PredicatePoint::Constructed(one),
+                PredicatePoint::Constructed(other),
+            ],
+            Measures::ManyLengths { how_many: 5 },
+            policy,
+            log,
+        )
+    }
+
+    /// The cone the face lies on, when `node` is that cone's apex exactly.
+    fn the_cone_whose_apex_the_face_pinches_at(&self, node: usize) -> Option<Cone> {
+        let Surface::Cone(cone) = self.surface else {
+            return None;
+        };
+        (self.nodes[node].point == PredicatePoint::from(cone.apex().coordinates())).then_some(cone)
+    }
+
+    /// What anticlockwise is about at the apex of a face on the cone, where the
+    /// face has no gradient: the axis, pointing out of the nappe the two ways
+    /// out go into.
+    ///
+    /// **Why that is the gradient's own answer.** Write the nappe along `+w` as
+    /// `t·d(θ)` for the rulings `d(θ)` round it and `t > 0`. The gradient there
+    /// is `t·G(d)`, and `det(t·G(d), d, t·d′(θ))` works out to
+    /// `−t²·slope²·(1 + slope²)` for a cone about `+z`, which is below nothing:
+    /// the rulings go round clockwise about the gradient as `θ` climbs, which is
+    /// anticlockwise about `−w`. On the other nappe the gradient is `t·G(d)`
+    /// with `t < 0`, the way out is `−d(θ)`, and the sign turns round with it,
+    /// so there it is `+w`. Both nappes read the same off the gradient a step
+    /// out along any ruling, which is what every other node of the face uses.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::TwoCurvesTouchWithoutCrossing`] when the two ways out go into
+    /// different nappes. The apex is where the two nappes touch, and nothing
+    /// goes round it from one to the other: this face has pieces on both and
+    /// no one order of its ways out.
+    fn what_a_turn_at_the_apex_is_about(
+        &self,
+        cone: &Cone,
+        one: [Interval; 3],
+        other: [Interval; 3],
+    ) -> Result<[Interval; 3]> {
+        let axis = cone.axis().direction().components().map(Interval::exactly);
+        match (dot_of(one, axis).sign(), dot_of(other, axis).sign()) {
+            (Decision::Pos, Decision::Pos) => {
+                Ok(axis.map(|component| Interval::exactly(0.0) - component))
+            }
+            (Decision::Neg, Decision::Neg) => Ok(axis),
+            _ => Err(Error::TwoCurvesTouchWithoutCrossing {
+                face: self.face.keys[0],
+            }),
+        }
     }
 
     /// [`Arrangement::turns_anticlockwise`], and where that says the two lie on
@@ -2445,6 +2729,14 @@ impl<'f> Arrangement<'f> {
     /// cut surface tangent to the face's own here: that crossing has no
     /// direction to compare and nothing about the drawing follows from it.
     ///
+    /// **At the apex of a face on the cone, "one line" is one line round the
+    /// axis**, since that is what the turn there is about
+    /// ([`Arrangement::what_a_turn_at_the_apex_is_about`]). A plane through the
+    /// axis cuts two rulings half a turn apart round it, and in space the two
+    /// leave the apex less than a quarter turn apart, both up the one nappe; so
+    /// each way out is compared as it runs round the axis
+    /// ([`round_the_axis`]).
+    ///
     /// # Errors
     ///
     /// [`Error::TwoCurvesTouchWithoutCrossing`] for that last case.
@@ -2457,8 +2749,12 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         let at = self.nodes[node].point;
-        let mine = self.way_out_of(node, first);
-        let theirs = self.way_out_of(node, second);
+        let mut mine = self.way_out_of(node, first);
+        let mut theirs = self.way_out_of(node, second);
+        if let Some(cone) = self.the_cone_whose_apex_the_face_pinches_at(node) {
+            mine = round_the_axis(&cone, mine);
+            theirs = round_the_axis(&cone, theirs);
+        }
         let same_way = must_decide(
             dot_of(mine, theirs).sign(),
             THE_SAME_WAY_ALONG_ONE_LINE,
@@ -2555,13 +2851,18 @@ impl<'f> Arrangement<'f> {
     }
 
     /// The direction a half-edge leaves a node in: `±(∇S × ∇Q)` for the crossing
-    /// it runs on, the sign being which way along the crossing it goes.
+    /// it runs on, the sign being which way along the crossing it goes, and
+    /// `±` the line's own direction for a ruling through a cone's apex
+    /// ([`ThroughAnApex`]).
     fn way_out_of(&self, node: usize, direction: Direction) -> [Interval; 3] {
         let at = self.nodes[node].point;
-        let run = cross_of(
-            gradient_at(&self.surface, at),
-            gradient_at(&self.crossings[direction.crossing].partner, at),
-        );
+        let run = match self.crossings[direction.crossing].through_an_apex {
+            Some(line) => line.along,
+            None => cross_of(
+                gradient_at(&self.surface, at),
+                gradient_at(&self.crossings[direction.crossing].partner, at),
+            ),
+        };
         if direction.forward {
             run
         } else {
@@ -3628,7 +3929,7 @@ impl<'f> Arrangement<'f> {
                 let arc = &self.arcs[half_edge / 2];
                 Ok(FaceMeet {
                     carried_by: [self.surface, self.crossings[arc.crossing].partner],
-                    material_side: if half_edge.is_multiple_of(2) {
+                    material_side: if half_edge.is_multiple_of(2) != arc.against_its_gradients {
                         Decision::Neg
                     } else {
                         Decision::Pos
@@ -4360,6 +4661,15 @@ fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
         .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
 }
 
+/// How a way out of a cone's apex runs round the cone's axis: `way` with its
+/// part along the axis taken off, `|w|²·way − (w·way)·w`, which is `|w|²`
+/// times the part square to it.
+fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
+    let axis = cone.axis().direction().components().map(Interval::exactly);
+    let (squared, up) = (dot_of(axis, axis), dot_of(axis, way));
+    [0, 1, 2].map(|index| squared * way[index] - up * axis[index])
+}
+
 /// How points along `surface ∩ partner` are put in order, read at a point `at`
 /// that is already known to be on both.
 ///
@@ -4473,6 +4783,75 @@ fn how_a_crossing_runs(
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
+}
+
+/// The apex and the line's direction, for one of the two rulings a plane
+/// through a cone's apex cuts it in, and `None` for any other curve.
+///
+/// A ruling is told from the other by a pair of opposite half-spaces whose flat
+/// surface holds it (`rcad-geom`'s `two_lines_through_a_cones_apex`), so the
+/// line is where that flat surface and the plane cross, `n × p`. The one ruling
+/// a plane resting along the cone touches it in carries no picker and is left
+/// as it was: there `∇S × ∇Q` is nothing along the whole line, not only at the
+/// apex, and that is another gap.
+///
+/// The direction is turned to point where `∇S × ∇Q` does a step out along it.
+/// Read at `apex + d` for the direction `d`, that is `(∇S × ∇Q) · d`, which is
+/// nothing only where the plane rests along the cone, and two rulings mean it
+/// does not.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when that sign cannot be
+/// proved.
+fn a_ruling_through_an_apex(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<ThroughAnApex>> {
+    let Some((flat, cone)) = a_plane_and_a_cone(surface, partner) else {
+        return Ok(None);
+    };
+    if a_plane_cuts_a_cone_in_rulings(flat, cone) != Some(true) {
+        return Ok(None);
+    }
+    let [Picker::InFrontOf(picker), ..] = pickers_of(run) else {
+        return Ok(None);
+    };
+    let apex = PredicatePoint::from(cone.apex().coordinates());
+    let along = cross_of(
+        PredicatePoint::from(flat.normal().components()),
+        PredicatePoint::from(picker.normal().components()),
+    );
+    let apex_box = apex.enclosure();
+    let a_step_out = PredicatePoint::Constructed([0, 1, 2].map(|axis| apex_box[axis] + along[axis]));
+    let there = cross_of(gradient_at(surface, a_step_out), gradient_at(partner, a_step_out));
+    let agrees = must_decide(
+        dot_of(there, along).sign(),
+        WHICH_WAY_A_CROSSING_RUNS,
+        &[apex, a_step_out],
+        Measures::ManyLengths { how_many: 4 },
+        policy,
+        log,
+    )?;
+    let along = match agrees {
+        Decision::Pos => along,
+        Decision::Neg => along.map(|component| Interval::exactly(0.0) - component),
+        // Nothing in the reals only for a plane resting along the cone, which
+        // cuts one ruling and not two. A tolerant policy can still read a
+        // narrow box as nothing, and then no way along is known.
+        _ => {
+            return Err(gave_up(
+                WHICH_WAY_A_CROSSING_RUNS,
+                &[apex, a_step_out],
+                Measures::ManyLengths { how_many: 4 },
+                log,
+            ));
+        }
+    };
+    Ok(Some(ThroughAnApex { apex, along }))
 }
 
 /// The pair as a plane and a cone, whichever way round it arrived.
@@ -5024,6 +5403,10 @@ const WHICH_WAY_AN_EDGE_RUNS_ROUND: &str = "which way an edge runs round a close
 /// The name the choice between "the same way" and "opposite ways" along one line
 /// goes by in provenance records.
 const THE_SAME_WAY_ALONG_ONE_LINE: &str = "two ways out of a node along one line";
+
+/// The name the turn between two ways out of a node, read off the ways out
+/// themselves, goes by in provenance records.
+const TWO_WAYS_OUT_OF_A_NODE: &str = "which way round a node two ways out of it turn";
 
 /// The name the second-order order of two tangent curves goes by in provenance
 /// records.
