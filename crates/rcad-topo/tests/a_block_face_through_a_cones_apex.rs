@@ -163,10 +163,7 @@ fn the_same_block_with_the_apex_just_below_its_face_answers_all_but_the_unions()
     let shared = 511.0 * pi / 24.0;
     for (rule, cone_first) in six_fuses() {
         let (volume, today) = match (rule, cone_first) {
-            (Rule::Union, _) => (
-                block + cone - shared,
-                Today::TwoCornersOnOnePointOfTheChart,
-            ),
+            (Rule::Union, _) => (block + cone - shared, Today::TwoCornersOnOnePointOfTheChart),
             (Rule::Intersection, _) => (shared, Today::Answers(shared)),
             (Rule::Difference, true) => (cone - shared, Today::Answers(cone - shared)),
             (Rule::Difference, false) => (block - shared, Today::Answers(block - shared)),

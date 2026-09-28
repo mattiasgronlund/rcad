@@ -1354,7 +1354,11 @@ impl<'f> Arrangement<'f> {
         if self.a_corner_is_this_place(first, second, apex, &[apex]) {
             return;
         }
-        let mut named = [Surface::Plane(*flat), Surface::Cone(*cone), Surface::Cone(*cone)];
+        let mut named = [
+            Surface::Plane(*flat),
+            Surface::Cone(*cone),
+            Surface::Cone(*cone),
+        ];
         named.sort_by_key(name_of_surface_bits);
         self.nodes.push(Node {
             point: apex,
@@ -1596,7 +1600,8 @@ impl<'f> Arrangement<'f> {
                 continue;
             };
             if let Some(line) = self.crossings[crossing].through_an_apex {
-                let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(line.along, log)?;
+                let (axis, forward_climbs_the_axis) =
+                    dominant_axis_of_a_direction(line.along, log)?;
                 self.crossings[crossing].order = HowItRuns::AlongAnAxis {
                     axis,
                     forward_climbs_the_axis,
@@ -4850,8 +4855,12 @@ fn a_ruling_through_an_apex(
         PredicatePoint::from(picker.normal().components()),
     );
     let apex_box = apex.enclosure();
-    let a_step_out = PredicatePoint::Constructed([0, 1, 2].map(|axis| apex_box[axis] + along[axis]));
-    let there = cross_of(gradient_at(surface, a_step_out), gradient_at(partner, a_step_out));
+    let a_step_out =
+        PredicatePoint::Constructed([0, 1, 2].map(|axis| apex_box[axis] + along[axis]));
+    let there = cross_of(
+        gradient_at(surface, a_step_out),
+        gradient_at(partner, a_step_out),
+    );
     let away = must_decide(
         dot_of(there, along).sign(),
         WHICH_WAY_A_CROSSING_RUNS,
