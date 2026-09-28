@@ -2351,18 +2351,6 @@ mod tests {
             .expect("the copy is whole and shares nothing");
     }
 
-    fn counts_of(model: &Model) -> [usize; 7] {
-        [
-            model.vertex_count(),
-            model.edge_count(),
-            model.coedge_count(),
-            model.wire_count(),
-            model.face_count(),
-            model.shell_count(),
-            model.solid_count(),
-        ]
-    }
-
     /// Every corner of the solid, as bits, in the order of the slots they sit
     /// in.
     fn corners_in_slot_order(model: &Model, solid: SolidKey) -> Vec<[u64; 3]> {
