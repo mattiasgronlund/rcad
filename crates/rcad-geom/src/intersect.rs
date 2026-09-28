@@ -52,7 +52,7 @@ use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
     squared_length_enclosing,
 };
-use crate::exact::{Exact, binary_exponent, multiplied_by_a_power_of_two};
+use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two};
 use crate::half_space::normals_exactly_square_to;
 use crate::{
     Cone, Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere,
@@ -497,7 +497,17 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
 
 /// `n·n·r² − (n·o − d)²` as an enclosure: how much room a plane running along a
 /// pipe's axis leaves inside it, as an area.
+///
+/// **Off the expansion wherever one can be built**, and that is what decides a
+/// pipe moved a hair off a plane it would otherwise touch. A bar moved by
+/// `2⁻¹⁰⁰⁷` against a plane two from its axis has `2⁻¹⁰⁰⁵` of room, and the
+/// interval form rounds the move away before it squares anything: `[0,
+/// 8.9e-16]`, which holds zero. The expansion keeps it (`docs/decisions.md`
+/// §322).
 fn how_much_room_a_plane_leaves_in_a_pipe_enclosing(flat: &Plane, pipe: &Cylinder) -> Interval {
+    if let Some(room) = how_much_room_a_plane_leaves_in_a_pipe_nearly(flat, pipe) {
+        return room.enclosure();
+    }
     let normal = flat.normal().components();
     let reading = dot_enclosing(exactly(normal), exactly(pipe.axis().origin().coordinates()))
         - Interval::exactly(flat.offset());
@@ -506,13 +516,18 @@ fn how_much_room_a_plane_leaves_in_a_pipe_enclosing(flat: &Plane, pipe: &Cylinde
 
 /// `n·n·r² − (n·o − d)²`, exactly.
 fn how_much_room_a_plane_leaves_in_a_pipe_exactly(flat: &Plane, pipe: &Cylinder) -> Option<Exact> {
+    how_much_room_a_plane_leaves_in_a_pipe_nearly(flat, pipe)?.exactly()
+}
+
+/// `n·n·r² − (n·o − d)²`, to within what fell off the bottom of the range.
+fn how_much_room_a_plane_leaves_in_a_pipe_nearly(flat: &Plane, pipe: &Cylinder) -> Option<Nearly> {
     let normal = flat.normal().components();
     let radius = pipe.radius();
-    let reading =
-        Exact::dot_of(normal, pipe.axis().origin().coordinates())?.minus(&Exact::of(flat.offset()));
+    let reading = Nearly::dot_of(normal, pipe.axis().origin().coordinates())?
+        .minus(&Nearly::of(flat.offset()));
     Some(
-        Exact::dot_of(normal, normal)?
-            .times(&Exact::product_of(radius, radius)?)?
+        Nearly::dot_of(normal, normal)?
+            .times(&Nearly::product_of(radius, radius)?)?
             .minus(&reading.times(&reading)?),
     )
 }

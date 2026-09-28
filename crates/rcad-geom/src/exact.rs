@@ -275,16 +275,40 @@ impl Exact {
     /// This times `other`, exactly, or `None` when one of the products it needs
     /// would round.
     pub(crate) fn times(&self, other: &Exact) -> Option<Exact> {
+        let (product, rounded) = self.times_holding_on(other)?;
+        (rounded == 0).then_some(product)
+    }
+
+    /// This times `other`, and how many of the products it took rounded on the
+    /// way — or `None` when one of them overflows.
+    ///
+    /// **A product that rounds can only have fallen off the bottom of the
+    /// range**, because one that ran off the top is refused here. Its two halves
+    /// then add up to the true product give or take less than the smallest
+    /// subnormal: the high half is the product rounded, and the fused
+    /// multiply-add that makes the low half rounds only when that low half is
+    /// down among the subnormals itself. [`two_sum`](rcad_predicates::expansion::two_sum)
+    /// is exact everywhere, so what [`scale_expansion`] and [`Exact::plus`] add
+    /// on top loses nothing. So the expansion that comes back is the true
+    /// product to within one smallest subnormal per product counted, and
+    /// [`Nearly::times`] is where that count becomes a bound.
+    fn times_holding_on(&self, other: &Exact) -> Option<(Exact, u32)> {
         let mut running = Exact::of(0.0);
         let mut scaled = vec![0.0; 2 * self.0.len()];
+        let mut rounded = 0;
         for &factor in &other.0 {
-            if !self.0.iter().all(|&entry| product_is_exact(entry, factor)) {
-                return None;
+            for &entry in &self.0 {
+                if !(entry * factor).is_finite() {
+                    return None;
+                }
+                if !product_is_exact(entry, factor) {
+                    rounded += 1;
+                }
             }
             let len = scale_expansion(&self.0, factor, &mut scaled);
             running = running.plus(&Exact(scaled[..len].to_vec()));
         }
-        Some(running)
+        Some((running, rounded))
     }
 
     /// `a × b`, exactly, where `a` is already exact and `b` is stored numbers.
@@ -456,6 +480,111 @@ pub(crate) fn binary_exponent(value: f64) -> i32 {
 pub(crate) fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
     let half = exponent / 2;
     value * 2f64.powi(half) * 2f64.powi(exponent - half)
+}
+
+/// A number worked out from stored `f64` the way [`Exact`] works one out, and a
+/// box round how far the true number can be from it.
+///
+/// **What this is for is a number whose own terms span more of the range than
+/// `f64` has.** A pipe moved `2⁻¹⁰⁰⁷` off the origin and a plane two from its
+/// axis leave `4·2⁻¹⁰⁰⁷ − 2⁻²⁰¹⁴` of room, and the second term is below the
+/// smallest subnormal. No expansion holds it at any scale — squaring the
+/// reading `2⁻¹⁰⁰⁷ − 2` needs 1008 binades where [`Exact::square_minus`]'s
+/// window is 995 — so [`Exact`] refuses, and an interval of the same sum is
+/// `[0, 8.9e-16]` wide because it rounds `2⁻¹⁰⁰⁷` away first. The sign is
+/// nevertheless plain: what fell off the bottom is `2¹⁰⁰⁹` times smaller than
+/// the room (`docs/decisions.md` §322).
+///
+/// So this keeps every product [`Exact`] would have refused for falling below
+/// the range, counts it, and carries a box one smallest subnormal wide per
+/// product round the expansion ([`Exact::times_holding_on`] says why that is
+/// enough). A product that overflows is still refused: what runs off the top
+/// is not small.
+///
+/// **Where nothing rounded, the box is exactly zero and [`Nearly::exactly`]
+/// hands back the very expansion [`Exact`] would have built**, so a question
+/// that was decided exactly before is decided by the same arithmetic now.
+#[derive(Clone, Debug)]
+pub(crate) struct Nearly {
+    held: Exact,
+    off_by: Interval,
+}
+
+impl Nearly {
+    /// The number `value`, exactly.
+    pub(crate) fn of(value: f64) -> Self {
+        Self::from(Exact::of(value))
+    }
+
+    /// `a * b`.
+    pub(crate) fn product_of(a: f64, b: f64) -> Option<Self> {
+        Self::of(a).times(&Self::of(b))
+    }
+
+    /// `a · b` over two triples of stored numbers.
+    pub(crate) fn dot_of(a: [f64; 3], b: [f64; 3]) -> Option<Self> {
+        let mut total = Self::of(0.0);
+        for axis in 0..3 {
+            total = total.plus(&Self::product_of(a[axis], b[axis])?);
+        }
+        Some(total)
+    }
+
+    /// This plus `other`. Adding loses nothing, so the two boxes add and nothing
+    /// else does.
+    pub(crate) fn plus(&self, other: &Nearly) -> Nearly {
+        Nearly {
+            held: self.held.plus(&other.held),
+            off_by: self.off_by + other.off_by,
+        }
+    }
+
+    /// This minus `other`.
+    pub(crate) fn minus(&self, other: &Nearly) -> Nearly {
+        Nearly {
+            held: self.held.minus(&other.held),
+            off_by: self.off_by - other.off_by,
+        }
+    }
+
+    /// This times `other`, or `None` when a product it needs overflows.
+    ///
+    /// `(x + δx)(y + δy)` is `xy + x·δy + y·δx + δx·δy`, and the three terms
+    /// past the first are worked out in intervals, which round outward. The
+    /// first is the expansion product, with one smallest subnormal either way
+    /// for each product that rounded.
+    pub(crate) fn times(&self, other: &Nearly) -> Option<Nearly> {
+        let (held, rounded) = self.held.times_holding_on(&other.held)?;
+        let lost = f64::from(rounded) * f64::from_bits(1);
+        let dropped = Interval::new(-lost, lost).expect("a count of subnormals is a real number");
+        Some(Nearly {
+            held,
+            off_by: dropped
+                + self.held.enclosure() * other.off_by
+                + other.held.enclosure() * self.off_by
+                + self.off_by * other.off_by,
+        })
+    }
+
+    /// This number exactly, or `None` when a product on the way to it fell off
+    /// the bottom of the range.
+    pub(crate) fn exactly(&self) -> Option<Exact> {
+        (self.off_by.lo() == 0.0 && self.off_by.hi() == 0.0).then(|| self.held.clone())
+    }
+
+    /// A box the true number is inside.
+    pub(crate) fn enclosure(&self) -> Interval {
+        self.held.enclosure() + self.off_by
+    }
+}
+
+impl From<Exact> for Nearly {
+    fn from(held: Exact) -> Self {
+        Self {
+            held,
+            off_by: Interval::exactly(0.0),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -984,5 +1113,133 @@ mod how_far_exact_arithmetic_reaches {
                 .nearest_f64(),
             3.25 * 3.25
         );
+    }
+}
+
+#[cfg(test)]
+mod a_nearly_exact_number {
+    use rcad_predicates::Decision;
+
+    use super::{Exact, Nearly, WIDEST_SQUARABLE_SPREAD, multiplied_by_a_power_of_two};
+
+    /// `2⁻¹⁰⁰⁷`, the move a fuzzer seed put on a round bar (§246.1).
+    const SPECK: f64 = f64::from_bits(0x0100_0000_0000_0000);
+
+    /// The room a plane two from a pipe's axis leaves once the pipe has moved
+    /// `2⁻¹⁰⁰⁷` towards it: `4 − (2⁻¹⁰⁰⁷ − 2)²`, which is `2⁻¹⁰⁰⁵ − 2⁻²⁰¹⁴`.
+    ///
+    /// **This is the demonstration that the scaling family does not reach it and
+    /// another family does** (§322). The reading spans 1008 binades, past the
+    /// 995 any slide can square, so [`Exact::square_minus`] refuses as well as
+    /// [`Exact::times`]. Held as a [`Nearly`], the one product that fell off the
+    /// bottom costs a box one smallest subnormal wide round `2⁻¹⁰⁰⁵`.
+    #[test]
+    fn a_reading_no_slide_can_square_is_still_decided() {
+        let reading = Exact::of(SPECK).minus(&Exact::of(2.0));
+        assert_eq!(reading.spread(), 1008);
+        assert!(reading.spread() > WIDEST_SQUARABLE_SPREAD);
+        assert!(reading.times(&reading).is_none());
+        assert!(reading.square_minus(&Exact::of(4.0)).is_none());
+
+        let reading = Nearly::of(SPECK).minus(&Nearly::of(2.0));
+        let room = Nearly::of(4.0).minus(&reading.times(&reading).expect("nothing overflows"));
+        assert!(room.exactly().is_none(), "one product rounded");
+        let enclosure = room.enclosure();
+        let quarter_speck = f64::from_bits(0x0120_0000_0000_0000);
+        assert_eq!(quarter_speck, 4.0 * SPECK);
+        assert!(enclosure.lo() > 0.0, "{enclosure:?}");
+        assert!(
+            enclosure.lo() <= quarter_speck && quarter_speck <= enclosure.hi(),
+            "{enclosure:?} misses 2^-1005"
+        );
+        assert!(
+            enclosure.width() <= 4.0 * f64::EPSILON * quarter_speck,
+            "a few roundings of the room wide, and no wider: {enclosure:?}"
+        );
+    }
+
+    /// Where nothing rounds, a [`Nearly`] is the [`Exact`] it holds, entry for
+    /// entry, so a question [`Exact`] answered is answered by the same
+    /// arithmetic.
+    #[test]
+    fn where_nothing_rounds_the_expansion_is_the_exact_one() {
+        let big = 2f64.powi(60);
+        let exact = Exact::dot_of([big, 1.0, 0.0], [1.0, -big, 1.0])
+            .expect("in range")
+            .times(&Exact::of(3.0).plus(&Exact::of(0.25)))
+            .expect("in range");
+        let nearly = Nearly::dot_of([big, 1.0, 0.0], [1.0, -big, 1.0])
+            .expect("in range")
+            .times(&Nearly::of(3.0).plus(&Nearly::of(0.25)))
+            .expect("in range");
+        assert_eq!(nearly.exactly().expect("nothing rounded").0, exact.0);
+    }
+
+    /// A product that overflows is refused, as [`Exact`] refuses it: what runs
+    /// off the top is not a small error.
+    #[test]
+    fn a_product_that_overflows_is_still_refused() {
+        assert!(Nearly::product_of(1e200, 1e200).is_none());
+    }
+
+    /// **The published bound, checked**: one smallest subnormal per product that
+    /// rounded, carried through a second multiplication, holds the true
+    /// product.
+    ///
+    /// The true value is out of `f64`'s reach where it stands, so it is taken
+    /// from the same product with both factors moved up `2⁶⁰⁰` — where
+    /// [`Exact::product_of`] holds it — and each end of the box is moved up
+    /// `2¹²⁰⁰` to meet it. Both moves are exact. The comparison is then two
+    /// signs of exact expansions, so nothing in the check rounds.
+    #[test]
+    fn the_box_holds_the_true_product_wherever_it_falls_off_the_bottom() {
+        let mantissas = [
+            1.0,
+            1.5,
+            1.0000000000000002,
+            1.9999999999999998,
+            1.2345678901234567,
+        ];
+        let factor_exponents = [-470, -500, -520, -537, -560, -600];
+        let then_times = [1.0, -3.0, 1.7976931348623157e150];
+        let mut rounded = 0;
+        for &one in &mantissas {
+            for &other in &mantissas {
+                for &here in &factor_exponents {
+                    for &there in &factor_exponents {
+                        for &after in &then_times {
+                            let a = multiplied_by_a_power_of_two(one, here);
+                            let b = -multiplied_by_a_power_of_two(other, there);
+                            let nearly = Nearly::product_of(a, b)
+                                .expect("no overflow")
+                                .times(&Nearly::of(after))
+                                .expect("no overflow");
+                            if nearly.exactly().is_none() {
+                                rounded += 1;
+                            }
+                            let truth = Exact::product_of(
+                                multiplied_by_a_power_of_two(a, 600),
+                                multiplied_by_a_power_of_two(b, 600),
+                            )
+                            .expect("moved up, the product is exact")
+                            .times(&Exact::of(after))
+                            .expect("and so is the next one");
+                            let enclosure = nearly.enclosure();
+                            let [low, high] = [enclosure.lo(), enclosure.hi()]
+                                .map(|end| Exact::of(multiplied_by_a_power_of_two(end, 1200)));
+                            assert!(
+                                matches!(truth.minus(&low).sign(), Decision::Pos | Decision::Zero)
+                                    && matches!(
+                                        high.minus(&truth).sign(),
+                                        Decision::Pos | Decision::Zero
+                                    ),
+                                "{a:e} · {b:e} · {after:e}: {enclosure:?} misses it"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(rounded > 1000, "the sweep has to reach the products that round: {rounded}");
     }
 }
