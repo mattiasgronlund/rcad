@@ -100,11 +100,11 @@
 //! §16.10 scopes a verdict to the family swept. This is balls, placed along one
 //! axis, meshed under [`Policy::certified()`]. The parity law is checked on the
 //! `z` axis as well as `x` and holds on both — but the *refusal it produces* is
-//! not the same one on both axes, which
+//! not the same one on both axes, and
 //! [`the_law_travels_to_another_axis_but_the_refusal_it_produces_does_not`]
-//! records rather than explains.
+//! says why: which coordinate collapses decides which step notices.
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model};
 
@@ -457,18 +457,69 @@ fn each_radius_has_its_own_band_and_they_all_alternate() {
 }
 
 /// The parity law holds on the `z` axis too, and the refusal it produces there
-/// is a different one.
+/// is a different one, because a different coordinate collapses.
 ///
-/// Recorded and not explained. Both axes agree on *which* placements fail,
-/// which is the claim this file makes; they disagree on which layer notices
-/// first, and working out why is not something the measurements here can do.
-/// §16.10 — this is the scope of what was swept.
+/// The mesher works a placed face out in the frame it is stored in, where the
+/// ball sits about the origin, and reads a point of the table back into that
+/// frame by the placement's inverse. A point of the unit ball moved out to
+/// [`EVEN`] and back has `0` in the coordinate the ball was moved along,
+/// whatever it had there before.
+///
+/// - **Along `x`** the poles `(0, 0, ±1)` do not use that coordinate. They come
+///   back where they were and the seam between them is walked, but the point
+///   walked at its middle, `(1, 0, 0)` to within a rounding, comes back on the
+///   axis between the poles — and the triangulator finds two corners in one
+///   place.
+/// - **Along `z`** the poles do use it. Both come back as the centre, and the
+///   seam's middle comes back at height `0` as well, so every point of the wire
+///   reads as the same place in the ball's own two coordinates and the
+///   mesher's `cut_up` refuses the wire as one that will not lie flat.
+///
+/// Until `docs/decisions.md` §333 the walk was handed the poles moved out and
+/// back too, both on the centre, and the geometry layer refused
+/// `CannotNameWhichPieceOfACrossingThisIs` before `cut_up` was reached. The walk
+/// now starts from the poles the arena stores; `cut_up` still moves every point
+/// out and back, and it is what refuses. §333 has the printout of what each step
+/// read, for both axes and both refusals.
+///
+/// The three points are checked here with the kernel's own [`Isometry`], which
+/// is how the mesher moves them.
 #[test]
 fn the_law_travels_to_another_axis_but_the_refusal_it_produces_does_not() {
+    let north = Point::new(0.0, 0.0, 1.0);
+    let south = Point::new(0.0, 0.0, -1.0);
+    let the_seams_middle = Point::new(1.0, 0.0, 0.0);
+
+    let along_x = Isometry::translation(Vector::new(EVEN, 0.0, 0.0)).expect("a finite placement");
+    assert_eq!(
+        out_and_back(&along_x, north),
+        north,
+        "along x the poles stay"
+    );
+    assert_eq!(out_and_back(&along_x, south), south);
+    assert_eq!(
+        out_and_back(&along_x, the_seams_middle),
+        Point::origin(),
+        "and the seam's middle lands on the axis between them"
+    );
+
+    let up_z = Isometry::translation(Vector::new(0.0, 0.0, EVEN)).expect("a finite placement");
+    assert_eq!(
+        out_and_back(&up_z, north),
+        Point::origin(),
+        "up z the poles land on the centre"
+    );
+    assert_eq!(out_and_back(&up_z, south), Point::origin());
+    assert_eq!(
+        out_and_back(&up_z, the_seams_middle),
+        the_seams_middle,
+        "and the seam's middle stays at height 0 with them"
+    );
+
     assert_eq!(
         along_z(EVEN),
-        "the geometry layer refused: CannotNameWhichPieceOfACrossingThisIs",
-        "up the z axis the same collapse is caught somewhere else"
+        "a wire will not lie flat on its face",
+        "up the z axis the same collapse is caught by cut_up"
     );
     assert_eq!(along_z(ODD), "meshed", "and the odd placement still meshes");
 }
@@ -619,6 +670,14 @@ fn along_z(out: f64) -> String {
     }
 }
 
+/// `point` moved out by `placement` and back by its inverse, the way the mesher
+/// reads a point of its table back into the frame a placed face is worked in.
+fn out_and_back(placement: &Isometry, point: Point) -> Point {
+    placement
+        .inverse()
+        .apply_to_point(placement.apply_to_point(point))
+}
+
 fn try_to_mesh(
     radius: f64,
     out: f64,
@@ -666,6 +725,9 @@ fn what_it_refused(why: &Error) -> String {
             ..
         } => "the triangulator found two corners in the same place".to_owned(),
         Error::CannotMeshAFace { why, .. } => format!("the triangulator refused: {why:?}"),
+        Error::AWireWillNotLieFlatOnItsFace { .. } => {
+            "a wire will not lie flat on its face".to_owned()
+        }
         Error::Geometry(what) => format!("the geometry layer refused: {what:?}"),
         Error::Undecidable { .. } => "a predicate could not settle a sign".to_owned(),
         other => format!("an unexpected refusal: {other:?}"),
