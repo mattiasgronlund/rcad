@@ -424,13 +424,22 @@ pub(crate) struct Placement {
 
 /// The plane a `PLANE` placed at `origin` and facing along `axis` describes.
 ///
-/// The normal comes back scaled to length one, and the offset is `origin`
-/// dotted with that normal and rounded once, so the file's point decides the
-/// offset's last bit. The writer asks this same function which point to write
-/// (`a_point_this_reader_reads_back_as`, in `write.rs`), so that what one
-/// writes and the other reads cannot drift apart.
+/// **A direction already of length one to within what a turn leaves is kept
+/// as the file wrote it**, and any other is scaled to length one
+/// ([`Plane::from_point_and_normal_as_written`]). A face a turn placed has a
+/// normal an ulp or two off length one, and scaling it again moved its last
+/// bit on 1 509 of the writer fuzzer's 2026-09-26 crash files, most of them
+/// normals no direction scaled to length one reads back as
+/// (`docs/decisions.md` §313.3). A direction another writer wrote to seventeen
+/// digits a few ulps from length one keeps its own bits too.
+///
+/// The offset is `origin` dotted with that normal and rounded once, so the
+/// file's point decides the offset's last bit. The writer asks this same
+/// function which point to write (`a_point_this_reader_reads_back_as`, in
+/// `write.rs`), so that what one writes and the other reads cannot drift
+/// apart.
 pub(crate) fn plane_through(origin: Point, axis: Vector) -> rcad_geom::Result<Plane> {
-    Plane::from_point_and_normal(origin, axis)
+    Plane::from_point_and_normal_as_written(origin, axis)
 }
 
 /// A `CONICAL_SURFACE`'s cone, whose apex the file does not write down.
