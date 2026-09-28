@@ -89,9 +89,9 @@ does when it fails.
 
 - **The trap now goes by the tag alone**, `fuzz/artifacts/*/*-<tag>`. The trap
   is a function that the recipe also calls at its end, and the recipe then
-  fails if any file with the tag is left. The last arm leaves its `timeout-` to
-  that function. So the arm checks every kind an arm writes, not only the kinds
-  somebody named. The recipe passed unchanged, in 83 s. With the old two-kind
+  fails if any file with the tag is left. Arm twenty-three leaves its `timeout-`
+  to that function, which runs after the last arm (twenty-five since Q181). So
+  the check covers every kind an arm writes, not only the kinds somebody named. The recipe passed unchanged, in 83 s. With the old two-kind
   trap put back, it failed and named
   `fuzz/artifacts/where_two_surfaces_cross/timeout-overnight-selftest-…`.
 - **The trap runs on TERM, INT and HUP, and not on KILL.** That was measured on
