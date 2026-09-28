@@ -109,6 +109,8 @@ reader, both shown by the lane and reproduced by its verifier:
   sign read off it is wrong: with the plane as the partner the rule answers
   Neg, which matches the lower band; with the two cones it answers Pos. It fails
   the same way on `da8073ae`, so it cannot yet tell the old reader from the new.
+  §341 makes the check read the plane; the file now validates and measures
+  `312π`.
 - **A torus written twice.** Refused before the reader's change matters: the
   mesher answers `CornersCoincide` on a band that goes right round the ring,
   and `tests/rings/mod.rs` says the only torus face the kernel builds is a bend.
