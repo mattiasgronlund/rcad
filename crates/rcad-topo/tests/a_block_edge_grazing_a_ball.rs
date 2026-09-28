@@ -31,9 +31,9 @@
 //! an `f64`: their boxes are `[15.999999999999998, 16]` and
 //! `[16, 16.000000000000004]`, and they share the point `16`.
 
-use rcad_geom::{Isometry, Scale, Vector};
+use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule};
+use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule};
 
 /// The name `order_along` records a refusal under.
 const ALONG_A_CROSSING: &str = "order along a crossing";
@@ -104,6 +104,8 @@ fn a_tolerant_policy_asked_about_the_same_two_meets_folds_them() {
 ///
 /// What the fuse refuses on at `h = 0` is the tiny piece, the same as the
 /// tolerant fuse at `h = 16` — which is what says that refusal is not the fold.
+/// That piece holds no point with `f64` coordinates, which the next test
+/// shows, so `select` cannot place it (`docs/decisions.md` §346).
 #[test]
 fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
@@ -122,6 +124,54 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
                 "{rule:?}: {records:#?}"
             );
         }
+    }
+}
+
+/// No point with `f64` coordinates is inside any of the three pieces the two
+/// places fence off at `h = 0`, so no point `select` builds is (§346).
+///
+/// The three are the ball's skin inside the block, the block's face `x = −1`
+/// inside the ball, and its face `y = 2⁻²⁵` inside the ball. A point inside
+/// any of them has `x ≤ −1` and `y ≥ 2⁻²⁵`, with one of the two strict, and is
+/// on the ball or in it. The doubles nearest past those two planes are
+/// `−1 − 2⁻⁵²` and `2⁻²⁵ + 2⁻⁷⁷`, and with the other two coordinates as near
+/// the ball's centre as they may be, each is already outside the ball. Every
+/// other such point is further from the centre still. The same holds for a
+/// box: one proved past a plane has every point past the nearest double.
+#[test]
+fn no_point_with_f64_coordinates_is_inside_the_piece_between_the_two_places() {
+    let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+    let ball = model
+        .add_ball(1.0 + f64::powi(2.0, -51), &Isometry::identity())
+        .expect("a positive radius");
+    let ball = model.solid(ball).expect("this model made the key");
+    let edge = f64::powi(2.0, -25);
+    let place = f64::powi(2.0, -51);
+    let where_it_is = |at: [f64; 3]| {
+        ball.classify_point(
+            Point::new(at[0], at[1], at[2]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+    };
+    for corner in [[-1.0, edge, -place], [-1.0, edge, place]] {
+        assert_eq!(
+            where_it_is(corner),
+            Containment::OnBoundary,
+            "{corner:?} is one of the two places"
+        );
+    }
+    assert_eq!(f64::next_down(-1.0), -1.0 - f64::EPSILON);
+    assert_eq!(f64::next_up(edge), edge + f64::powi(2.0, -77));
+    for nearest in [
+        [f64::next_down(-1.0), edge, 0.0],
+        [-1.0, f64::next_up(edge), 0.0],
+    ] {
+        assert_eq!(
+            where_it_is(nearest),
+            Containment::Outside,
+            "{nearest:?} is the nearest a double gets to the pieces"
+        );
     }
 }
 
