@@ -766,8 +766,7 @@ fn settle_against_each(
 ) -> Result<Option<Placement>> {
     let mut lying_on = LyingOn::default();
     for &index in against {
-        if let Some(same_way) = coincident_face(model, solids[index], piece, point, policy, log)?
-        {
+        if let Some(same_way) = coincident_face(model, solids[index], piece, point, policy, log)? {
             lying_on.add(index, same_way);
             continue;
         }
