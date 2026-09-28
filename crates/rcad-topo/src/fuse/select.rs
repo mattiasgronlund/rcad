@@ -1622,8 +1622,13 @@ fn where_the_ring_crosses_the_plane(normal: Vector, offset: f64, ring: &Torus) -
 /// what settled (§17.1).
 ///
 /// **The box is sized by the numbers the round trip goes through, and by
-/// nothing else** — [`Surface::ROUND_TRIP_ROUNDOFF`]'s own size: the point, the
-/// numbers that place the surface, and its radius. It used to be the point's
+/// nothing else** — [`Surface::ROUND_TRIP_ROUNDOFF`]'s own size: the point on
+/// the surface, the numbers that place the surface, and its radius. The
+/// candidate before its trip is not one of them. It is off the surface, and
+/// the box only has to hold the true point at the two coordinates it came back
+/// with, whatever those are. Sizing by it too grew one ball's box from
+/// `1.14e-13` to `1.71e-13` and lost the only candidate inside a cap in
+/// `every_model_the_fuse_fuzzer_kept_is_fused_again.rs`. It used to be the point's
 /// size floored at one, which is wrong both ways. A ball of radius `4.6e-14` on
 /// a cube's corner got a box `1.1e-13` wide, so no box fitted in the piece of
 /// it inside the cube and every fuse of the two refused
@@ -1644,7 +1649,6 @@ fn back_onto_the_surface(surface: &Surface, candidate: PredicatePoint) -> Option
         return None;
     }
     let size = the_largest_number_placing(surface)?
-        .max(at.largest_coordinate_magnitude())
         .max(there.largest_coordinate_magnitude())
         .max(SMALLEST_SIZE_A_ROUND_TRIP_SCALES_FROM);
     let reach = Surface::ROUND_TRIP_ROUNDOFF * size;
