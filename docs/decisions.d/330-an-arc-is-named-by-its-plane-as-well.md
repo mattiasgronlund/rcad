@@ -8,8 +8,10 @@ way round. The ball less a block over one corner gets past `assemble` and stops
 in the mesher; the cone's halved-slope control answers and measures right; 32
 cases of `a_narrow_lune_from_a_pole_corner.rs` and the three refused fuses of
 the exact `z = y` plane in `a_plane_leaning_through_a_bars_rim_start.rs` now
-answer, and every one was held to its closed form. Those two files are not
-this lane's, so their pins are left for the merge (330.5).*
+answer, and every one was held to its closed form. Those two files were not
+that lane's, so a second lane, `lane-q114-name-the-arcs-plane-2`, off
+`740ae21a` with the first merged in, changed their pins and printed what the
+tolerant turned block's refusal now is (330.5, 330.6).*
 
   330.1   The change
   330.2   The two shapes the row names
@@ -17,6 +19,7 @@ this lane's, so their pins are left for the merge (330.5).*
   330.4   Whether a spelling can pair four faces crosswise
   330.5   Pins in other files that moved, and why each new one is right
   330.6   What this leaves
+  330.7   Which of Q210's two questions this answers
 
 ### 330.1 The change
 
@@ -156,9 +159,15 @@ named an arc. Nothing was built here either; the argument is what closes it.
 
 ### 330.5 Pins in other files that moved, and why each new one is right
 
-Neither file is in this lane's write set, so both need their pins changed where
-this lands. Each move is from a refusal to an answer, or from one count to
-another, and each new answer was checked before being called right.
+Neither file was in the first lane's write set; the second lane changed both.
+Each move is from a refusal to an answer, or from one count to another, and
+each new answer was checked before being called right. With `assemble.rs` put
+back to `740ae21a`'s, both files' changed tests fail — every one of the 32
+lune cases refused `ResultIsNotManifold { count: 4 }`, the exact plane's union
+refused the same, and the tolerant turned block's union refused `count: 3` —
+and with it as this section leaves it, all nine tests in the two files pass
+(`mise exec -- just t -p rcad-topo --test a_plane_leaning_through_a_bars_rim_start
+--test a_narrow_lune_from_a_pole_corner`).
 
 - **`crates/rcad-topo/tests/a_narrow_lune_from_a_pole_corner.rs`.** 32 cases
   pinned as refused now answer: in
@@ -172,34 +181,62 @@ another, and each new answer was checked before being called right.
   `measures` against the case's closed form instead of reporting it, passed all
   six tests, and printed 32 volumes each under its closed form within
   `3δ/r` — for instance `98.9098` against `98.9602`, `3.13966` against `π`.
-  No case moved from answered to refused.
+  No case moved from answered to refused. The file's answered path,
+  `moved_from_its_pin`, already validates and measures every case it lists, so
+  the 32 are now in the two `answered` lists and held to their closed forms
+  there, and the header's counts are counted off those lists: 29 wedges cut by
+  two knives (11 intersections, 12 unions, 6 differences) and 30 by one prism
+  (10 of each). The header had said 13 intersections and 4 unions for the
+  knives' 17, which were 11 and 6.
 - **`crates/rcad-topo/tests/a_plane_leaning_through_a_bars_rim_start.rs`.**
-  `a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_get_one_name`:
+  `a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_get_one_name`
+  — §284.6's name for it — is now
+  `a_plane_exactly_through_a_bars_rim_start_answers_all_six_fuses_right_under_both_policies`:
   both unions and the bar less the prism answered `count: 4` because an arc of
   the cap circle and an arc of the ellipse on `z = y` join the same corners on
   the wall — this row's shape on a pipe. All six fuses now answer under both
   policies, validate, and are within `measure`'s own `volume_error` of the
-  file's by-hand volumes: the unions `32701.787 ± 2.641` against `32702.065`,
-  the bar less the prism `701.787 ± 2.641` against `702.065`, the prism less
-  the bar `31916.715 ± 0.496` against `31916.667`, the intersections
+  file's by-hand volumes, which the test works out from the bar and the prism
+  and no longer takes as written numbers. A print in the test, since removed,
+  gave the same figures under both policies: the unions
+  `32701.787 ± 2.641` against `32702.065`, the bar less the prism
+  `701.787 ± 2.641` against `702.065`, the prism less the bar
+  `31916.715 ± 0.496` against `31916.667`, the intersections
   `83.284 ± 0.496` against `83.333`.
   `under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner`:
   the two fuses pinned `count: 3` (the union and the difference with the bar
-  as the argument) now refuse `count: 1`, like the other four. That fits the
-  four-face edge being split into two good ones and the corner the faces
-  disagree on being what is left, but no print confirmed it.
+  as the argument) now refuse `count: 1`, like the other four. **A print
+  confirmed why, and it was not a four-face edge.** A temporary `eprintln!` in
+  `darts_along_each_edge` listed every edge not claimed by exactly two faces,
+  with its corners and its two surfaces, for all six fuses, once as this
+  section leaves `assemble.rs` and once with the arc's name carrying the
+  curved surface twice in place of the plane, which is the base's key. The
+  print for the union with the bar first, condensed to the edges on the wall:
 
-The row in 330.6 names the exact edits.
+  ```
+  base, union bar first:  edge 0 claimed 3  (5,0,0) → (−5,2.5e-15,0)  z = 0 and wall   faces: cap, wall, wall
+  now,  union bar first:  edge 0 claimed 2  (5,0,0) → (−5,2.5e-15,0)  z = 0 and wall   faces: cap, wall
+                          edge 3 claimed 1  (5,0,0) → (−5,2.5e-15,0)  wall and turned  faces: wall
+  ```
+
+  On the base, the wall's arc of the ellipse ran between the same two corners
+  as the cap circle's arc and got its name, so that edge was claimed by the
+  cap once and by the wall twice. With the plane in the name they are two
+  edges, one sound. What is left, in all six fuses alike, is four edges with
+  one face each: the diameter on `z = 0` and the half ellipse on the wall,
+  each once from the rim start `(5, 0, 0)` for the cap and the wall, and once
+  from the meet `(5, 2.5e-15, 0)` for the turned face, all to
+  `(−5, 2.5e-15, 0)`. That is the corner the faces disagree on, which is what
+  the test's name already said; its doc now carries this.
 
 ### 330.6 What this leaves
 
-- **Pin edits at merge**, outside this lane's write set:
-  `a_narrow_lune_from_a_pole_corner.rs` adds the 32 cases of 330.5 to the two
-  tests' answered lists and to the file header's counts;
-  `a_plane_leaning_through_a_bars_rim_start.rs` measures all six exact-plane
-  fuses instead of expecting `count: 4` for four of them, rewrites that test's
-  doc and the file header's paragraph that says they refuse, and changes the
-  tolerant test's counts from `[3, 1, 1, 1, 3, 1]` to all `1`.
+- **The tolerant turned block's corner**, what is left of Q210 (330.7): why
+  the turned face keeps the meet as a corner of its own where the cap and the
+  wall fold it into the rim start. Its check is
+  `under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner`
+  in `crates/rcad-topo/tests/a_plane_leaning_through_a_bars_rim_start.rs`,
+  whose messages carry the volumes.
 - **The ball less the block, in the mesher.** `which_pole_this_cap_reaches` in
   `crates/rcad-topo/src/mesh.rs` needs a partner that puts the two poles on
   different sides, read off the coedge it takes its step along, and not the
@@ -217,3 +254,15 @@ The row in 330.6 names the exact edits.
   arcs of one crossing have such a pair, the four faces pair crosswise. No
   shape was built for it. `crates/rcad-topo/src/fuse/assemble.rs`, and a test
   file of its own.
+
+### 330.7 Which of Q210's two questions this answers
+
+Q210 asks first whether this change answers the exact `z = y` plane, and then
+why the tolerant turned block refuses. **It answers the first**: all six exact
+plane fuses answer, validate and measure under both policies (330.5). **It
+narrows the second without answering it**: under the tolerant policy the
+turned block no longer has an edge claimed three times, and every one of its
+six fuses is refused on the corner that the cap and the wall fold into the
+rim start and the turned face keeps as the meet, `2.5e-15` away. Why the
+turned face keeps it is the part of Q210 still open, and the row can be cut
+down to that.
