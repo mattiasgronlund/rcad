@@ -120,11 +120,8 @@ fn a_box_no_face_meets_is_answered_and_one_on_the_wall_is_not() {
         "the turned bend starts an eighth of a turn round"
     );
 
-    let placed = bend.classify_uncertain_point(
-        a_fifth_of_the_way_round,
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
+    let placed =
+        bend.classify_uncertain_point(a_fifth_of_the_way_round, &policy, &mut ProvenanceLog::new());
     let Containment::CannotFireARayAtAFacesSurface { face } = placed else {
         panic!("a box on the bend's own wall: {placed:?}");
     };

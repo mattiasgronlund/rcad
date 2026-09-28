@@ -224,7 +224,7 @@ impl SolidView<'_> {
                 Ok(pass) => pass,
                 Err(no_ray @ Containment::CannotFireARayAtAFacesSurface { .. }) => {
                     return self
-                        .from_a_point_beside_it_an_exact_ray_leaves(point, low, high, policy, log)
+                        .what_a_point_beside_it_says(point, low, high, policy, log)
                         .unwrap_or(no_ray);
                 }
                 Err(no_ray) => return no_ray,
@@ -270,7 +270,7 @@ impl SolidView<'_> {
     /// classified with an ordinary ray: what it gets, every point of the box
     /// gets. A target whose grown box a face meets, or whose ray grazes
     /// something, hands over to the next.
-    fn from_a_point_beside_it_an_exact_ray_leaves(
+    fn what_a_point_beside_it_says(
         self,
         point: PredicatePoint,
         low: Point,
@@ -313,7 +313,12 @@ impl SolidView<'_> {
     /// box has to be off the plane through every one of them. Every other face
     /// is the part of its surface it holds, so the box has to be off the
     /// surface, or the face has to hold none of the box.
-    fn no_face_meets(self, point: PredicatePoint, policy: &Policy, log: &mut ProvenanceLog) -> bool {
+    fn no_face_meets(
+        self,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
         self.faces().all(|face| {
             if face.surface().as_plane().is_some() && every_side_of_it_is_straight(face) {
                 let mut clear = true;
@@ -612,10 +617,7 @@ fn ray_targets(low: Point, high: Point) -> [Point; 3] {
 /// from the point to the target is `d` itself, and the point is within half an
 /// ulp of `d` of the middle. The step is checked rather than trusted, because a
 /// middle further out than the target need not give one.
-fn a_point_an_exact_ray_leaves_for(
-    point: PredicatePoint,
-    target: Point,
-) -> Option<PredicatePoint> {
+fn a_point_an_exact_ray_leaves_for(point: PredicatePoint, target: Point) -> Option<PredicatePoint> {
     let enclosure = point.enclosure();
     let target = target.coordinates();
     let mut beside = [0.0; 3];

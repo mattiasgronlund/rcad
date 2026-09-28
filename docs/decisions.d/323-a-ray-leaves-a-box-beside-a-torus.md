@@ -55,8 +55,8 @@ not a power of two.
 
 So the ray leaves from beside the box, and it does it in `classify.rs`, where
 the refusal is made — every caller of `classify_uncertain_point` gets it and
-`fuse/select.rs` is not touched. `from_a_point_beside_it_an_exact_ray_leaves`
-runs only once a ray from the point itself has been refused
+`fuse/select.rs` is not touched. `what_a_point_beside_it_says` runs only
+once a ray from the point itself has been refused
 `CannotFireARayAtAFacesSurface`, so no answer that came back before moves. For
 each of the three targets in turn:
 
