@@ -267,9 +267,15 @@ fn a_point_well_clear_of_the_plane_is_settled_by_the_float_filter() {
 /// determinant is exactly zero whatever `d` is. Down among the subnormals the
 /// roundoff term of a product no longer fits in an `f64`, so expansion
 /// arithmetic stops being exact — `robust` answers `-1.5e-323` here, which is
-/// simply wrong. We refuse instead.
+/// simply wrong.
+///
+/// This used to be refused, and the refusal was a gap rather than a limit
+/// (`docs/decisions.md` §324): every coordinate here is exact, the largest is
+/// `3`, and multiplying all twelve by `2^337` lifts `-3.5e-323` to a normal
+/// number without losing a bit. On that copy exact arithmetic runs, and it says
+/// zero. What must never come back is a sign.
 #[test]
-fn coordinates_down_among_the_subnormals_are_refused_rather_than_guessed() {
+fn coordinates_down_among_the_subnormals_are_lifted_and_decided_rather_than_guessed() {
     let a = [1.5, 1.5, 1.5];
     let b = [-1.5, -1.5, -1.5];
     let c = [3.0, 3.0, 3.0];
@@ -291,15 +297,12 @@ fn coordinates_down_among_the_subnormals_are_refused_rather_than_guessed() {
         Decision::Neg | Decision::Pos => {
             panic!("claimed a sign for a determinant that is exactly zero")
         }
-        Decision::Zero => panic!("level 2 cannot prove this, so it must not claim to"),
-        Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
+        Decision::Zero => (),
+        Decision::Undecidable { enclosure } => {
+            panic!("refused at {level:?} with {enclosure}, though a lifted copy decides it")
+        }
         other => panic!("unhandled decision {other:?}"),
     }
-    assert_eq!(
-        level,
-        Level::Interval,
-        "exact arithmetic must decline to run"
-    );
 }
 
 /// One coordinate. Mixes exact small values, where degeneracies actually
