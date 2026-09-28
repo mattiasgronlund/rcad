@@ -106,10 +106,11 @@ fn every_fuse_refuses_on_the_turn_where_the_two_circles_cross() {
             let ball = a_ball(&mut model, RADIUS);
             let [top, wall] = the_top_and_the_leaning_wall(&model, block);
             let mut log = ProvenanceLog::new();
-            let records = match model.fuse(&[ball], &[block], rule, &policy, &mut log) {
-                Err(Error::Undecidable { records }) => records.records().to_vec(),
-                other => panic!("{rule:?} {policy:?}: {:?}", other.map(|_: Fused| "an answer")),
+            let fused = model.fuse(&[ball], &[block], rule, &policy, &mut log);
+            let Err(Error::Undecidable { records }) = fused else {
+                panic!("{rule:?} {policy:?}: {:?}", fused.map(|_: Fused| "an answer"));
             };
+            let records = records.records().to_vec();
             assert_eq!(records.len(), 1, "{rule:?} {policy:?}: {records:#?}");
             assert!(
                 is_the_turn_between_the_top_and_the_wall(&records[0], &top, &wall),
@@ -122,9 +123,11 @@ fn every_fuse_refuses_on_the_turn_where_the_two_circles_cross() {
 /// Whether a refusal is `orient3d` on a box and the two planes' normals, which
 /// is the turn between the two circles those planes cut on the ball.
 fn is_the_turn_between_the_top_and_the_wall(record: &Record, top: &Surface, wall: &Surface) -> bool {
-    let normal = |surface: &Surface| match surface {
-        Surface::Plane(flat) => PredicatePoint::from(flat.normal().components()),
-        other => panic!("a plane: {other:?}"),
+    let normal = |surface: &Surface| {
+        let Surface::Plane(flat) = surface else {
+            panic!("a plane: {surface:?}");
+        };
+        PredicatePoint::from(flat.normal().components())
     };
     let inputs = record.inputs();
     record.predicate() == "orient3d"
