@@ -51,12 +51,20 @@
 //!   boundary curves and neither is outer (§31.3). Gone.
 //!
 //! What replaces all three is one rule and it needs no ray and no construction:
-//! **two walks in different lumps of the drawing bound the same cell exactly
-//! when they lie on the same side of every crossing that is drawn in full.** A
-//! crossing is drawn in full when none of its arcs was thrown away, which is
-//! every cut crossing and every closed boundary edge; the side a walk lies on is
-//! read off the half-edge where the walk uses that crossing, and off any of its
-//! own nodes where it does not. Both are signs the kernel already had.
+//! **two walks in different lumps of the drawing that lie on different sides of
+//! a crossing drawn in full bound different cells.** A crossing is drawn in
+//! full when none of its arcs was thrown away, which is every cut crossing and
+//! every closed boundary edge; the side a walk lies on is read off the half-edge
+//! where the walk uses that crossing, and off any of its own nodes where it does
+//! not. Both are signs the kernel already had.
+//!
+//! **Lying on the same side of every one is not enough**, though this said so
+//! until §282 caught it: a lump's walks can be told apart only by a curve that
+//! runs on for ever, and a walk elsewhere then agrees with several of them.
+//! Which of those it faces is settled by winding on a flat face and by what
+//! goes round the axis on a cone or a pipe
+//! ([`Arrangement::the_walk_of_each_other_lump_each_walk_faces`]), and a cell
+//! left holding two walks of one lump is refused (§36.3).
 
 use core::cmp::Ordering;
 
@@ -2520,14 +2528,32 @@ impl<'f> Arrangement<'f> {
     /// **A lump every one of whose curves closes** — a hole a cut left in the
     /// middle of a face, or a cap circle of a bar's wall — is placed by which
     /// side of it everything else lies on. A closed curve cuts the surface into
-    /// exactly two, so the side is a sign, and two walks bound one cell exactly
-    /// when they agree about every such curve.
+    /// exactly two, so the side is a sign, and a walk of one lump and a walk of
+    /// another that disagree about one such curve bound different cells.
+    ///
+    /// **Agreeing about every one is not enough, and §36.3 used to say it
+    /// was.** A lump can have several walks on the same side of every closed
+    /// curve, told apart only by a curve that runs on for ever: a floor cut in
+    /// two by a straight line, or the patch a leaning plane cuts off a
+    /// frustum's face. A walk elsewhere agrees with all of them, and joining it
+    /// to each glued them into one cell with no point in it (§282, and the
+    /// panic of queue row Q20). So a walk is joined to a walk of another lump
+    /// only when each is the one walk of the other's lump it faces
+    /// ([`Arrangement::the_walk_of_each_other_lump_each_walk_faces`]), and a
+    /// cell holding two walks of one lump is refused.
     ///
     /// **A lump with a curve that runs on for ever** is placed by following one
     /// of them until it runs into the rest of the drawing, which is what
     /// [`Arrangement::piece_around`] does. That route needs a direction to fire
     /// along and a bounded face to hit, and a closed curve has neither — which
     /// is why there are two and not one.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotTellTheCellsOfAFaceApart`] when a walk's signs match
+    /// several walks of one other lump and nothing here says which of them it
+    /// faces, or when the joins leave two walks of one lump in one cell on any
+    /// surface but a torus.
     fn group_the_cycles_into_cells(
         &mut self,
         policy: &Policy,
@@ -2541,22 +2567,11 @@ impl<'f> Arrangement<'f> {
 
         self.say_whether_the_face_holds_each_lump_of_closed_cuts(&lump);
 
+        let facing = self.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides)?;
         let mut same = Sameness::of(self.cycles.len());
-        for one in 0..self.cycles.len() {
-            for other in (one + 1)..self.cycles.len() {
-                if lump[one] == lump[other] || self.windings_are_known_to_differ(one, other) {
-                    continue;
-                }
-                let mut agreed = 0;
-                let mut differed = false;
-                for (mine, theirs) in sides[one].iter().zip(&sides[other]) {
-                    match (mine, theirs) {
-                        (Some(mine), Some(theirs)) if mine == theirs => agreed += 1,
-                        (Some(_), Some(_)) => differed = true,
-                        _ => (),
-                    }
-                }
-                if agreed > 0 && !differed {
+        for (one, its) in facing.iter().enumerate() {
+            for &other in its {
+                if facing[other].contains(&one) {
                     same.join(one, other);
                 }
             }
@@ -2586,6 +2601,333 @@ impl<'f> Arrangement<'f> {
             self.cell_of[cycle] = self.cell_of[leader];
             let cell = self.cell_of[cycle];
             self.cells[cell].push(cycle);
+        }
+        self.no_cell_holds_two_walks_of_one_lump(&lump)
+    }
+
+    /// For each walk, the walks of other lumps it bounds a cell with as far as
+    /// it can tell: one per lump at most.
+    ///
+    /// Where a walk's signs agree with one walk of a lump, that is the one.
+    /// Where they agree with several, [`Arrangement::which_of_them_holds`] is
+    /// asked. What it cannot settle is refused, except for a walk the face's
+    /// boundary is known to wind round no times: no piece is made of its cell,
+    /// so leaving it unjoined loses nothing, and joining it to the wrong walk
+    /// would not either — but a guess is not what this function hands out.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotTellTheCellsOfAFaceApart`] where a walk that may be
+    /// inside the face agrees with several walks of one lump and nothing here
+    /// says which of them it faces.
+    fn the_walk_of_each_other_lump_each_walk_faces(
+        &self,
+        lump: &[usize],
+        sides: &[Vec<Option<Decision>>],
+    ) -> Result<Vec<Vec<usize>>> {
+        let count = self.cycles.len();
+        let mut agreeing: Vec<Vec<usize>> = vec![Vec::new(); count];
+        for one in 0..count {
+            for other in (one + 1)..count {
+                if lump[one] == lump[other] || self.windings_are_known_to_differ(one, other) {
+                    continue;
+                }
+                if they_agree_about_every_closed_curve(&sides[one], &sides[other]) {
+                    agreeing[one].push(other);
+                    agreeing[other].push(one);
+                }
+            }
+        }
+
+        let mut facing = vec![Vec::new(); count];
+        for walk in 0..count {
+            let mut lumps: Vec<usize> = agreeing[walk].iter().map(|&other| lump[other]).collect();
+            lumps.sort_unstable();
+            lumps.dedup();
+            for which in lumps {
+                let candidates: Vec<usize> = agreeing[walk]
+                    .iter()
+                    .copied()
+                    .filter(|&other| lump[other] == which)
+                    .collect();
+                let chosen = match candidates[..] {
+                    [only] => Some(only),
+                    _ => self.which_of_them_holds(walk, &candidates),
+                };
+                match chosen {
+                    Some(chosen) => facing[walk].push(chosen),
+                    None if self.winding_of_cycle[walk] == Some(0) => (),
+                    None => {
+                        return Err(Error::CannotTellTheCellsOfAFaceApart {
+                            face: self.face.keys[0],
+                        });
+                    }
+                }
+            }
+        }
+        Ok(facing)
+    }
+
+    /// Which of several walks of one lump bounds the region `walk` is in, when
+    /// they all agree with it about every closed curve; `None` when nothing here
+    /// can say.
+    ///
+    /// Two ways, one for a flat face and one for a face round an axis, and
+    /// neither for a ball or a torus. What neither answers is a gap (§16.10):
+    /// the regions are there, and the walk is in one of them.
+    fn which_of_them_holds(&self, walk: usize, candidates: &[usize]) -> Option<usize> {
+        match self.surface.as_plane().and_then(InPlane::of) {
+            Some(in_plane) => self.which_straight_walk_winds_round(&in_plane, walk, candidates),
+            None => self.the_one_that_goes_round_the_axis_as_well(walk, candidates),
+        }
+    }
+
+    /// On a flat face: the one candidate whose corners wind once round a node
+    /// of `walk`, when every candidate is made of straight sides.
+    ///
+    /// There the corners of a walk are its whole shape, so how often they wind
+    /// round a point is exact: once for a point inside a walk that goes
+    /// anticlockwise round a region of its own, and never for a point outside
+    /// it. The walk round the outside of a lump never winds once round
+    /// anything, so a point no candidate winds once round is in that one or in
+    /// none of them, and is not answered. A curved side is not answered either:
+    /// its corners are not its shape.
+    fn which_straight_walk_winds_round(
+        &self,
+        in_plane: &InPlane,
+        walk: usize,
+        candidates: &[usize],
+    ) -> Option<usize> {
+        let all_straight = candidates
+            .iter()
+            .flat_map(|&candidate| &self.cycles[candidate])
+            .all(|&half_edge| {
+                self.crossings[self.arcs[half_edge / 2].crossing]
+                    .order
+                    .runs_straight()
+            });
+        if !all_straight {
+            return None;
+        }
+        let corners: Vec<Vec<PredicatePoint>> = candidates
+            .iter()
+            .map(|&candidate| {
+                self.cycles[candidate]
+                    .iter()
+                    .map(|&half_edge| self.nodes[self.from(half_edge)].point)
+                    .collect()
+            })
+            .collect();
+        // Every node of the walk is tried, for the reason
+        // `say_whether_the_face_holds_each_lump_of_closed_cuts` gives: a node on
+        // the line of one of a candidate's sides is one the count cannot answer
+        // about, and another node of the same walk is not.
+        self.cycles[walk].iter().find_map(|&half_edge| {
+            let at = self.nodes[self.from(half_edge)].point;
+            let wound: Vec<i32> = corners
+                .iter()
+                .map(|corners| {
+                    how_often_the_rim_winds_round(in_plane, core::slice::from_ref(corners), at)
+                })
+                .collect::<Option<_>>()?;
+            let mut once = (0..candidates.len()).filter(|&index| wound[index] == 1);
+            let only = once.next()?;
+            once.next().is_none().then_some(candidates[only])
+        })
+    }
+
+    /// On a cone or a pipe: the one candidate that goes round the axis, when
+    /// `walk` goes round it too.
+    ///
+    /// **The argument is about loops, not about points.** One nappe of a cone,
+    /// or a pipe, is a ring: a loop on it either goes round the axis or could
+    /// be shrunk to a point. Take a lump that holds a loop going round — every
+    /// candidate's lump here, when one of its walks goes round — and each walk of
+    /// it bounds a region that is either a disc, whose walk goes round nothing,
+    /// or one of the two ends of the ring, whose walk goes round once. `walk`'s
+    /// lump is connected and misses the candidates' lump, so it lies wholly in
+    /// one of those regions, and when `walk` goes round the axis that region
+    /// cannot be a disc: nothing in a disc goes round anything. So a candidate
+    /// that goes round nothing is ruled out, and one left standing is the
+    /// answer. Both ends left standing is not answered.
+    ///
+    /// That is §282's frustum: the bottom rim goes round, the patch a leaning
+    /// plane cuts off below the top rim goes round nothing, and the rest of the
+    /// face goes round once.
+    ///
+    /// **What it rests on, each checked rather than assumed:**
+    ///
+    /// - Every node of both lumps is on one nappe, by the sign of `(x − apex)·w`,
+    ///   so no arc runs through the apex and the ring is the whole story.
+    /// - Every curved arc is cut by a **plane**. A plane crosses a cone or a
+    ///   pipe in a curve whose height is a function of the angle round the axis
+    ///   — `h = d / (s(n_x cos θ + n_y sin θ) + n_z)` on a cone in its own frame,
+    ///   and `z = (d − r(n_x cos θ + n_y sin θ)) / n_z` on a pipe — so along one
+    ///   the angle only ever grows or only ever shrinks, and a closed one goes
+    ///   round exactly once. A straight arc is a ruling or a line along a pipe,
+    ///   at one angle throughout. Another curved partner is not answered.
+    /// - How often a walk goes round is counted as how often it crosses one
+    ///   half-plane through the axis, each arc's crossing read off exact signs of
+    ///   the node boxes ([`Arrangement::how_often_an_arc_crosses`]). A half-plane
+    ///   one of the nodes sits on, to within its box, is swapped for another.
+    fn the_one_that_goes_round_the_axis_as_well(
+        &self,
+        walk: usize,
+        candidates: &[usize],
+    ) -> Option<usize> {
+        let (centre, up) = match self.surface {
+            Surface::Cone(cone) => (cone.apex(), cone.axis().direction()),
+            Surface::Cylinder(pipe) => (pipe.axis().origin(), pipe.axis().direction()),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => return None,
+        };
+        let centre = centre.coordinates().map(Interval::exactly);
+        let up = up.components().map(Interval::exactly);
+        let from_the_axis = |node: usize| -> [Interval; 3] {
+            core::array::from_fn(|axis| self.nodes[node].point.enclosure()[axis] - centre[axis])
+        };
+
+        if matches!(self.surface, Surface::Cone(_)) {
+            let lump_of = self.lump_of_each_cycle();
+            let lumps = [lump_of[walk], lump_of[candidates[0]]];
+            let mut heights = (0..self.cycles.len())
+                .filter(|&cycle| lumps.contains(&lump_of[cycle]))
+                .flat_map(|cycle| &self.cycles[cycle])
+                .map(|&half_edge| dot_of(from_the_axis(self.from(half_edge)), up).sign());
+            let first = heights.next()?;
+            if !matches!(first, Decision::Pos | Decision::Neg)
+                || heights.any(|other| other != first)
+            {
+                return None;
+            }
+        }
+
+        let reference_planes = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, -1.0],
+        ];
+        for across in reference_planes {
+            let reference = cross_of_intervals(up, across.map(Interval::exactly));
+            let round = |cycle: usize| -> Option<i32> {
+                self.cycles[cycle].iter().try_fold(0, |so_far, &half_edge| {
+                    Some(
+                        so_far
+                            + self.how_often_an_arc_crosses(
+                                half_edge,
+                                &from_the_axis,
+                                up,
+                                reference,
+                            )?,
+                    )
+                })
+            };
+            let Some(its_own) = round(walk) else {
+                continue;
+            };
+            if its_own == 0 {
+                return None;
+            }
+            let Some(theirs) = candidates
+                .iter()
+                .map(|&candidate| round(candidate))
+                .collect::<Option<Vec<i32>>>()
+            else {
+                continue;
+            };
+            let mut going_round = (0..candidates.len()).filter(|&index| theirs[index] != 0);
+            let only = going_round.next()?;
+            return going_round.next().is_none().then_some(candidates[only]);
+        }
+        None
+    }
+
+    /// How often one half-edge crosses the half-plane from the axis towards
+    /// `reference`, `+1` going anticlockwise about `up` and `−1` going the other
+    /// way; `None` when a sign it needs is not settled.
+    ///
+    /// The half-edge's angle round the axis only grows or only shrinks
+    /// ([`Arrangement::the_one_that_goes_round_the_axis_as_well`] says why), and
+    /// which it does is read off the way out of its first node against the way
+    /// round the axis there. A whole closed curve crosses once. An arc from `a`
+    /// to `b` going anticlockwise crosses when `reference` is strictly between
+    /// them going that way round: certainly when it is left of `a` and right of
+    /// `b`, certainly not when it is right of `a` and left of `b`, and otherwise
+    /// exactly when the arc goes more than half a turn — `b` right of `a`.
+    fn how_often_an_arc_crosses(
+        &self,
+        half_edge: usize,
+        from_the_axis: &impl Fn(usize) -> [Interval; 3],
+        up: [Interval; 3],
+        reference: [Interval; 3],
+    ) -> Option<i32> {
+        let turns_left = |from: [Interval; 3], to: [Interval; 3]| -> Option<bool> {
+            match dot_of(up, cross_of_intervals(from, to)).sign() {
+                Decision::Pos => Some(true),
+                Decision::Neg => Some(false),
+                Decision::Zero | Decision::Undecidable { .. } | _ => None,
+            }
+        };
+        let crossing = &self.crossings[self.arcs[half_edge / 2].crossing];
+        let (from, to) = (self.from(half_edge), self.to(half_edge));
+        let (start, end) = (from_the_axis(from), from_the_axis(to));
+        if crossing.order.runs_straight() {
+            turns_left(start, reference)?;
+            turns_left(end, reference)?;
+            return Some(0);
+        }
+        crossing.partner.as_plane()?;
+        let way_round = cross_of_intervals(up, start);
+        let anticlockwise =
+            match dot_of(way_round, self.way_out_of(from, self.direction(half_edge))).sign() {
+                Decision::Pos => true,
+                Decision::Neg => false,
+                Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+            };
+        let once = if anticlockwise { 1 } else { -1 };
+        if from == to {
+            return Some(once);
+        }
+        let (first, last) = if anticlockwise {
+            (start, end)
+        } else {
+            (end, start)
+        };
+        let passes = match (turns_left(first, reference)?, turns_left(reference, last)?) {
+            (true, true) => true,
+            (false, false) => false,
+            _ => !turns_left(first, last)?,
+        };
+        Some(if passes { once } else { 0 })
+    }
+
+    /// Refuse a cell that holds two walks of one lump, on any surface but a
+    /// torus.
+    ///
+    /// One lump of the drawing is connected, and on a plane, a pipe, a cone or
+    /// a ball a connected drawing's walks each go round a region of their own:
+    /// nothing else drawn can join two of them up again. A cell with two walks
+    /// of one lump in it is two regions glued into one, which no point can be
+    /// in, and handed on it either stops selection or — where every region of
+    /// it is kept — panics in `assemble` joining the pieces back into faces.
+    /// **A torus is the exception**, because a circle round its tube leaves one
+    /// region and not two, so its two walks are one cell there.
+    fn no_cell_holds_two_walks_of_one_lump(&self, lump: &[usize]) -> Result<()> {
+        if matches!(self.surface, Surface::Torus(_)) {
+            return Ok(());
+        }
+        for cell in &self.cells {
+            let mut lumps: Vec<usize> = cell.iter().map(|&cycle| lump[cycle]).collect();
+            lumps.sort_unstable();
+            let before = lumps.len();
+            lumps.dedup();
+            if lumps.len() != before {
+                return Err(Error::CannotTellTheCellsOfAFaceApart {
+                    face: self.face.keys[0],
+                });
+            }
         }
         Ok(())
     }
@@ -3296,6 +3638,28 @@ impl<'f> Arrangement<'f> {
     fn to(&self, half_edge: usize) -> usize {
         self.arcs[half_edge / 2].ends[1 - half_edge % 2]
     }
+}
+
+/// Whether two walks are on the same side of every curve drawn in full that
+/// both can say something about, with at least one such curve.
+///
+/// Read [`Arrangement::which_side_of_everything`] for what a side is. Two walks
+/// that agree may still be in different cells —
+/// [`Arrangement::the_walk_of_each_other_lump_each_walk_faces`] says when — but
+/// two that disagree never are.
+fn they_agree_about_every_closed_curve(
+    mine: &[Option<Decision>],
+    theirs: &[Option<Decision>],
+) -> bool {
+    let mut agreed = 0;
+    for (mine, theirs) in mine.iter().zip(theirs) {
+        match (mine, theirs) {
+            (Some(mine), Some(theirs)) if mine == theirs => agreed += 1,
+            (Some(_), Some(_)) => return false,
+            _ => (),
+        }
+    }
+    agreed > 0
 }
 
 /// Put a hinted order right wherever the hint was not the proved one.
@@ -4589,7 +4953,10 @@ const A_PLANE_AGAINST_A_CONE: &str = "a plane against a cone";
 
 /// The cross product of two boxes.
 fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
-    let (mine, theirs) = (one.enclosure(), other.enclosure());
+    cross_of_intervals(one.enclosure(), other.enclosure())
+}
+
+fn cross_of_intervals(mine: [Interval; 3], theirs: [Interval; 3]) -> [Interval; 3] {
     [0, 1, 2].map(|axis| {
         let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
         mine[next] * theirs[last] - mine[last] * theirs[next]
