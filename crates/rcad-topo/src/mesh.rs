@@ -34,8 +34,7 @@ use smallvec::SmallVec;
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::validate::{
-    nothing_curved_says_where_it_bends, side_of_surface, the_curved_surface_a_run_names,
-    the_way_it_is_parametrised_about,
+    nothing_curved_says_where_it_bends, side_of_surface, the_way_it_is_parametrised_about,
 };
 use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
 use crate::{EdgeKey, Error, FaceKey, Invalid, Result, SolidView, VertexKey};
@@ -694,14 +693,28 @@ impl BuildingAMesh {
     /// [`nothing_curved_says_where_it_bends`], which the sweep refuses by too,
     /// so only a solid that never went through the sweep reaches that refusal.
     ///
-    /// # An edge with only flat faces along it
+    /// # The pair it walks between is the one everyone reads
     ///
-    /// Two planes cross in a straight line or not at all, so for such an edge
-    /// the pair this hands the walk is one face's plane and the curved surface
-    /// the run names — the circle's own cylinder, for a circle a file imprinted
-    /// on a flat face. It is the pair [`rcad_geom::walk`] reads off the same run
-    /// too, handed over already read so that the direction rule for a closed
-    /// edge below sees a curved surface as well.
+    /// The two faces either side are handed through
+    /// [`which_two_surfaces_a_run_is_between`], the pair [`rcad_geom::walk`],
+    /// `Model::validate` and the fuse read off the same run, so that the
+    /// direction rule for a closed edge below reads the curve that was walked.
+    /// For an edge with only flat faces along it that is one face's plane and
+    /// the curved surface the run names — the circle's own cylinder, for a
+    /// circle a file imprinted on a flat face — since two planes cross in a
+    /// straight line or not at all.
+    ///
+    /// **This used to be a narrower copy that stopped there** (§222.1 item 1),
+    /// and it cost a rim between two faces on one ball. The fuse writes that rim
+    /// naming the plane that cut it, and the copy left the pair as the ball
+    /// twice, which has no crossing direction, so the rule below fell back to
+    /// the ball's longitude at the corner. Where the corner is on the equator
+    /// and the plane stands upright, that longitude is square to the rim, and
+    /// the fallback then read nothing but how the circle curves: the rim kept
+    /// whichever way the walker drew it, and five of eight such unions put each
+    /// face's triangles on the other face's side of the plane
+    /// (`the_mesher_reads_a_rim_between_two_flat_faces_as_the_run_says.rs`).
+    /// The ball and the plane read the latitude there, as the fuse does.
     fn walk(
         &mut self,
         edge: EdgeView<'_>,
@@ -724,10 +737,7 @@ impl BuildingAMesh {
         if nothing_curved_says_where_it_bends(run.run(), along) {
             return Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge: edge.key() });
         }
-        let along = match the_curved_surface_a_run_names(run.run()) {
-            Some(named) if along.iter().all(|side| side.as_plane().is_some()) => [along[0], named],
-            Some(_) | None => along,
-        };
+        let along = which_two_surfaces_a_run_is_between(run.run(), [&along[0], &along[1]]);
 
         let along_it = rcad_geom::walk(
             &run,
