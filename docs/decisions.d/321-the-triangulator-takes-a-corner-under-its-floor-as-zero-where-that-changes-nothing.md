@@ -153,6 +153,15 @@ so they guard the checks and not the flush.
 ### 321.6 What this leaves
 
 - **Q167 and Q172 close** with Q79: both rows are at 0 on the tip.
+- **A fuse pinned as refused now answers, and answers right.**
+  `a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_by_name`
+  in `crates/rcad-topo/tests/a_narrow_lune_from_a_pole_corner.rs` pins
+  `(90°, radius 1000, Intersection)` as refused, and with the flush it
+  answers. It was measured in a scratch copy of this branch, with that case
+  moved into the test's `answered` list. The answer is one solid, the model
+  validates, and it measures as a quarter of the ball, so the test passes.
+  That file is not this lane's, so the pin is not moved here. Until it is,
+  the gate on this branch fails on that one test, and 2 575 of the 2 576 pass.
 - **`orient2d`'s retry in `crates/rcad-predicates/src/orient2d.rs`** picks
   its power of two from the largest difference, so it misses inputs whose
   products span from a subnormal to about one. One power fits them all. That
