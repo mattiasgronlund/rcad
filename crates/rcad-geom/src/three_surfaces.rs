@@ -63,7 +63,7 @@ use rcad_predicates::{
 use smallvec::{SmallVec, smallvec};
 
 use crate::enclosure::{quotient_or_everything, root_enclosing};
-use crate::exact::Exact;
+use crate::exact::{Exact, Nearly};
 use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
 use crate::plane::which_side_of_a_flat_surface;
 use crate::real_roots::where_a_polynomial_is_zero;
@@ -864,12 +864,12 @@ fn what_a_stored_plane_and_an_exact_one_share(
             continue;
         };
         let mut through = [Term::of(0.0), Term::of(0.0), Term::of(0.0)];
-        through[across] = Term::Exactly(here);
-        through[and] = Term::Exactly(there);
+        through[across] = Term::exact(here);
+        through[and] = Term::exact(there);
         return Some(WhatTwoPlanesShare::ALine(Box::new(ALine {
             through,
-            direction: direction.map(Term::Exactly),
-            divided_by: Term::Exactly(minor),
+            direction: direction.map(Term::exact),
+            divided_by: Term::exact(minor),
         })));
     }
     if something_would_not_fit {
@@ -1048,10 +1048,20 @@ struct ALine {
 /// is the honest answer and not a shortcoming of the arithmetic (§2.5). A box
 /// that names one `f64` is that `f64`, which is what
 /// [`Term::from_a_box`] reads and `as_exact_as_it_is` exists to notice.
+///
+/// **A product of stored numbers that falls off the bottom of the range stays
+/// on the stored side.** It is held as a [`Nearly`]: the expansion, and a box
+/// round what fell off, a smallest subnormal per product that rounded. Its
+/// exact level then cannot run, and its enclosure is that expansion and that
+/// box — tight enough to decide a discriminant of `3` where a term of `2⁻²⁰¹⁴`
+/// went missing, which a round bar moved by `2⁻¹⁰⁰⁷` against a cube's wall
+/// asks for (`docs/decisions.md` §322). Before, such a product refused the
+/// whole meet with an unbounded enclosure.
 #[derive(Clone)]
 enum Term {
-    /// Known exactly, because every number it was built from was an `f64`.
-    Exactly(Exact),
+    /// Worked out from stored numbers, so known exactly — or, where a product
+    /// fell off the bottom of the range, to within a box of subnormals.
+    Stored(Nearly),
     /// Known only as a box, because the line it was built from is one.
     Boxed(Interval),
 }
@@ -1059,7 +1069,12 @@ enum Term {
 impl Term {
     /// A stored number, exactly.
     fn of(value: f64) -> Self {
-        Term::Exactly(Exact::of(value))
+        Term::Stored(Nearly::of(value))
+    }
+
+    /// A number worked out exactly.
+    fn exact(value: Exact) -> Self {
+        Term::Stored(value.into())
     }
 
     /// A box, or the number it names where it names one.
@@ -1073,7 +1088,7 @@ impl Term {
     /// This number as an enclosure.
     fn enclosure(&self) -> Interval {
         match self {
-            Term::Exactly(value) => value.enclosure(),
+            Term::Stored(value) => value.enclosure(),
             Term::Boxed(enclosure) => *enclosure,
         }
     }
@@ -1081,55 +1096,71 @@ impl Term {
     /// This number exactly, or `None` where it was never known that well.
     fn exactly(&self) -> Option<Exact> {
         match self {
-            Term::Exactly(value) => Some(value.clone()),
+            Term::Stored(value) => value.exactly(),
             Term::Boxed(_) => None,
         }
+    }
+
+    /// Whether this was worked out from stored numbers and lost more than a
+    /// rounding of itself off the bottom of the range on the way — the one case
+    /// where it is refused as it always was ([`Nearly::is_within_a_rounding`]).
+    fn lost_more_than_a_rounding(&self) -> bool {
+        match self {
+            Term::Stored(value) => !value.is_within_a_rounding(),
+            Term::Boxed(_) => false,
+        }
+    }
+
+    /// Whether this was worked out from stored numbers and lost anything at
+    /// all off the bottom of the range.
+    fn lost_anything(&self) -> bool {
+        matches!(self, Term::Stored(value) if value.exactly().is_none())
     }
 
     /// Which way this number points, or [`NOTHING_IS_KNOWN`] where a box
     /// straddles zero.
     fn sign(&self) -> Decision {
-        match self {
-            Term::Exactly(value) => value.sign(),
-            Term::Boxed(enclosure) => {
-                if enclosure.lo() > 0.0 {
-                    return Decision::Pos;
-                }
-                if enclosure.hi() < 0.0 {
-                    return Decision::Neg;
-                }
-                NOTHING_IS_KNOWN
-            }
+        if let Some(value) = self.exactly() {
+            return value.sign();
         }
+        let enclosure = self.enclosure();
+        if enclosure.lo() > 0.0 {
+            return Decision::Pos;
+        }
+        if enclosure.hi() < 0.0 {
+            return Decision::Neg;
+        }
+        NOTHING_IS_KNOWN
     }
 
     /// This plus `other`.
     fn plus(&self, other: &Term) -> Term {
-        match (self.exactly(), other.exactly()) {
-            (Some(mine), Some(theirs)) => Term::Exactly(mine.plus(&theirs)),
+        match (self, other) {
+            (Term::Stored(mine), Term::Stored(theirs)) => Term::Stored(mine.plus(theirs)),
             _ => Term::Boxed(self.enclosure() + other.enclosure()),
         }
     }
 
     /// This minus `other`.
     fn minus(&self, other: &Term) -> Term {
-        match (self.exactly(), other.exactly()) {
-            (Some(mine), Some(theirs)) => Term::Exactly(mine.minus(&theirs)),
+        match (self, other) {
+            (Term::Stored(mine), Term::Stored(theirs)) => Term::Stored(mine.minus(theirs)),
             _ => Term::Boxed(self.enclosure() - other.enclosure()),
         }
     }
 
-    /// This times `other`, or `None` when both are exact and the exact product
-    /// falls out of `f64`'s range.
+    /// This times `other`, or `None` when both are stored and the product
+    /// overflows.
     ///
-    /// **Two exact numbers whose product does not fit do not quietly become a
+    /// **Two stored numbers whose product does not fit do not quietly become a
     /// box.** That refusal is the one every discriminant in
     /// [`intersect`](crate::intersect) has, and answering it with an interval
     /// instead would give a caller a second, wider answer to a question it had
-    /// already been told nobody could take.
+    /// already been told nobody could take. A product that falls off the
+    /// *bottom* is another matter, and [`Term`]'s own doc says why it is kept.
     fn times(&self, other: &Term) -> Option<Term> {
-        match (self.exactly(), other.exactly()) {
-            (Some(mine), Some(theirs)) => Some(Term::Exactly(mine.times(&theirs)?)),
+        match (self, other) {
+            (Term::Stored(mine), Term::Stored(theirs)) => Some(Term::Stored(mine.times(theirs)?)),
             _ => Some(Term::Boxed(self.enclosure() * other.enclosure())),
         }
     }
@@ -1204,12 +1235,12 @@ fn the_line_two_planes_cross_in(
             continue;
         };
         let mut through = [Term::of(0.0), Term::of(0.0), Term::of(0.0)];
-        through[across] = Term::Exactly(here);
-        through[and] = Term::Exactly(there);
+        through[across] = Term::exact(here);
+        through[and] = Term::exact(there);
         return Ok(Some(ALine {
             through,
-            direction: direction.map(Term::Exactly),
-            divided_by: Term::Exactly(minor),
+            direction: direction.map(Term::exact),
+            divided_by: Term::exact(minor),
         }));
     }
 
@@ -1251,6 +1282,12 @@ fn where_a_line_crosses_one_plane(
     ) else {
         return Err(an_exact_step_could_not_be_taken(named, at));
     };
+    // Three planes have Cramer's rule to fall back on in
+    // `where_three_planes_meet`, so a product that fell off the bottom here is
+    // refused as it was and that route is left to answer.
+    if along.lost_anything() || across.lost_anything() {
+        return Err(an_exact_step_could_not_be_taken(named, at));
+    }
 
     // `along` is the determinant of the three normals, which is dimensionless.
     // `Measures` has no arm for that; see the note in
@@ -1304,6 +1341,7 @@ fn where_a_line_meets_a_ring(
     at: &[PredicatePoint],
 ) -> Result<WhereALineMeetsIt> {
     let quartic = how_a_ring_cuts_the_line(line, ring)
+        .filter(|quartic| !quartic.iter().any(Term::lost_anything))
         .ok_or_else(|| an_exact_step_could_not_be_taken(named, at))?;
     // **The quartic route is the one place level 3 is not optional.** Its roots
     // are found by evaluating signs along the line, and a coefficient that is a
@@ -1354,10 +1392,10 @@ fn where_a_line_meets_a_ring(
 fn how_a_ring_cuts_the_line(line: &ALine, ring: &Torus) -> Option<[Term; 5]> {
     let along = ring.axis().direction().components();
     let reach = the_line_offset_to(line, ring.centre().coordinates())?;
-    let axis_squared = Term::Exactly(Exact::dot_of(along, along)?);
+    let axis_squared = Term::Stored(Nearly::dot_of(along, along)?);
     let divisor_squared = line.divided_by.times(&line.divided_by)?;
-    let ring_squared = Term::Exactly(Exact::product_of(ring.ring_radius(), ring.ring_radius())?);
-    let hollow = ring_squared.minus(&Term::Exactly(Exact::product_of(
+    let ring_squared = Term::Stored(Nearly::product_of(ring.ring_radius(), ring.ring_radius())?);
+    let hollow = ring_squared.minus(&Term::Stored(Nearly::product_of(
         ring.tube_radius(),
         ring.tube_radius(),
     )?));
@@ -1469,13 +1507,22 @@ impl Quadratic {
 /// torus through all three positions, and two of them and three, so the claim is
 /// demonstrated rather than argued.
 fn how_a_quadric_cuts_the_line(line: &ALine, quadric: &Surface) -> Option<Quadratic> {
-    match quadric {
+    let quadratic = match quadric {
         Surface::Sphere(ball) => how_a_ball_cuts_the_line(line, ball),
         Surface::Cylinder(pipe) => how_a_pipe_cuts_the_line(line, pipe),
         Surface::Cone(cone) => how_a_cone_cuts_the_line(line, cone),
         Surface::Plane(flat) => panic!("{flat:?} is flat, so three planes is the question"),
         Surface::Torus(ring) => panic!("{ring:?} is a quartic and is refused before this"),
-    }
+    }?;
+    let coefficients = [
+        &quadratic.squared,
+        &quadratic.half_linear,
+        &quadratic.constant,
+    ];
+    (!coefficients
+        .iter()
+        .any(|term| term.lost_more_than_a_rounding()))
+    .then_some(quadratic)
 }
 
 /// `‖V + s·D‖² − m²R²` where `V` is the line's point offset to the ball's
@@ -1514,7 +1561,7 @@ fn how_a_pipe_cuts_the_line(line: &ALine, pipe: &Cylinder) -> Option<Quadratic> 
     let reach = the_line_offset_to(line, pipe.axis().origin().coordinates())?;
     let sideways = cross_of(&line.direction, along)?;
     let across = cross_of(&reach, along)?;
-    let axis_squared = Term::Exactly(Exact::dot_of(along, along)?);
+    let axis_squared = Term::Stored(Nearly::dot_of(along, along)?);
     Some(Quadratic {
         squared: squared_length_of(&sideways)?,
         half_linear: dot_of(&sideways, &across)?,
@@ -1540,7 +1587,7 @@ fn how_a_cone_cuts_the_line(line: &ALine, cone: &Cone) -> Option<Quadratic> {
     let reach = the_line_offset_to(line, cone.apex().coordinates())?;
     let sideways = cross_of(&line.direction, along)?;
     let across = cross_of(&reach, along)?;
-    let slope_squared = Term::Exactly(Exact::product_of(cone.slope(), cone.slope())?);
+    let slope_squared = Term::Stored(Nearly::product_of(cone.slope(), cone.slope())?);
     let direction_up = dot_of(&line.direction, &up)?;
     let reach_up = dot_of(&reach, &up)?;
     Some(Quadratic {
@@ -1573,7 +1620,7 @@ fn the_line_offset_to(line: &ALine, place: [f64; 3]) -> Option<[Term; 3]> {
 fn squared_radius_of(line: &ALine, radius: f64) -> Option<Term> {
     line.divided_by
         .times(&line.divided_by)?
-        .times(&Term::Exactly(Exact::product_of(radius, radius)?))
+        .times(&Term::Stored(Nearly::product_of(radius, radius)?))
 }
 
 /// Where the line meets the quadric: nowhere, at one step along it, at two, or
@@ -1797,7 +1844,9 @@ fn the_discriminant_of<'a>(
 /// The fallback is the interval form, for the rare case where a product the
 /// exact route needs falls out of range. It is honest and it is wide.
 fn the_size_of_the_discriminant(quadratic: &Quadratic) -> Interval {
-    if let Some(exactly) = quadratic.difference_of_the_two_halves() {
+    if let Some(exactly) = quadratic.difference_of_the_two_halves()
+        && !exactly.lost_more_than_a_rounding()
+    {
         return exactly.enclosure();
     }
     let half_linear = quadratic.half_linear.enclosure();

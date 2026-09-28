@@ -468,7 +468,16 @@ fn how_many_corners_two_bars_running_the_same_way_have_is_what_the_closed_form_s
 /// the one whose skin was being asked about; fourteen of the ninety went
 /// undecided for that reason alone and now decide. Measured on the merged tree,
 /// not on the lane that moved it.
-const TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED: usize = 51;
+///
+/// **It was 51 until §322, and every one of the 51 was the exact level's
+/// product floor and not the geometry.** The turned discriminant is an
+/// expansion whose lowest entries sit far down the range, and squaring it
+/// multiplied two of them into a product below `2⁻⁹⁶⁹`, which refused the whole
+/// sum. Keeping that product with a box one smallest subnormal wide round what
+/// it lost leaves each discriminant a rounding of itself wide or narrower, and
+/// all 51 decide. A `Nearly` (`exact.rs`) that lost nothing is the exact
+/// expansion entry for entry, so a row that lost nothing could not have moved.
+const TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED: usize = 0;
 
 /// Which three surfaces they are decides the answer, and which face asked first
 /// does not (§31.3).
