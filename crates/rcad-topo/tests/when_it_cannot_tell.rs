@@ -66,9 +66,9 @@ fn a_profile_too_big_for_f64_to_multiply_is_normalised_rather_than_refused() {
 /// The exact level multiplies raw coordinates, and the one determinant holds
 /// both `1 * 1` and `t * t`. `t * t` is `1e-610`, far below the `2^-969`
 /// under which a product is no longer exact. A power of two that lifts it
-/// above that has to be at least `2^529`, and that takes `1 * 1` past the top
-/// of the range, which it leaves at `2^511`. So no scaling lets the exact
-/// level run, and
+/// above that has to be at least `2^529`, and any power past `2^511` takes
+/// `1 * 1` off the top of the range. So no scaling lets the exact level run,
+/// and
 /// [`no_power_of_two_lets_f64_see_which_way_the_cut_bends`] tries every one.
 ///
 /// This used to be a square with a spike `1e-150` from the origin. The spike's

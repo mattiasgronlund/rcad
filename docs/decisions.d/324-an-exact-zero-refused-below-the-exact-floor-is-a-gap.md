@@ -152,3 +152,53 @@ predicate, `"a point inside a piece of a face"`, at `Level::Interval` with an
 infinite enclosure, on `(0.5, −0, 1e308)`, `(1, −0, 1e308)`,
 `(1, 0.5, 1e308)`, `(0.5, 0.5, 1e308)`. That predicate is in `rcad-topo`'s
 source. This lane did not trace whether it is a limit or a gap.
+
+### 324.7 The re-pins: no spike at the origin stays undecided, so the shape changed
+
+*Q315's second lane, on `9ff8c852`.*
+
+**A smaller spike does not help.** 324.6 put the line at a spread of about
+`2^994`, and that is where `orient2d` starts refusing: with every exponent
+from `-1100` to `1100` tried on each ordered triple of the spike's seven
+corners, a spike at `2^-994` is decided and one at `2^-995` is refused on
+eight triples. But each of those eight is decided by 499 of the 1051
+exponents that scale it exactly, `2^510` to `2^1008`. Smaller spikes are the
+same. At `2^-1000` it is 496 exponents, and at the smallest subnormal,
+`2^-1074`, it is 435, from `2^589` to `2^1023`. So a spike refused there is a
+gap, not a limit. A spike at the origin under a unit square makes
+determinants whose products are `tiny * tiny` and `tiny * 1`, never `1 * 1`.
+The ratio between them is at most `2^1074`, and level 3 can hold a ratio of
+`2^1992`. The second exponent stops at `2^509` only because it assumes the
+largest product is the largest coordinate squared. For a spike that is
+false, and that is a gap in the retry, left as a row.
+
+**The shape now used** is a square with one corner cut off, the cut running
+from `(1, t)` through `(0.5, 0.5)` to `(t, 1)` with `t = 1e-305`. The middle
+corner is `t / √2` inside the straight line, so the turn there is clockwise.
+Its determinant holds `1 * 1` and `t * t` together. Lifting `t * t` above
+`2^-969` needs `2^529` or more, and `1 * 1` overflows past `2^511`. Measured
+the same way: six ordered triples are refused, with enclosures of `0.75` and
+`0.25` of `f64::EPSILON`, and none of the 1032 exponents that scale them
+exactly decides any. At `t = 1e-300` it is none of 1049. At `t = 1e-290` the
+build is certified. `when_it_cannot_tell.rs` keeps both measurements as
+tests: `no_power_of_two_lets_f64_see_which_way_the_cut_bends` tries every
+exponent on every turn the tolerant build approximated, and
+`a_cut_corner_bent_by_1e_290_is_decided` is its control. The seven pins in
+324.6 now use this shape and assert what they asserted before. One shape
+serves all seven.
+
+**The tower fuse** in `fusing_solids.rs` is pinned to the one record it now
+gives, as 324.6 describes it. Its doc says that whether that refusal is a
+limit or a gap is not traced.
+
+**Replayed on this tip, not fixed:**
+
+- §244.3's ball and block at `cx = 0`, under `Policy::certified`, still
+  refuses under all three rules on one record: `"order along a crossing"` at
+  `Level::Interval`, enclosure `0.0`, on `(±2^-51, 1, −2^-25)`. Q310 stands.
+- Q79's `orient2d` example, `(15.391695551144624, 0)`,
+  `(15.602540695680851, 0)`, `(8.012115492376656, 5e-324)`, is now decided in
+  all six orders at `Level::Float`, as `Pos` in the order given. By the
+  arithmetic rather than by a probe, it is the second exponent that does it:
+  the first, `2^-2` from the largest difference, would push `5e-324` off the
+  bottom, and the second, `2^506`, lifts it to `2^-568`.
