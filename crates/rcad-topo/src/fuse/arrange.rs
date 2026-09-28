@@ -1430,15 +1430,15 @@ impl<'f> Arrangement<'f> {
     ///
     /// **Or when the three are planes `bake` solved the corner among**, however
     /// far the meet's box reaches. Those three were each asked about the corner
-    /// grown by the same room, along their own normals, and none proved it off;
+    /// grown by the same room, and none proved it off;
     /// a meet of three of them can then sit many rooms away in space only
     /// because two of them are nearly one plane
     /// ([`Arrangement::bake_placed_the_corner_on_the_three_planes`]). A turned
     /// pyramid whose base is bent by a sixty-fourth has its apex's two folding
     /// faces' meets 4.7 rooms past the apex's box, and the meet of the three
-    /// stored planes itself, worked out exactly, still 1.6 rooms past it; every
-    /// such union was refused before this rule and every one is answered with
-    /// it (§356).
+    /// stored planes itself, worked out exactly, still 1.6 rooms past it. Its 36
+    /// turned unions at height one were all refused before this rule and are
+    /// all answered with it (§356).
     ///
     /// **Anything further stays a node of its own**, and whether two
     /// overlapping nodes are one point is left to
@@ -1498,17 +1498,18 @@ impl<'f> Arrangement<'f> {
     /// best-conditioned triple, and every surface round it is then asked about
     /// the corner grown by the room writing it down cost; one that proves it
     /// off is a refusal ([`BakedCorner::around`](super::bake::BakedCorner)).
-    /// So each of the three passes within that room of the corner, measured
-    /// **along the plane's normal**, which is where the room is a room at all:
-    /// it is how far a plane through one corner of a face misses the next.
+    /// So each of the three passes through the corner's box grown by that room.
+    /// **That is a room across each plane**, which is where the room is a room
+    /// at all: it is how far a plane through one corner of a face misses the
+    /// next.
     ///
     /// Carried to the point where the three meet, that room grows by how badly
     /// the three are placed to pin a point down. Where two of them are nearly
     /// one plane, moving either one moves the line they cross in by about the
     /// move over the small angle between them, and the meet goes with that
     /// line. So the meet of three of a corner's own planes can land well outside
-    /// the room in *space* while every one of them is inside it along its
-    /// normal (§356.2). That is the same corner written down by a worse triple,
+    /// the room in *space* while every one of them passes through the grown
+    /// corner (§356.2). That is the same corner written down by a worse triple,
     /// not a second point: three planes meet at most once, so two straight
     /// crossings on a flat face that both run through the corner cross nowhere
     /// else.

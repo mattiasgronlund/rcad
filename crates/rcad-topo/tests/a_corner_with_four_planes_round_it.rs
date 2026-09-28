@@ -37,14 +37,14 @@
 //! After, the room no longer moves any of the six counts: the same numbers
 //! came back with it scaled by 0, 0.5 and 1000 (§356.3). The refusals left —
 //! 5, 5, 1, 3 and 11 — are "could not settle 1 decisions" or "two regions of
-//! one face could not be told apart", with every meet of every apex folded,
-//! and are §310.5's second bullet.
+//! one face could not be told apart", with every meet the fold was asked
+//! about folded, and are §310.5's second bullet.
 //!
 //! **So a four-plane corner does fill the room, and the room is not what it
-//! should be measured in.** Every plane round the apex passes within the room
-//! of it along its own normal, which `bake` checks; carried through a triple
-//! of nearly-flat planes, that room grows by one over the fold. The sixty-fourth
-//! was a gap, not a limit, and is closed.
+//! should be measured in.** Every plane round the apex passes through the
+//! apex's box grown by the room, which `bake` checks; carried through a triple
+//! of nearly-flat planes, that room grows by about one over the fold. The
+//! sixty-fourth was a gap, not a limit, and is closed.
 //!
 //! Not reached here: a corner with five or more planes round it, a side face
 //! whose own angle at the apex is a sliver, and an apex far enough from the
@@ -94,9 +94,9 @@ fn a_pyramid_whose_two_faces_fold_by_a_sixteenth_is_united_though_its_apex_meets
 /// not take them, the meet stayed a node beside the apex, and the certified
 /// policy could not order the two along the face's edge: all 36 were refused
 /// on "order along a crossing". **That was a gap, not a limit** (§16.10,
-/// §310.3): every one of the four planes passes within the room of the apex
-/// along its own normal, which is what `bake` checks, and only the nearly-flat
-/// triple carries that room out further in space.
+/// §310.3): every one of the four planes passes through the apex's box grown
+/// by the room, which is what `bake` checks, and only the nearly-flat triple
+/// carries that room out further in space.
 #[test]
 fn a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_united_though_its_apex_meets_stick_out_past_the_room()
  {
