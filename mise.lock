@@ -64,7 +64,7 @@ version = "1.42.4"
 backend = "cargo:just"
 
 [[tools."cargo:kache"]]
-version = "0.16.0"
+version = "0.27.0"
 backend = "cargo:kache"
 
 [[tools."cargo:taplo-cli"]]
