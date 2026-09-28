@@ -500,3 +500,76 @@ stand-in) that it is not a drop-in addition to today's `check` step.
 
 Run at 2026-09-27T22:00Z, on this branch's own tip (`main` at `778b6ace`
 plus this row's own commits).
+
+### 273.9 Q181's second pass: redone after a full disk, and a stale count fixed
+
+The first lane's verifier rejected this row only because the disk was full —
+its gate failed at `check-ignored` with nextest unable to list the ignored
+tests, and every call after that failed with `ENOSPC`, so nothing above was
+re-checked. The disk is clear now (`df -h /`: 322G free of 913G). This section
+redoes the checks rather than trusting the first lane's own read-out of them.
+
+**The scan against 3319f838's build.** The locked tree's `q163-before.bin`
+(sha256 `05cec502...ae3dd0`, matching the copy kept here byte for byte) fed to
+`fuzz/timing-hooked-calls.py` reports the same four offenders at the same
+addresses and the same `read_back`/`how_slow_the_name_says` lines 273.8
+printed, with `SlowRun::is` correctly left out, and exit 1 — unchanged.
+
+**The five targets, built fresh at this tip.** `taskset -c 6-15`, a worktree
+that had never built the fuzz crate before, the same `cargo +nightly fuzz
+build` with the sancov stand-in: **1m 47s** (273.8's cold figure for a
+different worktree was 1m08s; both are the same kind of run, on different
+machines' cache state, not a regression). The stand-in's own guard passed —
+`rcad-fuzz-timing`'s rlib carries 0 `sancov` references. The script against
+all five binaries: each reports exactly one hooked call, in `SlowRun::is`,
+none outside it, `clean`, exit 0 — unchanged.
+
+**A stale count, found and fixed.** Both transcripts above also print
+"calls ... through a computed pointer, unscanned" — **2** for `q163-before.bin`
+and **3** for each of the five targets. A fresh run of the same script against
+the same, checksum-identical binaries reports **16** and **21**. This is not a
+build difference or a tool-version difference (binutils 2.42 both times, and
+`q163-before.bin` was not rebuilt, only copied) — it is the same script
+counting differently than the number written down. Read out by mnemonic
+(`target/timing-computed-breakdown.py`, gitignored), `q163-before.bin`'s 16
+split as 2 `call *%reg` and 14 `jmp *%reg`; the five targets' 21 split as 4
+`call` and 17 `jmp`. The `call` counts (2, and 4) match what this section
+already reported as merge_out's genuinely unresolved calls in 273.8's own
+broadened re-measurement. The `jmp` instances do not belong in the same
+bucket: reading the instructions before one (`movslq
+(%rax,%r12,4),%rcx; add %rax,%rcx; jmp *%rcx`, inside a monomorphized
+`core::ptr::drop_glue` for `Option<Result<std::fs::DirEntry, Error>>>`) is the
+ordinary relative-jump-table pattern a match or switch lowers to under
+`-fPIE`: the table holds offsets from the function's own base, so the jump
+can only land inside the same function, never at an imported symbol like
+`bcmp`. Counting it as "unscanned, might reach a hook" is not wrong in the
+sense of missing a real risk — it is over-cautious in a way that buries the
+few calls that are genuinely unresolved. The script's exit code never used
+this count (`main` fails only on `offenders` or `timing_unmatched`), so this
+was a stale transcript, not a behavior bug: the two numbers above were
+apparently taken from a run that only counted the `call` mnemonic, and the
+checked-in script counts `call` and `jmp` alike in one shared branch,
+without anyone re-running the transcript after that widened. Fixed here by
+correcting the numbers rather than narrowing the script — telling a jump
+table's tail `jmp` apart from a genuine cross-function tail call by mnemonic
+alone is not reliable enough to build in the same row that found the gap, and
+the script's own docstring already names "a call through a memory operand"
+as a known blind spot this count is not meant to resolve.
+
+**The selftest and the file reverted to the base.** With
+`fuzz/timing-hooked-calls.py` removed entirely (its state at the base commit,
+where it does not exist), `just check-fuzz-overnight-selftest` still passes
+clean, with no output, twice run. None of its arms call the real file: `run()`
+now points `RCAD_FUZZ_TIMING_CHECK` at a stub for every arm that uses it, and
+the one arm that does not (arm Six) hands off to a second, nested `just`
+process reading a fixture recipe that never reaches the build step at all —
+that hand-off is the arm's own point. So the tests this row's `justfile`
+change lives or dies by are arms Twenty-four and Twenty-five, not the `.py`
+file's presence: removing the `timing_check=...` block this row added to
+`fuzz-overnight` — the counterpart in `justfile#fuzz-overnight`, keeping
+Twenty-four and Twenty-five themselves — makes Twenty-four fail exactly as
+it should, `a timing-crate call reaching a hook outside SlowRun::is was
+found and the night reported success`; restoring the block returns the
+selftest to clean. `tests_that_fail_without_the_change` names that block.
+
+Run at 2026-09-28T10:00Z–10:20Z, on this branch's own tip.
