@@ -1180,7 +1180,7 @@ impl BuildingAMesh {
         let quarters: [f64; 4] =
             [0, 1, 2, 3].map(|step| from + way * f64::from(step) * whole_turn / 4.0);
         let cap = &with_a_corner_where_a_pole_side_passes(cap, &quarters, pinch);
-        let along = quarters.map(|at| nearest_corner_off_the_rims_poles(cap, at, pinch));
+        let along = corners_the_quarter_cuts_leave_from(cap, quarters, pinch);
 
         let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let at_the_pole = stored.point_at(from, towards);
@@ -2174,25 +2174,73 @@ fn passes_strictly(at: f64, one: f64, other: f64) -> bool {
     one.min(other) < at && at < one.max(other)
 }
 
-/// Which corner of a cap sits nearest a longitude, and of two as near, the one
-/// off the pole.
+/// The corners of a cap the four quarter cuts leave from: each the corner
+/// nearest its quarter, and **four different ones, in the order the loop runs**.
+///
+/// The four patches are the stretches of the loop between one cut and the
+/// next, so two cuts from one corner leave a patch of no width, and cuts out of
+/// the loop's order leave stretches that overlap. On a coarse walk the nearest
+/// corners can do the first. A block that keeps under a third of a turn of a
+/// pointed cone's rim leaves a cap walked as both ends of that rim, its middle,
+/// and the middle of the crossing round the far side of the apex; two quarters
+/// fall on the crossing, both are nearest its one corner, and the patch between
+/// their cuts was that corner and the apex twice, which the triangulator
+/// refused as `CornersCoincide` (§285.2).
+///
+/// So when the nearest corners do not run in order, each quarter after the
+/// first is given the nearest of the corners after the one before it, leaving
+/// one for each quarter still to come. When they do, that is the same choice,
+/// and it is kept as it was. A cap of fewer than four corners has no four to
+/// give, and goes on to the triangulator as it was.
+fn corners_the_quarter_cuts_leave_from(
+    cap: &WalkedLoop,
+    quarters: [f64; 4],
+    pinch: f64,
+) -> [usize; 4] {
+    let count = cap.corners.len();
+    let nearest = quarters.map(|at| nearest_corner_off_the_rims_poles(cap, 0..count, at, pinch));
+    let first = nearest[0];
+    let past_the_first = |corner: usize| (corner + count - first) % count;
+    let in_loop_order = nearest
+        .windows(2)
+        .all(|pair| past_the_first(pair[0]) < past_the_first(pair[1]));
+    if in_loop_order || count < 4 {
+        return nearest;
+    }
+    let mut along = nearest;
+    let mut taken = 0;
+    for step in 1..4 {
+        let room = (taken + 1..=count - (4 - step)).map(|offset| (first + offset) % count);
+        along[step] = nearest_corner_off_the_rims_poles(cap, room, quarters[step], pinch);
+        taken = past_the_first(along[step]);
+    }
+    along
+}
+
+/// Which of `among`, corners of a cap, sits nearest a longitude, and of two as
+/// near, the one off the pole.
 ///
 /// The end of a pole side shares its longitude with the rim corner beside it,
 /// because the rim leaves the pole up that meridian, and a cut from the pole
 /// end would run along the rim's own step (see [`starting_off_the_poles`]).
-fn nearest_corner_off_the_rims_poles(cap: &WalkedLoop, at: f64, pinch: f64) -> usize {
+fn nearest_corner_off_the_rims_poles(
+    cap: &WalkedLoop,
+    among: impl Iterator<Item = usize>,
+    at: f64,
+    pinch: f64,
+) -> usize {
     let on_a_pole = |which: usize| {
         let latitude = cap.corners[which][1];
         latitude == pinch || latitude == -pinch
     };
-    (0..cap.corners.len())
+    among
         .min_by(|&one, &other| {
             let away = |which: usize| (cap.corners[which][0] - at).abs();
             away(one)
                 .total_cmp(&away(other))
                 .then(on_a_pole(one).cmp(&on_a_pole(other)))
         })
-        .expect("a walked loop has a corner")
+        .expect("a walked loop has a corner, and a quarter still to place has one left")
 }
 
 /// Which corner of a loop sits nearest a longitude.
@@ -3664,6 +3712,12 @@ fn how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it(
 /// pole, the swing is a pole side and runs the way the face lies. The pole
 /// cannot be put in beside it instead: the two are one rounding apart and the
 /// flat face across the edge reads them as one corner.
+///
+/// **Not a cone's apex, and that was measured.** The same rule for an apex
+/// answers the two blocks less the cone whose steep face misses the apex by a
+/// rounding, and takes two cones less the block that answered right without
+/// it: the cone's face and the steep face then both draw the same sides across
+/// the strip between the crossing's two arms just above the apex (§354).
 fn the_pole_a_point_sits_within_a_rounding_of(stored: &Surface, at: Point) -> Option<f64> {
     let Surface::Sphere(sphere) = stored else {
         return None;
