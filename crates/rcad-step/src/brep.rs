@@ -1135,17 +1135,16 @@ impl Walk {
     /// lies on every face, which also holds one pipe's radius and lean against
     /// the other's. The file's own sizes cannot be held to that: KiCad writes
     /// twelve digits, and the `0.141421356237` its exporter writes for `0.1·√2`
-    /// is `3.1e-13` short, which puts the Fujitsu `FTR-F1` relays' mitres 61
-    /// to 66 roundings off each pipe (`docs/decisions.md` §229.5 blamed the
-    /// axis miss, which is 5.26).
+    /// is `3.1e-13` short, dozens of roundings of the relay it is in
+    /// (`docs/decisions.md` §335 has the measurement).
     ///
     /// **The file's sizes are still checked**, so a file whose sizes are
     /// plainly wrong is named by its faces, as before, and not read as the
     /// curve the plane cuts. Its ellipse is held against every face to the
     /// same allowance plus what writing a size in twelve significant digits
-    /// costs — half a unit in the twelfth digit is at most five parts in
-    /// `10¹²` of the size — which is the fewest digits any writer in either
-    /// corpus writes an ellipse's size in.
+    /// costs: half a unit in the twelfth digit is at most five parts in `10¹²`
+    /// of the size. No ellipse in either corpus that the pipe's ellipse fits
+    /// fails this, and an eleven-digit size does.
     fn every_face_holds_the_curve(
         &self,
         reading: &Reading<'_>,
