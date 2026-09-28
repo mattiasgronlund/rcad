@@ -373,3 +373,8 @@ nothing. Both new checks fail without their fix, as the mutants above show.
    every step in **5m50s**, with the load average at 33: `gate: PASS`, 2681
    tests run, 2681 passed, 11 skipped, and 25 doc tests passed. It recorded
    `c7091797ee87`. Its log now begins with `check-plugins`' own output.
+4. `just gate quiet` on `d7143ba7`, a commit on top that touched only this
+   file, was served from `b2c83780` in **51 s**. Its summary carried run 3's
+   counts, each line marked `(served from b2c83780)`. The 43 steps it ran all
+   passed. It took 7 s more than §337.1's 44 s, which left out the new
+   selftest and was timed on a quieter machine.
