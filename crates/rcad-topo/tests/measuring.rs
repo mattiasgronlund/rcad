@@ -309,12 +309,7 @@ fn a_deflection() -> Deflection {
 /// A shape, how to build it, the five numbers M0 measured it as — volume,
 /// area, and the three coordinates of the centroid, as bits — and how far §338
 /// says its volume and area rounded.
-type FrozenShape = (
-    &'static str,
-    fn() -> (Model, SolidKey),
-    [u64; 5],
-    [f64; 2],
-);
+type FrozenShape = (&'static str, fn() -> (Model, SolidKey), [u64; 5], [f64; 2]);
 
 /// **The test this whole change is judged by** (`docs/decisions.md` §23.7).
 ///
