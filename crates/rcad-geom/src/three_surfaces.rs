@@ -285,38 +285,51 @@ fn the_lengths_of(surface: &Surface) -> SmallVec<[f64; 5]> {
 /// bits: going back through [`Axis::new`](crate::Axis::new) would scale a unit
 /// direction to length one a second time and can move its last bit, which
 /// would be another surface.
+///
+/// # Panics
+///
+/// If a constructor refuses what an exact slide of a surface it built hands
+/// back. Every length that comes through is finite, a radius above zero is
+/// still above zero, and a tube thinner than its ring is still thinner.
 fn the_same_surface_slid_by(surface: &Surface, exponent: i32) -> Option<Surface> {
+    const BUILT: &str = "an exact slide of a surface is a surface";
     let slid = |value: f64| slid_exactly(value, exponent);
     let slid_point = |place: Point| -> Option<Point> {
         let [x, y, z] = place.coordinates();
         Some(Point::new(slid(x)?, slid(y)?, slid(z)?))
     };
     let moved = match surface {
-        Surface::Plane(flat) => Surface::Plane(flat.moved_to(slid(flat.offset())?).ok()?),
-        Surface::Sphere(ball) => {
-            Surface::Sphere(Sphere::new(slid_point(ball.centre())?, slid(ball.radius())?).ok()?)
-        }
+        Surface::Plane(flat) => Surface::Plane(flat.moved_to(slid(flat.offset())?).expect(BUILT)),
+        Surface::Sphere(ball) => Surface::Sphere(
+            Sphere::new(slid_point(ball.centre())?, slid(ball.radius())?).expect(BUILT),
+        ),
         Surface::Cylinder(pipe) => Surface::Cylinder(
             Cylinder::new(
-                pipe.axis().moved_to(slid_point(pipe.axis().origin())?).ok()?,
+                pipe.axis()
+                    .moved_to(slid_point(pipe.axis().origin())?)
+                    .expect(BUILT),
                 slid(pipe.radius())?,
             )
-            .ok()?,
+            .expect(BUILT),
         ),
         Surface::Cone(cone) => Surface::Cone(
             Cone::new(
-                cone.axis().moved_to(slid_point(cone.apex())?).ok()?,
+                cone.axis()
+                    .moved_to(slid_point(cone.apex())?)
+                    .expect(BUILT),
                 cone.slope(),
             )
-            .ok()?,
+            .expect(BUILT),
         ),
         Surface::Torus(ring) => Surface::Torus(
             Torus::new(
-                ring.axis().moved_to(slid_point(ring.centre())?).ok()?,
+                ring.axis()
+                    .moved_to(slid_point(ring.centre())?)
+                    .expect(BUILT),
                 slid(ring.ring_radius())?,
                 slid(ring.tube_radius())?,
             )
-            .ok()?,
+            .expect(BUILT),
         ),
     };
     Some(moved)
