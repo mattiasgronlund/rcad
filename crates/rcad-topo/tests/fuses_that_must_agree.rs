@@ -4938,6 +4938,10 @@ impl Run {
                     .map(|picking| picking.moved_by(movement))
                     .collect(),
             },
+            Run::RightRoundWhereItCrosses { and, forward } => Run::RightRoundWhereItCrosses {
+                and: and.moved_by(movement),
+                forward: *forward,
+            },
         }
     }
 }
