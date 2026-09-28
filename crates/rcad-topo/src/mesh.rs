@@ -720,9 +720,11 @@ impl BuildingAMesh {
     /// the ball and the rim's plane, and so is walked the way the ball's latitude
     /// runs where its longitude is square to the rim. The copy read the ball and
     /// the pipe, which only touch, so no rule answered and the rim kept the
-    /// walker's way round; a solid built to that way is walked against the rule
-    /// now and refused by `AWireWillNotLieFlatOnItsFace`
-    /// (`a_half_ball_on_a_pipe_meshes_whichever_face_is_listed_first.rs`).
+    /// walker's way round. A solid built to that way is walked against the rule
+    /// now, and `Model::validate` reads the rim against the same plane and
+    /// refuses it by `AClosedEdgeIsWalkedAgainstItsSurface` before it is meshed
+    /// (`a_half_ball_on_a_pipe_of_its_own_radius.rs`, `docs/decisions.md`
+    /// §229.4). Meshed without that sweep, its pipe's wire will not lie flat.
     fn walk(
         &mut self,
         edge: EdgeView<'_>,
