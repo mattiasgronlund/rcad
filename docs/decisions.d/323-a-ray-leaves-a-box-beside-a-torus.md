@@ -1,6 +1,7 @@
 ## 323. A ray leaves a box beside a torus, and a ring's face counts the right way round — 2026-09-28
 
-*Row Q102 (`lane-q102-a-point-a-ray-can-leave`, off `e7b1894a`). §243.5 left
+*Row Q102 (`lane-q102-a-point-a-ray-can-leave`, off `e7b1894a`, merged as it
+was onto `0a7142ff` in `lane-q102-a-ray-leaves-a-box-2`, 323.8). §243.5 left
 a bend less a copy of itself turned an eighth of a turn refusing on "a point in
 a piece that every solid could place", and §243.6 named two ways out: give the
 piece an exact point, or let a ray leave a box. The second is taken, in
@@ -15,6 +16,7 @@ later, writing them back out.*
   323.5   Where the bend stops now
   323.6   The pins
   323.7   What this leaves
+  323.8   Sent again onto `0a7142ff`, and the rebuilt bend's pin
 
 ### 323.1 What refused
 
@@ -176,15 +178,15 @@ of this row's write set, and it was not traced.
 - `a_bend_less_a_copy_turned_an_eighth_of_a_turn_places_every_piece` — on the
   base, `Undecidable`.
 
-One pin outside this row's write set moves:
+One pin outside the first lane's write set moved with it:
 `building_a_solid_out_of_faces.rs`'s
-`a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds` expects the
-refusal of 323.1 and now fails with "expected the piece of the wall not to be
+`a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds` expected the
+refusal of 323.1 and failed with "expected the piece of the wall not to be
 placed, got TheFuseWroteABrokenAnswer { broken: CoedgesRunTheSameWay }". It
-asserts twice more what this row changed — that both descriptions refuse word
-for word alike, and that a ray from the blend of the wall piece's corners
-against the turned bend is `CannotFireARayAtAFacesSurface` — and neither was
-run with the first assertion moved.
+asserted twice more what this row changed — the corners that refusal named,
+and that a ray from the blend of those corners against the turned bend is
+`CannotFireARayAtAFacesSurface`. The row was sent again with that file in its
+write set, and 323.8 says what the pin says now.
 
 ### 323.7 What this leaves
 
@@ -192,7 +194,37 @@ run with the first assertion moved.
   pieces and fails writing them back, `CoedgesRunTheSameWay`, for all three
   rules (323.5). Not traced. The same refusal as a bend and its bit-for-bit
   copy (§243.5), so plausibly one cause.
-- `building_a_solid_out_of_faces.rs`'s bend pin needs moving to that refusal
-  (323.6).
 - Whether `validate.rs`'s torus gradient, multiplied by a face's orientation,
   is the sign 323.4 fixed here, and whether it is §243.6's three-quarter bend.
+
+### 323.8 Sent again onto `0a7142ff`, and the rebuilt bend's pin
+
+The first lane's verifier found the pin 323.6 names broken outside its write
+set, so the row was sent again as `lane-q102-a-ray-leaves-a-box-2`, with
+`building_a_solid_out_of_faces.rs` in the write set. The first lane's branch,
+tip `fef89d7e`, was merged onto `0a7142ff` with no conflicts and not rebased,
+so every sha above still names what it named. That base is past `e7b1894a` by
+Q79 (§321), Q100 (§322), Q116 (§325) and Q168 (§326).
+
+The pin now says three things.
+
+- **Both descriptions of the bend, less the turned bend, refuse
+  `TheFuseWroteABrokenAnswer { broken: CoedgesRunTheSameWay }`**, and refuse
+  it word for word alike. That is still the refusal the fuse half of that
+  oracle compares, one stop later than before. The right answer is the eighth
+  of the bend from `y = 0` to the turned bend's first cap, `π²` by Pappus, so
+  when 323.7's first stop is closed the pin moves again and that half becomes
+  `the_same_numbers`, as the cube's, the bar's and the ball's are.
+- **The wall piece's corners are written from the shape**, `(3, 0, 0)` and
+  `(5/√2, 5/√2, 0)`, because the refusal whose record named them is gone.
+  `5/√2` goes in as a range, checked to hold it by squaring its two ends.
+- **A ray from the blend of those corners against the turned bend is
+  `Outside`**, and that answer is worked out from the shape rather than read
+  off `classify.rs`: the blend is `3.72` from the axis, in the tube, but only
+  `28°` round the ring, and the turned bend runs from `45°` to `135°`. On
+  `e7b1894a` it was `CannotFireARayAtAFacesSurface`.
+
+The table in 323.5 was printed again on the merged tree, with the same
+temporary `eprintln!` in `select::choose`, and every row holds for all three
+rules. The wall piece the old refusal stopped on has the corners the pin
+writes: `(3, 0, 0)` and `(5/√2, 5/√2, 0)`.
