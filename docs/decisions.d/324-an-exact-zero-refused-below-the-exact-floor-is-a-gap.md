@@ -202,3 +202,69 @@ limit or a gap is not traced.
   arithmetic rather than by a probe, it is the second exponent that does it:
   the first, `2^-2` from the largest difference, would push `5e-324` off the
   bottom, and the second, `2^506`, lifts it to `2^-568`.
+
+### 324.8 The triangulator's own lift decided nothing more, and went
+
+*Q332's lane, `lane-q332-triangulator-lift-after-q315`, on `c8c77484`.*
+
+§321.3 put a lift in `triangulate.rs`: `which_way_three_points_turn` moved
+every coordinate up by one exact power of two until the largest was near
+`2^500`, then asked `orient2d`. It was there because `orient2d` then took its
+power of two only from the largest difference. Since 324.4 it also lifts the
+largest coordinate into `[2^509, 2^510)`.
+
+**Why it should add nothing.** The flush check hands it scaled corners only,
+and each coordinate is zero, in `[2^-142, 2^201)` (what spade took), or a
+flushed one under `2^-142`. `orient2d` on the lifted copy tries the same two
+rescaled copies `orient2d` alone tries, so the one copy the lift adds is the
+`2^500` one. The `2^509` copy has every coordinate `2^9` larger, so every
+level-3 product sits `2^18` further off the floor, and 324.4's test shows none
+overflows. It is always exact here: a coordinate would have to be under
+`2^-1330` to stay subnormal after it.
+
+**Measured**, at `5c031a38`, with `mise exec -- just t
+what_the_lift_decides_that_orient2d_alone_does_not --no-capture` (the test is
+removed in the next commit, with the lift). Every ordered triple, both ways:
+
+- **A corner inside a straight side.** Ends `(15.391695551144624·2^s, 0)`
+  and `(15.602540695680851·2^s, 0)`, the corner at `u = 8.012115492376656·2^s`
+  or `15.5·2^s` and height `±2^-e` or `±3·2^-e`, `e` from 143 to 1074; each
+  also with the ends at heights `h` and `2h`, and with `u` and `v` swapped.
+  178 944 triples per `s`. All decided by both, at every `s`.
+- **A spike at the origin under a square**: `(0, 0)`, `(t, 3t)`, `(2t, 0)`
+  and `(±2^s, ±2^s)`, `t = 2^-e` for `e` from 144 to 1074, 195 510 triples
+  per `s`. Decided by each: 195 510, 195 430, 194 870, 194 310, 193 750 and
+  193 302 for `s` = −140, −70, 0, 70, 140, 196. The same triples both ways.
+  The refused ones are 8 of 210 at every spike whose spread `2^(s+e)` is
+  `2^995` or more, which is Q336's row.
+- Q332's own three points: all six orders decided both ways, `Pos` in the
+  order given.
+
+`s` ran over `−140, −70, 0, 70, 140, 196`, the ends of what spade takes.
+2 246 724 triples in all. The lift decided **0** that `orient2d` alone did
+not, and 0 the other way. Where both decided, they agreed.
+
+**Why that family.** Level 3 sums products of one point's `u` with another's
+`v`, so the check can form ordinary × ordinary, ordinary × flushed and
+flushed × flushed. The side has the second kind only, over the whole range
+of both factors. The spike adds the third kind, the one that falls off the
+bottom of any copy. The argument above says nothing outside the family can
+do better. The count checks the argument; it does not replace it.
+
+**So (b):** the lift and its doc are gone, and the flush check and
+`two_sides_of_an_outline_meet` ask `orient2d`.
+`a_corner_a_subnormal_inside_a_straight_side_of_the_hull_is_meshed` now
+asserts `orient2d` decides Q332's turn `Pos`, and meshes the corner at
+`5e-324`, `2^-1000`, `2^-600` and `2^-143`. With `crates/rcad-predicates/src`
+back at `0a7142ff` and that assertion taken out, the smallest height is
+refused `CoordinateOutOfRange { position: 1, why: TooSmall }`, so the meshing
+loop alone pins that the flush check stands on the second exponent. Q336 can
+only turn refusals into answers here, and it needs no lift to do it.
+
+**Fails with `crates/rcad-predicates/src` and `crates/rcad-mesh/src` at
+`0a7142ff`** (`mise exec -- just t --workspace --no-fail-fast`, 7 of 2619):
+this test; `orient3d_matches_robust::coordinates_down_among_the_subnormals_are_lifted_and_decided_rather_than_guessed`;
+both tests in `points_on_one_plane_a_1e-300_step_from_an_axis.rs`;
+`fusing_solids::a_fuse_that_needs_a_decision_nothing_can_prove_refuses`;
+`two_boxes_one_with_a_corner_moved_by_1e-300::each_fuse_is_the_one_box_whichever_comes_first`;
+`when_it_cannot_tell::a_cut_corner_bent_by_1e_290_is_decided`.
