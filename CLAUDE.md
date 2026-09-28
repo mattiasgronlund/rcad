@@ -104,6 +104,15 @@ streams every line, which is 300 KB, and 300 KB is 75 000 tokens you cannot put
 in a result. **Do not redirect `quiet` to a file**; redirecting is what made the
 summary block useless. Never write down a gate you have not read.
 
+**Code already gated green is served, not run again.** If this commit's code
+(its tree without `docs/` and `*.md`) passed a gate on this machine in the last
+day, `just gate` skips the slow steps in `gate_reusable_steps`, prints `·
+served:` naming the commit whose gate it is, and marks that gate's counts
+`(served from <sha>)` in the summary. `just gate quiet fresh` runs everything.
+So does a commit whose sha starts with `0`: that is the audit. **A `!!! verdict
+violated` line is a finding, not a flake** — read `docs/decisions.md` §337.6
+before running anything again.
+
 **Never pipe it through `tail` or `head`**: the exit code you get back is the
 pipe's last command's, so a failed gate reads as 0.
 

@@ -90,6 +90,7 @@ gate_steps := "check-plugins \
     check-gate-runs-every-check \
     check-gate-summary-selftest \
     check-gate-docs-selftest \
+    check-gate-verdicts-selftest \
     check-lanes-selftest \
     check-release-lanes-selftest \
     check-ff-main-selftest \
@@ -157,6 +158,20 @@ gate_steps := "check-plugins \
 # On a metered runner this is 1m07s against 9m46s. `docs/decisions.md` §172.
 gate_metered_steps := "check check-fuzz-builds check-wildcards lint test check-release-build check-fuzz-unit deny check-corpus"
 
+# The steps `gate` may serve from an earlier green of the same code instead of
+# running (`docs/decisions.md` §337). They are the slow ones: together about 215
+# of a 257-second gate, and nearly half of all green gates re-read code that had
+# already gated green, because a `docs/queue.md` push had moved `main`.
+#
+# **A step is here only if nothing it reads is prose, or outside the tree.** An
+# strace of every step settled that (§337.2). `check-hooks` is left out because it
+# runs the guardrails plugin's cases from outside the tree. `deny` is left out
+# because it fetches the advisory database, `check-corpus` because the corpus is
+# outside the tree, and `check-fuzz-unit` because it reads the installed systemd
+# unit. Every step that reads `docs/` is left out as well. A step missing from
+# this list runs every time, so a new step is never served by default.
+gate_reusable_steps := "check check-fuzz-builds check-wildcards check-ignored lint test check-release-build check-fuzz-overnight-selftest check-queue-api-selftest"
+
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
 # point a nested run somewhere else: the selftest runs inside the gate, and a
@@ -201,7 +216,7 @@ gate-docs mode="loud":
         exit 2
     fi
     echo "gate-docs: dropped${dropped:- nothing}"
-    exec {{ just_executable() }} --set gate_steps "${steps# }" gate '{{ mode }}'
+    exec {{ just_executable() }} --set gate_steps "${steps# }" --set gate_log '{{ gate_log }}' gate '{{ mode }}'
 
 # The gate with what this machine supplies taken away, which is the one thing a
 # local run cannot otherwise be: a fresh clone, in a container, with no `HOME`
@@ -420,23 +435,82 @@ gate-fresh image="rust:1-bookworm":
 # one line per step, the tail of whatever broke, and the block on stdout, and
 # sends the rest to the log — so one unredirected call answers the question.
 # `docs/decisions.md` §147.
-[doc("Everything, in the order CI runs it. `just gate quiet` prints only the summary.")]
-gate mode="loud":
+#
+# **Code that has already gated green on this machine is served, not run
+# again.** If this commit's code, which is its tree without `docs/` and `*.md`,
+# passed a gate here in the last day, the steps in `gate_reusable_steps` are
+# skipped and that pass stands in for them. Every other step still runs. The
+# second word `fresh` serves nothing. A commit whose sha starts with `0` also
+# serves nothing. That is the audit: it re-runs about one gate in sixteen. If a
+# re-run fails where the record said pass, that is reported as a violation and
+# the record is deleted. `docs/decisions.md` §337.
+[doc("Everything, in the order CI runs it. `just gate quiet` prints only the summary; `just gate quiet fresh` serves nothing from an earlier green.")]
+gate mode="loud" verdicts="reuse":
     #!/usr/bin/env bash
     set -uo pipefail
     mode='{{ mode }}'
+    verdicts='{{ verdicts }}'
     # Named rather than defaulted, so a typo is a refusal and not a loud run.
     case "$mode" in
         loud|quiet) ;;
-        *) echo "just gate takes 'quiet' or nothing, not '$mode'" >&2; exit 2 ;;
+        *) echo "just gate takes 'quiet', 'loud' or nothing first, not '$mode'" >&2; exit 2 ;;
+    esac
+    case "$verdicts" in
+        reuse|fresh) ;;
+        *) echo "just gate takes 'fresh' or nothing second, not '$verdicts'" >&2; exit 2 ;;
     esac
     log='{{ gate_log }}'
     mkdir -p "$(dirname "$log")"
     : >"$log"
+    j='{{ just_executable() }}'
+    note() { echo "$1" | tee -a "$log"; }
+
+    # Which of this run's steps an earlier green could stand in for. None is
+    # the usual answer inside the selftests, and then there is nothing to look
+    # up and nothing to say.
+    reusable=""
+    for step in {{ gate_steps }}; do
+        case " {{ gate_reusable_steps }} " in *" $step "*) reusable="$reusable $step" ;; esac
+    done
+    fingerprint="" record="" served=""
+    head=$(git rev-parse HEAD 2>/dev/null)
+    if [ -n "$reusable" ]; then
+        fingerprint=$($j _code-fingerprint)
+        if [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+            record="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-verdicts/$fingerprint"
+        else
+            note "· verdicts: ${fingerprint:-no fingerprint could be taken}, so nothing is served or recorded"
+            fingerprint=""
+        fi
+    fi
+    # Read from a copy. The summary reads the record again at the end, and a
+    # violation in another worktree can delete the record before then.
+    served_copy="$log.served"
+    rm -f "$served_copy"
+    if [ -n "$record" ] && cp "$record" "$served_copy" 2>/dev/null; then
+        from=$(sed -n 's/^commit //p' "$served_copy")
+        at=$(sed -n 's/^date //p' "$served_copy")
+        at_s=$(date -u -d "${at:-unreadable}" +%s 2>/dev/null || echo 0)
+        age=$(( $(date +%s) - at_s ))
+        if [ -z "$from" ] || [ "$at_s" -eq 0 ]; then
+            note "· verdicts: the record for this code cannot be read, so everything runs: $record"
+        elif [ "$verdicts" = fresh ]; then
+            note "· verdicts: fresh, so ${from:0:8}'s green for this code is run again, not served"
+        elif [ "$age" -lt 0 ] || [ "$age" -ge 86400 ]; then
+            note "· verdicts: ${from:0:8}'s green for this code is from $at, not the last day, so it is run again"
+        elif [[ "$head" == 0* ]]; then
+            note "· verdicts: audit, since this sha starts with 0: ${from:0:8}'s green for this code is run again"
+        else
+            served=$reusable
+            note "· served:$served from ${from:0:8}'s gate at $at"
+        fi
+    fi
+
     failed=""
     status=0
     started_at=0
     for step in {{ gate_steps }}; do
+        case " $served " in *" $step "*) continue ;; esac
         if [ "$mode" = quiet ]; then
             # The one thing a truncated result still has to answer is how far
             # the run got, which is why this costs a line even though nothing
@@ -471,7 +545,55 @@ gate mode="loud":
         echo "=== last 60 lines of $failed ==="
         tail -c "+$((started_at + 1))" "$log" | tail -60
     fi
-    {{ just_executable() }} _gate-summary "$log" "$status" "$failed" | tee -a "$log"
+    summary=$($j _gate-summary "$log" "$status" "$failed" "${served:+$served_copy}")
+
+    # What this run learned about the code, written down before the block is
+    # printed so that the block stays last. A served run learned nothing new.
+    if [ -n "$fingerprint" ] && [ -z "$served" ]; then
+        if [ "$status" -eq 0 ]; then
+            # A pass stands in for the whole list later, so it has to have run
+            # the whole list. `gate-docs` runs a trimmed one and never records.
+            left_out=""
+            for step in {{ gate_reusable_steps }}; do
+                case " {{ gate_steps }} " in *" $step "*) ;; *) left_out="$left_out $step" ;; esac
+            done
+            if [ -n "$left_out" ]; then
+                note "· verdicts: not recorded, because this run left out$left_out"
+            elif [ "$($j _code-fingerprint)" != "$fingerprint" ]; then
+                note "· verdicts: not recorded, because the tree changed while the gate ran"
+            else
+                store=$(dirname "$record")
+                mkdir -p "$store"
+                new=$(mktemp "$store/.new.XXXXXX")
+                {
+                    echo "commit $head"
+                    echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                    echo "host $(hostname)"
+                    grep -E '^(tests|doc tests): ' <<<"$summary"
+                } >"$new"
+                mv "$new" "$record"
+                # Nothing is served past a day, and a week keeps enough to
+                # catch a violation against an expired record.
+                find "$store" -maxdepth 1 -type f -mtime +7 -delete
+                note "· verdicts: this code's green is recorded as ${fingerprint:0:12}"
+            fi
+        elif [ -f "$record" ] && [[ " $reusable " == *" $failed "* ]]; then
+            # The same code and the same environment gave a different answer,
+            # so the fingerprint is missing an input or a step is not
+            # deterministic. Either way the record is wrong and must go before
+            # anything serves it.
+            from=$(sed -n 's/^commit //p' "$record")
+            at=$(sed -n 's/^date //p' "$record")
+            violations="$(dirname "$(dirname "$record")")/rcad-verdict-violations"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $fingerprint $failed $head passed-at=$from $(hostname)" >>"$violations"
+            rm -f "$record"
+            note "!!! verdict violated: $failed failed on code that ${from:0:8}'s gate passed at $at."
+            note "!!! Same code, same environment, different answer: the fingerprint is missing an"
+            note "!!! input, or the step is not deterministic (docs/decisions.md §337.6). The record is"
+            note "!!! deleted, and the case is kept in $violations"
+        fi
+    fi
+    echo "$summary" | tee -a "$log"
     # After the block, so that a reader's `tail -6` still lands on the summary,
     # and only on a pass: what it records is that this commit was read end to
     # end. §173.9 — it is what moves the overnight fuzz now that no push can be
@@ -480,6 +602,45 @@ gate mode="loud":
         {{ just_executable() }} _record-green "{{ gate_steps }}"
     fi
     exit $status
+
+# A name for the code a gate reads. It prints a sha256, or one sentence saying
+# why there is none. `docs/decisions.md` §337.
+#
+# **The files are HEAD's tree without `docs/` and `*.md`.** Those are exactly the
+# paths `ci.yml` leaves to `ci-docs.yml`, and the reason is the same: no prose
+# reaches a build or a test here. `check-gate-verdicts-selftest` holds the two
+# lists together, so the claim cannot change in one place only.
+#
+# **The environment is the variables the steps read that the tree does not
+# pin.** The tests read `RCAD_*`, proptest reads `PROPTEST_*`, and the rest
+# choose the compiler, its flags, or nextest's retries. `RCAD_STEP_CORPUS` is
+# left out. It only says where the corpus is. What the corpus holds is pinned by
+# `corpus/manifest.sha256`, which is in the tree, and `check-corpus` checks it
+# on every gate and is never served.
+#
+# **A tree with anything uncommitted or untracked has no name.** The name is
+# read from HEAD, and an untracked `.rs` file under `crates/*/tests/` gets
+# compiled anyway.
+[private]
+_code-fingerprint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git rev-parse --verify --quiet HEAD >/dev/null || { echo "there is no commit here"; exit 0; }
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "the tree has uncommitted or untracked files"
+        exit 0
+    fi
+    {
+        git ls-tree -r --full-tree HEAD | awk -F'\t' '$2 !~ /^docs\// && $2 !~ /\.md$/'
+        echo "-- environment"
+        for name in $(compgen -e | LC_ALL=C sort); do
+            case "$name" in
+                RCAD_STEP_CORPUS) ;;
+                RCAD_*|PROPTEST_*|NEXTEST_*|CARGO_BUILD_*|CARGO_PROFILE_*|RUSTFLAGS|RUSTDOCFLAGS|CARGO_ENCODED_RUSTFLAGS|RUSTC|RUSTUP_TOOLCHAIN|RUST_MIN_STACK)
+                    printf '%s=%s\0' "$name" "${!name}" ;;
+            esac
+        done
+    } | sha256sum | cut -d' ' -f1
 
 # The block itself, kept apart from the run so `check-gate-summary-selftest` can
 # hold it against logs whose answer is already known — the same split `t` and
@@ -503,8 +664,14 @@ gate mode="loud":
 # gate. A number that small and that wrong is worse than none, because it reads
 # as a real total. So the `Summary` lines are all printed, each under its own
 # `tests:` label, and the doc tests are added up.
+#
+# **A served run prints the counts of the gate that served it**, marked as such.
+# `test` did not run, so the log has no counts, and `tests: not reached` would
+# describe a pass as a gate that died early. `served` is that gate's record
+# (§337). If that record is gone by the end, the summary says so. The first real
+# served gate printed no counts at all, because a nested run had deleted it.
 [private]
-_gate-summary log status failed="":
+_gate-summary log status failed="" served="":
     #!/usr/bin/env bash
     set -uo pipefail
     plain=$(sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' 2>/dev/null)
@@ -521,12 +688,19 @@ _gate-summary log status failed="":
         first=$(grep -m1 -E '^ *FAIL \[' <<<"$plain" | sed 's/^ *//')
         [ -z "$first" ] || echo "first failing test: $first"
     fi
-    if [ -z "$tests" ]; then
-        echo "tests: not reached"
+    if [ -n '{{ served }}' ] && [ ! -r '{{ served }}' ]; then
+        echo "tests: served, but the record it was served from is gone: {{ served }}"
+    elif [ -n '{{ served }}' ]; then
+        from=$(sed -n 's/^commit //p' '{{ served }}')
+        grep -E '^(tests|doc tests): ' '{{ served }}' | sed "s/\$/ (served from ${from:0:8})/"
     else
-        sed 's/^ *//; s/^/tests: /' <<<"$tests"
+        if [ -z "$tests" ]; then
+            echo "tests: not reached"
+        else
+            sed 's/^ *//; s/^/tests: /' <<<"$tests"
+        fi
+        echo "doc tests: ${doctests:-not reached}"
     fi
-    echo "doc tests: ${doctests:-not reached}"
     echo "full log: {{ log }}"
 
 # Writes down that this commit has been read end to end, so that something other
@@ -796,6 +970,11 @@ check-gate-docs-selftest:
         || fail "the docs arm dropped something other than the one step it was told to"
     grep -q '^gate: FAIL  first failure: no-such-step' <<<"$got" \
         || fail "the step the docs arm was told to keep never ran"
+    # The log it was given, not the default. The default is the log of the real
+    # gate this selftest runs inside, and writing there empties it and deletes
+    # the record a served gate is still holding (§337.8).
+    grep -q '^gate: FAIL  first failure: no-such-step' "$dir/keep.log" \
+        || fail "the docs arm wrote its log to the default path, which is the real gate's, instead of the gate_log it was given"
 
     # Every step excluded. Running no steps exits 0 through the loop in `gate`,
     # prints a passing summary block, and has checked nothing whatsoever.
@@ -804,6 +983,207 @@ check-gate-docs-selftest:
         && fail "an empty docs arm passed by checking nothing"
     grep -q 'no steps at all' <<<"$got" \
         || fail "an empty docs arm failed without saying that it had nothing to run"
+
+# Holds the verdict cache to what §337 says it does, in a scratch repository.
+#
+# `GIT_DIR` and `GIT_WORK_TREE` point every git call at the scratch repository,
+# while `just` still reads this justfile. The store is kept in that repository's
+# git dir, so this never touches the real one. The gate is driven with `--set`,
+# as in `check-gate-summary-selftest`: `list` is the step that passes and
+# `no-such-step` the one that fails.
+#
+# The commit dates are fixed, so every sha here is the same on every run. The
+# audit is chosen by HEAD's first hex digit. With real dates, a scratch commit
+# starting with `0` would turn a serving case into an audit one run in sixteen.
+[private]
+check-gate-verdicts-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    j='{{ just_executable() }}'
+    got=""
+    fail() {
+        echo "the verdict cache drifted from what docs/decisions.md §337 says: $1"
+        [ -z "$got" ] || { echo "--- got ---"; echo "$got"; }
+        exit 1
+    }
+
+    # The lists, before anything is driven. A name that is not a step is never
+    # served and says so nowhere, which is how a rename leaves this list stale.
+    all=$(printf '%s\n' {{ gate_steps }})
+    reusable=$(printf '%s\n' {{ gate_reusable_steps }})
+    [ "$(grep -c . <<<"$reusable")" -ge 5 ] || fail "gate_reusable_steps came back empty"
+    while read -r step; do
+        grep -qx "$step" <<<"$all" || fail "gate_reusable_steps names '$step', which is not a step of the gate"
+    done <<<"$reusable"
+    # These read prose, or something outside the tree that no fingerprint of
+    # it can see, which is what the trace behind §337.2 found.
+    for never in check-plugins check-hooks check-hub check-corpus check-fuzz-unit deny \
+                 check-decisions check-plan check-queue check-where-the-work-is \
+                 check-skills check-lanes-workflow check-questions-selftest; do
+        grep -qx "$never" <<<"$reusable" \
+            && fail "$never reads prose or something outside the tree, and gate_reusable_steps would serve it"
+    done
+    # The fingerprint leaves out what CI's docs split leaves out, for the same
+    # reason. If one of the two claims changes, the other has to change with it.
+    wf='{{ justfile_directory() }}/.github/workflows'
+    [ "$(grep -cxF "    paths-ignore: ['docs/**', '**.md']" "$wf/ci.yml")" = 2 ] \
+        || fail "ci.yml no longer sends exactly docs/** and **.md to the docs arm, and _code-fingerprint still leaves exactly those out"
+    [ "$(grep -cxF "    paths: ['docs/**', '**.md']" "$wf/ci-docs.yml")" = 2 ] \
+        || fail "ci-docs.yml no longer takes exactly docs/** and **.md, and _code-fingerprint still leaves exactly those out"
+
+    repo="$dir/repo"
+    store="$repo/.git/rcad-verdicts"
+    mkdir -p "$repo/crates" "$repo/docs"
+    export GIT_DIR="$repo/.git" GIT_WORK_TREE="$repo"
+    export GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z'
+    unset RCAD_SOAK_SEED
+    g() { git -c user.name=selftest -c user.email=selftest@invalid "$@"; }
+    fingerprint() { "$j" _code-fingerprint; }
+    gate() {
+        "$j" --set gate_steps "$1" --set gate_reusable_steps "$2" \
+            --set gate_log "$dir/gate.log" gate quiet "${@:3}" 2>&1
+    }
+    g init -q -b main
+    printf 'fn main() {}\n' >"$repo/crates/a.rs"
+    printf 'notes\n' >"$repo/docs/notes.txt"
+    printf '# a readme\n' >"$repo/README.md"
+    g add -A
+    g commit -q -m 'the code'
+    base=$(g rev-parse HEAD)
+    [[ "$base" != 0* ]] || fail "the scratch commit starts with 0, so every serving case below is an audit"
+    f0=$(fingerprint)
+    [[ "$f0" =~ ^[0-9a-f]{64}$ ]] || fail "a clean tree had no fingerprint: $f0"
+
+    # Prose moves nothing: a file under docs/, and a .md anywhere.
+    printf 'more\n' >>"$repo/docs/notes.txt"
+    printf 'more\n' >>"$repo/README.md"
+    mkdir -p "$repo/crates/x"
+    printf 'notes\n' >"$repo/crates/x/NOTES.md"
+    g add -A
+    g commit -q -m prose
+    prose=$(g rev-parse HEAD)
+    [ "$(fingerprint)" = "$f0" ] || fail "a commit touching only docs/ and .md files changed the fingerprint"
+    g reset -q --hard "$base"
+
+    # Code moves it, including the two paths a loose pattern would call prose:
+    # a root file whose name starts with `docs`, and a `docs/` below the root.
+    for path in crates/a.rs docs.rs crates/docs/b.rs; do
+        mkdir -p "$repo/$(dirname "$path")"
+        printf '// moved\n' >>"$repo/$path"
+        g add -A
+        g commit -q -m "$path"
+        [ "$(fingerprint)" != "$f0" ] || fail "a commit touching $path left the fingerprint where it was"
+        g reset -q --hard "$base"
+    done
+
+    # A seed the suite reads moves it. Where the corpus lives does not, since
+    # what it holds is pinned in the tree and checked on every gate.
+    [ "$(RCAD_SOAK_SEED=7 fingerprint)" != "$f0" ] \
+        || fail "RCAD_SOAK_SEED changes what the suite draws, and the fingerprint did not move"
+    [ "$(RCAD_STEP_CORPUS=/elsewhere fingerprint)" = "$f0" ] \
+        || fail "moving RCAD_STEP_CORPUS changed the fingerprint, so no two machines could share a verdict"
+
+    # The first gate of this code runs its step and records a green.
+    got=$(gate list list) || fail "a gate of one passing step failed"
+    grep -qx '· list' <<<"$got" || fail "the first gate of this code did not run its step"
+    [ -f "$store/$f0" ] || fail "a passing gate that ran every reusable step recorded nothing"
+    grep -qx "commit $base" "$store/$f0" || fail "the record does not name the commit that was gated"
+
+    # The second is served: the step does not run, and the summary says whose
+    # counts it is showing.
+    got=$(gate list list) || fail "a served gate failed"
+    grep -q "^· served: list from ${base:0:8}'s gate at " <<<"$got" \
+        || fail "a gate of code that was already green did not serve it"
+    grep -qx '· list' <<<"$got" && fail "a served step ran anyway"
+    grep -qx 'gate: PASS' <<<"$got" || fail "a served gate did not say it passed"
+    grep -qx "tests: not reached (served from ${base:0:8})" <<<"$got" \
+        || fail "a served gate's summary did not say where its counts came from"
+
+    # A commit on top that touches only prose is the case all of this is for.
+    g reset -q --hard "$prose"
+    [[ "$prose" != 0* ]] || fail "the prose commit starts with 0, so this case would be an audit"
+    got=$(gate list list) || fail "a served gate of a prose commit failed"
+    grep -q "^· served: list from ${base:0:8}'s gate" <<<"$got" \
+        || fail "a commit that touched only docs/ was not served the green of the code under it"
+    g reset -q --hard "$base"
+
+    # A step that fails but is not in the reusable list says nothing about the
+    # verdict, and the record stays. `fresh`, because a served run records
+    # nothing and reports nothing, and would pass this case without reaching it.
+    got=$(gate 'list no-such-step' list fresh) && fail "a gate with a failing step exited 0"
+    grep -qx '· list' <<<"$got" || fail "fresh served a step"
+    grep -q 'verdict violated' <<<"$got" && fail "a step outside the reusable list was taken as a violation"
+    [ -f "$store/$f0" ] || fail "a failing step outside the reusable list deleted the record"
+
+    # `fresh` runs everything, and its pass writes the record again.
+    got=$(gate list list fresh) || fail "a fresh gate failed"
+    grep -qx '· list' <<<"$got" || fail "fresh served a step"
+    grep -q '^· verdicts: fresh' <<<"$got" || fail "fresh did not say why it ran a step it had a green for"
+
+    # An untracked file is not in HEAD, and it gets compiled all the same.
+    printf 'fn new() {}\n' >"$repo/crates/new.rs"
+    got=$(gate list list) || fail "a gate of an untracked file failed"
+    grep -qx '· list' <<<"$got" || fail "a tree with an untracked .rs file was served HEAD's green"
+    grep -q 'uncommitted or untracked' <<<"$got" || fail "a dirty tree did not say why nothing was served"
+    rm "$repo/crates/new.rs"
+
+    # A day is the whole of what is served. Every repeat measured came within
+    # it (§337.1).
+    old=$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%SZ)
+    sed -i "s/^date .*/date $old/" "$store/$f0"
+    got=$(gate list list) || fail "a gate over an expired record failed"
+    grep -qx '· list' <<<"$got" || fail "a record two days old was served"
+    grep -q 'not the last day' <<<"$got" || fail "an expired record did not say why it was not served"
+    grep -qx "date $old" "$store/$f0" && fail "a pass over an expired record did not write it again"
+
+    # The audit. Amending the message keeps the code and moves the sha, so this
+    # walks to a sha starting with 0 on the same fingerprint.
+    n=0
+    while [[ "$(g rev-parse HEAD)" != 0* ]]; do
+        n=$((n + 1))
+        [ "$n" -le 400 ] || fail "400 amended commits found no sha starting with 0"
+        g commit -q --amend -m "audit $n"
+    done
+    [ "$(fingerprint)" = "$f0" ] || fail "amending the message moved the fingerprint"
+    got=$(gate list list) || fail "an audited gate failed"
+    grep -qx '· list' <<<"$got" || fail "a commit whose sha starts with 0 was served"
+    grep -q '^· verdicts: audit' <<<"$got" || fail "an audit did not say it was one"
+    g reset -q --hard "$base"
+
+    # A violation: a reusable step fails on code that has a green on record.
+    got=$(gate no-such-step no-such-step fresh) && fail "a gate whose only step fails exited 0"
+    grep -q '^!!! verdict violated: no-such-step failed' <<<"$got" \
+        || fail "a reusable step failed on code with a green on record, and nothing said so"
+    [ -f "$store/$f0" ] && fail "a violated record was kept, so the next gate would serve it"
+    grep -q " $f0 no-such-step $base " "$repo/.git/rcad-verdict-violations" \
+        || fail "the violation was not written down"
+    [ "$(tail -6 <<<"$got" | grep -c '=== gate summary ===')" -eq 1 ] \
+        || fail "the violation pushed the summary block off the end"
+
+    # A run that left out a reusable step records nothing. That is `gate-docs`,
+    # which re-enters `gate` with the compiling steps taken out.
+    got=$(gate list 'list no-such-step') || fail "a gate of one passing step failed"
+    [ -f "$store/$f0" ] && fail "a run that left out a reusable step recorded a green for all of them"
+    grep -q 'left out no-such-step' <<<"$got" || fail "a run that recorded nothing did not say why"
+
+    # The summary of a served run, from a record holding the counts a real
+    # gate writes.
+    printf 'commit %s\ndate 2026-01-01T00:00:00Z\nhost h\n' "$base" >"$dir/record"
+    printf 'tests: Summary [  94.982s] 2672 tests run: 2672 passed\n' >>"$dir/record"
+    printf 'doc tests: 25 passed, 0 failed, across 9 crate(s)\n' >>"$dir/record"
+    : >"$dir/empty.log"
+    got=$("$j" _gate-summary "$dir/empty.log" 0 "" "$dir/record")
+    grep -qxF "tests: Summary [  94.982s] 2672 tests run: 2672 passed (served from ${base:0:8})" <<<"$got" \
+        || fail "a served summary did not carry the counts of the gate that served it"
+    grep -qxF "doc tests: 25 passed, 0 failed, across 9 crate(s) (served from ${base:0:8})" <<<"$got" \
+        || fail "a served summary did not carry the doc tests of the gate that served it"
+    grep -q 'not reached' <<<"$got" && fail "a served summary said the tests were not reached"
+    got=$("$j" _gate-summary "$dir/empty.log" 0 "" "$dir/gone" 2>&1)
+    grep -qxF "tests: served, but the record it was served from is gone: $dir/gone" <<<"$got" \
+        || fail "a served summary whose record had gone said nothing about the counts"
+    exit 0
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -1833,8 +2213,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "51" ]; then \
-        echo "found $n check-* recipes, expected 51"; \
+    if [ "$n" != "52" ]; then \
+        echo "found $n check-* recipes, expected 52"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
