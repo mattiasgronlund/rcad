@@ -8,12 +8,15 @@
 //! either side, so an `and` repeating the first face came back as that face
 //! twice, which names no crossing at all, and the same edge with its faces the
 //! other way round came back as the honest pair.
+//!
+//! §336 is the same rule one case further on: two different curved faces and a
+//! run that names a third surface, which was read with the first face listed.
 
 #![forbid(unsafe_code)]
 
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, HalfSpace, NamedRun, Picker, Plane, Point, Sphere, Surface, Vector,
-    where_a_closed_crossing_starts, which_two_surfaces_a_run_is_between,
+    Axis, Cone, Cylinder, EdgeRun, HalfSpace, NamedRun, Picker, Plane, Point, Sphere, Surface,
+    Torus, Vector, where_a_closed_crossing_starts, which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::ProvenanceLog;
 use smallvec::smallvec;
@@ -111,9 +114,10 @@ fn where_a_closed_crossing_starts_does_not_care_which_face_is_listed_first() {
 
 /// **The input `rcad-step` writes for a circle between one curved surface
 /// written twice a hair apart** (§219.6, §221.5): the circle's own plane in
-/// `and`. That plane is a third surface, so the answer is the first face and
-/// the plane — exactly, not up to order, because the importer's answer is
-/// pinned to that.
+/// `and`. That plane is a third surface, so the answer is one of the two
+/// spellings and the plane — exactly, not up to order, because the importer's
+/// answer is pinned to that — and it is the same spelling whichever is listed
+/// first (§336): the one whose axis sits at `x = 0`, which sorts first.
 #[test]
 fn a_closed_run_between_one_pipe_written_twice_names_the_pipe_and_its_plane() {
     let pipe = a_pipe(0.0);
@@ -124,10 +128,49 @@ fn a_closed_run_between_one_pipe_written_twice_names_the_pipe_and_its_plane() {
         "the two spellings differ in their bits"
     );
 
-    assert_eq!(
-        which_two_surfaces_a_run_is_between(&right_round(rims_plane), [&pipe, &written_again]),
-        [pipe, rims_plane]
-    );
+    for along in [[&pipe, &written_again], [&written_again, &pipe]] {
+        assert_eq!(
+            which_two_surfaces_a_run_is_between(&right_round(rims_plane), along),
+            [pipe, rims_plane]
+        );
+    }
+}
+
+/// **Two different curved faces, and a run that names a third surface.** The
+/// third surface is read with the face `Surface::how_it_sorts_against` puts
+/// first — a ball before a pipe, a pipe before a cone, a cone before a torus —
+/// whichever of the two a caller lists first (§336).
+///
+/// It used to be read with the first face listed, or with the ball if there
+/// was one. `Model::validate` lists first the face whose coedge it is checking,
+/// so one rim between a pipe and a cone was checked against two different
+/// curves, one from each side.
+#[test]
+fn a_third_surface_is_read_with_the_same_face_whichever_face_is_listed_first() {
+    let up = Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("z");
+    let cone = Surface::Cone(Cone::new(up, 0.75).expect("a positive slope"));
+    let ring = Surface::Torus(Torus::new(up, 4.0, 1.0).expect("a ring wider than its tube"));
+    let pairs = [
+        (a_ball(), a_pipe(0.0)),
+        (a_pipe(0.0), cone),
+        (cone, ring),
+        (a_ball(), ring),
+    ];
+    for (first, second) in pairs {
+        for and in [level_at(1.0), a_pipe(3.0)] {
+            for run in [right_round(and), a_piece_of(and)] {
+                for along in [[&first, &second], [&second, &first]] {
+                    assert_eq!(
+                        which_two_surfaces_a_run_is_between(&run, along),
+                        [first, and],
+                        "{run:?} between {:?} and {:?}",
+                        along[0],
+                        along[1]
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// A circle a file imprinted on a flat face: the plane both sides, a hair apart,
