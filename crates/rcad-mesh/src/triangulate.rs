@@ -357,7 +357,7 @@ fn the_flush_moved_nothing_the_patch_rests_on(
             continue;
         }
         let [a, b, c] = corners.map(&unflushed);
-        match which_way_three_points_turn(a, b, c) {
+        match orient2d(a, b, c) {
             Decision::Pos => {}
             Decision::Neg | Decision::Zero | Decision::Undecidable { .. } => return false,
             other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
@@ -379,51 +379,19 @@ fn the_flush_moved_nothing_the_patch_rests_on(
     })
 }
 
-/// [`orient2d`], asked of the three points moved up by one exact power of two
-/// when they are small enough to need it.
-///
-/// A corner the flush moved has a coordinate under `2⁻¹⁴²` and its neighbours
-/// usually have ones near one, so the determinant is a product of the two:
-/// `0.2 · 2⁻¹⁰⁷⁴` for a side along `v = 0` and a corner a subnormal above it.
-/// That product is under the smallest `f64` and `orient2d` refuses it.
-/// `orient2d` does retry at a power of two, but it chooses the power from the
-/// largest difference between the points, which here is about one, so it
-/// retries at the scale it started at (`docs/decisions.md` §321). Moving every
-/// coordinate up until the largest is near `2⁵⁰⁰` lifts every product of a
-/// small coordinate with a large one into range and takes none of them past
-/// the top, and multiplying by a power of two that stays in range is exact, so
-/// the sign is the sign of the points as they were.
-///
-/// Only upwards: a coordinate the triangulation took is under `2²⁰¹`, so the
-/// power is always at least `2²⁹⁹`. A product of two coordinates that are both
-/// small is still out of reach, and that comes back undecided as it did.
-fn which_way_three_points_turn(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Decision {
-    let largest = [a, b, c]
-        .iter()
-        .flatten()
-        .fold(0.0_f64, |largest, value| largest.max(value.abs()));
-    if largest == 0.0 || !largest.is_finite() {
-        return orient2d(a, b, c);
-    }
-    let up = (500 - largest.log2().floor() as i32).clamp(0, 1000);
-    let [first, second] = [up / 2, up - up / 2].map(|half| 2f64.powi(half));
-    let lifted = |point: [f64; 2]| point.map(|value| value * first * second);
-    orient2d(lifted(a), lifted(b), lifted(c))
-}
-
 /// Whether two sides of the hull's outline share a point they should not.
 ///
 /// Two sides that follow one another share their one corner, and that is all
 /// they may share: they meet wrongly only when the second turns straight back
 /// along the first. Any other two may share nothing at all. Exact, from
-/// [`which_way_three_points_turn`] and comparisons; a turn it cannot settle
-/// counts as meeting, since then nothing shows they do not.
+/// [`orient2d`] and comparisons; a turn it cannot settle counts as meeting,
+/// since then nothing shows they do not.
 ///
 /// # Panics
 ///
 /// On a [`Decision`] this file has not been taught.
 fn two_sides_of_an_outline_meet(one: [[f64; 2]; 2], other: [[f64; 2]; 2]) -> bool {
-    let turn = |a, b, c| match which_way_three_points_turn(a, b, c) {
+    let turn = |a, b, c| match orient2d(a, b, c) {
         Decision::Pos => Some(1),
         Decision::Neg => Some(-1),
         Decision::Zero => Some(0),

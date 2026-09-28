@@ -27,6 +27,31 @@ pub(crate) fn exponent_that_brings_into_range(
     Some(-binary_exponent(largest))
 }
 
+/// The exponent `k` for which multiplying every coordinate by `2^k` puts the
+/// largest of them in `[2^top, 2^(top + 1))`.
+///
+/// This is the second exponent a predicate tries, and it reads the raw
+/// coordinates rather than the differences because level 3 does: it expands
+/// the determinant over the coordinates themselves, so what has to stay clear
+/// of the bottom of the range is every product of two or three of them. Each of
+/// those products grows as `k` grows, and the only thing that stops `k` growing
+/// is the largest product running off the top. So the `k` that takes the
+/// largest coordinate as high as the predicate's `top` allows is the one that
+/// lifts every smaller product furthest off the bottom. A predicate that asks
+/// for it passes its own `top`, worked out from its own degree.
+///
+/// `None` when every coordinate is zero.
+pub(crate) fn exponent_that_lifts_the_largest_to(
+    coordinates: impl IntoIterator<Item = f64>,
+    top: i32,
+) -> Option<i32> {
+    let largest = coordinates.into_iter().map(f64::abs).fold(0.0, f64::max);
+    if largest == 0.0 {
+        return None;
+    }
+    Some(top - binary_exponent(largest))
+}
+
 /// `coordinates`, each multiplied by `2^exponent` — or `None` when that
 /// multiplication is not exact for one of them.
 ///
@@ -102,8 +127,8 @@ fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        binary_exponent, exponent_that_brings_into_range, multiplied_by_a_power_of_two,
-        scaled_by_a_power_of_two,
+        binary_exponent, exponent_that_brings_into_range, exponent_that_lifts_the_largest_to,
+        multiplied_by_a_power_of_two, scaled_by_a_power_of_two,
     };
 
     #[test]
@@ -142,6 +167,14 @@ mod tests {
     #[test]
     fn differences_that_are_all_zero_have_nothing_to_normalise() {
         assert_eq!(exponent_that_brings_into_range([0.0, -0.0, 0.0]), None);
+    }
+
+    #[test]
+    fn the_largest_coordinate_is_what_lands_in_the_binade_asked_for() {
+        let exponent = exponent_that_lifts_the_largest_to([1e-300, -2.0, 0.5], 338).unwrap();
+        let lifted = multiplied_by_a_power_of_two(-2.0, exponent);
+        assert_eq!(lifted, -(2f64.powi(338)));
+        assert_eq!(exponent_that_lifts_the_largest_to([0.0, -0.0], 338), None);
     }
 
     #[test]

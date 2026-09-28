@@ -193,22 +193,25 @@ fn a_classification_that_lands_on_the_skin_is_an_answer_and_not_an_error() {
 /// The other half of §5, read from the front door: when a tolerant policy has
 /// to approximate something, the caller gets the shape *and* the account of
 /// what it cost. The same loops under a certified policy get neither.
+///
+/// The loops are a square with one corner cut off and the cut bent by
+/// `1e-305` in the middle, which no power of two lets `f64` see
+/// (`crates/rcad-topo/tests/when_it_cannot_tell.rs` tries them all).
 #[test]
 fn a_tolerant_build_hands_back_both_the_shape_and_what_it_cost() {
-    let tiny = 1e-150;
+    let bend = 1e-305;
     let loops = vec![
-        [0.0, 0.0],
-        [tiny, 3.0 * tiny],
-        [2.0 * tiny, 0.0],
-        [1.0, -1.0],
-        [1.0, 1.0],
-        [-1.0, 1.0],
         [-1.0, -1.0],
+        [1.0, -1.0],
+        [1.0, bend],
+        [0.5, 0.5],
+        [bend, 1.0],
+        [-1.0, 1.0],
     ];
 
     let refused = ProfileBuilder::new(loops.clone())
         .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect_err("nothing in f64 can place that spike");
+        .expect_err("nothing in f64 can say which way that cut bends");
     assert!(matches!(Error::from(refused), Error::Undecidable { .. },));
 
     let mut log = ProvenanceLog::new();
