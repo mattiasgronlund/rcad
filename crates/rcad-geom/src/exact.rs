@@ -595,8 +595,9 @@ impl Nearly {
     /// millionth of the answer: a box that wide is sound, and too loose for the
     /// corner it bounds to be told from a surface moved well clear of it
     /// (`every_point_where_three_surfaces_meet_somewhere_else_in_f64_is_on_all_three_of_them`).
-    /// That case is the scaling family's to answer (§16.10) and it is refused
-    /// as it was. A number of order one that lost `2⁻²⁰¹⁴` passes.
+    /// That case is the scaling family's to answer (§16.10): refused here, and
+    /// `meet_of_three_surfaces` then asks the triple again slid up the range by
+    /// a power of two (§349). A number of order one that lost `2⁻²⁰¹⁴` passes.
     pub(crate) fn is_within_a_rounding(&self) -> bool {
         let lost = self.off_by.lo().abs().max(self.off_by.hi().abs());
         lost <= self.held.nearest_f64().abs() * f64::EPSILON

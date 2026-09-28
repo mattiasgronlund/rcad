@@ -188,6 +188,84 @@ fn two_planes_and_a_ball_written_about_1e_159_across_meet_where_the_same_three_d
     }
 }
 
+/// **The limit the slide runs into**: the same triple written `2⁻¹⁰⁶²` across,
+/// among the subnormals, where a corner has no box a billionth of the shape
+/// wide because `f64` has no numbers that close together.
+///
+/// The slide up is exact, because a subnormal moved up the range is a normal
+/// number with every bit it had. The corner is found at size one. It is the
+/// slide back that cannot be exact: `x = ±√8·2⁻¹⁰⁶²` lands between two
+/// subnormals `2⁻¹⁰⁷⁴` apart, and one such step is already `8e-5` of the
+/// ball's `3·2⁻¹⁰⁶²`. So the answer is a box at most two subnormal steps wide
+/// on each side that still holds the corner. Measured: `1.6e-4` of the shape,
+/// where `NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE` lets a row hand back `1e-9`.
+/// `√8` is not a fraction, so no box of `x` in `f64` is narrower than one step.
+/// A box a billionth of the shape does not exist there, so this is a limit and
+/// not a gap (§16.10), and §349 says why the family's range stops short of it.
+#[test]
+fn three_surfaces_written_among_the_subnormals_meet_in_a_box_a_subnormal_step_or_two_wide() {
+    let tiny = f64::from_bits(1 << 12);
+    assert_eq!(tiny, 2f64.powi(-531) * 2f64.powi(-531));
+    let [answer, home] = [tiny, 1.0].map(|size| {
+        let surfaces = the_seeds_three_at(size);
+        meet_of_three_surfaces(
+            [&surfaces[0], &surfaces[1], &surfaces[2]],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+    });
+    let home = home.expect("the lattice triple is answered");
+    let MeetOfThree::At(home_points) = &home else {
+        panic!("a line through a ball's middle meets it twice, not {home:?}");
+    };
+    let answer = answer.expect("the same triple among the subnormals is answered");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("a line through a ball's middle meets it twice, not {answer:?}");
+    };
+    assert_eq!(points.len(), home_points.len());
+
+    let size = 3.0 * tiny;
+    let mut widest = 0.0f64;
+    for (point, at_home) in points.iter().zip(home_points) {
+        for (side, home_side) in point.enclosure().iter().zip(at_home.enclosure()) {
+            let moved_up = |end: f64| end * 2f64.powi(531) * 2f64.powi(531);
+            assert!(
+                moved_up(side.lo()) <= home_side.lo() && home_side.hi() <= moved_up(side.hi()),
+                "{side:?} does not hold {home_side:?} moved down 2^-1062"
+            );
+            assert!(
+                side.hi() <= side.lo().next_up().next_up(),
+                "{side:?} is wider than two subnormal steps"
+            );
+            widest = widest.max(side.width() / size);
+        }
+    }
+    println!("among the subnormals: widest box {widest:e} of the size");
+    assert!(
+        widest > 1e-5,
+        "a box among the subnormals is a subnormal step wide, {widest:e} of the shape"
+    );
+}
+
+/// The triple the proptest seed `e0a2a205` shrank to, every number multiplied by
+/// `size`: the planes `y = 2` and `z = 0` and a ball of radius three about
+/// `(0, 1, 0)`.
+fn the_seeds_three_at(size: f64) -> [Surface; 3] {
+    let flat = |through: [f64; 3], normal: [f64; 3]| {
+        Surface::Plane(
+            Plane::from_point_and_normal(Point::from(through), Vector::from(normal))
+                .expect("an axis direction"),
+        )
+    };
+    [
+        flat([0.0, 2.0 * size, 0.0], [0.0, 1.0, 0.0]),
+        flat([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        Surface::Sphere(
+            Sphere::new(Point::new(0.0, size, 0.0), 3.0 * size).expect("a radius above zero"),
+        ),
+    ]
+}
+
 /// **§31.7's criterion 7.** Three surfaces of which fewer than two are flat are
 /// refused by name, and the refusal is a gap: the points are there and this is
 /// the demonstration.
