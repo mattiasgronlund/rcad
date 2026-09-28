@@ -363,6 +363,413 @@ fn the_bytes_of(point: [f64; 3]) -> Vec<u8> {
         .collect()
 }
 
+mod cones;
+
+fn read_back_moved(model: &Model, stored: [f64; 3], moved_to: [f64; 3]) -> Model {
+    let mut bytes = postcard::to_allocvec(model).expect("a model writes out");
+    let s = the_bytes_of(stored);
+    let places: Vec<usize> = bytes
+        .windows(s.len())
+        .enumerate()
+        .filter(|(_, w)| *w == s.as_slice())
+        .map(|(at, _)| at)
+        .collect();
+    let [at] = places.as_slice() else {
+        panic!("found at {places:?}");
+    };
+    bytes[*at..*at + s.len()].copy_from_slice(&the_bytes_of(moved_to));
+    postcard::from_bytes(&bytes).expect("reads back")
+}
+
+fn a_block_at(model: &mut Model, block: Block, placement: &Isometry) -> SolidKey {
+    let [wide, deep] = [block.high[0] - block.low[0], block.high[1] - block.low[1]];
+    let footprint = ProfileBuilder::new(vec![[0.0, 0.0], [wide, 0.0], [wide, deep], [0.0, deep]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let local = Isometry::translation(Vector::new(block.low[0], block.low[1], block.floor))
+        .expect("a plain translation");
+    model
+        .add_extrusion(&footprint, block.tall, &placement.compose(&local))
+        .expect("a block")
+}
+
+#[derive(Debug)]
+enum Got {
+    Ok {
+        corners: Vec<[u64; 3]>,
+        volume: f64,
+        solids: usize,
+        validates: String,
+    },
+    Err(String),
+    Panic(String),
+}
+
+fn attempt(
+    build: &dyn Fn(&mut Model) -> SolidKey,
+    stored: [f64; 3],
+    moved_to: [f64; 3],
+    partner: Block,
+    rule: Rule,
+    placement: &Isometry,
+    policy: &Policy,
+) -> Got {
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm"));
+        build(&mut model);
+        let mut model = read_back_moved(&model, stored, moved_to);
+        let solid = model.solids().next().expect("one").key();
+        let block = a_block_at(&mut model, partner, placement);
+        let mut log = ProvenanceLog::new();
+        match model.fuse(&[solid], &[block], rule, policy, &mut log) {
+            Err(e) => Got::Err(format!("{e:?}").chars().take(200).collect()),
+            Ok(fused) => {
+                let solids = fused.solids().len();
+                let mut corners = Vec::new();
+                let mut volume = 0.0;
+                let mut validates = String::new();
+                for s in fused.solids() {
+                    let view = model.solid(*s).expect("key");
+                    corners.extend(
+                        view.faces()
+                            .flat_map(|face| face.wires())
+                            .flat_map(|wire| wire.coedges())
+                            .map(|c| c.start().point().coordinates().map(f64::to_bits)),
+                    );
+                    volume += match view.measure(
+                        Deflection::for_scale(model.scale()),
+                        policy,
+                        &mut log,
+                    ) {
+                        Ok(m) => m.volume(),
+                        Err(e) => {
+                            validates.push_str(&format!("measure {e:?}; "));
+                            f64::NAN
+                        }
+                    };
+                    validates.push_str(&format!(
+                        "{:?}; ",
+                        model.validate_solid(*s, policy, &mut ProvenanceLog::new())
+                    ));
+                }
+                corners.sort_unstable();
+                corners.dedup();
+                Got::Ok {
+                    corners,
+                    volume,
+                    solids,
+                    validates,
+                }
+            }
+        }
+    }));
+    match caught {
+        Ok(got) => got,
+        Err(payload) => Got::Panic(
+            payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default(),
+        ),
+    }
+}
+
+fn validate_of(
+    build: &dyn Fn(&mut Model) -> SolidKey,
+    stored: [f64; 3],
+    moved_to: [f64; 3],
+    policy: &Policy,
+) -> String {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm"));
+    build(&mut model);
+    let model = read_back_moved(&model, stored, moved_to);
+    format!("{:?}", model.validate(policy, &mut ProvenanceLog::new()))
+}
+
+fn report(
+    family: &str,
+    build: &dyn Fn(&mut Model) -> SolidKey,
+    stored: [f64; 3],
+    moves: &[[f64; 3]],
+    pairs: &[(Block, Rule)],
+    placement: &Isometry,
+    policy: &Policy,
+) {
+    for &moved_to in moves {
+        eprintln!(
+            "PROBE {family} validate {moved_to:?}: {}",
+            validate_of(build, stored, moved_to, policy)
+        );
+    }
+    for &(partner, rule) in pairs {
+        let sound = attempt(build, stored, stored, partner, rule, placement, policy);
+        let sound_summary = match &sound {
+            Got::Ok {
+                volume,
+                solids,
+                validates,
+                ..
+            } => format!("Ok {solids} {volume} {validates}"),
+            Got::Err(error) => format!("Err({error:?})"),
+            Got::Panic(message) => format!("Panic({message:?})"),
+        };
+        eprintln!("PROBE {family} SOUND {partner:?} {rule:?}: {sound_summary}");
+        for &moved_to in moves {
+            let got = attempt(build, stored, moved_to, partner, rule, placement, policy);
+            let line = match (&got, &sound) {
+                (
+                    Got::Ok {
+                        corners,
+                        volume,
+                        solids,
+                        validates,
+                    },
+                    Got::Ok {
+                        corners: c2,
+                        volume: v2,
+                        ..
+                    },
+                ) => format!(
+                    "Ok solids {solids} same_corners {} dvol {:e} vol {volume} {validates}",
+                    corners == c2,
+                    (volume - v2).abs() / v2
+                ),
+                (
+                    Got::Ok {
+                        volume,
+                        solids,
+                        validates,
+                        ..
+                    },
+                    _,
+                ) => {
+                    format!("Ok solids {solids} vol {volume} {validates} (sound not Ok)")
+                }
+                (other, _) => format!("{other:?}"),
+            };
+            eprintln!("PROBE {family} {partner:?} {rule:?} {moved_to:?}: {line}");
+        }
+    }
+}
+
+const BAR_PAIRS: [(Block, Rule); 11] = [
+    (FAR_AWAY, Rule::Union),
+    (OVER_THE_BOTTOM, Rule::Difference),
+    (OVER_THE_TOP, Rule::Difference),
+    (OVER_THE_RIM_BY_THE_SEAM, Rule::Difference),
+    (OVER_THE_RIM_AWAY_FROM_THE_SEAM, Rule::Difference),
+    (OVER_THE_RIM_BY_THE_SEAM, Rule::Union),
+    (OVER_THE_RIM_BY_THE_SEAM, Rule::Intersection),
+    (A_NOTCH_A_QUARTER_TURN_ROUND, Rule::Difference),
+    (THE_HALF_PAST_THE_SEAM, Rule::Difference),
+    (THE_HALF_PAST_THE_SEAM, Rule::Intersection),
+    (OVER_THE_TOP, Rule::Intersection),
+];
+
+#[test]
+fn probe_q224() {
+    let which = std::env::var("Q224").unwrap_or_default();
+    let certified = Policy::certified();
+    let tolerant = Policy::tolerant(100.0);
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("shift");
+    let turn = Isometry::rotation(&rcad_geom::Axis::x(), 0.4)
+        .expect("turn")
+        .compose(&Isometry::identity());
+    let turn_and_shift = shift.compose(&turn);
+    if which.contains("place") {
+        for (name, placement) in [
+            ("shift", shift),
+            ("turn", turn),
+            ("turn+shift", turn_and_shift),
+        ] {
+            let build =
+                move |m: &mut Model| m.add_round_bar(RADIUS, HEIGHT, &placement).expect("bar");
+            report(
+                &format!("bar@{name}"),
+                &build,
+                WHERE_THE_BAR_PUTS_IT,
+                &EVERY_MOVE,
+                &BAR_PAIRS,
+                &placement,
+                &certified,
+            );
+        }
+    }
+    if which.contains("tol") {
+        let build = |m: &mut Model| {
+            m.add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
+                .expect("bar")
+        };
+        report(
+            "bar-tolerant",
+            &build,
+            WHERE_THE_BAR_PUTS_IT,
+            &EVERY_MOVE,
+            &BAR_PAIRS,
+            &Isometry::identity(),
+            &tolerant,
+        );
+    }
+    if which.contains("ball") {
+        let build = |m: &mut Model| m.add_ball(3.0, &Isometry::identity()).expect("ball");
+        let pairs = [
+            (FAR_AWAY, Rule::Union),
+            (
+                Block {
+                    low: [-5.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: 2.0,
+                    tall: 3.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [-5.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: -5.0,
+                    tall: 3.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [-5.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: -5.0,
+                    tall: 3.0,
+                },
+                Rule::Intersection,
+            ),
+            (
+                Block {
+                    low: [-1.0, -1.0],
+                    high: [1.0, 1.0],
+                    floor: -5.0,
+                    tall: 3.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [0.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: -5.0,
+                    tall: 10.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [-5.0, 0.0],
+                    high: [5.0, 5.0],
+                    floor: -5.0,
+                    tall: 10.0,
+                },
+                Rule::Difference,
+            ),
+        ];
+        for (policy_name, policy) in [("certified", certified), ("tolerant", tolerant)] {
+            report(
+                &format!("ball-{policy_name}"),
+                &build,
+                [0.0, 0.0, -3.0],
+                &[
+                    [0.0, 0.0, -4.0],
+                    [0.0, 0.0, -2.0],
+                    [3.0, 0.0, 0.0],
+                    [0.0, -3.0, 0.0],
+                    [1.0, 1.0, -3.0],
+                ],
+                &pairs,
+                &Isometry::identity(),
+                &policy,
+            );
+        }
+    }
+    if which.contains("cone") {
+        let build = |m: &mut Model| cones::a_frustum(m, 0.5, 2.0, 6.0);
+        let pairs = [
+            (FAR_AWAY, Rule::Union),
+            (
+                Block {
+                    low: [-5.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: 1.0,
+                    tall: 2.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [-5.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: 5.0,
+                    tall: 3.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [2.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: 5.0,
+                    tall: 3.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [-5.0, -5.0],
+                    high: [-1.0, 5.0],
+                    floor: 5.0,
+                    tall: 3.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [-5.0, -5.0],
+                    high: [5.0, 5.0],
+                    floor: 5.0,
+                    tall: 3.0,
+                },
+                Rule::Intersection,
+            ),
+            (
+                Block {
+                    low: [-5.0, 0.0],
+                    high: [5.0, 5.0],
+                    floor: 1.0,
+                    tall: 8.0,
+                },
+                Rule::Difference,
+            ),
+            (
+                Block {
+                    low: [-5.0, 0.0],
+                    high: [5.0, 5.0],
+                    floor: 1.0,
+                    tall: 8.0,
+                },
+                Rule::Intersection,
+            ),
+        ];
+        for (policy_name, policy) in [("certified", certified), ("tolerant", tolerant)] {
+            report(
+                &format!("frustum-{policy_name}"),
+                &build,
+                [3.0, 0.0, 6.0],
+                &[[4.0, 0.0, 6.0], [3.5, 0.0, 7.0], [0.0, 4.0, 6.0]],
+                &pairs,
+                &Isometry::identity(),
+                &policy,
+            );
+        }
+    }
+}
+
 fn a_block(model: &mut Model, block: Block) -> SolidKey {
     let [wide, deep] = [block.high[0] - block.low[0], block.high[1] - block.low[1]];
     let footprint = ProfileBuilder::new(vec![[0.0, 0.0], [wide, 0.0], [wide, deep], [0.0, deep]])
