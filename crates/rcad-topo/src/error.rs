@@ -183,11 +183,41 @@ pub enum Error {
     /// This kernel built an answer that does not validate, and threw it away
     /// rather than hand it over.
     ///
-    /// **This is a bug here, not bad input.** It is separate from
-    /// [`Error::Invalid`], which is what a caller gets when the *description*
-    /// they gave was unsound — [`SolidBuilder::build`](crate::SolidBuilder::build)
-    /// returns that for a corner off its own plane. Reading either as the other
-    /// sends the reader looking in the wrong place, so they are two variants.
+    /// **It does not say whether the fault is this kernel's or the input's.** A
+    /// fuse does not ask [`Model::validate`] of its inputs, and both have been
+    /// seen to end here:
+    ///
+    /// - **Sound inputs, and a gap here.** A quarter bend described through
+    ///   `SolidBuilder`, united with a second one built from the same numbers,
+    ///   is written back with both coedges of one edge running the same way:
+    ///   `broken` is [`Invalid::CoedgesRunTheSameWay`] (§243.5). Pinned by
+    ///   `a_quarter_bend_and_its_copy_are_refused_as_two_bends_built_alike_are`
+    ///   in `copying_a_solid.rs`.
+    /// - **A broken input, carried through.** A round bar whose top corner was
+    ///   moved a millimetre off its surfaces in the model's bytes, read back and
+    ///   fused under `Policy::certified` against a partner that leaves that
+    ///   corner in the answer — six fuses, three moves against two partners —
+    ///   comes back as this every time, with `broken` equal to the [`Invalid`]
+    ///   that [`Model::validate`] gives the bar before any fuse runs (§294.2).
+    ///   There the refusal blames the fuse for the caller's own file. Pinned by
+    ///   `a_fuse_that_keeps_the_moved_corner_blames_itself_for_the_broken_file`
+    ///   in `a_broken_two_surface_corner_read_back_from_bytes.rs`.
+    ///
+    /// Asking [`Model::validate`] of the inputs tells the two apart, and a fuse
+    /// leaves that to the caller on purpose. The same broken bar fused against a
+    /// partner that cuts the moved corner away gives the answer the sound bar
+    /// gives, in all twenty such fuses §294.2 counts, and §294.5 says why asking
+    /// at the door would refuse those twenty right answers too. The same file
+    /// pins them:
+    /// `a_fuse_that_cuts_the_moved_corner_away_gives_the_answer_the_sound_bar_gives`
+    /// eighteen, and
+    /// `a_cut_along_the_seam_refuses_a_corner_moved_in_the_cut_and_answers_one_moved_out_of_it`
+    /// the other two.
+    ///
+    /// It is separate from [`Error::Invalid`], which is what a caller gets when
+    /// the *description* they gave is refused before anything is built —
+    /// [`SolidBuilder::build`](crate::SolidBuilder::build) returns that for a
+    /// corner off its own plane. This one refuses what a fuse built.
     ///
     /// A fuse works its answer out in a throwaway model and sweeps that
     /// (`docs/decisions.md` §87), so a caller who sees this has a model exactly
@@ -204,6 +234,8 @@ pub enum Error {
     /// `f64` can resolve still gets the answer the arithmetic reached; §87.3 has
     /// the argument. Everything else the sweep refuses is wrapped in here, with
     /// no list of exceptions to keep honest.
+    ///
+    /// [`Model::validate`]: crate::Model::validate
     #[error("this kernel built an answer that does not validate, and wrote nothing: {broken}")]
     TheFuseWroteABrokenAnswer {
         /// What the sweep of the throwaway model refused the answer for.

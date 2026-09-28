@@ -169,20 +169,24 @@ impl Model {
     /// panicked between §84 and §86.
     ///
     /// [`Error::TheFuseWroteABrokenAnswer`] if the answer this built does not
-    /// validate. That is a bug here rather than bad input, and it used to be a
-    /// panic — but the answer is now built in a throwaway model and swept there,
-    /// so a caller who sees it has a model exactly as it was, and there is
-    /// nothing corrupt for a crash to protect (`docs/decisions.md` §87, which
-    /// amends §4.1 and §66.4). **The answer is swept in every build**, by twelve
-    /// of [`Model::validate`]'s thirteen checks: the throwaway holds the answer
-    /// and nothing else, which is what makes a whole-model sweep of it local to
-    /// what this fuse wrote. The thirteenth, the model-wide coordinate range, is
-    /// left out — `Assembly::check_dynamic_range` below asks that one, behind a
-    /// guard, and asking it again over a model holding only the answer would
-    /// undo the guard (§87.3). Before §66.3 the check was
-    /// `debug_assertions`-gated *and* skipped whenever the model did not already
-    /// validate, so a release fuse looked at nothing; §66.3 made it run always,
-    /// and §87 made it a refusal.
+    /// validate. That can be a gap here or an input that was already broken,
+    /// because nothing here asks [`Model::validate`] of the inputs: in §294.2,
+    /// six fuses of a bar whose corner was moved in its bytes came back as this,
+    /// carrying exactly what `validate` says of the bar before any fuse. The
+    /// variant's own doc has a pinned case of each. It used to be a panic — but
+    /// the answer is now built in a throwaway model and swept there, so a caller
+    /// who sees it has a model exactly as it was, and there is nothing corrupt
+    /// for a crash to protect (`docs/decisions.md` §87, which amends §4.1 and
+    /// §66.4).
+    /// **The answer is swept in every build**, by twelve of [`Model::validate`]'s
+    /// thirteen checks: the throwaway holds the answer and nothing else, which
+    /// is what makes a whole-model sweep of it local to what this fuse wrote.
+    /// The thirteenth, the model-wide coordinate range, is left out —
+    /// `Assembly::check_dynamic_range` below asks that one, behind a guard, and
+    /// asking it again over a model holding only the answer would undo the
+    /// guard (§87.3). Before §66.3 the check was `debug_assertions`-gated *and*
+    /// skipped whenever the model did not already validate, so a release fuse
+    /// looked at nothing; §66.3 made it run always, and §87 made it a refusal.
     ///
     /// # Panics
     ///
@@ -194,9 +198,23 @@ impl Model {
     /// §4.3).
     ///
     /// **An input broken in a way [`Model::validate`] rejects is not checked, in
-    /// any build.** This used to say it panicked; nothing here has ever asked.
-    /// What a broken input does is trip an assert somewhere further in, under
-    /// whatever name that site gives it.
+    /// any build.** This paragraph once said such an input panicked, and then
+    /// that it tripped an assert further in; nothing here has ever asked, and
+    /// the one kind of break measured since does neither. A round bar whose top
+    /// corner, where only the cap's plane and the wall's cylinder meet, was
+    /// moved a millimetre off one of the two in the model's bytes and read back was
+    /// fused under `Policy::certified` thirty times — three moves, each against
+    /// ten partners and rules — and none of the thirty panicked. Each came back
+    /// one of three ways: the answer the sound bar gives, where the partner cuts
+    /// the moved corner away (twenty); [`Error::TheFuseWroteABrokenAnswer`],
+    /// where the answer keeps it (six); or
+    /// [`Error::CannotTellTheCellsOfAFaceApart`] or [`Error::Undecidable`],
+    /// where a partner's face runs through where the corner should be (four).
+    /// `a_broken_two_surface_corner_read_back_from_bytes.rs` pins all thirty
+    /// (§294.2, §294.3). Those thirty say nothing about any other break: §294.7
+    /// lists what they left out, among them a placed bar, a ball's or a cone's
+    /// corner, a tolerant policy, and a corner with three or more surfaces round
+    /// it.
     pub fn fuse(
         &mut self,
         arguments: &[SolidKey],
