@@ -494,6 +494,48 @@ fn the_closed_forms_agree_with_the_model_about_the_frustum_and_the_blocks() {
     }
 }
 
+/// A pointed cone whose radius is twice its height, inside a block that holds
+/// all of it: every rule has an answer, and every rule gives it.
+///
+/// **The cone's face was placed by a point on its other nappe** until §350.
+/// The face is bounded by its rim alone, so every blend of its one corner is
+/// that corner, and of the six steps a radius long from it, four land back on
+/// the rim and one above the cap. The sixth goes a radius down the axis, and so
+/// does the step towards the side the cap keeps. A radius here is twice the
+/// height, so both land at `z = −8`, under the apex, and are put back onto the
+/// cone at `(−16, 0, −8)`. That point is below the cap,
+/// which was all `select.rs` asked of it, so it placed the face — outside the
+/// block, which stops at `z = −1`. The block holds the face, and all four rules
+/// refused `ResultIsNotManifold`.
+///
+/// The fix is in two halves and this fails without either. Without the cone
+/// half of `the_piece_holds`, the point under the apex still places the face,
+/// since it comes before any other that is inside it. Without the point half
+/// way from the rim to the apex, no candidate is left inside the face and all
+/// four refuse `a point inside a piece of a face`.
+#[test]
+fn a_cone_whose_radius_is_twice_its_height_inside_a_block_answers_every_rule_right() {
+    let case = Case {
+        cone: ConeShape {
+            slope: 2.0,
+            near: 0.0,
+            far: 8.0,
+        },
+        block: BoxShape {
+            size: [40.0, 40.0, 11.0],
+            placed: moved([-20.0, -20.0, -1.0]),
+        },
+        solids: [1, 1, 0, 1],
+    };
+    assert_eq!(
+        tally(&[case]),
+        Tally {
+            right: 4,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
 /// How many solids each rule leaves, in the order [`RULES`] runs them.
 type Solids = [usize; 4];
 
