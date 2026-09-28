@@ -16,11 +16,33 @@
 //! three deflections below, each holding the closed form. With the pipe listed
 //! first every one was refused `CannotMeshAFace { why: CornersCoincide }` on the
 //! ball's face, because the poles were looked for on the pipe.
+//!
+//! # Which way the rim is stored running
+//!
+//! The ball and the pipe only touch along the rim, so they say nothing about
+//! which way it runs; the ball and the rim's plane cross in it, and they are the
+//! pair `rcad_geom::which_two_surfaces_a_run_is_between` hands everyone who reads
+//! the run. The rule the fuse writes a closed edge with reads that pair: the
+//! ball's longitude is square to this rim at every point, because the rim is a
+//! circle through both poles, so the latitude answers, and the rim is stored
+//! running up towards `+z` at its corner. The ball below the rim walks it that
+//! way and the pipe above it walks it back.
+//!
+//! This file first built the rim the other way round, which is the way the
+//! walker happened to draw it. Until the mesher read the rim's pair from the
+//! shared function (§222.1 item 1) it read the ball and the pipe, no rule
+//! answered, and that way was kept. Reading the ball and the plane, the mesher
+//! walks the rim the way the rule says, and the solid built the other way is
+//! refused by `AWireWillNotLieFlatOnItsFace` on the pipe — which is what
+//! `a_half_ball_on_a_pipe_with_its_rim_stored_against_the_rule_is_refused` pins.
+//! `Model::validate` does not read this rim's way yet: it reads the two faces,
+//! which only touch (§229.4).
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Sphere, Surface, Vector,
+    which_way_a_closed_crossing_turns,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
 
 /// The radius of the ball and of the pipe.
@@ -108,12 +130,106 @@ fn both_poles_are_points_along_the_rim_whichever_face_is_listed_first() {
     }
 }
 
+/// Each face uses the rim the way the closed-edge rule stores it, read off the
+/// ball and the rim's plane, however the faces are listed.
+///
+/// The check on the fixture rather than on the kernel: the other tests here
+/// mean something only if the solid they measure is stored the way the rule
+/// says.
+#[test]
+fn the_rim_is_stored_the_way_the_ball_and_its_plane_say_whichever_face_is_listed_first() {
+    let corner = Vector::new(RADIUS, 0.0, 0.0);
+    let up = Vector::new(0.0, 1.0, 0.0);
+    let crossing = corner.cross(up);
+    let turns = which_way_a_closed_crossing_turns([corner, up], corner, Vector::new(0.0, 0.0, 1.0));
+    assert!(
+        matches!(turns, Decision::Pos | Decision::Neg),
+        "the ball and the rim's plane cross at the corner, and the rule said {turns:?}"
+    );
+    let stored_way = if turns == Decision::Pos {
+        crossing
+    } else {
+        -crossing
+    };
+    for first in [FirstInTheShell::Ball, FirstInTheShell::Pipe] {
+        let (model, key) = a_half_ball_on_a_pipe(first);
+        for face in model.solid(key).expect("this model made the key").faces() {
+            if face.surface().as_plane().is_some() {
+                continue;
+            }
+            let below = matches!(face.surface(), Surface::Sphere(_));
+            let [way] = face
+                .wires()
+                .flat_map(|wire| wire.coedges())
+                .filter(|coedge| {
+                    matches!(
+                        coedge.edge().run(),
+                        EdgeRun::RightRoundWhereItCrosses { .. }
+                    )
+                })
+                .map(|coedge| coedge.orientation_on_its_edge())
+                .collect::<Vec<_>>()[..]
+            else {
+                panic!("the {first:?} listed first: a face uses the rim once");
+            };
+            let walked = match way {
+                Orientation::Forward => stored_way,
+                Orientation::Reversed => -stored_way,
+            };
+            let on_its_left = corner.cross(walked).dot(up);
+            assert_eq!(
+                on_its_left < 0.0,
+                below,
+                "the {first:?} listed first: the face on {:?} walks the rim {way:?}, which puts \
+                 it on the wrong side of the rim",
+                face.surface()
+            );
+        }
+    }
+}
+
+/// The same solid with the rim's two uses turned round, which is the way it
+/// was first built here, is refused by name rather than measured.
+///
+/// Walked the way the rule stores it, the ball's face would be the half above
+/// the rim, inside the pipe, and it is the pipe's wire that no longer lies flat.
+/// Refused rather than pinned to one refusal, because `Model::validate` may
+/// come to read this rim's way and refuse it first (§229.4).
+#[test]
+fn a_half_ball_on_a_pipe_with_its_rim_stored_against_the_rule_is_refused() {
+    for first in [FirstInTheShell::Ball, FirstInTheShell::Pipe] {
+        let (_, built) = built_with_the_ball_using_the_rim(first, Orientation::Reversed);
+        assert!(
+            built.is_err(),
+            "the {first:?} listed first: a rim stored against the rule is built into {built:?}"
+        );
+    }
+}
+
 /// The half of a ball of `RADIUS` about the origin below `y = 0`, a pipe of the
 /// same radius up the `y` axis from the rim to `HEIGHT`, and a flat disc on top.
 ///
 /// The rim's one corner is `(RADIUS, 0, 0)`, a quarter turn from either pole.
 /// The pipe is cut open up a seam from that corner to the top circle's.
 fn a_half_ball_on_a_pipe(first: FirstInTheShell) -> (Model, SolidKey) {
+    let (model, key) = built_with_the_ball_using_the_rim(first, Orientation::Forward);
+    let key = key.expect("a half ball on a pipe is a solid");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a half ball on a pipe is a sound model");
+    (model, key)
+}
+
+/// [`a_half_ball_on_a_pipe`], with the ball using the rim `ball_uses_the_rim`
+/// and the pipe using it the other way.
+fn built_with_the_ball_using_the_rim(
+    first: FirstInTheShell,
+    ball_uses_the_rim: Orientation,
+) -> (Model, rcad_topo::Result<SolidKey>) {
+    let pipe_uses_the_rim = match ball_uses_the_rim {
+        Orientation::Forward => Orientation::Reversed,
+        Orientation::Reversed => Orientation::Forward,
+    };
     let origin = Point::origin();
     let up = Vector::new(0.0, 1.0, 0.0);
     let ball = Surface::Sphere(Sphere::new(origin, RADIUS).expect("a positive radius"));
@@ -154,7 +270,7 @@ fn a_half_ball_on_a_pipe(first: FirstInTheShell) -> (Model, SolidKey) {
 
     let the_ball = |builder: &mut SolidBuilder| {
         let under = builder
-            .add_coedge(rim, Orientation::Reversed)
+            .add_coedge(rim, ball_uses_the_rim)
             .expect("an edge of this builder");
         let wire = builder
             .add_wire(&[DraftStep::Along(under)])
@@ -163,7 +279,7 @@ fn a_half_ball_on_a_pipe(first: FirstInTheShell) -> (Model, SolidKey) {
     };
     let the_pipe = |builder: &mut SolidBuilder| {
         let steps = [
-            (rim, Orientation::Forward),
+            (rim, pipe_uses_the_rim),
             (seam, Orientation::Forward),
             (round_the_lid, Orientation::Reversed),
             (seam, Orientation::Reversed),
@@ -204,11 +320,6 @@ fn a_half_ball_on_a_pipe(first: FirstInTheShell) -> (Model, SolidKey) {
         .expect("the three faces close up");
 
     let mut model = Model::new(Scale::millimetres(10.0).expect("a positive size"));
-    let key = builder
-        .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a half ball on a pipe is a solid");
-    model
-        .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a half ball on a pipe is a sound model");
-    (model, key)
+    let built = builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new());
+    (model, built)
 }
