@@ -581,7 +581,10 @@ fn cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should()
                 .validate(&policy, &mut ProvenanceLog::new())
                 .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
             let [solid] = fused.solids() else {
-                panic!("{rule:?} of two half bars is one solid: {:?}", fused.solids());
+                panic!(
+                    "{rule:?} of two half bars is one solid: {:?}",
+                    fused.solids()
+                );
             };
             let solid = model.solid(*solid).expect("this model made the key");
 
