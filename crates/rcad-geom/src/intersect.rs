@@ -503,9 +503,12 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
 /// `2⁻¹⁰⁰⁷` against a plane two from its axis has `2⁻¹⁰⁰⁵` of room, and the
 /// interval form rounds the move away before it squares anything: `[0,
 /// 8.9e-16]`, which holds zero. The expansion keeps it (`docs/decisions.md`
-/// §322).
+/// §322). Where what fell off the bottom is more than a rounding of the room,
+/// the interval form answers as it always did.
 fn how_much_room_a_plane_leaves_in_a_pipe_enclosing(flat: &Plane, pipe: &Cylinder) -> Interval {
-    if let Some(room) = how_much_room_a_plane_leaves_in_a_pipe_nearly(flat, pipe) {
+    if let Some(room) = how_much_room_a_plane_leaves_in_a_pipe_nearly(flat, pipe)
+        && room.is_within_a_rounding()
+    {
         return room.enclosure();
     }
     let normal = flat.normal().components();

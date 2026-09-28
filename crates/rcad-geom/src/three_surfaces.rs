@@ -1101,6 +1101,22 @@ impl Term {
         }
     }
 
+    /// Whether this was worked out from stored numbers and lost more than a
+    /// rounding of itself off the bottom of the range on the way — the one case
+    /// where it is refused as it always was ([`Nearly::is_within_a_rounding`]).
+    fn lost_more_than_a_rounding(&self) -> bool {
+        match self {
+            Term::Stored(value) => !value.is_within_a_rounding(),
+            Term::Boxed(_) => false,
+        }
+    }
+
+    /// Whether this was worked out from stored numbers and lost anything at
+    /// all off the bottom of the range.
+    fn lost_anything(&self) -> bool {
+        matches!(self, Term::Stored(value) if value.exactly().is_none())
+    }
+
     /// Which way this number points, or [`NOTHING_IS_KNOWN`] where a box
     /// straddles zero.
     fn sign(&self) -> Decision {
@@ -1266,6 +1282,12 @@ fn where_a_line_crosses_one_plane(
     ) else {
         return Err(an_exact_step_could_not_be_taken(named, at));
     };
+    // Three planes have Cramer's rule to fall back on in
+    // `where_three_planes_meet`, so a product that fell off the bottom here is
+    // refused as it was and that route is left to answer.
+    if along.lost_anything() || across.lost_anything() {
+        return Err(an_exact_step_could_not_be_taken(named, at));
+    }
 
     // `along` is the determinant of the three normals, which is dimensionless.
     // `Measures` has no arm for that; see the note in
@@ -1319,6 +1341,7 @@ fn where_a_line_meets_a_ring(
     at: &[PredicatePoint],
 ) -> Result<WhereALineMeetsIt> {
     let quartic = how_a_ring_cuts_the_line(line, ring)
+        .filter(|quartic| !quartic.iter().any(Term::lost_anything))
         .ok_or_else(|| an_exact_step_could_not_be_taken(named, at))?;
     // **The quartic route is the one place level 3 is not optional.** Its roots
     // are found by evaluating signs along the line, and a coefficient that is a
@@ -1484,13 +1507,19 @@ impl Quadratic {
 /// torus through all three positions, and two of them and three, so the claim is
 /// demonstrated rather than argued.
 fn how_a_quadric_cuts_the_line(line: &ALine, quadric: &Surface) -> Option<Quadratic> {
-    match quadric {
+    let quadratic = match quadric {
         Surface::Sphere(ball) => how_a_ball_cuts_the_line(line, ball),
         Surface::Cylinder(pipe) => how_a_pipe_cuts_the_line(line, pipe),
         Surface::Cone(cone) => how_a_cone_cuts_the_line(line, cone),
         Surface::Plane(flat) => panic!("{flat:?} is flat, so three planes is the question"),
         Surface::Torus(ring) => panic!("{ring:?} is a quartic and is refused before this"),
-    }
+    }?;
+    let coefficients = [
+        &quadratic.squared,
+        &quadratic.half_linear,
+        &quadratic.constant,
+    ];
+    (!coefficients.iter().any(|term| term.lost_more_than_a_rounding())).then_some(quadratic)
 }
 
 /// `‖V + s·D‖² − m²R²` where `V` is the line's point offset to the ball's
@@ -1812,7 +1841,9 @@ fn the_discriminant_of<'a>(
 /// The fallback is the interval form, for the rare case where a product the
 /// exact route needs falls out of range. It is honest and it is wide.
 fn the_size_of_the_discriminant(quadratic: &Quadratic) -> Interval {
-    if let Some(exactly) = quadratic.difference_of_the_two_halves() {
+    if let Some(exactly) = quadratic.difference_of_the_two_halves()
+        && !exactly.lost_more_than_a_rounding()
+    {
         return exactly.enclosure();
     }
     let half_linear = quadratic.half_linear.enclosure();
