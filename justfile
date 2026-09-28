@@ -1522,7 +1522,16 @@ check-skills-selftest:
 # files still says to pass `run_in_background: true`: the sentence alone let
 # `merger.md` keep telling a merger to background a cold gate, four paragraphs
 # below the rule, which is the Q148 failure itself.
-[doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time.")]
+#
+# **A twelfth arm holds the run's own clean-up (§315.2).** 101 lane trees were
+# removed by hand on 2026-09-28 with `/` full, because nothing else ever removed
+# one. Three lines keep it working. The pruner is started only behind a merge,
+# because a run that did not land is the dispatcher's to judge. The command it
+# is sent is the exact text `.claude/settings.json` allows, because any other
+# form stops to ask and nobody is there to answer. And the merger is told to
+# mark its run's trees finished, because without the mark `prune-worktrees`
+# keeps all three for an hour.
+[doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1543,6 +1552,11 @@ check-lanes-workflow:
     pins_conflict='the lane is marked pinsOnly, but it declares a source directory to revert'
     pins_verify='  const pinsOnlyNote = lane.pinsOnly === true'
     foreground_rule='Every command you run stays in the foreground, this role included.'
+    prune_guard='      return row.merged ? pruned(lane, row, treesOf(prior).concat(merge.worktree_path)) : row'
+    prune_command='  mise exec -- just prune-worktrees'
+    prune_allowed='"Bash(mise exec -- just prune-worktrees)",'
+    mark_line='Only if your push went through, after unlocking your own tree: mise exec -- just mark-finished'
+    settings=.claude/settings.json
     scan() {
         local n t at prev line types
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -1651,6 +1665,18 @@ check-lanes-workflow:
                 return 11
             fi
         done
+        if ! grep -qxF -- "$prune_guard" "$1"; then
+            echo "$1 does not start the pruner only behind a merge; a run that did not land is the dispatcher's to judge (§315.2)"
+            return 12
+        fi
+        if ! grep -qxF -- "$prune_command" "$1" || ! grep -qF -- "$prune_allowed" "$settings"; then
+            echo "$1 does not send the pruner the exact command $settings allows, so it would stop to ask with nobody there to answer (§315.2)"
+            return 12
+        fi
+        if ! grep -qF -- "$mark_line" "$1"; then
+            echo "$1 does not tell the merger to mark its run's trees finished, so prune-worktrees keeps them for an hour (§315.2)"
+            return 12
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -1702,7 +1728,13 @@ check-lanes-workflow:
     grep -vF -- "$foreground_rule" "$agents/lane.md" > "$dir/no-foreground-rule/agents/lane.md"
     fresh merger-backgrounds
     printf '\nIf your tree is cold, pass `run_in_background: true`.\n' >> "$dir/merger-backgrounds/agents/merger.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11)
+    fresh prune-unguarded
+    awk -v l="$prune_guard" -v r='      return pruned(lane, row, treesOf(prior).concat(merge.worktree_path))' '$0 == l { print r; next } { print }' "$file" > "$dir/prune-unguarded/lanes.js"
+    fresh prune-command-drifts
+    awk -v l="$prune_command" -v r='  mise exec -- just prune-worktrees .' '$0 == l { print r; next } { print }' "$file" > "$dir/prune-command-drifts/lanes.js"
+    fresh no-mark-line
+    grep -vF -- "$mark_line" "$file" > "$dir/no-mark-line/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -1718,7 +1750,7 @@ check-lanes-workflow:
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, and merges one lane at a time; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged; ${#cuts[@]} cuts, each caught"
 
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
@@ -4681,8 +4713,19 @@ check-fuzz-overnight-selftest:
     # fixes `-artifact_prefix` and nothing in the environment moves it. So the tag
     # is unique per run, two lanes can gate at once, and the trap takes away
     # exactly what this run put there and nothing a real night left.
+    #
+    # It goes by the tag alone and never by kind. It used to name `crash-` and
+    # `slow-unit-`, so every `timeout-` an arm wrote stayed behind whenever that
+    # arm failed, and `prune-worktrees` then kept the tree for ever (§315.3).
+    # The trap runs on TERM, INT and HUP too, but not on KILL, and what a killed
+    # run leaves is `prune-worktrees`' to ignore.
     tag="overnight-selftest-$$-${RANDOM}"
-    trap 'rm -rf "$dir"; rm -f fuzz/artifacts/*/crash-"$tag" fuzz/artifacts/*/slow-unit-"$tag"; rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-"$tag"' EXIT
+    clean_up() {
+        rm -rf "$dir"
+        rm -f fuzz/artifacts/*/*-"$tag"
+        rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-"$tag"
+    }
+    trap clean_up EXIT
     mkdir -p "$dir/bin"
 
     # A fixture for `RCAD_STEP_CORPUS`, standing in for the 375 MiB the real
@@ -5682,7 +5725,13 @@ check-fuzz-overnight-selftest:
     line=$(grep -o 'no_model_makes_the_writer_panic: [0-9]* slow-unit' "$dir/logs/latest" || true)
     [ "$line" = "no_model_makes_the_writer_panic: 1 slow-unit" ] \
         || fail "a target with nothing before tonight was not counted as new: $(cat "$dir/logs/latest")"
-    rm -f "$carried"
+
+    # The last arm leaves its `timeout-` for `clean_up` rather than removing
+    # it itself. That is how this recipe checks that the trap takes every kind
+    # an arm writes, and not only the kinds somebody thought to name.
+    clean_up
+    left=$(find fuzz/artifacts -name "*-$tag")
+    [ -z "$left" ] || { echo "the trap leaves this run's artifacts behind: $left"; exit 1; }
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
@@ -7526,6 +7575,41 @@ check-clean-targets-selftest:
     grep -qE "^[0-9.]+K reclaimed; 3 worktree\(s\) kept$" <<<"$got" \
         || fail "the tally is wrong, so a sweep that found nothing would read like a tidy machine"
 
+# Mark worktrees whose run is over, so `prune-worktrees` removes them without
+# waiting out its hour (§315.2).
+#
+# A merger runs this on its lane's tree, its verifier's and its own once its
+# push has landed, and the `lanes` workflow runs `prune-worktrees` straight
+# after. The hour is there for a tree whose owner nobody can name. A merger can
+# name all three, and waiting the hour out keeps three `target/`s on the disk.
+#
+# The mark is a file in the tree's own git directory, so it goes when the tree
+# goes and never shows in `git status`. It skips the hour and nothing else:
+# `prune-worktrees` still keeps a marked tree that is not on `main`, is dirty,
+# or holds a real fuzz find. A locked tree is refused, because its owner is
+# still at work, so the merger unlocks its own tree first. The hub is refused
+# because it is never a lane's tree. Every tree is checked before any is
+# marked, so a refusal marks nothing.
+[doc("Mark worktrees as finished, so prune-worktrees removes them without waiting an hour.")]
+mark-finished +trees:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tops=()
+    gitdirs=()
+    for tree in "$@"; do
+        top=$(git -C "$tree" rev-parse --show-toplevel)
+        gitdir=$(git -C "$top" rev-parse --absolute-git-dir)
+        common=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir)
+        [ "$gitdir" != "$common" ] || { echo "$top is the hub, which is never a lane's tree"; exit 1; }
+        [ ! -e "$gitdir/locked" ] || { echo "$top is locked, so its owner is still at work: $(cat "$gitdir/locked")"; exit 1; }
+        tops+=("$top")
+        gitdirs+=("$gitdir")
+    done
+    for i in "${!gitdirs[@]}"; do
+        touch "${gitdirs[$i]}/rcad-run-over"
+        echo "marked: ${tops[$i]}"
+    done
+
 # Remove lane worktrees whose work has landed and whose lane is over.
 #
 # The closing gate runs this, because nothing else reclaims a worktree: the
@@ -7549,18 +7633,23 @@ check-clean-targets-selftest:
 #   §76's second fix: a detached tree's `HEAD` resolved through the wrong tree;
 # - **nothing uncommitted, untracked files included;**
 # - **no `fuzz/artifacts/`.** It is gitignored, so a tree holding the only copy
-#   of a crash input reads as clean (§92.3);
-# - **HEAD has not moved for an hour.** A lane that has just started sits at its
-#   base, which is on `main`, clean and unlocked, and the harness does not lock
-#   a workflow lane. `logs/HEAD` rather than `index`, because `git status`
-#   rewrites the index and this recipe runs it;
+#   of a crash input reads as clean (§92.3). What `check-fuzz-overnight-selftest`
+#   writes there does not count: it is a line of text under a name holding
+#   `-overnight-selftest-`, which libFuzzer never writes, and a gate killed
+#   mid-selftest leaves it behind for ever (§315.3);
+# - **HEAD has not moved for an hour, unless `mark-finished` said the run is
+#   over.** A lane that has just started sits at its base, which is on `main`,
+#   clean and unlocked, and the harness does not lock a workflow lane.
+#   `logs/HEAD` rather than `index`, because `git status` rewrites the index and
+#   this recipe runs it. The mark is how a merged run removes its own trees the
+#   minute it lands rather than an hour later (§315.2);
 # - **no process has its working directory inside it.**
 #
 # Until §205 a detached tree was kept whatever it held, and lanes here mostly
 # end detached: on 2026-09-22 this kept 55 trees and removed 7. The rule is
 # rscene's (`eed893f`) with the three rcad cases added. Branches are never
 # deleted, so a spike that is never merged by design (§50.4) keeps its commits.
-[doc("Remove lane worktrees that are clean, landed on main, unlocked and idle for an hour.")]
+[doc("Remove lane worktrees that are clean, landed on main, unlocked, and idle for an hour or marked finished.")]
 prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
     #!/usr/bin/env bash
     set -euo pipefail
@@ -7605,9 +7694,9 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
             keep "HEAD ${head:0:8} is not on ${landed[*]}"
         elif [ -n "$(git -C "$tree" status --porcelain)" ]; then
             keep "uncommitted changes"
-        elif [ -n "$(find "$tree/fuzz/artifacts" -type f -print -quit 2>/dev/null)" ]; then
+        elif [ -n "$(find "$tree/fuzz/artifacts" -type f -not -name '*-overnight-selftest-*' -print -quit 2>/dev/null)" ]; then
             keep "fuzz/artifacts holds files, and nothing else may have a copy"
-        elif [ "$idle" -lt 60 ]; then
+        elif [ "$idle" -lt 60 ] && [ ! -e "$gitdir/rcad-run-over" ]; then
             keep "HEAD moved $idle minutes ago"
         elif printf '%s\n' "$cwds" | awk -v p="$tree" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }'; then
             keep "a process is running in it"
@@ -7626,15 +7715,17 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
 
 # `prune-worktrees` against a throwaway repository laid out like this one: a
 # detached hub, `main` in a worktree of its own, one worktree for each reason to
-# keep a tree, and two with none.
+# keep a tree, and four with none.
 #
 # Each keep case fails exactly one of the recipe's conditions and passes the
 # rest, so deleting any single condition removes exactly one tree it should
-# have kept, and this names which. The two removed trees are the two shapes a
-# finished lane ends in here: detached on a commit only `origin/main` has, and
-# on a branch merged into `main`. The first also holds an ignored `target/`,
-# which `git worktree remove` must not refuse over. Everything is aged two hours
-# except `just-started`, which is the case the age exists for.
+# have kept, and this names which. The first two removed trees are the two
+# shapes a finished lane ends in here: detached on a commit only `origin/main`
+# has, and on a branch merged into `main`. The first also holds an ignored
+# `target/`, which `git worktree remove` must not refuse over. Everything is
+# aged two hours except `just-started`, which is the case the age exists for,
+# and `marked`, which `mark-finished` lets past the age (§315.2). `fakes` holds
+# only what `check-fuzz-overnight-selftest` leaves when it is killed (§315.3).
 [private]
 check-prune-worktrees-selftest:
     #!/usr/bin/env bash
@@ -7643,7 +7734,13 @@ check-prune-worktrees-selftest:
     # otherwise make the busy tree look idle.
     dir=$(realpath "$(mktemp -d)")
     busy=
+    got=
     trap '[ -z "$busy" ] || kill "$busy" 2>/dev/null || true; git -C "$dir/hub" worktree unlock "$dir/locked" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    fail() {
+        echo "prune-worktrees drifted from its own fixtures: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
     git init -q -b main "$dir/hub"
     git -C "$dir/hub" config user.email t@t
     git -C "$dir/hub" config user.name t
@@ -7654,7 +7751,7 @@ check-prune-worktrees-selftest:
     git -C "$dir/hub" worktree add -q "$dir/wave" main
     git -C "$dir/hub" worktree add -q "$dir/runner" -b runner
     git -C "$dir/hub" worktree add -q "$dir/merged" -b merged
-    for name in finished just-started unmerged dirty untracked fuzzed locked busy nightly; do
+    for name in finished just-started marked fakes unmerged dirty untracked fuzzed locked busy nightly; do
         git -C "$dir/hub" worktree add -q --detach "$dir/$name" main
     done
     printf '[Service]\nWorkingDirectory=%s\n' "$dir/nightly" >"$dir/rcad-fuzz.service"
@@ -7667,19 +7764,22 @@ check-prune-worktrees-selftest:
     echo change >"$dir/dirty/.gitignore"
     echo new >"$dir/untracked/new"
     mkdir -p "$dir/fuzzed/fuzz/artifacts/target"; echo crash >"$dir/fuzzed/fuzz/artifacts/target/crash-1"
+    mkdir -p "$dir/fakes/fuzz/artifacts/target"; echo "what a target found" >"$dir/fakes/fuzz/artifacts/target/slow-unit-overnight-selftest-1-2"
     git -C "$dir/hub" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/locked"
-    for name in wave runner merged finished unmerged dirty untracked fuzzed locked busy nightly; do
+    for name in wave runner merged finished fakes unmerged dirty untracked fuzzed locked busy nightly; do
         gitdir=$(git -C "$dir/$name" rev-parse --absolute-git-dir)
         touch -d '2 hours ago' "$gitdir/HEAD" "$gitdir/logs/HEAD"
     done
+    # A refusal marks nothing: `just-started` is named first, and it is still
+    # kept for its age below.
+    ! just mark-finished "$dir/just-started" "$dir/locked" >/dev/null 2>&1 \
+        || fail "mark-finished marked a locked tree, whose owner is still at work"
+    ! just mark-finished "$dir/hub" >/dev/null 2>&1 \
+        || fail "mark-finished marked the hub"
+    just mark-finished "$dir/marked" >/dev/null
     (cd "$dir/busy/" && exec sleep 300) &
     busy=$!
     got=$(just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service")
-    fail() {
-        echo "prune-worktrees drifted from its own fixtures: $1"
-        echo "--- got ---"; echo "$got"
-        exit 1
-    }
     [ -d "$dir/hub/.git" ] || fail "the hub was removed"
     expect_kept() {
         [ -d "$dir/$1" ] || fail "the $1 tree was removed"
@@ -7696,11 +7796,11 @@ check-prune-worktrees-selftest:
     expect_kept locked "locked, an agent is using it"
     expect_kept busy "a process is running in it"
     expect_kept nightly "the overnight fuzz unit runs in it"
-    for name in finished merged; do
+    for name in finished merged marked fakes; do
         [ ! -e "$dir/$name" ] || fail "the $name tree was not removed"
         grep -qF "removed: $dir/$name " <<<"$got" || fail "the $name tree was not reported as removed"
     done
-    [ "$(grep -c '^removed' <<<"$got")" = 2 ] || fail "more than the two finished trees were removed"
+    [ "$(grep -c '^removed' <<<"$got")" = 4 ] || fail "more than the four finished trees were removed"
     grep -qxF "10 worktree(s) kept; their branches are untouched either way" <<<"$got" \
         || fail "the tally is not the ten kept trees"
 

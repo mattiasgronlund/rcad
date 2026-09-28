@@ -189,8 +189,10 @@ the merger merges is `merger.md`'s; neither is repeated here.
 
 A lane's tree is unlocked by its verifier when checking starts, the verifier's
 by the merger, and the merger's by itself at the end, so a row holds one slot
-at a time. A row whose run stopped early leaves its trees locked, and the
-result names them.
+at a time. A merged row's merger then marks all three finished, and the run
+removes them with `prune-worktrees`. The result's `prune:` lines say which
+went and why any stayed (§315). A row whose run stopped early leaves its trees
+locked, and the result names them.
 
 ## 7. What is still yours
 
@@ -203,7 +205,10 @@ Whatever the merger lists as for you. Two cases come up:
   ahead, diverged or dirty, and that tree names no owner. Find out whose work
   it is before moving it.
 
-Reclaim the disk as you go:
+A merged run removes its own trees. Reclaiming the rest of the disk is yours:
+a run that did not merge, a read-only lane (its measurements may be in its
+gitignored `target/`, so copy them out first), and any merged tree that a
+`prune:` line says was kept. Do it as you go:
 
 ```
 mise exec -- just clean-targets

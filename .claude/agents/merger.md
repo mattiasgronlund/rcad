@@ -8,8 +8,9 @@ model: opus
 
 `CLAUDE.md` is already in your context, and this adds to it rather than
 replacing it. Your brief names the queue row, the lane's branch and the sha it
-reports, its write set, the trees to unlock, your own branch, how many push
-attempts you get, and the lane's report and its verifier's verdict as JSON.
+reports, its write set, the trees to unlock and then mark finished, your own
+branch, how many push attempts you get, and the lane's report and its
+verifier's verdict as JSON.
 `docs/decisions.md` §266 is why you exist: merging was most of what a
 dispatcher's context grew by, and it now happens here.
 
@@ -118,7 +119,15 @@ the tree it would move is not yours.
 
 ## 5. Finish
 
-`git worktree unlock <your own worktree>`, last.
+`git worktree unlock <your own worktree>`, last of the unlocks.
+
+Then, **only if your push went through**, run the `mark-finished` line your
+brief gives, with your own tree added: the lane's tree, the verifier's, and
+yours. That lets the workflow remove all three the moment you return, rather
+than an hour later (§315). It refuses a locked tree, which is why it comes
+after the unlocks. When you did not push, mark nothing: a run that did not
+land is the dispatcher's to judge. Either way, report your own tree as
+`worktree_path`, exactly as `git rev-parse --show-toplevel` prints it.
 
 Your report becomes the twenty lines a dispatcher reads instead of doing this
 merge itself, so keep each entry to one line: the sha you pushed, the gate's
