@@ -8649,6 +8649,21 @@ _queue-rows file:
 # Tier 2, to show it. The tiers go 1, 2, 2.2, 2.5, 3, 4 (§307), and a row whose
 # tier is none of them is refused rather than left out of the fill.
 #
+# **Tier 1 goes in class order** (§352.3). A tier 1 row's description may start
+# with a class: how bad the defect is, then how likely a user's model meets it.
+# The fill walks wrong/A, wrong/B, wrong/C, crash/A to C, refuses/A to C, then
+# the rows with no class, then every D, and the file's order only breaks ties
+# inside one class. The line order cannot carry it: the merge driver keeps the
+# frame side's order within a block, so a merge across a re-tag would undo it.
+#
+# **Rows tagged `small` go out in bundles** (§352.4): one lane takes up to
+# `queue_bundle` of them, and its line is `take Q1,Q2 (a bundle of 2 small rows,
+# one lane)` with each row's text indented under it. A full bundle that meets
+# nothing running goes to the first slot, ahead of tier 1. Otherwise a small row
+# waits for the walk to reach its tier, and takes the next ready small rows with
+# it. It is never taken alone, and the rows of one bundle may overlap each other,
+# since one lane does them all. The plain output ends with §352.6's measure.
+#
 # **Two write sets meet** on the same path, unless both name items in it and the
 # items differ (§230.6); on a directory ending in `/` that holds the other path;
 # and `-` meets nothing. The directory test is a prefix test on a name that ends
@@ -8658,9 +8673,10 @@ _queue-rows file:
 # it refuses rather than guesses at, and points at `check-queue` for the why.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after`, `rank`, `tier` and `pick`, with `show` and
-# `running` to read. `tier` moves an open row to another tier and, like `add`,
-# writes that tier's heading when the file has none (§307).
+# `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag` and `pick`, with `show`
+# and `running` to read. `tier` moves an open row to another tier and, like
+# `add`, writes that tier's heading when the file has none (§307). `tag` sets,
+# replaces or removes a row's class or `small` (§352.2).
 # Each takes the lock on the claims file in the git common directory, checks the
 # file as it would be with `check-queue`, and writes only if that passes. `just
 # queue take` with no arguments, or any verb given the wrong ones, prints the
@@ -8682,7 +8698,7 @@ _queue-rows file:
 # do rows another dispatcher holds, from its hold or its own copy.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `pick`, `apply` — also runs `queue-page` after it**, so the page
+# `rank`, `tier`, `tag`, `pick`, `apply` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -8693,7 +8709,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|tier|pick|apply)
+        take|add|done|drop|park|after|rank|tier|tag|pick|apply)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
             status=$?
@@ -8703,7 +8719,7 @@ queue mode="" *args:
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, tier, pick, apply, show, running" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, tier, tag, pick, apply, show, running" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
@@ -8721,11 +8737,15 @@ queue mode="" *args:
     fi
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" \
-        -v slots='{{ queue_slots }}' -v file='{{ queue_file }}' '
+        -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' '
         BEGIN {
             FS = "\037"
             nt = split("1 2 2.2 2.5 3 4", tiers, " ")
             for (t = 1; t <= nt; t++) known[tiers[t]] = 1
+            nc = split("wrong/A wrong/B wrong/C crash/A crash/B crash/C refuses/A refuses/B refuses/C - wrong/D crash/D refuses/D", classes, " ")
+            for (k = 1; k <= nc; k++) if (classes[k] != "-") isclass[classes[k]] = 1
+            bundle += 0
+            if (bundle < 1) { printf "queue: queue_bundle is %d, and a bundle holds at least one row\n", bundle > "/dev/stderr"; bad = 1; exit 1 }
         }
         $1 == "U" { refuse($2, "a fence is never closed"); next }
         $1 != "R" { next }
@@ -8737,6 +8757,9 @@ queue mode="" *args:
             r++
             ln[r] = $2; id[r] = $5; tier[r] = $6; st[r] = $7; ws[r] = $9; raw[r] = $11
             at[$5] = r
+            split($10, word, " ")
+            cl[r] = ($6 == "1" && (word[1] in isclass)) ? word[1] : "-"
+            small[r] = (word[1] == "small")
         }
         END {
             if (bad) exit 1
@@ -8762,8 +8785,9 @@ queue mode="" *args:
             if (bad) exit 1
             w = 0
             for (t = 1; t <= nt; t++)
-                for (i = 1; i <= r; i++)
-                    if (kind[i] == "ready" && tier[i] == tiers[t]) walk[++w] = i
+                for (k = 1; k <= nc; k++)
+                    for (i = 1; i <= r; i++)
+                        if (kind[i] == "ready" && tier[i] == tiers[t] && cl[i] == classes[k]) walk[++w] = i
 
             if (mode == "ready") {
                 for (x = 1; x <= w; x++) print raw[walk[x]]
@@ -8775,33 +8799,32 @@ queue mode="" *args:
                 n += 0
                 if (running + n > slots)
                     printf "note: %d running and %d more is past the %d slots of §230.8\n", running, n, slots
-                taken_n = 0; skipped = 0
-                for (x = 1; x <= w && taken_n < n; x++) {
-                    i = walk[x]; hit = 0
-                    for (j = 1; j <= r && !hit; j++)
-                        if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
-                            printf "skip %s (tier %s): its %s meets %s\047s %s, held by %s\n", id[i], tier[i], mine, id[j], theirs, st[j]
-                            hit = 1
-                        }
-                    for (j = 1; j <= e && !hit; j++)
-                        if (sets_meet(ws[i], ews[j])) {
-                            printf "skip %s (tier %s): its %s meets %s\047s %s, held elsewhere by %s\n", id[i], tier[i], mine, eid[j], theirs, est[j]
-                            hit = 1
-                        }
-                    for (j = 1; j <= taken_n && !hit; j++)
-                        if (sets_meet(ws[i], ws[taken[j]])) {
-                            printf "skip %s (tier %s): its %s meets %s\047s %s, taken above\n", id[i], tier[i], mine, id[taken[j]], theirs
-                            hit = 1
-                        }
-                    if (hit) { skipped++; continue }
-                    taken[++taken_n] = i
-                    print "take " raw[i]
+                lanes_n = 0; taken_n = 0; skipped = 0
+                if (n > 0) {
+                    m = 0
+                    for (x = 1; x <= w && m < bundle; x++)
+                        if (small[walk[x]] && !blocked(walk[x], 0)) pick[++m] = walk[x]
+                    if (m == bundle) take_bundle(m)
+                }
+                for (x = 1; x <= w && lanes_n < n; x++) {
+                    i = walk[x]
+                    if (i in took) continue
+                    if (blocked(i, 1)) { skipped++; continue }
+                    if (!small[i]) {
+                        took[i] = 1; taken[++taken_n] = i; lanes_n++
+                        print "take " raw[i]
+                        continue
+                    }
+                    m = 1; pick[1] = i
+                    for (y = x + 1; y <= w && m < bundle; y++)
+                        if (small[walk[y]] && !(walk[y] in took) && !blocked(walk[y], 0)) pick[++m] = walk[y]
+                    take_bundle(m)
                 }
                 if (n == 0) printf "took 0 of 0: every one of the %d slots is held\n", slots
-                else if (taken_n == n) printf "took %d of %d\n", taken_n, n
-                else if (skipped) printf "took %d of %d: every other ready row meets a running lane or a row taken above\n", taken_n, n
+                else if (lanes_n == n) printf "took %d of %d\n", lanes_n, n
+                else if (skipped) printf "took %d of %d: every other ready row meets a running lane or a row taken above\n", lanes_n, n
                 else if (w == 0) printf "took 0 of %d: no row is ready\n", n
-                else printf "took %d of %d: no other row is ready\n", taken_n, n
+                else printf "took %d of %d: no other row is ready\n", lanes_n, n
                 exit 0
             }
 
@@ -8839,10 +8862,48 @@ queue mode="" *args:
             for (i = 1; i <= r; i++)
                 if (kind[i] == "closedelsewhere") line = line (line == "" ? "" : ", ") id[i] " (" cwhere[i] ")"
             print "closed elsewhere: " (line == "" ? "none" : line)
+            for (i = 1; i <= r; i++) {
+                if (tier[i] != "1" || kind[i] == "parked" || kind[i] == "closed" || kind[i] == "closedelsewhere") continue
+                if (cl[i] ~ /\/[AB]$/) { ab++; abof[substr(cl[i], 1, index(cl[i], "/") - 1)]++ }
+                else if (cl[i] ~ /\/C$/) inc++
+                else if (cl[i] ~ /\/D$/) ind++
+                else unclassed++
+            }
+            for (x = 1; x <= w; x++) if (small[walk[x]]) smallready++
+            printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d in C, %d in D, %d with no class; %d small row%s ready, and a bundle is %d\n", \
+                ab, abof["wrong"], abof["crash"], abof["refuses"], inc, ind, unclassed, smallready, (smallready == 1 ? "" : "s"), bundle
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
             bad = 1
+        }
+        function blocked(i, say,    j) {
+            for (j = 1; j <= r; j++)
+                if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
+                    if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, held by %s\n", id[i], tier[i], mine, id[j], theirs, st[j]
+                    return 1
+                }
+            for (j = 1; j <= e; j++)
+                if (sets_meet(ws[i], ews[j])) {
+                    if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, held elsewhere by %s\n", id[i], tier[i], mine, eid[j], theirs, est[j]
+                    return 1
+                }
+            for (j = 1; j <= taken_n; j++)
+                if (sets_meet(ws[i], ws[taken[j]])) {
+                    if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, taken above\n", id[i], tier[i], mine, id[taken[j]], theirs
+                    return 1
+                }
+            return 0
+        }
+        function take_bundle(m,    y, ids) {
+            ids = ""
+            for (y = 1; y <= m; y++) {
+                ids = ids (y > 1 ? "," : "") id[pick[y]]
+                took[pick[y]] = 1; taken[++taken_n] = pick[y]
+            }
+            printf "take %s (a bundle of %d small row%s, one lane)\n", ids, m, (m == 1 ? "" : "s")
+            for (y = 1; y <= m; y++) print "    " raw[pick[y]]
+            lanes_n++
         }
         function sets_meet(x, y,    ex, ey, nx, ny, i, j) {
             nx = split(x, ex, ","); ny = split(y, ey, ",")
@@ -9058,6 +9119,12 @@ check-queue-page-selftest:
 # it. An `after:` names rows that can still finish. An open row sits under its
 # own tier, and a closed one under Closed.
 #
+# **A class is the first word of a tier 1 row's description** (§352.2): wrong,
+# crash or refuses, then `/` and a bucket A to D. A first word shaped like a
+# class that is none of them is refused as a typo, and so is a class on a row of
+# any other tier, since the fill ranks only tier 1 by class. `small` has nothing
+# to check: any tier may carry it.
+#
 # **An `after:` may name a `Q` row this copy does not hold yet** (§263.5): the
 # other dispatcher's new row, handed out by `just queue add` in its worktree and
 # not merged here. A tree cannot see another worktree, so the gate cannot tell
@@ -9168,6 +9235,10 @@ _queue-check file decisions:
             }
             n = split(what, w, " ")
             if (n == 0 || w[n] !~ /^§[0-9]+(\.[0-9]+)?$/) err(line, id ": the description does not end in a §N or §N.M")
+            if (w[1] ~ /^[a-z]+\/[A-Z]$/) {
+                if (w[1] !~ /^(wrong|crash|refuses)\/[ABCD]$/) err(line, id ": \"" w[1] "\" is not a class: wrong, crash or refuses, then /A, /B, /C or /D")
+                else if (tier != "1") err(line, id ": the class " w[1] " ranks tier 1 rows only, and this row is tier " tier)
+            }
             s = what
             while (match(s, /§[0-9]+(\.[0-9]+)?/)) { cite(line, id, substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH) }
             hk = key(head)
@@ -9239,7 +9310,12 @@ _queue-check file decisions:
 # the file, tier 2.2 included, a row a running lane blocks, two items of one fuse
 # file taken together while the same item twice is not, a directory blocking a
 # file in both directions, `-` fitting beside anything, `after:` on a running row
-# and on a done one, and a tier the fill does not know refused.
+# and on a done one, and a tier the fill does not know refused. §352 adds tier 1
+# in class order against the order in the file, with the measure line counted by
+# hand; a full bundle of small rows going ahead of tier 1, and a lone small row
+# still printed as a bundle; a partial bundle waiting for its tier and pulling the
+# later small rows forward, one overlapping its leader; and a small row a running
+# lane blocks, which neither joins nor completes a bundle.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -9264,14 +9340,14 @@ check-queue-selftest:
     ## Tier 1 — what a fuse gets wrong
 
     ```
-    T1  1  todo  opus  justfile#queue  make the queue fill from the top §230.3
+    T1  1  todo  opus  justfile#queue  refuses/B make the queue fill from the top §230.3
     Q2  1  lane:lane-q2  opus  .github/workflows/ci.yml  a row a lane holds §230
     ```
 
     ## Tier 2
 
     ```
-    Q3  2  after:T9  sonnet  docs/new.md  waits on a done row, so it is ready §226.3
+    Q3  2  after:T9  sonnet  docs/new.md  small waits on a done row, so it is ready §226.3
     ```
 
     ## Tier 2.2
@@ -9351,6 +9427,8 @@ check-queue-selftest:
     refused closed-open 's/^Q4  2.5  parked:§13/Q4  2.5  done:abcdef0/' 'a done row sits under'
     refused fields      's/^Q4 .*/Q4  2.5  parked:§13  opus  docs\//' 'five fields and a description'
     refused empty       '/^[TDQ][0-9]/d'                            'has no rows'
+    refused class-typo  's/refuses\/B make/wrong\/E make/'          '"wrong/E" is not a class'
+    refused class-tier  's/  changes how the work/  wrong\/C changes how the work/' 'the class wrong/C ranks tier 1 rows only, and this row is tier 2.2'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -9376,6 +9454,69 @@ check-queue-selftest:
     drive order next 5
     [ "$(takes)" = "T11 T12 Q20 Q22 Q25 " ] \
         || fail "tier 2.5 was not taken after tier 2.2, and before tier 3, which is written above both"
+
+    fence classes <<'MD'
+    Q1  1  todo  opus  docs/a.md  no class, written first §230
+    Q2  1  todo  opus  docs/b.md  refuses/D a refusal only past the scale envelope §230
+    Q3  1  todo  opus  docs/c.md  refuses/A a refusal a real file met §230
+    Q4  1  todo  opus  docs/d.md  crash/C a crash only a probe builds §230
+    Q5  1  todo  opus  docs/e.md  wrong/B a wrong answer on a flush pair §230
+    Q6  1  todo  opus  docs/f.md  wrong/D a wrong answer at 1e308 §230
+    Q7  1  todo  opus  docs/g.md  wrong/B another wrong answer, later in the file §230
+    Q8  2  todo  opus  docs/h.md  tier two §230
+    Q9  1  parked:§230  opus  docs/i.md  wrong/A parked, so out of the measure §230
+    MD
+    drive classes next 8
+    [ "$(takes)" = "Q5 Q7 Q4 Q3 Q1 Q6 Q2 Q8 " ] \
+        || fail "tier 1 was not taken wrong before crash before refuses, A to C, then no class, then D"
+    drive classes
+    grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 in C, 2 in D, 1 with no class; 0 small rows ready, and a bundle is 5' <<<"$got" \
+        || fail "the measure line does not count the classes fixture's tier 1 rows"
+
+    bundled() {
+        got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
+            || fail "queue ${*:3} failed on the $1 fixture with bundles of $2"
+    }
+
+    fence full <<'MD'
+    T1  1  todo  opus  docs/a.md  wrong/A a wrong answer a real file met §230
+    Q1  2  todo  sonnet  docs/b.md  small one test §230
+    Q2  2.5  todo  sonnet  docs/b.md  small a stale claim in the same file §230
+    Q3  3  todo  opus  docs/c.md  small a few-line fix §230
+    Q4  3  todo  sonnet  docs/d.md  small a fourth, past the bundle §230
+    MD
+    bundled full 3 next 2
+    [ "$(takes)" = "Q1,Q2,Q3 T1 " ] || fail "a full bundle of small rows did not go ahead of tier 1"
+    grep -qxF 'take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)' <<<"$got" \
+        || fail "a bundle's take line does not name its rows and say it is one lane"
+    grep -qxF '    Q2  2.5  todo  sonnet  docs/b.md  small a stale claim in the same file §230' <<<"$got" \
+        || fail "a bundle does not print each of its rows, indented, under its take line"
+    grep -qx 'took 2 of 2' <<<"$got" || fail "a bundle was not counted as one slot"
+    bundled full 3 next 3
+    [ "$(takes)" = "Q1,Q2,Q3 T1 Q4 " ] || fail "the small row left over was not taken once the walk reached it"
+    grep -qxF 'take Q4 (a bundle of 1 small row, one lane)' <<<"$got" || fail "a small row alone was not printed as a bundle"
+
+    fence partial <<'MD'
+    Q1  1  todo  opus  docs/a.md  tier one §230
+    Q2  2  todo  sonnet  docs/b.md  small one test §230
+    Q3  2  todo  opus  docs/c.md  tier two, between the small rows §230
+    Q4  3  todo  sonnet  docs/d.md  small a stale claim §230
+    Q5  4  todo  sonnet  docs/b.md  small another test in Q2's file §230
+    MD
+    drive partial next 3
+    [ "$(takes)" = "Q1 Q2,Q4,Q5 Q3 " ] \
+        || fail "three small rows, short of a bundle of 5, did not wait for tier 2 and then go together"
+
+    fence smallheld <<'MD'
+    Q1  1  lane:lane-q1  opus  docs/a.md  running §230
+    T2  1  todo  opus  docs/c.md  tier one §230
+    Q2  2  todo  sonnet  docs/a.md  small a test in the running lane's file §230
+    Q3  2  todo  sonnet  docs/b.md  small a test elsewhere §230
+    MD
+    bundled smallheld 2 next 2
+    [ "$(takes)" = "T2 Q3 " ] || fail "a small row a running lane blocks completed a bundle or joined one"
+    grep -qxF "skip Q2 (tier 2): its docs/a.md meets Q1's docs/a.md, held by lane:lane-q1" <<<"$got" \
+        || fail "a small row meeting a running lane was not skipped with the lane named"
 
     fence badtier <<'MD'
     Q1  1  todo  opus  docs/a.md  a row the fill knows §230
@@ -9505,8 +9646,11 @@ check-queue-merge-driver:
 # meeting. §307's verb is here too: `tier` moving a row to tier 2.2, which the
 # fixture has no heading for, writing that heading in its place, and refusing a
 # move to the row's own tier, to a tier that does not exist, and of a closed
-# row; and `add` writing the heading the same way. The hook's cases are
-# `check-hooks`'s. Without `tooling/queue/` the
+# row; and `add` writing the heading the same way. §352's are here too: `tag`
+# setting, replacing and removing a class, refusing one outside tier 1 and a
+# typo, `tier` refusing a row that carries one, `add` refused a class on tier 2,
+# and two small rows taken onto one branch holding one slot, not two. The
+# hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
 # add at the foot of Tier 2.
@@ -9827,6 +9971,56 @@ check-queue-api-selftest:
     total_lines=$(wc -l < "$claims_file")
     [ "$first" -gt 1 ] || fail "the probe batch ran before any spammed row landed, so this case raced against nothing"
     [ "$third" -lt "$total_lines" ] || fail "the probe batch ran after every spammed row, so this case raced against nothing"
+
+    # §352: a tag is the first word of the description, set through `tag` only.
+    tag_wt="$root/rcad-worktrees/tag"
+    g "$hub" worktree add -q -b tag "$tag_wt" main
+    words() { awk -v id="$1" '$1 == id { print $6, $7 }' "$tag_wt/docs/queue.md"; }
+    ranked=$(q "$tag_wt" add 1 opus - "a defect the tag verb ranks §230") || fail "add for the row to tag failed"
+    got=$(q "$tag_wt" tag "$ranked" refuses/B 2>&1) || fail "tag refused a class on a tier 1 row"
+    [ "$(words "$ranked")" = "refuses/B a" ] || fail "tag did not put refuses/B in front of the description"
+    got=$(q "$tag_wt" tag "$ranked" wrong/A 2>&1) || fail "tag refused to replace one class with another"
+    [ "$(words "$ranked")" = "wrong/A a" ] || fail "tag did not replace refuses/B with wrong/A"
+    got=$(q "$tag_wt" tag "$ranked" wrong/A 2>&1) && fail "tag set a class the row carries already"
+    grep -qF "$ranked is tagged wrong/A already" <<<"$got" || fail "tag did not say the row carries wrong/A already"
+    got=$(q "$tag_wt" tag "$ranked" wrong/E 2>&1) && fail "tag accepted wrong/E, which is no class"
+    grep -qF "'wrong/E' is not a tag" <<<"$got" || fail "tag did not say wrong/E is not a tag"
+    got=$(q "$tag_wt" tier "$ranked" 2 2>&1) && fail "tier moved a row carrying a class out of tier 1"
+    grep -qF "remove it first with \`tag $ranked -\`" <<<"$got" || fail "tier did not name the tag step that frees the row"
+    got=$(q "$tag_wt" tag "$ranked" - 2>&1) || fail "tag refused to remove the class"
+    [ "$(words "$ranked")" = "a defect" ] || fail "tag - did not leave the description as add wrote it"
+    got=$(q "$tag_wt" tier "$ranked" 2 2>&1) || fail "tier refused a row whose class was removed"
+    got=$(q "$tag_wt" tag "$ranked" crash/C 2>&1) && fail "tag put a class on a tier 2 row"
+    grep -qF "$ranked is tier 2, and a class ranks tier 1 rows only" <<<"$got" || fail "tag did not say a class ranks tier 1 only"
+    got=$(q "$tag_wt" tag "$ranked" small 2>&1) || fail "tag refused small on a tier 2 row"
+    [ "$(words "$ranked")" = "small a" ] || fail "tag did not put small in front of the description"
+    got=$(check "$tag_wt") || fail "the file tag wrote fails check-queue"
+    got=$(q "$tag_wt" add 2 sonnet - "wrong/B a class add writes onto a tier 2 row §230" 2>&1) \
+        && fail "add wrote a class onto a tier 2 row"
+    grep -qF 'the class wrong/B ranks tier 1 rows only, and this row is tier 2' <<<"$got" \
+        || fail "add's refusal did not carry check-queue's reason"
+
+    first_small=$(q "$tag_wt" add 2 sonnet - "small the first row of a bundle §230") || fail "add for the first small row failed"
+    second_small=$(q "$tag_wt" add 2 sonnet - "small the second row of a bundle §230") || fail "add for the second small row failed"
+    before=$(q "$tag_wt" running --count) || fail "running --count failed before the bundle was taken"
+    got=$(q "$tag_wt" apply take "$first_small" lane-bundle + take "$second_small" lane-bundle 2>&1) \
+        || fail "one branch could not take two small rows"
+    after=$(q "$tag_wt" running --count) || fail "running --count failed after the bundle was taken"
+    [ "$after" = "$((before + 1))" ] || fail "two small rows on one branch held $((after - before)) slots, and a bundle is one lane"
+    got=$(q "$tag_wt" running 2>&1) || fail "running failed with a bundle held"
+    grep -qxF "lane-bundle  $first_small,$second_small taken from $tag_wt, no tree yet" <<<"$got" \
+        || fail "running did not name a bundle's rows together on one line"
+
+    # The same, for a bundle whose branch exists with no tree on it: `has_a_tree`
+    # answers False there rather than None, and the two are counted apart.
+    unlanded=$(g "$hub" commit-tree -p main -m "a bundle's own commit" 'main^{tree}') || fail "commit-tree failed"
+    g "$hub" branch lane-bundle-2 "$unlanded"
+    third_small=$(q "$tag_wt" add 2 sonnet - "small the first row of a second bundle §230") || fail "add for the third small row failed"
+    fourth_small=$(q "$tag_wt" add 2 sonnet - "small the second row of a second bundle §230") || fail "add for the fourth small row failed"
+    got=$(q "$tag_wt" apply take "$third_small" lane-bundle-2 + take "$fourth_small" lane-bundle-2 2>&1) \
+        || fail "a branch with no tree could not take two small rows"
+    again=$(q "$tag_wt" running --count) || fail "running --count failed after the second bundle was taken"
+    [ "$again" = "$((after + 1))" ] || fail "two small rows on a branch with no tree held $((again - after)) slots, and a bundle is one lane"
     exit 0
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it

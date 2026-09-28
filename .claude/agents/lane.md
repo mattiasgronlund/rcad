@@ -42,6 +42,23 @@ A change to anything but a `.md` file names the tests that fail without it. A
 lane that changed only `.md` files names none, and its verifier then traces
 every paragraph it moved instead.
 
+**What your own change leaves stale is yours to fix, not to file** (§352.5): a
+doc comment or a section's claim your change makes false, a test it leaves
+missing. Fix it inside your write set before you report. Only what lies outside
+the write set goes in `out_of_write_set_needs`.
+
+**In `remaining`, give each defect you leave its class** (§352.3): `wrong`,
+`crash` or `refuses`, then `/A` when a real input met it, `/B` for a shape
+designers make on purpose, `/C` when only a probe builds it, `/D` when it lies
+outside §3.5's scale envelope, with the number that puts it there. A hypothesis
+nobody has run is `/C` at most. Mark an item `small` when it needs no trace, its
+place is known, and it takes about ten minutes. A defect is never small.
+
+**A brief naming several rows is a bundle of small rows** (§352.4): one branch,
+one report. Do each, and commit each on its own so its verifier and merger can
+tell them apart. One that turns out not to be small you leave undone, and say so
+in `remaining` with its id and why.
+
 Budget about 45 minutes. If the work is bigger, commit what is done, report
 what is left, and stop.
 

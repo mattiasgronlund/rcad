@@ -24,7 +24,9 @@
 //
 // Per lane: `label` (required, names the branch and the progress row),
 // `queueId` (the docs/queue.md row this lane does; required when it writes,
-// because its merger closes that row), `brief` (required, what the lane is for
+// because its merger closes that row. A bundle of small rows (§352.4) gives
+// them all, `Q501,Q502,Q503`, as `queue next` printed them, and its merger
+// closes each), `brief` (required, what the lane is for
 // -- the base and the switch below are appended), `writeSet` (the files it
 // owns; absent or empty means read-only, which also means no verifier, no
 // commit and no merge), `branch` (default `lane-<label>`, and it must not exist
@@ -63,6 +65,10 @@ const MERGE_ATTEMPTS = 3
 const RESULT_LINES = 20
 
 const writes = (lane) => Array.isArray(lane.writeSet) && lane.writeSet.length > 0
+const rowsOf = (lane) => {
+  const ids = lane.queueId.split(',')
+  return ids.length === 1 ? `row ${ids[0]}` : `rows ${ids.join(', ')}, a bundle of ${ids.length} small rows (§352.4)`
+}
 const branchOf = (lane) => lane.branch || `lane-${lane.label}`
 const mergeBranchOf = (lane) => `merge-${lane.label}`
 
@@ -73,8 +79,8 @@ const LANES = Array.isArray(args.lanes) ? args.lanes : []
 if (!LANES.length) throw new Error('lanes: args.lanes is empty')
 for (const lane of LANES) {
   if (!lane || !lane.label || !lane.brief) throw new Error('lanes: every lane needs a label and a brief')
-  if (writes(lane) && !/^[TDQ][0-9]+$/.test(lane.queueId || '')) {
-    throw new Error(`lanes: ${lane.label} writes, so it needs the queueId of its docs/queue.md row; its merger closes that row`)
+  if (writes(lane) && !/^[TDQ][0-9]+(,[TDQ][0-9]+)*$/.test(lane.queueId || '')) {
+    throw new Error(`lanes: ${lane.label} writes, so it needs the queueId of its docs/queue.md row, or Q1,Q2,... for a bundle; its merger closes them`)
   }
 }
 
@@ -306,7 +312,7 @@ If the switch refuses because ${branchOf(lane)} already exists, stop and report 
 }
 
 function WRITING(lane) {
-  return `Queue row ${lane.queueId}. You own these files and no others: ${lane.writeSet.join(', ')}.
+  return `Queue ${rowsOf(lane)}. You own these files and no others: ${lane.writeSet.join(', ')}.
 Your branch: ${branchOf(lane)}.
 
 ${lane.brief}
@@ -329,7 +335,7 @@ function reportSchema(lane) {
     summary: { type: 'string', description: 'plain words, at most 10 lines' },
     numbers: { type: 'array', items: numberSchema(), description: 'every figure you report, with its command' },
     out_of_write_set_needs: { type: 'array', items: { type: 'string' } },
-    remaining: { type: 'string', description: 'what is left, including what you learned about work you were told not to attempt' },
+    remaining: { type: 'string', description: 'what is left, including what you learned about work you were told not to attempt; each defect with its class (wrong, crash or refuses, then /A to /D, §352.3), and each item of about ten minutes whose place is known marked small' },
   }
   const required = ['start_sha', 'base_sha', 'branch', 'worktree_path', 'outcome', 'summary', 'numbers', 'remaining']
   if (writes(lane)) {
@@ -360,7 +366,7 @@ function VERIFY(lane, r, kind) {
   const pinsOnlyNote = lane.pinsOnly === true
     ? '\nThis lane is marked pinsOnly: a verdict, a pinned test and a decisions section, nothing in src/ to revert. Skip the revert step. Instead run the new tests on the branch and watch them pass, then report tests_fail_without_fix: false with no reproduced_mutation and say in notes that pinsOnly is why -- that is the expected shape here, not a defect.'
     : ''
-  return `Check lane ${lane.label}, queue row ${lane.queueId}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
+  return `Check lane ${lane.label}, queue ${rowsOf(lane)}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
 Base: ${BASE}
 Branch: ${branchOf(lane)}
 Write set: ${lane.writeSet.join(', ')}
@@ -378,7 +384,7 @@ function MERGE(lane, prior) {
   const verifier = prior.check
     ? `the verifier's, ${prior.check.worktree_path}`
     : 'none: the dispatcher set verify: false for this lane, so your gate is the only check'
-  return `Merge queue row ${lane.queueId}, lane ${lane.label}, onto main, or say why not.
+  return `Merge queue ${rowsOf(lane)}, lane ${lane.label}, onto main, or say why not.
 Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
 The lane's write set: ${lane.writeSet.join(', ')}
 Trees to unlock: the lane's, ${r.worktree_path}; ${verifier}

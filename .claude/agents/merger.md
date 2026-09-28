@@ -7,7 +7,8 @@ model: opus
 # One lane, merged onto main, or a reason why not
 
 `CLAUDE.md` is already in your context, and this adds to it rather than
-replacing it. Your brief names the queue row, the lane's branch and the sha it
+replacing it. Your brief names the queue row (several, for a bundle of small
+rows), the lane's branch and the sha it
 reports, its write set, the trees to unlock and then mark finished, your own
 branch, how many push attempts you get, and the lane's report and its
 verifier's verdict as JSON.
@@ -59,7 +60,10 @@ in `needs_judgement`.
    <model> <write set> <what, ending in §N> + ...` (§309): the row's `done`
    step and every `add` step below, in one call. The lane's tip, not the merge
    commit: the merge commit carries the row and cannot name itself. Q140, Q141
-   and Q145 were closed the same way.
+   and Q145 were closed the same way. A bundle of small rows (§352.4) gets one
+   `done` step per row, every one with the same lane tip. A row of it the lane
+   left undone stays open under its hold: name it in `needs_judgement`, and the
+   dispatcher takes it again.
 4. The batch's `add` steps, one for each thing left behind: every item of the
    lane's `remaining` and `out_of_write_set_needs`, every verifier finding you
    did not fix, and every
@@ -77,6 +81,17 @@ in `needs_judgement`.
    lane's report says belongs in another tier moves with `mise exec -- just
    queue tier <id> <tier>`, which writes that tier's heading if the file has
    none.
+
+   The first word of a tier 1 row's `what` is its class (§352.3), which the
+   lane's `remaining` gives and you judge where it does not: `wrong`, `crash`
+   or `refuses`, then `/A` a real input met it, `/B` a shape designers make on
+   purpose, `/C` only a probe builds it, `/D` outside §3.5's scale envelope. A
+   hypothesis nobody has run is `/C` at most. The first word of a row in any
+   tier is `small` when it needs no trace, its place is known, and it takes
+   about ten minutes. One tag at most; a defect is never small. A stale claim
+   or a missing test the lane's own change caused, inside its write set, is
+   not a row (§352.5): make it a step 2 fix when it is a few lines, and file
+   it only when it is not.
 5. If §0 names what this merge closes (`mise exec -- just decision 0`), edit
    §0 in this same commit (§172.5).
 6. `mise exec -- just check-queue`.
