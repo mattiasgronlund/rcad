@@ -21,9 +21,12 @@
 //!
 //! **Neither lid goes through the apex**, and that is deliberate. A plane
 //! through the apex cuts the cone in two straight rulings rather than in a
-//! closed curve, and the arrangement folds two corners on those two rulings into
-//! one node and refuses `EdgeHasNoLength` — a defect of its own, still there,
-//! and not this file's.
+//! closed curve, which is a different question from this file's. The
+//! arrangement used to fold two corners on those two rulings into one node and
+//! refuse `EdgeHasNoLength`; it does not since `f2fc7d1d`, and
+//! `a_frustum_cut_in_half_down_its_axis.rs` measures what such a cut does now:
+//! it answers where the cutting face stays clear of the apex, and refuses where
+//! the apex is on that face.
 //!
 //! Three faces, three edges, two corners: the two lids are each half of their
 //! own ellipse, the piece of the cone between them is bounded by both arcs, and
