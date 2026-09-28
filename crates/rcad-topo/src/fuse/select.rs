@@ -1204,9 +1204,10 @@ impl InPlane {
     /// abandoned, so which one lands decides nothing. **The second is the same
     /// distance the other way**, and it is what a plane out at `1e308` needs,
     /// where stepping further from the origin overflows and stepping towards it
-    /// cannot. `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` is where
-    /// that runs: with only the first try the fuse there stops before reaching
-    /// any arithmetic. Stepping towards the origin *first* was measured too, and
+    /// cannot. `two_towers_1e308_tall_are_united_by_proof_alone` in
+    /// `tests/fusing_solids.rs` is where that runs, and the fuse there now
+    /// answers: with only the first try it refuses on [`OFF_A_PLANE`] before it
+    /// reaches any arithmetic. Stepping towards the origin *first* was measured too, and
     /// it is the 37.9% again — a face far from the origin ends up with a
     /// reference point a whole offset away from it, and the fan degenerates.
     pub(crate) fn of(plane: &Plane) -> Option<Self> {
@@ -1784,13 +1785,28 @@ fn the_largest_number_placing(surface: &Surface) -> Option<f64> {
     }
 }
 
-/// Halfway between two points, which is exact whenever both ends are.
+/// Halfway between two points, which is exact whenever both ends are and the
+/// middle is a double.
+///
+/// **Two ways to halve, and each is exact where the other is not.** Adding
+/// first overflows once the two ends add up past the largest double: two
+/// corners at `z = 1e308` make `2e308`, and every point blended from a tower's
+/// top came back as a box reaching up to infinity, which no winding could
+/// place (`docs/decisions.md` §353). Halving first loses the last bit of a
+/// subnormal end. Both enclose the same middle, so the part they share does
+/// too, and it is one double whenever either of them was.
 fn midway_between(one: PredicatePoint, other: PredicatePoint) -> PredicatePoint {
     let (one, other) = (one.enclosure(), other.enclosure());
     let half = Interval::exactly(0.5);
-    as_exact_as_it_is(PredicatePoint::Constructed(
-        [0, 1, 2].map(|axis| (one[axis] + other[axis]) * half),
-    ))
+    as_exact_as_it_is(PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+        let added_first = (one[axis] + other[axis]) * half;
+        let halved_first = one[axis] * half + other[axis] * half;
+        Interval::new(
+            added_first.lo().max(halved_first.lo()),
+            added_first.hi().min(halved_first.hi()),
+        )
+        .expect("two enclosures of one middle both hold it")
+    })))
 }
 
 /// The name the search for a point inside a piece goes by in provenance records.

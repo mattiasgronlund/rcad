@@ -8,10 +8,8 @@
 //! the numbers can be compared with `==`.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{
-    Approximation, Cause, Level, Point as PredicatePoint, Policy, ProvenanceLog,
-};
-use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
+use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
+use rcad_topo::{Containment, Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
 
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -539,74 +537,109 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
     );
 }
 
-/// The other half of criterion 7. Two towers `1e308` tall overlap, a decision
-/// the answer depends on is not proved, and a certified policy refuses rather
-/// than guessing.
+/// Two towers `1e308` tall, a certified fuse settles them, and nothing it
+/// decided is left in the log.
 ///
-/// **Which decision that is moved in §324, and whether it can be proved is not
-/// yet traced.** This used to refuse on `orient3d`, whose products overflowed
-/// and which the retry of the day could not bring into range. `orient3d` now
-/// tries a second power of two, which takes `1e308` down to `2^338`, and
-/// decides it. What is left is one record from a different predicate, "a point
-/// inside a piece of a face", at `Level::Interval` with an infinite enclosure,
-/// on the quarter of the first tower's top that the second tower's wall cuts
-/// off. That predicate is in `rcad-topo`'s source, and whether this refusal is
-/// a limit or a gap (§16.10) has not been looked at, so the name of this test
-/// is a claim nobody has checked for this record yet.
+/// **This was criterion 7's refusing half, and three times the refusal was a
+/// gap.** At `1e200` it was `InPlane::of` stepping off the towers' top by a
+/// fixed distance, which vanishes into a plane that far out (§19.5). At `1e308`
+/// it was `orient3d`'s products overflowing, until its retry learned a second
+/// power of two (§324.6). Then it was "a point inside a piece of a face", on the
+/// quarter of the first tower's top that the second tower's wall cuts off: every
+/// candidate there is half way between two corners at `z = 1e308`, and adding
+/// the two first came to `2e308`, so each candidate was a box reaching from
+/// `9e307` to infinity and no winding could place one. The middle is `1e308`,
+/// a double, and halving first reaches it (`docs/decisions.md` §353).
 ///
-/// **This test asked the same question at `1e200` and got the right answer for
-/// the wrong reason.** What refused there was not the arithmetic: it was
-/// `InPlane::of` stepping off a plane by a fixed distance, which vanishes into a
-/// plane that far out, so the fuse never reached a predicate at all. The
-/// companion below is the same pair at `1e200`, now settled and measured, and
-/// `a_solid_a_long_way_from_the_origin.rs` is where that defect is written up. A
-/// refusal is only worth having as a demonstration when it is the arithmetic
-/// that refused, which is the distinction `docs/decisions.md` §15.8 draws
-/// between a refusal and a deserved one.
+/// An answer at all also says `InPlane::of`'s second reach ran: the first,
+/// `1e308` further out along the top's normal, overflows, and without the
+/// second the fuse refuses on "a point off a face's plane" before it reaches
+/// any arithmetic.
+///
+/// The volume is not the oracle here, as it is for the companion below: the
+/// walls' area adds up past the largest `f64`, and `measure` refuses with
+/// `SurfaceAreaTooLargeToMeasure`. The top's outline is, and so is where a
+/// point is — though not a point *on* the top, which `holds.rs`'s own step off
+/// a plane at `1e308` cannot place yet (§353).
 #[test]
-fn a_fuse_that_needs_a_decision_nothing_can_prove_refuses() {
+fn two_towers_1e308_tall_are_united_by_proof_alone() {
     let mut model = a_model();
     let one = tower(&mut model, Vector::new(0.0, 0.0, 0.0), 1e308);
     let other = tower(&mut model, Vector::new(0.5, 0.5, 0.0), 1e308);
 
-    let refused = model.fuse(
-        &[one],
-        &[other],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
+    let mut log = ProvenanceLog::new();
+    let united = model
+        .fuse(&[one], &[other], Rule::Union, &Policy::certified(), &mut log)
+        .expect("every decision the union of two towers needs is one f64 can prove");
+
+    assert!(
+        log.is_empty(),
+        "a fuse of two lattice-aligned towers proves everything it decides: {log:?}"
+    );
+    let [solid] = united.solids() else {
+        panic!("two towers that overlap unite into one: {united:?}");
+    };
+    let solid = model.solid(*solid).expect("this model made the key");
+    assert_eq!(
+        solid.faces().count(),
+        10,
+        "eight walls round the outline of two overlapping squares, a top and a bottom"
     );
 
-    match refused {
-        Err(Error::Undecidable { records }) => {
-            let [record] = records.records() else {
-                panic!("the fuse stops at one undecided decision: {records:?}");
-            };
-            assert_eq!(record.predicate(), "a point inside a piece of a face");
-            assert_eq!(record.level(), Level::Interval);
-            assert_eq!(record.enclosure(), f64::INFINITY);
-            assert_eq!(
-                record.inputs(),
-                [
-                    [0.5, -0.0, 1e308],
-                    [1.0, -0.0, 1e308],
-                    [1.0, 0.5, 1e308],
-                    [0.5, 0.5, 1e308],
-                ]
-                .map(PredicatePoint::Exact),
-                "the quarter of the first tower's top that the second tower's wall cuts off"
-            );
-            assert!(
-                records
-                    .records()
-                    .iter()
-                    .all(|record| record.predicate() != "a point off a face's plane"),
-                "the fuse got as far as the arithmetic: a plane at 1e308 is what \
-                 `InPlane::of`'s second reach — the same distance towards the origin \
-                 instead of away from it — is for, and this is where it runs: {records:?}"
-            );
-        }
-        other => panic!("nothing in f64 can settle that pair: {other:?}"),
+    let tops: Vec<Vec<Vec<Point>>> = solid
+        .faces()
+        .map(|face| face.wires().map(|wire| wire.points().collect()).collect())
+        .filter(|wires: &Vec<Vec<Point>>| {
+            wires
+                .iter()
+                .flatten()
+                .all(|corner| corner.coordinates()[2] == 1e308)
+        })
+        .collect();
+    let [top] = tops.as_slice() else {
+        panic!("one face across the top of both towers: {tops:?}");
+    };
+    let [outline] = top.as_slice() else {
+        panic!("the top has no hole in it: {top:?}");
+    };
+    let mut corners: Vec<[f64; 2]> = outline
+        .iter()
+        .map(|corner| [corner.coordinates()[0], corner.coordinates()[1]])
+        .collect();
+    corners.sort_by(|one, other| one.partial_cmp(other).expect("corners are numbers"));
+    assert_eq!(
+        corners,
+        [
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [0.5, 1.0],
+            [0.5, 1.5],
+            [1.0, 0.0],
+            [1.0, 0.5],
+            [1.5, 0.5],
+            [1.5, 1.5],
+        ],
+        "the top keeps the quarter of the first tower's top outside the second, \
+         the piece that used to refuse"
+    );
+
+    for (x, y, z, expected) in [
+        (0.25, 0.25, 5e307, Containment::Inside),
+        (0.75, 0.25, 5e307, Containment::Inside),
+        (0.75, 0.75, 5e307, Containment::Inside),
+        (1.25, 1.25, 5e307, Containment::Inside),
+        (1.25, 0.25, 5e307, Containment::Outside),
+        (0.25, 1.25, 5e307, Containment::Outside),
+        (0.75, 0.25, 1.5e308, Containment::Outside),
+        (0.75, 0.25, 0.0, Containment::OnBoundary),
+    ] {
+        let mut log = ProvenanceLog::new();
+        assert_eq!(
+            solid.classify_point(Point::new(x, y, z), &Policy::certified(), &mut log),
+            expected,
+            "({x}, {y}, {z:e})"
+        );
+        assert!(log.is_empty(), "({x}, {y}, {z:e}): {log:?}");
     }
 }
 
