@@ -258,18 +258,12 @@ impl Exact {
         if exponent == 0 {
             return Some(self.clone());
         }
-        let mut slid = self.0.clone();
-        for entry in &mut slid {
-            if *entry == 0.0 {
-                continue;
-            }
-            let moved = multiplied_by_a_power_of_two(*entry, exponent);
-            if !moved.is_normal() {
-                return None;
-            }
-            *entry = moved;
-        }
-        Some(Exact(slid))
+        let slid: Option<Vec<f64>> = self
+            .0
+            .iter()
+            .map(|entry| slid_exactly(*entry, exponent))
+            .collect();
+        Some(Exact(slid?))
     }
 
     /// This times `other`, exactly, or `None` when one of the products it needs
@@ -480,6 +474,21 @@ pub(crate) fn binary_exponent(value: f64) -> i32 {
 pub(crate) fn multiplied_by_a_power_of_two(value: f64, exponent: i32) -> f64 {
     let half = exponent / 2;
     value * 2f64.powi(half) * 2f64.powi(exponent - half)
+}
+
+/// `value * 2^exponent`, or `None` where that is not exactly `value` moved.
+///
+/// A power of two only changes the exponent field while the answer is a normal
+/// number. Past the top it is infinity, and below the bottom it is rounded onto
+/// the subnormal grid, and either way it stands for a different number. So an
+/// answer that is not normal is refused, and a zero, which slides to itself, is
+/// not.
+pub(crate) fn slid_exactly(value: f64, exponent: i32) -> Option<f64> {
+    if value == 0.0 {
+        return Some(value);
+    }
+    let moved = multiplied_by_a_power_of_two(value, exponent);
+    moved.is_normal().then_some(moved)
 }
 
 /// A number worked out from stored `f64` the way [`Exact`] works one out, and a

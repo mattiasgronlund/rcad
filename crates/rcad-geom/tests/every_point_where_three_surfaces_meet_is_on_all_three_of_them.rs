@@ -34,15 +34,20 @@
 mod crossings;
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, FileFailurePersistence, RngAlgorithm, TestRng, TestRunner};
+use proptest::test_runner::{
+    Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
+};
 use rcad_geom::{
     Axis, Cone, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Torus, Vector,
     meet_of_three_surfaces,
 };
-use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
+use rcad_predicates::{
+    Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
+};
 
 use crossings::{
-    Corner, a_corner_somewhere_else, a_lattice_corner, a_leaning_corner, a_turned_corner,
+    Corner, Elsewhere, Piece, a_corner_somewhere_else, a_lattice_corner, a_leaning_corner,
+    a_turned_corner,
 };
 
 /// How many triples each measured row draws.
@@ -109,6 +114,78 @@ fn every_point_where_three_turned_surfaces_meet_is_on_all_three_of_them() {
 fn every_point_where_three_surfaces_meet_somewhere_else_in_f64_is_on_all_three_of_them() {
     let measured = meet_every_triple(a_corner_somewhere_else(), "somewhere else");
     assert!(measured.worst_box < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+}
+
+/// The triple the proptest seed `e0a2a205` shrank to, by name: the planes
+/// `y = 2` and `z = 0` and a ball of radius three about `(0, 1, 0)`, every
+/// number multiplied by `2⁻⁵²⁸`, so about `1e-159` across.
+///
+/// Every product of two of those numbers is near `2⁻¹⁰⁵⁶`, among the
+/// subnormals, where each one loses bits. §322.4 kept the triple refused, because
+/// the box round what was lost is a millionth of the shape wide. Slid up the
+/// range by a power of two it is the same three surfaces at size one, and a slide
+/// is exact both ways while every number stays normal.
+///
+/// **So the oracle is the triple at home**: the same three written at `2⁰` meet
+/// at two corners, and these two are those, every end of every box moved down
+/// `2⁻⁵²⁸` and not one bit different. Then the first oracle of this file on top:
+/// on all three, and decided against each one moved clear.
+#[test]
+fn two_planes_and_a_ball_written_about_1e_159_across_meet_where_the_same_three_do_at_home() {
+    let tiny = Corner {
+        first: Piece::Flat {
+            normal: [0, 1, 0],
+            at: 2,
+        },
+        second: Piece::Flat {
+            normal: [0, 0, 1],
+            at: 0,
+        },
+        third: Piece::Ball {
+            centre: [0, 1, 0],
+            radius: 3,
+        },
+        turn: None,
+        elsewhere: Elsewhere {
+            scale: -528,
+            shift: None,
+        },
+    };
+    let at_home = Corner {
+        elsewhere: Elsewhere::here(),
+        ..tiny
+    };
+    let [answer, home] = [tiny, at_home].map(|corner| {
+        let surfaces = corner.surfaces();
+        meet_of_three_surfaces(
+            [&surfaces[0], &surfaces[1], &surfaces[2]],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+    });
+    let home = home.expect("the lattice triple is answered");
+    let MeetOfThree::At(home_points) = &home else {
+        panic!("a line through a ball's middle meets it twice, not {home:?}");
+    };
+    let answer = answer.expect("the same triple 2^-528 across is answered");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("a line through a ball's middle meets it twice, not {answer:?}");
+    };
+    assert_eq!(
+        points.iter().map(both_ends_of).collect::<Vec<_>>(),
+        home_points
+            .iter()
+            .map(|point| both_ends_of(point).map(|side| side.map(|end| end * 2f64.powi(-528))))
+            .collect::<Vec<_>>(),
+        "the corners 2^-528 across are the corners at home moved down, bit for bit"
+    );
+
+    let surfaces = tiny.surfaces();
+    for point in points {
+        if let Err(why) = on_all_three_and_clear_of_each_moved(&surfaces, tiny.how_big(), *point) {
+            panic!("{why}");
+        }
+    }
 }
 
 /// **§31.7's criterion 7.** Three surfaces of which fewer than two are flat are
@@ -258,27 +335,7 @@ fn meet_every_triple(strategy: impl Strategy<Value = Corner>, what: &str) -> Mea
             // `Surface::ROUND_TRIP_ROUNDOFF`'s wording).
             let scale = the_largest_number_involved(size, *point);
             worst_box.set(worst_box.get().max(point.uncertainty() / scale));
-            let mut on_all_three = true;
-            for surface in &surfaces {
-                match which_side_of(surface, *point) {
-                    Decision::Zero => (),
-                    Decision::Undecidable { .. } => on_all_three = false,
-                    decided => prop_assert!(
-                        false,
-                        "a point where three surfaces meet was certified {:?} off {:?}: {:?}",
-                        decided,
-                        surface,
-                        point
-                    ),
-                }
-                prop_assert!(
-                    which_side_of(&moved_clear(surface, scale), *point).is_certified(),
-                    "the same box against {:?} moved comfortably clear was not decided: {:?}",
-                    surface,
-                    point
-                );
-            }
-            if on_all_three {
+            if on_all_three_and_clear_of_each_moved(&surfaces, size, *point)? {
                 certified_zero.set(certified_zero.get() + 1);
             }
         }
@@ -306,6 +363,122 @@ fn meet_every_triple(strategy: impl Strategy<Value = Corner>, what: &str) -> Mea
         measured.worst_box,
     );
     measured
+}
+
+/// Both halves of the oracle for one point, and whether it came out certified
+/// on all three surfaces.
+///
+/// **Asked with the point and the three surfaces slid together to about size
+/// one**, by a power of two, which is the same question at another size. That
+/// is not the oracle being eased. Two planes and a ball `2⁻⁵²⁸` across that
+/// touch at `(0, 2⁻⁵²⁸, 0)` meet in a box of no width at all, and the ball moved
+/// a millionth of its size clear of it is `2·2⁻⁵²⁸·2⁻⁵⁴⁸` away in `‖p − c‖² − R²`,
+/// under the smallest subnormal. No box is tight enough for the side question
+/// to be decided there, and at size one this one is.
+fn on_all_three_and_clear_of_each_moved(
+    surfaces: &[Surface; 3],
+    size: f64,
+    point: PredicatePoint,
+) -> Result<bool, TestCaseError> {
+    let scale = the_largest_number_involved(size, point);
+    let up = -(scale.log2().floor() as i32);
+    let point = slid_outward(point, up);
+    let mut on_all_three = true;
+    for surface in surfaces {
+        let surface = slid(surface, up);
+        match which_side_of(&surface, point) {
+            Decision::Zero => (),
+            Decision::Undecidable { .. } => on_all_three = false,
+            decided => prop_assert!(
+                false,
+                "a point where three surfaces meet was certified {:?} off {:?}: {:?}",
+                decided,
+                surface,
+                point
+            ),
+        }
+        prop_assert!(
+            which_side_of(&moved_clear(&surface, slid_exactly(scale, up)), point).is_certified(),
+            "the same box against {:?} moved comfortably clear was not decided: {:?}",
+            surface,
+            point
+        );
+    }
+    Ok(on_all_three)
+}
+
+/// A box moved by `2^exponent`, each end exactly where it stays a normal number
+/// and one step further out where it does not.
+fn slid_outward(point: PredicatePoint, exponent: i32) -> PredicatePoint {
+    let outward = |end: f64, step: fn(f64) -> f64| {
+        let moved = end * 2f64.powi(exponent);
+        if end == 0.0 || moved.is_normal() {
+            moved
+        } else {
+            step(moved)
+        }
+    };
+    PredicatePoint::Constructed(point.enclosure().map(|side| {
+        Interval::new(
+            outward(side.lo(), f64::next_down),
+            outward(side.hi(), f64::next_up),
+        )
+        .expect("both ends moved the same way")
+    }))
+}
+
+/// The same surface with space scaled by `2^exponent`: every length multiplied
+/// and every direction, normal and slope left as its bits are.
+fn slid(surface: &Surface, exponent: i32) -> Surface {
+    let by = |value: f64| slid_exactly(value, exponent);
+    let place = |at: Point| Point::from(at.coordinates().map(by));
+    match surface {
+        Surface::Plane(flat) => {
+            Surface::Plane(flat.moved_to(by(flat.offset())).expect("a finite offset"))
+        }
+        Surface::Sphere(ball) => Surface::Sphere(
+            Sphere::new(place(ball.centre()), by(ball.radius())).expect("a radius"),
+        ),
+        Surface::Cylinder(pipe) => Surface::Cylinder(
+            Cylinder::new(
+                pipe.axis()
+                    .moved_to(place(pipe.axis().origin()))
+                    .expect("a finite origin"),
+                by(pipe.radius()),
+            )
+            .expect("a radius"),
+        ),
+        Surface::Cone(cone) => Surface::Cone(
+            Cone::new(
+                cone.axis()
+                    .moved_to(place(cone.apex()))
+                    .expect("a finite apex"),
+                cone.slope(),
+            )
+            .expect("the same slope"),
+        ),
+        Surface::Torus(ring) => Surface::Torus(
+            Torus::new(
+                ring.axis()
+                    .moved_to(place(ring.centre()))
+                    .expect("a finite centre"),
+                by(ring.ring_radius()),
+                by(ring.tube_radius()),
+            )
+            .expect("the same two radii"),
+        ),
+        other => panic!("nothing here can slide {other:?}"),
+    }
+}
+
+/// `value * 2^exponent`, which has to be exactly that.
+fn slid_exactly(value: f64, exponent: i32) -> f64 {
+    let moved = value * 2f64.powi(exponent);
+    assert!(
+        value == 0.0 || moved.is_normal(),
+        "{value:e} does not slide by 2^{exponent} exactly"
+    );
+    moved
 }
 
 /// The same surface moved comfortably clear of where it was.
@@ -393,6 +566,11 @@ fn middles_of(answer: &MeetOfThree) -> Vec<[f64; 3]> {
         .iter()
         .map(|point| point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0))
         .collect()
+}
+
+/// Both ends of each side of a box, as they are stored.
+fn both_ends_of(point: &PredicatePoint) -> [[f64; 2]; 3] {
+    point.enclosure().map(|side| [side.lo(), side.hi()])
 }
 
 fn a_runner(cases: u32) -> TestRunner {
