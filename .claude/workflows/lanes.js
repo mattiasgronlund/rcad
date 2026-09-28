@@ -12,7 +12,8 @@
 // lane, then its verifier, then a merger that lands it on main, closes the row
 // and hands back about twenty lines. The merge used to be the dispatcher's, in
 // its own context, and was most of what that context grew by. Several lanes in
-// one run still work; their merges wait for one another.
+// one run still work; their merges wait for one another. A run that merged then
+// removes its own three worktrees (§315).
 //
 // Invoke it as the `lanes` workflow, which is `meta.name` below and not this
 // file's name: Claude Code loads `.claude/workflows/*.js`, parses `meta`, and
@@ -54,6 +55,7 @@ export const meta = {
     { title: 'Work', detail: 'one isolated worktree per lane' },
     { title: 'Verify', detail: 're-derive each writing lane\'s claims from its branch', model: 'sonnet' },
     { title: 'Merge', detail: 'one at a time: merge onto origin/main, close the row, gate, push', model: 'opus' },
+    { title: 'Prune', detail: 'remove the worktrees a merged run leaves', model: 'haiku' },
   ],
 }
 
@@ -97,7 +99,10 @@ const results = await pipeline(
   (prior, lane) => {
     if (prior.stop) return handedBack(lane, prior)
     if (!writes(lane)) return { lane: lane.label, answer: prior.report }
-    return mergeAfterTheLast(lane, prior).then((merge) => merged(lane, prior, merge))
+    return mergeAfterTheLast(lane, prior).then((merge) => {
+      const row = merged(lane, prior, merge)
+      return row.merged ? pruned(lane, row, treesOf(prior).concat(merge.worktree_path)) : row
+    })
   },
 )
 
@@ -245,6 +250,33 @@ function merged(lane, prior, m) {
   return row
 }
 
+// The merger marked the lane's tree, the verifier's and its own with `just
+// mark-finished`, so `prune-worktrees` removes them now rather than an hour
+// from now (§315.2). It runs here and not in the merger because it keeps the
+// tree it is run from, and the merger's own is one of the three; from here it
+// runs in the dispatcher's tree, which it keeps for the same reason. The exact
+// command is the one `.claude/settings.json` allows, so nothing has to ask.
+//
+// A throw is caught here, and only here, because by now the row has merged and
+// a thrown stage would report it as not merged. A session started before
+// `pruner.md` existed cannot resolve the type and throws (§266.6).
+function pruned(lane, row, trees) {
+  return agent(PRUNE(trees), {
+    label: `prune:${lane.label}`,
+    phase: 'Prune',
+    agentType: 'pruner',
+    schema: prunedSchema(),
+    model: 'haiku',
+  }).then((p) => {
+    if (!p) row.lines.push('prune: the agent returned nothing, so the run\'s worktrees may still be on disk')
+    else for (const l of p.lines) row.lines.push(`prune: ${l}`)
+    return row
+  }, (e) => {
+    row.lines.push(`prune: did not run (${e && e.message}), so the run's worktrees are still on disk`)
+    return row
+  })
+}
+
 function handedBack(lane, prior) {
   const row = { row: lane.queueId, branch: branchOf(lane), merged: false, lines: [`${lane.label}: not merged -- ${prior.stop}`] }
   if (prior.report) {
@@ -350,6 +382,7 @@ function MERGE(lane, prior) {
 Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
 The lane's write set: ${lane.writeSet.join(', ')}
 Trees to unlock: the lane's, ${r.worktree_path}; ${verifier}
+Only if your push went through, after unlocking your own tree: mise exec -- just mark-finished ${treesOf(prior).join(' ')} <your own tree>
 Your first commands, in this order:
   git log --oneline -1
   git fetch origin
@@ -360,6 +393,13 @@ Push attempts: at most ${MERGE_ATTEMPTS}.
 The lane's report (JSON): ${JSON.stringify(r)}
 
 The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
+}
+
+function PRUNE(trees) {
+  return `Run this, once, and nothing else:
+  mise exec -- just prune-worktrees
+Then report, verbatim, every line of its output that names one of these worktrees, and its last line:
+${trees.map((t) => `  ${t}`).join('\n')}`
 }
 
 function verdictSchema(kind) {
@@ -413,9 +453,10 @@ function numberSchema() {
 function mergedSchema() {
   return {
     type: 'object',
-    required: ['start_sha', 'merge_branch', 'merged', 'push_attempts', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
+    required: ['start_sha', 'worktree_path', 'merge_branch', 'merged', 'push_attempts', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
     properties: {
       start_sha: { type: 'string', description: 'what git log -1 said before your switch' },
+      worktree_path: { type: 'string', description: 'the output of git rev-parse --show-toplevel run in your OWN tree' },
       merge_branch: { type: 'string' },
       merged: { type: 'boolean', description: 'true only when your push to origin/main went through' },
       merged_sha: { type: 'string', description: 'the sha you pushed to origin/main' },
@@ -428,6 +469,16 @@ function mergedSchema() {
       unlocked: { type: 'array', items: { type: 'string' } },
       not_merged_because: { type: 'string' },
       needs_judgement: { type: 'array', items: { type: 'string' }, description: 'only what the dispatcher must decide, one line each' },
+    },
+  }
+}
+
+function prunedSchema() {
+  return {
+    type: 'object',
+    required: ['lines'],
+    properties: {
+      lines: { type: 'array', items: { type: 'string' }, description: 'each output line that names one of the worktrees, then the last line, all verbatim' },
     },
   }
 }
