@@ -378,3 +378,11 @@ nothing. Both new checks fail without their fix, as the mutants above show.
    counts, each line marked `(served from b2c83780)`. The 43 steps it ran all
    passed. It took 7 s more than §337.1's 44 s, which left out the new
    selftest and was timed on a quieter machine.
+5. The landing gate, on `e214ddc7`, the branch merged with an `origin/main`
+   that had moved a test file, ran every step in **5m34s**: `gate: PASS`, 2682
+   tests run, 2682 passed, 11 skipped, and 25 doc tests passed.
+6. While it ran, `main` moved again, by a merge that touched only
+   `docs/decisions.d/250-*.md` and `docs/queue.md`. So the push was refused as
+   not a fast-forward, which is the case §337.1 counted 117 times. The branch
+   merged `main` again as `3c92df7b`, and its gate was **served from
+   `e214ddc7` in 47.5 s**. That was pushed to `main`.
