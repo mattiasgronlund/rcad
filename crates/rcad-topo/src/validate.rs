@@ -43,7 +43,8 @@ impl Model {
     ///   model through views and a view over a missing slot panics rather than
     ///   refusing ([`check_keys_resolve_in`]),
     /// - no coordinate is infinite and no edge has zero length,
-    /// - every edge is used by exactly two coedges running opposite ways,
+    /// - every edge is used by exactly two coedges running opposite ways, both
+    ///   from the one shell,
     /// - every wire closes back on itself and has enough steps to bound
     ///   something: three, or one edge that closes already, or two different
     ///   edges that are not both straight,
@@ -129,8 +130,10 @@ impl Model {
     /// - **Sharing is still counted over the whole model.** A coedge, wire, face
     ///   or shell this solid reaches that some other owner names too is refused
     ///   as [`Invalid::UsedMoreThanOnce`], and an edge walked by a coedge of
-    ///   another solid is counted with it. Ignoring the other owner would pass a
-    ///   solid that a change to its neighbour silently changes.
+    ///   another solid is counted with it and refused as
+    ///   [`Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells`]. Ignoring the other
+    ///   owner would pass a solid that a change to its neighbour silently
+    ///   changes.
     /// - **Orphans are not asked about.** Everything this looks at is reached
     ///   through what owns it, so none of it can be an orphan. A coedge, wire,
     ///   face or shell that nothing owns belongs to no solid, and whether a model
@@ -299,6 +302,7 @@ impl Model {
     /// [`Invalid::VertexNotFinite`], [`Invalid::FaceHasNoWires`],
     /// [`Invalid::WireTooShort`], [`Invalid::WireDoesNotClose`],
     /// [`Invalid::EdgeCoedgeCount`], [`Invalid::CoedgesRunTheSameWay`],
+    /// [`Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells`],
     /// [`Invalid::AFlatFaceIsUsedReversed`] or
     /// [`Invalid::AFaceUseCarriesAPlacement`], naming the first one that does
     /// not hold.
@@ -595,31 +599,54 @@ impl Model {
 
     /// An edge walked by exactly two coedges, running opposite ways — which is
     /// what says the two faces meeting there agree which side the material is
-    /// on.
+    /// on — and both of them from the one shell, which is what says that shell
+    /// closes along this edge on its own.
+    ///
+    /// **Counting coedges over the whole model is not enough on its own.** A
+    /// skin shared out between two shells still has two coedges running
+    /// opposite ways along every edge of the cut, one from each side, so the
+    /// count passed a cube whose six faces were split between two solids
+    /// (`docs/decisions.md` §342). The shell is read off the index, one lookup
+    /// per level, so this stays a question about one edge and costs no sweep.
+    ///
+    /// A coedge that no wire walks, a wire on no face, or a face in no shell
+    /// has no shell to compare, and is left to the checks that refuse an
+    /// orphan by name. `Deserialize` has refused all three before it asks this.
     ///
     /// Shared with [`Model::check_touched_edge`] for the reason
     /// [`Model::check_wire_closes`] gives.
     ///
     /// # Errors
     ///
-    /// [`Invalid::EdgeCoedgeCount`] or [`Invalid::CoedgesRunTheSameWay`].
+    /// [`Invalid::EdgeCoedgeCount`], [`Invalid::CoedgesRunTheSameWay`] or
+    /// [`Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells`].
     pub(crate) fn check_edge_is_walked_by_two_opposite_coedges(
         &self,
         slot: EdgeSlot,
     ) -> Result<()> {
-        let coedges = self.index().coedges_of_edge(slot);
-        if coedges.len() != 2 {
+        let &[one, other] = self.index().coedges_of_edge(slot) else {
             return Err(Invalid::EdgeCoedgeCount {
-                count: coedges.len(),
+                count: self.index().coedges_of_edge(slot).len(),
             }
             .into());
-        }
-        if self.data().coedges[coedges[0]].orientation
-            == self.data().coedges[coedges[1]].orientation
-        {
+        };
+        if self.data().coedges[one].orientation == self.data().coedges[other].orientation {
             return Err(Invalid::CoedgesRunTheSameWay.into());
         }
+        if let (Some(one), Some(other)) = (self.shell_of_coedge(one), self.shell_of_coedge(other))
+            && one != other
+        {
+            return Err(Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells.into());
+        }
         Ok(())
+    }
+
+    /// The shell whose skin this coedge is part of, through its wire and that
+    /// wire's face, or `None` where one of those links is missing.
+    fn shell_of_coedge(&self, coedge: CoedgeSlot) -> Option<ShellSlot> {
+        let wire = self.index().wire_of_coedge(coedge)?;
+        let face = self.index().face_of_wire(wire)?;
+        self.index().shell_of_face(face)
     }
 
     /// Every face on the surface it says it is on, wound the way its wires say,
@@ -3716,6 +3743,75 @@ mod tests {
                 count: 2
             }
         );
+    }
+
+    /// **Every way of sharing a cube's six faces, or a round bar's three,
+    /// out between two solids is refused by name**: by the sweep, by
+    /// `validate_solid` of either half, and by `check_shape_is_possible`,
+    /// which is the check `Deserialize` runs.
+    ///
+    /// Each half is an open skin and every edge along the cut is walked once
+    /// from each half. Counted over the model, those edges still have two
+    /// coedges running opposite ways, so the count alone let every one of
+    /// these through the door (`docs/decisions.md` §342).
+    /// `tests/a_skin_that_closes_only_with_another_never_reads_back.rs` shows
+    /// the door refusing the same 34 as bytes, where postcard drops the name.
+    #[test]
+    fn a_skin_shared_out_between_two_solids_is_caught_every_way_it_can_be_cut() {
+        let certified = Policy::certified();
+        let mut cuts = 0;
+        for (whole, faces) in [(a_cube(), 6), (a_round_bar(), 3)] {
+            for mask in 1u32..(1 << faces) - 1 {
+                if mask & 1 == 0 {
+                    continue;
+                }
+                let first: Vec<usize> = (0..faces).filter(|&at| mask & (1 << at) != 0).collect();
+                let model = shared_out_between_two_solids(whole.clone(), &first);
+
+                assert_eq!(
+                    refusal(&model),
+                    Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells,
+                    "{first:?} of {faces} faces"
+                );
+                for half in model.solids() {
+                    match model.validate_solid(half.key(), &certified, &mut ProvenanceLog::new()) {
+                        Err(Error::Invalid(Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells)) => {}
+                        other => panic!("a half of {first:?} of {faces} faces gave {other:?}"),
+                    }
+                }
+                assert!(
+                    matches!(
+                        model.check_shape_is_possible(),
+                        Err(Error::Invalid(
+                            Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells
+                        ))
+                    ),
+                    "the door let {first:?} of {faces} faces in"
+                );
+                cuts += 1;
+            }
+        }
+        assert_eq!(cuts, 31 + 3);
+    }
+
+    /// A model holding one solid of one shell, with the faces at the places
+    /// `first` names kept in that shell and the rest moved to a shell of their
+    /// own, used by a new solid.
+    fn shared_out_between_two_solids(mut model: Model, first: &[usize]) -> Model {
+        let shell = model.data().shells.keys().next().expect("one skin");
+        let every_face = std::mem::take(&mut model.data_mut().shells[shell].faces);
+        let (kept, moved): (Vec<_>, Vec<_>) = every_face
+            .into_iter()
+            .enumerate()
+            .partition(|(at, _)| first.contains(at));
+        model.data_mut().shells[shell].faces = kept.into_iter().map(|(_, used)| used).collect();
+        let other = model.add_shell(moved.into_iter().map(|(_, used)| used).collect());
+        model.add_solid(smallvec::smallvec![ShellUse {
+            shell: other,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]);
+        model
     }
 
     /// The refusing half of the curved-face check.
