@@ -1844,11 +1844,34 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, candidate_points, corners_of, every_picker_keeps,
+        InPlane, Piece, candidate_points, corners_of, every_picker_keeps, midway_between,
         the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::{FaceMeet, MeetPoint};
+
+    /// Adding first overflows here: `1e308 + 1.5e308` is past the largest
+    /// double, and the middle, `1.25e308`, is not.
+    #[test]
+    fn the_middle_of_two_corners_past_half_the_largest_double_is_exact() {
+        let middle = midway_between(
+            PredicatePoint::from([0.5, -1e308, 1e308]),
+            PredicatePoint::from([1.0, -1.5e308, 1.5e308]),
+        );
+        assert_eq!(middle, PredicatePoint::Exact([0.75, -1.25e308, 1.25e308]));
+    }
+
+    /// Halving first loses the last bit of the smallest subnormal: half of
+    /// `2⁻¹⁰⁷⁴` is no double. The middle of it and `3 × 2⁻¹⁰⁷⁴` is `2⁻¹⁰⁷³`, which is.
+    #[test]
+    fn the_middle_of_two_subnormal_corners_is_exact() {
+        let smallest = f64::from_bits(1);
+        let middle = midway_between(
+            PredicatePoint::from([smallest, 0.0, 0.0]),
+            PredicatePoint::from([3.0 * smallest, 0.0, 0.0]),
+        );
+        assert_eq!(middle, PredicatePoint::Exact([2.0 * smallest, 0.0, 0.0]));
+    }
 
     /// The torus `a_quarter_bend(4, 1)` is drawn on, and the plane `y = 0` its
     /// end cap lies on.
