@@ -427,12 +427,14 @@ fn a_frustum_cut_by_a_block_and_a_far_cube_unite_one_way_and_not_the_other() {
 
 /// The same frustum and block, and a small cube standing in the frustum.
 ///
-/// Refuses the same way as the far cube does, on the same unjoined cone pieces,
-/// so a cube that does touch the answer changes nothing about which grouping
-/// refuses.
+/// Q102 fixed the unjoined cone pieces this used to refuse on. `(block ∪
+/// cone) ∪ third` now refuses one step later, at the second union:
+/// `Undecidable` on a point in a piece that every solid could place — the
+/// same refusal Q102 worked on, still unresolved for this trio.
 #[test]
-#[ignore = "associativity: frustum cut by a block, cube inside the frustum — (block ∪ frustum) ∪ \
-            cube is AFaceMeetsItsNeighbourOnItsOwnSurface (cone pieces left unjoined)"]
+#[ignore = "associativity: frustum cut by a block, cube inside the frustum — (block ∪ cone) ∪ \
+            third refuses at the second union: Undecidable on a point in a piece that every \
+            solid could place"]
 fn a_frustum_cut_by_a_block_and_a_cube_in_the_frustum_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: Pair::BesideABlock {
