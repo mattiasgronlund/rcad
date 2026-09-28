@@ -3496,13 +3496,13 @@ mod tests {
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             );
-            let agrees = match (holds, &crossed) {
-                (Decision::Zero, Ok(SurfaceMeet::Curves(runs))) => runs.len() == 2,
-                (
-                    Decision::Neg,
-                    Err(rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic),
-                ) => true,
-                _ => false,
+            let agrees = if holds == Decision::Zero {
+                matches!(&crossed, Ok(SurfaceMeet::Curves(runs)) if runs.len() == 2)
+            } else {
+                matches!(
+                    &crossed,
+                    Err(rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic)
+                )
             };
             if !straddles || lies != holds || !agrees {
                 wrong.push(format!(
