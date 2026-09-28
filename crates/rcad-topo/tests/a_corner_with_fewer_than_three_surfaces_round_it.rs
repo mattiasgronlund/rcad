@@ -28,7 +28,7 @@
 //! grows the stored corner by the rounding and nothing more, so a crossing a
 //! nanometre away is not picked, nothing places the corner, and the fuse gives
 //! up `Undecidable`. That is §136.4's gap — `validate` accepts a solid the fuse
-//! cannot bake — and the second test pins it as it is today (§136.8).
+//! cannot bake — and the second test pins it as it is today.
 
 use rcad_geom::{
     Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
@@ -45,10 +45,6 @@ const OFF_THE_FRONT_PLANE: f64 = 1e-9;
 
 /// The block is `[0, 2]³`, so its largest coordinate is two.
 const SIDE: f64 = 2.0;
-
-/// The far end of `the_cube_over_the_far_corner`, and so the largest
-/// coordinate in the model once that cube is in it.
-const THE_CUBE_REACHES: f64 = 2.5;
 
 /// `MEASURING_SLACK` in `crates/rcad-topo/src/validate.rs`. It is
 /// `pub(crate)`, so it is written out here; the margin below is four orders of
@@ -89,7 +85,7 @@ fn a_block_with_a_corner_off_its_edge_by_less_than_validate_allows_is_cut_and_no
         .build(&mut model, &policy, &mut log)
         .expect("validate lets a flat face's corner sit 1e-9 of the size off its plane");
 
-    let corner = the_cube_over_the_far_corner(&mut model, &policy, &mut log);
+    let corner = a_unit_cube_from(Vector::new(1.5, 1.5, 1.5), &mut model, &policy, &mut log);
     let fused = model
         .fuse(&[block], &[corner], Rule::Difference, &policy, &mut log)
         .expect("a corner validate accepts is one the fuse has to be able to bake");
@@ -132,9 +128,10 @@ fn a_block_with_a_corner_off_its_edge_by_less_than_validate_allows_is_cut_and_no
 /// control, and the `Err` expected below becomes that `Ok`.
 ///
 /// The fix §136.4 names — sizing the room by the model's largest coordinate
-/// instead of the corner's — does not reach this case, and the third
-/// assertion is why: even at the largest coordinate the model has when it is
-/// fused, the rounding is under a ten-thousandth of the miss.
+/// instead of the corner's — does not reach this case. The cube stays inside
+/// `[-0.5, 0.5]³`, so the corner's own size, the block's largest coordinate
+/// and the model's are all two, and that fix would grow this corner by the
+/// same number it is grown by today.
 ///
 /// **The control is what stops the refusal being blamed on something else.**
 /// The same block with that corner off its plane by exactly the room the fuse
@@ -153,11 +150,9 @@ fn a_block_with_a_corner_off_one_of_its_three_planes_by_less_than_validate_allow
         .min(Scale::RELATIVE_LINEAR_TOLERANCE * SIDE)
         + rounding_at(SIDE);
     let the_fuse_allows = rounding_at(SIDE);
-    let at_the_models_size = rounding_at(THE_CUBE_REACHES);
     eprintln!(
         "the corner is {OFF_THE_FRONT_PLANE:e} off its front plane; validate allows \
-         {validate_allows:e}; the fuse grows the stored corner by {the_fuse_allows:e}, and \
-         would by {at_the_models_size:e} at the model's largest coordinate"
+         {validate_allows:e}; the fuse grows the stored corner by {the_fuse_allows:e}"
     );
     assert!(
         OFF_THE_FRONT_PLANE < validate_allows,
@@ -166,10 +161,6 @@ fn a_block_with_a_corner_off_one_of_its_three_planes_by_less_than_validate_allow
     assert!(
         OFF_THE_FRONT_PLANE > the_fuse_allows,
         "the miss is outside the room the fuse grows the stored corner by"
-    );
-    assert!(
-        OFF_THE_FRONT_PLANE > 1e4 * at_the_models_size,
-        "and outside it by more than four orders of magnitude at the model's own size"
     );
 
     let off_by_the_fuses_room = Point::new(0.0, the_fuse_allows, SIDE);
@@ -201,7 +192,7 @@ fn a_block_with_a_corner_off_one_of_its_three_planes_by_less_than_validate_allow
 
 /// A fresh model holding `[0, 2]³` with its top front left corner at
 /// `corner`, built face by face so the corner may sit off its planes, and the
-/// cube over the block's far corner.
+/// unit cube over the block's corner at the origin, which is nowhere near it.
 fn a_block_with_one_corner_at_and_the_cube(
     corner: Point,
     scale: Scale,
@@ -224,7 +215,7 @@ fn a_block_with_one_corner_at_and_the_cube(
     )
     .build(&mut model, policy, log)
     .expect("validate lets a flat face's corner sit 1e-9 of the size off its plane");
-    let cube = the_cube_over_the_far_corner(&mut model, policy, log);
+    let cube = a_unit_cube_from(Vector::new(-0.5, -0.5, -0.5), &mut model, policy, log);
     (model, block, cube)
 }
 
@@ -324,9 +315,12 @@ fn a_block_on_the_planes_of_the_cube(corners: &[Point], rings: [&[usize]; 6]) ->
     builder
 }
 
-/// The unit cube `[1.5, 2.5]³`, which takes one corner off the block and comes
-/// nowhere near the bent edge.
-fn the_cube_over_the_far_corner(
+/// The unit cube with its lowest corner at `lowest`. From `(1.5, 1.5, 1.5)` it
+/// takes the block's far corner off and comes nowhere near the bent edge; from
+/// `(-0.5, -0.5, -0.5)` it takes the corner at the origin off and leaves the
+/// model's largest coordinate at the block's two.
+fn a_unit_cube_from(
+    lowest: Vector,
     model: &mut Model,
     policy: &Policy,
     log: &mut ProvenanceLog,
@@ -338,7 +332,7 @@ fn the_cube_over_the_far_corner(
         .add_extrusion(
             &square,
             1.0,
-            &Isometry::translation(Vector::new(1.5, 1.5, 1.5)).expect("a plain translation"),
+            &Isometry::translation(lowest).expect("a plain translation"),
         )
         .expect("a unit cube")
 }
