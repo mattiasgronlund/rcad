@@ -150,6 +150,13 @@ What the row has to show:
 - The unit tests round `a_place_as_far_off_a_corner_as_its_room_is_folded_into_it_and_one_a_step_further_is_not`
   (§301.5).
 
+One measurement toward that, and no more than one: with the touch test
+skipped in every test, all of rcad-topo passes. The run was `Q273_NO_TOUCH=1
+mise exec -- cargo nextest run --manifest-path <scratchpad>/probe/Cargo.toml -p
+rcad-topo --no-fail-fast`: 1120 tests run, 1120 passed, 11 skipped. It was
+one run of the property suites, and it did not include the other crates or
+the STEP corpus.
+
 ### 344.3 Ten refused in bake: the base corner where the fold meets the base
 
 **Where it refuses.** `derive_a_corner` (`fuse/bake.rs:654` on `893b2b94`)
