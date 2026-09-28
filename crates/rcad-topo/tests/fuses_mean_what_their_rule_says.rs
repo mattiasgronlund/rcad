@@ -304,8 +304,9 @@ impl QuadrantTally {
     }
 }
 
-/// Run `property` over `cases` configurations from a fresh seed, and hand back
-/// what it saw.
+/// Run `property` over `cases` configurations from the seed `PROPTEST_RNG_SEED`
+/// names — `.cargo/config.toml`'s, unless a soak names its own (§339) — and
+/// hand back what it saw.
 fn over<T: core::fmt::Debug>(
     cases: u32,
     strategy: impl Strategy<Value = T>,
