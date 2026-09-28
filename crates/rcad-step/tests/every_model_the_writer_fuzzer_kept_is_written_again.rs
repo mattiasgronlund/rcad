@@ -489,6 +489,27 @@ fn every_shape_seed_is_the_shape_it_is_named_for() {
     }
 }
 
+/// Q166's seed (`docs/decisions.md` §313), the 2026-09-26 crash file
+/// `crash-001e0849a7f44ed74619db24f364721fa6dd90a5`: a round bar of radius
+/// five and length eleven, turned about `x` and moved to `(−13, 1, 8)`. Its
+/// cap at `18.060941075367033` came back from its own file at
+/// `18.06094107536703`, because the writer wrote the foot of the
+/// perpendicular and the reader dotted it back an ulp short. It comes back
+/// the same now.
+#[test]
+fn a_turned_round_bar_comes_back_with_its_caps_on_the_same_planes() {
+    let bytes = std::fs::read(
+        corpus().join("a_turned_round_bar_whose_cap_the_foot_of_its_perpendicular_misses"),
+    )
+    .expect("the seed is checked in");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
 /// Every file in the checked-in corpus, by name.
 fn every_seed() -> Vec<(String, Vec<u8>)> {
     let listing = std::fs::read_dir(corpus()).expect("the corpus is checked in beside the target");

@@ -66,7 +66,7 @@ impl<'a> Reading<'a> {
             Some(PLANE) => {
                 let position = self.reference_at(id, PLANE, 1)?;
                 let place = self.placement_at(id, position)?;
-                let plane = Plane::from_point_and_normal(place.origin, place.axis)
+                let plane = plane_through(place.origin, place.axis)
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Plane(plane))
             }
@@ -420,6 +420,17 @@ pub(crate) struct Placement {
     pub(crate) origin: Point,
     pub(crate) axis: Vector,
     pub(crate) reference: Option<Vector>,
+}
+
+/// The plane a `PLANE` placed at `origin` and facing along `axis` describes.
+///
+/// The normal comes back scaled to length one, and the offset is `origin`
+/// dotted with that normal and rounded once, so the file's point decides the
+/// offset's last bit. The writer asks this same function which point to write
+/// (`a_point_this_reader_reads_back_as`, in `write.rs`), so that what one
+/// writes and the other reads cannot drift apart.
+pub(crate) fn plane_through(origin: Point, axis: Vector) -> rcad_geom::Result<Plane> {
+    Plane::from_point_and_normal(origin, axis)
 }
 
 /// A `CONICAL_SURFACE`'s cone, whose apex the file does not write down.
