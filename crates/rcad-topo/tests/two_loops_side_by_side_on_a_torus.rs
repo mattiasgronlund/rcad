@@ -115,7 +115,9 @@ fn the_three_quarter_band_between_the_same_two_circles_is_refused_by_the_sweep()
     assert!(
         matches!(
             refused,
-            Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface))
+            Err(Error::Invalid(
+                Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+            ))
         ),
         "the three-quarter band came back {refused:?}"
     );
