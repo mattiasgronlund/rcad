@@ -39,7 +39,7 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use rcad_geom::{Axis, Cylinder, Deflection, Plane, Point, Scale, Sphere, Surface, Vector};
 use rcad_mesh::{CannotTriangulate, Loop, Patch, TrimmedDomain, triangulate};
-use rcad_predicates::Cause;
+use rcad_predicates::{Cause, Decision, orient2d};
 
 fn flat() -> Surface {
     Surface::from(
@@ -593,6 +593,210 @@ fn a_coordinate_too_large_to_triangulate_is_refused() {
     assert!(
         matches!(refusal, Err(CannotTriangulate::CoordinateOutOfRange { .. })),
         "got {refusal:?}"
+    );
+}
+
+/// Spade's floor: it takes no coordinate under this that is not zero.
+fn spade_floor() -> f64 {
+    2f64.powi(-142)
+}
+
+/// What `triangulate` answers when it cannot show that flushing the corner at
+/// `position` to zero left the patch as it was: the refusal it gave before it
+/// flushed anything.
+fn the_refusal_before_the_flush(position: usize) -> Result<Patch, CannotTriangulate> {
+    Err(CannotTriangulate::CoordinateOutOfRange {
+        position,
+        why: spade::InsertionError::TooSmall,
+    })
+}
+
+/// The bottom cap of a round bar of radius two moved by `2⁻¹⁰⁰⁷` along `v`, as
+/// `docs/decisions.md` §246 found it: read back from a file, the move is in the
+/// corners, and spade refused the corner at `v = 2⁻¹⁰⁰⁷` as too small.
+///
+/// Flushed to zero, that corner is exactly the unmoved disc's, and so is every
+/// other corner, because `2 sin θ + 2⁻¹⁰⁰⁷` rounds to `2 sin θ` wherever
+/// `sin θ` is not zero. So the triangles are the unmoved disc's too, index for
+/// index, and the patch still hands back the corners it was given.
+#[test]
+fn a_disc_moved_by_two_to_the_minus_1007_is_cut_as_the_disc_that_was_not_moved() {
+    let moved_by = f64::from_bits(0x0100_0000_0000_0000);
+    assert_eq!(moved_by, 2f64.powi(-1007));
+    let a_disc = |moved_by: f64| -> Vec<[f64; 2]> {
+        (0..24)
+            .map(|step| {
+                let angle = TAU * f64::from(step) / 24.0;
+                [2.0 * angle.cos(), 2.0 * angle.sin() + moved_by]
+            })
+            .collect()
+    };
+    let moved = a_disc(moved_by);
+    assert!(
+        moved
+            .iter()
+            .any(|corner| corner[1] != 0.0 && corner[1].abs() < spade_floor()),
+        "no corner of the moved disc is under spade's floor, so this tests nothing"
+    );
+
+    let still = triangulate(&domain_of(flat(), a_disc(0.0), Vec::new()))
+        .expect("the disc that was not moved");
+    check_everything(
+        "a disc moved by 2^-1007",
+        &domain_of(flat(), moved.clone(), Vec::new()),
+    );
+    let cut = triangulate(&domain_of(flat(), moved, Vec::new())).expect("checked just above");
+    assert_eq!(cut.triangles(), still.triangles());
+}
+
+/// A thin triangle whose third corner the flush carries across the line of
+/// the other two. Kept as spade drew it, it would come back turned over.
+///
+/// The line from `left` to `right` crosses `u = 0` at `v = 2⁻¹⁶¹`. The third
+/// corner sits above it at `2⁻¹⁵⁰`, and flushed to zero it sits below it, so
+/// the three corners turn one way as asked for and the other way as spade
+/// sees them. The corners are at the same place on both sides and the
+/// triangle spade draws has the same three, the other way round.
+#[test]
+fn a_triangle_the_flush_turns_over_is_refused() {
+    let left = [-1.0, 2f64.powi(-140) + 2f64.powi(-160)];
+    let right = [1.0, -2f64.powi(-140)];
+    let middle = [0.0, 2f64.powi(-150)];
+    assert!(middle[1] < spade_floor());
+    assert_eq!(orient2d(left, right, middle), Decision::Pos);
+    assert_eq!(
+        orient2d(left, right, [0.0, 0.0]),
+        Decision::Neg,
+        "flushed, the third corner is on the other side of the line"
+    );
+
+    assert_eq!(
+        triangulate(&domain_of(flat(), vec![left, right, middle], Vec::new())),
+        the_refusal_before_the_flush(2)
+    );
+}
+
+/// The same thin triangle as a hole in a square. Every triangle that is kept
+/// still turns the right way; the one inside the hole is turned over, and
+/// what that means for the kept ones is that the hole's own sliver is covered
+/// twice, by the triangle above its long side and by the ones below its two
+/// short ones.
+#[test]
+fn a_hole_the_flush_turns_inside_out_is_refused() {
+    let hole = vec![
+        [-1.0, 2f64.powi(-140) + 2f64.powi(-160)],
+        [1.0, -2f64.powi(-140)],
+        [0.0, 2f64.powi(-150)],
+    ];
+    assert_eq!(
+        triangulate(&domain_of(
+            flat(),
+            vec![[-4.0, -4.0], [4.0, -4.0], [4.0, 4.0], [-4.0, 4.0]],
+            vec![hole],
+        )),
+        the_refusal_before_the_flush(6)
+    );
+}
+
+/// A corner of one hole `2⁻¹⁵⁰` above a side of another. Flushed, it lands on
+/// that side, and spade splits the side there: the patch would draw it as two
+/// sides meeting at a corner of the other hole, while the face on the other
+/// side of that edge draws it whole.
+///
+/// Every triangle still turns the right way and the corner is nowhere near the
+/// hull, so the one thing that catches it is that the side is not there.
+#[test]
+fn a_corner_flushed_onto_another_loops_side_is_refused() {
+    let below = vec![[-1.0, 0.0], [0.0, -1.0], [1.0, 0.0]];
+    let above = vec![[0.0, 2f64.powi(-150)], [0.2, 1.0], [-0.2, 1.0]];
+    assert_eq!(
+        triangulate(&domain_of(
+            flat(),
+            vec![[-4.0, -4.0], [4.0, -4.0], [4.0, 4.0], [-4.0, 4.0]],
+            vec![below, above],
+        )),
+        the_refusal_before_the_flush(7)
+    );
+}
+
+/// Two holes whose tips are `2⁻¹⁵⁰` apart. Flushed, both tips are one place,
+/// and spade gives them one vertex. Two loops meeting at a corner they both
+/// name is a pinch this crate meshes, but these two do not meet: the patch
+/// would tie both holes to the first tip's point, and the second hole's two
+/// sides into that tip would be drawn to a point that is not on them.
+#[test]
+fn two_corners_the_flush_puts_in_one_place_are_refused() {
+    let below = vec![[0.5, 0.0], [0.3, -1.0], [0.7, -1.0]];
+    let above = vec![[0.5, 2f64.powi(-150)], [0.7, 1.0], [0.3, 1.0]];
+    assert_eq!(
+        triangulate(&domain_of(
+            flat(),
+            vec![[-4.0, -4.0], [4.0, -4.0], [4.0, 4.0], [-4.0, 4.0]],
+            vec![below, above],
+        )),
+        the_refusal_before_the_flush(7)
+    );
+}
+
+/// A corner `2⁻¹⁵⁰` above a straight side of the outline, which the flush puts
+/// on it. Flushed, the corner is on the hull; read where it really is, it dents
+/// the hull inwards by `2⁻¹⁵⁰`. The triangles spade drew are still a tiling of
+/// the patch that was asked for, so it is meshed.
+///
+/// The first version of the check asked for the hull to stay convex and
+/// refused this, and with it 95 of the writer fuzzer's 2026-09-26 files that
+/// the check as it stands meshes (`docs/decisions.md` §321.3).
+#[test]
+fn a_corner_flushed_onto_a_straight_side_of_the_hull_is_meshed() {
+    check_everything(
+        "a corner a hair inside a straight side",
+        &domain_of(
+            flat(),
+            vec![
+                [-1.0, 0.0],
+                [0.0, 2f64.powi(-150)],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+            ],
+            Vec::new(),
+        ),
+    );
+}
+
+/// The same, with the corner the smallest `f64` above the side. The three
+/// numbers along the side are the ones a bar turned `5.6e-309` radians
+/// about `x` put there, in one of the writer fuzzer's 2026-09-26 files.
+///
+/// Whether the corner is inside the side from `along[1]` to `along[2]` is the
+/// sign of a determinant about `0.2 · 2⁻¹⁰⁷⁴`, which is under the smallest
+/// `f64`, and `orient2d` alone leaves it undecided. The check asks it again
+/// with every coordinate lifted by an exact power of two, and that settles it.
+#[test]
+fn a_corner_a_subnormal_inside_a_straight_side_of_the_hull_is_meshed() {
+    let smallest = f64::from_bits(1);
+    let along = [8.012115492376656, 15.391695551144624, 15.602540695680851];
+    assert!(
+        matches!(
+            orient2d([along[1], 0.0], [along[2], 0.0], [along[0], smallest]),
+            Decision::Undecidable { .. }
+        ),
+        "orient2d settles this on its own now, so this no longer tests the lifting"
+    );
+    check_everything(
+        "a corner a subnormal inside a straight side",
+        &domain_of(
+            flat(),
+            vec![
+                [0.0, 0.0],
+                [along[0], smallest],
+                [along[1], 0.0],
+                [along[2], 0.0],
+                [along[2], 4.0],
+                [0.0, 4.0],
+            ],
+            Vec::new(),
+        ),
     );
 }
 
