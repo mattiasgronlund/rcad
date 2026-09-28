@@ -17,6 +17,11 @@ TIERS_IN_ORDER = ["1", "2", "2.2", "2.5", "3", "4"]
 TIERS = [tier for tier in TIERS_IN_ORDER if tier != "2.2"]
 CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 TIER_HEADING = re.compile(r"^Tier (" + "|".join(re.escape(tier) for tier in TIERS_IN_ORDER) + r")( |$)")
+# The first word of a description may be a tag (§352): a defect's class, which
+# only a tier 1 row carries, or `small`, which a row of any tier may.
+CLASS = re.compile(r"^(wrong|crash|refuses)/[ABCD]$")
+SMALL = "small"
+WHAT = re.compile(r"^(\s*(?:\S+\s+){5})(\S+)(.*)$")
 
 
 def heading_key(heading):
@@ -40,6 +45,8 @@ class Row:
         self.state = fields[2] if len(fields) > 2 else ""
         self.model = fields[3] if len(fields) > 3 else ""
         self.write_set = fields[4] if len(fields) > 4 else ""
+        first = fields[5] if len(fields) > 5 else ""
+        self.tag = first if CLASS.match(first) or first == SMALL else None
 
     def is_closed(self):
         return self.state.startswith(("done:", "dropped:"))
@@ -55,6 +62,17 @@ class Row:
         assert match, f"a row of fewer than three fields reached with_tier: {self.text!r}"
         gap = max(1, len(match.group(2)) + len(match.group(3)) - len(tier))
         return match.group(1) + tier + " " * gap + match.group(4)
+
+    def with_tag(self, tag):
+        """The row with its tag replaced, added in front of the description, or removed when `tag` is None."""
+        match = WHAT.match(self.text)
+        assert match, f"a row of fewer than six fields reached with_tag: {self.text!r}"
+        head, first, rest = match.groups()
+        if self.tag is None:
+            return head + (f"{tag} " if tag else "") + first + rest
+        if tag is None:
+            return head + rest.lstrip()
+        return head + tag + rest
 
 
 class Queue:

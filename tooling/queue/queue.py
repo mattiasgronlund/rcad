@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rows import TIERS_IN_ORDER, Queue, highest_q  # noqa: E402
+from rows import CLASS, SMALL, TIERS_IN_ORDER, Queue, highest_q  # noqa: E402
 
 ID = re.compile(r"^[TDQ][0-9]+$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -55,6 +55,8 @@ just queue show <id>                       one row, its hold, and its state in o
 just queue take <id> <branch>              dispatch a ready row to <branch>: state lane:<branch>, held until done/drop/park
 just queue add <tier> <model> <write set> <what ending in §N>    a new todo row at the foot of its tier; prints the id
 just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing
+just queue tag <id> <class>|small|-        tag an open row: a class (wrong, crash or refuses, then /A to /D) ranks
+                                            a tier 1 row; small lets a lane take it with other small rows; - removes it
 just queue done <id> <merge sha>           state done:<sha>, moved under ## Closed
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
@@ -503,6 +505,9 @@ def tier_step(queue, claims, here, args, batch):
         raise Refused(f"{row_id} is closed: {row.state}, and a closed row sits under ## Closed in no tier")
     if row.tier == to:
         raise Refused(f"{row_id} is tier {to} already")
+    if row.tag is not None and CLASS.match(row.tag):
+        raise Refused(f"{row_id} carries the class {row.tag}, which ranks tier 1 rows only; "
+                      f"remove it first with `tag {row_id} -`")
     block = queue.block_for_tier(to)
     if block is None:
         raise Refused(f"there is no '## Tier {to}' block, and no later heading to write one above")
@@ -515,6 +520,33 @@ def tier_step(queue, claims, here, args, batch):
 def refuse_unless_a_tier(tier):
     if tier not in TIERS_IN_ORDER:
         raise Refused(f"'{tier}' is not a tier: {', '.join(TIERS_IN_ORDER)}")
+
+
+def tag_step(queue, claims, here, args, batch):
+    """Set, replace or remove the tag an open row's description starts with (§352).
+
+    A class says how bad a defect is and how likely a user's model meets it,
+    and the fill takes tier 1 in class order. `small` lets the fill hand a lane
+    several such rows at once. A row carries one tag at most, since a defect
+    needs a trace first and so is never small.
+    """
+    need(args, 2, "tag <id> <class>|small|-")
+    row_id, tag = args
+    if tag == "-":
+        tag = None
+    elif not (CLASS.match(tag) or tag == SMALL):
+        raise Refused(f"'{tag}' is not a tag: a class (wrong, crash or refuses, then /A, /B, /C or /D), small, or -")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed():
+        raise Refused(f"{row_id} is closed: {row.state}")
+    if tag is not None and CLASS.match(tag) and row.tier != "1":
+        raise Refused(f"{row_id} is tier {row.tier}, and a class ranks tier 1 rows only")
+    if tag == row.tag:
+        raise Refused(f"{row_id} is tagged {tag or 'nothing'} already")
+    queue.replace(row, row.with_tag(tag))
+    message = f"{row_id}: tag {row.tag or '-'} -> {tag or '-'}"
+    return queue, message, None
 
 
 def pick_step(queue, claims, here, args, batch):
@@ -557,7 +589,7 @@ def put_in_its_block(queue, row):
 
 STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
-    "after": after_step, "rank": rank_step, "tier": tier_step, "pick": pick_step,
+    "after": after_step, "rank": rank_step, "tier": tier_step, "tag": tag_step, "pick": pick_step,
 }
 
 
@@ -653,6 +685,9 @@ def running(here, args):
     left still gets its fallback line, and two such rows never collapse onto
     one slot.
 
+    A bundle of small rows is several holds on one branch, and one lane (§352),
+    so holds are counted per branch: the rows sharing one are named together.
+
     `--count` prints the number alone, for `queue next`.
     """
     trees = here.trees()
@@ -660,16 +695,20 @@ def running(here, args):
     branches = {branch for branch, _ in counted}
     claimed = set()
     branch_gone = []
+    by_branch = {}
     for row_id, hold in sorted(Claims(here.claims).holds().items()):
-        found = has_a_tree(hold["branch"], branches, trees, claimed)
+        by_branch.setdefault(hold["branch"], ([], hold))[0].append(row_id)
+    for branch, (row_ids, hold) in by_branch.items():
+        ids = ",".join(row_ids)
+        found = has_a_tree(branch, branches, trees, claimed)
         if found is None:
-            branch_gone.append((row_id, hold))
+            branch_gone.append((ids, hold))
         elif not found:
-            counted.append((hold["branch"], f"{row_id} taken from {hold['tree']}, no tree yet"))
+            counted.append((branch, f"{ids} taken from {hold['tree']}, no tree yet"))
     spare = sum(1 for tree in trees
                 if tree.is_lane and tree.branch == "(detached)" and tree.path not in claimed)
-    for row_id, hold in branch_gone[spare:]:
-        counted.append((hold["branch"], f"{row_id} taken from {hold['tree']}, no tree yet"))
+    for ids, hold in branch_gone[spare:]:
+        counted.append((hold["branch"], f"{ids} taken from {hold['tree']}, no tree yet"))
     if args == ["--count"]:
         print(len(counted))
         return

@@ -8583,6 +8583,11 @@ check-plan-selftest:
 queue_file := "docs/queue.md"
 queue_slots := "6"
 
+# How many rows tagged `small` one lane takes at once (§352.4). Five small rows
+# of about ten minutes each fit the 45 minutes a lane is given (`lane.md`), with
+# the gate run once for all of them.
+queue_bundle := "5"
+
 # How many slots are held, when a fixture needs to say so. Empty — always, outside
 # a selftest — means `queue next` counts the machine (§263.4): a queue file under
 # `mktemp` has no machine of its own, and one counted from wherever the selftest
