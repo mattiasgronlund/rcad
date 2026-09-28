@@ -198,10 +198,11 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
         reached.written_but_unsound = 1;
         return reached;
     }
-    if source
-        .solids()
-        .any(|solid| source.validate_solid(solid.key(), &policy, &mut log).is_err())
-    {
+    if source.solids().any(|solid| {
+        source
+            .validate_solid(solid.key(), &policy, &mut log)
+            .is_err()
+    }) {
         reached.written_but_a_solid_unsound_alone = 1;
         return reached;
     }

@@ -19,7 +19,9 @@ mod fuzzing;
 
 use std::path::PathBuf;
 
-use rcad_geom::{Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile};
 use rcad_topo::{DraftStep, Invalid, Model, SolidBuilder, SolidKey};
@@ -51,7 +53,9 @@ fn a_cube_a_hair_off_its_plane_is_counted_rather_than_failed() {
     assert!(
         matches!(
             cube_alone,
-            Err(rcad_topo::Error::Invalid(Invalid::VertexOffItsFacePlane { .. }))
+            Err(rcad_topo::Error::Invalid(
+                Invalid::VertexOffItsFacePlane { .. }
+            ))
         ),
         "the cube alone has only its own room: {cube_alone:?}"
     );
@@ -144,13 +148,20 @@ fn a_bar_a_hair_tall_placed_by(placement: &Isometry) -> Model {
         )
         .expect("a cap plane cuts the cylinder in one closed curve");
     let top_circle = builder
-        .add_edge(top_corner, top_corner, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(
+            top_corner,
+            top_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
         .expect("a cap plane cuts the cylinder in one closed curve");
 
     let mut cap = |z: f64, outward: f64, circle, turn| {
-        let plane = Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, outward))
-            .expect("the z axis is a unit normal");
-        let coedge = builder.add_coedge(circle, turn).expect("an edge of this build");
+        let plane =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, outward))
+                .expect("the z axis is a unit normal");
+        let coedge = builder
+            .add_coedge(circle, turn)
+            .expect("an edge of this build");
         let wire = builder
             .add_wire(&[DraftStep::Along(coedge)])
             .expect("one closed edge is a wire");
@@ -169,7 +180,11 @@ fn a_bar_a_hair_tall_placed_by(placement: &Isometry) -> Model {
     ]
     .into_iter()
     .map(|(edge, turn)| {
-        DraftStep::Along(builder.add_coedge(edge, turn).expect("an edge of this build"))
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, turn)
+                .expect("an edge of this build"),
+        )
     })
     .collect();
     let wire = builder
