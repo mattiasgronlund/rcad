@@ -85,6 +85,16 @@ pub enum Run {
         and: WhatItSitsOn,
         picked_by: Vec<Picking>,
     },
+    /// Right round the closed curve where the face crosses `and`, and whether
+    /// the wire walks it the way the edge is stored running.
+    ///
+    /// **The fuse writes this** for a rim whose faces either side are the one
+    /// curved surface, which say nothing about where the rim runs: a ball cut
+    /// in two by the plane of a block's face, the block clear of the ball
+    /// (`docs/decisions.md` §217.1). `and` is the only place that plane is
+    /// written down in the answer, so leaving it out would call two balls cut
+    /// by two different planes through one corner the same answer.
+    RightRoundWhereItCrosses { and: WhatItSitsOn, forward: bool },
 }
 
 /// A picker, as numbers: `a·x + b·y + c·z ≥ d` for a flat one, the surface
@@ -108,14 +118,10 @@ impl Run {
                 and: WhatItSitsOn::of(&and),
                 picked_by: picked_by.iter().map(Picking::of).collect(),
             },
-            // Named rather than left to the wildcard, because it exists (§40).
-            // It gets no `Run` shape: the fuse never writes it — `assemble`
-            // still names a closed rim `RightRoundWhereItsFacesCross`, and only
-            // `SolidBuilder` can say which surface cut one (§216) — so a shape
-            // here would be one nothing reaches (§13).
-            EdgeRun::RightRoundWhereItCrosses { .. } => {
-                panic!("the fuse does not write a rim that names its cutting surface; §216")
-            }
+            EdgeRun::RightRoundWhereItCrosses { and } => Run::RightRoundWhereItCrosses {
+                and: WhatItSitsOn::of(&and),
+                forward: edge.orientation() == Orientation::Forward,
+            },
             other => panic!("this file does not know how to write {other:?} down"),
         }
     }
@@ -135,6 +141,12 @@ impl Run {
                 written.extend(and.written_out());
                 written.push(pickers.len() as u64);
                 written.extend(pickers.into_iter().flatten());
+                written
+            }
+            Run::RightRoundWhereItCrosses { and, forward } => {
+                let mut written = vec![3];
+                written.extend(and.written_out());
+                written.push(u64::from(*forward));
                 written
             }
         }
@@ -474,5 +486,60 @@ fn two_different_answers_are_refused() {
         ),
         Ok(()),
         "the same triangle walked from another corner"
+    );
+}
+
+/// A ball whose one rim is cut by another plane through the same corner, or
+/// walked the other way round, is a different answer.
+///
+/// The corner and the ball are all the rest of the face says, so the plane in
+/// the run is the only thing that tells the first apart and the direction the
+/// only thing that tells the second (`a_rim_that_names_its_cutting_surface.rs`).
+#[test]
+fn two_rims_cut_by_different_planes_or_walked_different_ways_are_refused() {
+    let a_ball_with_one_rim = |cut_by: [f64; 4], forward| Answer {
+        solids: vec![vec![Face {
+            sits: WhatItSitsOn::Ball([0.0, 0.0, 0.0], 1.0),
+            reversed: false,
+            wires: vec![vec![Step {
+                at: [0.0, -1.0, 0.0],
+                run: Run::RightRoundWhereItCrosses {
+                    and: WhatItSitsOn::Flat(cut_by),
+                    forward,
+                },
+            }]],
+        }]],
+    };
+    let answer = a_ball_with_one_rim([0.0, 1.0, 0.0, -1.0], true);
+
+    assert!(
+        same_answer(
+            &answer,
+            &a_ball_with_one_rim([0.0, 1.0, 1.0, -1.0], true),
+            Rule::Union,
+            "another plane through the corner"
+        )
+        .is_err(),
+        "a rim cut by another plane through the same corner passed for the same answer"
+    );
+    assert!(
+        same_answer(
+            &answer,
+            &a_ball_with_one_rim([0.0, 1.0, 0.0, -1.0], false),
+            Rule::Union,
+            "walking the rim the other way"
+        )
+        .is_err(),
+        "a rim walked the other way round passed for the same answer"
+    );
+    assert_eq!(
+        same_answer(
+            &answer,
+            &a_ball_with_one_rim([0.0, 1.0, 0.0, -1.0], true),
+            Rule::Union,
+            "nothing"
+        ),
+        Ok(()),
+        "the same rim"
     );
 }

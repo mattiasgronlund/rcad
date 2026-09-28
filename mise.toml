@@ -15,7 +15,7 @@ lockfile = true
 # pinning it costs a download and not a build — which is the whole reason python
 # is not pinned beside it. `docs/decisions.md` §173.7.
 "aqua:jqlang/jq" = "1.7"
-"cargo:kache" = "0.16"
+"cargo:kache" = "0.27"
 "cargo:taplo-cli" = "0.10"
 
 # kache is a content-addressed build cache. Cargo picks it up as a compiler
