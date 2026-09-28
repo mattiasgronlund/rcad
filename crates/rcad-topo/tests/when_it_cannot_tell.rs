@@ -7,7 +7,8 @@
 
 use rcad_geom::{DYNAMIC_RANGE_CHECK, Isometry, Point, Scale};
 use rcad_predicates::{
-    Approximation, Cause, Level, Measures, Policy, ProvenanceLog, Record, Severity,
+    Approximation, Cause, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog, Record,
+    Severity, orient2d,
 };
 use rcad_topo::{Containment, Error, Invalid, Model, Profile, ProfileBuilder};
 
@@ -52,37 +53,132 @@ fn a_profile_too_big_for_f64_to_multiply_is_normalised_rather_than_refused() {
     assert!(log.is_empty(), "and a certified build records nothing");
 }
 
-/// A square with a spike so close to the origin that nothing in `f64` can say
-/// which way the spike turns when it is seen from the square's far corners.
+/// A square with one corner cut off, where the cut is bent in the middle by
+/// so little that nothing in `f64` can say which way the bend turns.
 ///
-/// The exact level multiplies raw coordinates, and `1e-150 * 1e-150` is
-/// `1e-300` — too small for the product to still be exact — so it declines to
-/// run. The two cheap levels cannot help either: from a corner a whole unit
-/// away, the two products the turn is the difference of are equal to within a
-/// few of the last bits either one has, so the interval round the difference
-/// sits over zero.
+/// The cut runs from `(1, t)` through `(0.5, 0.5)` to `(t, 1)`, with
+/// `t = 1e-305`. A straight cut would pass `t / √2` further out than the
+/// middle corner does, so the bend turns clockwise. The two cheap levels
+/// cannot see that: the differences they form round `t` away, the two products
+/// the turn is the difference of come out equal, and the interval round the
+/// difference sits over zero.
+///
+/// The exact level multiplies raw coordinates, and the one determinant holds
+/// both `1 * 1` and `t * t`. `t * t` is `1e-610`, far below the `2^-969`
+/// under which a product is no longer exact. A power of two that lifts it
+/// above that has to be at least `2^529`, and that takes `1 * 1` past the top
+/// of the range, which it leaves at `2^511`. So no scaling lets the exact
+/// level run, and
+/// [`no_power_of_two_lets_f64_see_which_way_the_cut_bends`] tries every one.
+///
+/// This used to be a square with a spike `1e-150` from the origin. The spike's
+/// determinants hold only `tiny * tiny` and `tiny * 1`, never `1 * 1`, so some
+/// power of two always lifts them all into range, and since §324 `orient2d`
+/// finds one. A spike at the origin cannot be made small enough to stay
+/// undecided that way, which is why the shape changed (§324.7).
 ///
 /// Everything else is an ordinary shape at working size. The lowest corner —
 /// the one the winding direction is read off — is settled at the cheapest
-/// level, so only the spike is ever in doubt.
-fn a_square_with_a_spike_f64_cannot_place() -> ProfileBuilder {
-    let tiny = 1e-150;
-    ProfileBuilder::new(vec![
-        [0.0, 0.0],
-        [tiny, 3.0 * tiny],
-        [2.0 * tiny, 0.0],
-        [1.0, -1.0],
-        [1.0, 1.0],
-        [-1.0, 1.0],
+/// level, so only the bend is ever in doubt.
+fn a_square_whose_cut_corner_bends_too_little_for_f64_to_see() -> ProfileBuilder {
+    ProfileBuilder::new(a_cut_corner_bent_by(BEND))
+}
+
+/// How far off `1` or `0` the cut's two ends sit. Normal, and with every bit
+/// of its mantissa in use.
+const BEND: f64 = 1e-305;
+
+fn a_cut_corner_bent_by(t: f64) -> Vec<[f64; 2]> {
+    vec![
         [-1.0, -1.0],
-    ])
+        [1.0, -1.0],
+        [1.0, t],
+        [0.5, 0.5],
+        [t, 1.0],
+        [-1.0, 1.0],
+    ]
+}
+
+/// The claim that no scaling helps, run rather than argued
+/// (`docs/decisions.md` §16.10). Every turn the tolerant build had to
+/// approximate is asked again at every power of two that moves all three of
+/// its points exactly, which is every scaling that keeps the geometry the
+/// same. Not one of them is decided.
+#[test]
+fn no_power_of_two_lets_f64_see_which_way_the_cut_bends() {
+    let mut log = ProvenanceLog::new();
+    a_square_whose_cut_corner_bends_too_little_for_f64_to_see()
+        .build(&Policy::tolerant(100.0), &mut log)
+        .expect("a tolerant policy reads the bend as straight");
+    assert!(!log.is_empty());
+
+    for record in log.records() {
+        let [a, b, c] = <[[f64; 2]; 3]>::try_from(
+            record
+                .inputs()
+                .iter()
+                .map(|point| match point {
+                    PredicatePoint::Exact([x, y, _]) => [*x, *y],
+                    other => panic!("a profile's corners are exact: {other:?}"),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .expect("a turn has three corners");
+        let mut tried = 0;
+        for exponent in -1100..=1100 {
+            let (Some(a), Some(b), Some(c)) = (
+                exactly_scaled(a, exponent),
+                exactly_scaled(b, exponent),
+                exactly_scaled(c, exponent),
+            ) else {
+                continue;
+            };
+            tried += 1;
+            assert!(
+                !orient2d(a, b, c).is_certified(),
+                "2^{exponent} settled which way {a:?} {b:?} {c:?} turns"
+            );
+        }
+        assert!(tried > 1000, "only {tried} exponents scaled exactly");
+    }
+}
+
+/// The control: bent by `1e-290` instead, the same cut is decided, and a
+/// certified build takes it. So what the test above measures is the size of
+/// the bend, and not something else about the shape.
+#[test]
+fn a_cut_corner_bent_by_1e_290_is_decided() {
+    let mut log = ProvenanceLog::new();
+    let built = ProfileBuilder::new(a_cut_corner_bent_by(1e-290))
+        .build(&Policy::certified(), &mut log)
+        .expect("level 3 runs once the whole shape is lifted by 2^509");
+    assert_eq!(built.approximation(), None);
+    assert!(log.is_empty());
+}
+
+/// `point`, both coordinates multiplied by `2^exponent`, or `None` when that
+/// is not exact. It is exact while every result is a normal number, and a zero
+/// stays zero at any exponent.
+fn exactly_scaled(point: [f64; 2], exponent: i32) -> Option<[f64; 2]> {
+    let half = exponent / 2;
+    let mut scaled = point;
+    for value in &mut scaled {
+        if *value == 0.0 {
+            continue;
+        }
+        *value = *value * 2f64.powi(half) * 2f64.powi(exponent - half);
+        if !value.is_normal() {
+            return None;
+        }
+    }
+    Some(scaled)
 }
 
 #[test]
 fn a_corner_f64_cannot_place_stops_a_certified_build() {
     let mut log = ProvenanceLog::new();
 
-    let refused = a_square_with_a_spike_f64_cannot_place().build(&Policy::certified(), &mut log);
+    let refused = a_square_whose_cut_corner_bends_too_little_for_f64_to_see().build(&Policy::certified(), &mut log);
 
     match refused {
         Err(Error::Undecidable { records }) => {
@@ -105,7 +201,7 @@ fn a_corner_f64_cannot_place_stops_a_certified_build() {
 fn a_tolerant_policy_says_in_the_log_what_it_had_to_approximate() {
     let mut log = ProvenanceLog::new();
 
-    let profile = a_square_with_a_spike_f64_cannot_place()
+    let profile = a_square_whose_cut_corner_bends_too_little_for_f64_to_see()
         .build(&Policy::tolerant(100.0), &mut log)
         .expect("a tolerant policy reads those corners' enclosures as zero");
 
@@ -145,7 +241,7 @@ fn a_tolerant_policy_says_in_the_log_what_it_had_to_approximate() {
 fn a_tolerant_policy_with_too_small_a_budget_still_refuses() {
     let mut log = ProvenanceLog::new();
 
-    let refused = a_square_with_a_spike_f64_cannot_place().build(&Policy::tolerant(1e-6), &mut log);
+    let refused = a_square_whose_cut_corner_bends_too_little_for_f64_to_see().build(&Policy::tolerant(1e-6), &mut log);
 
     match refused {
         Err(Error::Undecidable { records }) => {
@@ -159,7 +255,7 @@ fn a_tolerant_policy_with_too_small_a_budget_still_refuses() {
 #[test]
 fn slop_a_tolerant_profile_carried_lands_on_the_solid_built_from_it() {
     let mut model = empty_model();
-    let profile = a_square_with_a_spike_f64_cannot_place()
+    let profile = a_square_whose_cut_corner_bends_too_little_for_f64_to_see()
         .build(&Policy::tolerant(100.0), &mut ProvenanceLog::new())
         .expect("a tolerant policy settles those corners");
     let slop = profile.approximation().expect("the profile is approximate");
@@ -216,7 +312,7 @@ fn a_certified_cube_leaves_nothing_approximate_anywhere() {
 #[test]
 fn extruding_an_approximated_profile_twice_does_not_inflate_the_slop() {
     let mut model = empty_model();
-    let profile: Profile = a_square_with_a_spike_f64_cannot_place()
+    let profile: Profile = a_square_whose_cut_corner_bends_too_little_for_f64_to_see()
         .build(&Policy::tolerant(100.0), &mut ProvenanceLog::new())
         .expect("a tolerant policy settles those corners");
     let slop = profile.approximation().expect("the profile is approximate");

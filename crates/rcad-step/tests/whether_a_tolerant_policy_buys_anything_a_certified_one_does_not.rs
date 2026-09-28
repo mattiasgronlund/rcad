@@ -171,11 +171,14 @@ fn a_step_file_the_two_policies_disagree_about() {
 /// The other half a corpus file could differ by: a predicate that could not
 /// decide.
 ///
-/// A square with a spike `1e-150` from the origin, seen from corners a whole
-/// unit away — the exact level declines to multiply numbers that small and the
-/// two cheap levels cannot separate the products, so `orient2d` comes back
-/// undecided. A certified policy stops there; a tolerant one reads the
-/// enclosure as zero and files a [`Cause::UndecidableResolved`] record.
+/// A square with one corner cut off, and the cut bent by `1e-305` in the
+/// middle. The two cheap levels cannot separate the products the bend's turn is
+/// the difference of, and the exact level would have to multiply `1 * 1` and
+/// `1e-305 * 1e-305` in one determinant, which no power of two brings into
+/// range together (`crates/rcad-topo/tests/when_it_cannot_tell.rs` tries them
+/// all). So `orient2d` comes back undecided. A certified policy stops there; a
+/// tolerant one reads the enclosure as zero and files a
+/// [`Cause::UndecidableResolved`] record.
 ///
 /// **Not a STEP file, and that is this lane's finding rather than a hole in
 /// it.** Every coordinate the reader takes is an exact `f64` written in the
@@ -186,15 +189,14 @@ fn a_step_file_the_two_policies_disagree_about() {
 /// at the predicate level.
 #[test]
 fn a_shape_whose_corners_f64_cannot_place() {
-    let tiny = 1e-150;
+    let bend = 1e-305;
     let corners = vec![
-        [0.0, 0.0],
-        [tiny, 3.0 * tiny],
-        [2.0 * tiny, 0.0],
-        [1.0, -1.0],
-        [1.0, 1.0],
-        [-1.0, 1.0],
         [-1.0, -1.0],
+        [1.0, -1.0],
+        [1.0, bend],
+        [0.5, 0.5],
+        [bend, 1.0],
+        [-1.0, 1.0],
     ];
 
     let mut runs = Vec::new();
@@ -216,7 +218,7 @@ fn a_shape_whose_corners_f64_cannot_place() {
 
     assert!(
         certified.outcome.is_err(),
-        "nothing in f64 places that spike, and a certified build said {:?}",
+        "nothing in f64 sees which way that cut bends, and a certified build said {:?}",
         certified.outcome
     );
     assert!(
