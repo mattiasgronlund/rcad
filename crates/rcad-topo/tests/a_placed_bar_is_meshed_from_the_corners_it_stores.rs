@@ -31,9 +31,10 @@
 //! a cap is split: for the eighth turn, 174 of 500 triangles join points the
 //! unplaced bar's triangles do not. Reading those points in the frame they
 //! were walked in instead would make every triangle match as well. It would
-//! also change which far-off balls refuse to mesh
-//! (`how_far_out_a_ball_can_sit_and_still_mesh.rs`), so that is left for a
-//! change that argues it.
+//! also turn the unit ball at `x = 1.0808639105689192e16` of
+//! `how_far_out_a_ball_can_sit_and_still_mesh.rs` from a refusal into a flat
+//! mesh that encloses nothing, which `docs/decisions.md` §333.6 measured to be
+//! a wrong answer, so that is left for a change that keeps the refusal.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};

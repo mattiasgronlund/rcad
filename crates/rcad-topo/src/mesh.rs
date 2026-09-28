@@ -668,9 +668,10 @@ impl BuildingAMesh {
     ///
     /// **What it does not reach.** [`BuildingAMesh::cut_up`] still reads each
     /// point of a wire moved out and back, so a placed bar's *triangles* are not
-    /// yet the unplaced bar's; and a solid read back from a file is meshed in the
-    /// world, not in its stored frame, so this does not make a STEP round trip
-    /// measure the same (§249.5).
+    /// yet the unplaced bar's (`docs/decisions.md` §333.3, and §333.6 for why the
+    /// obvious fix there is not taken); and a solid read back from a file is
+    /// meshed in the world, not in its stored frame, so this does not make a STEP
+    /// round trip measure the same (§249.5).
     ///
     /// # What a refusal from here is in, and why it is not what was walked
     ///
