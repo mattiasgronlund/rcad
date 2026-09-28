@@ -48,8 +48,8 @@
 //! | a ball inside a bar, touching | 54 of 54 | 96 of 96 | — |
 //! | a cone's apex on a block | 33 of 90 | 66 of 66 | `CannotNameWhichPieceOfACrossingThisIs` 21, *a point inside a piece of a face* 36 |
 //! | a frustum's cap flush on a block | 0 of 84 | 66 of 66 | *a point inside a piece of a face* 84 |
-//! | a bend lying on a block | 0 of 66 | 0 of 84 | nothing: both rows refuse as a quartic |
-//! | a bend's cap flush against a block | 0 of 66 | 0 of 84 | nothing: the control refuses too |
+//! | a bend lying on a block | 0 of 66 | 0 of 90 | nothing: both rows refuse as a quartic |
+//! | a bend's cap flush against a block | 0 of 66 | 45 of 90 | `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` 66 |
 //!
 //! Every answer that came back passed every law above. The two failures are a
 //! **panic** on a bar standing inside a bar and touching nothing —
@@ -100,11 +100,15 @@
 //! Its control still refuses 72 of 84, on *a point inside a piece of a face*;
 //! what in it refuses is not worked out here.
 //!
-//! **A torus cannot be reached.** No box of planes can be fused with one
-//! (`how_often_a_fuse_with_a_torus_refuses.rs` makes that theorem a
-//! measurement), and a torus against any other curved surface is refused by
-//! name, so the two bend cells are pinned at *nothing answers* and fail the day
-//! either changes.
+//! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
+//! refused as a quartic, touching or one unit clear, so that cell is pinned at
+//! *nothing answers* and fails the day that changes. A bend's cap against a
+//! block refuses its touching row the same way. Its control, whose block is
+//! clear of the bend, answers the fuses that leave the bend out and refuses the
+//! 45 that keep it, `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`:
+//! writing a bend back out, the stop §243.5 and §323.5 record and not a
+//! refusal of this file's. A torus against any other curved surface is refused
+//! by name.
 //!
 //! # What is not built, and why
 //!
@@ -514,8 +518,8 @@ fn a_frustums_cap_flush_on_a_block() {
     );
 }
 
-/// Pinned at nothing answered, touch and control alike: no box of planes can
-/// be fused with a torus (`how_often_a_fuse_with_a_torus_refuses.rs`), so the
+/// Pinned at nothing answered, touch and control alike: every fuse in both
+/// rows is refused `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`, so the
 /// touch is never reached. This fails the day that changes, which is the day
 /// this cell starts measuring its tangency.
 #[test]
@@ -527,13 +531,28 @@ fn a_bend_of_pipe_lying_on_a_block() {
     );
 }
 
-/// The same, for a bend's cap flush against a block.
+/// A bend's cap flush against a block, and the block slid one unit clear along
+/// the cap's plane.
+///
+/// The touching row refuses every fuse as a quartic: the block touches the
+/// bend, so the two are cut against each other, and three of the block's walls
+/// run along the bend's axis and off it. The control's block is clear of the
+/// bend, so nothing is cut, and since Q326 no fuse asks whether a block's wall
+/// is the bend's ring (`do_they_face_the_same_way` in `fuse/select.rs`). Until
+/// then that question was the quartic, and the control answered nothing.
+///
+/// Now the control answers the three fuses whose answer leaves the bend out:
+/// both intersections are nothing and the block less the bend is the whole
+/// block, its volume exact. The three that keep the bend, the union both ways
+/// round and the bend less the block, are refused writing it back,
+/// `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`: where a bend fused
+/// with a copy of itself stops (§243.5, §323.5), and not a new refusal.
 #[test]
 fn a_bends_cap_flush_against_a_block() {
     every_rule_over(
         "a bend's cap flush against a block",
         touching::a_bends_cap_against_a_block(),
-        Expect::NothingAnswers,
+        Expect::TheControlAnswers,
     );
 }
 
@@ -903,12 +922,20 @@ fn fused(
     }
 }
 
-/// An error's variant, and for an undecided predicate which ones gave up.
+/// An error's variant; for an undecided predicate which ones gave up, and for
+/// a broken answer what the sweep refused it for.
 fn named(why: &Error) -> String {
     let written = format!("{why:?}");
     let name: String = written.chars().take_while(|c| *c != '{').collect();
     let open = name.matches('(').count() - name.matches(')').count();
     let name = format!("{}{}", name.trim_end(), ")".repeat(open));
+    if let Error::TheFuseWroteABrokenAnswer { broken } = why {
+        let broken: String = format!("{broken:?}")
+            .chars()
+            .take_while(char::is_ascii_alphanumeric)
+            .collect();
+        return format!("{name} ({broken})");
+    }
     let Error::Undecidable { records } = why else {
         return name;
     };
