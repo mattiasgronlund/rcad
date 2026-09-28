@@ -89,3 +89,9 @@ turned up anyway, it would be a bug in this crate, and `copy_solid`'s own
   the message, so a refused file is `SerdeDeCustom` whatever refused it. So the
   file pins *that* the door refuses, and the unit tests pin *why* by asking the
   door's own check of the same data.
+
+**Nothing the kernel writes trips the new check.** Every builder, fuse and copy
+runs `check_touched_edge` on what it wrote, and the fuse also sweeps its
+throwaway answer, so a kernel-written edge walked from two shells would panic or
+refuse somewhere in the suite. `just gate` on the lane tip `122f9296` passed:
+2 686 tests passed and 11 skipped.
