@@ -781,7 +781,7 @@ fn one_ellipse_on_every_pipe(flat: &Plane, faces: &[Surface]) -> bool {
 
 /// How many imported arcs have to name a plane between two curved faces.
 ///
-/// Measured at 688 on 2026-09-25, with 0 a check could not have passed, by
+/// Measured at 848 on 2026-09-28, with 0 a check could not have passed, by
 ///
 /// ```text
 /// mise exec -- just t -p rcad-step --no-capture -E 'test(=how_often_a_real_file_imports)'
@@ -792,8 +792,11 @@ fn one_ellipse_on_every_pipe(flat: &Plane, faces: &[Surface]) -> bool {
 /// pipes of `Relay_DPDT_FCL_FTR-B4C.step` cross in an ellipse at 45°. From
 /// §220.4 until the ellipse got a bound there were 354, every one a circle; the
 /// 334 more are ellipses where pipes of one radius meet, that mitre among them,
-/// which the reader now checks rather than naming by a face.
-const A_PLANE_BETWEEN_CURVED_FACES: usize = 516;
+/// which the reader now checks rather than naming by a face. It was 688 until
+/// the reader worked an ellipse's sizes out from its pipe rather than reading
+/// the file's twelve digits (`docs/decisions.md` §335); the 160 more are
+/// ellipses too, and the files that import did not change.
+const A_PLANE_BETWEEN_CURVED_FACES: usize = 636;
 
 /// A corner off the surface it is meant to be on is **two** problems, and both
 /// corpora together have to hold both or the report is describing a corpus this
