@@ -146,7 +146,8 @@ pin `CornersCoincide` did not move. That includes the ball caps, which
 `cut_a_cap_up_to_its_pole` also cuts, and `a_block_face_through_a_cones_apex.rs`,
 whose `CornersCoincide` on a pointed cone's union is Q468's (§347.3, §347.4).
 The nearest-corner choice is unchanged wherever it already ran in order, so
-this is what 354.1's argument predicts.
+this is what 354.1's argument predicts. With A alone and the pins below
+moved, `just gate quiet` passed on `5824843f`: 2705 tests run, 2705 passed.
 
 Pins moved, before → after:
 
