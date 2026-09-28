@@ -124,7 +124,7 @@ impl Patch {
 /// is allowed, see [`refuse_loops_that_touch`] — and
 /// [`CannotTriangulate::CoordinateOutOfRange`] for a scaled coordinate the
 /// triangulation will not take — see that variant, the range is narrower than
-/// `f64`'s.
+/// `f64`'s, and one too small is taken as zero where that changes nothing.
 ///
 /// About the deflection:
 /// [`CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection`],
@@ -143,15 +143,22 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     let mut mesh = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
     let mut corner_of: Vec<u32> = Vec::new();
     let mut handles = Vec::with_capacity(corners.len());
+    let scaled = |corner: [f64; 2]| Point2::new(corner[0] * across, corner[1] * along);
+    let flushed = the_first_corner_the_flush_moves(&corners, scaled);
     for (position, corner) in corners.iter().enumerate() {
         let handle = mesh
-            .insert(Point2::new(corner[0] * across, corner[1] * along))
+            .insert(spade::mitigate_underflow(scaled(*corner)))
             .map_err(|why| CannotTriangulate::CoordinateOutOfRange { position, why })?;
         // Two loops are allowed to meet at a point, so a repeat is only a
         // refusal when it is a loop repeating itself. A repeat across loops is
         // one vertex of the mesh wearing two of the domain's corner numbers,
         // and the first of the two is the one the triangles get told about.
         match handles.iter().position(|earlier| *earlier == handle) {
+            Some(earlier) if scaled(corners[earlier]) != scaled(*corner) => {
+                return Err(the_refusal_the_flush_replaced(flushed.expect(
+                    "two corners in different places share a vertex only when the flush moved one",
+                )));
+            }
             Some(earlier) if loop_of[earlier] == loop_of[position] => {
                 return Err(CannotTriangulate::CornersCoincide { position });
             }
@@ -163,9 +170,14 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 
     for (from, to) in every_side(domain) {
         // Asking first, because `add_constraint` panics on a crossing and this
-        // crate takes its loops from whoever calls it.
+        // crate takes its loops from whoever calls it. A crossing among flushed
+        // corners may be one the flush made, so it says nothing true about the
+        // loops that were asked for.
         if !mesh.can_add_constraint(handles[from], handles[to]) {
-            return Err(CannotTriangulate::BoundaryCrossesItself { at: from });
+            return Err(match flushed {
+                Some(position) => the_refusal_the_flush_replaced(position),
+                None => CannotTriangulate::BoundaryCrossesItself { at: from },
+            });
         }
         mesh.add_constraint(handles[from], handles[to]);
     }
@@ -218,6 +230,16 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         },
     )?;
 
+    if let Some(position) = flushed {
+        let unflushed = |vertex: FixedVertexHandle| {
+            let at = scaled(corners[corner_of[vertex.index()] as usize]);
+            [at.x, at.y]
+        };
+        if !the_flush_moved_nothing_the_patch_rests_on(&mesh, domain, &handles, unflushed) {
+            return Err(the_refusal_the_flush_replaced(position));
+        }
+    }
+
     let inside = walk_in_from_the_outside(&mesh);
     let mut triangles = Vec::new();
     for face in mesh.inner_faces() {
@@ -231,6 +253,125 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         corners,
         triangles,
         deviation: Approximation::new(deviation, Cause::FlatStandIn),
+    })
+}
+
+/// The first corner with a scaled coordinate that is not zero and is under
+/// spade's floor of `2⁻¹⁴²`, which [`spade::mitigate_underflow`] sets to zero.
+///
+/// `None` for almost every patch, and then spade is handed exactly the numbers
+/// it was handed before the flush existed, so nothing about the answer can have
+/// changed. Compared bit for bit, so a coordinate that is not a number is not
+/// counted as moved: spade refuses that one on its own.
+fn the_first_corner_the_flush_moves(
+    corners: &[[f64; 2]],
+    scaled: impl Fn([f64; 2]) -> Point2<f64>,
+) -> Option<usize> {
+    corners.iter().position(|corner| {
+        let before = scaled(*corner);
+        let after = spade::mitigate_underflow(before);
+        before.x.to_bits() != after.x.to_bits() || before.y.to_bits() != after.y.to_bits()
+    })
+}
+
+/// What [`triangulate`] said about a patch with a coordinate under `2⁻¹⁴²`
+/// before it flushed any: spade refused the first such corner as too small.
+///
+/// So a flushed patch that cannot be shown to come out the same gets the
+/// refusal it always got, and the flush only ever turns a refusal into a mesh
+/// (`docs/decisions.md` §246.5).
+fn the_refusal_the_flush_replaced(position: usize) -> CannotTriangulate {
+    CannotTriangulate::CoordinateOutOfRange {
+        position,
+        why: InsertionError::TooSmall,
+    }
+}
+
+/// Whether the triangles spade drew with some corners flushed to zero are
+/// still a triangulation of the patch **as it was asked for**, with every
+/// corner where the caller put it.
+///
+/// A flushed corner moves by less than `2⁻¹⁴²` in the scaled domain, and a
+/// move that small can still change the answer. Each of these is a test in
+/// this file that fails without its check:
+///
+/// - **Every side of every loop is one side of a triangle.** A corner flushed
+///   onto the line of a side splits it, and a side split here is drawn whole by
+///   the face on the other side of it, which is a crack between the two
+///   (`a_corner_flushed_onto_another_loops_side_is_refused`).
+/// - **Every triangle still turns anticlockwise**, read with the corners where
+///   they really are. A corner flushed across the line of a thin triangle turns
+///   it over (`a_triangle_the_flush_turns_over_is_refused`), and so does a thin
+///   hole turned inside out, whose own triangle is not kept but is still what
+///   stops the kept ones overlapping
+///   (`a_hole_the_flush_turns_inside_out_is_refused`).
+/// - **Every point is on or inside every side of the hull**, read the same way.
+///
+/// Why those three are enough: with every triangle anticlockwise, how many of
+/// them cover a point is the number of times the hull's own outline winds round
+/// it; an outline that keeps every point on or to its left is convex and winds
+/// once. So the triangles tile the hull without overlapping, as they did
+/// before the flush. The loops are sides of that tiling, so which triangles
+/// are inside them is the same count of crossings it always was.
+///
+/// Two corners in different places flushed onto one vertex are refused before
+/// this runs, where [`triangulate`] inserts them.
+///
+/// Only what the flush moved is looked at: a triangle, or a side of the hull
+/// and a point, none of whose corners moved, is exactly what spade drew and
+/// spade's own predicates are exact. A comparison the exact predicate cannot
+/// settle counts as a failure, since then nothing shows the patch unchanged.
+///
+/// # Panics
+///
+/// On a [`Decision`] this file has not been taught.
+fn the_flush_moved_nothing_the_patch_rests_on(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    domain: &TrimmedDomain,
+    handles: &[FixedVertexHandle],
+    unflushed: impl Fn(FixedVertexHandle) -> [f64; 2],
+) -> bool {
+    let every_side_is_there = every_side(domain)
+        .into_iter()
+        .all(|(from, to)| mesh.get_edge_from_neighbors(handles[from], handles[to]).is_some());
+    if !every_side_is_there {
+        return false;
+    }
+
+    let moved = |vertex: FixedVertexHandle| {
+        let at = mesh.vertex(vertex).position();
+        [at.x, at.y] != unflushed(vertex)
+    };
+    let turns_left = |corners: [FixedVertexHandle; 3], or_is_straight: bool| {
+        let [a, b, c] = corners.map(&unflushed);
+        match orient2d(a, b, c) {
+            Decision::Pos => true,
+            Decision::Zero => or_is_straight,
+            Decision::Neg | Decision::Undecidable { .. } => false,
+            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+        }
+    };
+
+    for face in mesh.inner_faces() {
+        let corners = face.vertices().map(|vertex| vertex.fix());
+        if corners.iter().any(|&vertex| moved(vertex)) && !turns_left(corners, false) {
+            return false;
+        }
+    }
+
+    let moved_points: Vec<FixedVertexHandle> =
+        mesh.fixed_vertices().filter(|&point| moved(point)).collect();
+    mesh.convex_hull().all(|outward| {
+        let side = outward.rev();
+        let (from, to) = (side.from().fix(), side.to().fix());
+        if moved(from) || moved(to) {
+            mesh.fixed_vertices()
+                .all(|point| turns_left([from, to, point], true))
+        } else {
+            moved_points
+                .iter()
+                .all(|&point| turns_left([from, to, point], true))
+        }
     })
 }
 
@@ -1398,6 +1539,14 @@ pub enum CannotTriangulate {
     /// ends and narrower than this kernel's own limits. Note that it is the
     /// **scaled** coordinate that has to fit: an angle round a pipe of radius
     /// `1e60` is a small number that becomes a large one.
+    ///
+    /// **Under `2^-142` is refused only when zero would change the answer.**
+    /// [`triangulate`] hands spade such a coordinate as zero, then checks with
+    /// the corners where they really are that the triangles still tile the
+    /// patch and draw every side whole. When they do not, this is the refusal,
+    /// with `why` [`InsertionError::TooSmall`] and `position` the first corner
+    /// the flush moved — the one spade refused before the flush existed
+    /// (`docs/decisions.md` §246.5, §321).
     ///
     /// A refusal and never a wrong answer, which is the right way round.
     #[error("the corner at {position} is outside the range a triangulation takes: {why:?}")]

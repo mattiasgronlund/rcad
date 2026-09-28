@@ -100,6 +100,106 @@ fn a_round_bar_written_out_and_read_back_is_the_same_round_bar() {
     covered.report("a round bar");
 }
 
+/// The same bar moved along `y` by amounts down to the smallest `f64`, written
+/// out, read back and found the same, corner for corner and bit for bit.
+///
+/// `docs/decisions.md` §246. The file carries each move in every corner, so the
+/// bar read back has its bottom cap's corner at `v = d` on the plane `z = 0`,
+/// where the bar that went in is meshed in its placement's inverse and hands
+/// the triangulator zero. Spade takes nothing under `2⁻¹⁴²` that is not zero,
+/// and until the triangulator flushed such a coordinate to zero every move
+/// from `2⁻¹⁴³` down was refused on the way back in; §246.3's table is these
+/// moves. `2⁻¹⁰⁰⁷` is the one the fuzzer found, and `2⁻¹⁰⁷⁴` is subnormal.
+///
+/// Not [`Covered::the_same_solid_comes_back`], because the cut it compares is a
+/// fuse, and a fuse with this moved bar refuses for reasons of its own
+/// (§246.6).
+#[test]
+fn a_round_bar_moved_by_less_than_two_to_the_minus_142_comes_back_the_same() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    for exponent in [100_u64, 141, 142, 143, 200, 1007, 1022] {
+        let moved_by = f64::from_bits((1023 - exponent) << 52);
+        for moved_by in [moved_by, -moved_by] {
+            a_moved_bar_comes_back_the_same(moved_by, &policy, &mut log);
+        }
+    }
+    for subnormal in [1_u64 << 51, 1] {
+        a_moved_bar_comes_back_the_same(f64::from_bits(subnormal), &policy, &mut log);
+    }
+}
+
+fn a_moved_bar_comes_back_the_same(moved_by: f64, policy: &Policy, log: &mut ProvenanceLog) {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 8.0).expect("a working size"));
+    let bar = model
+        .add_round_bar(2.0, 8.0, &Isometry::identity())
+        .expect("a bar of radius two");
+    let move_it = Isometry::translation(Vector::new(0.0, moved_by, 0.0)).expect("a move");
+    model.place_solid(bar, &move_it).expect("a bar can be moved");
+    model
+        .validate(policy, log)
+        .unwrap_or_else(|why| panic!("the bar moved by {moved_by:e} is not sound: {why}"));
+
+    let text = rcad_step::write(&model, "a moved bar")
+        .unwrap_or_else(|why| panic!("the bar moved by {moved_by:e} is not written: {why}"));
+    let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+    let import = Import::read(&file, policy, log).unwrap_or_else(|why| {
+        panic!("the bar moved by {moved_by:e} is refused on the way back in: {why}")
+    });
+    let [(_, read_back)] = import.solids() else {
+        panic!("one bar came back as {}", import.solids().len());
+    };
+    let there = import.model();
+    there
+        .validate(policy, log)
+        .unwrap_or_else(|why| panic!("the bar moved by {moved_by:e} comes back unsound: {why}"));
+
+    let went = model.solid(bar).expect("this model made the key");
+    let came = there.solid(*read_back).expect("this model made the key");
+    assert_eq!(
+        where_its_corners_are(went),
+        where_its_corners_are(came),
+        "the bar moved by {moved_by:e} comes back with its corners somewhere else"
+    );
+    assert!(
+        where_its_corners_are(went).contains(&[2.0, moved_by, 0.0].map(f64::to_bits)),
+        "the bar was not moved by {moved_by:e} at all, so this compared two bars at the origin"
+    );
+
+    let deflection = the_same_mesh_on_both_sides();
+    let here = went
+        .measure(deflection, policy, log)
+        .unwrap_or_else(|why| panic!("the bar moved by {moved_by:e} does not measure: {why}"));
+    let back = came.measure(deflection, policy, log).unwrap_or_else(|why| {
+        panic!("the bar moved by {moved_by:e} does not measure after the round trip: {why}")
+    });
+    assert_eq!(here.volume(), back.volume(), "volume, moved by {moved_by:e}");
+    assert_eq!(
+        here.surface_area(),
+        back.surface_area(),
+        "area, moved by {moved_by:e}"
+    );
+    assert_eq!(
+        here.centroid(),
+        back.centroid(),
+        "centroid, moved by {moved_by:e}"
+    );
+}
+
+/// Every corner of every wire of a solid, where the solid puts it, as bits and
+/// in order.
+fn where_its_corners_are(solid: rcad_topo::SolidView<'_>) -> Vec<[u64; 3]> {
+    let mut corners: Vec<[u64; 3]> = solid
+        .faces()
+        .flat_map(|face| face.wires().collect::<Vec<_>>())
+        .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+        .map(|coedge| coedge.start().point().coordinates().map(f64::to_bits))
+        .collect();
+    corners.sort_unstable();
+    corners.dedup();
+    corners
+}
+
 /// A ball is refused, by the name of the thing an `EDGE_LOOP` cannot say.
 ///
 /// **A refusal recorded as a test rather than as a sentence.** A ball's one
