@@ -163,7 +163,10 @@ fn no_point_with_f64_coordinates_is_inside_the_piece_between_the_two_places() {
     }
     assert_eq!(f64::next_down(-1.0), -1.0 - f64::EPSILON);
     assert_eq!(f64::next_up(edge), edge + f64::powi(2.0, -77));
-    for nearest in [[f64::next_down(-1.0), edge, 0.0], [-1.0, f64::next_up(edge), 0.0]] {
+    for nearest in [
+        [f64::next_down(-1.0), edge, 0.0],
+        [-1.0, f64::next_up(edge), 0.0],
+    ] {
         assert_eq!(
             where_it_is(nearest),
             Containment::Outside,

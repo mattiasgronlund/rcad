@@ -111,16 +111,15 @@ fn a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot
                 let mut model =
                     Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
                 let mut log = ProvenanceLog::new();
-                match fuse_a_cube_and_a_ball_on_its_corner(&mut model, s, rule, &policy, &mut log)
-                {
+                match fuse_a_cube_and_a_ball_on_its_corner(&mut model, s, rule, &policy, &mut log) {
                     Err(
                         Error::CannotMeshAFace { .. }
                         | Error::AWireWillNotLieFlatOnItsFace { .. }
                         | Error::ACurvedFaceGoesRightRoundWithNoSeam { .. },
                     ) => (),
-                    Err(Error::Undecidable { records }) => panic!(
-                        "{case:?}: `select` refused the ball again: {records:#?}"
-                    ),
+                    Err(Error::Undecidable { records }) => {
+                        panic!("{case:?}: `select` refused the ball again: {records:#?}")
+                    }
                     Ok(fused) => panic!(
                         "{case:?}: the fuse answered with {} solids. These shapes can now show \
                          which place `a_corner_is_this_place` folds (§288.3, §346)",
