@@ -187,9 +187,11 @@ impl Plane {
     /// reads back as them. The file carries the bits exactly and this keeps
     /// them (`docs/decisions.md` §313.3).
     ///
-    /// `n·n − 1` is worked out exactly. A component so small that its square
-    /// cannot be formed exactly, below about `2⁻⁴⁸⁴`, leaves it unmeasured,
-    /// and that normal is scaled.
+    /// `n·n − 1` is worked out exactly, and a normal is kept only when it is
+    /// proved inside. A component so small that its square cannot be formed
+    /// exactly, below about `2⁻⁴⁸⁴`, is charged at the most its square could
+    /// be, `2⁻⁹⁶⁸`, which moves the edge by nothing a normal near one can
+    /// show.
     ///
     /// **A normal outside the bound is scaled and not refused.** STEP does not
     /// ask for a `DIRECTION` of length one — `(0, 0, 2)` is a correct way to
@@ -730,24 +732,40 @@ pub enum PlaneAgreement {
     CannotTell,
 }
 
-/// Whether `normal · normal`, worked out exactly, is within
-/// [`Plane::NORMAL_LENGTH_ROUNDOFF`] of one.
+/// Whether `normal · normal` is within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of
+/// one, **proved** rather than estimated.
 ///
-/// `false` for a normal that is not made of finite numbers, one with a
-/// component whose square cannot be formed exactly, and one whose squares sum
-/// past the top of the range: none of those is a turned unit vector, and
+/// Every square is formed exactly except one too small for its low half to
+/// be a normal number, which [`product_is_exact`] turns away. Such a square is
+/// below `2⁻⁹⁶⁸`, so it is not added and `2⁻⁹⁶⁸` is charged against the top
+/// of the bound instead: the answer is `true` only when the length is inside
+/// whatever those squares were. A turned face's normal can carry one —
+/// `4.1e-304` in `y` on four of the writer fuzzer's crash files — and was
+/// scaled before this was counted.
+///
+/// `false` for a normal that is not made of finite numbers, and for one with
+/// a square past the top of the range: neither is a turned unit vector, and
 /// [`Plane::from_point_and_normal`] is what answers for them.
 fn has_length_one_to_within_a_turn(normal: Vector) -> bool {
+    const EVERY_SQUARE_TOO_SMALL_TO_FORM_IS_BELOW: f64 =
+        f64::MIN_POSITIVE * 9_007_199_254_740_992.0 * 2.0;
     if !normal.is_finite() {
         return false;
     }
-    let components = normal.components();
-    let Some(squared_length) = Exact::dot_of(components, components) else {
-        return false;
-    };
+    let mut squared_length = Exact::of(0.0);
+    let mut left_out = 0.0;
+    for component in normal.components() {
+        match Exact::product_of(component, component) {
+            Some(square) => squared_length = squared_length.plus(&square),
+            None if (component * component).is_finite() => {
+                left_out += EVERY_SQUARE_TOO_SMALL_TO_FORM_IS_BELOW;
+            }
+            None => return false,
+        }
+    }
     let off_one = squared_length.minus(&Exact::of(1.0));
     let room = Exact::of(Plane::NORMAL_LENGTH_ROUNDOFF);
-    let not_above = match off_one.minus(&room).sign() {
+    let not_above = match off_one.plus(&Exact::of(left_out)).minus(&room).sign() {
         Decision::Neg | Decision::Zero => true,
         Decision::Pos | Decision::Undecidable { .. } => false,
         other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
@@ -977,10 +995,15 @@ mod tests {
                 assert_eq!(past_the_bound, !kept, "n·n − 1 is {off_one:?} for {length}");
 
                 let written = Vector::new(0.0, length, 0.0);
-                let stored = Plane::from_point_and_normal_as_written(Point::new(0.0, 3.0, 0.0), written)
-                    .expect("a finite normal with a length")
-                    .normal();
-                let expected = if kept { written } else { Vector::new(0.0, 1.0, 0.0) };
+                let stored =
+                    Plane::from_point_and_normal_as_written(Point::new(0.0, 3.0, 0.0), written)
+                        .expect("a finite normal with a length")
+                        .normal();
+                let expected = if kept {
+                    written
+                } else {
+                    Vector::new(0.0, 1.0, 0.0)
+                };
                 assert_eq!(
                     stored.components().map(f64::to_bits),
                     expected.components().map(f64::to_bits),
@@ -1014,15 +1037,34 @@ mod tests {
         );
     }
 
-    /// A normal just inside the bound, but with a component too small for its
-    /// square to be formed exactly, is not measured and so is scaled.
+    /// A turned face's normal from four of the writer fuzzer's 2026-09-26
+    /// crash files (`crash-024b8e42c5fdb3502f2dbeecc351d9b3cd58dcd0` is one),
+    /// whose `x` is too small for its square to be formed exactly. Its square
+    /// is charged at the most it could be rather than left unmeasured, so the
+    /// normal is kept; scaling it moves `y` down an ulp.
     #[test]
-    fn a_normal_with_a_component_too_small_to_square_is_scaled() {
-        let written = Vector::new(1.0 + 31.0 * f64::EPSILON, 1e-300, 0.0);
-        let stored = Plane::from_point_and_normal_as_written(Point::origin(), written)
+    fn a_normal_with_a_component_too_small_to_square_is_still_kept() {
+        let written = Vector::new(
+            4.101_256_136_000_473_6e-304,
+            -0.825_562_457_895_251_8,
+            0.564_310_754_916_075_2,
+        );
+        assert!(
+            !product_is_exact(written.x(), written.x()),
+            "the rest of this test rests on this"
+        );
+        let kept = Plane::from_point_and_normal_as_written(Point::origin(), written)
             .expect("a finite normal with a length")
             .normal();
-        assert_eq!(stored.x(), 1.0, "{stored:?} was scaled");
+        assert_eq!(
+            kept.components().map(f64::to_bits),
+            written.components().map(f64::to_bits),
+            "{kept:?}"
+        );
+        let scaled = Plane::from_point_and_normal(Point::origin(), written)
+            .expect("a finite normal with a length")
+            .normal();
+        assert_ne!(scaled, written, "and scaling it would have moved it");
     }
 
     /// The evidence behind the share of [`Plane::NORMAL_LENGTH_ROUNDOFF`] that

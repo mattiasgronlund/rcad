@@ -653,8 +653,9 @@ impl Writing {
 /// `|nⱼ| ≥ 2⁻²⁷`, and one whose widest component is ±1 leaves nothing over.
 /// The reader keeps a normal that is only within
 /// `Plane::NORMAL_LENGTH_ROUNDOFF` of length one, and one of those can have
-/// its widest component within `32ε` of one and the other two zero; there
-/// `r / nⱼ` is not a number, and the check below refuses the plane by name.
+/// its widest component within `32ε` of one and the other two zero, with no
+/// `nⱼ` to divide by. There the one coordinate is stepped an `f64` at a time
+/// until it reads back ([`stepped_until_it_reads_back`]).
 ///
 /// **Where `offset / nᵢ` overflows**, the point is `±offset` along the widest
 /// and `offset·(1 − |nᵢ|) / nⱼ` along the next. Scaling the first point by a
@@ -702,10 +703,48 @@ fn divided_along_the_widest(offset: f64, normal: [f64; 3], widest: usize, next: 
     coordinates[widest] = offset / normal[widest];
     let product = normal[widest] * coordinates[widest];
     let left_over = (offset - product) - normal[widest].mul_add(coordinates[widest], -product);
-    if left_over != 0.0 {
+    if left_over == 0.0 {
+        return coordinates;
+    }
+    if normal[next] == 0.0 {
+        coordinates[widest] =
+            stepped_until_it_reads_back(offset, normal[widest], coordinates[widest]);
+    } else {
         coordinates[next] = left_over / normal[next];
     }
     coordinates
+}
+
+/// The coordinate along a normal's only component that is not zero from which
+/// the reader works out `offset`, found by stepping one `f64` at a time from
+/// `start`, the quotient `offset / along`.
+///
+/// **Only a normal the reader keeps reaches this.** With its other two
+/// components zero it has no second coordinate to carry what the first left
+/// over, and its one component is not ±1 — `(0, 0, −1.0000000000000002)` is
+/// one a turn left — so `offset / along` can land an ulp or two from a
+/// coordinate that reads back. The reader's dot is then `along · z` rounded
+/// once, which rises with `z` when `along` is positive and falls when it is
+/// not, so the walk goes one way and stops at the first coordinate that reads
+/// back as `offset` or past it. A step moves the product by about an ulp of
+/// the offset, and the quotient starts within one, so eight steps is far more
+/// than it takes; one that finds nothing hands back a coordinate the check in
+/// [`a_point_this_reader_reads_back_as`] refuses by name.
+fn stepped_until_it_reads_back(offset: f64, along: f64, start: f64) -> f64 {
+    let mut coordinate = start;
+    let below = along * coordinate < offset;
+    for _ in 0..8 {
+        let read = along * coordinate;
+        if read == offset || (read < offset) != below {
+            return coordinate;
+        }
+        coordinate = if below == (along > 0.0) {
+            coordinate.next_up()
+        } else {
+            coordinate.next_down()
+        };
+    }
+    coordinate
 }
 
 fn the_offset_itself_along_the_widest(
@@ -1021,8 +1060,8 @@ mod plane_round_trip_tests {
     fn the_reader_keeps_a_normal_a_turn_left_short_of_length_one() {
         let short = core::f64::consts::FRAC_1_SQRT_2.next_down();
         let written = Vector::new(short, 0.0, short);
-        let read = plane_through(Point::new(3.0, -2.0, 5.0), written)
-            .expect("a direction with a length");
+        let read =
+            plane_through(Point::new(3.0, -2.0, 5.0), written).expect("a direction with a length");
         assert_eq!(
             read.normal().components().map(f64::to_bits),
             written.components().map(f64::to_bits),
@@ -1037,6 +1076,35 @@ mod plane_round_trip_tests {
             read.coefficients().map(f64::to_bits),
             "{read:?} read back from {point:?} as {back:?}"
         );
+    }
+
+    /// Two planes the writer fuzzer's 2026-09-26 crash files
+    /// `crash-7444ab6408bdd8fc9ca34f84cbf6fcd392681901` and
+    /// `crash-848d6458b595df9f964acfc599a4153579e42d34` placed: facing along
+    /// an axis, an ulp longer than one, which the reader keeps. The quotient
+    /// `offset / nᵢ` misses by a couple of ulps and there is no second
+    /// component to carry the rest, so the coordinate is stepped until it
+    /// reads back; before it was, both were refused by name.
+    #[test]
+    fn a_normal_along_an_axis_an_ulp_too_long_is_written_at_a_point_it_reads_back_from() {
+        let long = 1.0_f64.next_up();
+        for (normal, offset) in [
+            (Vector::new(0.0, 0.0, -long), 0.999_999_999_999_998_2),
+            (Vector::new(long, 0.0, 0.0), -0.999_999_999_999_998_4),
+        ] {
+            let plane = Plane::from_point_and_normal_as_written(Point::origin(), normal)
+                .and_then(|plane| plane.moved_to(offset))
+                .expect("a finite offset along a normal with a length");
+            assert_eq!(plane.normal(), normal, "the reader keeps this normal");
+            let point = a_point_this_reader_reads_back_as(&plane)
+                .unwrap_or_else(|why| panic!("{plane:?}: {why}"));
+            let back = plane_through(point, plane.normal()).expect("a finite point");
+            assert_eq!(
+                back.coefficients().map(f64::to_bits),
+                plane.coefficients().map(f64::to_bits),
+                "{plane:?} read back from {point:?} as {back:?}"
+            );
+        }
     }
 
     /// Twenty thousand planes facing no axis, at offsets from `1e-300` to
