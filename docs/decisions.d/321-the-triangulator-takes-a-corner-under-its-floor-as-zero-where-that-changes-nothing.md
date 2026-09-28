@@ -75,15 +75,19 @@ the check showed where it failed: a hull side from `(15.39, 0)` to
 `(15.60, 0)`, and the point `(8.01, 5e-324)`. Two things failed at that point:
 
 - **`orient2d` left that turn undecided.** Its determinant is about
-  `0.2 · 2⁻¹⁰⁷⁴`, under the smallest `f64`. `orient2d` does retry at a power of
-  two, but it picks the power from the largest difference between the points,
-  which here is about one. So it retries at the scale it started at. A single
-  scaling that lifts every product into range does exist, and it is what
-  `which_way_three_points_turn` in `triangulate.rs` now does: it moves every
-  coordinate up by one exact power of two until the largest is near `2⁵⁰⁰`.
-  `a_corner_a_subnormal_inside_a_straight_side_of_the_hull_is_meshed` uses
-  those three numbers, and asserts that `orient2d` alone still leaves them
-  undecided.
+  `0.2 · 2⁻¹⁰⁷⁴`, under the smallest `f64`. `orient2d` did retry at a power of
+  two, but then it picked the power only from the largest difference between
+  the points, which here is about one. So it retried at the scale it started
+  at. A single scaling that lifts every product into range does exist, and
+  this lane put it in the triangulator: `which_way_three_points_turn` in
+  `triangulate.rs` moved every coordinate up by one exact power of two until
+  the largest was near `2⁵⁰⁰`.
+  `a_corner_a_subnormal_inside_a_straight_side_of_the_hull_is_meshed` used
+  those three numbers, and asserted that `orient2d` alone left them
+  undecided. **Since §324.4, `orient2d` tries a second power of two**, the one
+  that lifts the largest coordinate into `[2⁵⁰⁹, 2⁵¹⁰)`, and that decides this
+  turn. §324.8 measured that the triangulator's lift decided nothing more,
+  took it out, and turned the test's assertion round.
 - **The dent itself.** A convexity check refuses it. A check that asks only
   that the outline not cross itself lets it through, and that is all the
   argument needs. `a_corner_flushed_onto_a_straight_side_of_the_hull_is_meshed`
@@ -164,11 +168,23 @@ so they guard the checks and not the flush.
   `lane-q79-flush-tiny-corners-2`, moved the pin in `e1194c80`. Its
   verifier ran the gate on `e1194c80`: green, 2 576 of 2 576. With the base
   `triangulate.rs` restored the moved pin fails, refused `TooSmall`.
-- **`orient2d`'s retry in `crates/rcad-predicates/src/orient2d.rs`** picks
-  its power of two from the largest difference, so it misses inputs whose
-  products span from a subnormal to about one. One power fits them all. That
-  is a §16.10 gap in the predicate. It is worked round here, inside the
-  triangulator's own check, because `rcad-predicates` was not this lane's to
-  change. The fix belongs in `exponent_that_brings_into_range`.
+- **`orient2d`'s retry in `crates/rcad-predicates/src/orient2d.rs`** picked
+  its power of two only from the largest difference, so it missed inputs
+  whose products span from a subnormal to about one. One power fits them
+  all. That was a §16.10 gap in the predicate. It was worked round here,
+  inside the triangulator's own check, because `rcad-predicates` was not
+  this lane's to change. **Closed since:** §324.4 gave `orient2d` a second
+  power of two, read off the largest coordinate, and §324.8 took the
+  triangulator's workaround out.
 - **The hull-outline check has no test that needs it alone** (321.2).
-- §246.6's fuse refusals on the moved bar are untouched.
+- §246.6's fuse refusals on the moved bar were untouched by this section.
+  **§322 has since closed both at the predicates**: the difference fuses and
+  measures as the unmoved bar's does, and the union got past every predicate
+  and stopped at the triangulator's `TooSmall`, which is this section's
+  flush. On `53b8997a` (§324.8's tip) the union comes back too: two solids,
+  an empty log under `Policy::certified()`, and `Model::validate` is `Ok`.
+  That was a scratch probe, not committed, building §246.1's pair with the
+  steps of `bar_and_cube` in
+  `crates/rcad-topo/tests/a_bar_moved_by_a_tiny_step_fuses_as_the_unmoved_bar.rs`.
+  That file's union test still asserts only that no predicate refuses, and
+  its module doc still says the union does not come back.

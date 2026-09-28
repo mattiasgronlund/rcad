@@ -764,40 +764,45 @@ fn a_corner_flushed_onto_a_straight_side_of_the_hull_is_meshed() {
     );
 }
 
-/// The same, with the corner the smallest `f64` above the side. The three
-/// numbers along the side are the ones a bar turned `5.6e-309` radians
-/// about `x` put there, in one of the writer fuzzer's 2026-09-26 files.
+/// The same, with the corner the smallest `f64` above the side, and a few
+/// heights between that and the flush's floor. The three numbers along the
+/// side are the ones a bar turned `5.6e-309` radians about `x` put there, in
+/// one of the writer fuzzer's 2026-09-26 files.
 ///
 /// Whether the corner is inside the side from `along[1]` to `along[2]` is the
 /// sign of a determinant about `0.2 · 2⁻¹⁰⁷⁴`, which is under the smallest
-/// `f64`, and `orient2d` alone leaves it undecided. The check asks it again
-/// with every coordinate lifted by an exact power of two, and that settles it.
+/// `f64`. `orient2d` decides it by lifting every coordinate by one exact power
+/// of two, so the check asks `orient2d` and nothing else. It used to lift the
+/// coordinates itself, when `orient2d` took its power of two only from the
+/// largest difference and refused this; `docs/decisions.md` §324.8 measured
+/// that the lift decided nothing more once `orient2d` lifted the largest
+/// coordinate too, and it went.
 #[test]
 fn a_corner_a_subnormal_inside_a_straight_side_of_the_hull_is_meshed() {
     let smallest = f64::from_bits(1);
     let along = [8.012115492376656, 15.391695551144624, 15.602540695680851];
-    assert!(
-        matches!(
-            orient2d([along[1], 0.0], [along[2], 0.0], [along[0], smallest]),
-            Decision::Undecidable { .. }
-        ),
-        "orient2d settles this on its own now, so this no longer tests the lifting"
+    assert_eq!(
+        orient2d([along[1], 0.0], [along[2], 0.0], [along[0], smallest]),
+        Decision::Pos,
+        "the flush check stands on orient2d deciding this turn"
     );
-    check_everything(
-        "a corner a subnormal inside a straight side",
-        &domain_of(
-            flat(),
-            vec![
-                [0.0, 0.0],
-                [along[0], smallest],
-                [along[1], 0.0],
-                [along[2], 0.0],
-                [along[2], 4.0],
-                [0.0, 4.0],
-            ],
-            Vec::new(),
-        ),
-    );
+    for height in [smallest, 2f64.powi(-1000), 2f64.powi(-600), 2f64.powi(-143)] {
+        check_everything(
+            &format!("a corner {height:e} inside a straight side"),
+            &domain_of(
+                flat(),
+                vec![
+                    [0.0, 0.0],
+                    [along[0], height],
+                    [along[1], 0.0],
+                    [along[2], 0.0],
+                    [along[2], 4.0],
+                    [0.0, 4.0],
+                ],
+                Vec::new(),
+            ),
+        );
+    }
 }
 
 /// How far the mesh really is from the surface, and not how far it says it is.

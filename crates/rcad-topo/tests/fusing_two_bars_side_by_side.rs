@@ -44,14 +44,20 @@
 //! how the kept pieces were named, and both refused `ResultIsNotManifold`.
 //!
 //! **Fusing any of the six answers once more still refuses**
-//! `AFaceTrimmedByACurveThisCannotFollow` (§252.8). Nothing here asks that yet.
+//! `AFaceTrimmedByACurveThisCannotFollow` (§252.8), at the two arcs of the
+//! answer's bottom cap, even with a block that touches nothing. A pipe's circle
+//! has no centre for the arrangement to read which arc an edge is by (§331).
+//! [`a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap`] pins
+//! where, and
+//! [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
+//! shows the answer exists.
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, Isometry, MeetOfThree, Plane, Point, Scale, Surface, Vector,
-    meet_of_three_surfaces,
+    Axis, Cylinder, Deflection, EdgeRun, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
+    Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule, SolidKey};
+use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 5.0;
 const HEIGHT: f64 = 10.0;
@@ -436,6 +442,272 @@ fn where_a_bar_started_its_cap_circle_stays_a_corner_where_the_other_circle_cros
             );
         }
     }
+}
+
+/// **Fusing any of the six answers once more refuses, at the arcs of the
+/// answer's bottom cap, whatever it is fused with.**
+///
+/// Each answer is fused again, by every rule and both ways round, with two
+/// blocks: one over the top half of the answer, and one fifty above it that
+/// touches nothing. Every one of those 72 fuses refuses
+/// `AFaceTrimmedByACurveThisCannotFollow`, naming the answer's face on the
+/// plane `z = 0`. The block that touches nothing refuses too, so what stops the
+/// fuse is not a cut: it is the arrangement reading the answer's own boundary.
+///
+/// That face is one wire of two arcs, each from `(3, −4, 0)` to `(3, 4, 0)`,
+/// one on each pipe's circle. A first fuse never meets such an edge, because a
+/// bar's cap circle is one closed edge. `Arrangement::which_way_an_edge_runs_round`
+/// in `fuse/arrange.rs` asks which of a circle's two arcs the edge is, and
+/// `the_way_into_an_arc` answers only for a curve whose centre
+/// `where_a_closed_crossing_is_centred` in `holds.rs` can place. That function
+/// knows a ball and a cone, not a pipe (`docs/decisions.md` §331).
+///
+/// **This test fails the day that is fixed.** Then the block that touches
+/// nothing should answer for the unions and the intersections, and the refusal
+/// that is left moves somewhere else. §331.3 has what a trial fix got.
+#[test]
+fn a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap() {
+    let policy = Policy::certified();
+    let bottom = Surface::Plane(
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the plane of both bars' bottom caps"),
+    );
+    for (first, mut model, answer) in every_first_answer() {
+        let solid = model.solid(answer).expect("this model made the key");
+        let cap = solid
+            .faces()
+            .find(|face| face.surface() == bottom)
+            .unwrap_or_else(|| panic!("{first} has a face on `z = 0`"))
+            .key();
+        the_face_is_two_arcs_of_two_pipes(&model, answer, cap, &first);
+
+        let over_the_top_half = a_block_from(&mut model, HEIGHT / 2.0);
+        let touching_nothing = a_block_from(&mut model, 50.0);
+        for (block, tool) in [
+            ("a block over the top half", over_the_top_half),
+            ("a block touching nothing", touching_nothing),
+        ] {
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                for (arguments, tools) in [(answer, tool), (tool, answer)] {
+                    let mut again = model.clone();
+                    let refused = again.fuse(
+                        &[arguments],
+                        &[tools],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    );
+                    assert!(
+                        matches!(
+                            refused,
+                            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == cap
+                        ),
+                        "{first}, then {rule:?} with {block}: expected the refusal at the \
+                         bottom cap {cap:?}, got {:?}",
+                        refused.map(|fused| fused.solids().to_vec())
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// **What the second fuse over the top half should give, reached by the other
+/// order of the same two cuts.**
+///
+/// Cutting the top half off each bar first and then fusing the two half bars
+/// is the same set as fusing first and cutting after, for every rule:
+/// `(A ∪ B) − T = (A − T) ∪ (B − T)`, `(A ∩ B) − T = (A − T) ∩ (B − T)` and
+/// `(A − B) − T = (A − T) − (B − T)`. This order never meets an arc of a pipe's
+/// circle as an input edge: each half bar's caps are whole circles again. So
+/// every fuse that
+/// [`a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap`] refuses
+/// with the block over the top half and `Rule::Difference` has an answer this
+/// kernel builds: half of the first answer's volume, with the same four corners
+/// at `z = 0` and `z = 5`.
+///
+/// That is what makes the refusal a gap and not a limit (§16.10).
+#[test]
+fn cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should() {
+    let policy = Policy::certified();
+    let half = HEIGHT / 2.0;
+    let four_corners = vec![
+        [3.0, -4.0, 0.0],
+        [3.0, -4.0, half],
+        [3.0, 4.0, 0.0],
+        [3.0, 4.0, half],
+    ];
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * half;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let shared = lens * half;
+
+    let (mut model, here, there) = two_bars_side_by_side();
+    let top_half = a_block_from(&mut model, half);
+    let [lower_here, lower_there] = [here, there].map(|bar| {
+        let fused = model
+            .fuse(
+                &[bar],
+                &[top_half],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("a bar less its top half: {refused:?}"));
+        let [lower] = fused.solids() else {
+            panic!("a bar less its top half is one solid: {:?}", fused.solids());
+        };
+        *lower
+    });
+
+    for (rule, by_hand) in [
+        (Rule::Union, 2.0 * one_bar - shared),
+        (Rule::Intersection, shared),
+        (Rule::Difference, one_bar - shared),
+    ] {
+        for (arguments, tools) in [(lower_here, lower_there), (lower_there, lower_here)] {
+            let mut model = model.clone();
+            let fused = model
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{rule:?} of two half bars: {refused:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
+            let [solid] = fused.solids() else {
+                panic!(
+                    "{rule:?} of two half bars is one solid: {:?}",
+                    fused.solids()
+                );
+            };
+            let solid = model.solid(*solid).expect("this model made the key");
+
+            let mut corners: Vec<[f64; 3]> = solid
+                .faces()
+                .flat_map(|face| face.wires().collect::<Vec<_>>())
+                .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+                .flat_map(|coedge| [coedge.edge().start(), coedge.edge().end()])
+                .map(|corner| corner.point().coordinates())
+                .collect();
+            corners.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+            corners.dedup();
+            assert_eq!(corners, four_corners, "{rule:?}: the corners of the answer");
+
+            let measured = solid
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid measures");
+            assert!(
+                (measured.volume() - by_hand).abs() <= measured.volume_error(),
+                "{rule:?}: measured {} ± {} against {by_hand} by hand",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
+/// Each of the six first fuses, on a model of its own, with the one solid it
+/// answered.
+fn every_first_answer() -> Vec<(String, Model, SolidKey)> {
+    let policy = Policy::certified();
+    let (model, here, there) = two_bars_side_by_side();
+    let mut answers = Vec::new();
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for (which, arguments, tools) in [
+            ("here on there", here, there),
+            ("there on here", there, here),
+        ] {
+            let mut model = model.clone();
+            let fused = model
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{rule:?} {which}: {refused:?}"));
+            let [answer] = fused.solids() else {
+                panic!("{rule:?} {which} is one solid: {:?}", fused.solids());
+            };
+            answers.push((format!("{rule:?} {which}"), model, *answer));
+        }
+    }
+    answers
+}
+
+/// A block wider than both bars, ten tall, from `z = from` up.
+fn a_block_from(model: &mut Model, from: f64) -> SolidKey {
+    let rectangle = ProfileBuilder::new(vec![
+        [-10.0, -10.0],
+        [20.0, -10.0],
+        [20.0, 10.0],
+        [-10.0, 10.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a rectangle is a profile");
+    model
+        .add_extrusion(
+            &rectangle,
+            HEIGHT,
+            &Isometry::translation(Vector::new(0.0, 0.0, from)).expect("a lift along `z`"),
+        )
+        .expect("a rectangle extrudes")
+}
+
+/// `cap` is one wire of two edges, each an arc from `(3, ±4, 0)` to
+/// `(3, ∓4, 0)` with a pipe on the other side, one on each pipe.
+fn the_face_is_two_arcs_of_two_pipes(model: &Model, answer: SolidKey, cap: FaceKey, first: &str) {
+    let solid = model.solid(answer).expect("this model made the key");
+    let face = solid
+        .faces()
+        .find(|face| face.key() == cap)
+        .expect("the cap is a face of the answer");
+    let wires: Vec<_> = face.wires().collect();
+    let [wire] = wires.as_slice() else {
+        panic!("{first}: the bottom cap has one wire, not {}", wires.len());
+    };
+    let mut pipes = Vec::new();
+    for coedge in wire.coedges() {
+        let edge = coedge.edge();
+        assert!(
+            matches!(edge.run(), EdgeRun::PartOfWhereItCrosses { .. }),
+            "{first}: a side of the bottom cap is part of a crossing, not {:?}",
+            edge.run()
+        );
+        let mut ends = [edge.start(), edge.end()].map(|end| end.point().coordinates());
+        ends.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+        assert_eq!(
+            ends,
+            [[3.0, -4.0, 0.0], [3.0, 4.0, 0.0]],
+            "{first}: an arc of the bottom cap runs between the two corners"
+        );
+        let across = edge
+            .neighbouring_faces()
+            .find(|&other| other != cap)
+            .expect("a side of a closed solid has a face on its other side");
+        let Surface::Cylinder(pipe) = model.face(across).expect("a face of this model").surface()
+        else {
+            panic!("{first}: the face across an arc of the bottom cap is a pipe");
+        };
+        pipes.push(pipe.axis().origin().coordinates());
+    }
+    pipes.sort_by(|one, other| one.partial_cmp(other).expect("no axis is NaN"));
+    assert_eq!(
+        pipes,
+        [[0.0, 0.0, 0.0], [APART, 0.0, 0.0]],
+        "{first}: one arc on each pipe"
+    );
 }
 
 /// **The corner the fuse could not place, and now can, asked for on its own.**

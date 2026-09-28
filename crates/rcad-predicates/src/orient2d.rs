@@ -1,5 +1,7 @@
 use crate::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
-use crate::power_of_two::{exponent_that_brings_into_range, scaled_by_a_power_of_two};
+use crate::power_of_two::{
+    exponent_that_brings_into_range, exponent_that_lifts_the_largest_to, scaled_by_a_power_of_two,
+};
 use crate::{
     Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN, Point, Policy, Predicate,
     ProvenanceLog, Record, are_real_numbers, decide, resolve_under_policy,
@@ -21,7 +23,9 @@ pub const ORIENT2D: &str = "orient2d";
 /// the bottom or the top of the `f64` range, and those are decided anyway: the
 /// whole input is moved into range by an exact power of two, which multiplies
 /// the determinant by a positive number and so leaves its sign alone
-/// ([`decided_after_normalising`]).
+/// ([`decided_after_normalising`]). So are points near the origin whose
+/// differences reach from ordinary sizes down to `1e-300`, lifted instead as
+/// high as the top of the range allows.
 ///
 /// What is left as [`Decision::Undecidable`] is a genuine *spread* — a model
 /// whose coordinates sit far from the origin while its differences are far
@@ -103,14 +107,22 @@ fn at_height_zero(point: [f64; 2]) -> Point {
     Point::from([point[0], point[1], 0.0])
 }
 
-/// One more run of the whole cascade, on a copy of the input moved into range
-/// by an exact power of two. `None` when there is no such copy, or when the
-/// copy could not be settled either.
+/// One or two more runs of the whole cascade, on a copy of the input moved into
+/// range by an exact power of two. `None` when there is no such copy, or when
+/// no copy could be settled either.
 ///
 /// This determinant is homogeneous of degree two in the coordinates, so scaling
-/// all six by `s > 0` multiplies it by `s^2` and leaves its sign alone. That is
-/// what the metamorphic test next door already trusts; here it is used as a
-/// technique rather than as an oracle.
+/// all six by `s > 0` multiplies it by `s^2` and leaves its sign alone — and a
+/// determinant of exactly zero stays exactly zero. That is what the metamorphic
+/// test next door already trusts; here it is used as a technique rather than as
+/// an oracle.
+///
+/// The two exponents are `orient3d`'s, for the same reasons
+/// (`docs/decisions.md` §324): the largest difference into `[1, 2)` first, and
+/// then the largest coordinate into [`HIGHEST_BINADE_LEVEL_THREE_TAKES`], for
+/// three points near the origin whose differences reach down to `1e-300` —
+/// where the first exponent is zero and level 3 refuses products below
+/// [`product_is_exact`]'s floor.
 ///
 /// Only reached from an [`Decision::Undecidable`], so the path that already
 /// works pays nothing. The retry re-enters at the top rather than inside
@@ -137,12 +149,46 @@ fn at_height_zero(point: [f64; 2]) -> Point {
 /// `ORIENT2D_ERROR_BOUND` is a relative bound that holds for any such input
 /// whose products stay normal, so it holds here on its own terms.
 fn decided_after_normalising(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<(Decision, Level)> {
-    let exponent =
-        exponent_that_brings_into_range([a[0] - c[0], a[1] - c[1], b[0] - c[0], b[1] - c[1]])?;
-    if exponent == 0 {
-        return None;
-    }
+    let differences_into_one =
+        exponent_that_brings_into_range([a[0] - c[0], a[1] - c[1], b[0] - c[0], b[1] - c[1]]);
+    let coordinates_to_the_top = exponent_that_lifts_the_largest_to(
+        [a, b, c].into_iter().flatten(),
+        HIGHEST_BINADE_LEVEL_THREE_TAKES,
+    )
+    .filter(|&exponent| Some(exponent) != differences_into_one);
 
+    [differences_into_one, coordinates_to_the_top]
+        .into_iter()
+        .flatten()
+        .filter(|&exponent| exponent != 0)
+        .find_map(|exponent| decided_at_scale(a, b, c, exponent))
+}
+
+/// The binade [`decided_after_normalising`]'s second exponent lifts the largest
+/// coordinate into: `[2^509, 2^510)`, the highest in which no level of the
+/// cascade can overflow.
+///
+/// Every coordinate is then below `2^510`. Level 3 forms three cross products
+/// of coordinates, each below `2^1021`, summing to below `3 * 2^1021 < 2^1023`.
+/// Levels 1 and 2 work on differences, which are at most `2^511`, so each of
+/// the two products is at most `2^1022` and the permanent at most `2^1023`.
+/// One binade higher and the permanent could pass `2^1024`.
+/// `the_highest_binade_the_retry_lifts_into_overflows_nothing` runs it.
+///
+/// Going past it would only cost reach, never soundness — an overflowed level 1
+/// bound is refused by [`decide`] and an overflowed product by
+/// [`product_is_exact`] — so the one thing this number decides is how far the
+/// retry gets.
+const HIGHEST_BINADE_LEVEL_THREE_TAKES: i32 = 509;
+
+/// [`decide`] on the three points scaled by `2^exponent`, if that is exact and
+/// the answer is certified.
+fn decided_at_scale(
+    a: [f64; 2],
+    b: [f64; 2],
+    c: [f64; 2],
+    exponent: i32,
+) -> Option<(Decision, Level)> {
     let a = scaled_by_a_power_of_two(a, exponent)?;
     let b = scaled_by_a_power_of_two(b, exponent)?;
     let c = scaled_by_a_power_of_two(c, exponent)?;
@@ -338,8 +384,9 @@ fn cross(u: [f64; 2], v: [f64; 2]) -> Option<([f64; 4], usize)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DETERMINANT_ENTRIES, ORIENT2D, ORIENT2D_ERROR_BOUND, Orient2d, exact_determinant, orient2d,
-        orient2d_exactly, orient2d_reporting_level, orient2d_tolerantly, scaled_by_a_power_of_two,
+        DETERMINANT_ENTRIES, HIGHEST_BINADE_LEVEL_THREE_TAKES, ORIENT2D, ORIENT2D_ERROR_BOUND,
+        Orient2d, exact_determinant, orient2d, orient2d_exactly, orient2d_reporting_level,
+        orient2d_tolerantly, scaled_by_a_power_of_two,
     };
     use crate::expansion::{expansion_sum, two_diff};
     use crate::{
@@ -536,6 +583,41 @@ mod tests {
         let apart = 2f64.powi(-650);
         let far = 2f64.powi(1000);
         ([near, near], [near, near + apart], [far, far])
+    }
+
+    /// `HIGHEST_BINADE_LEVEL_THREE_TAKES`'s arithmetic, run rather than argued:
+    /// every coordinate at the top of that binade, under every one of the 64
+    /// ways to sign them, and neither level 1 nor level 3 overflows. One binade
+    /// higher, some of them do, so the constant is the highest that holds.
+    #[test]
+    fn the_highest_binade_the_retry_lifts_into_overflows_nothing() {
+        assert_eq!(
+            sign_patterns_that_overflow(HIGHEST_BINADE_LEVEL_THREE_TAKES),
+            0
+        );
+        assert!(sign_patterns_that_overflow(HIGHEST_BINADE_LEVEL_THREE_TAKES + 1) > 0);
+    }
+
+    /// Of the 64 ways to sign six coordinates all at the top of `binade`, how
+    /// many overflow level 1 or level 3.
+    fn sign_patterns_that_overflow(binade: i32) -> usize {
+        let top = 2f64.powi(binade + 1).next_down();
+        (0..1u32 << 6)
+            .filter(|signs| {
+                let coordinate = |bit: u32| if signs & (1 << bit) == 0 { top } else { -top };
+                let point = |first: u32| [coordinate(first), coordinate(first + 1)];
+                let [a, b, c] = [point(0), point(2), point(4)];
+                let level_one = Orient2d { a, b, c }
+                    .on_floats()
+                    .expect("level 1 always runs here");
+                let mut total = [0.0; DETERMINANT_ENTRIES];
+                let level_three = exact_determinant(a, b, c, &mut total);
+                !level_one.value.is_finite()
+                    || !level_one.error_bound.is_finite()
+                    || level_three
+                        .is_none_or(|length| !total[..length].iter().all(|e| e.is_finite()))
+            })
+            .count()
     }
 
     /// The claim [`decided_after_normalising`] rests on, executed rather than
