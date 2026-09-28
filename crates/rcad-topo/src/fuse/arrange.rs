@@ -724,9 +724,16 @@ struct ThroughAnApex {
     /// `n × p` for the plane's normal `n` and the normal `p` of the half-space
     /// that picks the ruling out. Both are square to the ruling and `p` is not
     /// along `n`, since `p`'s flat surface meets the other ruling at the apex
-    /// alone, so this is along the ruling. Turned to point where `∇S × ∇Q` does
-    /// on the side of the apex it points to.
+    /// alone, so this is along the ruling.
     along: [Interval; 3],
+    /// Whether `∇S × ∇Q` points back towards the apex, on both sides of it,
+    /// rather than away from it on both.
+    ///
+    /// **Which way `along` points cannot change this, and that is why it is a
+    /// field and not an orientation.** Along `apex + t·d` the cross product is
+    /// `t·V` for one vector `V` along `d`, so a step `d` out and a step `−d`
+    /// out read `V·d` and `(−V)·(−d)`, which are one number.
+    towards_the_apex: bool,
 }
 
 impl Crossing {
@@ -2049,13 +2056,16 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
-    /// Whether an arc between `ends` lies on the far side of the apex its
-    /// crossing runs through, where the crossing's forward direction runs
-    /// against `∇S × ∇Q` ([`ThroughAnApex`]). `false` for every crossing that
-    /// runs through no apex.
+    /// Whether the crossing's forward direction runs against `∇S × ∇Q` along
+    /// the arc between `ends`, which only a ruling through an apex does, and
+    /// on one side of the apex ([`ThroughAnApex`]). `false` for every crossing
+    /// that runs through no apex.
     ///
-    /// Each end is placed against the apex by the very comparison the order
-    /// along the crossing is proved with, so the answer agrees with the order.
+    /// Forward is `along`. Ahead of the apex `∇S × ∇Q` runs with it when it
+    /// runs away from the apex and against it when it runs towards it; behind
+    /// the apex, the other way round. Each end is placed against the apex by
+    /// the very comparison the order along the crossing is proved with, so the
+    /// answer agrees with the order.
     ///
     /// # Errors
     ///
@@ -2109,7 +2119,9 @@ impl<'f> Arrangement<'f> {
             }
             behind = Some(this_one_is_behind);
         }
-        Ok(behind.expect("an arc has two different ends, and only one of them is the apex"))
+        let behind =
+            behind.expect("an arc has two different ends, and only one of them is the apex");
+        Ok(behind != line.towards_the_apex)
     }
 
     /// Throw away lumps of the drawing made of straight cut arcs alone.
@@ -3556,6 +3568,13 @@ impl<'f> Arrangement<'f> {
     ///
     /// Every place two crossings meet already has a node
     /// ([`Arrangement::place_the_meets`]), so nothing is worked out again here.
+    /// **Two curves of one pair are the exception**, bar a plane's two rulings
+    /// through a cone's apex, which get theirs from
+    /// [`Arrangement::place_where_two_rulings_cross`]. Every other pair that
+    /// names two curves names two that lie on parallel lines, in parallel
+    /// planes, either side of an axis or in different nappes, or `intersect`
+    /// refuses the pair where its two curves touch; §347 lists them, and none
+    /// was tried here with two curves that meet.
     fn where_the_ray_crosses(&self, crossing: usize, arc: usize) -> MetAt {
         let other = self.arcs[arc].crossing;
         let Some(at) = (0..self.nodes.len()).find(|&node| {
@@ -4795,10 +4814,10 @@ fn how_a_crossing_runs(
 /// as it was: there `∇S × ∇Q` is nothing along the whole line, not only at the
 /// apex, and that is another gap.
 ///
-/// The direction is turned to point where `∇S × ∇Q` does a step out along it.
-/// Read at `apex + d` for the direction `d`, that is `(∇S × ∇Q) · d`, which is
-/// nothing only where the plane rests along the cone, and two rulings mean it
-/// does not.
+/// Whether `∇S × ∇Q` runs towards the apex or away from it is read a step out,
+/// at `apex + d` for the direction `d`, as the sign of `(∇S × ∇Q) · d`. That
+/// is nothing only where the plane rests along the cone, and two rulings mean
+/// it does not.
 ///
 /// # Errors
 ///
@@ -4828,7 +4847,7 @@ fn a_ruling_through_an_apex(
     let apex_box = apex.enclosure();
     let a_step_out = PredicatePoint::Constructed([0, 1, 2].map(|axis| apex_box[axis] + along[axis]));
     let there = cross_of(gradient_at(surface, a_step_out), gradient_at(partner, a_step_out));
-    let agrees = must_decide(
+    let away = must_decide(
         dot_of(there, along).sign(),
         WHICH_WAY_A_CROSSING_RUNS,
         &[apex, a_step_out],
@@ -4836,9 +4855,9 @@ fn a_ruling_through_an_apex(
         policy,
         log,
     )?;
-    let along = match agrees {
-        Decision::Pos => along,
-        Decision::Neg => along.map(|component| Interval::exactly(0.0) - component),
+    let towards_the_apex = match away {
+        Decision::Pos => false,
+        Decision::Neg => true,
         // Nothing in the reals only for a plane resting along the cone, which
         // cuts one ruling and not two. A tolerant policy can still read a
         // narrow box as nothing, and then no way along is known.
@@ -4851,7 +4870,11 @@ fn a_ruling_through_an_apex(
             ));
         }
     };
-    Ok(Some(ThroughAnApex { apex, along }))
+    Ok(Some(ThroughAnApex {
+        apex,
+        along,
+        towards_the_apex,
+    }))
 }
 
 /// The pair as a plane and a cone, whichever way round it arrived.
