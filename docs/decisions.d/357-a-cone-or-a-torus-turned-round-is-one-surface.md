@@ -114,6 +114,16 @@ pins where it stops rather than an answer.
 
 ### 357.5 What this leaves
 
+- **One pin outside this lane's files moves with it.**
+  `two_cones_holding_the_same_numbers_are_one_surface`
+  (`crates/rcad-geom/tests/the_seven_shapes_a_plane_cuts_a_cone_in.rs` line
+  674) asserts the cone about `−z` is refused against the cone about `+z`, and
+  now gets `Ok(SameSurface)`; it is the only failure in a `--no-fail-fast` run
+  of the workspace (2725 of 2726 pass). Its doc comment says calling the pair
+  `SameSurface` "would need a canonical spelling that `transformed` could not
+  round away". It does not: 357.2 compares the two spellings exactly without
+  choosing either, so the assertion flips to `Ok(SameSurface)` and that
+  paragraph goes.
 - **The measure finding of 357.3**: a cone face named about the axis pointing
   away from it measures short beyond its own bound. A trace row for
   `measure`/the mesher, with the four numbers above as its reproducer.
