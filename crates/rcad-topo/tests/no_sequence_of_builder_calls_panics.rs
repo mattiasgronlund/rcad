@@ -2,7 +2,7 @@
 //!
 //! `docs/decisions.md` §42.12 criterion 2: *no sequence of builder calls panics;
 //! every misuse is a named `Err`*. §42.5's rule is that once the builder is
-//! public every arena invariant is caller input, and CLAUDE.md's tier table says
+//! public every arena invariant is caller input, and §4.1's tier table says
 //! caller input is an `Err` and never a panic. This is that rule checked over
 //! inputs nobody chose.
 //!
