@@ -103,7 +103,10 @@ pub enum Containment {
     /// gives it one — "a corner on the lattice", in that function's own words —
     /// only when the point being classified and the ray built from it both land
     /// on numbers a line can be written out of exactly. Most rays do not, and
-    /// this is what they get instead.
+    /// then an exact point beside the point is fired from instead, once no face
+    /// of the solid is shown to meet the box round both (`docs/decisions.md`
+    /// §323). This is what is left: a point a face meets, or one whose every
+    /// such ray grazes something.
     ///
     /// Deliberately its own answer and not
     /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*

@@ -1,0 +1,198 @@
+## 323. A ray leaves a box beside a torus, and a ring's face counts the right way round — 2026-09-28
+
+*Row Q102 (`lane-q102-a-point-a-ray-can-leave`, off `e7b1894a`). §243.5 left
+a bend less a copy of itself turned an eighth of a turn refusing on "a point in
+a piece that every solid could place", and §243.6 named two ways out: give the
+piece an exact point, or let a ray leave a box. The second is taken, in
+`classify.rs`, and firing from exact points turned up a ring's face counting
+its crossings backwards. The fuse now places every piece rightly and stops
+later, writing them back out.*
+
+  323.1   What refused
+  323.2   Which way out
+  323.3   Why one point can answer for a box
+  323.4   A ring's face counted its crossings backwards
+  323.5   Where the bend stops now
+  323.6   The pins
+  323.7   What this leaves
+
+### 323.1 What refused
+
+Reproduced on `e7b1894a` in `tests/a_bend_less_a_turned_copy_of_itself.rs`:
+`a_quarter_bend(4, 1)` and a second one placed an eighth of a turn round `z`.
+Difference, union and intersection all came back `Err(Undecidable)` with one
+record, "a point in a piece that every solid could place", whose inputs are
+`(3, 0, 0)` and a box round `(5/√2, 5/√2, 0)`: the first bend's wall between
+`y = 0` and the turned bend's first cap, as §243.5 says.
+
+Every candidate in a curved piece is a box — `candidate_points` blends the
+corners and `back_onto_the_surface` puts each back through the surface's two
+coordinates. A box has no exact line, `where_a_line_meets_a_surface` refuses a
+ring anything but an exact line (`WhereALineMeetsARingNeedsTheLineExactly`),
+and the classifier answers `CannotFireARayAtAFacesSurface`.
+
+### 323.2 Which way out
+
+**Giving the piece an exact point is not a way out on its own**, and that was
+measured before it was argued. With the box route below in and nothing else,
+the next piece refused under the same name was flat: the turned bend's first
+cap, whose candidate in the middle of the tube is where the ring crosses the
+cap's plane — `the_middles_of_a_round_wire` hands that over as an *exact*
+point, `(2.82842712474619, 2.8284271247461903, 0)`. The piece was refused
+all the same. The new test's second case asks the exact point an ulp from it,
+`4·(1/√2)` rounded on both axes, and on `e7b1894a` that is
+`CannotFireARayAtAFacesSurface`. A ray's line is exact only where the point is
+exact *and* its step to the target is, and that step was not. So an exact point
+in the piece is not enough; its step has to be exact too.
+
+And a curved piece has no exact point on it in general. A point with `f64`
+coordinates is a fraction over a power of two, and a point like that on a
+circle whose radius is a power of two is one of its four points on the axes:
+`a² + b² = 4ᵏ` has no other whole solutions, because two odd squares add to
+two more than a multiple of four and an odd and an even add to an odd number.
+The bend of ring four has `(3, 4, 0)` on its outer equator only because five is
+not a power of two.
+
+So the ray leaves from beside the box, and it does it in `classify.rs`, where
+the refusal is made — every caller of `classify_uncertain_point` gets it and
+`fuse/select.rs` is not touched. `from_a_point_beside_it_an_exact_ray_leaves`
+runs only once a ray from the point itself has been refused
+`CannotFireARayAtAFacesSurface`, so no answer that came back before moves. For
+each of the three targets in turn:
+
+1. An exact point beside the middle `m` of the box, with an exact step to the
+   target `t`: round the step `d = fl(t − m)` first and take the point as
+   `t − d`. That subtraction is exact where `|t| ≥ |m|` (Dekker's), so the step
+   from the point to the target is `d`. The step is checked with an interval
+   subtraction rather than trusted.
+2. The box grown to hold that point.
+3. No face of the solid meets the grown box (`no_face_meets`, 323.3).
+4. The exact point is fired from with the ordinary ray. A pass with no graze
+   is the answer. A graze, a refusal, or a grown box a face meets hands over to
+   the next target, and when none is left the first refusal stands.
+
+### 323.3 Why one point can answer for a box
+
+The brief's condition was that a ray from a box be shown to classify every
+point of the box the same way. A box is convex, so the segment between any two
+of its points stays inside it. A segment that meets no face of the solid does
+not cross its skin, so its two ends are both inside or both outside. So when no
+face meets the grown box, the exact point's answer is the answer for every
+point of it, and the box the caller handed over is inside the grown one.
+
+`no_face_meets` asks each face by the description the ray counts it by. A flat
+face with straight sides is its fanned triangles, so the box has to be off the
+plane through every one of them — a decided `orient3d` each. Every other face
+is the part of its surface it holds, so either the surface's sign is decided
+over the box, or `what_this_face_holds` says `NotHeld` of the box.
+
+Both rest on **a sign decided about a box holds for every point in the box**.
+That is not a new assumption. `count_where_the_ray_meets_it` already asks a
+root's *box* whether the face holds it and drops the crossing on `NotHeld`, and
+that is sound only under the same contract.
+
+A ray from the exact point that says `OnBoundary` would contradict the proof,
+and is asserted against rather than answered.
+
+What is not answered, and stays refused: a box a face meets — the new test
+pins a box on the first bend's own wall refused against that bend — and a box
+with an infinite end, which has no finite middle. A box near the plane of a
+straight-sided face's fan triangle is refused too, where a finer test could
+answer; no consumer asks for it.
+
+### 323.4 A ring's face counted its crossings backwards
+
+With the box route in and nothing else, the fuse got past selection and came
+back `ResultIsNotManifold` (count 1 for difference and union, 3 for
+intersection). A temporary `eprintln!` in `select::choose` showed why: the
+turned bend's wall from `90°` to `135°` was placed **inside** the first bend,
+which ends at `90°`. A second `eprintln!` of each ray's tally gave `−1` for the
+middle of the tube at `45°` against the first bend, and `−2` for the lattice
+point `(−1, 3.5, 0)`, past its cap on `x = 0`, through the route that was
+already there. One ray against a solid comes to nought or one whichever way
+its faces are oriented, if they are oriented consistently; `−2` is not a count
+any solid gives.
+
+The cause is the torus arm of `gradient_at`. It is the quartic's own gradient,
+which points out of the tube, and the count turns it round for a face used
+reversed. But a face's orientation is read against the surface's own normal,
+and a ring's points *into* its tube: `Torus::point_at` takes the tube angle
+first, and at the outer equator `∂/∂tube × ∂/∂ring` is `r·w × (R + r)·u`,
+which points towards the axis. That is why a bend's wall is stored `Reversed`
+(`tests/rings/mod.rs`) — and why it was counted the wrong way round. The arm is
+turned round now, and the two rays came to `+1` and `0`.
+
+**That was a wrong answer on `main` from the public API.** `classify_point` of
+`(−1, 3.5, 0)` against a quarter bend said `Inside`; the new test's first case
+fails on `e7b1894a` with `left: Inside, right: Outside`. What hid it is that a
+ray through a bend's wall alone comes to `−1`, which is not zero and was read
+as inside, rightly by accident.
+
+**Not changed, and possibly the same sign:** `validate.rs`'s `gradient_of` is
+the same quartic gradient, and it is multiplied by the face's orientation in
+the closed-edge rule that `Model::validate` and `holds.rs`'s
+`what_a_ring_face_between_two_planes_holds` both read. §243.6 records
+`Model::validate` refusing a valid three-quarter bend and passing one walked the
+wrong way. Whether that is this sign was not checked; neither file is in this
+row's write set. `mesh.rs` has a `gradient_of` of its own.
+
+### 323.5 Where the bend stops now
+
+With both changes in, the same `eprintln!` printed each piece's placement
+against the other bend, and every one is what the geometry says:
+
+| piece | placed against the other bend |
+|---|---|
+| first bend's cap on `y = 0` | outside |
+| first bend's cap on `x = 0` | inside |
+| first bend's wall, `0°` to `45°` | outside |
+| first bend's wall, `45°` to `90°` | on it, facing the same way |
+| turned bend's cap at `45°` | inside |
+| turned bend's cap at `135°` | outside |
+| turned bend's wall, `45°` to `90°` | on it, facing the same way |
+| turned bend's wall, `90°` to `135°` | outside |
+
+So the difference keeps the cap on `y = 0`, the wall to `45°` and the cap at
+`45°` turned round; the union keeps both end caps, the first bend's wall and
+the turned bend's wall past `90°`; the intersection keeps the cap at `45°`, the
+wall from `45°` to `90°` once, and the cap on `x = 0`.
+
+All three then refuse `TheFuseWroteABrokenAnswer { broken:
+CoedgesRunTheSameWay }` — the refusal §243.5 recorded for a bend and its
+bit-for-bit copy — writing those pieces back out. That is in `assemble.rs`, out
+of this row's write set, and it was not traced.
+
+### 323.6 The pins
+
+`tests/a_bend_less_a_turned_copy_of_itself.rs`, three tests, each failing on
+`e7b1894a`'s `classify.rs` with the tests kept:
+
+- `a_point_past_a_bends_cap_is_outside_it_and_one_in_its_tube_is_inside` —
+  eight exact points against a quarter bend. On the base, `(−1, 3.5, 0)` is
+  `Inside`.
+- `a_box_no_face_meets_is_answered_and_one_on_the_wall_is_not` — on the base,
+  the exact point in the middle of the tube at `45°` is
+  `CannotFireARayAtAFacesSurface`.
+- `a_bend_less_a_copy_turned_an_eighth_of_a_turn_places_every_piece` — on the
+  base, `Undecidable`.
+
+One pin outside this row's write set moves:
+`building_a_solid_out_of_faces.rs`'s
+`a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds` expects the
+refusal of 323.1 and now fails with "expected the piece of the wall not to be
+placed, got TheFuseWroteABrokenAnswer { broken: CoedgesRunTheSameWay }". It
+asserts twice more what this row changed — that both descriptions refuse word
+for word alike, and that a ray from the blend of the wall piece's corners
+against the turned bend is `CannotFireARayAtAFacesSurface` — and neither was
+run with the first assertion moved.
+
+### 323.7 What this leaves
+
+- A bend fused with a copy of itself turned an eighth of a turn keeps the right
+  pieces and fails writing them back, `CoedgesRunTheSameWay`, for all three
+  rules (323.5). Not traced. The same refusal as a bend and its bit-for-bit
+  copy (§243.5), so plausibly one cause.
+- `building_a_solid_out_of_faces.rs`'s bend pin needs moving to that refusal
+  (323.6).
+- Whether `validate.rs`'s torus gradient, multiplied by a face's orientation,
+  is the sign 323.4 fixed here, and whether it is §243.6's three-quarter bend.
