@@ -1135,6 +1135,9 @@ impl Assembly {
     /// or one the arithmetic cannot place, is passed over. Which side of its
     /// chord an arc bulges is read off the direction it leaves its named corner
     /// ([`WhichArc::LeavingACorner`]); every other sign is exact.
+    /// `a_sliver_arc_on_a_joined_flat_face.rs` pins how far from wrong that
+    /// reading stays: on every chord the fuse builds down to a few millionths
+    /// long, the rounding never puts the point on the wrong side.
     ///
     /// `None` for a ring along a torus — a plane square to its axis cuts it in
     /// two circles with the torus between them, so the inside of the torus is
@@ -1215,8 +1218,12 @@ impl Assembly {
                 match turns_round(&arcs, normal, at_corner(corner))? {
                     0 => Some(false),
                     1 | -1 => Some(true),
-                    // A simple ring winds round a point once at most, so this
-                    // is an arc whose bulge was read the wrong way round.
+                    // A simple ring winds round a point once at most, so
+                    // reaching more than that is a bug here. Which bug is not
+                    // shown: forcing an arc's bulge to read the wrong way
+                    // round gave no turns, or two rings each holding the
+                    // other, not two turns (Q600, with a hook since
+                    // reverted).
                     _ => None,
                 }
             })
