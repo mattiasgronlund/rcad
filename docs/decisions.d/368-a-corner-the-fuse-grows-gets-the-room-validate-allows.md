@@ -2,7 +2,9 @@
 
 *Q414, which replaced Q27. Lane `lane-q414-a-corner-given-validates-room`, off
 `7fc73410`. Every figure below was run in this lane, at that base plus its own
-commit, with the command named beside it.*
+commit, with the command named beside it, except where 368.3 says Q705 ran it.
+Q705 merged that branch onto `6273ce5e` as
+`lane-q705-a-corner-given-validates-room` and flipped the three pins of 368.3.*
 
 `derive_a_corner` in `crates/rcad-topo/src/fuse/bake.rs` asks two questions
 of a corner with three or more surfaces round it. The selector,
@@ -32,7 +34,7 @@ fuse refused solids `validate` accepts, and §75.6's rule is that it must not.
 
   368.1   Why it is `validate`'s figure and not a copy of it
   368.2   What it lets through, and what it still refuses
-  368.3   The pins it retires, outside this lane
+  368.3   The three pins it retired
   368.4   What this leaves
 
 ### 368.1 Why it is `validate`'s figure and not a copy of it
@@ -108,55 +110,88 @@ test(/big_solid_is_baked|grazing_planes|a_fourth_plane/)'` gives 10 run, 7
 passed, 3 failed. The three are the §136.8 test, the §136.4 test and the
 size test above.
 
-### 368.3 The pins it retires, outside this lane
+### 368.3 The three pins it retired
 
-Three pins fail with the change, and this lane owns none of their files.
-`just t --workspace --no-fail-fast` gives 2824 run, 2821 passed, 3 failed, 9
-skipped. The steps the gate runs after its tests pass on this commit:
-`cargo test --workspace --doc`, `just check-release-build` (3 run, 3 passed)
-and `just check-fuzz-unit` (exit 0).
+Three pins failed with the change, in files Q414's lane did not own; Q705
+flipped them. In Q414's lane `just t --workspace --no-fail-fast` gave 2824
+run, 2821 passed, 3 failed, 9 skipped. The steps the gate runs after its tests
+passed on that commit: `cargo test --workspace --doc`, `just
+check-release-build` (3 run, 3 passed) and `just check-fuzz-unit` (exit 0).
 
-`crates/rcad-step/tests/a_fuse_read_back_from_rounded_text.rs`'s
+**`crates/rcad-step/tests/a_fuse_read_back_from_rounded_text.rs`.**
 `a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing`
 pinned this gap as it stood: a turned cube read back from thirteen-digit text,
 which `validate` accepts, refused `Undecidable` at "where three surfaces
-meet". Its doc comment says the day this is fixed it fails, and it does: the
+meet". Its doc comment said the day this is fixed it fails, and it did: the
 union answers one solid (`expected a rounded corner to stop the fuse, got
-Ok(1)`). It becomes a union that answers. The same file's header says that at
-11, 12 and 13 digits every one of the turned family's 109 fuses is refused.
-That figure is printed and not asserted. With the change,
-`just t -p rcad-step --no-capture -E 'test(a_turned_pair_read_back_from_rounded_text)'`
-prints 107, 105 and 111 decided at 11, 12 and 13 digits, against 109 from the
-exact text. So the header's claim is stale. Whether it was already stale at the
-base was not run.
+Ok(1)`). It is `a_turned_cube_read_back_from_thirteen_digits_is_united_with_nothing`
+now, and asserts one solid, a sound model, and the volume as built to within
+the file's own rounding bound, `how_far_rounding_can_move_a_volume`.
 
-`crates/rcad-topo/tests/a_corner_its_own_surfaces_place_somewhere_else.rs`
-pins the rounding-only room from both sides. Its two failures:
+The same file's header gives each family's counts, which are printed and not
+asserted. Q705 ran each family's test, `just t -p rcad-step --no-capture -E
+'test(a_turned_pair_read_back_from_rounded_text)'` and the same for
+`a_skew_pair_…`, `a_lattice_pair_…` and `a_block_with_a_bar_through_it_…`,
+with the change and under the mutation of 368.2, which is the base's fuse:
+
+| family | exact text | 11 digits | 12 digits | 13 digits |
+|---|---|---|---|---|
+| turned, before | 109 of 144 | 0 | 0 | 0 |
+| turned, after | 109 of 144 | 107 | 105 | 111 |
+| skew, before | 122 of 144 | 122 | 122 | 45 |
+| skew, after | 122 of 144 | 122 | 122 | 122 |
+
+Decided fuses, on the file's fixed seed. With the change the turned family's
+rounding still introduces 8, 10 and 4 refusals and rescues 6 at each digit
+count, and no answer is wrong. The header's claim that every one of the 109 is
+refused held at the base and the change made it stale. Its skew row said 77 of
+119 at 13 digits; the base gives 77 of 122, so the 119 was stale before this
+change. The lattice and bar-through-a-block rows move no real and decide 144
+at every digit count, before and after.
+
+**`crates/rcad-topo/tests/a_corner_its_own_surfaces_place_somewhere_else.rs`**
+pinned the rounding-only room from both sides.
 
 - `a_corner_a_tenth_of_a_nanometre_off_its_own_top_is_refused`: a box of side
-  two with a corner `1e-10` off its top. Its header says `validate` accepts it,
+  two with a corner `1e-10` off its top. Its header said `validate` accepts it,
   and that the fuse "silently" replacing the stored corner with where its
   planes cross is what it guards against. §75.6's rule and §136.8 overrule
   that: the corner is inside the room `validate` grants, a face *is* its plane
-  (§17.1), and the corner moves by less than that room. It becomes a fuse that
-  answers.
+  (§17.1), and the corner moves by less than that room. It is
+  `a_corner_a_tenth_of_a_nanometre_off_its_own_top_is_moved_onto_where_its_planes_cross`
+  now. It asks the intersection and not the union, because the union swallows
+  the corner inside the cube and the intersection, `[0, 1]³`, keeps it, and it
+  asserts the answer's corner is `(1, 1, 1)` bit for bit.
 - `a_corner_twice_the_rounding_room_off_its_own_top_is_refused`: `2.84e-14` off
   is inside the new room too. Its line, "the room is a rounding and not a
-  licence to move a corner", is what this section changes. The line that pins
-  the new room from the far side is a corner just past `allowed_wobble`, and
-  that one cannot be built: `SolidBuilder::build` sweeps the solid and refuses
-  it as `VertexOffItsFacePlane` first.
+  licence to move a corner", is what this section changes. It is
+  `a_corner_twice_the_rounding_room_off_its_own_top_is_baked` now.
+- **The far side of the new room cannot be pinned through the fuse.** A corner
+  past it is past what `validate` allows, and `SolidBuilder::build` sweeps the
+  solid and refuses it as `VertexOffItsFacePlane` first.
+  `a_corner_just_past_the_fuses_room_is_refused_before_the_fuse_sees_it` shows
+  that, with a corner a rounding past the fuse's room. It passes with or
+  without the change: it pins the claim, not the change.
 
-Under the mutation of 368.2 both pass again, which is how they are known to
-pin the old room and nothing else.
+Under the mutation of 368.2 the three flipped pins fail, and so do the three
+tests 368.2 names: `just t -p rcad-topo -p rcad-step --no-fail-fast -E
+'binary(a_corner_its_own_surfaces_place_somewhere_else) |
+test(a_turned_cube_read_back_from_thirteen_digits_is_united_with_nothing) |
+binary(a_corner_with_fewer_than_three_surfaces_round_it) |
+test(/bake::tests::/)'` gives 20 run, 14 passed, 6 failed. The header's
+`allowed_wobble` figure was also wrong, a tenth of a nanometre where the
+formula gives `1e-9` at size one, and Q705 corrected it.
 
 ### 368.4 What this leaves
 
 - **`a_corner_is_this_place` in `arrange.rs` still folds a meet into a corner
   only within the corner's own rounding**, or when the three are planes bake
-  solved the corner among (§356). Its doc says that rounding is "the allowance
-  `bake.rs` uses to let a meet stand in for a stored corner", which is no
-  longer true. The case it would miss: a corner with four or more surfaces
+  solved the corner among (§356). Its doc said that rounding is "the allowance
+  `bake.rs` uses to let a meet stand in for a stored corner", which stopped
+  being true here. Q705 corrected that doc comment and
+  `bake_placed_the_corner_on_the_three_planes`'s, and left the code as it was.
+  Its room should grow to `bake.rs`'s, as a row of its own. The case it would
+  miss: a corner with four or more surfaces
   round it, one of them curved, where a plane misses the solved corner by more
   than the rounding and within `allowed_wobble`. A meet of a triple holding the
   curved surface and that plane can then land outside the rounding, stays a

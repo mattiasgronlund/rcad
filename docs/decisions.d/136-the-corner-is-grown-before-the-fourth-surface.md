@@ -7,7 +7,8 @@ Both are done here. A third thing came out of doing them, and it is the part of
 this section worth reading: **the allowance the re-check now grants is sized off
 the corner and `Model::validate`'s is sized off the model, so the two still
 disagree — in the direction §75.6 says they must not.** That is §136.4, and it
-is left open with a repro rather than argued away.
+is left open with a repro rather than argued away. §368 closed it, and §136.8
+with it.
 
 ### 136.1 What changed
 
@@ -99,7 +100,13 @@ graze is still solved exactly.** The conditioning filter does not refuse these,
 so the selector really is the only thing standing in front of §70.3's corner,
 and the argument does not get a second guard it was not entitled to.
 
-### 136.4 Open: the re-check's size is the corner's and `validate`'s is the model's
+### 136.4 Closed by §368: the re-check's size is the corner's and `validate`'s is the model's
+
+**Closed by §368 (Q414, landed as Q705).** The re-check and the selector now
+grow the corner by the room `Model::validate_solid` grants its solid plus the
+corner's own rounding, and the repro below runs, as
+`a_corner_at_the_origin_of_a_big_solid_is_baked_for_a_miss_validate_allows`.
+What follows is the record as it stood.
 
 `what_writing_the_corner_down_cost` floors the corner's own size at one;
 `Model::what_writing_a_plane_down_costs` scales by the model's largest
@@ -200,7 +207,7 @@ that is recorded rather than acted on.
 ### 136.6 What is left
 
 - **§136.4**, above, and **§136.8**, below: the same rule broken at ordinary
-  size, by a term §136.4's named fix does not reach.
+  size, by a term §136.4's named fix does not reach. Both closed by §368.
 - **The other five not-a-solid bands are still single-draw derivations**,
   §136.5's last paragraph. Not known to be wrong; the method behind them has a
   floor it does not survive.
@@ -291,4 +298,10 @@ The fix is Q414: grant the selector and `derive_a_corner`'s re-check
 `validate`'s whole allowance, and show §136.3's grazing corner, 1.414 from
 where its planes cross, is still refused. It replaces Q27, which carried
 §136.4's narrower fix.
+
+**Closed by §368 (Q414, landed as Q705).** The fix went in as named, and the
+grazing corner is still refused (§368.2). The pin is
+`a_block_with_a_corner_off_one_of_its_three_planes_by_less_than_validate_allows_is_cut`
+now: the fuse cuts the block to the volume a plain block less the corner cube
+gives, and the answer validates.
 
