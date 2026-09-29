@@ -53,6 +53,14 @@ why none crossed.
 At `slope = 1` the step down the axis of a cone about `z` lands on the apex
 itself, by the same formula. That is arithmetic and was not run.
 
+**All of this takes the cone to be named about the axis pointing into its
+face.** Named about the other way, every corner of the face has `along` below
+zero (§357.6), so the face's own nappe is the one with negative `along`, and
+"lands on the other nappe" means `along` coming out above zero. Family 1's
+premise fails there, and the three families were not worked through again for
+that case. Until Q560, `Cone::point_at` also put every candidate on such a
+face half a turn round; it now keeps the direction across on either nappe.
+
 ### 350.2 What it gave
 
 **A cone swallowed by a block.** The pointed cone of slope 2 up to `z = 8`, and
