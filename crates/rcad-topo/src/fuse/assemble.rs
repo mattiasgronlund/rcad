@@ -3818,6 +3818,24 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 /// leaves apart can only split an edge, which is refused, and never pair the
 /// faces of two different arcs (§330).
 ///
+/// **The sign reads the plane the way its name is written, and not the way the
+/// face spells it.** `∇plane` turns round with the spelling, so read as each
+/// face spells it, a face naming the plane facing the other way gets the other
+/// arc's sign. Two flat input faces on one plane facing apart do that: a curved
+/// face they both cut along one curve holds the two cuts as one crossing, which
+/// keeps the spelling of whichever cut came first (`Arrangement::crossing_like`
+/// in `arrange.rs`), and the flat face along an
+/// arc of it in the answer can be the other one. Read as spelled, one such pair
+/// split its arc into two edges of one face each — a ball between two blocks
+/// that meet its equator from above and from below was refused
+/// `ResultIsNotManifold { count: 1 }` — and a pair along each arc of one
+/// crossing paired the four faces crosswise: a lower half ball under two blocks
+/// side by side, united, had two faces walk one edge the same way, which the
+/// sweep refused (`tests/two_flat_faces_on_one_plane_facing_apart_along_an_arc.rs`).
+/// **The curved surface needs no such fold**: a pipe's and a cone's gradient
+/// are even in the axis direction, a pipe's does not move when its origin
+/// slides along the axis, and a ball has the one spelling.
+///
 /// **The plane costs here what it costs a closed edge, and not what it cost an
 /// open straight one.** [`which_curve_it_is`] records a plane in *every* open
 /// side's name splitting edges between two solids pressed flush, each working
@@ -3878,13 +3896,34 @@ fn which_arc_of_a_circle_this_is(
     };
     let mine_is_the_round_one = round_one == 0;
     let along_the_round_one_then_the_plane = along_mine_then_partner == mine_is_the_round_one;
+    let flat = &meet.carried_by[1 - round_one];
     Some((
         [
             name_of_the_surface_either_way_round(&meet.carried_by[round_one]),
-            name_of_the_surface_either_way_round(&meet.carried_by[1 - round_one]),
+            name_of_the_surface_either_way_round(flat),
         ],
-        along_the_round_one_then_the_plane != walked_from_the_far_corner,
+        (along_the_round_one_then_the_plane != walked_from_the_far_corner)
+            != is_written_the_other_way_round(flat),
     ))
+}
+
+/// Whether a plane is spelled facing the other way from the spelling its name
+/// is folded to: the one whose first coefficient that is not zero is positive,
+/// as `written_the_one_way` in `arrange.rs` folds it.
+///
+/// # Panics
+///
+/// If the surface is not a plane.
+/// [`which_of_them_a_closed_crossing_runs_round`] answers only for a pair one of
+/// which is a plane, and this is asked of that one.
+fn is_written_the_other_way_round(flat: &Surface) -> bool {
+    let flat = flat
+        .as_plane()
+        .expect("a closed crossing this names runs between a plane and a curved surface");
+    flat.coefficients()
+        .into_iter()
+        .find(|number| *number != 0.0)
+        .is_some_and(|number| number < 0.0)
 }
 
 /// Which of two surfaces a closed crossing runs round — `0` or `1` — or `None`
