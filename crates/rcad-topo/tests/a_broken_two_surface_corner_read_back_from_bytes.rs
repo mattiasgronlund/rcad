@@ -15,9 +15,10 @@
 //!
 //! - **Where the answer keeps the moved corner**, the sweep of the answer finds
 //!   it and the fuse refuses with `TheFuseWroteABrokenAnswer`, carrying the
-//!   very refusal `validate` gave the bar. That error's own doc says it is "a
-//!   bug here rather than bad input". Here it is bad input, so the fuse blames
-//!   itself for the caller's file. The model is left as it was.
+//!   very refusal `validate` gave the bar. That error's own doc says it does
+//!   not say whether the fault is this kernel's or the input's. Here it is
+//!   the input's, so the fuse blames itself for the caller's file. The model
+//!   is left as it was.
 //! - **Where the partner cuts the moved corner away**, the answer is the one
 //!   the sound bar gives: the same corners to the last bit, the same volume, and
 //!   it validates on its own. A face is its surface (§17.1), and a corner that
@@ -337,11 +338,12 @@ fn a_bar_whose_top_corner_is_moved_a_millimetre_in_its_file_reads_back_and_does_
 }
 
 /// **The error is the wrong one to hand a caller whose file is broken.**
-/// `TheFuseWroteABrokenAnswer` is documented as "a bug here rather than bad
-/// input", and what it carries here is the refusal `validate` gives the bar
-/// before any fuse. No model is harmed: the refusal leaves it byte for byte
-/// as it was, which is the fuse's "Atomic" promise, and nothing corrupt is
-/// written. §294 says why this is not the gap option (c) closes.
+/// `TheFuseWroteABrokenAnswer` is documented as not saying whether the fault
+/// is this kernel's or the input's, and what it carries here is the refusal
+/// `validate` gives the bar before any fuse. No model is harmed: the refusal
+/// leaves it byte for byte as it was, which is the fuse's "Atomic" promise,
+/// and nothing corrupt is written. §294 says why this is not the gap option
+/// (c) closes.
 #[test]
 fn a_fuse_that_keeps_the_moved_corner_blames_itself_for_the_broken_file() {
     for (shape, policy) in [

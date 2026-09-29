@@ -211,10 +211,15 @@ impl Model {
     /// [`Error::CannotTellTheCellsOfAFaceApart`] or [`Error::Undecidable`],
     /// where a partner's face runs through where the corner should be (four).
     /// `a_broken_two_surface_corner_read_back_from_bytes.rs` pins all thirty
-    /// (§294.2, §294.3). Those thirty say nothing about any other break: §294.7
-    /// lists what they left out, among them a placed bar, a ball's or a cone's
-    /// corner, a tolerant policy, and a corner with three or more surfaces round
-    /// it.
+    /// (§294.2, §294.3), and Q419 pinned the same "no wrong `Ok`, no panic"
+    /// result for a placed bar, a tolerant policy, a ball's moved pole, and a
+    /// frustum's moved corner, in
+    /// `a_turned_and_shifted_bar_blames_itself_for_a_corner_off_the_cap_with_the_distance_rounded`,
+    /// `under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_touches_without_crossing`,
+    /// `a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer`, and
+    /// `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more`
+    /// (§294.7). Only a corner with three or more surfaces round it is still
+    /// untried.
     pub fn fuse(
         &mut self,
         arguments: &[SolidKey],
