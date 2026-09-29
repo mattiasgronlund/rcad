@@ -189,10 +189,12 @@ pub enum Error {
     ///
     /// - **Sound inputs, and a gap here.** A quarter bend described through
     ///   `SolidBuilder`, united with a second one built from the same numbers,
-    ///   is written back with both coedges of one edge running the same way:
-    ///   `broken` is [`Invalid::CoedgesRunTheSameWay`] (§243.5). Pinned by
-    ///   `a_quarter_bend_and_its_copy_are_refused_as_two_bends_built_alike_are`
-    ///   in `copying_a_solid.rs`.
+    ///   was written back with both coedges of one edge running the same way,
+    ///   `broken` [`Invalid::CoedgesRunTheSameWay`] (§243.5), while the mesher
+    ///   read a torus facing into its tube and the bend's wall was used turned
+    ///   round to suit it. Built the way a file writes a bend, it answers
+    ///   (§361), and no test in this crate now pins a sound pair that ends
+    ///   here.
     /// - **A broken input, carried through.** A round bar whose top corner was
     ///   moved a millimetre off its surfaces in the model's bytes, read back and
     ///   fused under `Policy::certified` against a partner that leaves that

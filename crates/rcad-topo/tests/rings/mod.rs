@@ -29,6 +29,11 @@
 //! flat half-space, which says *this quarter of that circle and not the other
 //! three*.
 //!
+//! **Every torus face here is used forwards**, because a torus faces out of its
+//! tube, and every loop turns right-handed about its own face's outward normal
+//! — the way a file written as the standard says holds a bend
+//! (`docs/decisions.md` §329, §361).
+//!
 //! # Everything here is exact on purpose
 //!
 //! `Model::validate` asks that every corner of a curved face be **certified** on
@@ -141,8 +146,8 @@ pub fn the_top_half_of_a_ring(
         .expect("the z axis is a unit normal");
     let mut flat_wires = Vec::with_capacity(2);
     for (edge, turn) in [
-        (outer_equator, Orientation::Reversed),
-        (inner_equator, Orientation::Forward),
+        (outer_equator, Orientation::Forward),
+        (inner_equator, Orientation::Reversed),
     ] {
         let coedge = builder.add_coedge(edge, turn)?;
         flat_wires.push(builder.add_wire(&[DraftStep::Along(coedge)])?);
@@ -173,9 +178,9 @@ pub fn the_top_half_of_a_ring(
         )?;
         let mut steps = Vec::with_capacity(4);
         for (edge, turn) in [
-            (outer_equator, Orientation::Forward),
+            (outer_equator, Orientation::Reversed),
             (seam, Orientation::Forward),
-            (inner_equator, Orientation::Reversed),
+            (inner_equator, Orientation::Forward),
             (seam, Orientation::Reversed),
         ] {
             steps.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
@@ -183,8 +188,8 @@ pub fn the_top_half_of_a_ring(
         round_wires.push(builder.add_wire(&steps)?);
     } else {
         for (edge, turn) in [
-            (outer_equator, Orientation::Forward),
-            (inner_equator, Orientation::Reversed),
+            (outer_equator, Orientation::Reversed),
+            (inner_equator, Orientation::Forward),
         ] {
             let coedge = builder.add_coedge(edge, turn)?;
             round_wires.push(builder.add_wire(&[DraftStep::Along(coedge)])?);
@@ -192,7 +197,7 @@ pub fn the_top_half_of_a_ring(
     }
     let round = builder.add_face(Surface::Torus(skin), &round_wires)?;
 
-    builder.add_shell(&[(round, Orientation::Reversed), (flat, Orientation::Forward)])?;
+    builder.add_shell(&[(round, Orientation::Forward), (flat, Orientation::Forward)])?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
@@ -298,20 +303,20 @@ fn a_bend(model: &mut Model, ring: f64, tube: f64, sits: &WhereABendSits) -> Res
         &mut builder,
         sits.start_cap_facing,
         start_circle,
-        Orientation::Reversed,
+        Orientation::Forward,
     )?;
     let end_cap = cap(
         &mut builder,
         sits.end_cap_facing,
         end_circle,
-        Orientation::Forward,
+        Orientation::Reversed,
     )?;
 
     let mut round_the_wall = Vec::with_capacity(4);
     for (edge, turn) in [
-        (start_circle, Orientation::Forward),
+        (start_circle, Orientation::Reversed),
         (seam, Orientation::Forward),
-        (end_circle, Orientation::Reversed),
+        (end_circle, Orientation::Forward),
         (seam, Orientation::Reversed),
     ] {
         round_the_wall.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
@@ -322,7 +327,7 @@ fn a_bend(model: &mut Model, ring: f64, tube: f64, sits: &WhereABendSits) -> Res
     builder.add_shell(&[
         (start_cap, Orientation::Forward),
         (end_cap, Orientation::Forward),
-        (side, Orientation::Reversed),
+        (side, Orientation::Forward),
     ])?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
