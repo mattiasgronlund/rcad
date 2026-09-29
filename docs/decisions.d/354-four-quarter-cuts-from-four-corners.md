@@ -157,6 +157,10 @@ Pins moved, before → after:
 - `the_mesher_refuses_sixteen_caps_of_the_pointed_cone_and_two_folds_on_the_frustum`
   → `the_mesher_refuses_two_folds_on_the_frustum_and_no_cap_of_the_pointed_cone`:
   18 mesher refusals → the frustum's 2.
+
+  **2026-09-29:** Q221 (`14ba0254`) renamed this test again, to
+  `the_mesher_refuses_no_cap_of_the_pointed_cone_and_no_fold_on_the_frustum`,
+  since the frustum's two folds now answer too.
 - `two_quarter_cuts_share_a_corner_exactly_when_the_kept_rim_is_under_a_third_of_a_turn`
   → `two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_turn_and_every_cap_answers`.
   The prediction is unchanged. The six lean-3/8 intersections were each

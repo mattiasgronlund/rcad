@@ -340,6 +340,16 @@ the frustum at turn 3.
 - **Cause 2, the coarse fold**: a gap with a fix shown for both. Experiment B
   is the whole of it, and it is where §208.3's retry already sits one ladder
   down.
+
+  **2026-09-29, closed by Q221 at `14ba0254`.**
+  `the_coarsest_mesh_whose_sides_do_not_cross`
+  (`crates/rcad-topo/src/validate.rs`) now retries a fold
+  (`TwoPatchesOfTheMeshDrewTheSameSide`) at half the room, the same way it
+  already retried a crossing — experiment B, landed. The frustum's two folds
+  (lean 3/8, crossing −1/4, turns 3 and 3.5, intersection) answer right under
+  the family's four checks.
+  `a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses` moved
+  from 22 right to 24.
 - **Cause 3, the apex within a rounding**: a gap, half found. Experiment C
   answers the two blocks-less-cone. The fold in the two intersections under
   A + B + C is not traced.
