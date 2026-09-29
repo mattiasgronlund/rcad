@@ -24,8 +24,8 @@
 //! was empty — at most one solid, no faces, no vertices — so the door check
 //! walked three empty iterators 1180 times and the writer never got past
 //! `TheModelHasNoSolid` or `ASolidWithNoShell`. `two_cubes_that_write` and
-//! `a_ball_whose_pole_the_writer_refuses` are the two seeds that fix that, one
-//! either side.
+//! `a_ball_whose_pole_the_writer_refuses` are the two seeds that fix that. They
+//! were one either side; since Q730 the ball is written too.
 //!
 //! **A file that was written is read back and compared with the model that went
 //! in** (`docs/decisions.md` §129.5 item 3). Not panicking was all this target
@@ -325,13 +325,55 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) {
                 format!("{:?}", back_coedge.end().point()),
                 "a sound solid's coedge came back from its own file ending at a different corner"
             );
-            assert_eq!(
-                format!("{:?}", here_coedge.edge().run()),
-                format!("{:?}", back_coedge.edge().run()),
-                "a sound solid's coedge came back from its own file with a different edge run"
+            let (here_run, back_run) = (here_coedge.edge().run(), back_coedge.edge().run());
+            assert!(
+                the_same_run(&here_run, &back_run),
+                "a sound solid's coedge came back from its own file with a different edge run: \
+                 {here_run:?} went in, {back_run:?} came back"
             );
         }
     }
+}
+
+/// Whether two runs are the same, which is the same bits except for a flat
+/// picker of an arc: that one is the same when it faces the same way.
+///
+/// **A picker is the one number of a run no file carries.** STEP says which arc
+/// of a circle an edge is by the way the circle turns and the edge's two ends,
+/// and the reader builds its own half-space from those — facing
+/// `(B − A) × w`, not scaled to length one, and let down by a rounding so both
+/// ends are in front of it (`Walk::the_arc_between`). The kernel's own ball
+/// faces `(1, 0, 0)`, so a ball's seam comes back facing `(2r, 0, 0)`: the same
+/// half-space, spelled another way. What decides which arc is picked is which
+/// way the half-space faces, since both stand on the chord between the two
+/// ends, and those ends and the surface `and` names are compared bit for bit.
+/// So a flat picker is compared by facing the same way — along each other,
+/// the cross product exactly zero, and not opposite — and everything else in
+/// a run as the same bits.
+fn the_same_run(here: &EdgeRun, back: &EdgeRun) -> bool {
+    let same_bits = || format!("{here:?}") == format!("{back:?}");
+    let (
+        EdgeRun::PartOfWhereItCrosses {
+            and: here_and,
+            picked_by: here_picks,
+        },
+        EdgeRun::PartOfWhereItCrosses {
+            and: back_and,
+            picked_by: back_picks,
+        },
+    ) = (here, back)
+    else {
+        return same_bits();
+    };
+    format!("{here_and:?}") == format!("{back_and:?}")
+        && here_picks.len() == back_picks.len()
+        && here_picks.iter().zip(back_picks).all(|pair| match pair {
+            (Picker::InFrontOf(here), Picker::InFrontOf(back)) => {
+                here.normal().cross(back.normal()) == Vector::zero()
+                    && here.normal().dot(back.normal()) > 0.0
+            }
+            (here, back) => format!("{here:?}") == format!("{back:?}"),
+        })
 }
 
 /// Whether `solid` carries no placement at all: every shell it uses sits at

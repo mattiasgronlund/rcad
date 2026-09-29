@@ -7,7 +7,7 @@
 //! the kernel did not have. Nothing is written into the caller's model until
 //! the whole description has been through `Model::validate`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rcad_geom::{
     Axis, Cylinder, EdgeRun, HalfSpace, NEAREST_F64_POINT_ROUNDOFF, Orientation, Picker, Plane,
@@ -133,6 +133,13 @@ struct Walk {
     /// The closed circles described as two halves — see
     /// [`Walk::describe_the_halves_of_a_circle`].
     halves: BTreeMap<EntityId, [DraftEdge; 2]>,
+    /// The two corners of every edge described so far, start first, which is
+    /// what [`with_a_pole_where_it_turns_back`] reads a turn off.
+    ends: HashMap<DraftEdge, [DraftVertex; 2]>,
+    /// Where every corner described so far is, kept as it is read rather than
+    /// read again: [`Import::integers_read_as_reals`](crate::Import) counts
+    /// every read.
+    corner_points: HashMap<DraftVertex, Point>,
     vertex_names: Vec<EntityId>,
     edge_names: Vec<EntityId>,
     coedge_names: Vec<EntityId>,
@@ -156,6 +163,8 @@ impl Walk {
             vertices: BTreeMap::new(),
             edges: BTreeMap::new(),
             halves: BTreeMap::new(),
+            ends: HashMap::new(),
+            corner_points: HashMap::new(),
             vertex_names: Vec::new(),
             edge_names: Vec::new(),
             coedge_names: Vec::new(),
@@ -269,7 +278,7 @@ impl Walk {
         let outer_first = self.outer_bound_first(reading, face, &bounds, &surface)?;
         let mut wires = Vec::with_capacity(outer_first.len());
         for bound in outer_first {
-            wires.push(self.describe_the_bound(reading, face, bound)?);
+            wires.push(self.describe_the_bound(reading, face, bound, &surface)?);
         }
         let drafted = self
             .builder
@@ -540,17 +549,18 @@ impl Walk {
         reading: &Reading<'_>,
         face: EntityId,
         bound: EntityId,
+        surface: &Surface,
     ) -> Result<rcad_topo::DraftWire, Refusal> {
         let (loop_id, walk_it_backwards) = self.loop_of_bound(reading, face, bound)?;
         let mut oriented = reading.references_at(loop_id, EDGE_LOOP, 1)?;
         if walk_it_backwards {
             oriented.reverse();
         }
-        let mut steps = Vec::with_capacity(oriented.len());
+        let mut walked = Vec::with_capacity(oriented.len());
         for use_of_an_edge in oriented {
-            let coedges = self.describe_the_coedge(reading, use_of_an_edge, walk_it_backwards)?;
-            steps.extend(coedges.into_iter().map(DraftStep::Along));
+            walked.extend(self.describe_the_coedge(reading, use_of_an_edge, walk_it_backwards)?);
         }
+        let steps = with_a_pole_where_it_turns_back(&walked, surface);
         let wire = self
             .builder
             .add_wire(&steps)
@@ -580,7 +590,7 @@ impl Walk {
         reading: &Reading<'_>,
         oriented: EntityId,
         walk_it_backwards: bool,
-    ) -> Result<Vec<DraftCoedge>, Refusal> {
+    ) -> Result<Vec<Walked>, Refusal> {
         let edge_curve = reading.reference_at(oriented, ORIENTED_EDGE, 3)?;
         let along_the_loop = reading.flag_at(oriented, ORIENTED_EDGE, 4)? != walk_it_backwards;
         if let Some([there, back]) = self.describe_the_halves_of_a_circle(reading, edge_curve)? {
@@ -594,12 +604,7 @@ impl Walk {
             };
             let mut coedges = Vec::with_capacity(uses.len());
             for (half, way) in uses {
-                let coedge = self
-                    .builder
-                    .add_coedge(half, way)
-                    .map_err(|why| self.refused(oriented, why))?;
-                self.coedge_names.push(oriented);
-                coedges.push(coedge);
+                coedges.push(self.walk_along(oriented, half, way)?);
             }
             return Ok(coedges);
         }
@@ -607,19 +612,39 @@ impl Walk {
         let forwards = self
             .which_way_round_a_closed_edge_is_stored(reading, edge_curve, along_the_loop)?
             .unwrap_or(along_the_loop);
+        let way = if forwards {
+            Orientation::Forward
+        } else {
+            Orientation::Reversed
+        };
+        Ok(vec![self.walk_along(oriented, edge, way)?])
+    }
+
+    /// One coedge on `edge`, running `way`, with the corners it walks from and
+    /// to.
+    fn walk_along(
+        &mut self,
+        oriented: EntityId,
+        edge: DraftEdge,
+        way: Orientation,
+    ) -> Result<Walked, Refusal> {
         let coedge = self
             .builder
-            .add_coedge(
-                edge,
-                if forwards {
-                    Orientation::Forward
-                } else {
-                    Orientation::Reversed
-                },
-            )
+            .add_coedge(edge, way)
             .map_err(|why| self.refused(oriented, why))?;
         self.coedge_names.push(oriented);
-        Ok(vec![coedge])
+        let [start, end] = self.ends[&edge];
+        let (from, to) = if way.is_reversed() {
+            (end, start)
+        } else {
+            (start, end)
+        };
+        Ok(Walked {
+            coedge,
+            edge,
+            from,
+            to: (to, self.corner_points[&to]),
+        })
     }
 
     /// The two halves a closed circle is described as, or `None` for an edge
@@ -733,11 +758,13 @@ impl Walk {
         let back = self.the_arc_between(edge_curve, &place, and, [far, near], along_the_curve)?;
 
         let near = self.describe_the_vertex(reading, corner)?;
+        let far_point = far;
         let far = self
             .builder
-            .add_vertex(far)
+            .add_vertex(far_point)
             .map_err(|why| self.refused(edge_curve, why))?;
         self.vertex_names.push(edge_curve);
+        self.corner_points.insert(far, far_point);
         let mut halves = Vec::with_capacity(2);
         for (from, to, run) in [(near, far, there), (far, near, back)] {
             let half = self
@@ -745,6 +772,7 @@ impl Walk {
                 .add_edge(from, to, run)
                 .map_err(|why| self.refused(edge_curve, why))?;
             self.edge_names.push(edge_curve);
+            self.ends.insert(half, [from, to]);
             halves.push(half);
         }
         let halves = [halves[0], halves[1]];
@@ -898,6 +926,7 @@ impl Walk {
             .map_err(|why| self.refused(edge_curve, why))?;
         self.edge_names.push(edge_curve);
         self.edges.insert(edge_curve, edge);
+        self.ends.insert(edge, [start, end]);
         Ok(edge)
     }
 
@@ -1302,6 +1331,7 @@ impl Walk {
             .map_err(|why| self.refused(vertex_point, why))?;
         self.vertex_names.push(vertex_point);
         self.vertices.insert(vertex_point, drafted);
+        self.corner_points.insert(drafted, point);
         Ok(drafted)
     }
 
@@ -1689,7 +1719,7 @@ impl ProbeWalk {
         let bound_count = outer_first.len();
         let mut wires = Vec::with_capacity(bound_count);
         for bound in outer_first {
-            if let Some(wire) = self.probe_the_bound(reading, face, bound) {
+            if let Some(wire) = self.probe_the_bound(reading, face, bound, &surface) {
                 wires.push(wire);
             }
         }
@@ -1724,6 +1754,7 @@ impl ProbeWalk {
         reading: &Reading<'_>,
         face: EntityId,
         bound: EntityId,
+        surface: &Surface,
     ) -> Option<rcad_topo::DraftWire> {
         let (loop_id, walk_it_backwards) =
             self.record(self.walk.loop_of_bound(reading, face, bound))?;
@@ -1731,14 +1762,14 @@ impl ProbeWalk {
         if walk_it_backwards {
             oriented.reverse();
         }
-        let mut steps = Vec::with_capacity(oriented.len());
+        let mut walked = Vec::with_capacity(oriented.len());
         let mut every_edge_described = true;
         for use_of_an_edge in oriented {
             match self
                 .walk
                 .describe_the_coedge(reading, use_of_an_edge, walk_it_backwards)
             {
-                Ok(coedges) => steps.extend(coedges.into_iter().map(DraftStep::Along)),
+                Ok(coedges) => walked.extend(coedges),
                 Err(why) => {
                     self.refusals.push(why);
                     every_edge_described = false;
@@ -1748,7 +1779,11 @@ impl ProbeWalk {
         if !every_edge_described {
             return None;
         }
-        match self.walk.builder.add_wire(&steps) {
+        match self
+            .walk
+            .builder
+            .add_wire(&with_a_pole_where_it_turns_back(&walked, surface))
+        {
             Ok(wire) => {
                 self.walk.wire_names.push(loop_id);
                 Some(wire)
@@ -1772,6 +1807,59 @@ impl ProbeWalk {
             }
         }
     }
+}
+
+/// One coedge as a loop walks it, with the corners it goes from and to, and
+/// where the second one is.
+#[derive(Clone, Copy, Debug)]
+struct Walked {
+    coedge: DraftCoedge,
+    edge: DraftEdge,
+    from: DraftVertex,
+    to: (DraftVertex, Point),
+}
+
+/// A loop's coedges as the steps of a wire on `surface`, **with a pole
+/// wherever the loop turns back along the edge it has just walked at a corner
+/// where the surface has no way round**.
+///
+/// That is how a real file writes a ball's pole, and how this crate's writer
+/// writes one: the loop runs up the seam to the pole and straight back down it,
+/// and the pole itself is left unwritten (`kicad/LED_D5.0mm.step` `#17`).
+/// `SolidBuilder` takes a pole as a step of its own, [`DraftStep::Pole`], and
+/// refuses a whole ball's two steps of seam and back as a wire too short to
+/// bound anything (`ADraftWireIsTooShort { steps: 2 }`).
+///
+/// **The corner has to be exactly where the surface has no way round**
+/// ([`Surface::the_way_its_first_coordinate_runs_at`] answers `None`), the
+/// same test [`Walk::describe_the_halves_of_a_circle`] reads a pole with. A
+/// turn anywhere else is left as the file wrote it, which is what this reader
+/// did with every turn before: the horizontal KiCad LEDs turn back along a
+/// dome's seam at a corner their ball, which this kernel pinches only on the
+/// `z` line through its centre, does not pinch at, and they import with no
+/// pole there. A pole put at that corner is one `Model::validate` refuses as
+/// `APoleStandsWhereTheSurfaceDoesNotPinch`, and 20 pinned files stopped
+/// importing when this asked nothing of the corner. The upright
+/// `LED_D5.0mm.step` writes its pole `1.6e-15` off that line, so it gets no
+/// pole either, and imports as it did.
+///
+/// An edge with one corner is never turned at: it has no far end to come back
+/// from.
+fn with_a_pole_where_it_turns_back(walked: &[Walked], surface: &Surface) -> Vec<DraftStep> {
+    let mut steps = Vec::with_capacity(walked.len() + 2);
+    for (position, there) in walked.iter().enumerate() {
+        steps.push(DraftStep::Along(there.coedge));
+        let back = walked[(position + 1) % walked.len()];
+        let (corner, at) = there.to;
+        if back.edge == there.edge
+            && there.from != corner
+            && back.from == corner
+            && surface.the_way_its_first_coordinate_runs_at(at).is_none()
+        {
+            steps.push(DraftStep::Pole(corner));
+        }
+    }
+    steps
 }
 
 /// The half-space facing `facing` whose flat surface stands on the chord, low

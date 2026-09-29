@@ -137,6 +137,11 @@ every_model_the_writer_fuzzer_kept_is_written_again --no-capture`).
 panics** — 241.5 item 2. The turned seed that is in is refused before the
 comparison, so it covers the turn through the writer's refusal path only.
 
+*Q730 changed the ball's row on 2026-09-30. The writer now leaves a ball's
+poles unwritten and the reader puts them back where the seam turns, so
+`a_ball_of_radius_three` and `a_ball_whose_pole_the_writer_refuses` are both
+written and come back the same. The replay counts above are from before it.*
+
 ### 241.5 What the first minutes found
 
 All three are reproduced outside libFuzzer by the same scratch program, calling
@@ -178,6 +183,10 @@ the writer's or the reader's, not the target's.
    turned bars reach the writer and stop at its door, and none of them reaches
    the read-back comparison. These are named refusals, not crashes,
    but they are what caps 241.3's "came back the same".
+
+*Since Q730 (2026-09-30) a ball upright on `z` is written and comes back the
+same. A ball turned so its poles leave the `z` line through its centre is still
+refused `AWireThatStandsStillAtAPole` (`a_ball_turned_off_z_is_refused_at_its_pole`).*
 
 ### 241.6 What is left
 
