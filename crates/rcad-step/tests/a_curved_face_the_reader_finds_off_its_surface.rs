@@ -1,23 +1,21 @@
-//! A round bar whose wall the reader finds its corners off, though both of the
-//! kernel's own checks pass it.
+//! A round bar whose wall the reader finds its corners off, and which the
+//! kernel's own checks now refuse too.
 //!
 //! Q169's crash file, `crash-4fa1eb2d42f7b22c3ff6455d6ae0de9bb736a93e`, holds
 //! a round bar 15 tall whose side sits on a pipe of radius `2 + 91·2⁻⁵¹`, while
 //! its two corners sit at radius 2: `91·2⁻⁵¹ ≈ 4.04e-14` inside the wall. A
 //! corner of a curved face gets `16·ε·L` of room, where `L` is the largest
-//! coordinate of any corner the check looks at. `Model::validate` and
-//! `Model::validate_solid` read `L` where the corners are stored, which is 15
-//! here, and give `5.33e-14`. The fuzzer moved the bar by `(0, −1, −10)`, the
-//! writer writes it there, and the reader reads `L` as 10 and gives
-//! `3.55e-14`. So the reader refuses the corner and the writer's fuzz harness
-//! panics on a model it was right to call sound.
+//! coordinate of any corner the check looks at. The fuzzer moved the bar by
+//! `(0, −1, −10)`, the writer writes it there, and the reader reads `L` as 10
+//! and gives `3.55e-14`, so it refuses the corner.
 //!
-//! This is §326.3's gap on a curved face, with the curved face's room in place
-//! of `allowed_wobble` (`docs/decisions.md` §327). The tests below pin it as it
-//! is today. The day the room stops depending on where the bar sits, the three
-//! about the moved bar fail. The day the harness judges a solid where its
-//! placement puts it, the harness test fails. The unmoved bar is the control
-//! and passes either way.
+//! `Model::validate` and `Model::validate_solid` used to read `L` where the
+//! corners are stored, 15 here, which gives `5.33e-14`. They passed the bar and
+//! the writer's fuzz harness panicked on it (`docs/decisions.md` §327). They
+//! now read `L` where the corners are stored or where the placement puts them,
+//! whichever is smaller (§363). So they refuse the moved bar as the reader
+//! does, and the harness counts it rather than panicking. The unmoved bar is
+//! the control, and it comes back the same.
 
 #![forbid(unsafe_code)]
 
@@ -28,15 +26,16 @@ use rcad_geom::{
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile};
-use rcad_topo::{DraftStep, Model, SolidBuilder};
+use rcad_topo::{DraftStep, Invalid, Model, SolidBuilder};
 
 use fuzzing::writer::one_model_decoded_and_written;
 
 /// How far the wall is from the corners: 91 steps of `f64` above 2.
 const THE_MISS: f64 = 91.0 * f64::EPSILON * 2.0;
 
-/// Unmoved, the bar's largest coordinate is its top corner's 15, the reader
-/// gives it the room `validate` does, and it comes back the same.
+/// Unmoved, the bar's largest coordinate is its top corner's 15 wherever it is
+/// read, the reader gives it the room `validate` does, and it comes back the
+/// same.
 #[test]
 fn the_bar_where_it_was_built_comes_back_the_same() {
     let bytes = postcard::to_allocvec(&a_bar_whose_wall_is_a_hair_outside_its_corners(
@@ -51,21 +50,31 @@ fn the_bar_where_it_was_built_comes_back_the_same() {
     );
 }
 
-/// Moved as the fuzzer moved it, both of the kernel's checks still pass the
-/// bar, and the reader refuses its bottom corner, `#15` at `(2, −1, −10)`, for
-/// the whole of the miss.
+/// Moved as the fuzzer moved it, both of the kernel's checks refuse the bar as
+/// a corner off its pipe, and the reader refuses its bottom corner, `#15` at
+/// `(2, −1, −10)`, for the whole of the miss.
 #[test]
-fn the_bar_moved_as_the_fuzzer_moved_it_passes_validate_and_the_reader_refuses_it() {
+fn the_bar_moved_as_the_fuzzer_moved_it_is_refused_by_validate_as_by_the_reader() {
     let model = a_bar_whose_wall_is_a_hair_outside_its_corners(&the_fuzzers_move());
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    model
-        .validate(&policy, &mut log)
-        .expect("the stored corners give the room of 15");
+    let whole = model.validate(&policy, &mut log);
+    assert!(
+        matches!(
+            whole,
+            Err(rcad_topo::Error::Invalid(Invalid::VertexOffItsFaceSurface))
+        ),
+        "where it sits the bar's largest coordinate is 10: {whole:?}"
+    );
     let bar = model.solids().next().expect("one solid").key();
-    model
-        .validate_solid(bar, &policy, &mut log)
-        .expect("alone, the bar still has its stored room of 15");
+    let alone = model.validate_solid(bar, &policy, &mut log);
+    assert!(
+        matches!(
+            alone,
+            Err(rcad_topo::Error::Invalid(Invalid::VertexOffItsFaceSurface))
+        ),
+        "alone, the bar has the room of 10 too: {alone:?}"
+    );
 
     let refusal = what_the_reader_says_of(&model);
     let Err(Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn { off_by, .. }) = refusal else {
@@ -74,39 +83,53 @@ fn the_bar_moved_as_the_fuzzer_moved_it_passes_validate_and_the_reader_refuses_i
     assert_eq!(off_by, THE_MISS);
 }
 
-/// The fuzz harness asks `validate` and `validate_solid`, finds the model
-/// sound, and then panics at the reader's refusal.
+/// The fuzz harness asks `validate`, which refuses the model, so the file owes
+/// the harness nothing and it stops there without asking the reader.
 #[test]
-#[should_panic(expected = "a sound model was written as a file the reader refuses")]
-fn the_writer_harness_panics_on_the_bar_moved_as_the_fuzzer_moved_it() {
+fn the_writer_harness_counts_the_bar_moved_as_the_fuzzer_moved_it_rather_than_panicking() {
     let bytes = postcard::to_allocvec(&a_bar_whose_wall_is_a_hair_outside_its_corners(
         &the_fuzzers_move(),
     ))
     .expect("a model always encodes");
-    let _ = one_model_decoded_and_written(&bytes);
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.written, reached.written_but_unsound, reached.read_back),
+        (1, 1, 0),
+        "{reached:?}"
+    );
 }
 
 /// The reader's room is `16·ε` times the largest coordinate where the bar
 /// sits, so the miss of `91·2⁻⁵¹` fits once that coordinate reaches
 /// `91·2⁻⁵¹ / (16·2⁻⁵²) = 11.375`. Moved down by 3.5 its top corner is at
-/// 11.5 and the reader takes it. Moved down by 4 its top corner is at 11 and
-/// the reader refuses it. Nothing about the bar differs between the two but
-/// where it sits.
+/// 11.5, and `validate` and the reader both take it. Moved down by 4 its top
+/// corner is at 11, and both refuse it. Nothing about the bar differs between
+/// the two but where it sits, and the two checks now draw the line in the same
+/// place.
 #[test]
-fn the_reader_takes_the_bar_once_its_top_corner_is_past_11_375() {
+fn validate_and_the_reader_both_take_the_bar_once_its_top_corner_is_past_11_375() {
     let at = |down: f64| {
         let moved = Isometry::translation(Vector::new(0.0, 0.0, -down)).expect("a finite offset");
-        what_the_reader_says_of(&a_bar_whose_wall_is_a_hair_outside_its_corners(&moved))
+        let model = a_bar_whose_wall_is_a_hair_outside_its_corners(&moved);
+        let kernel = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+        (kernel, what_the_reader_says_of(&model))
     };
-    let high_enough = at(3.5);
-    assert!(high_enough.is_ok(), "{high_enough:?}");
-    let too_low = at(4.0);
+    let (kernel, reader) = at(3.5);
+    assert!(kernel.is_ok() && reader.is_ok(), "{kernel:?} {reader:?}");
+    let (kernel, reader) = at(4.0);
     assert!(
         matches!(
-            too_low,
+            kernel,
+            Err(rcad_topo::Error::Invalid(Invalid::VertexOffItsFaceSurface))
+        ),
+        "{kernel:?}"
+    );
+    assert!(
+        matches!(
+            reader,
             Err(Refusal::ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn { .. })
         ),
-        "{too_low:?}"
+        "{reader:?}"
     );
 }
 
