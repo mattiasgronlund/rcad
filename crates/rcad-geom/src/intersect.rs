@@ -120,7 +120,9 @@ pub const WHERE_A_PLANE_AND_A_TORUS_CROSS: &str = "where a plane and a torus cro
 /// shapes** — see [`where_a_plane_and_a_torus_cross`] for the table. A torus
 /// against a ball, a pipe, a cone or another torus is not named at all: the
 /// crossing runs to degree eight and none of the machinery for that exists. Two
-/// tori that hold the same numbers are the same surface and come back as one.
+/// tori with one centre, one pair of radii and their axes along one line are the
+/// same surface and come back as one, **whichever way each axis points** — see
+/// [`one_ring_either_way_round`].
 ///
 /// **A cone against a plane is classified whole and named in every one of its
 /// seven shapes** — see [`where_a_plane_and_a_cone_cross`] for the table. **A
@@ -129,8 +131,9 @@ pub const WHERE_A_PLANE_AND_A_TORUS_CROSS: &str = "where a plane and a torus cro
 /// [`where_a_cone_and_a_pipe_cross`]. Every other cone against a pipe, and a
 /// cone against a ball or another cone, is not named at all: the crossing is a
 /// degree-four space curve and none of the machinery §29 built for two pipes
-/// exists for a cone. Two cones that hold the same numbers are the same surface
-/// and come back as one.
+/// exists for a cone. Two cones with one apex, one slope and their axes along
+/// one line are the same surface and come back as one, **whichever way each
+/// axis points** — see [`one_cone_either_way_round`].
 ///
 /// # Errors
 ///
@@ -194,7 +197,9 @@ pub fn intersect(
         | (Surface::Cone(cone), Surface::Plane(flat)) => {
             where_a_plane_and_a_cone_cross(flat, cone, policy, log)
         }
-        (Surface::Cone(one), Surface::Cone(other)) if one == other => Ok(SurfaceMeet::SameSurface),
+        (Surface::Cone(one), Surface::Cone(other)) if one_cone_either_way_round(one, other) => {
+            Ok(SurfaceMeet::SameSurface)
+        }
         (Surface::Cone(cone), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Cone(cone)) => {
             where_a_cone_and_a_pipe_cross(cone, pipe, policy, log)
@@ -207,7 +212,7 @@ pub fn intersect(
         | (Surface::Torus(ring), Surface::Plane(flat)) => {
             where_a_plane_and_a_torus_cross(flat, ring, policy, log)
         }
-        (Surface::Torus(one), Surface::Torus(other)) if one == other => {
+        (Surface::Torus(one), Surface::Torus(other)) if one_ring_either_way_round(one, other) => {
             Ok(SurfaceMeet::SameSurface)
         }
         (
@@ -3518,6 +3523,101 @@ fn two_circles_round_the_axis(ring: &Torus) -> Result<SurfaceMeet> {
     ))
 }
 
+/// Whether two cones are one point set: one apex, one slope, and their axes
+/// along one line, **whichever way each axis points**.
+///
+/// A cone here is both nappes ([`Cone`]'s "Two nappes and not one"), and its
+/// sign `‖x × w‖² − slope²·(x·w)²` is degree two in the stored direction on both
+/// terms, so `w` and every multiple of it — `−w` among them, and a `w` a turn
+/// left a hair off length one — give the same sign at every point, not only the
+/// same zero set. That is the whole of the "if".
+///
+/// **And nothing else is the same cone**, which is what keeps this from being
+/// a guess. The apex is the one point of a cone with no normal, the axis is its
+/// one line of symmetry, and a slope above zero is how fast it widens along
+/// that line, so two cones that differ in any of the three differ somewhere.
+/// A pair that is not the same point set falls through to the refusal by name,
+/// as every pair did before §357.
+///
+/// Nothing here is rounded, so no [`Policy`] is asked: the apex and the slope
+/// are compared as stored, and the direction as [`two_directions_lie_along_one_line`]
+/// says. A pair a hair apart is two cones.
+fn one_cone_either_way_round(one: &Cone, other: &Cone) -> bool {
+    one.apex() == other.apex()
+        && one.slope() == other.slope()
+        && two_directions_lie_along_one_line(one.axis().direction(), other.axis().direction())
+}
+
+/// Whether two tori are one point set: one centre, one pair of radii, and
+/// their axes along one line, whichever way each axis points.
+///
+/// The same argument as [`one_cone_either_way_round`]: [`Torus`]'s sign
+/// `(w·w)·(x·x + R² − r²)² − 4R²·‖x × w‖²` is degree two in `w` on both terms.
+/// And a torus with its tube narrower than its ring — the only one [`Torus::new`]
+/// builds — has one centre, one axis of symmetry, and its widest and narrowest
+/// circles round that axis at `R + r` and `R − r`, so no other four numbers name
+/// it.
+fn one_ring_either_way_round(one: &Torus, other: &Torus) -> bool {
+    one.centre() == other.centre()
+        && one.ring_radius() == other.ring_radius()
+        && one.tube_radius() == other.tube_radius()
+        && two_directions_lie_along_one_line(one.axis().direction(), other.axis().direction())
+}
+
+/// Whether `u × v` is exactly the zero vector, **decided in whole numbers**.
+///
+/// [`squared_length_of_a_cross_product`] asks the same thing through the
+/// cascade, and its exact level refuses a product whose low half would be
+/// subnormal. A unit direction reaches that with two components below about
+/// `2⁻⁴⁸⁵`, so `(2⁻⁶⁰⁰, 2⁻⁶⁰⁰, 1)` and its reverse are one line the cascade
+/// cannot call one (`a_cone_about_a_direction_the_cascade_cannot_square_is_still_one_cone`).
+/// Each component of the cross product is `a·b − c·d`, and asking whether two
+/// products of `f64` are equal needs no range at all: each is a whole number
+/// below `2¹⁰⁶` times a power of two, and `i128` holds the whole number.
+fn two_directions_lie_along_one_line(u: Vector, v: Vector) -> bool {
+    let [u, v] = [u, v].map(|direction| direction.components());
+    (0..3).all(|axis| {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        a_product_in_whole_numbers(u[next], v[after])
+            == a_product_in_whole_numbers(u[after], v[next])
+    })
+}
+
+/// `a·b` as an odd whole number times a power of two, or `(0, 0)`, so that two
+/// products are equal exactly when the pairs are.
+fn a_product_in_whole_numbers(a: f64, b: f64) -> (i128, i32) {
+    let [(m, e), (n, f)] = [a, b].map(a_whole_number_times_a_power_of_two);
+    let product = i128::from(m) * i128::from(n);
+    if product == 0 {
+        return (0, 0);
+    }
+    let twos = product.trailing_zeros();
+    (product >> twos, e + f + twos as i32)
+}
+
+/// A finite `value` as `m·2^e` with `|m| < 2⁵³`, read straight out of the bits.
+///
+/// # Panics
+///
+/// If `value` is not finite: a surface's axis direction is finite by
+/// construction.
+fn a_whole_number_times_a_power_of_two(value: f64) -> (i64, i32) {
+    assert!(value.is_finite(), "a stored direction is finite: {value}");
+    let bits = value.to_bits();
+    let stored_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = (bits & ((1 << 52) - 1)) as i64;
+    let (whole, power) = if stored_exponent == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | (1 << 52), stored_exponent - 1075)
+    };
+    if value.is_sign_negative() {
+        (-whole, power)
+    } else {
+        (whole, power)
+    }
+}
+
 /// The point on `flat` nearest `centre`, as the box it is really known to be
 /// inside.
 ///
@@ -3848,6 +3948,175 @@ mod tests {
             &a_pipe([-3.0, -6.0, -9.0], [4.0, 0.0, -1.0], 2.0),
         );
         assert_eq!(met, SurfaceMeet::SameSurface);
+    }
+
+    fn a_cone(along: [f64; 3], apex: [f64; 3], slope: f64) -> Surface {
+        Surface::Cone(
+            Cone::new(
+                Axis::new(Point::from(apex), Vector::from(along)).expect("a direction"),
+                slope,
+            )
+            .expect("a slope"),
+        )
+    }
+
+    fn a_ring(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
+        Surface::Torus(
+            Torus::new(
+                Axis::new(Point::from(centre), Vector::from(along)).expect("a direction"),
+                ring,
+                tube,
+            )
+            .expect("a tube narrower than its ring"),
+        )
+    }
+
+    /// A cone is both nappes, so the same cone pointed the other way is one
+    /// cone, and a ring pointed the other way is one ring (§357). Both were
+    /// refused by name while only a pair holding the same numbers was one.
+    #[test]
+    fn the_same_cone_or_ring_pointed_backwards_is_the_same_surface() {
+        for [one, other] in [
+            [
+                a_cone([1.0, 2.0, 3.0], [4.0, 0.0, -1.0], 0.5),
+                a_cone([-3.0, -6.0, -9.0], [4.0, 0.0, -1.0], 0.5),
+            ],
+            [
+                a_cone([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.5),
+                a_cone([0.0, 0.0, -1.0], [0.0, 0.0, 0.0], 0.5),
+            ],
+            [
+                a_ring([1.0, 2.0, 3.0], [4.0, 0.0, -1.0], 5.0, 1.0),
+                a_ring([-3.0, -6.0, -9.0], [4.0, 0.0, -1.0], 5.0, 1.0),
+            ],
+            [
+                a_ring([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 5.0, 1.0),
+                a_ring([0.0, 0.0, -1.0], [0.0, 0.0, 0.0], 5.0, 1.0),
+            ],
+        ] {
+            assert_ne!(one, other, "the two spellings hold different numbers");
+            assert_eq!(crossing(&one, &other), SurfaceMeet::SameSurface, "{one:?}");
+        }
+    }
+
+    /// **A near-equal pair is two surfaces.** One ulp off in the apex or
+    /// centre, the slope or a radius, or the axis, and the pair turned round
+    /// falls through to the refusal by name, as every pair did before §357.
+    #[test]
+    fn a_cone_or_ring_a_hair_off_its_own_reverse_is_another_surface() {
+        let hair = f64::from_bits(1);
+        let leaning = [2f64.powi(-60), 0.0, -1.0];
+        let cone = a_cone([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.5);
+        for other in [
+            a_cone([0.0, 0.0, -1.0], [0.0, 0.0, hair], 0.5),
+            a_cone([0.0, 0.0, -1.0], [0.0, 0.0, 0.0], 0.5f64.next_up()),
+            a_cone(leaning, [0.0, 0.0, 0.0], 0.5),
+        ] {
+            for [first, second] in [[&cone, &other], [&other, &cone]] {
+                assert_eq!(
+                    intersect(
+                        first,
+                        second,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new()
+                    ),
+                    Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                    "{other:?}"
+                );
+            }
+        }
+        let ring = a_ring([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 5.0, 1.0);
+        for other in [
+            a_ring([0.0, 0.0, -1.0], [hair, 0.0, 0.0], 5.0, 1.0),
+            a_ring([0.0, 0.0, -1.0], [0.0, 0.0, 0.0], 5f64.next_up(), 1.0),
+            a_ring([0.0, 0.0, -1.0], [0.0, 0.0, 0.0], 5.0, 1f64.next_down()),
+            a_ring(leaning, [0.0, 0.0, 0.0], 5.0, 1.0),
+        ] {
+            for [first, second] in [[&ring, &other], [&other, &ring]] {
+                assert_eq!(
+                    intersect(
+                        first,
+                        second,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new()
+                    ),
+                    Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+                    "{other:?}"
+                );
+            }
+        }
+    }
+
+    /// Two unit directions along one line whose cross product the cascade
+    /// cannot square: `2⁻⁶⁰⁰ · 2⁻⁶⁰⁰` is below the subnormals, so the exact
+    /// level refuses and the enclosure straddles zero. Whole numbers decide it,
+    /// and a cone and a ring about that axis are one surface either way round.
+    #[test]
+    fn a_cone_about_a_direction_the_cascade_cannot_square_is_still_one_cone() {
+        let tiny = 2f64.powi(-600);
+        let up = [tiny, tiny, 1.0];
+        let down = [-tiny, -tiny, -1.0];
+        let asked_the_cascade = decide(&squared_length_of_a_cross_product(
+            WHERE_TWO_PIPES_CROSS,
+            up,
+            down,
+        ))
+        .0;
+        assert!(
+            matches!(asked_the_cascade, Decision::Undecidable { .. }),
+            "the cascade was meant to be unable to tell: {asked_the_cascade:?}"
+        );
+        for [one, other] in [
+            [up, down].map(|along| a_cone(along, [1.0, 2.0, 3.0], 0.5)),
+            [up, down].map(|along| a_ring(along, [1.0, 2.0, 3.0], 5.0, 1.0)),
+        ] {
+            assert_eq!(crossing(&one, &other), SurfaceMeet::SameSurface, "{one:?}");
+        }
+    }
+
+    /// Whole numbers tell a line at any size, and tell apart what a rounded
+    /// cross product calls one line.
+    ///
+    /// `(1 + 2⁻⁵²)²` is `1 + 2⁻⁵¹ + 2⁻¹⁰⁴`, which rounds to `1 + 2⁻⁵¹`, so the
+    /// last pair below has an `f64` cross product of exactly nothing and is not
+    /// along one line.
+    #[test]
+    fn two_directions_along_one_line_are_told_in_whole_numbers_at_any_size() {
+        let smallest = f64::from_bits(1);
+        for (u, v) in [
+            ([1.0, 2.0, 3.0], [-3.0, -6.0, -9.0]),
+            ([smallest, smallest, 1.0], [-smallest, -smallest, -1.0]),
+            ([0.1, 0.0, 0.0], [-1e300, 0.0, 0.0]),
+            (
+                [smallest, 3.0 * smallest, 0.0],
+                [2f64.powi(1000), 3.0 * 2f64.powi(1000), 0.0],
+            ),
+        ] {
+            assert!(
+                two_directions_lie_along_one_line(Vector::from(u), Vector::from(v)),
+                "{u:?} and {v:?} lie along one line"
+            );
+        }
+        let just_over_one = 1f64.next_up();
+        let rounded_the_same = (
+            [just_over_one, just_over_one.next_up(), 0.0],
+            [1.0, just_over_one, 0.0],
+        );
+        assert_eq!(
+            Vector::from(rounded_the_same.0).cross(Vector::from(rounded_the_same.1)),
+            Vector::new(0.0, 0.0, 0.0),
+            "the rounded cross product was meant to call these one line"
+        );
+        for (u, v) in [
+            ([1.0, 2.0, 3.0], [1.0, 2.0, 3f64.next_up()]),
+            ([smallest, 0.0, 1.0], [0.0, 0.0, 1.0]),
+            rounded_the_same,
+        ] {
+            assert!(
+                !two_directions_lie_along_one_line(Vector::from(u), Vector::from(v)),
+                "{u:?} and {v:?} do not lie along one line"
+            );
+        }
     }
 
     #[test]
