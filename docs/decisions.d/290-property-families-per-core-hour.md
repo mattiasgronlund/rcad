@@ -441,3 +441,50 @@ of Q231's), so every chunk behind §290.5 ran while `over()` still drew a
 fixed count. A soak planned from this section now, at a later
 `RCAD_SOAK_FACTOR`, would give the `over()`-based properties a bigger draw
 than any chunk here did.
+
+**2026-09-29, Q531: the bigger draw above is not the whole draw, and part of
+it does not grow at all.** Every one of `fuses_that_must_agree.rs`'s
+`over()` call sites (33 of them, `grep -c '= over(' crates/rcad-topo/tests/fuses_that_must_agree.rs`)
+opens its `TestRunner` through `configured()`, which sets
+`failure_persistence` to the file `fuses_that_must_agree.proptest-regressions`
+— 19 seed lines on this section's base (`grep -c '^cc '
+crates/rcad-topo/tests/fuses_that_must_agree.proptest-regressions`). Proptest
+replays every line in that file once per `TestRunner::run`, on top of the
+`cases` it was asked for, whatever `cases` or `RCAD_SOAK_FACTOR` say: Q266's
+own demonstration (commit `571101033b5c558a16239dcf2c0f9a3c3e1b4086`) ran
+`over_scaled_by(CASES, 1, any::<u8>(), …)` — a strategy with nothing to do
+with any property the 19 lines were originally recorded from — and still got
+67 runs where `CASES` alone is 48; the replay ran regardless, over a
+strategy the seeds were never drawn against, so the 19 lines are a per-file
+minimum every `over()` call pays, not a per-property one. Cited here as
+Q266's count, not re-measured by this note.
+
+This section's own figures counted the *time* these replays cost without
+separating it out: §290.3's wall and CPU seconds are `/usr/bin/time` over the
+whole `just t --test fuses_that_must_agree --test fuses_that_touch` command,
+so whatever the 19-times-33 replay invocations took is already inside every
+row of that table, uncounted as its own line. §290.4's fuse counts (the
+25401 denominator) are not this note's figures at all — they come from
+`every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing` and
+its neighbours, which call `measured()`, not `over()`; but `measured()`
+opens its runner through the same `configured()`, so it replays from the
+same file too (`measured_cases`'s own doc comment records 45 fuses read back
+from 15 replayed seeds, at a factor extreme where the fresh draw was zero,
+before the file grew to 19 lines). Neither this section nor Q266's own
+commit separated the replayed count out of any published total, and this
+note does not do that arithmetic either — it only says the replayed count is
+in there, not broken out.
+
+**What does not grow.** The 19 lines are read off the file, not derived from
+`RCAD_SOAK_SEED` or scaled by `RCAD_SOAK_FACTOR`, so the values proptest
+regenerates from them at a given call site are the same seed-to-value draw
+in every chunk §290.3 ran — chunk 2's replay of `over()`'s 19 seeds is the
+same 19 draws as chunk 17's, at every one of the 33 call sites, whatever
+`RCAD_SOAK_SEED` that chunk used. Raising `RCAD_SOAK_FACTOR` (or running
+more chunks, each a fresh `RCAD_SOAK_SEED`) grows the fresh portion of each
+`over()` call's draw, exactly as §290.1's dated note says; it does not touch
+this fixed 19-line slice, which repeats unchanged in every chunk rather than
+widening what the soak explores. A soak's core-hours buy a bigger fresh draw
+per chunk and, separately, one more repetition of the same 19 replays per
+`over()` call — the second of those does not become a bigger search by
+running more chunks or raising the factor.
