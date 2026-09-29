@@ -1820,17 +1820,22 @@ fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
 }
 
 /// The face a run names where every face along it is curved and they are not
-/// all one surface: the ball if there is one, and otherwise the first face.
+/// all one surface: [`the_curved_one_of`] them, the same pick a run's second
+/// surface makes when the file writes its own circle apart from every face
+/// (`Walk::every_face_holds_the_curve` refuses it).
 ///
-/// The ball first, because it is the face `rcad_geom::walk` pairs with a plane
-/// when there is one, so a run naming it rather than another face changes
-/// nothing a ball's run did before §220.4.
+/// **Not `faces[0]`.** A run's stored second surface used to be the ball if
+/// there was one and otherwise the first face, so which face it named — Cone
+/// against Cylinder, one ball or the other — depended on the order the file's
+/// faces happened to be listed in (Q541, and Q388 before it for two balls).
+/// `the_curved_one_of` sorts on the faces' own numbers instead, so the pick no
+/// longer depends on that order.
 fn a_face_where_curved_faces_meet(faces: &[Surface]) -> Option<Surface> {
     let all_curved = faces.len() >= 2 && faces.iter().all(|face| face.as_plane().is_none());
     if !all_curved || the_faces_along_it_name_no_crossing(faces) {
         return None;
     }
-    Some(a_ball_where_curved_faces_meet(faces).map_or(faces[0], Surface::Sphere))
+    the_curved_one_of(faces)
 }
 
 /// The ball among the faces along an edge, when every face along it is curved
