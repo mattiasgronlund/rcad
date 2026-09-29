@@ -994,8 +994,17 @@ impl Assembly {
     /// from the knife's other half, winds round no area at all (§200.1's two
     /// knives at 90 degrees, as a union). With one outline found among the other
     /// rings it is a hole; with none, and it the only such ring, it is the
-    /// outline. Two or more such rings and no outline is the one case the rule
-    /// cannot settle, and that still panics.
+    /// outline.
+    ///
+    /// **Two or more such rings and no outline are placed by the regions they
+    /// bound**, since the outline is the one ring that holds the others
+    /// ([`Assembly::holds_the_other_rings`]). A tube's cap cut by the pipe of a
+    /// bar standing inside the tube's wall is two pieces, and joined back up it
+    /// is two whole circles of one corner each (`a_bar_inside_a_tubes_wall.rs`).
+    /// A ring shown to hold the others is the outline and the rest are holes;
+    /// with none shown to, and only one ring left that nothing could place,
+    /// that one is the outline by the rule above. Two or more left unplaced
+    /// still panics: no answer reaches it yet, so it is not demonstrated.
     fn rings_round(
         &self,
         members: &[usize],
@@ -1041,18 +1050,115 @@ impl Assembly {
                 holes.extend(enclosing_nothing);
                 outline
             }
+            None if enclosing_nothing.len() == 1 => enclosing_nothing.remove(0),
             None => {
-                assert!(
-                    enclosing_nothing.len() == 1,
-                    "every face joined here brought an outline of its own and joining only takes \
-                     edges away, so the joined face has one too, and {} rings enclose no area to \
-                     say which it is",
-                    enclosing_nothing.len()
-                );
-                enclosing_nothing.remove(0)
+                let held: Vec<Option<bool>> = (0..enclosing_nothing.len())
+                    .map(|ring| {
+                        let others = enclosing_nothing
+                            .iter()
+                            .enumerate()
+                            .filter(|&(other, _)| other != ring)
+                            .map(|(_, other)| other)
+                            .chain(&holes);
+                        self.holds_the_other_rings(&enclosing_nothing[ring], others)
+                    })
+                    .collect();
+                let holding: Vec<usize> = (0..held.len())
+                    .filter(|&ring| held[ring] == Some(true))
+                    .collect();
+                let unplaced: Vec<usize> = (0..held.len())
+                    .filter(|&ring| held[ring].is_none())
+                    .collect();
+                let which = match (holding.as_slice(), unplaced.as_slice()) {
+                    ([only], _) | ([], [only]) => *only,
+                    ([], []) => panic!(
+                        "every face joined here brought an outline of its own and joining only \
+                         takes edges away, so the joined face has one too, and none of its rings \
+                         winds with the plane or bounds a region holding the others"
+                    ),
+                    ([], _) => panic!(
+                        "{} rings of a joined face enclose no area between their corners, and the \
+                         regions they bound cannot say which of them is the outline",
+                        unplaced.len()
+                    ),
+                    (_, _) => panic!(
+                        "a face joined out of coplanar pieces has one outline, and {} of its rings \
+                         each hold the others, so the answer's rings cross",
+                        holding.len()
+                    ),
+                };
+                let outline = enclosing_nothing.remove(which);
+                holes.extend(enclosing_nothing);
+                outline
             }
         };
         Ok(core::iter::once(outline).chain(holes).collect())
+    }
+
+    /// Whether the region `ring` bounds on its plane holds the rings `others`,
+    /// or `None` where that region cannot be read off its sides.
+    ///
+    /// **A ring every side of which runs where the plane crosses one pipe, ball
+    /// or cone is the whole of that crossing**, and the crossing closes: the
+    /// ones that do not — two lines, a parabola, a hyperbola's two branches —
+    /// cannot close a ring on their own. The region such a ring bounds is then
+    /// the part of the plane inside that surface, so a corner of another ring
+    /// is held exactly when the surface puts it inside. One corner answers for
+    /// the whole question, because the outline holds every other ring of the
+    /// face and a hole holds none of them. A corner on the surface, or one the
+    /// arithmetic cannot place, is passed over for the next, the way
+    /// [`Assembly::one_shell_is_inside_another`] passes over a corner.
+    ///
+    /// `None` for a ring with a straight side or a side along a second curved
+    /// surface, for a ring along a torus — a plane square to its axis cuts it
+    /// in two circles with the torus between them, so the inside of the torus
+    /// is not the region either circle bounds — and where no corner is placed.
+    ///
+    /// # Panics
+    ///
+    /// On a [`Decision`] this crate has not been taught, for the reason
+    /// [`winding_round`] gives.
+    fn holds_the_other_rings<'a>(
+        &self,
+        ring: &[Dart],
+        mut others: impl Iterator<Item = &'a Vec<Dart>>,
+    ) -> Option<bool> {
+        let the_curved_one = |dart: Dart| {
+            let [one, other] = self.edges[self.edge_of(dart)].carried_by;
+            match (one.as_plane(), other.as_plane()) {
+                (Some(_), None) => Some(other),
+                (None, Some(_)) => Some(one),
+                (Some(_), Some(_)) | (None, None) => None,
+            }
+        };
+        let surface = the_curved_one(*ring.first()?)?;
+        match surface {
+            Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Cone(_) => (),
+            Surface::Plane(_) | Surface::Torus(_) => return None,
+            // A kind added to `rcad-geom` after this has not been shown to
+            // bound the region inside it, so a ring along it is not placed.
+            _ => return None,
+        }
+        if !ring
+            .iter()
+            .all(|&dart| the_curved_one(dart).is_some_and(|curved| one_surface(&curved, &surface)))
+        {
+            return None;
+        }
+        others.find_map(|other| {
+            other.iter().find_map(|&dart| {
+                let at = self.corners[self.starts_at(dart)].point.coordinates();
+                match crate::validate::side_of_surface(&surface, PredicatePoint::from(at)) {
+                    Decision::Neg => Some(true),
+                    Decision::Pos => Some(false),
+                    Decision::Zero | Decision::Undecidable { .. } => None,
+                    other => panic!(
+                        "which side of a surface a corner is on came back as a decision nothing \
+                         here knows: {other:?}"
+                    ),
+                }
+            })
+        })
     }
 
     /// # Panics
