@@ -10,6 +10,10 @@ In short: 33 more steps go into `gate_reusable_steps`, 42 in all. They are the
 `docs/`, which now do not. A served gate still runs 14 steps. Eight check the
 machine and are Q693's. Six read `docs/`, and those have to run.
 
+A served gate of `e5d281ab` took 19.9 s and then 19.5 s end to end (`time
+mise exec -- just gate quiet`, twice, after the full gate that recorded its
+green). §367.7 measured 43.7 s with the old list.
+
 ### 369.1 What the traces could not see
 
 §337.2's three checks were an strace, a grep of the recipe, and a grep of the
