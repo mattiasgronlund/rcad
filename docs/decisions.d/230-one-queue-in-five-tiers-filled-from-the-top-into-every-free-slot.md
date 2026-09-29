@@ -96,6 +96,9 @@ A row is **ready** when its state is `todo`, or `after:` with every row it names
 The dispatcher edits the file — to `lane:` when it dispatches a row, to `done:`
 when it merges it. A lane never writes it, so no two lanes conflict over it.
 
+*§352.2 added a tag on 2026-09-29: the first word of a description may be a
+class, on a tier 1 row only, or `small`, on a row of any tier.*
+
 ### 230.3 Every free slot takes the highest ready row that fits
 
 Two write sets **meet** when they share a path, or one names a directory that
@@ -111,6 +114,9 @@ slot only when every ready row of tiers 1 to 2.5 is either running already or
 meets a running lane — typically, when every fuse fix is waiting on a file held
 by another fuse fix. The slot goes to whatever can use it, and the higher tiers
 lose nothing by it.
+
+*§352 changed the walk on 2026-09-29: tier 1 goes in class order (§352.3), and
+ready `small` rows go out as bundles, one lane each (§352.4).*
 
 ### 230.4 A slot is refilled when its lane finishes, not when the batch does
 
@@ -166,6 +172,10 @@ a pointer to `just queue`, and each item on them becomes a row. Those two are th
 longest part of §0, and §0 stood at 50 of its 50 lines when this was written
 (`just check-where-the-work-is`). The morning
 line, row T4, will add each night's new findings as tier-2 or tier-2.5 rows.
+
+*§352 kept this rule on 2026-09-29 and set §348.7's proposal aside, with one
+exception: what a lane's own change leaves stale inside its write set is fixed
+there, not filed (§352.5).*
 
 ### 230.8 How many slots
 

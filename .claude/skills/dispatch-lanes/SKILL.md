@@ -91,6 +91,12 @@ It takes the first ready row of the highest tier whose write set meets no
 running `lane:` row and no row taken above it, and names what each skipped row
 met. N defaults to the free slots, counted from the trees agents hold on this
 machine — lanes, verifiers and mergers alike, whoever sent them (§263.4).
+Tier 1 goes in class order, not file order (§352.3).
+
+A line `take Q501,Q502,Q503 (a bundle of 3 small rows, one lane)` is **one
+lane** doing all of those rows (§352.4), with each row's text indented under
+it. Its model is opus if any of its rows says opus, else sonnet. Its write set
+is the union of its rows' sets, leaving out `-`.
 
 Before a brief, check the row's write set against what the work really
 touches. A row whose write set is wrong is fixed in the file first: a lane that
@@ -122,9 +128,11 @@ For every row the fill took:
    commit goes straight there. The merger reads the queue
    from `origin/main`, so a `lane:` it finds there flips to `done:` on one side
    only. A take left on your branch meets that flip at your next merge of
-   `main` as a row changed on both sides, and costs a `just queue pick`.
+   `main` as a row changed on both sides, and costs a `just queue pick`. A
+   bundle is one `take` step per row, every one onto the same branch, in the
+   same `apply`.
 2. `Workflow` with `scriptPath: ".claude/workflows/lanes.js"`, one call per
-   row, all of a fill's rows in one message. **Never `name: "lanes"`**: the
+   row or bundle, all of a fill's in one message. **Never `name: "lanes"`**: the
    name runs the copy the registry read earlier in the process, and neither a
    merge into your tree nor a `/clear` refreshes it. Q118's run by name got
    `lanes.js` as of Q182, from before Q186, and refused a merge its verifier
@@ -138,6 +146,8 @@ its type, so `.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the
 standing rules and a brief carries only what is this row's:
 
 - the work, and anything to report beyond the standard record;
+- for a bundle, `queueId: "Q501,Q502,Q503"` as `queue next` printed it, and
+  one run for the whole bundle;
 - the write set, as `writeSet`. The branch defaults to `lane-<label>` and must
   not exist yet — this repo keeps its finished `lane-*` branches, so check `git
   branch --list 'lane-*'` first; a reused label stops the lane at its second

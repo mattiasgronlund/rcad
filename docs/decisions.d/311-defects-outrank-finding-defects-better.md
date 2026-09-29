@@ -70,3 +70,6 @@ every fix.
   behind the defects. Filing them only when Mattias asks would mean changing
   §230.7's rule that everything a lane leaves becomes a row. That is not done
   here.
+
+*§352.5 settled it on 2026-09-29: they are still filed, in their tiers, and
+tagged `small` when they are small.*

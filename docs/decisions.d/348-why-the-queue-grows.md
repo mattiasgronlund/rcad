@@ -198,6 +198,12 @@ Three things follow:
 
 ### 348.7 What this leaves
 
+**Not adopted: §352 decided otherwise.** Every finding is still filed, tier 1
+is ranked by how bad a defect is and how likely a user's model meets it, and
+small rows go out in bundles. Of the proposal below, only the lane fixing what
+its own change leaves stale survives, as §352.5. It stays here as the proposal
+§352 answered.
+
 The change this points at is to §230.7 and `merger.md` step 4. §311.4 set it
 aside for Mattias to decide, so it is written here as a proposal and is not
 adopted:
