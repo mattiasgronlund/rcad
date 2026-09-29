@@ -38,8 +38,13 @@
 //! model.validate(&Policy::certified(), &mut log)?;
 //! assert!(log.is_empty(), "a clean sweep records nothing at all");
 //!
-//! // A cube is a polyhedron: the deflection is ignored, its own fan is summed,
-//! // and all three error terms come back exactly zero.
+//! // A cube is a polyhedron: the deflection is ignored and its own fan is
+//! // summed. Each error term is how far that sum rounded, and on this cube
+//! // nothing did, so all three come back exactly zero. Whole-number corners
+//! // alone do not promise that: an L extruded from a four-by-four square less
+//! // a two-by-two corner has its middle at five thirds along `x` and `y`,
+//! // which no `f64` holds, and publishes a wobble of `1.05e-16`
+//! // (`docs/decisions.md` §338.5).
 //! let measured = model.solid(cube)?.measure(
 //!     Deflection::for_scale(scale),
 //!     &Policy::certified(),
