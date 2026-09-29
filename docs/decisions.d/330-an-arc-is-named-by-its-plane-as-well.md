@@ -255,6 +255,34 @@ and with it as this section leaves it, all nine tests in the two files pass
   shape was built for it. `crates/rcad-topo/src/fuse/assemble.rs`, and a test
   file of its own.
 
+**2026-09-29, Q553: closed by Q365** (`lane-q365-a-plane-spelt-both-ways-along-one-arc`,
+merged at `04296595`; its own commit is `65a5db7f`, and `5cb3132e` is only a
+later formatting pass over the test file it added, not the fix). Two shapes,
+both in the new `crates/rcad-topo/tests/two_flat_faces_on_one_plane_facing_apart_along_an_arc.rs`:
+
+- **A ball of radius 5 between two blocks that meet its equator from
+  opposite sides** — one under it where `x ≤ −3`, one over it where
+  `x ≥ 3`, both crossing `z = 0`. On the base, before Q365, every one of the
+  twelve fuses the file builds from this shape refused
+  `ResultIsNotManifold { count: 1 }` (Q365's own commit message,
+  `65a5db7f`). Q365's fix gets past that: the intersection and the blocks
+  less the ball now answer and measure right
+  (`a_ball_shares_with_two_blocks_meeting_its_equator_from_opposite_sides_the_two_pieces_they_cut_off`,
+  `two_blocks_meeting_a_balls_equator_from_opposite_sides_less_the_ball_lose_a_piece_each`),
+  and the ball less the blocks, and the union, now stop one step later, in
+  the mesher, on the still-open second bullet above
+  (`a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_stops_in_the_mesher`,
+  six fuses — `just t --test two_flat_faces_on_one_plane_facing_apart_along_an_arc`
+  passes all five tests in the file on this section's base). §39.4 records
+  both refusals under their own rows.
+- **A lower half ball, split flat side up, under two blocks standing on it
+  side by side at `x = 3`.** On the base this paired the four faces along
+  the equator's two arcs crosswise and the union was refused
+  (`CoedgesRunTheSameWay` or `FacesDoNotAgreeWhichWayTheyFace`, by the order
+  of the arguments — Q365's own commit message again). It now answers
+  `4000 + 250π/3` under all four orders
+  (`a_lower_half_ball_united_with_two_blocks_standing_on_it_side_by_side_is_the_two_together`).
+
 ### 330.7 Which of Q210's two questions this answers
 
 Q210 asks first whether this change answers the exact `z = y` plane, and then
