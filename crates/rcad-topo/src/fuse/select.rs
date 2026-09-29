@@ -364,9 +364,8 @@ fn place_the_piece(
         }
         one_was_inside = true;
         let mut trial = ProvenanceLog::new();
-        let settled = settle_against_each(
-            model, solids, against, candidate, piece, in_plane, policy, &mut trial,
-        )?;
+        let settled =
+            settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
         if let Some(placement) = settled {
             trial.drain_into(log);
             return Ok(placement);
@@ -808,17 +807,12 @@ fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool>
 /// piece around it, and an undecided answer is a box straddling a plane — every
 /// corner of a turned solid is one, which is why `A \ A` there needs coincidence
 /// asked at all. Either abandons this candidate rather than being read as `ON`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "same list as `place_the_piece`, one point further in"
-)]
 fn settle_against_each(
     model: &Model,
     solids: &[&BakedSolid],
     against: &[usize],
     point: PredicatePoint,
     piece: &Piece,
-    _in_plane: Option<&InPlane>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Placement>> {
