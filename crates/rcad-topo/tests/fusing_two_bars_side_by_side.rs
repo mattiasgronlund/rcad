@@ -509,7 +509,8 @@ fn a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was()
             (Rule::Difference, true, &["the answer"][..]),
             (Rule::Difference, false, &["the block"][..]),
         ] {
-            let asked = format!("{first}, then {rule:?} with the block, answer first {answer_first}");
+            let asked =
+                format!("{first}, then {rule:?} with the block, answer first {answer_first}");
             let [arguments, tools] = if answer_first {
                 [answer, block]
             } else {
