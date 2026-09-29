@@ -544,24 +544,21 @@ impl Model {
     ///
     /// [`Invalid::ApproximationOrdering`] if the tag would be larger than one
     /// of the edge's vertices carries, or smaller than one of the faces that
-    /// meet along it. [`Invalid::DanglingKey`] if one of the edge's own
-    /// stored ends does not resolve — this is a caller-input case and not a
-    /// broken invariant: the end is a `VertexSlot` stored inside `EdgeData`,
-    /// which `Model`'s `Deserialize` reads wholesale with no check that it
-    /// resolves, and calling this does not require `Model::validate` (which
-    /// does catch it) to have run first.
-    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
+    /// meet along it. [`Error::KeyFromAnotherModel`] if the key was made by a
+    /// different model.
+    ///
+    /// # Panics
+    ///
+    /// If the edge's own stored ends do not resolve. Nothing in the public
+    /// API removes an entity from an arena, and every door that fills one —
+    /// `Deserialize`, the builder, a fuse — resolves its keys before a
+    /// `Model` comes out of it, so a dangling end here is a broken invariant
+    /// and not bad input.
     pub fn set_edge_approximation(&mut self, key: EdgeKey, tag: Approximation) -> Result<()> {
         let slot = key.try_slot_in(self.id)?;
         let edge = &self.data.edges[slot];
         for end in [edge.start, edge.end] {
-            let on_vertex = magnitude_of(
-                self.data
-                    .vertices
-                    .get(end)
-                    .ok_or(Invalid::DanglingKey { entity: "vertex" })?
-                    .approximation,
-            );
+            let on_vertex = magnitude_of(self.data.vertices[end].approximation);
             if on_vertex < tag.magnitude() {
                 return Err(ordering_broken(
                     "edge",
@@ -587,21 +584,18 @@ impl Model {
     /// # Errors
     ///
     /// [`Invalid::ApproximationOrdering`] if the tag would be larger than one
-    /// of the face's own edges carries. [`Invalid::DanglingKey`] if one of
-    /// the face's own stored wires, coedges or edges does not resolve —
-    /// caller-input, the same way and for the same reason as
-    /// [`Model::set_edge_approximation`]'s own `DanglingKey` case.
-    /// [`Error::KeyFromAnotherModel`] if the key was made by a different model.
+    /// of the face's own edges carries. [`Error::KeyFromAnotherModel`] if the
+    /// key was made by a different model.
+    ///
+    /// # Panics
+    ///
+    /// If the face's own stored wires, coedges or edges do not resolve, the
+    /// same way and for the same reason as
+    /// [`Model::set_edge_approximation`]'s own broken-invariant panic.
     pub fn set_face_approximation(&mut self, key: FaceKey, tag: Approximation) -> Result<()> {
         let slot = key.try_slot_in(self.id)?;
-        for edge in self.edges_of_face(slot)? {
-            let on_edge = magnitude_of(
-                self.data
-                    .edges
-                    .get(edge)
-                    .ok_or(Invalid::DanglingKey { entity: "edge" })?
-                    .approximation,
-            );
+        for edge in self.edges_of_face(slot) {
+            let on_edge = magnitude_of(self.data.edges[edge].approximation);
             if on_edge < tag.magnitude() {
                 return Err(ordering_broken("face", tag.magnitude(), "edge", on_edge));
             }
@@ -949,30 +943,22 @@ impl Model {
 
     /// Every edge along one of `face`'s wires.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`Invalid::DanglingKey`] if one of the face's own stored wires or
-    /// coedges does not resolve. `Model` derives `Deserialize`, and `wires`
-    /// and `coedges` are stored slots this reads wholesale, so a wire or
-    /// coedge slot a file names can point at nothing.
-    fn edges_of_face(&self, face: FaceSlot) -> Result<Vec<EdgeSlot>> {
+    /// If one of the face's own stored wires or coedges does not resolve.
+    /// Nothing in the public API removes an entity from an arena, and every
+    /// door that fills one — `Deserialize`, the builder, a fuse — resolves
+    /// its keys before a `Model` comes out of it, so a dangling wire or
+    /// coedge here is a broken invariant and not bad input.
+    fn edges_of_face(&self, face: FaceSlot) -> Vec<EdgeSlot> {
         let mut edges = Vec::new();
         for &wire in &self.data.faces[face].wires {
-            let wire = self
-                .data
-                .wires
-                .get(wire)
-                .ok_or(Invalid::DanglingKey { entity: "wire" })?;
+            let wire = &self.data.wires[wire];
             for coedge in wire.coedges() {
-                let coedge = self
-                    .data
-                    .coedges
-                    .get(coedge)
-                    .ok_or(Invalid::DanglingKey { entity: "coedge" })?;
-                edges.push(coedge.edge);
+                edges.push(self.data.coedges[coedge].edge);
             }
         }
-        Ok(edges)
+        edges
     }
 
     /// Bring [`Model::worst_approximation`] back in step after one entity's tag
@@ -1983,12 +1969,13 @@ mod tests {
         assert_eq!(model.worst_approximation(), 0.0);
     }
 
-    /// `Model` derives `Deserialize`, so an edge's stored end can point at a
-    /// vertex the arenas do not hold — nothing between the bytes and this
-    /// call confirms it does, since `set_edge_approximation` does not
-    /// require `Model::validate` (which does catch it) to have run first.
+    /// `data_mut` is the one door round the invariant (test-only, Q84): no
+    /// public method removes an entity from an arena, so this breaks the
+    /// model by hand to prove `set_edge_approximation` panics rather than
+    /// silently trusting a dangling end.
     #[test]
-    fn tagging_an_edge_whose_stored_end_is_gone_is_refused_rather_than_asserted_against() {
+    #[should_panic(expected = "invalid SlotMap key used")]
+    fn tagging_an_edge_whose_stored_end_is_gone_panics() {
         let (mut model, _) = a_cube();
         let vertex = model
             .data()
@@ -2006,28 +1993,23 @@ mod tests {
         let edge = crate::EdgeKey::new(edge, model.id());
         model.data_mut().vertices.remove(vertex);
 
-        assert!(matches!(
-            model
-                .set_edge_approximation(edge, Approximation::new(1e-6, Cause::ImportedUncertainty)),
-            Err(Error::Invalid(Invalid::DanglingKey { entity: "vertex" }))
-        ));
+        let _ =
+            model.set_edge_approximation(edge, Approximation::new(1e-6, Cause::ImportedUncertainty));
     }
 
     /// The same case one arena further out: a face's stored wire can point at
     /// a wire the arenas do not hold.
     #[test]
-    fn tagging_a_face_whose_stored_wire_is_gone_is_refused_rather_than_asserted_against() {
+    #[should_panic(expected = "invalid SlotMap key used")]
+    fn tagging_a_face_whose_stored_wire_is_gone_panics() {
         let (mut model, _) = a_cube();
         let face = model.data().faces.keys().next().expect("a cube has faces");
         let wire = model.data().faces[face].wires[0];
         let face = crate::FaceKey::new(face, model.id());
         model.data_mut().wires.remove(wire);
 
-        assert!(matches!(
-            model
-                .set_face_approximation(face, Approximation::new(1e-6, Cause::ImportedUncertainty)),
-            Err(Error::Invalid(Invalid::DanglingKey { entity: "wire" }))
-        ));
+        let _ =
+            model.set_face_approximation(face, Approximation::new(1e-6, Cause::ImportedUncertainty));
     }
 
     #[test]
