@@ -388,7 +388,7 @@ impl Model {
 
         self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
         self.check_something_curved_says_where_this_edge_bends(slot)?;
-        self.check_flat_faces_along_a_closed_edge_are_one_plane(slot, start.point, rounding)?;
+        self.check_flat_faces_put_an_edge_in_one_place(slot, [start.point, end.point], rounding)?;
 
         // The other half of Q16's invariant, and the half that keeps an
         // edge's *name* honest. An edge named by a crossing has to be on
@@ -518,13 +518,19 @@ impl Model {
         .into())
     }
 
-    /// A closed edge whose every face is flat has all of them on one plane.
+    /// An edge whose every face is flat, and whose run names a curved surface
+    /// to say where it goes, is put in one place by all of those faces.
     ///
-    /// Its run names a curved surface — the rule above has refused it
-    /// otherwise — and the curve is where that surface crosses a face's plane.
-    /// A closed plane section of a surface lies in that plane and in no other,
-    /// so two faces on two planes put the edge in two places, and the one drawn
-    /// was the first face's (Q386, Q574).
+    /// The rule above has refused a bent edge between flat faces whose run
+    /// names nothing curved, so this is every such edge that is not straight.
+    /// Its curve is where the named surface crosses a face's plane, and which
+    /// face's plane was the first face's (Q386, Q574). A curve that lies in two
+    /// planes lies on the line they cross in, so the curve one face puts the
+    /// edge on leaves every other face's plane unless it is that line — and
+    /// then which face the solid listed first changes the shape. That holds
+    /// for a closed edge and for an open arc alike: a bar whose lid is split by
+    /// a half disc tilted along its chord measured `113.088` with the lid
+    /// listed first and `113.488` with the half disc first (Q604).
     ///
     /// **One plane spelt two ways is one plane.** [`Plane::agreement_with`]
     /// answers the exact question first, which takes a plane turned round or
@@ -535,23 +541,29 @@ impl Model {
     /// curve on each plane can reach off the other, against `rounding`, the
     /// room [`Model::what_writing_a_plane_down_costs`] gives a corner against
     /// its own face's plane. Only a pipe has that bound
-    /// ([`how_far_a_closed_crossing_reaches_off_another_plane`]); a closed edge
-    /// that names any other curved surface between two planes proved different
-    /// is refused, which is the safe way for a missing bound to fall.
+    /// ([`how_far_a_crossing_reaches_off_another_plane`]); an edge that names
+    /// any other curved surface between two planes proved different is
+    /// refused, which is the safe way for a missing bound to fall.
     ///
     /// # Errors
     ///
-    /// [`Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes`], and
-    /// [`Error::Undecidable`] where [`Plane::agreement_with`] cannot tell —
-    /// an answer nobody could reach is not taken for "one plane".
-    fn check_flat_faces_along_a_closed_edge_are_one_plane(
+    /// [`Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes`] for a closed
+    /// edge and [`Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes`] for an
+    /// open one, and [`Error::Undecidable`] where [`Plane::agreement_with`]
+    /// cannot tell — an answer nobody could reach is not taken for "one plane".
+    fn check_flat_faces_put_an_edge_in_one_place(
         &self,
         slot: EdgeSlot,
-        corner: Point,
+        ends: [Point; 2],
         rounding: f64,
     ) -> Result<()> {
-        let EdgeRun::RightRoundWhereItCrosses { and } = &self.data().edges[slot].run else {
-            return Ok(());
+        let run = &self.data().edges[slot].run;
+        let in_two_places = match run {
+            EdgeRun::RightRoundWhereItCrosses { .. } => {
+                Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes
+            }
+            EdgeRun::PartOfWhereItCrosses { .. } => Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes,
+            EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross | _ => return Ok(()),
         };
         let Some(planes) = self
             .faces_along_edge(slot)
@@ -588,11 +600,11 @@ impl Model {
                 }
             }
             let within = |on: &Plane, off: &Plane| {
-                how_far_a_closed_crossing_reaches_off_another_plane(on, off, and, corner)
+                how_far_a_crossing_reaches_off_another_plane(on, off, run, ends)
                     .is_some_and(|reach| reach <= rounding)
             };
             if !(within(first, other) && within(other, first)) {
-                return Err(Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes.into());
+                return Err(in_two_places.into());
             }
         }
         Ok(())
@@ -1807,40 +1819,61 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
     }
 }
 
-/// The furthest any point of the closed curve `and` cuts out of `on` can be
-/// from `off`, with `corner` a point of that curve; `None` where `and` is a
-/// surface this has no bound for.
+/// The furthest any point of the curve `run` puts between `ends` on `on` can
+/// be from `off`; `None` where the surface `run` names is one this has no
+/// bound for.
 ///
 /// Write `n` and `m` for the two unit normals and `X` for a point of the
-/// curve, which is on `on` exactly, and `V` for the corner projected onto
-/// `on`. Then `off`'s distance at `X` is its distance at the corner, plus at
-/// most the corner's distance from `on` (the step from the corner to `V` is
-/// along `n`, and `|m·n| ≤ 1`), plus `m·(X − V)` — and `X − V` lies in `on`,
-/// so only the part of `m` square to `n` reads it, which is `|n × m|` long.
+/// curve, which is on `on` exactly, and `V` for the first end projected onto
+/// `on`. Then `off`'s distance at `X` is its distance at that end, plus at
+/// most the end's distance from `on` (the step from the end to `V` is along
+/// `n`, and `|m·n| ≤ 1`), plus `m·(X − V)` — and `X − V` lies in `on`, so
+/// only the part of `m` square to `n` reads it, which is `|n × m|` long.
 ///
 /// **A pipe** of radius `R` about the unit axis `a` is crossed by `on` in an
 /// ellipse whose longest half-width is `R / |n·a|`, so `|X − V|` is at most
-/// twice that. What the corner misses the ellipse by is left out: it is
-/// multiplied by `|n × m|`, which is a rounding wherever the answer is near
-/// the room it is held to. A plane along the axis crosses the pipe in two
-/// lines, `R / 0` is infinite, and the answer is a NaN or infinite, which no
-/// room holds.
+/// twice that, for the whole ellipse and so for any arc of it. What the end
+/// misses the ellipse by is left out: it is multiplied by `|n × m|`, which is
+/// a rounding wherever the answer is near the room it is held to.
+///
+/// **A plane along the axis** crosses the pipe in two lines, and an arc there
+/// is drawn straight between its ends — `n·a == 0.0` is the very test the walk
+/// draws it straight by — so every point of it is as close to `off` as the
+/// further end. Two faces that cross in one of the pipe's own lines are sound,
+/// and this is what keeps them. A closed run there names no curve the walk
+/// can draw; `R / 0` is infinite, and the answer is a NaN or infinite, which
+/// no room holds.
 ///
 /// Worked in plain `f64` as [`off_a_plane_by_no_more_than_writing_it_down_cost`]
-/// is: the two distances are what [`Plane::signed_distance_to`] rounds, and
-/// the caller's room is sixteen times that.
-fn how_far_a_closed_crossing_reaches_off_another_plane(
+/// is: the distances are what [`Plane::signed_distance_to`] rounds, and the
+/// caller's room is sixteen times that.
+fn how_far_a_crossing_reaches_off_another_plane(
     on: &Plane,
     off: &Plane,
-    and: &Surface,
-    corner: Point,
+    run: &EdgeRun,
+    [start, end]: [Point; 2],
 ) -> Option<f64> {
-    let Surface::Cylinder(pipe) = and else {
+    let (EdgeRun::RightRoundWhereItCrosses {
+        and: Surface::Cylinder(pipe),
+    }
+    | EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cylinder(pipe),
+        ..
+    }) = run
+    else {
         return None;
     };
-    let widest = 2.0 * pipe.radius() / on.normal().dot(pipe.axis().direction()).abs();
+    let leans = on.normal().dot(pipe.axis().direction());
+    if leans == 0.0 && matches!(run, EdgeRun::PartOfWhereItCrosses { .. }) {
+        return Some(
+            off.signed_distance_to(start)
+                .abs()
+                .max(off.signed_distance_to(end).abs()),
+        );
+    }
+    let widest = 2.0 * pipe.radius() / leans.abs();
     let tilt = on.normal().cross(off.normal()).length();
-    Some(off.signed_distance_to(corner).abs() + on.signed_distance_to(corner).abs() + widest * tilt)
+    Some(off.signed_distance_to(start).abs() + on.signed_distance_to(start).abs() + widest * tilt)
 }
 
 /// Every one of `held` named exactly once by `named`, and none of them left out.
