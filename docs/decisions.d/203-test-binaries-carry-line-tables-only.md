@@ -11,6 +11,10 @@ it in `target/debug/deps`: about two hundred test binaries. kache caches a
 compiled crate. It does not cache a link, so every worktree links its own copy
 of every test binary, and nothing is shared between them.
 
+*Corrected by §373.2: under kache 0.27 test binaries are cached, 15 copies of
+`fuses_that_must_agree` with 78 hits between them. What still holds is that none
+is shared: every executable is restored as a private copy.*
+
 Most of each binary was debug info. `fuses_that_must_agree` was 93 MB, of which
 87 MB were `.debug*` sections: 36 MB of `.debug_str`, 23 MB of `.debug_info`,
 19 MB of `.debug_loc`. `[profile.test]` sets `opt-level` and nothing else, so it
