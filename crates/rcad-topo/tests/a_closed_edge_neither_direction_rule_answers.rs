@@ -30,8 +30,8 @@
 //! has to follow, and this pin says so when it moves.
 //!
 //! The lid listed first, with the rim named by the lid's plane turned over, is
-//! left out: that spelling hands the walk two planes and is refused
-//! `AWireDoesNotFanIntoALoopToMesh` whichever way round, off the pole as on it.
+//! left out: on the pole that spelling is refused
+//! `AWireDoesNotFanIntoALoopToMesh { TooFewCorners }` whichever way round.
 
 use core::f64::consts::PI;
 use std::collections::HashMap;
