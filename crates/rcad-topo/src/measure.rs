@@ -408,7 +408,12 @@ impl SolidView<'_> {
         let four_times_the_six_volumes = packed(&multiplied(&exact_six_volumes, &[4.0]));
         Ok(Measurement {
             volume,
-            volume_error: how_far_the_volume_rounded(&exact_six_volumes, sixth, volume, whole_shift),
+            volume_error: how_far_the_volume_rounded(
+                &exact_six_volumes,
+                sixth,
+                volume,
+                whole_shift,
+            ),
             surface_area,
             area_error,
             centroid,
@@ -1022,9 +1027,14 @@ fn how_far_the_middle_of_its_fan_rounded(
         let along = exactly_along(a, b, across);
         let down = exactly_along(a, c, across);
         let turned = crossed(&along, &down);
-        let shadow = packed(&turned.iter().zip(twice).fold(Vec::new(), |total, (part, of)| {
-            added(&total, &multiplied(part, of))
-        }));
+        let shadow = packed(
+            &turned
+                .iter()
+                .zip(twice)
+                .fold(Vec::new(), |total, (part, of)| {
+                    added(&total, &multiplied(part, of))
+                }),
+        );
         for (axis, total) in moment.iter_mut().enumerate() {
             let corners = added(&along[axis], &down[axis]);
             *total = packed(&added(total, &multiplied(&shadow, &corners)));
@@ -1057,7 +1067,12 @@ fn crossed(along: &[[f64; 2]; 3], down: &[[f64; 2]; 3]) -> [Vec<f64>; 3] {
 /// rounding it down. Shifting `sixth` itself back is exact unless the volume
 /// lands among the subnormals, and then it is off by less than their spacing,
 /// which is charged.
-fn how_far_the_volume_rounded(six_volumes: &[f64], sixth: f64, volume: f64, whole_shift: i32) -> f64 {
+fn how_far_the_volume_rounded(
+    six_volumes: &[f64],
+    sixth: f64,
+    volume: f64,
+    whole_shift: i32,
+) -> f64 {
     let (six_sixths, lost) = two_product(sixth, 6.0);
     let off = added(six_volumes, &[-lost, -six_sixths]);
     let error = shift_up(divided_up(at_most(&off), 6.0), whole_shift);
@@ -1099,7 +1114,10 @@ fn how_far_the_middle_is_from(
     length_at_most([0, 1, 2].map(|axis| {
         let (near, lost) = two_diff(middle[axis], from[axis]);
         let offset = [shift(lost, -shifts[axis]), shift(near, -shifts[axis])];
-        let off = packed(&added(&multiplied(&offset, weight), &negated(&moment[axis])));
+        let off = packed(&added(
+            &multiplied(&offset, weight),
+            &negated(&moment[axis]),
+        ));
         shift_up(divided_up(at_most(&off), floor), shifts[axis])
     }))
 }
@@ -1221,7 +1239,10 @@ fn volume_and_moment_as_expansions(fan: &[[[f64; 2]; 9]]) -> (Vec<f64>, [Vec<f64
         six_volumes = packed(&added(&six_volumes, &six_volume));
         let six_volume = packed(&six_volume);
         for (axis, total) in moment.iter_mut().enumerate() {
-            let corners = added(&added(&triangle[axis], &triangle[3 + axis]), &triangle[6 + axis]);
+            let corners = added(
+                &added(&triangle[axis], &triangle[3 + axis]),
+                &triangle[6 + axis],
+            );
             *total = packed(&added(total, &multiplied(&six_volume, &corners)));
         }
     }

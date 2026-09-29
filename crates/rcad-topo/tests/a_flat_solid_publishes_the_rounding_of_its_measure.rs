@@ -165,7 +165,7 @@ fn a_cube_turned_and_far_away_owns_up_to_what_each_face_rounds_to() {
 /// floors that too, so a wobble grown loose fails here as well.
 #[test]
 fn the_middle_of_a_flat_solid_and_of_each_face_is_within_its_wobble() {
-    let builders: [fn() -> (Model, Vec<(&'static str, SolidKey)>); 5] = [
+    let builders: [fn() -> NamedSolids; 5] = [
         two_turned_cubes_each_less_the_other,
         || a_cube_turned_and_far_away("a cube turned and a million units out"),
         || an_uneven_l("an uneven L", &Isometry::identity()),
@@ -290,7 +290,10 @@ fn a_cube_on_whole_numbers_still_owes_nothing() {
     }
 }
 
-fn a_cube_turned_and_far_away(what: &'static str) -> (Model, Vec<(&'static str, SolidKey)>) {
+/// A model, and the solids in it each with what to call it.
+type NamedSolids = (Model, Vec<(&'static str, SolidKey)>);
+
+fn a_cube_turned_and_far_away(what: &'static str) -> NamedSolids {
     let mut model = a_model();
     let cube = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
@@ -303,10 +306,7 @@ fn a_cube_turned_and_far_away(what: &'static str) -> (Model, Vec<(&'static str, 
 
 /// An L whose sides are none of them whole numbers, nor the same, so its
 /// middle is a ratio no `f64` holds even where it stands.
-fn an_uneven_l(
-    what: &'static str,
-    placement: &Isometry,
-) -> (Model, Vec<(&'static str, SolidKey)>) {
+fn an_uneven_l(what: &'static str, placement: &Isometry) -> NamedSolids {
     let mut model = a_model();
     let ell = ProfileBuilder::new(vec![
         [0.0, 0.0],
@@ -324,7 +324,7 @@ fn an_uneven_l(
     (model, vec![(what, ell)])
 }
 
-fn a_plate_with_a_hole_turned_and_far_away() -> (Model, Vec<(&'static str, SolidKey)>) {
+fn a_plate_with_a_hole_turned_and_far_away() -> NamedSolids {
     let mut model = a_model();
     let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
         .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
@@ -339,7 +339,7 @@ fn a_plate_with_a_hole_turned_and_far_away() -> (Model, Vec<(&'static str, Solid
     )
 }
 
-fn two_turned_cubes_each_less_the_other() -> (Model, Vec<(&'static str, SolidKey)>) {
+fn two_turned_cubes_each_less_the_other() -> NamedSolids {
     let policy = Policy::certified();
     let mut model = a_model();
     let a = model
@@ -410,7 +410,10 @@ fn six_times_the_volume(model: &Model, solid: SolidKey) -> Vec<f64> {
     let mut total = Vec::new();
     for face in model.solid(solid).expect("a key the model made").faces() {
         face.for_each_triangle(|corners| {
-            total = plus(&total, &six_times_the_volume_under(corners.map(|corner| corner.coordinates())));
+            total = plus(
+                &total,
+                &six_times_the_volume_under(corners.map(|corner| corner.coordinates())),
+            );
         });
     }
     total
@@ -480,7 +483,10 @@ fn where_the_solid_balances(model: &Model, solid: SolidKey) -> ([Vec<f64>; 3], V
             let six_volume = six_times_the_volume_under(corners);
             weight = plus(&weight, &times(&six_volume, &[4.0]));
             for (axis, total) in moment.iter_mut().enumerate() {
-                let summed = plus(&plus(&[corners[0][axis]], &[corners[1][axis]]), &[corners[2][axis]]);
+                let summed = plus(
+                    &plus(&[corners[0][axis]], &[corners[1][axis]]),
+                    &[corners[2][axis]],
+                );
                 *total = plus(total, &times(&six_volume, &summed));
             }
         });
@@ -510,10 +516,15 @@ fn where_the_face_balances(face: FaceView<'_>) -> ([Vec<f64>; 3], Vec<f64>) {
         let shadow = turned
             .iter()
             .zip(&twice)
-            .fold(Vec::new(), |total, (part, of)| plus(&total, &times(part, of)));
+            .fold(Vec::new(), |total, (part, of)| {
+                plus(&total, &times(part, of))
+            });
         weight = plus(&weight, &times(&shadow, &[3.0]));
         for (axis, total) in moment.iter_mut().enumerate() {
-            let summed = plus(&plus(&[corners[0][axis]], &[corners[1][axis]]), &[corners[2][axis]]);
+            let summed = plus(
+                &plus(&[corners[0][axis]], &[corners[1][axis]]),
+                &[corners[2][axis]],
+            );
             *total = plus(total, &times(&shadow, &summed));
         }
     }
