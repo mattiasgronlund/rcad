@@ -25,7 +25,8 @@ const R: Orientation = Orientation::Reversed;
 #[test]
 fn a_disc_tilted_off_the_lid_is_refused_whichever_face_is_listed_first() {
     for disc_first in [false, true] {
-        let (_, built) = a_bar_with_its_lid_split_by_a_disc(tilted_through_the_corner(), disc_first);
+        let (_, built) =
+            a_bar_with_its_lid_split_by_a_disc(tilted_through_the_corner(), disc_first);
 
         assert!(
             matches!(
@@ -111,14 +112,28 @@ fn a_bar_with_its_lid_split_by_a_disc(disc: Plane, disc_first: bool) -> (Model, 
     };
     let base = Plane::from_point_and_normal(Point::origin(), -up()).expect("a plane");
     let mut builder = SolidBuilder::new();
-    let at_the_bottom = builder.add_vertex(Point::new(3.0, 0.0, 0.0)).expect("a corner");
-    let at_the_top = builder.add_vertex(Point::new(3.0, 0.0, 4.0)).expect("a corner");
-    let on_the_circle = builder.add_vertex(Point::new(1.0, 0.0, 4.0)).expect("a corner");
+    let at_the_bottom = builder
+        .add_vertex(Point::new(3.0, 0.0, 0.0))
+        .expect("a corner");
+    let at_the_top = builder
+        .add_vertex(Point::new(3.0, 0.0, 4.0))
+        .expect("a corner");
+    let on_the_circle = builder
+        .add_vertex(Point::new(1.0, 0.0, 4.0))
+        .expect("a corner");
     let bottom = builder
-        .add_edge(at_the_bottom, at_the_bottom, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(
+            at_the_bottom,
+            at_the_bottom,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
         .expect("an edge");
     let top = builder
-        .add_edge(at_the_top, at_the_top, EdgeRun::RightRoundWhereItsFacesCross)
+        .add_edge(
+            at_the_top,
+            at_the_top,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
         .expect("an edge");
     let circle = builder
         .add_edge(
@@ -127,7 +142,9 @@ fn a_bar_with_its_lid_split_by_a_disc(disc: Plane, disc_first: bool) -> (Model, 
             EdgeRun::RightRoundWhereItCrosses { and: pipe(1.0) },
         )
         .expect("an edge");
-    let seam = builder.add_edge(at_the_bottom, at_the_top, EdgeRun::Straight).expect("an edge");
+    let seam = builder
+        .add_edge(at_the_bottom, at_the_top, EdgeRun::Straight)
+        .expect("an edge");
 
     let steps = [(bottom, F), (seam, F), (top, R), (seam, R)]
         .map(|(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")));
@@ -142,7 +159,9 @@ fn a_bar_with_its_lid_split_by_a_disc(disc: Plane, disc_first: bool) -> (Model, 
     };
     let disc = |builder: &mut SolidBuilder| {
         let round = one_step_round(builder, circle, F);
-        builder.add_face(Surface::Plane(disc), &[round]).expect("a face")
+        builder
+            .add_face(Surface::Plane(disc), &[round])
+            .expect("a face")
     };
     let (first, second) = if disc_first {
         let listed_first = disc(&mut builder);
@@ -166,7 +185,9 @@ fn a_bar_with_its_lid_split_by_a_disc(disc: Plane, disc_first: bool) -> (Model, 
 
 fn one_step_round(builder: &mut SolidBuilder, edge: DraftEdge, way: Orientation) -> DraftWire {
     let coedge = builder.add_coedge(edge, way).expect("a coedge");
-    builder.add_wire(&[DraftStep::Along(coedge)]).expect("a wire")
+    builder
+        .add_wire(&[DraftStep::Along(coedge)])
+        .expect("a wire")
 }
 
 /// `model` written out with postcard, the disc's plane overwritten with
@@ -187,7 +208,11 @@ fn with_the_discs_plane_swapped(model: &Model, disc_first: bool, tilted: Plane) 
     let [annulus_or_disc, disc_or_annulus] = places[..] else {
         panic!("the lid's plane is written once per face on it, and it was found {places:?}");
     };
-    let at = if disc_first { annulus_or_disc } else { disc_or_annulus };
+    let at = if disc_first {
+        annulus_or_disc
+    } else {
+        disc_or_annulus
+    };
     bytes[at..at + stored.len()].copy_from_slice(&the_bytes_of(tilted));
     postcard::from_bytes(&bytes).expect("reading back does not ask where a face is")
 }

@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use rcad_geom::{
     Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
-    Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS,
-    Scale, Surface, Vector, which_two_surfaces_a_run_is_between, which_way_a_closed_crossing_turns,
+    Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE,
+    SIDE_OF_TORUS, Scale, Surface, Vector, which_two_surfaces_a_run_is_between,
+    which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -581,7 +582,9 @@ impl Model {
                     return Err(Error::Undecidable { records });
                 }
                 unknown => {
-                    panic!("plane agreement came back with an answer nothing here knows: {unknown:?}")
+                    panic!(
+                        "plane agreement came back with an answer nothing here knows: {unknown:?}"
+                    )
                 }
             }
             let within = |on: &Plane, off: &Plane| {
@@ -1837,11 +1840,7 @@ fn how_far_a_closed_crossing_reaches_off_another_plane(
     };
     let widest = 2.0 * pipe.radius() / on.normal().dot(pipe.axis().direction()).abs();
     let tilt = on.normal().cross(off.normal()).length();
-    Some(
-        off.signed_distance_to(corner).abs()
-            + on.signed_distance_to(corner).abs()
-            + widest * tilt,
-    )
+    Some(off.signed_distance_to(corner).abs() + on.signed_distance_to(corner).abs() + widest * tilt)
 }
 
 /// Every one of `held` named exactly once by `named`, and none of them left out.

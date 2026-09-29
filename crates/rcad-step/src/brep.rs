@@ -2298,8 +2298,9 @@ mod tests {
     /// circle between flat faces without asking (Q574).
     #[test]
     fn a_plane_holds_a_circle_on_it_and_not_one_on_a_disc_tilted_off_it() {
-        let lid = Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
-            .expect("a plane");
+        let lid =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane");
         let a_hair_off = Plane::from_point_and_normal_as_written(
             Point::new(0.0, 0.0, 4.0),
             Vector::new(1e-17, 0.0, 1.0),
