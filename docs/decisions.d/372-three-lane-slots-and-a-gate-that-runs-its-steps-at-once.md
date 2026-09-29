@@ -132,3 +132,131 @@ Up to four if the rate of mergers needing more than one try falls well below
 this baseline and the one-minute load stays under 24 with three lanes gating.
 Down to two if the load still goes past the core count with the gate running
 its steps at once.
+
+### 372.8 What Q713 built
+
+*Lane Q713, 2026-09-30. The figures in this subsection are its own, on 24
+cores, each from `time mise exec -- just gate quiet …` with `uptime` read just
+before.*
+
+`gate` starts every step as soon as a slot is free, one slot per core. The
+steps that build with cargo take one slot between them and run one after
+another, in `gate_steps` order (§372.10). Each step writes its own log under
+`target/last-gate.log.steps/`, and a step's output goes into `last-gate.log`
+whole when the step ends, under a `===` line with its name and time.
+
+| run | load at start | wall | CPU-seconds |
+|---|---|---|---|
+| fresh, this worktree's first build | 0.42 | 120.9 s | 1132 |
+| fresh, warm | 8.55 | 91.2 s | 904 |
+| served right after | 7.43 | 6.6 s | 23 |
+
+In the warm run the chain's eight steps took 85.4 s together, `test` 69.9 s of
+that, and the last step to end was `check-fuzz-overnight-selftest` at 89.7 s
+(**Q709**). §372.3's `ordered-1` ran `test` first and took 91.2 s, so the order
+inside the chain moves nothing on a warm tree. The first run was slower because
+`check`, `lint` and `check-ignored` compiled: 8.6, 20.5 and 7.0 s against 2.9,
+5.0 and 2.6 s in the warm one.
+
+A third word sets the slot count: `just gate quiet fresh 1` runs the steps in
+turn, the way to rule the change out if two steps are ever suspected of
+disturbing each other.
+
+### 372.9 A failure stops nothing
+
+Every step runs to its end, and the block names every step that failed. `first
+failure:` is the first failed step in `gate_steps`, not the first to end, so
+the name does not depend on which step was quicker, and the exit code is that
+step's. The rest are on an `also failed:` line. `quiet` prints the first
+failure's last 60 lines, out of its own log.
+
+The two other choices, and why not:
+
+- **Stop starting new steps, and wait for the running ones.** This saves almost
+  nothing. The two longest pieces, the cargo chain and
+  `check-fuzz-overnight-selftest`, start in the first second, so a failure found
+  at five seconds still waits about 90 for them.
+- **Kill the running ones.** This makes a failure quick, but the killed steps
+  report nothing. A lane that broke a test and a lint would then find the lint
+  one gate later. Making merges re-gate less often is the point of this whole
+  section. The serial loop never killed a step either, so no step was written to
+  expect it.
+
+What it costs: a failing gate now takes as long as a passing one, about 91 s on
+idle cores. Under the serial loop a failure cost anything up to 308 s,
+depending on where in the list it came.
+
+One thing moves with it. `check-plugins` no longer runs by itself before the
+rest, so a gate with no plugins runs every step. It is still what the block
+names first, with its install command in the tail, because it comes first in
+`gate_steps` and `check-gate-runs-every-check` keeps it there.
+
+### 372.10 Which steps are chained
+
+The list is in `gate`: `cargo_steps`, eight names. Its order comes from
+`gate_steps`, so `check-t-selftest`, which needs the binaries `test` builds,
+still runs after `test`.
+
+It is a list, held by a check, and not worked out on each run. The simple
+test, "the recipe mentions cargo", puts `check-fuzz-overnight-selftest` in the
+chain, because its body builds a stub `cargo`, and `deny`, whose `cargo deny`
+builds nothing. It also misses `check-t-selftest`, which reaches cargo through
+`just t`. A wrong answer at run time is silent. The first would add that
+selftest's 90 s to the chain. So `check-gate-runs-every-check` got an arm that
+compares the list both ways with a stricter test: a line of the recipe that is
+not a comment, where `cargo` starts a command and takes a subcommand that
+builds (`build check clippy nextest test run bench doc llvm-cov fuzz`), or a
+line that calls the `t` recipe. On today's 56 steps that test finds exactly the
+eight. Taking `check-t-selftest` off the list and putting `deny` on fails the
+arm, and its message names both. A new cargo step that the test cannot see
+(one that calls some other recipe that builds) still gets past it. That makes
+the gate slower, never wrong.
+
+### 372.11 What loud and quiet print
+
+`quiet` prints one line per step as the step ends, `· <step> (<seconds> s)`,
+with `FAILED, exit <n>` added on a failure. It prints at the end rather than
+the start because every step now starts at once: a start line would list them
+all in the first second, and a result cut short would say nothing about how far
+the run got. The first failure's tail and the block come after, and the block
+is still last.
+
+`loud`, which is bare `just gate` and what CI runs, prints each step's whole
+output as one piece when the step ends, under its `===` line. Steps finish out
+of list order, so that line is what says which step the text below it belongs
+to. Nothing prints while a step runs, and on CI that means minutes of silence
+while `test` runs. GitHub Actions has no timeout for a job that prints nothing,
+so this is only a matter of taste. Streaming the chain and holding the rest
+back would interleave the two.
+
+### 372.12 CI's runner
+
+`ubuntu-latest` has 4 cores, so the gate runs four steps at once there: the
+chain and three others. This was not measured on a runner; the Actions
+allowance is spent (§172). The case for it on four cores: cargo already uses
+every core for the chain, and the other 48 steps are shell selftests that
+mostly wait. In §372.3's `ordered-1` they used 128 of the 921 CPU-seconds,
+while the eight chain steps used 794 (summed from its `steps.csv`). Running the
+rest beside the chain costs the chain at most their CPU time. Running them in
+turn instead adds their whole wall time, and that includes
+`check-fuzz-overnight-selftest`'s 90 s of sleep. A job count from the cores
+covers both machines and needs no threshold. A 1-core machine gets 1 slot,
+which means running in turn.
+
+### 372.13 A busy machine
+
+The gate limits how many steps run at once to the number of cores, and only
+that. It does not look at the load average, for two reasons:
+
+- The one-minute load describes the last minute, and a gate takes about a
+  minute and a half. `ordered-2-after-touch` (§372.3) started at a load of 11.8,
+  under 24, so a limit based on load would have started every step, and it
+  ended at 56.5.
+- Running fewer steps at once does not reduce the work. It spreads the same CPU
+  time over a longer wall and holds the merger's slot longer. The lever for a
+  busy machine is how many gates run at once, which is §372.4's three slots.
+
+No serial gate was measured under load, so it is not known whether in turn
+would beat at once on a busy machine. The case for "no" is the second reason
+above, not a measurement. If three lanes gating still push the load past the
+core count, §372.7 already says what moves, and it is the cap, not this.
