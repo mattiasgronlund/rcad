@@ -8125,9 +8125,18 @@ fmt:
     cargo fmt --all
     taplo fmt
 
-# Strip `target/` from every worktree git knows about. Always safe: kache holds
-# the compilation, so a cleaned worktree refills from the cache instead of
-# rebuilding, and nothing a lane wrote can be lost this way.
+# Strip `target/` from every worktree git knows about, once nobody has written in
+# it for three hours. kache holds the compilation, so a cleaned worktree refills
+# from the cache instead of rebuilding.
+#
+# **Three hours untouched, because a lane's `target/` holds more than the
+# compilation.** A measuring lane's probe logs and CSVs are gitignored and live
+# there, and its verifier and merger read them after the lane has stopped
+# writing. Across 174 lanes, the merger finished at most 53 minutes after its
+# lane stopped (§371.5). The newest file anywhere under the tree's `target/`
+# directories decides, never `target/`'s own time, which moves only when its own
+# entries do. One fresh `target/` keeps the whole tree, and so does a walk that
+# `find` could not finish, since then nobody knows how old the tree is.
 #
 # Separate from `prune-worktrees` on purpose (docs/decisions.md §50.8). That one
 # can only run once the work is merged; this one can run any time, and merging
@@ -8149,7 +8158,7 @@ fmt:
 # same interruption; and any **locked** tree, because a lock means an agent is
 # working in there and deleting its `target/` mid-build is exactly the
 # interruption the lock exists to prevent.
-[doc("Strip target/ from every worktree git knows about. Skips locked ones.")]
+[doc("Strip target/ from worktrees nobody has written in for three hours. Skips locked ones.")]
 clean-targets dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
     #!/usr/bin/env bash
     set -euo pipefail
@@ -8177,16 +8186,26 @@ clean-targets dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fu
             kept=$((kept + 1))
             continue
         fi
-        targets=$(find "$tree" -maxdepth 2 -type d -name target -prune)
-        [ -n "$targets" ] || continue
-        size=$(du -sb --files0-from=<(tr '\n' '\0' <<<"$targets") --total | awk '/total$/{print $1}')
-        find "$tree" -maxdepth 2 -type d -name target -prune -exec rm -rf {} +
+        mapfile -t targets < <(find "$tree" -maxdepth 2 -type d -name target -prune)
+        [ "${#targets[@]}" -gt 0 ] || continue
+        if ! recent=$(find "${targets[@]}" -mmin -180 -print -quit 2>/dev/null); then
+            echo "kept (find could not read all of its target/, so how old it is is unknown): $tree"
+            kept=$((kept + 1))
+            continue
+        fi
+        if [ -n "$recent" ]; then
+            echo "kept (its target/ was written in the last three hours): $tree"
+            kept=$((kept + 1))
+            continue
+        fi
+        size=$(du -sb --total -- "${targets[@]}" | awk '/total$/{print $1}')
+        rm -rf -- "${targets[@]}"
         echo "swept $(numfmt --to=iec "$size"): $tree"
         reclaimed=$((reclaimed + size))
     done
     echo "$(numfmt --to=iec "$reclaimed") reclaimed; $kept worktree(s) kept"
 
-# Pins the three trees `clean-targets` must not touch, and the one it used to miss.
+# Pins the trees `clean-targets` must not touch, and the one it used to miss.
 #
 # A sweep that deletes too much is noticed within the minute; a sweep that
 # deletes too little says "nothing to clean" and is believed for a month, which
@@ -8207,11 +8226,31 @@ check-clean-targets-selftest:
     git -C "$dir/main" worktree add -q "$dir/free" -b free
     git -C "$dir/main" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/held"
     git -C "$dir/main" worktree add -q "$dir/nightly" -b nightly
+    git -C "$dir/main" worktree add -q "$dir/busy" -b busy
+    git -C "$dir/main" worktree add -q "$dir/twofold" -b twofold
     printf '[Service]\nWorkingDirectory=%s\n' "$dir/nightly" >"$dir/rcad-fuzz.service"
-    for tree in main held free nightly; do
-        mkdir -p "$dir/$tree/target/debug"
+    # Every target/ starts four hours old, so each tree below is kept or swept
+    # for its own reason and not because the fixture wrote it a moment ago.
+    for tree in main held free nightly busy twofold; do
+        mkdir -p "$dir/$tree/target/debug/deps"
         head -c 4096 /dev/zero >"$dir/$tree/target/debug/artifact"
+        find "$dir/$tree/target" -exec touch -d '4 hours ago' {} +
     done
+    # Written a moment ago, three levels down. target/'s own time stays four
+    # hours old, because a directory's time moves only when its own entries do.
+    printf 'probe log\n' >"$dir/busy/target/debug/deps/fresh"
+    mkdir -p "$dir/twofold/fuzz/target"
+    printf 'corpus\n' >"$dir/twofold/fuzz/target/fresh"
+    # Stands in for a file a build deletes while find is walking past it: either
+    # way find cannot say how old the tree is, and says so with its exit code.
+    git -C "$dir/main" worktree add -q "$dir/sealed" -b sealed
+    mkdir -p "$dir/sealed/target/debug/unreadable"
+    find "$dir/sealed/target" -exec touch -d '4 hours ago' {} +
+    chmod 000 "$dir/sealed/target/debug/unreadable"
+    if find "$dir/sealed/target" >/dev/null 2>&1; then
+        echo "clean-targets-selftest: find read a directory with mode 000, so this is running as root and the unreadable case cannot be built"
+        exit 1
+    fi
     got=$(just clean-targets "$dir/free" "$dir/rcad-fuzz.service")
     fail() {
         echo "clean-targets drifted from its own fixtures: $1"
@@ -8228,7 +8267,17 @@ check-clean-targets-selftest:
         || fail "the current worktree was not reported as kept"
     grep -qF "kept (the overnight fuzz unit runs in it): $dir/nightly" <<<"$got" \
         || fail "the overnight fuzz tree was not reported as kept"
-    grep -qE "^[0-9.]+K reclaimed; 3 worktree\(s\) kept$" <<<"$got" \
+    [ -f "$dir/busy/target/debug/deps/fresh" ] \
+        || fail "an unlocked tree was swept with a file in its target/ written a moment ago (§371.5)"
+    grep -qF "kept (its target/ was written in the last three hours): $dir/busy" <<<"$got" \
+        || fail "the tree with a fresh target/ was not reported as kept"
+    [ -d "$dir/twofold/target" ] && [ -d "$dir/twofold/fuzz/target" ] \
+        || fail "a tree with one fresh target/ and one old one was partly swept; a fresh one anywhere keeps the tree whole"
+    [ -d "$dir/sealed/target" ] \
+        || fail "a tree find could not read all of was swept, as if it had read it and found it old"
+    grep -qF "kept (find could not read all of its target/, so how old it is is unknown): $dir/sealed" <<<"$got" \
+        || fail "the tree find could not read was not reported as kept"
+    grep -qE "^[0-9.]+K reclaimed; 6 worktree\(s\) kept$" <<<"$got" \
         || fail "the tally is wrong, so a sweep that found nothing would read like a tidy machine"
 
 # Mark worktrees whose run is over, so `prune-worktrees` removes them without
