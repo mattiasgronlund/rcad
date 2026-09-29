@@ -313,6 +313,7 @@ moved them.
 | `ACurvedFaceGoesRightRoundWithNoSeam` | a cut meets a ball's seam twice | **gap** | `a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name`. The answer is two caps of a ball |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | **a cut leaving a piece of a ball that holds no pole, or both** | **gap, and a §19 violation** | four public calls: `add_ball(4)` intersected with `add_cube(20)` whose face sits at `y = 1`. The answer is a spherical cap of volume 84.823 — the same solid `a_ball_cut_by_a_plane_meshes_into_a_closed_surface` certifies when the plane is `z = 1`. **Turning the whole arrangement flips it**: answered from 1.00 to 1.30 radians about `x` and refused from 1.40, either side of `acos(1/4)`, which is where the kept cap stops holding a pole. §38.6 filed the family a limit; a closed curve on a sphere leaves three kinds of piece and only the one-pole cap is handled |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | a face with no boundary at all on a surface that does not pinch | **limit** | such a face is unbounded and there is no answer. Reachable from `Deserialize` only |
+| `ACurvedFaceGoesRightRoundWithNoSeam` | **2026-09-29, Q553: a fuse of a ball and two blocks meeting its equator from opposite sides** — the skin comes out as pieces of the ball meeting along the equator, and the mesher reads which pole a cap reaches off its *first* coedge, which here has the ball on both sides | **gap, already named in §330.6's second bullet** | `a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_stops_in_the_mesher` in `crates/rcad-topo/tests/two_flat_faces_on_one_plane_facing_apart_along_an_arc.rs`, six fuses. Reached only after Q365 (`65a5db7f`) got the same shape's fuses past `assemble` — see the row below for what they refused before that |
 | `CannotTellWhichCurveOfACrossingAFaceRunsAlong` | a boundary edge's corner is held by two of the curves its pair names, or by none | **gap, undemonstrated** | a picker's `Undecidable` rules nothing out (§33.8) |
 | `CannotTellTheCellsOfAFaceApart` | two regions of one face were joined that the surface keeps apart | **gap, undemonstrated** | telling them apart takes a point inside each |
 | `AFaceMeetsItsNeighbourOnItsOwnSurface` | two faces on one cylinder with an edge between them | **gap**, undemonstrated here; §325.4 reaches it from the public API | what closes it is a joiner written in surfaces |
@@ -357,6 +358,19 @@ geometry disagree, which §16.11 says arrive from a file.
 > hair off the solid's own planes (§351). §351 fixed it; the replay's
 > `a_solid_one_way_round_only` now reads 0. This row's family count and cause
 > are unchanged.
+
+> **2026-09-29 note (Q553): a separate family reached this refusal too, and
+> is fixed rather than reclassified.** A ball of radius 5 between a block
+> under its equator (`x ≤ −3`) and one over it (`x ≥ 3`) refused
+> `ResultIsNotManifold { count: 1 }` in all twelve fuses the row's own test
+> file builds, on the base before Q365 (commit `65a5db7f`'s own message,
+> not re-measured here). Q365's fix — reading an arc's sign off the plane as
+> each face spells it, §330.6's third bullet — gets every one of those
+> twelve past `assemble`: two now answer in full and six stop one step
+> later, in the mesher, on the `ACurvedFaceGoesRightRoundWithNoSeam` row
+> added above. This family's `count: 1` is closed; it is a different bug
+> from the turned-pair gap the rest of this note is about, and says nothing
+> about that count.
 
 **Seven rows are named, classified and undemonstrated**, marked above. §30.5 had
 one such row and called it the one worth reading twice; seven is a different
