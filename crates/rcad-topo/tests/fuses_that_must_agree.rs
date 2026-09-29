@@ -4779,11 +4779,64 @@ fn over<T: core::fmt::Debug>(
     strategy: impl Strategy<Value = T>,
     property: impl Fn(T, &Tally) -> Result<(), TestCaseError>,
 ) -> Tally {
+    over_scaled_by(cases, soak_factor(), strategy, property)
+}
+
+/// [`over`]'s own scaling and run, pulled out with `factor` as a plain
+/// argument in place of reading [`SOAK_FACTOR`] itself.
+///
+/// A test can hand this a literal factor and count how many times `property`
+/// actually ran, which checks the scaling reaches the run rather than just
+/// checking [`scaled_by_soak_factor`]'s arithmetic on its own — the gap
+/// `over_scaled_by_runs_the_literal_cases_times_the_factor` closes (§290,
+/// Q266): a revert of `over`'s call into this scaling, with that arithmetic
+/// test kept, used to still pass.
+fn over_scaled_by<T: core::fmt::Debug>(
+    cases: u32,
+    factor: u32,
+    strategy: impl Strategy<Value = T>,
+    property: impl Fn(T, &Tally) -> Result<(), TestCaseError>,
+) -> Tally {
     run(
-        TestRunner::new(configured(scaled_by_soak_factor(cases, soak_factor()))),
+        TestRunner::new(configured(scaled_by_soak_factor(cases, factor))),
         strategy,
         property,
     )
+}
+
+/// Q266: the only test of `over`'s scaling used to be
+/// `scaled_by_soak_factor_gives_the_literal_back_at_one_and_sixty_six_times_it_at_sixty_six`,
+/// which checks [`scaled_by_soak_factor`] alone — so `over` could stop
+/// calling it and every test would still pass. This one runs
+/// [`over_scaled_by`] itself, with a literal factor rather than
+/// `RCAD_SOAK_FACTOR`, and counts how many times the property was actually
+/// called.
+///
+/// The count at one factor alone is not `CASES * factor`:
+/// `fuses_that_must_agree.proptest-regressions` carries persisted failure
+/// seeds that `configured`'s `failure_persistence` replays once regardless of
+/// `cases`, on top of the fresh draw. That replay count does not depend on
+/// `factor`, so it cancels out of the difference between two factors, which
+/// is what this asserts instead.
+#[test]
+fn over_scaled_by_runs_the_literal_cases_times_the_factor() {
+    let runs_at = |factor: u32| {
+        let runs = Cell::new(0u32);
+        over_scaled_by(CASES, factor, any::<u8>(), |_, _tally| {
+            runs.set(runs.get() + 1);
+            Ok(())
+        });
+        runs.get()
+    };
+    let (at_one, at_three) = (runs_at(1), runs_at(3));
+    assert_eq!(
+        at_three - at_one,
+        CASES * 2,
+        "over_scaled_by ran {at_one} times at factor 1 and {at_three} at \
+         factor 3; the difference should be the literal cases times the \
+         change in factor, {}",
+        CASES * 2
+    );
 }
 
 /// `cases` configurations from the fixed seed, whatever [`SOAK_SEED`] says.
