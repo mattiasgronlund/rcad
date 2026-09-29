@@ -556,7 +556,9 @@ const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 3] = [
         // shift that rounds nothing was handed on exact (Q509).
         [
             None,
-            Some("the second union: Undecidable on a point in a piece that every solid could place"),
+            Some(
+                "the second union: Undecidable on a point in a piece that every solid could place",
+            ),
         ],
     ),
     (

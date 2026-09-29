@@ -306,7 +306,8 @@ fn is_the_offset_it_should_have(moved: f64, offset: f64, normal: Vector, by: Vec
 /// Whether an axis moved to `after` is `before` with its origin moved by
 /// exactly `by` and its direction untouched.
 fn is_the_axis_shifted(before: Axis, after: Axis, by: Vector) -> bool {
-    after.direction() == before.direction() && is_exactly_shifted(before.origin(), after.origin(), by)
+    after.direction() == before.direction()
+        && is_exactly_shifted(before.origin(), after.origin(), by)
 }
 
 /// The largest magnitude anything in this move was worked out from.
@@ -465,8 +466,9 @@ mod tests {
     #[test]
     fn a_whole_number_shift_moves_a_corner_on_any_square_surface_exactly() {
         let whole = Isometry::translation(Vector::new(-7.0, 11.0, 5.0)).expect("a finite shift");
-        let flat = Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0))
-            .expect("a plane");
+        let flat =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane");
         let rows = [
             (Point::new(1.0, 2.0, 3.0), Surface::Plane(flat)),
             (
@@ -513,8 +515,7 @@ mod tests {
     fn a_corner_moved_exactly_on_a_surface_that_was_not_keeps_its_box() {
         let far_on_its_axis = Surface::Cylinder(
             Cylinder::new(
-                Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0))
-                    .expect("an axis"),
+                Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
                 1.0,
             )
             .expect("a pipe"),
@@ -557,11 +558,7 @@ mod tests {
             );
             let (exact, _) = where_a_corner_lands_after_moving(corner, [&surface], &whole)
                 .expect("finite numbers");
-            assert_eq!(
-                exact.uncertainty(),
-                0.0,
-                "{surface:?} moved by {whole:?}"
-            );
+            assert_eq!(exact.uncertainty(), 0.0, "{surface:?} moved by {whole:?}");
         }
     }
 
