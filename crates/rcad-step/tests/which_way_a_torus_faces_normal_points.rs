@@ -18,37 +18,26 @@
 //! `same_sense .T.`, and every loop — both caps and the wall — winds the way a
 //! right hand turns about its own face's outward normal.
 //!
-//! **As this kernel builds one** — `tests/rings/mod.rs`'s `a_quarter_bend`,
-//! read in here by path so that it is the kernel's own description and not a
-//! copy of it. Its wall is used `Reversed` and every one of its loops runs the
-//! other way. Written as a file that is `same_sense .F.` and every
-//! `ORIENTED_EDGE` flag turned over, and that file is read in here too: it
-//! answers everything the built bend answers, which is what shows the reader
-//! adds nothing of its own.
+//! **With every turn turned over** — the wall `same_sense .F.` and every
+//! `ORIENTED_EDGE` flag the other way. That is how this kernel built its bends
+//! until §361: the wall used turned round and every loop run the other way,
+//! two turns that cancel for `Model::validate`'s closed-edge rule, which reads
+//! only the wall. The wall then faces into the material and the caps out of
+//! it, and that is not a solid.
 //!
-//! # What this kernel says today, and which pin moves
+//! # What this kernel says
 //!
-//! `Model::validate`'s closed-edge rule and the file reader take a torus's own
-//! normal **out of the tube**. The mesher takes it **into** the tube, because
-//! `Torus::point_at` puts the tube angle first and `hand_over` turns a face's
-//! triangles by the chart's own `∂first × ∂second`; and since Q102 so does
-//! `classify_point`, whose torus arm Q102 turned round to fit the kernel's
-//! bends. So:
-//!
-//! - the bend written as the standard says passes the closed-edge rule and is
-//!   refused by the mesh, `FacesDoNotAgreeWhichWayTheyFace`, and so are three
-//!   KiCad relays in the corpus;
-//! - the bend built the kernel's way passes the mesh, because its wall is
-//!   turned round, and passes the closed-edge rule, because its loops are
-//!   turned round too; it measures `2π²`, and `classify_point`, turned round
-//!   the same way, places every point as the shape does.
-//!
-//! When `mesh.rs` turns a torus face's triangles against its chart,
-//! `classify.rs`'s torus arm is turned back, and `tests/rings/mod.rs` builds
-//! its bends the standard way — one change, since no part of it lands alone —
-//! the pins marked *today* in the first and last tests move to what the shape
-//! says, and the middle test's file written the kernel's way is refused.
-//! §329.5 lists the rows.
+//! `Model::validate`'s closed-edge rule, the file reader, the mesher and
+//! `classify_point` all take a torus's own normal **out of the tube**. The
+//! mesher once took it into the tube, because `Torus::point_at` puts the tube
+//! angle first and `hand_over` turned a face's triangles by the chart's own
+//! `∂first × ∂second`; it now turns a torus face's triangles against its chart
+//! (§361). So the bend written as the standard says, and the one
+//! `tests/rings/mod.rs` builds — read in here by path, so that it is the
+//! kernel's own description and not a copy of it — validate, measure `2π²` and
+//! place every point as the shape does; so do three KiCad relays in the corpus
+//! that were refused before; and the bend with every turn turned over is
+//! refused.
 
 mod written_by_hand;
 
@@ -63,56 +52,30 @@ use rcad_step::{Import, Refusal, StepFile};
 use rcad_topo::{Containment, Error, Invalid, Model, SolidKey};
 use written_by_hand::a_header;
 
-/// The bend written as the standard says is refused by the mesh today, after
-/// passing the closed-edge rule that runs before it.
+/// The bend written as the standard says, and the bend `tests/rings/mod.rs`
+/// builds, validate, enclose `2π²`, and place every point in [`POINTS`] as the
+/// shape does.
 ///
-/// **Today's pin, and the one a fix to `mesh.rs` moves.** What the shape says
-/// is that it validates, encloses `2π²`, and places every point in [`POINTS`]
-/// as listed there. With the mesher turning a torus face's triangles against
-/// its chart and `classify.rs`'s torus arm turned back from Q102's, this very
-/// file validates, measures `19.706` give or take `0.392`, and places all eight
-/// exact points right (§329.3's second row); with Q102's arm kept, it places
-/// the two past a cap inside (the fourth row).
+/// Until §361 the file was refused `FacesDoNotAgreeWhichWayTheyFace` by the
+/// mesh, and the built bend was the one with every turn turned over, right
+/// only because two turns cancelled (§329.3).
 #[test]
-fn a_bend_written_as_the_standard_says_is_refused_by_the_mesh_today() {
-    let text = a_quarter_bend_written(Written::AsTheStandardSays);
-    let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) else {
-        panic!("today the mesh refuses the bend a file writes");
-    };
-    assert!(
-        is_faces_do_not_agree(&refused),
-        "the mesh takes a torus's own normal into the tube and the file out of it, and the \
-         refusal says so by name: {refused:?}"
-    );
-}
-
-/// The bend built the way this kernel builds one, and the same bend written as
-/// a file the kernel's way, validate, enclose `2π²`, and place every point as
-/// the shape does.
-///
-/// **Right because two turns cancel.** The wall is turned round against the
-/// standard, and since Q102 so is `classify.rs`'s torus arm. Before Q102 the
-/// two points past a cap came back inside (§329.3's first row); with it every
-/// point matches the shape (its third row). Undoing either turn alone puts the
-/// two back inside or refuses the bend, so this pin moves with Q346.
-#[test]
-fn a_bend_built_the_kernels_way_validates_and_places_every_point_as_the_shape_does() {
+fn a_bend_written_as_the_standard_says_validates_and_places_every_point_as_the_shape_does() {
     let policy = Policy::certified();
     let mut built = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let key = rings::a_quarter_bend(&mut built, 4.0, 1.0);
 
-    let text = a_quarter_bend_written(Written::AsThisKernelBuildsIt);
+    let text = a_quarter_bend_written(Written::AsTheStandardSays);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let read = Import::read(&file, &policy, &mut ProvenanceLog::new())
-        .expect("the kernel's own bend written out as a file imports");
+        .expect("the bend written as the standard says imports");
     let [(_, read_key)] = read.solids() else {
         panic!("one MANIFOLD_SOLID_BREP is one solid");
     };
 
     for (spelling, model, key) in [
         ("built", &built, key),
-        ("written the kernel's way", read.model(), *read_key),
+        ("written as the standard says", read.model(), *read_key),
     ] {
         model
             .validate(&policy, &mut ProvenanceLog::new())
@@ -126,16 +89,30 @@ fn a_bend_built_the_kernels_way_validates_and_places_every_point_as_the_shape_do
     }
 }
 
-/// Three KiCad relays in the corpus, each with a torus face used forwards, are
-/// refused by the same name as the bend written as the standard says.
+/// The bend with every turn turned over — wall `same_sense .F.` and every
+/// `ORIENTED_EDGE` flag the other way — is refused: its wall faces into the
+/// material and its caps out of it.
 ///
-/// **Ground truth the kernel did not make.** With the mesher turning a torus
-/// face's triangles against its chart and nothing else changed, all three
-/// import — which is to say they validate — and no file in the corpus with a
-/// torus in it is refused that was not refused before (§329.4). Today's pin; it
-/// moves with the first test's.
+/// It is how this kernel built its bends until §361, and it imported then,
+/// because the mesher's turn and the file's cancelled.
 #[test]
-fn three_relays_in_the_corpus_are_refused_by_the_mesh_today() {
+fn a_bend_written_with_every_turn_turned_over_is_refused() {
+    let text = a_quarter_bend_written(Written::EveryTurnTurnedOver);
+    let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
+    let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) else {
+        panic!("a bend whose wall faces into its own material imported");
+    };
+    assert!(is_faces_do_not_agree(&refused), "{refused:?}");
+}
+
+/// Three KiCad relays in the corpus, each with a torus face used forwards,
+/// import — which is to say they validate.
+///
+/// **Ground truth the kernel did not make.** Until §361 the mesher took a
+/// torus's own normal into the tube and all three were refused
+/// `FacesDoNotAgreeWhichWayTheyFace` (§329.4).
+#[test]
+fn three_relays_in_the_corpus_import() {
     let root = PathBuf::from(std::env::var_os("RCAD_STEP_CORPUS").expect("`just t` sets it"));
     for name in [
         "Relay_1-Form-A_Schrack-RYII_RM5mm.step",
@@ -146,11 +123,10 @@ fn three_relays_in_the_corpus_are_refused_by_the_mesh_today() {
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|why| panic!("{} is in the corpus: {why}", path.display()));
         let file = StepFile::read(&bytes).expect("a corpus file reads");
-        let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-        else {
-            panic!("today the mesh refuses {name}");
-        };
-        assert!(is_faces_do_not_agree(&refused), "{name}: {refused:?}");
+        if let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+        {
+            panic!("{name} is refused: {refused:?}");
+        }
     }
 }
 
@@ -211,8 +187,8 @@ enum Written {
     /// outward normal.
     AsTheStandardSays,
     /// Wall `same_sense .F.` and every `ORIENTED_EDGE` turned over: the bend
-    /// `tests/rings/mod.rs` builds.
-    AsThisKernelBuildsIt,
+    /// `tests/rings/mod.rs` built until §361.
+    EveryTurnTurnedOver,
 }
 
 /// A quarter bend of ring four and tube one about `+z`, in millimetres.
@@ -222,11 +198,11 @@ enum Written {
 /// them and has no seam. Each `CIRCLE` turns right-handed about its cap's
 /// outward normal — `−y` for the near cap, `−x` for the far one — so a cap
 /// walks its circle with the curve and the wall against it, as the standard
-/// asks. [`Written::AsThisKernelBuildsIt`] turns every one of those flags over.
+/// asks. [`Written::EveryTurnTurnedOver`] turns every one of those flags over.
 fn a_quarter_bend_written(written: Written) -> String {
     let (cap, wall, same_sense) = match written {
         Written::AsTheStandardSays => (".T.", ".F.", ".T."),
-        Written::AsThisKernelBuildsIt => (".F.", ".T.", ".F."),
+        Written::EveryTurnTurnedOver => (".F.", ".T.", ".F."),
     };
     let mut text = a_header(".MILLI.");
     text.push_str(&format!(
