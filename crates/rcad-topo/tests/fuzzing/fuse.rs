@@ -67,7 +67,7 @@
 //!
 //! - **A refusal leaves the model byte-identical.** §17.4's atomicity row, and
 //!   `Model::fuse`'s own "Atomic" heading. Nothing else in the tree asked it:
-//!   the nearest thing is `fusing_two_bars_side_by_side.rs`, which re-validates
+//!   the nearest thing is `a_fuse_that_builds_a_sliver.rs`, which re-validates
 //!   after a refusal and so would pass a model that had been half written and
 //!   was still sound.
 //! - **Every solid handed back resolves**, through `Model::solid`, in the model
