@@ -765,12 +765,23 @@ fn a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_fi
         for (rule, answer_first, by_hand, corners) in [
             (Rule::Union, true, whole / 2.0 + block, None),
             (Rule::Union, false, whole / 2.0 + block, None),
-            (Rule::Intersection, true, whole / 2.0, corners_at(half, HEIGHT)),
-            (Rule::Intersection, false, whole / 2.0, corners_at(half, HEIGHT)),
+            (
+                Rule::Intersection,
+                true,
+                whole / 2.0,
+                corners_at(half, HEIGHT),
+            ),
+            (
+                Rule::Intersection,
+                false,
+                whole / 2.0,
+                corners_at(half, HEIGHT),
+            ),
             (Rule::Difference, true, whole / 2.0, corners_at(0.0, half)),
             (Rule::Difference, false, block - whole / 2.0, None),
         ] {
-            let asked = format!("{first}, then {rule:?} with the top half, answer first {answer_first}");
+            let asked =
+                format!("{first}, then {rule:?} with the top half, answer first {answer_first}");
             let [arguments, tools] = if answer_first {
                 [answer, top_half]
             } else {

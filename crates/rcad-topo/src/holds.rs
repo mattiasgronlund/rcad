@@ -1769,11 +1769,9 @@ fn is_a_pair_of_pipes_running_the_same_way(flat: &Plane, cuts: &[Cut]) -> bool {
     are_pipes_running_the_same_way(&one.surface, &other.surface)
         && [one, other].iter().all(|cut| match cut.surface {
             Surface::Cylinder(pipe) => pipe.is_cut_in_a_closed_curve_by(flat) == Some(true),
-            Surface::Plane(_)
-            | Surface::Sphere(_)
-            | Surface::Cone(_)
-            | Surface::Torus(_)
-            | _ => false,
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_) | _ => {
+                false
+            }
         })
 }
 
@@ -2069,8 +2067,7 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 };
                 let on_a_pipe_running_the_same_way = arcs_own_pipe
                     .is_some_and(|own| are_pipes_running_the_same_way(own, &cut.surface));
-                return if on_a_pipe_running_the_same_way
-                    && ends == [Decision::Zero, Decision::Zero]
+                return if on_a_pipe_running_the_same_way && ends == [Decision::Zero, Decision::Zero]
                 {
                     where_an_arc_between_two_points_of_a_pipe_lies(
                         surface,
