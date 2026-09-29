@@ -21,7 +21,7 @@ use std::collections::HashSet;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
-use rcad_topo::{Error, Invalid, Model, Rule, SolidKey, WireStepView};
+use rcad_topo::{Error, Model, Rule, SolidKey, WireStepView};
 
 /// The radius of the ring the other tests bend a tube round.
 const THE_RING: f64 = 4.0;
@@ -131,7 +131,7 @@ fn moving_the_original_leaves_the_copy_where_it_was() {
 /// the answers read back the same bit for bit, whichever rule is asked.
 #[test]
 fn a_solid_fused_with_its_copy_answers_as_with_one_built_again() {
-    for (what, build) in every_kind_a_fuse_takes_with_its_copy() {
+    for (what, build) in every_kind_of_solid() {
         let mut model = a_model();
         let original = build(&mut model);
         let built_again = build(&mut model);
@@ -164,7 +164,7 @@ fn a_solid_fused_with_its_copy_answers_as_with_one_built_again() {
 /// above holds bit for bit.
 #[test]
 fn a_solid_united_with_its_unmoved_copy_is_the_solid_again() {
-    for (what, build) in every_kind_a_fuse_takes_with_its_copy()
+    for (what, build) in every_kind_of_solid()
         .into_iter()
         .filter(|&(what, _)| what != A_TURNED_CUBE)
     {
@@ -190,7 +190,7 @@ fn a_solid_united_with_its_unmoved_copy_is_the_solid_again() {
 
 #[test]
 fn a_solid_less_its_unmoved_copy_is_nothing() {
-    for (what, build) in every_kind_a_fuse_takes_with_its_copy() {
+    for (what, build) in every_kind_of_solid() {
         let mut model = a_model();
         let original = build(&mut model);
         let copy = model.copy_solid(original).expect("this model made the key");
@@ -313,65 +313,23 @@ fn a_copy_of_a_copy_is_the_original_again() {
     }
 }
 
-/// The one shape here a certified fuse will not take with its copy, pinned so
-/// that closing the gap moves a test rather than a sentence.
-///
-/// **The refusal is the fuse's and not the copy's**: a second bend built from
-/// the same numbers is refused in the same words. The union keeps the right
-/// pieces and writes them back with both coedges of one edge running the same
-/// way round, and the difference is answered with nothing left (§243.5).
-#[test]
-fn a_quarter_bend_and_its_copy_are_refused_as_two_bends_built_alike_are() {
-    let mut model = a_model();
-    let (what, build) = A_QUARTER_BEND;
-    let bend = build(&mut model);
-    let built_again = build(&mut model);
-    let copy = model.copy_solid(bend).expect("this model made the key");
-
-    let with_the_copy = refused(&model, bend, copy, Rule::Union, what);
-    let with_one_built_again = refused(&model, bend, built_again, Rule::Union, what);
-    assert!(
-        matches!(
-            with_the_copy,
-            Error::TheFuseWroteABrokenAnswer {
-                broken: Invalid::CoedgesRunTheSameWay
-            }
-        ),
-        "Union: expected the answer written back broken, got {with_the_copy}"
-    );
-    assert_eq!(
-        format!("{with_the_copy:?}"),
-        format!("{with_one_built_again:?}"),
-        "Union: the copy is refused differently from a bend built again"
-    );
-    for other in [copy, built_again] {
-        let (_, solids) = fused(&model, bend, other, Rule::Difference, what);
-        assert!(solids.is_empty(), "{what} less itself left {solids:?}");
-    }
-}
-
 type Build = fn(&mut Model) -> SolidKey;
-
-/// Every shape a copy has to get right.
-fn every_kind_of_solid() -> impl Iterator<Item = (&'static str, Build)> {
-    every_kind_a_fuse_takes_with_its_copy()
-        .into_iter()
-        .chain([A_QUARTER_BEND])
-}
-
-/// A torus face, which a union with its copy refuses (see
-/// `a_quarter_bend_and_its_copy_are_refused_as_two_bends_built_alike_are`).
-const A_QUARTER_BEND: (&str, Build) = ("a quarter bend", |model| {
-    rings::a_quarter_bend(model, THE_RING, 1.0)
-});
 
 const A_TURNED_CUBE: &str = "a cube turned before it is copied";
 
-/// Flat, each curved surface but the torus, a ball's poles, a cone's apex, the
-/// answer of a fuse, a solid with a hollow inside it, and one that was moved
-/// before it was copied.
-fn every_kind_a_fuse_takes_with_its_copy() -> [(&'static str, Build); 8] {
+/// Every shape a copy has to get right, and a fuse with it: flat, every curved
+/// surface, a ball's poles, a cone's apex, the answer of a fuse, a solid with a
+/// hollow inside it, and one that was moved before it was copied.
+///
+/// **The quarter bend was kept out of the fuses until its wall was used
+/// forwards.** Built with its wall turned round, the union with its copy kept
+/// the right pieces and wrote them back with both coedges of one edge running
+/// the same way round, `TheFuseWroteABrokenAnswer` (§243.5, §361).
+fn every_kind_of_solid() -> [(&'static str, Build); 9] {
     [
+        ("a quarter bend", |model| {
+            rings::a_quarter_bend(model, THE_RING, 1.0)
+        }),
         ("a cube", |model| a_cube(model, 2.0)),
         ("a ball", |model| {
             model
@@ -595,24 +553,6 @@ fn fused(
     );
     let solids = answer.solids().to_vec();
     (model, solids)
-}
-
-/// Fuse on a clone, certified, and hand back why it was refused.
-fn refused(model: &Model, one: SolidKey, other: SolidKey, rule: Rule, what: &str) -> Error {
-    let fused = model.clone().fuse(
-        &[one],
-        &[other],
-        rule,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    match fused {
-        Ok(answer) => panic!(
-            "{what}: {rule:?} answered {} solids where it was expected to refuse",
-            answer.solids().len()
-        ),
-        Err(why) => why,
-    }
 }
 
 /// Every key a walk down from the solid reaches, of every kind.

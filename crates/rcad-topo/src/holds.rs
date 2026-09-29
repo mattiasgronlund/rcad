@@ -3450,15 +3450,15 @@ mod tests {
             let wire = model.add_wire(smallvec::smallvec![round_it]);
             model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
         };
-        let near_cap = cap(&mut model, near.cap, near_circle, Orientation::Reversed);
-        let far_cap = cap(&mut model, far.cap, far_circle, Orientation::Forward);
+        let near_cap = cap(&mut model, near.cap, near_circle, Orientation::Forward);
+        let far_cap = cap(&mut model, far.cap, far_circle, Orientation::Reversed);
 
         let wires: SmallVec<[_; 1]> = match seam {
             Some(seam) => {
                 let round_the_wall: SmallVec<[_; 4]> = [
-                    (near_circle, Orientation::Forward),
+                    (near_circle, Orientation::Reversed),
                     (seam, Orientation::Forward),
-                    (far_circle, Orientation::Reversed),
+                    (far_circle, Orientation::Forward),
                     (seam, Orientation::Reversed),
                 ]
                 .map(|(edge, turn)| model.add_coedge(edge, turn))
@@ -3467,8 +3467,8 @@ mod tests {
                 smallvec::smallvec![model.add_wire(round_the_wall)]
             }
             None => [
-                (near_circle, Orientation::Forward),
-                (far_circle, Orientation::Reversed),
+                (near_circle, Orientation::Reversed),
+                (far_circle, Orientation::Forward),
             ]
             .map(|(edge, turn)| {
                 let round_it = model.add_coedge(edge, turn);
@@ -3483,7 +3483,7 @@ mod tests {
             [
                 (near_cap, near.used),
                 (far_cap, far.used),
-                (wall, Orientation::Reversed),
+                (wall, Orientation::Forward),
             ]
             .into_iter()
             .map(|(face, orient)| FaceUse {
@@ -3600,12 +3600,12 @@ mod tests {
             let wire = model.add_wire(smallvec::smallvec![round_it]);
             model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
         };
-        let lid = disk(&mut model, 1.0, round_the_top, Orientation::Forward);
-        let base = disk(&mut model, -1.0, round_the_bottom, Orientation::Reversed);
+        let lid = disk(&mut model, 1.0, round_the_top, Orientation::Reversed);
+        let base = disk(&mut model, -1.0, round_the_bottom, Orientation::Forward);
         let round_the_rim: SmallVec<[_; 4]> = [
-            (round_the_bottom, Orientation::Forward),
+            (round_the_bottom, Orientation::Reversed),
             (seam, Orientation::Forward),
-            (round_the_top, Orientation::Reversed),
+            (round_the_top, Orientation::Forward),
             (seam, Orientation::Reversed),
         ]
         .map(|(edge, turn)| model.add_coedge(edge, turn))
@@ -3619,7 +3619,7 @@ mod tests {
             [
                 (lid, Orientation::Forward),
                 (base, Orientation::Forward),
-                (rim, Orientation::Reversed),
+                (rim, Orientation::Forward),
             ]
             .into_iter()
             .map(|(face, orient)| FaceUse {
@@ -3682,11 +3682,11 @@ mod tests {
             let wire = model.add_wire(smallvec::smallvec![round_it]);
             model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
         };
-        let lid = disk(&mut model, 1.0, round_the_top, Orientation::Forward);
-        let base = disk(&mut model, -1.0, round_the_bottom, Orientation::Reversed);
+        let lid = disk(&mut model, 1.0, round_the_top, Orientation::Reversed);
+        let base = disk(&mut model, -1.0, round_the_bottom, Orientation::Forward);
         let rim_wires: SmallVec<[_; 1]> = [
-            (round_the_bottom, Orientation::Forward),
-            (round_the_top, Orientation::Reversed),
+            (round_the_bottom, Orientation::Reversed),
+            (round_the_top, Orientation::Forward),
         ]
         .map(|(edge, turn)| {
             let round_it = model.add_coedge(edge, turn);
@@ -3701,7 +3701,7 @@ mod tests {
             [
                 (lid, Orientation::Forward),
                 (base, Orientation::Forward),
-                (rim, Orientation::Reversed),
+                (rim, Orientation::Forward),
             ]
             .into_iter()
             .map(|(face, orient)| FaceUse {
