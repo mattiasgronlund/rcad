@@ -13,10 +13,14 @@
 //! showed the other half of this: a ring's face counted its crossings the wrong
 //! way round, which no test had seen because a ray through a bend's wall alone
 //! came to `−1` and was read as inside.
+//!
+//! Every rule now answers, since the bends' walls are used forwards (§361).
 
-use rcad_geom::{Axis, Isometry, Point, Scale, Surface};
+use core::f64::consts::PI;
+
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface};
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Invalid, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Model, Rule, SolidKey};
 
 mod rings;
 
@@ -136,36 +140,54 @@ fn a_box_no_face_meets_is_answered_and_one_on_the_wall_is_not() {
     );
 }
 
-/// The fuse places every piece now, and all three rules go on to stop at the
-/// same place: writing the kept pieces back out, where a bend and a bit-for-bit
-/// copy of itself stop too (§243.5).
+/// Every rule answers one solid that validates and holds what Pappus says.
 ///
-/// Selection is right for each, read off a temporary `eprintln!` in
-/// `select::choose` and written up in §323.3: the difference keeps the first
-/// bend's cap on `y = 0`, its wall up to the turned bend's first cap and that
-/// cap turned round; the union keeps both caps at the ends and both walls once;
-/// the intersection keeps the eighth between the turned bend's first cap and
-/// the first bend's second one.
+/// A disk of radius one carried once round a circle of radius four holds
+/// `π · 2π · 4 = 8π²`, so an eighth of the ring holds `π²`. The difference is
+/// the eighth from the first bend's cap on `y = 0` to the turned bend's first
+/// cap; the intersection is the eighth from there to the first bend's second
+/// cap; the union is the three eighths from `y = 0` round to the turned bend's
+/// second cap. The union keeps its wall in three faces, one per piece of the
+/// two walls, because nothing joins pieces of a torus into one face yet.
+///
+/// All three used to stop writing the kept pieces back out,
+/// `TheFuseWroteABrokenAnswer { CoedgesRunTheSameWay }`, as a bend and a
+/// bit-for-bit copy of itself did (§243.5), until the bends' walls were used
+/// forwards (§361).
 #[test]
-fn a_bend_less_a_copy_turned_an_eighth_of_a_turn_places_every_piece() {
-    for rule in [Rule::Difference, Rule::Union, Rule::Intersection] {
+fn a_bend_and_a_copy_turned_an_eighth_of_a_turn_fuse_under_every_rule() {
+    let an_eighth_of_the_ring = PI * PI;
+    for (rule, eighths, faces) in [
+        (Rule::Difference, 1.0, 3),
+        (Rule::Intersection, 1.0, 3),
+        (Rule::Union, 3.0, 5),
+    ] {
+        let policy = Policy::certified();
         let (mut model, bend, turned) = a_bend_and_a_copy_turned_an_eighth_of_a_turn();
-        let answer = model.fuse(
-            &[bend],
-            &[turned],
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
+        let answer = model
+            .fuse(&[bend], &[turned], rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?}: {why:?}"));
+        let &[solid] = answer.solids() else {
+            panic!("{rule:?} answers {:?}", answer.solids());
+        };
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?}: {why:?}"));
+        let solid = model.solid(solid).expect("the fuse made the key");
+        assert_eq!(solid.faces().count(), faces, "{rule:?}");
+        let measured = solid
+            .measure(
+                Deflection::of(0.01).expect("a hundredth of the tube"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{rule:?} does not measure: {why:?}"));
+        let holds = eighths * an_eighth_of_the_ring;
         assert!(
-            matches!(
-                answer,
-                Err(Error::TheFuseWroteABrokenAnswer {
-                    broken: Invalid::CoedgesRunTheSameWay,
-                    ..
-                })
-            ),
-            "{rule:?}: {answer:?}"
+            (measured.volume() - holds).abs() <= measured.volume_error(),
+            "{rule:?} holds {holds}, and measures {} give or take {}",
+            measured.volume(),
+            measured.volume_error()
         );
     }
 }
