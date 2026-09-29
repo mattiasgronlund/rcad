@@ -1041,9 +1041,11 @@ impl<'f> Arrangement<'f> {
     /// curve for that edge to run along, and are one face. The joiner,
     /// `join_up_what_is_one_face` in [`assemble`](super::assemble), removes
     /// such an edge from every answer a fuse gives and from a wholly flat input
-    /// before it is baked; a pair it leaves apart — pieces of a cone or pipe it
-    /// does not join, or of a ball or a ring, which it never joins — is refused
-    /// here rather than arranged wrongly.
+    /// before it is baked, and joins pieces of one pipe however it is written.
+    /// A pair it leaves apart — a pipe spelled twice where the spelling does
+    /// not fold, a cone turned round, a piece of a ball or a ring, which it
+    /// never joins, or two faces of a caller's own solid on one curved surface —
+    /// is refused here rather than arranged wrongly.
     fn crossing_for(
         &mut self,
         partner: Surface,

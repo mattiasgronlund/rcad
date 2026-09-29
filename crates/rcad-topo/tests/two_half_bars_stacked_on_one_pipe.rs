@@ -17,8 +17,15 @@
 //! fused, which is the same set by plain set algebra. That is what this file
 //! pins, so a fix has the answer to check against. Pinning the refusal itself
 //! would keep a gap as if it were settled. `docs/decisions.md` §325 has the
-//! measurements, and the second refusal, which the same route meets once the
-//! wall is spelled twice.
+//! measurements.
+//!
+//! # The same route with the wall spelled twice
+//!
+//! §325.4's second refusal is answered: the whole bars' union left a wall
+//! spelled twice as two faces, and cutting the block off it refused
+//! `AFaceMeetsItsNeighbourOnItsOwnSurface` on the circle between them. The
+//! joiner now joins pieces of one pipe however it is written, so the union's
+//! wall is one face and every later fuse of it answers.
 
 use core::f64::consts::PI;
 
@@ -113,6 +120,159 @@ fn cutting_the_block_off_after_fusing_the_whole_bars_answers_what_the_half_bars_
     }
 }
 
+/// The whole bars' union with the upper wall naming its axis at `z = 2`, less
+/// the block, is the half bar four tall, `8π`, either way round.
+///
+/// It used to refuse `AFaceMeetsItsNeighbourOnItsOwnSurface` (§325.4): the
+/// union kept its wall as two faces, one per spelling, and the cut asked
+/// `intersect` about the circle between them and heard `SameSurface`.
+#[test]
+fn a_wall_spelled_twice_is_cut_to_the_same_half_bar_as_a_wall_spelled_once() {
+    let policy = Policy::certified();
+    for lower_first in [true, false] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 0.0);
+        let upper = a_bar_whose_wall_names_its_axis_at(&mut model, HEIGHT, HEIGHT);
+        let [argument, tool] = if lower_first {
+            [lower, upper]
+        } else {
+            [upper, lower]
+        };
+        let whole = model
+            .fuse(
+                &[argument],
+                &[tool],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| {
+                panic!("the whole bars, lower first {lower_first}: {refused:?}")
+            });
+        let block = a_block_over_negative_x(&mut model);
+        let cut = model
+            .fuse(
+                whole.solids(),
+                &[block],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| {
+                panic!("less the block, lower first {lower_first}: {refused:?}")
+            });
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("lower first {lower_first}: {broken:?}"));
+        let [half] = cut.solids() else {
+            panic!("lower first {lower_first}: {:?}", cut.solids());
+        };
+        let measured = model
+            .solid(*half)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a half bar measures");
+        assert!(
+            (measured.volume() - 8.0 * PI).abs() <= measured.volume_error(),
+            "lower first {lower_first}: {} ± {} against 8π",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
+/// Two bars from `Model::add_round_bar`, the second placed on the first,
+/// united and then united with a cube far away that touches neither: two
+/// solids, `16π + 8` between them, either way round.
+///
+/// Each builder call writes its wall's axis where its own placement puts it,
+/// so the two walls are one pipe spelled twice. The union used to keep them
+/// as two faces, and this second fuse refused on the lower one
+/// (`AFaceMeetsItsNeighbourOnItsOwnSurface`) though the cube meets nothing.
+#[test]
+fn two_round_bars_stacked_and_united_fuse_with_a_cube_that_touches_nothing() {
+    let policy = Policy::certified();
+    let placed_at = |z: f64| Isometry::translation(Vector::new(0.0, 0.0, z)).expect("a shift");
+    for lower_first in [true, false] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let lower = model
+            .add_round_bar(RADIUS, HEIGHT, &placed_at(0.0))
+            .expect("a bar");
+        let upper = model
+            .add_round_bar(RADIUS, HEIGHT, &placed_at(HEIGHT))
+            .expect("a bar");
+        let [argument, tool] = if lower_first {
+            [lower, upper]
+        } else {
+            [upper, lower]
+        };
+        let bar = model
+            .fuse(
+                &[argument],
+                &[tool],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| {
+                panic!("the two bars, lower first {lower_first}: {refused:?}")
+            });
+        let cube = a_cube_far_from_the_bars(&mut model);
+        let both = model
+            .fuse(
+                bar.solids(),
+                &[cube],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| {
+                panic!("with the far cube, lower first {lower_first}: {refused:?}")
+            });
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("lower first {lower_first}: {broken:?}"));
+        assert_eq!(both.solids().len(), 2, "lower first {lower_first}");
+        let (mut volume, mut bound) = (0.0, 0.0);
+        for &solid in both.solids() {
+            let measured = model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a bar and a cube measure");
+            volume += measured.volume();
+            bound += measured.volume_error();
+        }
+        let by_hand = 16.0 * PI + 8.0;
+        assert!(
+            (volume - by_hand).abs() <= bound,
+            "lower first {lower_first}: {volume} ± {bound} against 16π + 8"
+        );
+    }
+}
+
+/// A cube two on a side at `(20, 20, 20)`, nowhere near either bar.
+fn a_cube_far_from_the_bars(model: &mut Model) -> SolidKey {
+    let square = ProfileBuilder::new(vec![[20.0, 20.0], [22.0, 20.0], [22.0, 22.0], [20.0, 22.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    model
+        .add_extrusion(
+            &square,
+            2.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, 20.0)).expect("a finite shift"),
+        )
+        .expect("a positive height")
+}
+
 /// A point the half bar's own faces cannot place has an answer: the bar holds
 /// it and the block that was cut off does not.
 #[test]
@@ -160,9 +320,18 @@ fn a_block_over_negative_x(model: &mut Model) -> SolidKey {
 ///
 /// Built face by face rather than with `Model::add_round_bar`, which places the
 /// whole solid and so moves the wall's axis origin with it: the fuse would then
-/// read the two walls as two spellings of one pipe, and the whole bars' union
-/// would keep its wall as two faces (§231, §247).
+/// read the two walls as two spellings of one pipe (§231, §247).
 fn a_bar_on_the_one_pipe(model: &mut Model, bottom: f64) -> SolidKey {
+    a_bar_whose_wall_names_its_axis_at(model, bottom, 0.0)
+}
+
+/// A round bar from `bottom` up [`HEIGHT`], whose wall names its axis at
+/// `z = axis_origin`.
+fn a_bar_whose_wall_names_its_axis_at(
+    model: &mut Model,
+    bottom: f64,
+    axis_origin: f64,
+) -> SolidKey {
     let top = bottom + HEIGHT;
     let mut builder = SolidBuilder::new();
     let low = builder
@@ -219,7 +388,11 @@ fn a_bar_on_the_one_pipe(model: &mut Model, bottom: f64) -> SolidKey {
         .add_wire(&round_the_wall)
         .expect("the wall's one wire");
     let pipe = Cylinder::new(
-        Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a direction with a length"),
+        Axis::new(
+            Point::new(0.0, 0.0, axis_origin),
+            Vector::new(0.0, 0.0, 1.0),
+        )
+        .expect("a direction with a length"),
         RADIUS,
     )
     .expect("a positive radius");

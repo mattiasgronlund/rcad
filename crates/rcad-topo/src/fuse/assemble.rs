@@ -611,6 +611,9 @@ impl Assembly {
         if !same.joined_anything() && !renumbered.closed_a_curve_up {
             return Ok(false);
         }
+        self.turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way(
+            &joined, &along, &dissolved,
+        )?;
         self.rebuild_from(&joined, renumbered)?;
         Ok(true)
     }
@@ -714,11 +717,17 @@ impl Assembly {
                     let rings = self.rings_round(&members, along, dissolved, plane)?;
                     (Surface::Plane(plane), Orientation::Forward, rings)
                 }
+                // The lowest spelling by bits, so the face does not depend on
+                // which solid was handed over first.
                 None => {
-                    let first = &self.faces[members[0]];
+                    let lowest = members
+                        .iter()
+                        .map(|&member| &self.faces[member])
+                        .min_by_key(|face| name_of_surface_bits(&face.surface))
+                        .expect("a joined face is made of at least one piece");
                     (
-                        first.surface,
-                        first.used,
+                        lowest.surface,
+                        lowest.used,
                         self.rings_of_a_curved_face(&members, along, dissolved),
                     )
                 }
@@ -910,7 +919,10 @@ impl Assembly {
         for &dart in ring {
             let side = self.side_of(dart);
             let edge = &self.edges[side.edge];
-            let partner = edge.carried_by.iter().find(|other| *other != surface)?;
+            let partner = edge
+                .carried_by
+                .iter()
+                .find(|other| !one_surface(other, surface))?;
             partner.as_plane()?;
             let [from, to] = [self.starts_at(dart), self.stops_at(side)];
             if from == to {
@@ -1102,6 +1114,97 @@ impl Assembly {
     /// The corner a side arrives at.
     fn stops_at(&self, side: &Side) -> usize {
         self.edges[side.edge].ends[usize::from(side.forward)]
+    }
+
+    /// Turn round both sides of every closed edge that the spelling its face
+    /// is joined onto stores running the other way.
+    ///
+    /// **A closed edge is stored running the way the longitude of the lower of
+    /// its two faces' curved surfaces by bits increases** — what the mesher and
+    /// `Model::validate` both read, and what
+    /// [`every_closed_edge_read_off_one_spelling`] already settled each side
+    /// against. Where joining changes that surface, both sides of the edge turn
+    /// round exactly when the new one stores it the other way, the flat cap's
+    /// side too though the cap was never joined to anything:
+    ///
+    /// - **Two spellings of one pipe**: the longitude is `axis × gradient`, the
+    ///   gradient does not change, and turning the axis round negates it, so
+    ///   the dot product of the two axes says it with no rounding (§231.3).
+    ///   Sliding the origin changes neither.
+    /// - **Two different surfaces**, which is a curved partner whose bits sort
+    ///   between two spellings of the wall: the two stored ways are read with
+    ///   the rule itself, [`a_closed_crossing_is_walked_the_way_it_is_stored`],
+    ///   along the crossing the edge was cut as.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] where the rule cannot tell
+    /// which way a different surface stores the edge, and
+    /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] where it says the
+    /// crossing has no direction at the edge's corner.
+    fn turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way(
+        &mut self,
+        joined: &[JoinedFace],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> Result<()> {
+        let mut joined_on: Vec<Surface> = self.faces.iter().map(|face| face.surface).collect();
+        for face in joined {
+            for &member in &face.members {
+                joined_on[member] = face.surface;
+            }
+        }
+        for (edge, darts) in along.iter().enumerate() {
+            let [start, end] = self.edges[edge].ends;
+            if dissolved[edge] || start != end {
+                continue;
+            }
+            let before = darts.map(|dart| self.faces[dart.face].surface);
+            let after = darts.map(|dart| joined_on[dart.face]);
+            if before.map(|surface| name_of_surface_bits(&surface))
+                == after.map(|surface| name_of_surface_bits(&surface))
+            {
+                continue;
+            }
+            let at = self.corners[start].point;
+            let [was, is] = [before, after].map(|pair| {
+                the_curved_one_of(&pair)
+                    .expect("a face that joining moved onto another spelling is curved")
+            });
+            if name_of_surface_bits(&was) == name_of_surface_bits(&is) {
+                continue;
+            }
+            let turned = if one_surface(&was, &is) {
+                the_way_it_is_parametrised_about(&was, at)
+                    .dot(the_way_it_is_parametrised_about(&is, at))
+                    < 0.0
+            } else {
+                let outward = self.edges[edge]
+                    .carried_by
+                    .map(|surface| gradient_of(&surface, at));
+                let stored_way = |reference: &Surface| {
+                    a_closed_crossing_is_walked_the_way_it_is_stored(
+                        [reference, reference],
+                        outward,
+                        at,
+                        Decision::Neg,
+                    )?
+                    .ok_or_else(|| {
+                        Error::AClosedEdgeOfTheAnswerWouldStartAtAPole {
+                            face: self.faces[darts[0].face].ancestors[0],
+                        }
+                    })
+                };
+                stored_way(&was)? != stored_way(&is)?
+            };
+            if turned {
+                for dart in darts {
+                    let side = &mut self.faces[dart.face].wires[dart.wire][dart.position];
+                    side.forward = !side.forward;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Write the corners, edges and faces out again with the joined faces in
@@ -2401,22 +2504,41 @@ fn how_much_space_it_encloses(
 /// Whether two curved faces are pieces of one cone or one pipe, used the same
 /// way round, so that an edge between them is not boundary at all.
 ///
-/// **The surface's own bits decide it, and nothing else does** (§224.2 item 1).
-/// A piece inherits its surface from its ancestor bit for bit (§31.3), so two
-/// pieces of one input face carry the same bits, and those are the pieces a
-/// fuse leaves cut apart. The same surface used the other way round is a sheet
-/// of no thickness with material either side, which is two faces and not one.
-/// A surface that is only the same up to how it is written — its axis turned
-/// round, say — is left apart: nothing here proves the two are one surface,
-/// and the answer with them apart is the sound one the fuse always gave.
+/// **A pipe is one pipe however it is written**: its axis turned round, or its
+/// origin slid along it where [`name_of_the_surface_either_way_round`] folds
+/// that exactly. Two bars stacked on one pipe, the upper one written in its own
+/// frame, leave the wall as two spellings either side of the circle between
+/// them. Left apart, that circle is an edge with the one surface on both sides,
+/// and every later fuse of the answer asks `intersect` about it, hears
+/// `SameSurface` and refuses `AFaceMeetsItsNeighbourOnItsOwnSurface`
+/// (`docs/decisions.md` §231.5, §325.5). Joined, the face takes the lowest of
+/// its spellings ([`Assembly::rings_of_each_joined_face`]) and every closed
+/// side read off another is read again
+/// ([`Assembly::turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way`]).
+/// `used` means the same thing for every spelling, because a pipe's gradient
+/// ([`gradient_of`]) does not change sign when its axis is turned round or its
+/// origin slid.
+///
+/// **A cone still goes by its bits** (§224.2 item 1): a piece inherits its
+/// surface from its ancestor bit for bit (§31.3), so two pieces of one input
+/// face carry the same bits. A cone turned round is left apart until
+/// `intersect` calls it one surface, which it does not yet.
+///
+/// The same surface used the other way round is a sheet of no thickness with
+/// material either side, which is two faces and not one.
 ///
 /// **Only a cone or a pipe.** Their rings are asked how often they go round the
 /// axis ([`Assembly::a_ring_goes_right_round`]), and a ball or a ring has no
 /// one axis to ask about, so pieces of those stay apart.
 fn one_cone_or_pipe_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
-    matches!(mine.surface, Surface::Cone(_) | Surface::Cylinder(_))
-        && name_of_surface_bits(&mine.surface) == name_of_surface_bits(&theirs.surface)
-        && mine.used == theirs.used
+    let one = match mine.surface {
+        Surface::Cylinder(_) => one_surface(&mine.surface, &theirs.surface),
+        Surface::Cone(_) => {
+            name_of_surface_bits(&mine.surface) == name_of_surface_bits(&theirs.surface)
+        }
+        Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => false,
+    };
+    one && mine.used == theirs.used
 }
 
 /// Whether two surfaces are one point set, however each is written.
@@ -3858,9 +3980,9 @@ mod tests {
     use super::super::Scratch;
     use super::super::select::choose;
     use super::{
-        Assembly, Corner, Corners, Edge, EdgeKey, Error, Face, FaceMeet, Lump, MeetPoint, Model,
-        Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep, Written, assemble,
-        names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
+        Assembly, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace, Lump,
+        MeetPoint, Model, Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep,
+        Written, assemble, names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
         the_half_space_both_ends_are_on, vertices_that_only_start_a_closed_edge,
     };
 
@@ -4521,8 +4643,12 @@ mod tests {
     /// points, and each wall read which way it walks the circle against its own
     /// spelling, so both came out walking it the same way.
     ///
-    /// `Model::validate` skips a closed edge between two faces on one pipe, so
-    /// the volume is what shows the circle was walked right.
+    /// Now the two walls are joined into one face, and there is no circle
+    /// between them. The face is on the lower spelling by bits, which is the
+    /// one pointing down, so whichever bar's wall was the other spelling has
+    /// both its cap circles walked the other way round
+    /// ([`Assembly::turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way`]).
+    /// `Model::validate` checks those, and the volume checks the rest.
     #[test]
     fn two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written() {
         let up = Cylinder::new(Axis::z(), 1.0).expect("a radius");
@@ -4560,6 +4686,19 @@ mod tests {
             let [solid] = fused.solids() else {
                 panic!("two bars end to end are one bar: {:?}", fused.solids());
             };
+            let walls: Vec<Surface> = model
+                .solid(*solid)
+                .expect("this model made the key")
+                .faces()
+                .map(|face| face.surface())
+                .filter(|surface| surface.as_plane().is_none())
+                .collect();
+            let lowest = if wall == down { down } else { up };
+            assert_eq!(
+                walls,
+                [Surface::Cylinder(lowest)],
+                "the wall is one face on the lower spelling, lower first {lower_first}"
+            );
             let measured = model
                 .solid(*solid)
                 .expect("this model made the key")
@@ -4678,6 +4817,153 @@ mod tests {
             ])
             .expect("a closed skin");
         draft.build(model, policy, log).expect("a round bar")
+    }
+
+    /// A ring counted against one spelling of a pipe, whose side names the pipe
+    /// by the other spelling, still has the cap's plane for a partner.
+    ///
+    /// The count runs before the joined face is written onto one spelling, so
+    /// a side cut from the upper bar still says its pipe is the upper bar's
+    /// while the face is counted against the lower one. Read bit for bit, the
+    /// pipe itself was taken for the partner, it is not a plane, and the count
+    /// gave up — which leaves a wall that needed a seam in pieces.
+    #[test]
+    fn a_side_naming_its_pipe_by_the_other_spelling_is_still_counted_round() {
+        let up = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a radius"));
+        let down = Surface::Cylinder(Cylinder::new(Axis::z().reversed(), 2.0).expect("a radius"));
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let assembly = Assembly {
+            corners: vec![Corner {
+                point: Point::new(2.0, 0.0, 4.0),
+                wobble: 0.0,
+                from: None,
+            }],
+            edges: vec![Edge {
+                ends: [0, 0],
+                carried_by: [up, cap],
+                arc: WhichArc::TheOnlyOne,
+                from: Vec::new(),
+            }],
+            runs: Vec::new(),
+            faces: vec![Face {
+                ancestors: Vec::new(),
+                surface: down,
+                used: Orientation::Forward,
+                wires: vec![vec![Side {
+                    edge: 0,
+                    forward: true,
+                }]],
+                is_a_whole_closed_surface: false,
+            }],
+            shells: Vec::new(),
+            solids: Vec::new(),
+        };
+        let ring = [Dart {
+            face: 0,
+            wire: 0,
+            position: 0,
+        }];
+        assert_eq!(
+            assembly.a_ring_goes_right_round(&ring, &down),
+            Some(true),
+            "a whole cap circle goes right round the pipe once"
+        );
+    }
+
+    /// A thin pipe across a wall spelled twice, whose bits sort between the two
+    /// spellings, turns the circle between it and the wall round when the wall
+    /// is joined onto its lower spelling — and one sorting above both does not.
+    ///
+    /// Worked out by hand at the corner `(2, 0, z + ½)` where the thin pipe,
+    /// along `x` through `(0, 0, z)` with radius ½, meets the wall of radius 2
+    /// about `z`: the wall's gradient is `(2, 0, 0)` and the thin pipe's
+    /// `(0, 0, ½)`, so the crossing runs along `(0, −1, 0)`. The wall's
+    /// longitude there is `z × (2, 0, 0) = (0, 2, 0)` and the thin pipe's is
+    /// `x × (0, 0, ½) = (0, −½, 0)`, so the two store the circle running
+    /// opposite ways. With the thin pipe between the spellings it named the
+    /// circle before the join and the wall names it after; above both, the
+    /// wall names it before and after, spelled two ways that wind alike.
+    #[test]
+    fn a_circle_the_joined_spelling_names_instead_of_a_thin_pipe_is_turned_round() {
+        let about_z = |origin: f64| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(Point::new(0.0, 0.0, origin), Vector::new(0.0, 0.0, 1.0))
+                        .expect("a direction"),
+                    2.0,
+                )
+                .expect("a radius"),
+            )
+        };
+        let (lower, upper) = (about_z(0.0), about_z(4.0));
+        let turned_round = |across_at: f64| {
+            let thin = Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(Point::new(0.0, 0.0, across_at), Vector::new(1.0, 0.0, 0.0))
+                        .expect("a direction"),
+                    0.5,
+                )
+                .expect("a radius"),
+            );
+            let face = |surface, forward| Face {
+                ancestors: Vec::new(),
+                surface,
+                used: Orientation::Forward,
+                wires: vec![vec![Side { edge: 0, forward }]],
+                is_a_whole_closed_surface: false,
+            };
+            let mut assembly = Assembly {
+                corners: vec![Corner {
+                    point: Point::new(2.0, 0.0, across_at + 0.5),
+                    wobble: 0.0,
+                    from: None,
+                }],
+                edges: vec![Edge {
+                    ends: [0, 0],
+                    carried_by: [upper, thin],
+                    arc: WhichArc::TheOnlyOne,
+                    from: Vec::new(),
+                }],
+                runs: Vec::new(),
+                faces: vec![face(upper, true), face(thin, false)],
+                shells: Vec::new(),
+                solids: Vec::new(),
+            };
+            let joined = [(0, lower), (1, thin)].map(|(member, surface)| JoinedFace {
+                members: vec![member],
+                surface,
+                used: Orientation::Forward,
+                is_a_whole_closed_surface: false,
+                rings: Vec::new(),
+            });
+            let along = [[0, 1].map(|face| Dart {
+                face,
+                wire: 0,
+                position: 0,
+            })];
+            assembly
+                .turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way(
+                    &joined,
+                    &along,
+                    &[false],
+                )
+                .expect("both surfaces say which way the circle runs");
+            [0, 1].map(|face| assembly.faces[face].wires[0][0].forward)
+        };
+
+        assert_eq!(
+            turned_round(1.0),
+            [false, true],
+            "between the spellings, both sides turn round"
+        );
+        assert_eq!(
+            turned_round(5.0),
+            [true, false],
+            "above both spellings, neither side turns round"
+        );
     }
 
     /// A triangle walked forwards and then walked forwards again, which is one
