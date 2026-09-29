@@ -115,7 +115,10 @@ fn a_turned_cube_has_every_face_cut_up_the_same_after_its_own_file() {
             let [going_in, coming_back] = [&here, &there].map(|model| {
                 let solid = the_one_solid(model);
                 let mesh = meshed(solid, deflection);
-                (the_bits_of_every_point(&mesh), each_flat_face_cut_up(solid, &mesh))
+                (
+                    the_bits_of_every_point(&mesh),
+                    each_flat_face_cut_up(solid, &mesh),
+                )
             });
             assert_eq!(
                 going_in.0, coming_back.0,
