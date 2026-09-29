@@ -167,7 +167,7 @@ closed, one is measured where it answers, and one is still open.*
   every other case as refused by name. Those refusals are still open, and no
   row names them.
 - **The named refusal for a closed edge that neither direction rule answers:
-  still open.** §202.1 did not add it. Its lane found that the only walks
+  open at the time.** §202.1 did not add it. Its lane found that the only walks
   reaching that code are the caps of
   `a_cap_whose_rim_runs_through_the_other_pole.rs`, and that all of them
   answer. `walk` in `mesh.rs` still keeps the walker's order when neither
@@ -178,5 +178,15 @@ closed, one is measured where it answers, and one is still open.*
 
 Q580's lane proposed a row for each of the last two, and its merger filed
 them: Q607 traces the narrow lune's refusals, and Q606 is the closed edge.
+
+*2026-09-29, Q606 (`5f6cab39`): no refusal is needed.* Built through
+`SolidBuilder`, a ball and a plane cornered exactly on the ball's north pole.
+The way round against the walk is refused `FacesDoNotAgreeWhichWayTheyFace` by
+`Model::validate`; the other builds, meshes closed and measures at deflections
+0.5, 0.05 and 0.005, alone and after a union. Pinned in
+`a_closed_edge_neither_direction_rule_answers.rs`. What it leaves: the
+cone-apex and torus-axis corners are unbuilt, and the lid-first spelling named
+by the lid's plane turned over is refused `AWireDoesNotFanIntoALoopToMesh
+{ TooFewCorners }` whichever way round.
 
 Commands: `just decision 198.2`, `198.3`, `197.2`, `167`, `16.10`.

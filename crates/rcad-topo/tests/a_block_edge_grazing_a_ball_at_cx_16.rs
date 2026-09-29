@@ -1,5 +1,5 @@
-//! §244.3's block edge along `x`, grazing a ball centred at `x = 16`: the turn
-//! a certified fuse refuses on, and the sign that turn has.
+//! §244.3's block edge along `x`, grazing a ball centred at `x = 16`: what a
+//! certified fuse refuses on, and the sign of the turn it used to refuse on.
 //!
 //! # The shape
 //!
@@ -8,7 +8,19 @@
 //! `x = 16 ± 2⁻⁵¹`, which are not `f64`s: the two places come back as the boxes
 //! `[15.999999999999998, 16]` and `[16, 16.000000000000004]`.
 //!
-//! # What refuses, and why it is a gap
+//! # What refuses
+//!
+//! The walked start of both the top's circle and the side's is `(16, 1, −2⁻²⁵)`,
+//! on the edge between the two places and off both circles by a rounding. All
+//! three points lie on one line along `x`, so going round either circle from
+//! that start the two places sweep exactly zero, and their boxes touch at `16`.
+//! A certified fuse refuses on which of the two comes first, which is the
+//! refusal §244.2 found where the two places are exact at `x = 0`.
+//!
+//! Until §244.5 that pair was folded into one node without a policy being
+//! asked, and the fuse went on to refuse on the turn below.
+//!
+//! # The turn it used to refuse on, and why that is a gap
 //!
 //! Splitting the ball's face, `Arrangement::turns_anticlockwise` in
 //! `fuse/arrange.rs` asks which way two crossings turn at a place they meet:
@@ -22,29 +34,33 @@
 //! `∓2⁻⁵¹`, never zero. And the same three surfaces solved about the ball's
 //! own centre meet at two `f64` triples, where the same determinant is decided.
 //! So this is a gap and not a limit (§16.10). `docs/decisions.md` §317 has the
-//! measurement and the question a fix should ask.
+//! measurement and the question a fix should ask. A certified fuse of this
+//! shape refuses on the order of the two places before it asks the turn, so
+//! only the measurement below shows the gap here.
 
 use rcad_geom::{
     Isometry, MeetOfThree, Plane, Point, Scale, Sphere, Surface, Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{
-    Decision, Interval, Level, ORIENT3D, Point as PredicatePoint, Policy, ProvenanceLog, Record,
+    Decision, Interval, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record,
     orient3d_of_points,
 };
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule};
 
+/// The name `order_along` records a refusal under.
+const ALONG_A_CROSSING: &str = "order along a crossing";
+
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
-/// The pin: under a certified policy every rule refuses on the turn at the
-/// place below `x = 16`, and on nothing else.
+/// The pin: under a certified policy every rule refuses on which of the two
+/// places comes first round a circle, and on nothing else.
 ///
-/// This is a gap being pinned, not an answer being kept. When the turn is
-/// asked a question that reaches its sign, this goes red, and it should.
-/// Measured with the turn given its true sign by a probe patch (§317): every
-/// rule then refuses on `order along a crossing` about the two places instead,
-/// as `a_block_edge_grazing_a_ball.rs` does with its edge along `z`.
+/// Before §244.5 the two places were folded into one node here, because the
+/// sweep over them is exactly zero and their boxes touch, and every rule went
+/// on to refuse on the turn at the place below `x = 16`.
 #[test]
-fn a_certified_fuse_refuses_on_the_turn_at_the_place_below_16() {
+fn a_certified_fuse_refuses_on_the_order_of_the_two_places() {
+    let places = where_the_edge_meets_a_ball_centred_at(16.0);
     for rule in EVERY_RULE {
         let mut log = ProvenanceLog::new();
         let refused = match fuse_a_block_edge_grazing_a_ball(rule, &mut log) {
@@ -53,7 +69,7 @@ fn a_certified_fuse_refuses_on_the_turn_at_the_place_below_16() {
         };
         assert_eq!(refused.len(), 1, "{rule:?}: {refused:#?}");
         assert!(
-            is_the_turn_at_the_place_below_16(&refused[0]),
+            is_the_order_of_the_two_places(&refused[0], &places),
             "{rule:?}: {:#?}",
             refused[0]
         );
@@ -152,22 +168,14 @@ fn fuse_a_block_edge_grazing_a_ball(
     model.fuse(&[ball], &[block], rule, &Policy::certified(), log)
 }
 
-/// Whether a record is `turns_anticlockwise`'s: the ball's gradient at the
-/// place below `16`, then the top's normal, then the side's.
-fn is_the_turn_at_the_place_below_16(record: &Record) -> bool {
-    let top = -f64::powi(2.0, -25);
-    let [gradient, lid, side] = record.inputs() else {
-        return false;
-    };
-    let PredicatePoint::Constructed(sides) = gradient else {
-        return false;
-    };
-    record.predicate() == ORIENT3D
+/// Whether a record is `order_along`'s about the two places, in either order,
+/// as wide as the last place of `16`, `2⁻⁴⁸`, which is how wide either box is.
+fn is_the_order_of_the_two_places(record: &Record, places: &[PredicatePoint]) -> bool {
+    let inputs = record.inputs();
+    record.predicate() == ALONG_A_CROSSING
         && record.level() == Level::Interval
-        && [sides[0].lo(), sides[0].hi()] == [-f64::powi(2.0, -49), 0.0]
-        && [sides[1].lo(), sides[1].hi(), sides[2].lo(), sides[2].hi()] == [1.0, 1.0, top, top]
-        && *lid == PredicatePoint::from([0.0, 0.0, 1.0])
-        && *side == PredicatePoint::from([0.0, 1.0, 0.0])
+        && (inputs == places || inputs == [places[1], places[0]])
+        && record.enclosure() == f64::powi(2.0, -48)
 }
 
 /// The block's top, `z = −2⁻²⁵`, and its side, `y = 1`, facing the way the

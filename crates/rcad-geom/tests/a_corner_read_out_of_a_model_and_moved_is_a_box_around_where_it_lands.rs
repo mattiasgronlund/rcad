@@ -49,10 +49,20 @@ const COMFORTABLY_CLEAR: f64 = 1e-6;
 const NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND: f64 = 1.0;
 
 /// The bound holds, and the box is not so wide that holding it means nothing.
+///
+/// Since a shift that rounds nothing hands the corner back exact (§34.6's
+/// `where_a_corner_lands_after_moving`), a wobble of zero shows up here too —
+/// the identity and every whole-number shift among [`every_way_of_placing_it`]
+/// give one. Dividing by that zero would be `0.0 / 0.0`, which is `NaN`, and
+/// `f64::max` drops a `NaN` silently rather than counting it: the ratio would
+/// still measure something, just not every reading. So the two kinds are kept
+/// apart — an exact reading is asserted off its surface by exactly nothing,
+/// and only an inexact one goes into the ratio.
 #[test]
 fn a_moved_corner_stays_inside_the_box_published_for_it() {
     let mut worst = 0.0f64;
-    let mut checked = 0usize;
+    let mut exact_readings = 0usize;
+    let mut inexact_readings = 0usize;
     for (corner, surfaces) in every_corner_with_two_surfaces_round_it() {
         for movement in every_way_of_placing_it() {
             let on = [&surfaces[0], &surfaces[1]];
@@ -61,8 +71,17 @@ fn a_moved_corner_stays_inside_the_box_published_for_it() {
             let moved = movement.apply_to_point(corner);
             for surface in on {
                 let placed = surface.transformed(&movement);
-                checked += 1;
-                worst = worst.max(how_far_off(&placed, moved) / wobble.magnitude());
+                if wobble.magnitude() == 0.0 {
+                    exact_readings += 1;
+                    assert_eq!(
+                        how_far_off(&placed, moved),
+                        0.0,
+                        "a shift that rounds nothing left {placed:?} off by something"
+                    );
+                } else {
+                    inexact_readings += 1;
+                    worst = worst.max(how_far_off(&placed, moved) / wobble.magnitude());
+                }
 
                 assert!(
                     !matches!(
@@ -81,8 +100,9 @@ fn a_moved_corner_stays_inside_the_box_published_for_it() {
         }
     }
     println!(
-        "moved corners: {checked} readings, the furthest any of them sat off its own surface was \
-         {worst:.3} of the bound published for it"
+        "moved corners: {exact_readings} exact readings, {inexact_readings} inexact readings; the \
+         furthest any inexact one sat off its own surface was {worst:.3} of the bound published \
+         for it"
     );
     assert!(worst < NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND);
 }

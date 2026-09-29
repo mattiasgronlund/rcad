@@ -9,9 +9,13 @@
 //! satisfies both. There is nothing to solve, so such a corner is read out of the
 //! model rather than re-derived (`docs/decisions.md` §31.3).
 //!
-//! Read, it is exact and better than a Cramer solve: `check_curved_face` has
-//! already certified it [`Decision::Zero`](rcad_predicates::Decision::Zero) on
-//! its surface, which is a stronger promise than a box.
+//! Read, it is exact and better than a Cramer solve: it is the stored value
+//! itself, with no arithmetic on the way to round it away. That is not a
+//! certificate that it sits exactly on its surface — nothing runs
+//! `Model::validate` before a fuse bakes, and `validate` itself only asks
+//! whether a corner is not provably off its surface, within its modelling
+//! tolerance, never that it is [`Decision::Zero`](rcad_predicates::Decision::Zero)
+//! on it (§75.6).
 //!
 //! **Moved, it is not.** `bake` composes placement, and both the point and the
 //! surface round it are rounded on the way — separately, and in different ways.
@@ -560,6 +564,38 @@ mod tests {
                 .expect("finite numbers");
             assert_eq!(exact.uncertainty(), 0.0, "{surface:?} moved by {whole:?}");
         }
+    }
+
+    /// Pins the claim `bake.rs`'s `where_the_model_puts_a_corner` makes for
+    /// keeping its identity short-cut: without it, the general road below would
+    /// turn a stored `-0.0` into `0.0` even though the movement is the identity
+    /// and rounds nothing.
+    #[test]
+    fn the_general_road_turns_a_stored_negative_zero_into_zero_under_identity() {
+        let corner = Point::new(-0.0, 1.0, -0.0);
+        let (landed, wobble) = where_a_corner_lands_after_moving(
+            corner,
+            Vec::<&Surface>::new(),
+            &Isometry::identity(),
+        )
+        .expect("finite numbers");
+        assert_eq!(
+            wobble.magnitude(),
+            0.0,
+            "the identity movement rounds nothing"
+        );
+        let PredicatePoint::Exact([x, y, z]) = landed else {
+            panic!("a shift that rounds nothing comes back exact, not a box: {landed:?}")
+        };
+        assert!(
+            x.is_sign_positive(),
+            "x came back {x}, still a negative zero"
+        );
+        assert_eq!(y, 1.0);
+        assert!(
+            z.is_sign_positive(),
+            "z came back {z}, still a negative zero"
+        );
     }
 
     /// How far a shifted flat surface is from where it truly goes, as a multiple

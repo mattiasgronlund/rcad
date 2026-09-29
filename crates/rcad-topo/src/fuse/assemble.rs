@@ -1190,52 +1190,8 @@ impl Assembly {
             });
         }
 
-        /// An arc of a ring, the surface it runs along, and whether it bulges
-        /// to the left of the chord from its first end to its second.
-        struct Bulging {
-            ends: [[f64; 3]; 2],
-            surface: Surface,
-            left: bool,
-        }
         let normal = plane.normal().components();
-        let arcs: Vec<Option<Bulging>> = ring
-            .iter()
-            .map(|&dart| {
-                let side = self.side_of(dart);
-                let [from, to] = [self.starts_at(dart), self.stops_at(side)];
-                if from == to {
-                    return None;
-                }
-                let WhichArc::LeavingACorner { corner, towards } = self.edges[side.edge].arc else {
-                    return Some(None);
-                };
-                let surface = the_curved_one(dart)?;
-                match surface {
-                    Surface::Cylinder(_) | Surface::Sphere(_) => (),
-                    Surface::Cone(_) => {
-                        where_a_closed_crossing_is_centred(&surface, plane)?;
-                    }
-                    Surface::Plane(_) | Surface::Torus(_) => return None,
-                    // A kind added to `rcad-geom` after this has not been shown
-                    // to bound the region inside it, so an arc along it is not
-                    // counted.
-                    _ => return None,
-                }
-                let ends = [from, to].map(|at| self.corners[at].point.coordinates());
-                let into_the_arc = (self.corners[corner].point + towards).coordinates();
-                let left = match winding_round(&[ends[0], ends[1], into_the_arc], normal).ok()? {
-                    Decision::Pos => true,
-                    Decision::Neg => false,
-                    Decision::Zero | Decision::Undecidable { .. } => return None,
-                    other => panic!("which side of its chord an arc bulges came back as {other:?}"),
-                };
-                Some(Some(Bulging {
-                    ends,
-                    surface,
-                    left,
-                }))
-            })
-            .collect::<Option<_>>()?;
+        let arcs = how_each_arc_bulges(self, ring, plane, normal, the_curved_one)?;
 
         let own: Vec<usize> = ring.iter().map(|&dart| self.starts_at(dart)).collect();
         let at_corner = |corner: usize| self.corners[corner].point.coordinates();
@@ -1250,42 +1206,13 @@ impl Assembly {
             }
         }
 
-        let turns_round = |at: [f64; 3]| -> Option<i32> {
-            arcs.iter()
-                .flatten()
-                .map(|arc| {
-                    match crate::validate::side_of_surface(&arc.surface, PredicatePoint::from(at)) {
-                        Decision::Pos | Decision::Zero => return Some(0),
-                        Decision::Neg => (),
-                        Decision::Undecidable { .. } => return None,
-                        other => panic!(
-                            "which side of a surface a corner is on came back as a decision \
-                             nothing here knows: {other:?}"
-                        ),
-                    }
-                    let left = match winding_round(&[arc.ends[0], arc.ends[1], at], normal).ok()? {
-                        Decision::Pos => true,
-                        Decision::Neg => false,
-                        Decision::Zero | Decision::Undecidable { .. } => return None,
-                        other => {
-                            panic!("which side of a chord a corner is on came back as {other:?}")
-                        }
-                    };
-                    Some(match (left == arc.left, arc.left) {
-                        (false, _) => 0,
-                        (true, true) => -1,
-                        (true, false) => 1,
-                    })
-                })
-                .sum()
-        };
         others.find_map(|other| {
             other.iter().find_map(|&dart| {
                 let corner = self.starts_at(dart);
                 if own.contains(&corner) {
                     return None;
                 }
-                match turns_round(at_corner(corner))? {
+                match turns_round(&arcs, normal, at_corner(corner))? {
                     0 => Some(false),
                     1 | -1 => Some(true),
                     // A simple ring winds round a point once at most, so this
@@ -2282,6 +2209,95 @@ impl Assembly {
         }
         worst.max(inherited.magnitude())
     }
+}
+
+/// An arc of a ring, the surface it runs along, and whether it bulges
+/// to the left of the chord from its first end to its second.
+struct Bulging {
+    ends: [[f64; 3]; 2],
+    surface: Surface,
+    left: bool,
+}
+
+/// How each arc of `ring` bulges against its chord, for
+/// [`Assembly::holds_the_other_rings`] to wind a point round; `None` where an
+/// arc's surface, its bulge, or the ring itself cannot be placed.
+fn how_each_arc_bulges(
+    assembly: &Assembly,
+    ring: &[Dart],
+    plane: &Plane,
+    normal: [f64; 3],
+    the_curved_one: impl Fn(Dart) -> Option<Surface>,
+) -> Option<Vec<Option<Bulging>>> {
+    ring.iter()
+        .map(|&dart| {
+            let side = assembly.side_of(dart);
+            let [from, to] = [assembly.starts_at(dart), assembly.stops_at(side)];
+            if from == to {
+                return None;
+            }
+            let WhichArc::LeavingACorner { corner, towards } = assembly.edges[side.edge].arc else {
+                return Some(None);
+            };
+            let surface = the_curved_one(dart)?;
+            match surface {
+                Surface::Cylinder(_) | Surface::Sphere(_) => (),
+                Surface::Cone(_) => {
+                    where_a_closed_crossing_is_centred(&surface, plane)?;
+                }
+                Surface::Plane(_) | Surface::Torus(_) => return None,
+                // A kind added to `rcad-geom` after this has not been shown
+                // to bound the region inside it, so an arc along it is not
+                // counted.
+                _ => return None,
+            }
+            let ends = [from, to].map(|at| assembly.corners[at].point.coordinates());
+            let into_the_arc = (assembly.corners[corner].point + towards).coordinates();
+            let left = match winding_round(&[ends[0], ends[1], into_the_arc], normal).ok()? {
+                Decision::Pos => true,
+                Decision::Neg => false,
+                Decision::Zero | Decision::Undecidable { .. } => return None,
+                other => panic!("which side of its chord an arc bulges came back as {other:?}"),
+            };
+            Some(Some(Bulging {
+                ends,
+                surface,
+                left,
+            }))
+        })
+        .collect::<Option<_>>()
+}
+
+/// How many times `arcs` winds round the point `at`, or `None` where an arc's
+/// surface cannot place it.
+fn turns_round(arcs: &[Option<Bulging>], normal: [f64; 3], at: [f64; 3]) -> Option<i32> {
+    arcs.iter()
+        .flatten()
+        .map(|arc| {
+            match crate::validate::side_of_surface(&arc.surface, PredicatePoint::from(at)) {
+                Decision::Pos | Decision::Zero => return Some(0),
+                Decision::Neg => (),
+                Decision::Undecidable { .. } => return None,
+                other => panic!(
+                    "which side of a surface a corner is on came back as a decision \
+                     nothing here knows: {other:?}"
+                ),
+            }
+            let left = match winding_round(&[arc.ends[0], arc.ends[1], at], normal).ok()? {
+                Decision::Pos => true,
+                Decision::Neg => false,
+                Decision::Zero | Decision::Undecidable { .. } => return None,
+                other => {
+                    panic!("which side of a chord a corner is on came back as {other:?}")
+                }
+            };
+            Some(match (left == arc.left, arc.left) {
+                (false, _) => 0,
+                (true, true) => -1,
+                (true, false) => 1,
+            })
+        })
+        .sum()
 }
 
 /// The name the search for a point that places one shell against another goes by
