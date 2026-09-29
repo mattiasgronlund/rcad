@@ -3762,11 +3762,12 @@ impl<'f> Arrangement<'f> {
     /// on that surface, and that is exactly as exact as the list. Under
     /// [`Policy::certified`] a crossing is on the list because the model says
     /// so (a corner's own faces and the edge it starts), because the node was
-    /// made for it, or because a sign was proved zero — with two exceptions.
-    /// [`round_a_closed_crossing`] calls two nodes whose boxes are equal bit
-    /// for bit one point without proving it, and [`Arrangement::fold_the_nodes`]
-    /// gives the node two nodes fold into every crossing either had, so a wrong
-    /// fold lists a crossing only one of them was on. Under
+    /// made for it, or because a sign was proved zero. [`Arrangement::fold_the_nodes`]
+    /// gives the node two nodes fold into every crossing either had, and under
+    /// this policy two nodes fold only where they were proved one point, so the
+    /// node is on every one of them. Until §244.5 [`round_a_closed_crossing`]
+    /// folded two nodes whose boxes were equal, or touched, without that proof,
+    /// and a wrong fold listed a crossing only one of them was on. Under
     /// [`Policy::tolerant`], [`Arrangement::passes_through`] and
     /// [`Arrangement::order_along`] read a narrow undecided sign as zero, so a
     /// node can list a crossing it is only near.
@@ -4483,6 +4484,14 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// `x = 0, z = 0.5`. The sweep is exactly zero, and read as "these two are
 /// one point" it folded the two places the circles cross into one.
 /// [`the_one_the_start_is`] settles which pair the zero is about.
+///
+/// **Two nodes whose boxes share a point are one point only if both boxes are
+/// points.** A box with width can hold two different points, and the sweep
+/// cannot tell them apart when it comes out exactly zero. Two places a block
+/// edge cuts a ball far out come back as one box, bit for bit (§318.3), and
+/// two places a slanted wall's circle holds on a line through its start sweep
+/// exactly zero with boxes that touch (§244.5). [`one_point_if_both_are_exact`]
+/// answers both, and leaves the rest to the policy (§17.4).
 fn round_a_closed_crossing(
     pair: [&Surface; 2],
     [from, node]: [PredicatePoint; 2],
@@ -4490,7 +4499,7 @@ fn round_a_closed_crossing(
     other: PredicatePoint,
 ) -> rcad_geom::Result<Decision> {
     if one == other {
-        return Ok(Decision::Zero);
+        return Ok(one_point_if_both_are_exact(one, other));
     }
     if one == from || one == node {
         return Ok(Decision::Pos);
@@ -4501,10 +4510,29 @@ fn round_a_closed_crossing(
     let decided = which_comes_first_round_a_crossing(pair, from, one, other)?;
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
-    if decided != Decision::Zero || boxes_overlap(one, other) {
+    if decided != Decision::Zero {
         return Ok(decided);
     }
+    if boxes_overlap(one, other) {
+        return Ok(one_point_if_both_are_exact(one, other));
+    }
     Ok(the_one_the_start_is(from, one, other))
+}
+
+/// Whether two nodes whose boxes share a point are that one point.
+///
+/// Two boxes of no width that share a point are both that point, which is a
+/// proof, and the answer is [`Decision::Zero`]. Where either box has width it
+/// can hold a point the other does not, so nothing here says the two are one,
+/// and the answer is [`Decision::Undecidable`] as wide as the wider box: the
+/// policy merges them or the operation refuses (§17.4).
+fn one_point_if_both_are_exact(one: PredicatePoint, other: PredicatePoint) -> Decision {
+    let widest = one.uncertainty().max(other.uncertainty());
+    if widest == 0.0 {
+        Decision::Zero
+    } else {
+        Decision::Undecidable { enclosure: widest }
+    }
 }
 
 /// Which of two points that are provably apart is the start, when the two and
