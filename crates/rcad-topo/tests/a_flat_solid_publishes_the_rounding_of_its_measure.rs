@@ -290,6 +290,252 @@ fn a_cube_on_whole_numbers_still_owes_nothing() {
     }
 }
 
+/// `docs/queue.md` Q402 and Q549: a solid whose corners mix coordinates near
+/// nothing with ones near two, so products in the exact sums behind its errors
+/// fall below the smallest subnormal. **Every published error still holds the
+/// truth.**
+///
+/// The solid is a cube of side two moved by `speck` along all three axes,
+/// through the public API, and `Model::validate` accepts every one of them:
+/// its dynamic-range check compares the largest coordinate with the shortest
+/// edge, which is two here whatever the speck. So §338.3's "`Model::validate`'s
+/// dynamic-range check refuses such a solid" does not hold for this one, and
+/// no `Deserialize` is needed to reach it.
+///
+/// `2 + speck` rounds to `2`, so the cube's corners are `speck` and `2` along
+/// each axis, and the truth is worked out by hand: a volume of `(2 − speck)³`,
+/// faces of `(2 − speck)²`, and every middle `1 + speck / 2` along each axis
+/// the face or solid spans. The kernel hangs its sums from the corner at
+/// `speck`, so each offset to a far corner is `2 − speck`, kept as `2` and a
+/// lost part of `−speck`, and in the solid's units `u = speck / 2` is what
+/// multiplies. The products of lost parts that fall below `2^-1074`, and the
+/// first speck where each does:
+///
+/// - `2^-220`: a face's moment, `u⁵ = 2^-1105`.
+/// - `2^-270`: the solid's moment and a face's weights, `u⁴ = 2^-1084`.
+/// - `2^-400` and `1e-300`, which is §338.3's own mix: the volume, `u³`.
+///
+/// **They are dropped and nothing is published wrong**, because each is below
+/// `2^-1075` in the solid's units, and the published distance is at least the
+/// lost parts' own first-order share, rounded up by more than that. What does
+/// break is the next test.
+#[test]
+fn a_cube_moved_by_a_speck_owns_up_to_what_the_speck_moves() {
+    for speck in [
+        2f64.powi(-100),
+        2f64.powi(-220),
+        2f64.powi(-270),
+        2f64.powi(-400),
+        1e-300,
+        2f64.powi(-1000),
+        2f64.powi(-1060),
+        f64::from_bits(2),
+    ] {
+        let (model, cube) = a_cube_of_side_two_moved_by(speck);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("a cube moved by {speck:e} validates: {why}"));
+        let solid = model.solid(cube).expect("this model made the key");
+        let measured = solid
+            .measure(
+                any_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a moved cube measures");
+        assert_eq!(
+            [
+                measured.volume(),
+                measured.surface_area(),
+                measured.centroid().coordinates()[0],
+                measured.centroid().coordinates()[1],
+                measured.centroid().coordinates()[2],
+            ],
+            [8.0, 24.0, 1.0, 1.0, 1.0],
+            "a cube moved by {speck:e}"
+        );
+        assert!(
+            at_least(measured.volume_error(), 12.0, speck),
+            "a cube moved by {speck:e} publishes a volume of 8 ± {:e}, and 8 − (2 − speck)³ is \
+             about {:e}",
+            measured.volume_error(),
+            12.0 * speck
+        );
+        assert!(
+            at_least(measured.area_error(), 24.0, speck),
+            "a cube moved by {speck:e} publishes a skin of 24 ± {:e}, and 24 − 6·(2 − speck)² is \
+             about {:e}",
+            measured.area_error(),
+            24.0 * speck
+        );
+        assert!(
+            covers_a_middle_off_along(measured.centroid_wobble(), speck, 3.0),
+            "a cube moved by {speck:e} publishes a middle within {:e}, and it is √3 · {:e} off",
+            measured.centroid_wobble(),
+            speck / 2.0
+        );
+
+        for face in solid.faces() {
+            let measured = solid
+                .measure_one_face(
+                    face.key(),
+                    any_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a face of a moved cube measures");
+            let middle = measured.centroid().coordinates();
+            assert_eq!(
+                (
+                    measured.area(),
+                    middle.iter().filter(|&&at| at == 1.0).count(),
+                    middle
+                        .iter()
+                        .filter(|&&at| at == speck || at == 2.0)
+                        .count()
+                ),
+                (4.0, 2, 1),
+                "a face of a cube moved by {speck:e} measures {} with its middle at {middle:?}",
+                measured.area()
+            );
+            assert!(
+                at_least(measured.area_error(), 4.0, speck),
+                "a face of a cube moved by {speck:e} publishes 4 ± {:e}, and 4 − (2 − speck)² is \
+                 about {:e}",
+                measured.area_error(),
+                4.0 * speck
+            );
+            assert!(
+                covers_a_middle_off_along(measured.centroid_wobble(), speck, 2.0),
+                "a face of a cube moved by {speck:e} publishes a middle within {:e}, and it is \
+                 √2 · {:e} off",
+                measured.centroid_wobble(),
+                speck / 2.0
+            );
+        }
+    }
+}
+
+/// **The limit, pinned: a cube of side two moved by `2^-1074`, the smallest
+/// subnormal, publishes all five errors as `0.0`, and every one of its
+/// answers is off.** `docs/queue.md` Q402 and Q549, class D.
+///
+/// It is not a product that fails here but the step before any product: each
+/// axis is measured in units of `2^1` for a cube two across, and the lost part
+/// of an offset, `−2^-1074`, halves to `2^-1075`, which rounds to zero. So the
+/// exact sums are the sums of the cube that was not moved, the rounded ones
+/// are too, and the two agree to the bit. One step up, a move of `2^-1073`
+/// halves to `2^-1074`, which is there to keep, and the test above holds it.
+/// The truth is a volume of
+/// `(2 − 2^-1074)³`, below `8` by about `3.5e-323`, and a middle `2^-1075` off
+/// along each axis.
+///
+/// **What puts it outside `docs/decisions.md` §3.5's envelope is `2^1075`**:
+/// the cube is two across and carries a move of `2^-1074`, a spread of
+/// `2^1075`, about `4e323`, against §3.5's `1e11`. It is `docs/queue.md` Q325's
+/// bar moved by `2^-1007`, one step further down. Any shape needs that
+/// spread for a lost part to vanish this way, because the units are picked so
+/// that the solid's widest offset along the axis is between one and two, and a
+/// part vanishes only once it is under `2^-1075` of those. The check in
+/// `Model::validate` passes it, as it passes the cube above: it reads edges,
+/// and every edge is two long.
+#[test]
+fn a_cube_moved_by_the_smallest_subnormal_publishes_no_error_and_is_off() {
+    let speck = f64::from_bits(1);
+    let (model, cube) = a_cube_of_side_two_moved_by(speck);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("validate reads edges, and every edge is two long");
+    let solid = model.solid(cube).expect("this model made the key");
+    let measured = solid
+        .measure(
+            any_deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a moved cube measures");
+    assert_eq!(
+        [
+            measured.volume(),
+            measured.volume_error(),
+            measured.surface_area(),
+            measured.area_error(),
+            measured.centroid().coordinates()[0],
+            measured.centroid_wobble(),
+        ],
+        [8.0, 0.0, 24.0, 0.0, 1.0, 0.0],
+        "the limit moved: a cube moved by 2^-1074 now publishes something other than an \
+         unmoved cube's exact answers"
+    );
+    for face in solid.faces() {
+        let measured = solid
+            .measure_one_face(
+                face.key(),
+                any_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a face of a moved cube measures");
+        assert_eq!(
+            [
+                measured.area(),
+                measured.area_error(),
+                measured.centroid_wobble()
+            ],
+            [4.0, 0.0, 0.0],
+            "the limit moved for a face of a cube moved by 2^-1074"
+        );
+    }
+}
+
+/// A cube of side two, moved by `speck` along each axis.
+fn a_cube_of_side_two_moved_by(speck: f64) -> (Model, SolidKey) {
+    let mut model = a_model();
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(speck, speck, speck)).expect("a shift"),
+        )
+        .expect("this model made the key");
+    (model, cube)
+}
+
+/// Whether `error` is at least `by · speck`, checked exactly.
+///
+/// For a cube moved by `speck` that is enough to hold the truth: `8 −
+/// (2 − speck)³` is `12·speck − 6·speck² + speck³`, which is under `12·speck`,
+/// and the skin and a face go the same way with `24` and `4`.
+fn at_least(error: f64, by: f64, speck: f64) -> bool {
+    at_least_zero(&plus(&[error], &negated(&times(&[speck], &[by]))))
+}
+
+/// Whether `wobble` reaches a point `speck / 2` off along each of `axes` axes,
+/// which is `√axes · speck / 2` away: `(2 · wobble)² ≥ axes · speck²`, checked
+/// exactly.
+///
+/// Both are doubled up to where `speck` is at least one, which is exact, so
+/// that their squares cannot fall into the subnormals and make the check round.
+fn covers_a_middle_off_along(wobble: f64, speck: f64, axes: f64) -> bool {
+    if wobble >= speck {
+        return true;
+    }
+    if wobble < speck / 2.0 {
+        return false;
+    }
+    let (mut wobble, mut speck) = (wobble, speck);
+    while speck < 1.0 {
+        wobble *= 2.0;
+        speck *= 2.0;
+    }
+    at_least_zero(&plus(
+        &times(&times(&[wobble], &[wobble]), &[4.0]),
+        &negated(&times(&times(&[speck], &[speck]), &[axes])),
+    ))
+}
+
 /// A model, and the solids in it each with what to call it.
 type NamedSolids = (Model, Vec<(&'static str, SolidKey)>);
 
