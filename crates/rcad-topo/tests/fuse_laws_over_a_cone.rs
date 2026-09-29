@@ -552,7 +552,14 @@ const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 3] = [
             third_side: 8.0,
             third_at: [5.0, 0.5, -2.5],
         },
-        [None, Some("the first union: Undecidable on side of plane")],
+        // The first union stopped on *side of plane* until a corner moved by a
+        // shift that rounds nothing was handed on exact (Q509).
+        [
+            None,
+            Some(
+                "the second union: Undecidable on a point in a piece that every solid could place",
+            ),
+        ],
     ),
     (
         Trio {
