@@ -180,7 +180,15 @@ Its determinant holds `1 * 1` and `t * t` together. Lifting `t * t` above
 the same way: six ordered triples are refused, with enclosures of `0.75` and
 `0.25` of `f64::EPSILON`, and none of the 1032 exponents that scale them
 exactly decides any. At `t = 1e-300` it is none of 1049. At `t = 1e-290` the
-build is certified. `when_it_cannot_tell.rs` keeps both measurements as
+build is certified.
+
+**Corrected by §358.** "None of the 1032 exponents decides any" holds only for
+the cascade as it stood, where level 3 gives up at the first product below the
+floor. It says nothing about keeping that product, and that family reaches
+this turn at its own scale. Its determinant is `-t (1 - t)`, an ordinary
+number, and the one product that falls off, `t * t`, loses less than the
+smallest subnormal. So this shape was a gap, not a limit. §358 closes it and
+moves the pins to a cut whose whole turn is `-t^2` with `t = 1e-318`. `when_it_cannot_tell.rs` keeps both measurements as
 tests: `no_power_of_two_lets_f64_see_which_way_the_cut_bends` tries every
 exponent on every turn the tolerant build approximated, and
 `a_cut_corner_bent_by_1e_290_is_decided` is its control. The seven pins in
