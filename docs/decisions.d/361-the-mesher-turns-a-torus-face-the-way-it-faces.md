@@ -11,6 +11,7 @@ answers Q39 and Q82.*
   361.1   What changed
   361.2   Which answers moved
   361.3   What this leaves
+  361.4   Landed with the bends it left (Q667)
 
 ### 361.1 What changed
 
@@ -143,15 +144,28 @@ Q644's branch at `3e51e291` and did 361.3's list.*
 - `error.rs`'s first example for `TheFuseWroteABrokenAnswer` is now history.
   No test in `rcad-topo` pins a sound pair that still ends there.
 
-**One test still fails: the writer fuzzer's checked-in seed.**
-`fuzz/corpus/no_model_makes_the_writer_panic/a_quarter_bend_of_pipe` holds
-the old bend as `postcard` bytes, and it measures `VolumeIsNotPositive {
+**The writer fuzzer's checked-in seed was drawn again.**
+`fuzz/corpus/no_model_makes_the_writer_panic/a_quarter_bend_of_pipe` held
+the old bend as `postcard` bytes, and it measured `VolumeIsNotPositive {
 volume: -84.29124343776743 }`, so `every_shape_seed_is_the_shape_it_is_named_for`
-fails until the seed is drawn again. The builder alone was enough for the
+failed. The builder alone was enough for the
 mutator: `every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model`
-passes. A throwaway probe drew `a_quarter_bend(model, 6, 2)` in a 100 mm model
+passed. A throwaway probe drew `a_quarter_bend(model, 6, 2)` in a 100 mm model
 again. The new bytes are 681 long like the old, differ from them in 5 bytes,
 validate, have faces plane, plane and torus, have their middle at
 `(3.9254, 3.9255, −0.0021)` against the test's `3.9257`, and are refused by
-the writer. Those are the test's four checks. The corpus is outside Q667's
-write set.
+the writer. Those are the test's four checks. The corpus was outside the first
+run's write set, so a second run (`lane-q667-land-the-turned-torus-mesh-2`,
+off `6273ce5e`) merged the first without a rebase and checked the new seed in
+on its own, sha256 `86943d84…f87a`: `mise exec -- just t -p rcad-step --test
+every_model_the_writer_fuzzer_kept_is_written_again` ran 13 and passed 13,
+and `mise exec -- just gate quiet` passed 2825 of 2825.
+
+**One doc outside the row is left stale.** The module doc of
+`a_plane_is_never_one_surface_with_a_curved_face.rs` says its cube and bend
+twenty units apart are refused `TheFuseWroteABrokenAnswer` for the union and
+for the bend less the cube. On the second run's branch both answer, the
+certified log empty and `Model::validate` passing: the union two solids, the
+cube's `8` exactly and the bend's `19.7061 ± 0.3921` at deflection `0.01`
+(`2π² = 19.7392`), and the bend less the cube one solid, the bend. No test
+there pins the refusal, so nothing fails; Q463 holds the file.
