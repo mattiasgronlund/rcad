@@ -159,18 +159,62 @@ gate_steps := "check-plugins \
 gate_metered_steps := "check check-fuzz-builds check-wildcards lint test check-release-build check-fuzz-unit deny check-corpus"
 
 # The steps `gate` may serve from an earlier green of the same code instead of
-# running (`docs/decisions.md` §337). They are the slow ones: together about 215
-# of a 257-second gate, and nearly half of all green gates re-read code that had
-# already gated green, because a `docs/queue.md` push had moved `main`.
+# running (`docs/decisions.md` §337). The first nine were the slow ones: together
+# about 215 of a 257-second gate, and nearly half of all green gates re-read code
+# that had already gated green, because a `docs/queue.md` push had moved `main`.
+# The tooling selftests after them were another 16 s of every served gate (§369).
 #
 # **A step is here only if nothing it reads is prose, or outside the tree.** An
-# strace of every step settled that (§337.2). `check-hooks` is left out because it
-# runs the guardrails plugin's cases from outside the tree. `deny` is left out
-# because it fetches the advisory database, `check-corpus` because the corpus is
-# outside the tree, and `check-fuzz-unit` because it reads the installed systemd
-# unit. Every step that reads `docs/` is left out as well. A step missing from
-# this list runs every time, so a new step is never served by default.
-gate_reusable_steps := "check check-fuzz-builds check-wildcards check-ignored lint test check-release-build check-fuzz-overnight-selftest check-queue-api-selftest"
+# strace of every step settled that (§337.2, §369). `check-hooks` and
+# `check-questions-selftest` are left out because each runs a plugin's own cases
+# from its checkout. `deny` is left out because it fetches the advisory database,
+# `check-corpus` because the corpus is outside the tree, `check-fuzz-unit`
+# because it reads the installed systemd unit, and `check-queue-merge-driver`
+# because it reads git's config. Every step that reads `docs/` is left out as
+# well. A step missing from this list runs every time, so a new step is never
+# served by default.
+gate_reusable_steps := "check \
+    check-fuzz-builds \
+    check-enums \
+    check-wildcards-selftest \
+    check-wildcards \
+    check-ignored \
+    check-skills-selftest \
+    check-kache-off-on-ci \
+    check-gate-runs-every-check \
+    check-gate-summary-selftest \
+    check-gate-docs-selftest \
+    check-gate-verdicts-selftest \
+    check-lanes-selftest \
+    check-release-lanes-selftest \
+    check-ff-main-selftest \
+    check-status-selftest \
+    check-plan-selftest \
+    check-queue-selftest \
+    check-queue-api-selftest \
+    check-queue-page-selftest \
+    check-hub-selftest \
+    check-hub-align-selftest \
+    check-clean-targets-selftest \
+    check-prune-worktrees-selftest \
+    check-decisions-selftest \
+    check-claim-section-selftest \
+    check-src-selftest \
+    check-recipe-selftest \
+    check-corpus-selftest \
+    check-coverage-selftest \
+    check-fuzz-overnight-selftest \
+    check-fuzz-watermark-selftest \
+    check-gate-fresh-selftest \
+    check-gate-fresh-cleanup-selftest \
+    check-fuzz-triage-selftest \
+    check-fuzz-unit-selftest \
+    check-fuzz-yield-selftest \
+    check-spend-selftest \
+    lint \
+    test \
+    check-release-build \
+    check-t-selftest"
 
 # Where the whole run is kept, so the block at the end can be read back in full
 # without running it again. A variable so `check-gate-summary-selftest` can
@@ -1018,10 +1062,11 @@ check-gate-verdicts-selftest:
         grep -qx "$step" <<<"$all" || fail "gate_reusable_steps names '$step', which is not a step of the gate"
     done <<<"$reusable"
     # These read prose, or something outside the tree that no fingerprint of
-    # it can see, which is what the trace behind §337.2 found.
+    # it can see, which is what the traces behind §337.2 and §369 found.
     for never in check-plugins check-hooks check-hub check-corpus check-fuzz-unit deny \
                  check-decisions check-plan check-queue check-where-the-work-is \
-                 check-skills check-lanes-workflow check-questions-selftest; do
+                 check-skills check-lanes-workflow check-questions-selftest \
+                 check-queue-merge-driver; do
         grep -qx "$never" <<<"$reusable" \
             && fail "$never reads prose or something outside the tree, and gate_reusable_steps would serve it"
     done
@@ -1794,8 +1839,10 @@ check-skills-selftest:
     fi
     rm -rf "$dir/bad-recipe"
 
+    # Not a docs/ path: this step is served, and a prose commit that added the
+    # file would fail this case without moving the fingerprint (§369).
     mkdir -p "$dir/bad-path"
-    printf 'Read `docs/no-such-file.md` first.\n' > "$dir/bad-path/SKILL.md"
+    printf 'Read `crates/no-such-file.rs` first.\n' > "$dir/bad-path/SKILL.md"
     if $j _skills-check "$dir" >/dev/null 2>&1; then
         echo "a skill naming a path that is not in the tree passed"; exit 1
     fi
@@ -9421,8 +9468,19 @@ check-queue-selftest:
         exit 1
     }
 
+    # `_queue-check` asks git which paths are tracked, and `check-queue` reads
+    # `decisions_dir` from where it runs. Both run in a scratch repository, so
+    # this step's answer never rests on what the real tree holds under docs/,
+    # which is what lets it be served (§369).
+    repo="$dir/repo"
+    mkdir -p "$repo/docs/decisions.d" "$repo/.github/workflows" "$repo/tooling/queue"
+    decisions="$repo/docs/decisions.d/sections.md"
     printf '%s\n' '## 13. How work is decomposed' '## 226. The test plan' \
-        '### 226.3 The nights' '## 230. One queue' '### 230.3 The fill' > "$dir/decisions.md"
+        '### 226.3 The nights' '## 230. One queue' '### 230.3 The fill' > "$decisions"
+    touch "$repo/justfile" "$repo/.github/workflows/ci.yml" "$repo/tooling/queue/queue.py"
+    git init -q "$repo"
+    git -C "$repo" add -A
+    q() { "$j" --justfile '{{ justfile() }}' --working-directory "$repo" "$@"; }
 
     cat > "$dir/good.md" <<'MD'
     # A queue
@@ -9471,20 +9529,20 @@ check-queue-selftest:
     ```
     MD
 
-    got=$("$j" _queue-check "$dir/good.md" "$dir/decisions.md" 2>&1) \
+    got=$(q _queue-check "$dir/good.md" "$decisions" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
     grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 6 slots, 1 parked, 2 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
-    got=$("$j" check-queue "$dir/good.md" 2>&1) \
-        || fail "check-queue rejected the good queue against the real decisions"
+    got=$(q check-queue "$dir/good.md" 2>&1) \
+        || fail "check-queue rejected the good queue against the sections in decisions_dir"
     sed '/^## Tier 4$/,+4d' "$dir/good.md" > "$dir/no-tier-4.md"
     grep -q '^## Tier 4' "$dir/no-tier-4.md" && fail "the fixture without Tier 4 still has its heading"
-    got=$("$j" _queue-check "$dir/no-tier-4.md" "$dir/decisions.md" 2>&1) \
+    got=$(q _queue-check "$dir/no-tier-4.md" "$decisions" 2>&1) \
         || fail "a tier with no rows was refused for leaving its heading out"
 
     refused() {
         sed "$2" "$dir/good.md" > "$dir/$1.md"
-        got=$("$j" _queue-check "$dir/$1.md" "$dir/decisions.md" 2>&1) \
+        got=$(q _queue-check "$dir/$1.md" "$decisions" 2>&1) \
             && fail "$1: a queue with this defect was accepted"
         grep -qF -- "$3" <<<"$got" || fail "$1: the refusal does not say '$3'"
     }
