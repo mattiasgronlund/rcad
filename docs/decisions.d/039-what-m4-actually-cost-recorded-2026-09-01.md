@@ -349,6 +349,15 @@ geometry disagree, which §16.11 says arrive from a file.
 > `how_often_one_pair_of_turned_boxes_leaves_such_an_edge`, and it is still a
 > gap.
 
+> **2026-09-29 note (Q479).** "The four families the earlier record was written
+> from ... reach it in none of 3 000 fuses each" is about that swept sample, not
+> the fuzz corpus. The corpus held three seeds whose two-solid lattice fuse
+> answered `ResultIsNotManifold` one way round and a plain cube the other — a
+> different cause from this row's turned-pair assembly bug: a stored corner a
+> hair off the solid's own planes (§351). §351 fixed it; the replay's
+> `a_solid_one_way_round_only` now reads 0. This row's family count and cause
+> are unchanged.
+
 **Seven rows are named, classified and undemonstrated**, marked above. §30.5 had
 one such row and called it the one worth reading twice; seven is a different
 quantity of the same thing, and §39.7 hands it on. Six are reachable in principle
