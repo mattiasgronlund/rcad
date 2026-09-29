@@ -1034,6 +1034,15 @@ impl Walk {
     /// model (`docs/decisions.md` §176.2). The cylinder crosses the face in
     /// exactly the circle, so `rcad_geom::walk` has a curve to walk round.
     ///
+    /// **Only where every flat face holds the file's circle**
+    /// ([`Walk::every_face_holds_the_curve`]), and this used to write the
+    /// cylinder without asking. The cylinder crosses each face's plane, not
+    /// the circle's, so a disc tilted off the face round it named a circle on
+    /// one plane and an ellipse on the other, and the solid's volume followed
+    /// the order its faces were listed in (Q386, Q574). A circle a face does
+    /// not hold keeps its own plane instead, and `Model::validate` refuses that
+    /// by name, as it refuses the pair of planes this used to write.
+    ///
     /// **An `ELLIPSE` keeps its plane**, and on flat faces is then refused by
     /// the mesher as an edge that bends with nothing naming it. No single
     /// surface this kernel holds crosses a plane in a given ellipse and is
@@ -1086,7 +1095,10 @@ impl Walk {
         }
         let only_flat_faces_along_it =
             faces_along_it.is_some_and(|faces| faces.iter().all(|face| face.as_plane().is_some()));
-        if keyword == CIRCLE && only_flat_faces_along_it {
+        if keyword == CIRCLE
+            && only_flat_faces_along_it
+            && self.every_face_holds_the_curve(reading, edge_curve, curve, keyword, place)?
+        {
             let radius = reading.real_at(curve, CIRCLE, 2)?;
             let round = Axis::new(place.origin, place.axis)
                 .and_then(|axis| Cylinder::new(axis, radius))
@@ -1901,6 +1913,9 @@ fn the_faces_along_it_name_no_crossing(faces: &[Surface]) -> bool {
 ///   `h = d·w` along the axis and `q = |d − h·w|` across it,
 ///   `|X − s|² = h² + |d − h·w + r·e|²`, and the second term runs from
 ///   `(r − q)²` to `(r + q)²` as `e` goes round. Both ends are held against `ρ`.
+/// - **A plane** of unit normal `n`. A point is `n·X − d` off it, which is
+///   `n·c − d` plus `r·(n·e)`, and `|n·e|` is at most `|n × w|` as `e` goes
+///   round, so `|n·c − d| + r·|n × w|` bounds every point.
 /// - **A pipe** of axis direction `a` and radius `R`. With `q` the distance
 ///   from `c` to the axis and `sin θ = |w × a|`, the part of `r·e` square to
 ///   the axis is at least `r·(1 − sin θ)` long and at most `r`, so every point
@@ -2046,7 +2061,10 @@ fn how_far_off_the_circle_can_be(
                 largest,
             ))
         }
-        Surface::Plane(_) => None,
+        Surface::Plane(flat) => Some((
+            flat.signed_distance_to(centre).abs() + radius * flat.normal().cross(axis).length(),
+            largest_of(&[centre], &[radius, flat.offset()]),
+        )),
         // A surface kind this reader has no bound for holds nothing, which
         // names the run by its faces as before.
         _ => None,
@@ -2228,7 +2246,8 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cone, Cylinder, NEAREST_F64_POINT_ROUNDOFF, Point, Sphere, Surface, Torus, Vector,
+        Axis, Cone, Cylinder, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Sphere, Surface, Torus,
+        Vector,
     };
     use rcad_predicates::{Decision, Point as PredicatePoint};
 
@@ -2270,6 +2289,45 @@ mod tests {
                 "{face:?} holds a circle a thousandth wider"
             );
         }
+    }
+
+    /// A flat face holds a circle drawn on its plane, and on that plane written
+    /// again a hair off, as a file writes a disc's own `PLANE` (§219.6); it does
+    /// not hold one on Q386's disc tilted a tenth through the circle's corner.
+    /// A plane had no bound here, so the reader wrote a cylinder round any
+    /// circle between flat faces without asking (Q574).
+    #[test]
+    fn a_plane_holds_a_circle_on_it_and_not_one_on_a_disc_tilted_off_it() {
+        let lid = Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a plane");
+        let a_hair_off = Plane::from_point_and_normal_as_written(
+            Point::new(0.0, 0.0, 4.0),
+            Vector::new(1e-17, 0.0, 1.0),
+        )
+        .expect("a plane");
+        let tilted =
+            Plane::from_point_and_normal(Point::new(1.0, 0.0, 4.0), Vector::new(-0.1, 0.0, 1.0))
+                .expect("a plane");
+        let centre = Point::new(0.0, 0.0, 4.0);
+
+        for face in [lid, a_hair_off] {
+            assert!(
+                a_surface_holds_the_circle(&Surface::Plane(face), centre, lid.normal(), 1.0),
+                "{face:?} does not hold the circle drawn on it"
+            );
+        }
+        assert!(!a_surface_holds_the_circle(
+            &Surface::Plane(lid),
+            centre,
+            tilted.normal(),
+            1.0
+        ));
+        assert!(!a_surface_holds_the_circle(
+            &Surface::Plane(tilted),
+            centre,
+            lid.normal(),
+            1.0
+        ));
     }
 
     /// The worst case [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] publishes, held against
