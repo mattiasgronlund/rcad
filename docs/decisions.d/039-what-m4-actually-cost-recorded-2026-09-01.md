@@ -290,11 +290,11 @@ moved them.
 
 | Refusal | Cause | | Demonstration |
 |---|---|---|---|
-| `AFaceTrimmedByACurveThisCannotFollow` | an edge of the face runs along *part* of a crossing | **gap** | `a_face_trimmed_by_part_of_a_curve_is_refused_by_name` |
+| `AFaceTrimmedByACurveThisCannotFollow` | an edge of the face runs along *part* of a crossing | **gap** | `a_face_trimmed_by_part_of_a_curve_is_refused_by_name`. **2026-09-29, Q596 (`4375e684`):** closed on the side-by-side answers — `holds.rs` now follows an arc of one pipe against another running the same way, the two discs of a union cap taken together, a disc less a disc, a pipe running the same way as a cut along a wall axis, and a reversed wall walk as the view gives it (§331.5) |
 | `AFaceMissesPartOfWhereItsSurfacesCross` | the face runs along some but not all of the curves its pair crosses in | **gap** | `a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both` |
 | `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` | every corner of a curved face sits on the surface trimming it | **gap, undemonstrated** | the side exists and the model does not record it |
 | `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` | a **flat** face with a corner at the top of the range and a normal off the axes | **gap, new at this gate, undemonstrated** | `a_point_off_the_plane` grows its step from the corner's own magnitude, so the first try overflows and every one after it does; a smaller step reaches an answer. Reachable from `Deserialize` only |
-| `Containment::CannotFollowAFacesTrimming` | any of the above, met while counting a ray | **gap** | the above, one layer up |
+| `Containment::CannotFollowAFacesTrimming` | any of the above, met while counting a ray | **gap** | the above, one layer up. Closed on the side-by-side answers by the same Q596 fix (§331.5) |
 | `Undecidable` out of `face_holds_the_point` | a sign about a box could not be settled | **limit** where the box straddles the surface, **gap** where the arithmetic ran out | no generator reaches either |
 
 **The curved arrangement and the commit — `rcad-topo`**
@@ -303,6 +303,8 @@ moved them.
 |---|---|---|---|
 | `ACrossingThisCannotBeOrderedAlong` | a ball with a pipe through it — the quartic | **gap** | `a_ball_with_a_pipe_through_it_is_refused_by_name`. **Not a budget question**: `Policy::tolerant` refuses it too (§37.7). §36.20 and §34.10 |
 | `Undecidable`, *order along a crossing* | a **turned notched bar** — §34.5's determinant, in the arrangement | **gap** | `a_turned_notched_bar_is_refused_for_want_of_an_order_along_a_crossing`, tolerant too, and the same shape unturned is decided and records nothing |
+| `Undecidable`, *order along a crossing* | **a block turned by −π/4 to lean through a bar's rim start** — a second cause, met ordering the meet and the rim start round the cap circle | **gap** | `a_block_turned_to_lean_through_a_bars_rim_start_cannot_order_two_points_round_its_cap` (Q209, §284.6) |
+| `ResultIsNotManifold { count: 1 }` | under a **tolerant** policy, that same turned block is ordered, and its faces disagree on a corner | **gap** | `under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner` (§284.7) |
 | `Undecidable`, *a point inside a piece of a face* | a **bar cut by a single plane not through its axis** | **gap** | `a_bar_cut_by_one_plane_off_its_axis_is_refused_for_want_of_a_point_inside_a_piece`. §36.28, and §38.9 says the coincident-face gap below is entangled with it: a knife whose face is exactly the bar's own cap plane refuses here too |
 | `Undecidable`, *a point inside a piece of a face* | two coincident curved faces | **gap** | `a_bar_and_a_copy_of_it_in_the_same_place_are_refused_for_want_of_a_point_inside_a_piece`. The answer is the bar. Tolerant too. **This is what criterion 15's second name runs into** |
 | `Undecidable`, *a point inside a piece of a face* | two tools meeting on one plane that cuts a round wall | **gap** | `two_tools_meeting_on_a_plane_that_cuts_a_round_wall_are_refused_by_name`; one tool making the same cut is answered |

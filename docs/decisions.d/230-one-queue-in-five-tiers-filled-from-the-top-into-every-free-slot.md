@@ -32,7 +32,8 @@ no row above it can use that slot.
 | 4 | New functionality | §171.5's B, still under §13 |
 
 *§311 swapped tiers 1 and 2 on 2026-09-27, at Mattias's word: new defects are
-tier 1 and finding defects better is tier 2.*
+tier 1 and finding defects better is tier 2. §307 amends this table again: tier
+2.2, for rows that change how the work is done, sits between tiers 2 and 2.5.*
 
 This amends two sections. §171.5 kept C out of every dispatch list, because C
 frees no file and so loses any ranking by what a lane frees. §226.2 answered that
@@ -71,7 +72,7 @@ them, then the description, which runs to the end of the line.
 ```
 
 - **id** — `T<n>`, `D<n>` or `Q<n>`, unique in the file.
-- **tier** — `1`, `2`, `2.5`, `3` or `4`.
+- **tier** — `1`, `2`, `2.5`, `3` or `4`, or `2.2` (§307).
 - **state** — `todo`; `lane:<branch>` while a lane holds it; `after:<id>[,<id>]`
   while it waits on other rows; `done:<sha>`; `dropped:§N`; or `parked:§N` when
   a section holds it — Mattias parked it, §13 defers it for want of a consumer,
@@ -87,7 +88,9 @@ them, then the description, which runs to the end of the line.
 The file has a heading per tier — `## Tier 1`, `## Tier 2`, `## Tier 2.5`,
 `## Tier 3`, `## Tier 4`, in that order — each over one fenced block holding that
 tier's open rows, parked ones included. Then `## Closed`, over one block of the
-done and dropped rows. The tier field is what a recipe reads; the heading a row
+done and dropped rows. §307 adds `## Tier 2.2` between `## Tier 2` and
+`## Tier 2.5`, and §307.3 amends "a heading per tier" itself: a tier with no
+rows may leave its heading out. The tier field is what a recipe reads; the heading a row
 sits under has to agree with it.
 
 A row is **ready** when its state is `todo`, or `after:` with every row it names
