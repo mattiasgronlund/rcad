@@ -177,7 +177,7 @@ fn a_lower_half_ball_united_with_two_blocks_standing_on_it_side_by_side_is_the_t
 /// other is itself.
 #[test]
 fn a_lower_half_ball_and_two_blocks_standing_on_it_share_nothing_and_take_nothing_from_each_other()
- {
+{
     for left_first in [true, false] {
         for half_first in [true, false] {
             let mut model = a_model();
@@ -187,7 +187,10 @@ fn a_lower_half_ball_and_two_blocks_standing_on_it_share_nothing_and_take_nothin
             } else {
                 fused(&mut model, &blocks, &[half], Rule::Intersection)
             };
-            assert!(shared.is_empty(), "two solids that only touch share nothing");
+            assert!(
+                shared.is_empty(),
+                "two solids that only touch share nothing"
+            );
         }
 
         let mut model = a_model();
@@ -245,14 +248,20 @@ fn the_ball_between_two_blocks(model: &mut Model, below_first: bool) -> (SolidKe
 /// The ball of radius five less everything above `z = 0`, and the two blocks
 /// that stand on its flat face side by side, split at `x = 3`: the one on the
 /// left first when `left_first`.
-fn the_half_ball_under_two_blocks(model: &mut Model, left_first: bool) -> (SolidKey, [SolidKey; 2]) {
+fn the_half_ball_under_two_blocks(
+    model: &mut Model,
+    left_first: bool,
+) -> (SolidKey, [SolidKey; 2]) {
     let ball = model
         .add_ball(RADIUS, &Isometry::identity())
         .expect("a ball of radius five");
     let lid = block(model, [20.0, 20.0, 10.0], Vector::new(-10.0, -10.0, 0.0));
     let half = fused(model, &[ball], &[lid], Rule::Difference);
     let [half] = half[..] else {
-        panic!("the ball less its top half is one solid, not {}", half.len());
+        panic!(
+            "the ball less its top half is one solid, not {}",
+            half.len()
+        );
     };
     let left = block(model, [13.0, 20.0, 10.0], Vector::new(-10.0, -10.0, 0.0));
     let right = block(model, [7.0, 20.0, 10.0], Vector::new(3.0, -10.0, 0.0));
