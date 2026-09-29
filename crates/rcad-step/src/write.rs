@@ -28,7 +28,7 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{Plane, Point, Scale, Surface, Unit, Vector};
+use rcad_geom::{EdgeRun, Picker, Plane, Point, Scale, Sphere, Surface, Unit, Vector};
 use rcad_predicates::expansion::two_product;
 use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
 
@@ -95,37 +95,48 @@ pub enum CannotWrite {
         shells: usize,
     },
 
-    /// A wire step that stands still on a corner — a ball's pole.
+    /// A wire step that stands still on a corner, where this writer cannot
+    /// leave the pole unwritten.
     ///
-    /// **Gap.** An `EDGE_LOOP` is a list of `ORIENTED_EDGE`s and a pole is not
-    /// one; STEP says it with a `VERTEX_LOOP`, which
-    /// [`Refusal::ALoopThisReaderDoesNotWalk`](crate::Refusal::ALoopThisReaderDoesNotWalk)
-    /// refuses to read, because a wire of only a pole is one step that is not an
-    /// edge and neither `SolidBuilder::add_wire` nor `Invalid::WireTooShort`
-    /// takes it: both ask for three steps, or one edge that closes already, or
-    /// two different edges that are not both straight. Writing a file this
-    /// kernel will not read back is not a round trip. What closes it is a fourth
-    /// arm on that same rule, in `rcad-topo`; the two-step arm landed there with
-    /// §44.11 item 3 and this one has its own consumer waiting — four NIST files
-    /// stop first at a `VERTEX_LOOP`.
-    #[error("a wire in this model stands still at a pole, and an EDGE_LOOP has no step for that")]
+    /// An `EDGE_LOOP` is a list of `ORIENTED_EDGE`s and a pole is not one.
+    /// Real files say a pole in two ways. A ball's is left unwritten: the loop
+    /// runs up the seam and turns straight back down it, which is how 69
+    /// `SPHERICAL_SURFACE` faces of the KiCad corpus write it
+    /// (`kicad/LED_D5.0mm.step` `#17`). A cone's apex is a `VERTEX_LOOP` of its
+    /// own, a second bound of the face, in 136 `CONICAL_SURFACE` faces of the
+    /// NIST files (`nist_ctc_05` `#1340`). **This writer writes the first**, and
+    /// the reader puts the pole back wherever a loop turns back along the edge
+    /// it has just walked — so a ball comes back the ball that went out.
+    ///
+    /// **Gap, and what is left of it is two shapes.** A pole whose wire does not
+    /// turn back along one edge there, and a pole that is not where the face's
+    /// surface pinches — a ball turned so its poles are no longer on the `z`
+    /// line through its centre, where this kernel's [`Sphere`](rcad_geom::Sphere)
+    /// pinches. The reader would put that pole back where the surface does not
+    /// pinch, which `Model::validate` refuses, and writing a file this kernel
+    /// will not read back is not a round trip. The first is a `VERTEX_LOOP`
+    /// away, which the reader does not walk yet
+    /// ([`Refusal::ALoopThisReaderDoesNotWalk`](crate::Refusal::ALoopThisReaderDoesNotWalk));
+    /// the second wants a placed solid on the way back in, which the reader
+    /// never builds.
+    #[error("a wire in this model stands still at a pole this writer cannot leave unwritten")]
     AWireThatStandsStillAtAPole,
 
     /// The two faces either side of an edge do not name the curve it runs
     /// along.
     ///
-    /// **Gap, and it is `EdgeView::run` being `pub(crate)`.** The model knows
-    /// exactly what this edge runs along; a run is un-located geometry and
-    /// handing one out wants an `EdgeRun::transformed`, which wants a
-    /// `HalfSpace::transformed` in `rcad-geom` — the *same single missing
-    /// function* §42.5's lane reported for a placement argument and §42.10's
-    /// reported for a turned arc. This lane is its third consumer.
+    /// **Gap.** The model knows exactly what this edge runs along, and
+    /// `EdgeView::run` hands the located run out since `EdgeRun::transformed`
+    /// landed — the function §42.5's lane reported missing for a placement
+    /// argument and §42.10's for a turned arc. What closes the gap is reading
+    /// it for every edge rather than for a ball's seam alone.
     ///
-    /// Until then this writer derives the curve from the two surfaces either
-    /// side, which is what §24.3 says an edge *is*, and that reaches every
-    /// curve except the ones a surface has to be cut open along: a sphere's
-    /// meridian seam runs between the two poles, which are in a line with the
-    /// centre, so no plane through them is picked out by the ends.
+    /// This writer derives the curve from the two surfaces either
+    /// side, which is what §24.3 says an edge *is*. The one curve it reads off
+    /// the run instead is a ball's seam: it runs between the two poles, which
+    /// are in a line with the centre, so no plane through them is picked out by
+    /// the ends, and the located run [`EdgeView::run`](rcad_topo::EdgeView::run)
+    /// hands out — it is `pub` now — names the plane it was cut from.
     #[error(
         "an edge between a {first} and a {second} runs along a curve those two do not name \
          (closed: {closed})"
@@ -293,17 +304,28 @@ impl Writing {
     /// The shell is taken as its solid handed it out and never looked up again
     /// by key: `Model::shell` sees it un-located, so a placed solid would be
     /// written where it was built rather than where it was put (§191).
+    ///
+    /// **A pole is left unwritten where the wire turns back along the edge it
+    /// has just walked**, the way a real file writes a ball, and the reader puts
+    /// it back at exactly that turn. See [`CannotWrite::AWireThatStandsStillAtAPole`]
+    /// for the poles that are refused instead.
     fn solid_from_shell(&mut self, model: &Model, shell: ShellView<'_>) -> Result<(), CannotWrite> {
         let mut either_side: HashMap<EdgeKey, Vec<Surface>> = HashMap::new();
         for face in shell.faces() {
             let surface = face.surface();
             for wire in face.wires() {
-                for step in wire.steps() {
-                    match step {
+                let walk: Vec<WireStepView<'_>> = wire.steps().collect();
+                for (position, step) in walk.iter().enumerate() {
+                    match *step {
                         WireStepView::Along(coedge) => either_side
                             .entry(coedge.edge().key())
                             .or_default()
                             .push(surface),
+                        WireStepView::Pole(pole)
+                            if the_wire_turns_back_at(&walk, position)
+                                && surface
+                                    .the_way_its_first_coordinate_runs_at(pole.point())
+                                    .is_none() => {}
                         WireStepView::Pole(_) => {
                             return Err(CannotWrite::AWireThatStandsStillAtAPole);
                         }
@@ -331,8 +353,10 @@ impl Writing {
             for (which, wire) in face.wires().enumerate() {
                 let mut steps = Vec::with_capacity(wire.step_count());
                 for step in wire.steps() {
+                    // Every pole left here was found to be one the file can
+                    // leave unwritten by the pass above.
                     let WireStepView::Along(coedge) = step else {
-                        return Err(CannotWrite::AWireThatStandsStillAtAPole);
+                        continue;
                     };
                     let key = coedge.edge().key();
                     let forwards = !coedge.orientation_on_its_edge().is_reversed();
@@ -347,7 +371,7 @@ impl Writing {
                             let written = self.edge_curve(
                                 model,
                                 &mut corners,
-                                key,
+                                (key, &coedge.edge().run()),
                                 (start.key(), start.point()),
                                 (end.key(), end.point()),
                                 either_side.get(&key).map_or(&[][..], Vec::as_slice),
@@ -379,12 +403,13 @@ impl Writing {
         Ok(())
     }
 
-    /// One `EDGE_CURVE`, with the corners and the curve it needs.
+    /// One `EDGE_CURVE`, with the corners and the curve it needs. The run is
+    /// the located one, where the solid is placed.
     fn edge_curve(
         &mut self,
         model: &Model,
         corners: &mut HashMap<VertexKey, u64>,
-        edge: EdgeKey,
+        (edge, run): (EdgeKey, &EdgeRun),
         start: (VertexKey, Point),
         end: (VertexKey, Point),
         either_side: &[Surface],
@@ -402,7 +427,7 @@ impl Writing {
                 });
             }
         };
-        let curve = self.curve(first, second, start.1, end.1, closed)?;
+        let curve = self.curve(first, second, run, start.1, end.1, closed)?;
         let from = self.vertex_point(corners, start);
         let to = self.vertex_point(corners, end);
         Ok(self.entity(&format!("EDGE_CURVE('',#{from},#{to},#{curve},.T.)")))
@@ -426,14 +451,18 @@ impl Writing {
     ///   of everything this kernel can put on a cylinder, only the straight one
     ///   joins two such corners.
     ///
+    /// And one the surfaces do not name, which is read off the run instead:
+    /// **a seam of one ball from pole to pole** — see
+    /// [`Writing::a_seam_of_one_ball`].
+    ///
     /// Everything else refuses by name, and
-    /// [`CannotWrite::ACurveTheFacesEitherSideOfItDoNotName`] says why the
-    /// alternative — asking the model what the edge runs along — is one
-    /// function away in another crate.
+    /// [`CannotWrite::ACurveTheFacesEitherSideOfItDoNotName`] says what closes
+    /// it.
     fn curve(
         &mut self,
         first: &Surface,
         second: &Surface,
+        run: &EdgeRun,
         start: Point,
         end: Point,
         closed: bool,
@@ -469,6 +498,9 @@ impl Writing {
                 }
                 Ok(self.line(start, end - start))
             }
+            (Surface::Sphere(ball), Surface::Sphere(other)) if !closed && ball == other => self
+                .a_seam_of_one_ball(ball, run, start, end)
+                .ok_or_else(refuse),
             (Surface::Plane(_), Surface::Plane(_))
             | (Surface::Plane(_), Surface::Cylinder(_))
             | (Surface::Cylinder(_), Surface::Plane(_))
@@ -499,6 +531,58 @@ impl Writing {
             // yet, since every one that exists today has its own line above.
             _ => Err(refuse()),
         }
+    }
+
+    /// The half of a great circle a ball's seam runs along from `start` to
+    /// `end`, or `None` where this is not one.
+    ///
+    /// **Only between the two poles**, where the ball has no way round
+    /// ([`Surface::the_way_its_first_coordinate_runs_at`]), which is exactly on
+    /// the `z` line through the centre. A plane through both poles holds that
+    /// line and so the centre, so the seam is half of the circle of the ball's
+    /// own centre and radius in the plane the run was cut from. An edge with
+    /// the one ball on both sides and its ends anywhere else could be an arc of
+    /// a smaller circle, and is refused rather than written as a great one.
+    ///
+    /// **Which half is the way the circle turns.** A `CIRCLE` runs the way a
+    /// right hand turns about its axis `w`, and the reader names the arc from
+    /// `A` to `B` by the half-space facing `(B − A) × w`, which every point of
+    /// that arc is strictly in front of (`Walk::the_arc_between`). So `w` is the
+    /// plane's normal turned whichever way puts `(B − A) × w` on the side the
+    /// run's own half-space faces. The sign is read in plain `f64`: the two
+    /// directions are along each other or opposite, never square, so a dot
+    /// that comes out zero is a run this does not recognise and is refused.
+    fn a_seam_of_one_ball(
+        &mut self,
+        ball: &Sphere,
+        run: &EdgeRun,
+        start: Point,
+        end: Point,
+    ) -> Option<u64> {
+        let skin = Surface::Sphere(*ball);
+        let at_a_pole = |corner: Point| skin.the_way_its_first_coordinate_runs_at(corner).is_none();
+        if start == end || !at_a_pole(start) || !at_a_pole(end) {
+            return None;
+        }
+        let EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(cut),
+            picked_by,
+        } = run
+        else {
+            return None;
+        };
+        let [Picker::InFrontOf(picking)] = picked_by.as_slice() else {
+            return None;
+        };
+        let leaning = (end - start).cross(cut.normal()).dot(picking.normal());
+        let axis = if leaning > 0.0 {
+            cut.normal()
+        } else if leaning < 0.0 {
+            -cut.normal()
+        } else {
+            return None;
+        };
+        Some(self.circle(ball.centre(), axis, ball.radius()))
     }
 
     fn line(&mut self, from: Point, along: Vector) -> u64 {
@@ -630,6 +714,21 @@ impl Writing {
         self.text += "ENDSEC;\nEND-ISO-10303-21;\n";
         self.text
     }
+}
+
+/// Whether the pole at `position` of `walk` stands where the wire turns back
+/// along the edge it has just walked: the step before it walks an edge with
+/// two corners into the pole, and the step after walks that same edge straight
+/// back out. That is the turn the reader puts a pole back at, and no other.
+fn the_wire_turns_back_at(walk: &[WireStepView<'_>], position: usize) -> bool {
+    let before = walk[(position + walk.len() - 1) % walk.len()];
+    let after = walk[(position + 1) % walk.len()];
+    let (WireStepView::Along(there), WireStepView::Along(back)) = (before, after) else {
+        return false;
+    };
+    there.edge().key() == back.edge().key()
+        && there.start().key() != there.end().key()
+        && there.end().key() == back.start().key()
 }
 
 /// A point on `flat` from which this crate's reader works out `flat`'s own

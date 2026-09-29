@@ -25,10 +25,13 @@
 //!
 //! `two_cubes_that_write` is two cubes of side 2, one at the origin and one at
 //! `(1, 1, 1)` — 12 faces, 16 corners — which writes 10 435 bytes of Part 21.
-//! `a_ball_whose_pole_the_writer_refuses` is one ball of radius 2, which is
+//! `a_ball_whose_pole_the_writer_refuses` is one ball of radius 2, which was
 //! refused `AWireThatStandsStillAtAPole`: a named gap deep inside
 //! `solid_from_shell`, not one of the two doorstep refusals. One either side,
-//! and the second one reaches past where the corpus had ever been.
+//! and the second one reached past where the corpus had ever been. **Its name
+//! is out of date**: since Q730 the writer leaves a ball's poles unwritten, the
+//! reader puts them back where the seam turns, and the ball comes back the
+//! same, so both control seeds now land on the written side.
 //!
 //! **These two seeds are `postcard` bytes, so they stop decoding if `Model`'s
 //! serialized shape changes.** That is the alarm working, not a fragility: a
@@ -43,7 +46,7 @@
 //! seed here had ever decoded into a model with a curved face — the sixteen
 //! empty decodes above have no faces at all, and of the two control seeds,
 //! `two_cubes_that_write` is planar and `a_ball_whose_pole_the_writer_refuses`
-//! is refused before it is ever measured. Mutating `postcard` bytes almost
+//! was refused before it was ever measured. Mutating `postcard` bytes almost
 //! never lands on a shape whose internal keys are even self-consistent (16 of
 //! 1180), let alone one whose curved corners also certify onto their surface
 //! the way `Model::validate` asks — every curved shape in this corpus, cube or
@@ -100,10 +103,11 @@
 //!           solids_the_same: 5, came_back_the_same: 4 }
 //! ```
 //!
-//! Only the bar and the moved bar are written. The other five are refused by
-//! name — the ball at its pole, and the frustum, the cone, the bend and the
-//! turned bar at a curve between two faces the writer cannot name yet — and
-//! §241 lists what that costs the fuzzer.
+//! Only the bar and the moved bar were written then. The other five were
+//! refused by name — the ball at its pole, and the frustum, the cone, the bend
+//! and the turned bar at a curve between two faces the writer cannot name yet —
+//! and §241 lists what that costs the fuzzer. Since Q730 the ball is written
+//! and comes back the same, so four are refused.
 
 #![forbid(unsafe_code)]
 
@@ -300,9 +304,11 @@ fn every_seed_in_the_checked_in_corpus_is_written_without_panicking() {
     );
 }
 
-/// The two named seeds, each asserted to be the thing it was checked in as.
+/// The two named seeds, each asserted to be the thing it was checked in as —
+/// and the second is no longer what its name says: the writer leaves a ball's
+/// poles unwritten now, and the ball comes back the same.
 #[test]
-fn the_two_named_control_seeds_still_land_either_side_of_the_writer() {
+fn the_two_named_control_seeds_are_written_and_come_back() {
     let writes = std::fs::read(corpus().join("two_cubes_that_write"))
         .expect("the control seed is checked in");
     let reached = one_model_decoded_and_written(&writes);
@@ -322,9 +328,10 @@ fn the_two_named_control_seeds_still_land_either_side_of_the_writer() {
     let reached = one_model_decoded_and_written(&pole);
     assert_eq!(reached.decoded, 1, "{reached:?}");
     assert_eq!(
-        reached.refused, 1,
-        "a ball's pole is a wire step that stands still, which this writer \
-         refuses by name: {reached:?}"
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "a ball's poles are left unwritten and put back by the reader, so the \
+         ball comes back the same: {reached:?}"
     );
 }
 
@@ -431,7 +438,7 @@ fn every_shape_seed_is_the_shape_it_is_named_for() {
             seed: "a_ball_of_radius_three",
             faces: &["sphere"],
             centroid: [0.0, 0.0, 0.0],
-            comes_back: false,
+            comes_back: true,
         },
         Shape {
             seed: "a_frustum_of_a_half_slope_cone",

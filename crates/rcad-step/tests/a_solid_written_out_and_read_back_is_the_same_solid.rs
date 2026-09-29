@@ -206,23 +206,47 @@ fn where_its_corners_are(solid: rcad_topo::SolidView<'_>) -> Vec<[u64; 3]> {
     corners
 }
 
-/// A ball is refused, by the name of the thing an `EDGE_LOOP` cannot say.
+/// A ball: one face, a seam from pole to pole, and two poles the wire stands
+/// still at.
 ///
-/// **A refusal recorded as a test rather than as a sentence.** A ball's one
-/// wire is four steps and two of them stand still on a pole, which STEP writes
-/// as a `VERTEX_LOOP` and
-/// [`Refusal::ALoopThisReaderDoesNotWalk`](rcad_step::Refusal) will not read
-/// back. Writing a file this kernel cannot read is not a round trip, so the
-/// writer refuses first. The ball's seam is refused for a second, independent
-/// reason — see the next test.
+/// A ball's one wire is four steps, and two of them stand still on a pole.
+/// The file leaves both poles unwritten and walks the seam there and back, the
+/// way `kicad/LED_D5.0mm.step` writes its dome, and the reader puts a pole
+/// back at each turn. The seam is half of a great circle, which is written as
+/// the `CIRCLE` of the ball's own centre and radius turned the way that picks
+/// the half the model's seam is.
 #[test]
-fn a_ball_is_refused_because_an_edge_loop_cannot_stand_still_at_a_pole() {
-    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
-    model
-        .add_ball(4.0, &Isometry::identity())
-        .expect("a ball of radius four");
+fn a_ball_written_out_and_read_back_is_the_same_ball() {
+    let mut covered = Covered::new();
+    covered.the_same_solid_comes_back(
+        "a ball of radius four",
+        Scale::new(Unit::Millimetre, 4.0).expect("a working size"),
+        &|model| {
+            model
+                .add_ball(4.0, &Isometry::identity())
+                .expect("a ball of radius four")
+        },
+        // A block under the ball whose top is the equator's plane: it cuts the
+        // seam in two at `(4, 0, 0)`, so the comparison reaches the seam a
+        // round trip rewrote.
+        &|model| a_block(model, [10.0, 10.0, 5.0], Vector::new(-5.0, -5.0, -5.0)),
+    );
+    covered.report("a ball");
+}
 
-    let refused = rcad_step::write(&model, "a ball");
+/// A ball turned so its poles leave the `z` line through its centre is
+/// refused, because this kernel's sphere pinches only on that line.
+///
+/// The reader would put each pole back where it was written, which is where
+/// the ball it reads does not pinch, and `Model::validate` refuses such a pole.
+/// A ball moved without a turn is still written: its poles stay on the line.
+#[test]
+fn a_ball_turned_off_z_is_refused_at_its_pole() {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let turned = Isometry::rotation(&rcad_geom::Axis::x(), 0.5).expect("a finite angle");
+    model.add_ball(4.0, &turned).expect("a ball of radius four");
+
+    let refused = rcad_step::write(&model, "a turned ball");
     assert!(
         matches!(refused, Err(CannotWrite::AWireThatStandsStillAtAPole)),
         "expected the pole to stop it, got {refused:?}"

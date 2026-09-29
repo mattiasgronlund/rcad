@@ -60,10 +60,11 @@
 //! - A skew pair: 122 of 144 decided from exact text, and no refusal
 //!   introduced at any of the three digit counts. Before §368, 77 of the 122
 //!   were refused at 13 digits.
-//! - A lattice pair and a bar through a block: no real moves at any of the three
-//!   digit counts, because every number is a whole one, so those rows are
-//!   controls and not measurements.
-//! - A ball and a frustum: the writer refuses every one, so nothing is read.
+//! - A lattice pair, a bar through a block and a ball and a block: no real
+//!   moves at any of the three digit counts, because every number is a whole
+//!   one, so those rows are controls and not measurements. The ball and block
+//!   decide all 144 fuses at each.
+//! - A frustum: the writer refuses every one, so nothing is read.
 //! - The writer dropped a solid's placement:
 //!   [`a_cube_moved_along_x_is_written_where_it_was_moved_to`], fixed in §191.
 //!
@@ -162,24 +163,25 @@ fn a_frustum_up_through_a_block_never_reaches_the_reader_because_the_writer_refu
     );
 }
 
-/// **Compares nothing, and says so.** The writer refuses every ball, because a
-/// ball's wire stands still at a pole and an `EDGE_LOOP` cannot say that —
-/// `a_ball_is_refused_because_an_edge_loop_cannot_stand_still_at_a_pole` in
-/// `a_solid_written_out_and_read_back_is_the_same_solid.rs`. So the family
-/// cannot reach the reader by this road. The day the writer learns balls, this
-/// fails and becomes a row like the others.
+/// Every ball of the family is written and read back, since the writer leaves
+/// a ball's poles unwritten and the reader puts them back where the seam turns
+/// (`a_ball_written_out_and_read_back_is_the_same_ball` in
+/// `a_solid_written_out_and_read_back_is_the_same_solid.rs`). Until then the
+/// writer refused all 48 at the pole and nothing reached the reader.
+///
+/// Every number in the family is a whole one, so no real moves at any digit
+/// count and this row is a control, like the lattice pair.
 #[test]
-fn a_ball_and_a_block_never_reaches_the_reader_because_the_writer_refuses_a_ball() {
+fn a_ball_and_a_block_read_back_from_rounded_text() {
     let tally = a_family_read_back_from_rounded_text(
         "a ball and a block",
         a_ball_and_a_block(),
         BallAndBlock::build,
     );
     tally.all_answers_right();
-    assert_eq!(
-        tally.not_written.get("AWireThatStandsStillAtAPole"),
-        Some(&(CASES as usize)),
-        "every ball was expected to stop the writer: {:?}",
+    assert!(
+        tally.not_written.is_empty(),
+        "every ball and block was expected to be written: {:?}",
         tally.not_written
     );
 }
