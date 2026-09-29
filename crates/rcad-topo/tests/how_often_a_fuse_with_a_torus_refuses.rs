@@ -91,9 +91,9 @@
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
 mod rings;
 
@@ -474,33 +474,48 @@ fn no_box_of_planes_can_close_round_a_torus_axis_without_a_quartic() {
 ///
 /// **So the difference is answered, and the answer is nothing**, which is what
 /// a solid less itself is. The union and the intersection keep the first
-/// bend's three faces and drop the copy's — the table's "keep once" — and then
-/// writing those three faces back as a solid is refused:
-/// `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`. The pieces chosen
-/// are the bend itself, so that refusal is about writing an answer out and not
-/// about which pieces were chosen (§243).
+/// bend's three faces and drop the copy's — the table's "keep once" — and are
+/// the bend again: one solid that validates and holds `2π²`. Until the bend's
+/// wall was used forwards, writing those three faces back was refused,
+/// `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay` (§243, §361).
 ///
 /// This is still the one place in the file where the arrangement is reached
 /// at all, and so the one that says the ordering added for a bend is real code
 /// and not a gate nothing walks through.
 #[test]
-fn a_bend_fused_with_a_copy_of_itself_is_nothing_less_it_and_refused_otherwise() {
+fn a_bend_fused_with_a_copy_of_itself_is_the_bend_or_nothing() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let first = a_quarter_bend(&mut model, 4.0, 1.0);
     let second = a_quarter_bend(&mut model, 4.0, 1.0);
 
     for rule in [Rule::Union, Rule::Intersection] {
-        let mut log = ProvenanceLog::new();
-        let refused = model.fuse(&[first], &[second], rule, &policy, &mut log);
+        let mut answer = model.clone();
+        let fused = answer
+            .fuse(&[first], &[second], rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?} of a bend and a copy of itself: {why}"));
+        let [bend] = fused.solids() else {
+            panic!("{rule:?} of a bend and a copy of itself: {fused:?}");
+        };
+        answer
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?}: the answer does not validate: {why}"));
+        let measured = answer
+            .solid(*bend)
+            .expect("the fuse made the key")
+            .measure(
+                Deflection::of(0.01).expect("a hundredth of the tube"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{rule:?}: the answer measures: {why}"));
+        let pappus = 2.0 * core::f64::consts::PI * core::f64::consts::PI;
         assert!(
-            matches!(
-                refused,
-                Err(Error::TheFuseWroteABrokenAnswer {
-                    broken: Invalid::CoedgesRunTheSameWay
-                })
-            ),
-            "{rule:?} of a bend and a bit-for-bit copy of itself: {refused:?}"
+            (measured.volume() - pappus).abs() <= measured.volume_error(),
+            "{rule:?}: a quarter bend of ring four and tube one holds {pappus}, and the answer \
+             measures {} give or take {}",
+            measured.volume(),
+            measured.volume_error()
         );
     }
     let mut log = ProvenanceLog::new();

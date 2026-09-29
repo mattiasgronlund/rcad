@@ -143,25 +143,19 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// A quarter bend built face by face is the bend `rings::a_quarter_bend`
 /// builds.
 ///
-/// The measurement half of the oracle is exactly the cube's, the bar's and
-/// the ball's: volume, area and centroid, read through views only, compared
-/// bit for bit. The fuse half cannot copy `the_same_numbers`'s shape, because
-/// **no solid this kernel holds fuses with a torus-faced solid into a solid
-/// today** — not a plane-bounded block, not a second bend on the bend's own
-/// axis, not even a bit-for-bit copy of the bend itself
-/// (`a_bend_fused_with_a_copy_of_itself_is_nothing_less_it_and_refused_otherwise`
-/// in `how_often_a_fuse_with_a_torus_refuses.rs` is the demonstration: a bend
-/// less its copy is answered, and is nothing, and the union and the
-/// intersection are refused writing the bend back out).
+/// The oracle is the cube's, the bar's and the ball's, `the_same_numbers`:
+/// volume, area and centroid, read through views only, compared bit for bit,
+/// for each bend and for what is left of each once a second bend on the same
+/// ring, turned an eighth of a turn, is taken away. What is left is an eighth
+/// of the ring, and it holds `π²` by Pappus. The fuse reads topology the
+/// measurement never touches — the arrangement places and orders the corners
+/// the rebuild itself produced, walks round them and cuts every face into
+/// pieces — so a coedge walked backwards or a picker handed the wrong sign
+/// shows up as two different answers.
 ///
-/// So the fuse half of the oracle here compares the **refusal**: the same
-/// rule against the same third solid must refuse the same way for both.
-/// That still reads topology the measurement never touches — the refusal is
-/// raised once the arrangement has placed and ordered the corners the rebuild
-/// itself produced, walked round them and cut every face into pieces, so a
-/// coedge walked backwards or a picker handed the wrong sign would have to be
-/// caught before that walk gets as far as the question both descriptions are
-/// shown to answer alike.
+/// Until the bend's wall was used forwards the fuse half compared refusals
+/// instead, because every stop below was met by both descriptions alike. The
+/// history of those stops follows.
 ///
 /// **It used to be which side of a plane a point exactly on it is.** The
 /// turned bend's end cap at three eighths of a turn is on the plane
@@ -205,12 +199,11 @@ fn a_ball_built_face_by_face_is_the_ball_add_ball_builds() {
 /// ray leaves from an exact point beside a box no face meets now (§323), and
 /// the piece is placed.
 ///
-/// **Both descriptions now stop writing the answer out**, and refuse it word
-/// for word alike: `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`, the
-/// stop a bend and a bit-for-bit copy of itself reach too. The answer exists —
-/// the first bend from `y = 0` to the turned bend's first cap, an eighth of the
-/// ring, `π²` by Pappus — so this is a gap, and when it closes this half of the
-/// oracle becomes `the_same_numbers`.
+/// **Then both descriptions stopped writing the answer out**, word for word
+/// alike: `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`, the stop a
+/// bend and a bit-for-bit copy of itself reached too. That was the bend's wall
+/// used turned round, against the way a torus faces; built the way the
+/// standard writes it, the answer is written out and measures `π²` (§361).
 ///
 /// **Every place asked about here is answered from the shape**, not from what
 /// the kernel says. The turned bend runs from `45°` round the ring to `135°`.
@@ -265,23 +258,29 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
             .expect("this model made the key");
         second
     };
-    let refusal_of_built =
-        refused_fusing_a_third_solid(&model, built, &a_turned_bend_of_the_same_ring_and_tube);
-    let refusal_of_rebuilt =
-        refused_fusing_a_third_solid(&model, rebuilt, &a_turned_bend_of_the_same_ring_and_tube);
-    assert!(
-        matches!(
-            refusal_of_built,
-            Error::TheFuseWroteABrokenAnswer {
-                broken: Invalid::CoedgesRunTheSameWay
-            }
-        ),
-        "expected the eighth of the bend to be refused writing it out, got {refusal_of_built:?}"
+    the_same_numbers(
+        &model,
+        built,
+        rebuilt,
+        &a_turned_bend_of_the_same_ring_and_tube,
     );
-    assert_eq!(
-        format!("{refusal_of_built}"),
-        format!("{refusal_of_rebuilt}"),
-        "the kernel-built bend and the one described again refused the same fuse differently"
+    let pieces = cut_by_a_third_solid(
+        &model,
+        built,
+        &a_turned_bend_of_the_same_ring_and_tube,
+        deflection,
+    )
+    .expect("the bend less the turned bend is answered");
+    let [eighth] = pieces.as_slice() else {
+        panic!("the bend less the turned bend is one piece, not {}", pieces.len());
+    };
+    let pappus = core::f64::consts::PI * core::f64::consts::PI;
+    assert!(
+        (eighth.volume() - pappus).abs() <= eighth.volume_error(),
+        "an eighth of the ring of four round a tube of one holds {pappus}, and the piece \
+         measures {} give or take {}",
+        eighth.volume(),
+        eighth.volume_error()
     );
 
     let mut scratch = model.clone();
@@ -462,37 +461,6 @@ fn a_seam_of_a_bend_named_the_way_a_file_names_one(edge: EdgeView<'_>) -> EdgeRu
             ),
         ],
     }
-}
-
-/// One solid of the model, fused with a third one under [`Rule::Difference`],
-/// on a clone so the two runs this is called from cannot see each other's
-/// answer — the refusal `cut_by_a_third_solid` expects not to happen here.
-fn refused_fusing_a_third_solid(
-    model: &Model,
-    which: SolidKey,
-    cutter: &dyn Fn(&mut Model) -> SolidKey,
-) -> Error {
-    let policy = Policy::certified();
-    let position = model
-        .solids()
-        .position(|solid| solid.key() == which)
-        .expect("the solid is in the model it came from");
-    let mut scratch = model.clone();
-    let keep = scratch
-        .solids()
-        .nth(position)
-        .expect("a clone holds the same solids in the same order")
-        .key();
-    let knife = cutter(&mut scratch);
-    scratch
-        .fuse(
-            &[keep],
-            &[knife],
-            Rule::Difference,
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-        .expect_err("a bend does not fuse successfully with anything this lane found")
 }
 
 /// A box of the given lengths, with its low corner at `at`.
