@@ -51,8 +51,9 @@ the write set goes in `out_of_write_set_needs`.
 `crash` or `refuses`, then `/A` when a real input met it, `/B` for a shape
 designers make on purpose, `/C` when only a probe builds it, `/D` when it lies
 outside §3.5's scale envelope, with the number that puts it there. A hypothesis
-nobody has run is `/C` at most. Mark an item `small` when it needs no trace, its
-place is known, and it takes about ten minutes. A defect is never small.
+nobody has run gets no class at all (§360.5). Mark an item `small` when it
+needs no trace, its place is known, and it takes about ten minutes. A defect is
+never small.
 
 **A brief naming several rows is a bundle of small rows** (§352.4): one branch,
 one report. Do each, and commit each on its own so its verifier and merger can

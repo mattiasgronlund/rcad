@@ -53,6 +53,13 @@ in `needs_judgement`.
   the row's write set. Bump it yourself anyway, outside the write set, when
   the value is the one the check itself demands and no open row already owns
   that recipe; say so in the merge commit, as 80571131 did.
+- A stale citation or a dated note in a decisions section, made stale by the
+  lane's own change, is yours to fix outside the write set too: a section that
+  still calls the row open, or quotes a number the change moved. Fix it when it
+  is a few lines and no row in `mise exec -- just queue running` has a write
+  set holding that file (a `docs/decisions.d/` entry holds every section), and
+  say so in the merge commit. Otherwise file it. On 09-29 seven such notes were
+  filed as rows instead (§360.6).
 
 ## 3. Merge, close the row, add the rows it leaves
 
@@ -76,7 +83,10 @@ in `needs_judgement`.
    item of the "what this leaves" of a section the merge brings (§230.7). §N is
    that section, or the one the row cites. Skip what is already a row — `just
    queue` lists them — and use `mise exec -- just queue after <id> <id>` for
-   one that waits on another. Tiers are §230.1's in §311's order — 1 a new
+   one that waits on another. A row whose fix adds a refusal, or turns a panic
+   into one, names its crate's `error.rs` in its write set, since the new
+   variant goes there: Q574, Q604 and Q605 were each dropped and filed again
+   for want of it (§360.6). Tiers are §230.1's in §311's order — 1 a new
    defect, 2 a follow-up that measures or improves what the tests and the
    nights search — with §307's 2.2 between 2 and 2.5: a row that changes how
    the work is done — the queue and its verbs, the lanes workflow and its
@@ -92,12 +102,14 @@ in `needs_judgement`.
    lane's `remaining` gives and you judge where it does not: `wrong`, `crash`
    or `refuses`, then `/A` a real input met it, `/B` a shape designers make on
    purpose, `/C` only a probe builds it, `/D` outside §3.5's scale envelope. A
-   hypothesis nobody has run is `/C` at most. The first word of a row in any
+   hypothesis nobody has run gets no class at all, whatever it predicts
+   (§360.5): C is for what a probe has built. The first word of a row in any
    tier is `small` when it needs no trace, its place is known, and it takes
    about ten minutes. One tag at most; a defect is never small. A stale claim
    or a missing test the lane's own change caused, inside its write set, is
    not a row (§352.5): make it a step 2 fix when it is a few lines, and file
-   it only when it is not.
+   it only when it is not. Nor is a stale note in a decisions section that
+   step 2's last bullet lets you fix.
 5. If §0 names what this merge closes (`mise exec -- just decision 0`), edit
    §0 in this same commit (§172.5).
 6. `mise exec -- just check-queue`.

@@ -84,7 +84,7 @@ How likely, as buckets tied to evidence rather than a guessed percentage:
 - **B, typical**: a shape designers make on purpose (tangent, flush, coaxial,
   a fillet), or one that a turn or a file written to 11–13 digits rounds apart.
 - **C, possible**: inside §3.5's scale envelope, but only a probe builds it. A
-  hypothesis nobody has run is C at most.
+  hypothesis nobody has run has no class until a lane runs it (§360.5).
 - **D, never**: outside §3.5's envelope, with the number that puts it there,
   such as Q325's bar moved by 2^-1007 or Q335's towers 1e308 tall. That number
   is the demonstration §16.10 asks for.
@@ -101,6 +101,11 @@ The fill walks tier 1 in this order:
 - **Rows with no class go just above D.** That is where `add` puts a new row
   today, at the foot of its tier, so a merger that knows nothing of classes
   changes nothing in the order.
+
+*§360.5 changed the C bucket on 2026-09-29. It said "a hypothesis nobody has
+run is C at most", and every guess came in as C, so the walk took guesses
+ahead of every refusal a user meets and the A-or-B count stood still. A guess
+now has no class until a lane runs it, and 19 open rows lost their class.*
 
 The file's line order breaks ties only inside one class. **The fill sorts by
 class; the lines do not have to be in class order.** They could not be kept
@@ -165,7 +170,7 @@ These rows have no user who could meet them, so the classes do not fit them.
   so, and `merger.md` step 4 makes such a thing a step 2 fix when it is a few
   lines. This is §230.7's one exception.
 - **Hypotheses are filed.** One that predicts a kernel defect is a tier 1 row
-  with a class, C at most until someone runs it. Any other goes in its tier.
+  with no class until someone runs it (§360.5). Any other goes in its tier.
   A row of the form "build a shape that reaches this code, or show none can"
   is such a hypothesis when reaching the code would be a defect. When the code
   there is already right and the row only asks for a test that fails without
