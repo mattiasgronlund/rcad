@@ -42,6 +42,20 @@ A tree somebody works in by hand without locking it loses its `target/` once an
 hour. kache refills it, which is the whole reason the recipe calls itself safe.
 Lock the tree if the refill costs you.
 
+**A lane still being verified is not covered by that advice, and this is the
+cost the hour brings with it.** The verifier's first step is to unlock the
+lane's tree (`.claude/agents/verifier.md`, for §263.4's slot count). From then
+until the merger finishes, the lane's `target/` is unlocked while a verifier and
+a merger may still want to read what is in it. A clean run by hand did exactly
+that to Q354 on 2026-09-29: its probe logs went while it sat at its verifier,
+and the merger had to file reruns because the figures now rested on the lane's
+word alone. Before this timer, that took somebody running a clean at the wrong
+moment. Now it happens to any run whose checking spans the top of an hour. The
+timer stays anyway: a full disk stops every lane at once, and losing one run's
+probe logs costs one rerun. The fix belongs in `clean-targets`,
+which should leave alone a tree whose branch belongs to a queue row still
+running, and it is queued as its own row rather than done here.
+
 ### 371.3 Installing it
 
 ```
