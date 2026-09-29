@@ -122,8 +122,10 @@ impl Model {
     /// - **The rounding room is this solid's own.** How far a corner may sit off
     ///   the plane of its face, or off its curved surface, grows with the
     ///   largest coordinate in the model. Here that is the largest coordinate
-    ///   among this solid's own corners. Keeping the whole model's would let a
-    ///   solid a long way off widen the room a small cube's corners get, and
+    ///   among this solid's own corners, read where they are stored or where the
+    ///   solid's placement puts them, whichever is smaller
+    ///   ([`Model::largest_coordinate_in`]). Keeping the whole model's would let
+    ///   a solid a long way off widen the room a small cube's corners get, and
     ///   accept a corner off its plane because of a neighbour. Accepting a
     ///   broken solid is the worse of the two ways to be wrong.
     /// - **The coordinate range is this solid's own**, largest coordinate
@@ -1588,9 +1590,9 @@ impl Model {
     /// face may sit a `default_linear_tolerance` off its plane, and a corner of
     /// a curved face may sit off its surface only by the width of the number.
     ///
-    /// The size it is measured against is the largest coordinate any corner of
-    /// the model holds, which is the same size the flat check uses so that the
-    /// two have one standard. It does **not** grow with a surface's own numbers,
+    /// The size it is measured against is [`Model::largest_coordinate_in`], the
+    /// same size the flat check uses so that the two have one standard. It
+    /// does **not** grow with a surface's own numbers,
     /// so a pipe of radius `1e9` carrying a face at the origin gets a budget
     /// smaller than its own radius rounds by. That is the safe direction and it
     /// is untested here: too small a budget refuses a sound corner, where too
@@ -1599,19 +1601,78 @@ impl Model {
         MEASURING_SLACK * NEAREST_F64_POINT_ROUNDOFF * largest_coordinate
     }
 
-    /// The largest coordinate magnitude any corner in `scope` holds.
+    /// The size every room in this sweep is measured against: the largest
+    /// coordinate magnitude any corner in `scope` holds where it is stored, or
+    /// where its solid's placement puts it, **whichever is smaller**.
     ///
-    /// Read where the corners are stored, not where a placement puts them,
-    /// because every check that sizes its room from this reads its faces at
-    /// [`Isometry::identity`] too.
+    /// **A corner has two places, and it has to fit the room of both.** The
+    /// checks read every face at [`Isometry::identity`], so they measure how far
+    /// a corner is off its surface where the corner is stored, and that is where
+    /// its numbers were written down. Everything outside this crate finds the
+    /// corner where the placement puts it instead: a view composes the placement
+    /// in, the writer writes the corner there, and the reader builds the solid
+    /// there and sizes its room from there. How far the corner is off its
+    /// surface is the same in both places, up to the rounding in moving it, but
+    /// the room is not, because the room grows with the coordinates.
+    ///
+    /// Sized from where the corners are stored alone, a solid moved toward the
+    /// origin got more room here than the reader gives the same solid out of
+    /// its own file, and a model this passed was written as a file the reader
+    /// refuses (`docs/decisions.md` §363). Sized from where the placement puts
+    /// them alone, a placement read from a file could widen the room without
+    /// limit: a translation of `5.5e303` makes a corner `4.7e226` off its ball
+    /// read as on it. Taking the smaller of the two means a placement can
+    /// narrow the room and never widen it, so this passes nothing it passed
+    /// before it looked at placements.
     fn largest_coordinate_in(&self, scope: &Scope) -> f64 {
-        scope
+        let stored = scope
             .vertices
             .keys()
             .map(|slot| {
                 self.data().vertices[slot]
                     .point
                     .largest_coordinate_magnitude()
+            })
+            .fold(0.0, f64::max);
+        stored.min(self.largest_placed_coordinate_in(scope))
+    }
+
+    /// The largest coordinate magnitude any corner in `scope` holds, read where
+    /// its solid's placement puts it.
+    ///
+    /// A corner that no solid in `scope` reaches has no placement to read, so
+    /// it is read where it is stored. Only [`Model::validate`] meets one, and
+    /// it goes on to refuse the model for it.
+    fn largest_placed_coordinate_in(&self, scope: &Scope) -> f64 {
+        let mut placed: SecondaryMap<VertexSlot, f64> = SecondaryMap::new();
+        for slot in scope.solids.keys() {
+            let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
+            for step in solid
+                .faces()
+                .flat_map(FaceView::wires)
+                .flat_map(WireView::steps)
+            {
+                let corners = match step {
+                    WireStepView::Along(coedge) => [coedge.start(), coedge.end()],
+                    WireStepView::Pole(corner) => [corner, corner],
+                };
+                for corner in corners {
+                    let size = corner.point().largest_coordinate_magnitude();
+                    let slot = corner.key().slot_in(self.id());
+                    let widest = placed.get(slot).map_or(size, |&before| before.max(size));
+                    placed.insert(slot, widest);
+                }
+            }
+        }
+        scope
+            .vertices
+            .keys()
+            .map(|slot| {
+                placed.get(slot).copied().unwrap_or_else(|| {
+                    self.data().vertices[slot]
+                        .point
+                        .largest_coordinate_magnitude()
+                })
             })
             .fold(0.0, f64::max)
     }
@@ -3552,6 +3613,43 @@ mod tests {
             Err(Error::Invalid(broken)) => broken,
             other => panic!("the sweep should have refused this model, and gave {other:?}"),
         }
+    }
+
+    /// A block stored at `x` from 1000 to 1002 and moved back to the origin is
+    /// sized where it now sits, 2, because that is where the reader will size
+    /// it once the writer has written it there (`docs/decisions.md` §363).
+    #[test]
+    fn a_solid_moved_toward_the_origin_gets_the_room_of_where_it_now_sits() {
+        let mut model = an_empty_model();
+        let block = crate::ProfileBuilder::new(vec![
+            [1000.0, 0.0],
+            [1002.0, 0.0],
+            [1002.0, 2.0],
+            [1000.0, 2.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square two across");
+        let solid = model
+            .add_extrusion(&block, 2.0, &Isometry::identity())
+            .expect("a block two thick");
+        assert_eq!(largest_coordinate(&model), 1002.0);
+
+        let back = Isometry::translation(Vector::new(-1000.0, 0.0, 0.0)).expect("a finite offset");
+        model.place_solid(solid, &back).expect("this model's key");
+        assert_eq!(largest_coordinate(&model), 2.0);
+    }
+
+    /// A cube moved far from the origin keeps the room of where it is stored.
+    /// Where it now sits would give it more, and a placement read from a file
+    /// could then buy a corner as much room as it liked (§363).
+    #[test]
+    fn a_solid_moved_away_from_the_origin_gets_no_more_room_than_where_it_is_stored() {
+        let mut model = a_cube();
+        let at_rest = largest_coordinate(&model);
+        let cube = model.solids().next().expect("one solid").key();
+        let away = Isometry::translation(Vector::new(1.0e6, 0.0, 0.0)).expect("a finite offset");
+        model.place_solid(cube, &away).expect("this model's key");
+        assert_eq!(largest_coordinate(&model), at_rest);
     }
 
     #[test]
