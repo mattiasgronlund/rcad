@@ -46,9 +46,14 @@ hub_aligned := shell('bash "$1/tooling/hub-align/align.sh" "$1" || true', justfi
 list:
     @{{ just_executable() }} --list --unsorted
 
-# Every step of the gate, in the order CI runs them, and the one place that
-# order is written down. `check-gate-runs-every-check` reads this block to prove
-# no `check-*` recipe was written and then never run.
+# Every step of the gate, and the one place their order is written down.
+# `check-gate-runs-every-check` reads this block to prove no `check-*` recipe
+# was written and then never run.
+#
+# **The steps run at once since §372, so the order no longer says what runs
+# first.** It says three things: which failure the block names first when
+# several fail, the order in which steps take a free slot, and the order of the
+# steps that build with cargo, which still run one after another.
 #
 # **One step per line, joined by `\` into a single-line value.** The value is
 # what it always was — every consumer below word-splits it and none can tell —
@@ -68,8 +73,9 @@ list:
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
 #
-# **`check-wildcards-selftest` runs before `check-wildcards`, and the order is
-# the finding of §173.** The ledger check judges the tree with an instrument it
+# **`check-wildcards-selftest` comes before `check-wildcards`, and the order is
+# the finding of §173.** With both failing, the block names the selftest first,
+# and that is the point: the ledger check judges the tree with an instrument it
 # does not itself prove; the selftest proves the instrument against fixtures
 # whose answer is known. With the ledger first, a broken scan is reported as
 # "a new one, or a new variant reaching an old one" — a sentence about the tree,
@@ -488,12 +494,24 @@ gate-fresh image="rust:1-bookworm":
 # serves nothing. That is the audit: it re-runs about one gate in sixteen. If a
 # re-run fails where the record said pass, that is reported as a violation and
 # the record is deleted. `docs/decisions.md` §337.
-[doc("Everything, in the order CI runs it. `just gate quiet` prints only the summary; `just gate quiet fresh` serves nothing from an earlier green.")]
-gate mode="loud" verdicts="reuse":
+#
+# **The steps run at once, as many as there are cores.** In turn they took 308 s
+# on 24 idle cores; at once, with the steps that build with cargo run one after
+# another beside the rest, 91 s (§372.3). Each step writes its own log, and a
+# step's output reaches the terminal and `gate_log` whole, when it ends, under a
+# `===` line naming it, so no two steps' lines interleave. **A failure stops
+# nothing**: every step runs, the block names the first step of `gate_steps` that
+# failed, and the others that failed after it. Stopping early would mean killing
+# `test` and the slowest selftest, which start at once, and a lane would then
+# find its second failure one gate later. The third word is how many steps run
+# at once; `1` runs them in turn. `docs/decisions.md` §372.8 to §372.12.
+[doc("Every step, as many at once as there are cores. `just gate quiet` prints one line a step and the summary; `just gate quiet fresh` serves nothing from an earlier green; a third word `1` runs the steps in turn.")]
+gate mode="loud" verdicts="reuse" jobs="cores":
     #!/usr/bin/env bash
     set -uo pipefail
     mode='{{ mode }}'
     verdicts='{{ verdicts }}'
+    jobs='{{ jobs }}'
     # Named rather than defaulted, so a typo is a refusal and not a loud run.
     case "$mode" in
         loud|quiet) ;;
@@ -503,9 +521,19 @@ gate mode="loud" verdicts="reuse":
         reuse|fresh) ;;
         *) echo "just gate takes 'fresh' or nothing second, not '$verdicts'" >&2; exit 2 ;;
     esac
+    [ "$jobs" != cores ] || jobs={{ num_cpus() }}
+    if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+        echo "just gate takes how many steps to run at once, or nothing, third, not '{{ jobs }}'" >&2
+        exit 2
+    fi
     log='{{ gate_log }}'
     mkdir -p "$(dirname "$log")"
     : >"$log"
+    # One log a step, so that a failing step's tail is its own however many
+    # steps were writing beside it.
+    steps_dir="$log.steps"
+    rm -rf "$steps_dir"
+    mkdir -p "$steps_dir"
     j='{{ just_executable() }}'
     note() { echo "$1" | tee -a "$log"; }
 
@@ -550,46 +578,101 @@ gate mode="loud" verdicts="reuse":
         fi
     fi
 
-    failed=""
-    status=0
-    started_at=0
+    # The steps that build with cargo run one after another, in the order
+    # `gate_steps` gives them, beside everything else. Cargo locks the build
+    # directory, so two of them started together only wait on each other: all 56
+    # steps started at once took 110 s, not 91, and `test` waited on the lock
+    # seven times (§372.3). `check-t-selftest` also needs the binaries `test`
+    # built, which is why it comes after `test` in the list.
+    # `check-gate-runs-every-check` holds this line to the steps whose recipes
+    # run cargo, so a new one cannot be left off it unnoticed.
+    cargo_steps="check check-fuzz-builds check-wildcards check-ignored lint test check-release-build check-t-selftest"
+    names=()
+    chained=()
+    unchained=()
     for step in {{ gate_steps }}; do
         case " $served " in *" $step "*) continue ;; esac
+        case " $cargo_steps " in
+            *" $step "*) chained+=("${#names[@]}") ;;
+            *) unchained+=("${#names[@]}") ;;
+        esac
+        names+=("$step")
+    done
+    # Keyed by index rather than by name: a fixture list can name a step twice.
+    declare -A running=()
+    began=()
+    ended_with=()
+    chain_busy=""
+    start() {
+        began[$1]=${EPOCHREALTIME//[!0-9]/}
+        "$j" "${names[$1]}" >"$steps_dir/$1-${names[$1]}.log" 2>&1 &
+        running[$!]=$1
+    }
+    while :; do
+        # The next cargo step takes a free slot first, because the chain is
+        # the longest thing the gate waits on.
+        while [ "${#running[@]}" -lt "$jobs" ]; do
+            if [ -z "$chain_busy" ] && [ "${#chained[@]}" -gt 0 ]; then
+                chain_busy=${chained[0]}
+                chained=("${chained[@]:1}")
+                start "$chain_busy"
+            elif [ "${#unchained[@]}" -gt 0 ]; then
+                start "${unchained[0]}"
+                unchained=("${unchained[@]:1}")
+            else
+                break
+            fi
+        done
+        [ "${#running[@]}" -gt 0 ] || break
+        wait -n -p pid
+        step_status=$?
+        i=${running[$pid]}
+        unset "running[$pid]"
+        [ "$i" != "$chain_busy" ] || chain_busy=""
+        ended_with[$i]=$step_status
+        tenths=$(( (${EPOCHREALTIME//[!0-9]/} - began[i]) / 100000 ))
+        line="${names[$i]} ($((tenths / 10)).$((tenths % 10)) s)"
+        [ "$step_status" -eq 0 ] || line="$line FAILED, exit $step_status"
         if [ "$mode" = quiet ]; then
-            # The one thing a truncated result still has to answer is how far
-            # the run got, which is why this costs a line even though nothing
-            # reads it until something goes wrong.
-            echo "· $step"
-            # Where this step's own output begins. A plain `tail` of the log
-            # would spend its lines on the step before, which on a gate whose
-            # previous step was `list` is forty lines of recipe names and one
-            # line of the error that actually stopped it.
-            started_at=$(wc -c <"$log")
-            {{ just_executable() }} "$step" >>"$log" 2>&1
-            step_status=$?
+            # As each step ends rather than as it starts: with every step
+            # started at once, a result cut short would otherwise list them all
+            # and say nothing about how far the run got.
+            echo "· $line"
+            { echo "=== $line ==="; cat "$steps_dir/$i-${names[$i]}.log"; } >>"$log"
         else
-            {{ just_executable() }} "$step" 2>&1 | tee -a "$log"
-            # Read before anything else runs. `[` is a command, so it rewrites
-            # `PIPESTATUS` with its own 0 — which read as a clean gate over a step
-            # that had just failed, the first time this loop was run.
-            step_status=${PIPESTATUS[0]}
-        fi
-        if [ "$step_status" -ne 0 ]; then
-            failed="$step"
-            status=$step_status
-            break
+            { echo "=== $line ==="; cat "$steps_dir/$i-${names[$i]}.log"; } | tee -a "$log"
         fi
     done
+
+    # The first failure is the first in `gate_steps`, not the first to end, so
+    # the name does not depend on which step happened to be quicker. That keeps
+    # what `check-gate-runs-every-check` pins `check-plugins` first for: with no
+    # plugins, it is `check-plugins` and its install command that are named.
+    failed=""
+    status=0
+    first=""
+    for i in "${!names[@]}"; do
+        [ "${ended_with[$i]}" -ne 0 ] || continue
+        failed="$failed ${names[$i]}"
+        [ -n "$first" ] || { first=$i; status=${ended_with[$i]}; }
+    done
+    failed=${failed# }
     # Only in `quiet`, and only before the block: `loud` has already shown these
     # lines once, and the block stays last because `tail -6` is where a reader
     # looks for it. Capped, because a step can fail with a megabyte behind it
     # and `full log:` names where the rest is.
-    if [ "$mode" = quiet ] && [ "$status" -ne 0 ]; then
+    if [ "$mode" = quiet ] && [ -n "$first" ]; then
         echo
-        echo "=== last 60 lines of $failed ==="
-        tail -c "+$((started_at + 1))" "$log" | tail -60
+        echo "=== last 60 lines of ${names[$first]} ==="
+        tail -60 "$steps_dir/$first-${names[$first]}.log"
     fi
     summary=$($j _gate-summary "$log" "$status" "$failed" "${served:+$served_copy}")
+
+    # The first failing step that an earlier green of this code also ran.
+    violated=""
+    for step in $failed; do
+        case " $reusable " in *" $step "*) violated=$step; break ;; esac
+    done
 
     # What this run learned about the code, written down before the block is
     # printed so that the block stays last. A served run learned nothing new.
@@ -621,7 +704,7 @@ gate mode="loud" verdicts="reuse":
                 find "$store" -maxdepth 1 -type f -mtime +7 -delete
                 note "· verdicts: this code's green is recorded as ${fingerprint:0:12}"
             fi
-        elif [ -f "$record" ] && [[ " $reusable " == *" $failed "* ]]; then
+        elif [ -f "$record" ] && [ -n "$violated" ]; then
             # The same code and the same environment gave a different answer,
             # so the fingerprint is missing an input or a step is not
             # deterministic. Either way the record is wrong and must go before
@@ -629,9 +712,9 @@ gate mode="loud" verdicts="reuse":
             from=$(sed -n 's/^commit //p' "$record")
             at=$(sed -n 's/^date //p' "$record")
             violations="$(dirname "$(dirname "$record")")/rcad-verdict-violations"
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $fingerprint $failed $head passed-at=$from $(hostname)" >>"$violations"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $fingerprint $violated $head passed-at=$from $(hostname)" >>"$violations"
             rm -f "$record"
-            note "!!! verdict violated: $failed failed on code that ${from:0:8}'s gate passed at $at."
+            note "!!! verdict violated: $violated failed on code that ${from:0:8}'s gate passed at $at."
             note "!!! Same code, same environment, different answer: the fingerprint is missing an"
             note "!!! input, or the step is not deterministic (docs/decisions.md §337.6). The record is"
             note "!!! deleted, and the case is kept in $violations"
@@ -714,6 +797,11 @@ _code-fingerprint:
 # describe a pass as a gate that died early. `served` is that gate's record
 # (§337). If that record is gone by the end, the summary says so. The first real
 # served gate printed no counts at all, because a nested run had deleted it.
+#
+# **`failed` is every step that failed, first of `gate_steps` first.** The steps
+# run at once and a failure stops none of them (§372.9), so a gate can end with
+# several. The first is named as the first failure, the rest on a line of their
+# own.
 [private]
 _gate-summary log status failed="" served="":
     #!/usr/bin/env bash
@@ -728,7 +816,9 @@ _gate-summary log status failed="" served="":
     if [ '{{ status }}' = "0" ]; then
         echo "gate: PASS"
     else
-        echo "gate: FAIL  first failure: {{ failed }} (exit {{ status }})"
+        read -r first others <<<'{{ failed }}'
+        echo "gate: FAIL  first failure: $first (exit {{ status }})"
+        [ -z "$others" ] || echo "also failed: $others"
         first=$(grep -m1 -E '^ *FAIL \[' <<<"$plain" | sed 's/^ *//')
         [ -z "$first" ] || echo "first failing test: $first"
     fi
@@ -826,6 +916,13 @@ _record-green steps:
 # remove. The fourth is the typo — a mode that is neither word must refuse,
 # because a `quiet` misspelt into a 300 KB result is the defect wearing a
 # different hat.
+#
+# Running the steps at once gets four (§372): a failure that stops the steps
+# after it, a second failure the block does not name, steps that run in turn
+# when they were told they could run at once, and a third word `1` that does not
+# run them in turn. The two about time use `_gate-selftest-sleep`, and they
+# measure what no load can shorten: three two-second sleeps in turn take six
+# seconds at least, so the one that wants them at once asks for under five.
 [private]
 check-gate-summary-selftest:
     #!/usr/bin/env bash
@@ -851,22 +948,51 @@ check-gate-summary-selftest:
         || fail "a run that never reached the suite reported a count anyway"
 
     # A failure. The step list names something that is not a recipe, so `just`
-    # exits non-zero on it, and the two steps after it must not run.
+    # exits non-zero on it, and the step after it still runs: a failure stops
+    # nothing, so that a second one is found by this gate and not the next.
     got=$($j --set gate_steps 'list no-such-step list' --set gate_log "$dir/fail.log" gate 2>&1) \
         && fail "a gate with a failing step exited 0"
     grep -q '=== gate summary ===' <<<"$got" \
         || fail "a failing gate printed no block, which is the defect this exists to remove"
     grep -q '^gate: FAIL  first failure: no-such-step' <<<"$got" \
         || fail "the block does not name the step that broke"
-    [ "$(grep -c 'Everything this repo can do' "$dir/fail.log")" -eq 1 ] \
-        || fail "the gate carried on past a failing step"
+    [ "$(grep -c 'Everything this repo can do' "$dir/fail.log")" -eq 2 ] \
+        || fail "a failing step stopped the steps after it"
+    grep -q '^also failed' <<<"$got" && fail "a gate with one failure named another"
+
+    # Two failures. The first of the list is named as the first failure, and
+    # the other is named too.
+    got=$($j --set gate_steps 'no-such-step list no-such-other-step' --set gate_log "$dir/two.log" gate quiet 2>&1) \
+        && fail "a gate with two failing steps exited 0"
+    grep -q '^gate: FAIL  first failure: no-such-step (exit ' <<<"$got" \
+        || fail "a gate with two failures did not name the first of the list first"
+    grep -qx 'also failed: no-such-other-step' <<<"$got" \
+        || fail "a gate with two failures named only one"
+
+    # At once. Three steps that each take two seconds, given three slots.
+    began=$(date +%s%N)
+    got=$($j --set gate_steps '_gate-selftest-sleep _gate-selftest-sleep _gate-selftest-sleep' \
+            --set gate_log "$dir/once.log" gate quiet reuse 3 2>&1) \
+        || fail "three steps that sleep failed"
+    took=$(( ($(date +%s%N) - began) / 1000000 ))
+    [ "$took" -lt 5000 ] || fail "three two-second steps given three slots took $took ms, so they ran in turn"
+    # And in turn, when told to.
+    began=$(date +%s%N)
+    got=$($j --set gate_steps '_gate-selftest-sleep _gate-selftest-sleep' \
+            --set gate_log "$dir/turn.log" gate quiet reuse 1 2>&1) \
+        || fail "two steps that sleep failed"
+    took=$(( ($(date +%s%N) - began) / 1000000 ))
+    [ "$took" -ge 4000 ] || fail "two two-second steps given one slot took $took ms, so they ran at once"
+    got=$($j --set gate_steps list --set gate_log "$dir/jobs.log" gate quiet reuse many 2>&1) \
+        && fail "a gate told to run 'many' steps at once ran anyway"
+    grep -q "not 'many'" <<<"$got" || fail "a gate given a bad count did not say what it was given"
 
     # A quiet pass. The step still runs and the log still gets everything; what
     # must not appear on stdout is the step's own output.
     got=$($j --set gate_steps list --set gate_log "$dir/quiet-pass.log" gate quiet 2>&1) \
         || fail "a quiet gate whose every step passed exited non-zero"
     grep -q '^gate: PASS$' <<<"$got" || fail "a passing quiet gate did not say so"
-    grep -q '^· list$' <<<"$got" || fail "a quiet gate did not say which step it was on"
+    grep -qE '^· list \([0-9]+\.[0-9] s\)$' <<<"$got" || fail "a quiet gate did not say which step it had run"
     grep -q 'Everything this repo can do' <<<"$got" \
         && fail "a quiet gate put a step's own output in the result, which is the whole thing it exists not to do"
     grep -q 'Everything this repo can do' "$dir/quiet-pass.log" \
@@ -914,6 +1040,13 @@ check-gate-summary-selftest:
     got=$($j _gate-summary "$dir/counts.log" 1 test)
     grep -q '^first failing test: FAIL \[   0.011s\] rcad-geom a_plane_and_a_sphere$' <<<"$got" \
         || fail "a failing suite did not name the first test that failed"
+
+# A gate step that takes two seconds and does nothing else, so that
+# `check-gate-summary-selftest` can tell steps run at once from steps run in turn
+# by the clock.
+[private]
+_gate-selftest-sleep:
+    @sleep 2
 
 # Holds `gate-docs` to the two things it claims: that it drops the compiles, and
 # that it still runs everything a prose commit can break.
@@ -1132,7 +1265,7 @@ check-gate-verdicts-selftest:
 
     # The first gate of this code runs its step and records a green.
     got=$(gate list list) || fail "a gate of one passing step failed"
-    grep -qx '· list' <<<"$got" || fail "the first gate of this code did not run its step"
+    grep -q '^· list (' <<<"$got" || fail "the first gate of this code did not run its step"
     [ -f "$store/$f0" ] || fail "a passing gate that ran every reusable step recorded nothing"
     grep -qx "commit $base" "$store/$f0" || fail "the record does not name the commit that was gated"
 
@@ -1141,7 +1274,7 @@ check-gate-verdicts-selftest:
     got=$(gate list list) || fail "a served gate failed"
     grep -q "^· served: list from ${base:0:8}'s gate at " <<<"$got" \
         || fail "a gate of code that was already green did not serve it"
-    grep -qx '· list' <<<"$got" && fail "a served step ran anyway"
+    grep -q '^· list (' <<<"$got" && fail "a served step ran anyway"
     grep -qx 'gate: PASS' <<<"$got" || fail "a served gate did not say it passed"
     grep -qx "tests: not reached (served from ${base:0:8})" <<<"$got" \
         || fail "a served gate's summary did not say where its counts came from"
@@ -1158,19 +1291,19 @@ check-gate-verdicts-selftest:
     # verdict, and the record stays. `fresh`, because a served run records
     # nothing and reports nothing, and would pass this case without reaching it.
     got=$(gate 'list no-such-step' list fresh) && fail "a gate with a failing step exited 0"
-    grep -qx '· list' <<<"$got" || fail "fresh served a step"
+    grep -q '^· list (' <<<"$got" || fail "fresh served a step"
     grep -q 'verdict violated' <<<"$got" && fail "a step outside the reusable list was taken as a violation"
     [ -f "$store/$f0" ] || fail "a failing step outside the reusable list deleted the record"
 
     # `fresh` runs everything, and its pass writes the record again.
     got=$(gate list list fresh) || fail "a fresh gate failed"
-    grep -qx '· list' <<<"$got" || fail "fresh served a step"
+    grep -q '^· list (' <<<"$got" || fail "fresh served a step"
     grep -q '^· verdicts: fresh' <<<"$got" || fail "fresh did not say why it ran a step it had a green for"
 
     # An untracked file is not in HEAD, and it gets compiled all the same.
     printf 'fn new() {}\n' >"$repo/crates/new.rs"
     got=$(gate list list) || fail "a gate of an untracked file failed"
-    grep -qx '· list' <<<"$got" || fail "a tree with an untracked .rs file was served HEAD's green"
+    grep -q '^· list (' <<<"$got" || fail "a tree with an untracked .rs file was served HEAD's green"
     grep -q 'uncommitted or untracked' <<<"$got" || fail "a dirty tree did not say why nothing was served"
     rm "$repo/crates/new.rs"
 
@@ -1179,7 +1312,7 @@ check-gate-verdicts-selftest:
     old=$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%SZ)
     sed -i "s/^date .*/date $old/" "$store/$f0"
     got=$(gate list list) || fail "a gate over an expired record failed"
-    grep -qx '· list' <<<"$got" || fail "a record two days old was served"
+    grep -q '^· list (' <<<"$got" || fail "a record two days old was served"
     grep -q 'not the last day' <<<"$got" || fail "an expired record did not say why it was not served"
     grep -qx "date $old" "$store/$f0" && fail "a pass over an expired record did not write it again"
 
@@ -1193,7 +1326,7 @@ check-gate-verdicts-selftest:
     done
     [ "$(fingerprint)" = "$f0" ] || fail "amending the message moved the fingerprint"
     got=$(gate list list) || fail "an audited gate failed"
-    grep -qx '· list' <<<"$got" || fail "a commit whose sha starts with 0 was served"
+    grep -q '^· list (' <<<"$got" || fail "a commit whose sha starts with 0 was served"
     grep -q '^· verdicts: audit' <<<"$got" || fail "an audit did not say it was one"
     g reset -q --hard "$base"
 
@@ -1212,6 +1345,18 @@ check-gate-verdicts-selftest:
     got=$(gate list 'list no-such-step') || fail "a gate of one passing step failed"
     [ -f "$store/$f0" ] && fail "a run that left out a reusable step recorded a green for all of them"
     grep -q 'left out no-such-step' <<<"$got" || fail "a run that recorded nothing did not say why"
+
+    # A failure stops no step (§372.9), so a run can pass every reusable step
+    # and still fail. It records nothing.
+    got=$(gate 'no-such-other-step list' list) && fail "a gate with a failing step exited 0"
+    [ -f "$store/$f0" ] && fail "a failing run recorded a green because every reusable step in it passed"
+    # And a reusable step that fails after another failure is still a violation.
+    got=$(gate list list) || fail "a gate of one passing step failed"
+    [ -f "$store/$f0" ] || fail "a passing gate that ran every reusable step recorded nothing"
+    got=$(gate 'no-such-other-step no-such-step' no-such-step fresh) && fail "a gate with two failing steps exited 0"
+    grep -q '^!!! verdict violated: no-such-step failed' <<<"$got" \
+        || fail "a reusable step failed after a step that is not reusable, and the violation went unsaid"
+    [ -f "$store/$f0" ] && fail "a violated record was kept, so the next gate would serve it"
 
     # The summary of a served run, from a record holding the counts a real
     # gate writes.
@@ -2349,8 +2494,18 @@ check-kache-off-on-ci:
 # 1 and names the install command, while `check-hooks` and
 # `check-questions-selftest` exit **127** on a missing `selftest.sh` — no
 # message, no remedy, and the failure a CI log explains worst. Found by rcad-c2,
-# who also noticed that nothing held the ordering it depends on.
-[doc("Every check-* recipe is in `gate`, and check-plugins is first.")]
+# who also noticed that nothing held the ordering it depends on. Since the steps
+# run at once (§372) all three fail, and the order is what makes the block name
+# `check-plugins` first and print its tail.
+#
+# **The arm after it holds `gate`'s `cargo_steps` line to the steps whose recipes
+# run cargo.** Those run one after another, and one left off the line would wait
+# on cargo's lock beside `test`: slower, never wrong, so nothing else would
+# notice (§372.10). A recipe runs cargo if a line of it, not a comment, starts a
+# command with `cargo` and a subcommand that builds, or calls the `t` recipe. The
+# line is read out of `just --show gate`, and an empty read fails, for the
+# reason the count above is pinned.
+[doc("Every check-* recipe is in `gate`, check-plugins is first, and every step that builds with cargo is in gate's chain.")]
 check-gate-runs-every-check:
     @steps=$(printf '%s\n' {{ gate_steps }}); \
     defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
@@ -2389,12 +2544,28 @@ check-gate-runs-every-check:
     fi; \
     first=$(printf '%s\n' "$steps" | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
-        echo "gate runs '$first' first, expected 'check-plugins'"; \
-        echo "CLAUDE.md says check-plugins runs first thing in just gate, and"; \
+        echo "gate names '$first' first, expected 'check-plugins'"; \
+        echo "CLAUDE.md says check-plugins fails first thing in just gate, and"; \
         echo "ci.yml leans on it: with no plugins, check-hooks and"; \
         echo "check-questions-selftest exit 127 on a missing selftest.sh, which is"; \
         echo "the failure a runner explains worst, while check-plugins exits 1 and"; \
         echo "names the command that installs them"; \
+        exit 1; \
+    fi; \
+    chain=$({{ just_executable() }} --show gate | sed -n 's/^ *cargo_steps="\(.*\)"$/\1/p' | tr ' ' '\n' | grep . | sort); \
+    if [ -z "$chain" ]; then \
+        echo "found no cargo_steps line in just --show gate, so the arm below would compare nothing"; \
+        exit 1; \
+    fi; \
+    builds='(^[[:space:]]*@?|\$\(|&& *|; *|! *)([A-Z_]+=[^ ]* +)*cargo +(\+[a-z]+ +)?(build|check|clippy|nextest|test|run|bench|doc|llvm-cov|fuzz)( |$)|just_executable\(\) *\}\} +t( |$)'; \
+    cargo=$(for step in $steps; do \
+        {{ just_executable() }} --show "$step" | grep -v '^ *#' | grep -qE "$builds" && echo "$step"; \
+    done | sort); \
+    if [ "$cargo" != "$chain" ]; then \
+        echo "gate's cargo_steps line and the steps whose recipes run cargo disagree:"; \
+        for step in $cargo; do printf '%s\n' "$chain" | grep -qx "$step" || echo "  $step runs cargo and is not on the line"; done; \
+        for step in $chain; do printf '%s\n' "$cargo" | grep -qx "$step" || echo "  $step is on the line and its recipe builds nothing with cargo"; done; \
+        echo "a cargo step off the line waits on cargo's lock beside test (docs/decisions.md §372.10)"; \
         exit 1; \
     fi
 
