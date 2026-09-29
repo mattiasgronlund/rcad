@@ -110,10 +110,28 @@ size test above.
 
 ### 368.3 The pins it retires, outside this lane
 
+Three pins fail with the change, and this lane owns none of their files.
+`just t --workspace --no-fail-fast` gives 2824 run, 2821 passed, 3 failed, 9
+skipped. The steps the gate runs after its tests pass on this commit:
+`cargo test --workspace --doc`, `just check-release-build` (3 run, 3 passed)
+and `just check-fuzz-unit` (exit 0).
+
+`crates/rcad-step/tests/a_fuse_read_back_from_rounded_text.rs`'s
+`a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing`
+pinned this gap as it stood: a turned cube read back from thirteen-digit text,
+which `validate` accepts, refused `Undecidable` at "where three surfaces
+meet". Its doc comment says the day this is fixed it fails, and it does: the
+union answers one solid (`expected a rounded corner to stop the fuse, got
+Ok(1)`). It becomes a union that answers. The same file's header says that at
+11, 12 and 13 digits every one of the turned family's 109 fuses is refused.
+That figure is printed and not asserted. With the change,
+`just t -p rcad-step --no-capture -E 'test(a_turned_pair_read_back_from_rounded_text)'`
+prints 107, 105 and 111 decided at 11, 12 and 13 digits, against 109 from the
+exact text. So the header's claim is stale. Whether it was already stale at the
+base was not run.
+
 `crates/rcad-topo/tests/a_corner_its_own_surfaces_place_somewhere_else.rs`
-pins the rounding-only room from both sides, and this lane does not own it.
-With the change, `just t -p rcad-topo --no-fail-fast` gives 1223 run, 1221
-passed, 2 failed, 9 skipped, and the two are that file's:
+pins the rounding-only room from both sides. Its two failures:
 
 - `a_corner_a_tenth_of_a_nanometre_off_its_own_top_is_refused`: a box of side
   two with a corner `1e-10` off its top. Its header says `validate` accepts it,
