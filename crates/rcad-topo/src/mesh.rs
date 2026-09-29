@@ -1754,7 +1754,7 @@ impl BuildingAMesh {
         // (for its seam, `Torus::point_at`), so there the chart's turn points
         // into the tube while the torus itself faces out of it, as the standard,
         // the reader and `validate.rs` read it (`docs/decisions.md` §329.1).
-        let inside_out = face.orientation().is_reversed() != matches!(stored, Surface::Torus(_));
+        let inside_out = face.orientation().is_reversed() != matches!(surface, Surface::Torus(_));
         for triangle in cut.triangles() {
             let [first, second, third] = triangle.map(|corner| corner_is[corner as usize]);
             // A pole is a *side* of the patch whose two corners are one point in
