@@ -290,11 +290,11 @@ moved them.
 
 | Refusal | Cause | | Demonstration |
 |---|---|---|---|
-| `AFaceTrimmedByACurveThisCannotFollow` | an edge of the face runs along *part* of a crossing | **gap** | `a_face_trimmed_by_part_of_a_curve_is_refused_by_name` |
+| `AFaceTrimmedByACurveThisCannotFollow` | an edge of the face runs along *part* of a crossing | **gap** | `a_face_trimmed_by_part_of_a_curve_is_refused_by_name`. **2026-09-29, Q596 (`4375e684`):** closed on the side-by-side answers — `holds.rs` now follows an arc of one pipe against another running the same way, the two discs of a union cap taken together, a disc less a disc, a pipe running the same way as a cut along a wall axis, and a reversed wall walk as the view gives it (§331.5) |
 | `AFaceMissesPartOfWhereItsSurfacesCross` | the face runs along some but not all of the curves its pair crosses in | **gap** | `a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both` |
 | `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` | every corner of a curved face sits on the surface trimming it | **gap, undemonstrated** | the side exists and the model does not record it |
 | `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` | a **flat** face with a corner at the top of the range and a normal off the axes | **gap, new at this gate, undemonstrated** | `a_point_off_the_plane` grows its step from the corner's own magnitude, so the first try overflows and every one after it does; a smaller step reaches an answer. Reachable from `Deserialize` only |
-| `Containment::CannotFollowAFacesTrimming` | any of the above, met while counting a ray | **gap** | the above, one layer up |
+| `Containment::CannotFollowAFacesTrimming` | any of the above, met while counting a ray | **gap** | the above, one layer up. Closed on the side-by-side answers by the same Q596 fix (§331.5) |
 | `Undecidable` out of `face_holds_the_point` | a sign about a box could not be settled | **limit** where the box straddles the surface, **gap** where the arithmetic ran out | no generator reaches either |
 
 **The curved arrangement and the commit — `rcad-topo`**
