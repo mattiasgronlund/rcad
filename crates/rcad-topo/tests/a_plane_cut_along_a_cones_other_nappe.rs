@@ -108,8 +108,12 @@ fn a_steeper_plane_across_a_frustum_answers_right_or_refuses() {
 /// block and so is the stretch of the lower nappe round it.
 ///
 /// **All thirty-two refused until §251**, twenty-four of them for want of a
-/// point inside a piece. Twenty-two answer now, and two of the twenty-four
-/// give up one step on, meshing the answer.
+/// point inside a piece. Twenty-two answered then, and two of the twenty-four
+/// gave up one step on, meshing the answer: the intersection at lean three
+/// eighths, crossing `−1/4`, turned 3 and 3.5, whose steep face and frustum face
+/// share both arcs and at the coarsest mesh both draw the side between the arcs'
+/// middles (§285.4). That mesh retries a fold at half the room now, and both
+/// answer right.
 #[test]
 fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -125,12 +129,8 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 22,
-            refused: [
-                ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 8),
-                ("TwoPatchesOfTheMeshDrewTheSameSide", 2),
-            ]
-            .into()
+            right: 24,
+            refused: [("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 8)].into()
         }
     );
 }
@@ -648,15 +648,13 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 /// Every way a fuse in this file refuses today, and the two ways an answer
 /// that holds every grid point it is asked about can still not be checked:
 /// a mesh finer than the mesher reaches, and a face it cannot mesh.
-const REFUSALS: [&str; 8] = [
+const REFUSALS: [&str; 6] = [
     "a point inside a piece of a face",
     "ResultIsNotManifold",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
     "the answer does not measure: CannotMeshAFace",
     "order along a crossing",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
-    "CannotMeshAFace",
-    "TwoPatchesOfTheMeshDrewTheSameSide",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the
