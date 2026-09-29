@@ -185,9 +185,11 @@ measured one. It is a **gap**, since the table in 284.4 holds.
 - **Name an arc by its plane as well** where two planes cut one curved
   surface between the same corners (284.5). `crates/rcad-topo/src/fuse/assemble.rs`.
   Its check is
-  `a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_get_one_name`.
+  `a_plane_exactly_through_a_bars_rim_start_answers_all_six_fuses_right_under_both_policies`.
   `which_curve_it_is`'s doc says why the plane is left out, and it has to be
-  read before this is changed.
+  read before this is changed. **Done by §330**, which renamed the check from
+  `a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_get_one_name`
+  when all six fuses of the exact plane came to answer.
 - **§39.4's table** has one row for "order along a crossing", the turned
   notched bar. This is a second cause of that refusal, and the table should
   gain a row when either item above lands. `docs/decisions.d/039-*.md` is
