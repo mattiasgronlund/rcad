@@ -47,6 +47,12 @@ in `needs_judgement`.
   merge, and say which fix and why.
 - An unbacked claim or a number that did not reproduce is yours to weigh. If
   the row's result rests on it, do not merge.
+- A row that adds a `check-*` recipe or an `#[ignore]` moves a count the gate
+  pins — `check-gate-runs-every-check`'s `check-*` count, `check-ignored`'s
+  declared count, `wildcard_arms` — and the recipe that pins it is rarely in
+  the row's write set. Bump it yourself anyway, outside the write set, when
+  the value is the one the check itself demands and no open row already owns
+  that recipe; say so in the merge commit, as 80571131 did.
 
 ## 3. Merge, close the row, add the rows it leaves
 

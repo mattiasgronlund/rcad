@@ -108,9 +108,10 @@ bar says `Inside` and the block says `Outside`.
 ### 325.4 `AFaceMeetsItsNeighbourOnItsOwnSurface`: the other route, spelled twice
 
 With the upper wall naming its axis at `z = 2`, the whole bars' union
-answers with its wall as two faces (§247.1, and
-`spelling_the_wall_of_a_stacked_bar_twice_changes_only_how_many_faces_the_wall_is`).
-Cutting the block off that refuses, both orders:
+answered with its wall as two faces (§247.1, and
+`spelling_the_wall_of_a_stacked_bar_twice_leaves_the_wall_one_face`, which
+pinned two faces at the time). Cutting the block off that refuses, both
+orders:
 
 ```
 PROBE2 spelling 2 Union lower first true: whole bars gave 4 faces, cylinders 2, volume Ok((50.20344246266877, 0.2486362321677122))
@@ -130,6 +131,14 @@ own surface.
 kernel builds that one. This is §39.4's row "two faces on one cylinder with
 an edge between them", filed as undemonstrated, now reached from the public
 API in two fuses.
+
+**2026-09-29, since Q354 (84538a4e).** The joiner now joins the two spellings
+of the wall onto one face instead of leaving one per spelling
+(`spelling_the_wall_of_a_stacked_bar_twice_leaves_the_wall_one_face`), so the
+union above no longer has two faces meeting on their own surface, and cutting
+the block off it answers the same `8π` half bar
+(`a_wall_spelled_twice_is_cut_to_the_same_half_bar_as_a_wall_spelled_once` in
+`two_half_bars_stacked_on_one_pipe.rs`). The gap this row named is closed.
 
 ### 325.5 Rows for a fix lane
 

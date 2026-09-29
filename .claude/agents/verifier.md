@@ -65,8 +65,16 @@ finds it by hand (§263.4).
    decisions section, nothing in `src/`): report `tests_fail_without_fix:
    false`, no `reproduced_mutation`, and say in `notes` that pinsOnly is why.
    Without that mark, a declared-empty source list is the lane's own gap, not
-   grounds for `merge`. Then put the branch's source back the same way, `git
-   checkout <branch> -- <path>`.
+   grounds for `merge`. When a source path also holds the row's new tests,
+   revert by hand instead of `git checkout <base> --`: keep the new tests and
+   take out only the change they test — the call site the fix touches, not a
+   helper it calls — so the tests still run against the old behaviour. Q231's
+   verifier reverted such a file whole, ran nextest, read "no tests to run" as
+   the test failing, and said `merge`, where the new test checked a helper
+   `over()` could stop calling with every other test still passing. A run that
+   finds no tests to run is not a failure; it means the revert took the tests
+   out too. Then put the branch's source back the same way, `git checkout
+   <branch> -- <path>`.
 
 ## Moved text
 

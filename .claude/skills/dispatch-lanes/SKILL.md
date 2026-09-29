@@ -101,7 +101,12 @@ is the union of its rows' sets, leaving out `-`.
 Before a brief, check the row's write set against what the work really
 touches. A row whose write set is wrong is fixed in the file first: a lane that
 needs a file its row does not name either stops or writes outside its set, and
-the fill has already let another lane hold that file.
+the fill has already let another lane hold that file. A row that adds a
+`check-*` recipe or an `#[ignore]` moves a count the gate pins —
+`check-gate-runs-every-check`'s `check-*` count, `check-ignored`'s declared
+count, `wildcard_arms` — so name the recipe that pins that count in its write
+set too, or the merger has to bump it outside the write set on its own
+(`.claude/agents/merger.md`).
 
 Model per row, from its `model` field. Opus for anything reasoning about a
 numerical refusal, a published bound, or whether a claim of impossibility
