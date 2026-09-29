@@ -9883,7 +9883,10 @@ check-queue-api-selftest:
         exit 1
     }
     g() { git -C "$1" -c user.name=selftest -c user.email=selftest@invalid "${@:2}"; }
-    q() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" queue "${@:2}"; }
+    # Six slots of its own, whatever the cap is: the machine count's case holds
+    # three and needs slots left over for two ready rows. `check-queue-selftest`
+    # is where the real cap is pinned (§372).
+    q() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" --set queue_slots 6 queue "${@:2}"; }
     check() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" check-queue 2>&1; }
     lock() { g "$hub" worktree lock --reason "agent $(basename "$1") since 2026-09-26T00:00:00Z" "$1"; }
 
