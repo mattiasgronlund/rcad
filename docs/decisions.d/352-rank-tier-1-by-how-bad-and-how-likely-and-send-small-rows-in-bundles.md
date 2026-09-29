@@ -139,7 +139,7 @@ How `just queue next` takes them:
   does them all. A small row that meets a running lane, a row held elsewhere,
   or a row already taken is skipped as any row is. The bundle's write set is
   the union of its rows' sets, and `-` adds nothing.
-- **Its line** is `take Q501,Q502,Q503 (a bundle of 3 small rows, one lane)`,
+- **Its line** is `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)`,
   with each row's text indented under it. The id list is what the `lanes`
   workflow takes as `queueId`.
 - **One bundle is one slot.** `just queue running` counts holds per branch,
@@ -189,9 +189,10 @@ page (§352.7).
 
 - **The queue file's own header** still says five tiers (§307 added 2.2) and
   names no tags. The write guard refuses every hand edit to `docs/queue.md`,
-  its prose included, so only a row can fix it. Filed in tier 2.2.
+  its prose included, so only a row can fix it, and that row needs a checked
+  way to change the header first. Q500, tier 2.2.
 - **The queue page shows the measure and the rows' ages**, after Q284 teaches
-  it tier 2.2. Filed in tier 2.2.
+  it tier 2.2. Q501, tier 2.2.
 - **The open rows get their tags** in a separate commit, from a read-only sweep
   that labelled every open row from its text. Its labels are one reader's
   judgement and were spot-checked before they were applied.

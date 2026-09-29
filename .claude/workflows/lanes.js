@@ -25,7 +25,7 @@
 // Per lane: `label` (required, names the branch and the progress row),
 // `queueId` (the docs/queue.md row this lane does; required when it writes,
 // because its merger closes that row. A bundle of small rows (§352.4) gives
-// them all, `Q501,Q502,Q503`, as `queue next` printed them, and its merger
+// them all, `Q1,Q2,Q3`, as `queue next` printed them, and its merger
 // closes each), `brief` (required, what the lane is for
 // -- the base and the switch below are appended), `writeSet` (the files it
 // owns; absent or empty means read-only, which also means no verifier, no

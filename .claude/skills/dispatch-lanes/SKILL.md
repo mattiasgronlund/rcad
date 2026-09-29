@@ -93,7 +93,7 @@ met. N defaults to the free slots, counted from the trees agents hold on this
 machine — lanes, verifiers and mergers alike, whoever sent them (§263.4).
 Tier 1 goes in class order, not file order (§352.3).
 
-A line `take Q501,Q502,Q503 (a bundle of 3 small rows, one lane)` is **one
+A line `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)` is **one
 lane** doing all of those rows (§352.4), with each row's text indented under
 it. Its model is opus if any of its rows says opus, else sonnet. Its write set
 is the union of its rows' sets, leaving out `-`.
@@ -146,7 +146,7 @@ its type, so `.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the
 standing rules and a brief carries only what is this row's:
 
 - the work, and anything to report beyond the standard record;
-- for a bundle, `queueId: "Q501,Q502,Q503"` as `queue next` printed it, and
+- for a bundle, `queueId: "Q1,Q2,Q3"` as `queue next` printed it, and
   one run for the whole bundle;
 - the write set, as `writeSet`. The branch defaults to `lane-<label>` and must
   not exist yet — this repo keeps its finished `lane-*` branches, so check `git
