@@ -18,10 +18,10 @@ use crate::{Error, FaceKey, Invalid, Result, SolidView};
 /// §15.2, is the units mistake §12.4 says this kernel loses money on.
 ///
 /// For a solid whose faces are all flat, the divergence-theorem sum over its
-/// own triangles is the answer and not a picture of it, so all that the volume
-/// and area errors carry is the rounding of those sums — exactly `0.0` where
-/// nothing rounded, as on a cube with whole-number corners, and a rounding or
-/// so where something did, as on a turned one (`docs/decisions.md` §338).
+/// own triangles is the answer and not a picture of it, so all that the three
+/// errors carry is the rounding of those sums — exactly `0.0` where nothing
+/// rounded, as on a cube with whole-number corners, and a rounding or so where
+/// something did, as on a turned one (`docs/decisions.md` §338).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Measurement {
     volume: f64,
@@ -124,10 +124,13 @@ impl Measurement {
     /// to the far side shifts the balance point by at most
     /// `volume_error / volume` of that reach.
     ///
-    /// `0.0` for a wholly flat solid. **That does not yet count the rounding
-    /// of the centroid's own sums**, which the volume and area errors now do;
-    /// a turned polyhedron's centroid is a few roundings off the exact middle
-    /// of its triangles and this says nothing. `docs/decisions.md` §338.3.
+    /// For a wholly flat solid there is no such material, and this is how far
+    /// the rounded centroid landed from where the solid's own triangles balance
+    /// exactly — each tetrahedron they make with the hub weighed by its signed
+    /// volume, the same triangles the volume is the exact sum of — worked out
+    /// rather than bounded in advance, as the volume and area errors are:
+    /// `0.0` exactly when the centroid came out on the nose, as on a cube with
+    /// whole-number corners (`docs/decisions.md` §338.5). Never negative.
     #[must_use]
     pub fn centroid_wobble(self) -> f64 {
         self.centroid_wobble
@@ -266,8 +269,13 @@ impl FaceMeasurement {
     /// what dominates. A bound on how lopsided a face's triangles can be would
     /// tighten it; nothing here has one.
     ///
-    /// `0.0` for a face of a wholly flat solid, which does not yet count the
-    /// rounding of the centroid's own sums (`docs/decisions.md` §338.3).
+    /// For a face of a wholly flat solid, how far the rounded centroid landed
+    /// from where the face's own fan balances exactly, each triangle weighed by
+    /// its signed shadow on the fan's exact vector area: `0.0` exactly when it
+    /// did not round. A turned face's corners are not quite in one plane, so
+    /// which middle is exact needed choosing, and
+    /// [`how_far_the_middle_of_its_fan_rounded`] says why this one
+    /// (`docs/decisions.md` §338.5). Never negative.
     #[must_use]
     pub fn centroid_wobble(self) -> f64 {
         self.centroid_wobble
@@ -289,9 +297,9 @@ impl SolidView<'_> {
     /// A solid whose faces are **all flat** is measured over the triangles
     /// [`FaceView::for_each_triangle`] hands out, exactly as it was in M0:
     /// `deflection` is ignored, no mesh is built, nothing is logged, and the
-    /// value of every answer is bit for bit what M0 gave. The volume and area
-    /// errors are then only the rounding of those sums, worked out exactly,
-    /// so `0.0` wherever nothing rounded (§338). That is not an optimisation.
+    /// value of every answer is bit for bit what M0 gave. The three errors are
+    /// then only the rounding of those sums, worked out exactly, so `0.0`
+    /// wherever nothing rounded (§338). That is not an optimisation.
     /// Every metamorphic property in the fuse suite — inclusion–exclusion,
     /// idempotence, absorption — reads these numbers, and putting them
     /// downstream of a triangulator is the schedule risk §23.7 named before this
@@ -395,13 +403,22 @@ impl SolidView<'_> {
         }
 
         let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
+        let centroid = hub + Vector::from(balance);
+        let (exact_six_volumes, exact_moment) = volume_and_moment_as_expansions(&fan);
+        let four_times_the_six_volumes = packed(&multiplied(&exact_six_volumes, &[4.0]));
         Ok(Measurement {
             volume,
-            volume_error: how_far_the_volume_rounded(&fan, sixth, volume, whole_shift),
+            volume_error: how_far_the_volume_rounded(&exact_six_volumes, sixth, volume, whole_shift),
             surface_area,
             area_error,
-            centroid: hub + Vector::from(balance),
-            centroid_wobble: 0.0,
+            centroid,
+            centroid_wobble: how_far_the_middle_is_from(
+                centroid,
+                hub,
+                shifts,
+                &exact_moment,
+                &four_times_the_six_volumes,
+            ),
         })
     }
 
@@ -549,8 +566,8 @@ impl SolidView<'_> {
     /// balances is [`Measurement::centroid`], which nothing branches on.
     ///
     /// The third thing handed back is every triangle's offsets, exactly, which
-    /// is what [`how_far_the_volume_rounded`] needs to say how far the rounded
-    /// sum landed from the exact one.
+    /// is what [`volume_and_moment_as_expansions`] needs to say how far the
+    /// rounded sums landed from the exact ones.
     fn volume_and_moment(self, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3], ExactFan) {
         let mut fan: Vec<[[f64; 2]; 9]> = Vec::new();
         let mut six_volumes = 0.0;
@@ -838,6 +855,7 @@ fn one_face_measured_over_its_own_fan(face: FaceView<'_>) -> OneFace {
     let OwnFan {
         across,
         facing,
+        twice,
         area,
         area_error,
     } = OwnFan::of(face);
@@ -860,23 +878,27 @@ fn one_face_measured_over_its_own_fan(face: FaceView<'_>) -> OneFace {
         weight += share;
     });
     let apex = apex.expect("a face with area has a triangle");
+    let centroid = apex + shrink(divided(moment, 3.0 * weight), -across);
     OneFace::Measured(FaceMeasurement {
         area,
         area_error,
-        centroid: apex + shrink(divided(moment, 3.0 * weight), -across),
-        centroid_wobble: 0.0,
+        centroid,
+        centroid_wobble: how_far_the_middle_of_its_fan_rounded(face, across, &twice, centroid),
     })
 }
 
 /// One face's own fan, measured: the power of two its sides were shrunk by,
-/// the way it faces in those units, its area, and how far that area can be
-/// from the area the fan really has.
+/// the way it faces in those units, its vector area exactly, its area, and how
+/// far that area can be from the area the fan really has.
 ///
 /// The one copy of the arithmetic, so a face measured alone and the same face
 /// summed into [`SolidView::surface_area`] are the same numbers bit for bit.
 struct OwnFan {
     across: i32,
     facing: Vector,
+    /// Twice the fan's vector area, exactly, in the units `across` picked: the
+    /// sum over its triangles of `(b − a) × (c − a)`, one expansion per axis.
+    twice: [Vec<f64>; 3],
     area: f64,
     area_error: f64,
 }
@@ -886,24 +908,38 @@ impl OwnFan {
         let across = shift_for(largest_edge_component(&face));
         let facing = which_way_its_own_fan_faces(face, across);
         let length = facing.length();
+        let twice = twice_its_vector_area_exactly(face, across);
         Self {
             across,
             facing,
             area: shift(length, 2 * across),
-            area_error: shift_up(how_far_the_area_rounded(face, across, length), 2 * across),
+            area_error: shift_up(how_far_the_area_rounded(&twice, length), 2 * across),
+            twice,
         }
     }
+}
+
+/// [`which_way_its_own_fan_faces`] doubled, before it rounded: each side of
+/// each triangle taken exactly with [`two_diff`], and the cross products
+/// multiplied out in [`rcad_predicates::expansion`], so nothing is lost.
+fn twice_its_vector_area_exactly(face: FaceView<'_>, across: i32) -> [Vec<f64>; 3] {
+    let mut twice: [Vec<f64>; 3] = Default::default();
+    face.for_each_triangle(|[a, b, c]| {
+        let turned = crossed(&exactly_along(a, b, across), &exactly_along(a, c, across));
+        for (total, part) in twice.iter_mut().zip(&turned) {
+            *total = packed(&added(total, part));
+        }
+    });
+    twice
 }
 
 /// How far `length` — the rounded length of a face's vector area, in the units
 /// `across` picked — is from the exact length of the same vector, rounded up.
 ///
-/// **The truth is worked out, not bounded in advance.** Each side of each
-/// triangle is taken exactly with [`two_diff`], the cross products are
-/// multiplied out in [`rcad_predicates::expansion`], so `twice` below is the
-/// fan's vector area doubled with nothing lost, and `S = |twice|²` is exact
-/// too. The area is `√S / 2`, which no `f64` need hold, so the distance is
-/// taken without a square root:
+/// **The truth is worked out, not bounded in advance.** `twice` is the fan's
+/// vector area doubled with nothing lost, and `S = |twice|²` is exact too. The
+/// area is `√S / 2`, which no `f64` need hold, so the distance is taken
+/// without a square root:
 ///
 /// ```text
 ///     |√S/2 − length| = |S − 4·length²| / (2·(√S + 2·length)) ≤ |S − 4·length²| / (4·length)
@@ -915,17 +951,7 @@ impl OwnFan {
 ///
 /// A rounded length of nothing leaves nothing to divide by, and then the whole
 /// of `√S / 2` is the distance.
-fn how_far_the_area_rounded(face: FaceView<'_>, across: i32, length: f64) -> f64 {
-    let mut twice: [Vec<f64>; 3] = Default::default();
-    face.for_each_triangle(|[a, b, c]| {
-        let along = exactly_along(a, b, across);
-        let down = exactly_along(a, c, across);
-        for (axis, (second, third)) in [(1, 2), (2, 0), (0, 1)].into_iter().enumerate() {
-            let turning = multiplied(&along[second], &down[third]);
-            let against = multiplied(&along[third], &down[second]);
-            twice[axis] = packed(&added(&twice[axis], &added(&turning, &negated(&against))));
-        }
-    });
+fn how_far_the_area_rounded(twice: &[Vec<f64>; 3], length: f64) -> f64 {
     let squared = twice.iter().fold(Vec::new(), |total, part| {
         packed(&added(&total, &multiplied(part, part)))
     });
@@ -937,9 +963,93 @@ fn how_far_the_area_rounded(face: FaceView<'_>, across: i32, length: f64) -> f64
     divided_up(at_most(&off), 4.0 * length)
 }
 
-/// How far `volume` is from a sixth of what `fan` adds up to exactly, rounded
-/// up: the rounding of the sum, of the division by six, and of the shift back
-/// to the model's own units, all three.
+/// How far `middle` — where [`one_face_measured_over_its_own_fan`] put the
+/// face's balance point — is from where the face's own fan balances exactly,
+/// rounded up: a length, in the model's own unit.
+///
+/// # Which middle is the exact one
+///
+/// **The middle of the fan's triangles, each weighed by its signed shadow on
+/// the fan's exact vector area.** Write `N` for `twice`, the sum over the
+/// triangles of `(b − a) × (c − a)` with nothing lost. A triangle weighs
+/// `((b − a) × (c − a)) · N` and stands at its own middle `(a + b + c) / 3`,
+/// and the face's middle is the weighted average of those.
+///
+/// It needs choosing because a turned face's corners are not in one plane:
+/// the turn rounded each of them on its own. **Where the corners are in one
+/// plane, every sensible choice is the same point** — each cross product is
+/// then parallel to `N`, so each weight is the triangle's area times one
+/// common factor, with the sign it faces, and the weighted average is the
+/// textbook middle of the face the corners bound, holes and notches taken
+/// back. Off one plane the choices part, and the three worth naming are:
+///
+/// - **The shadow on the rounded vector area**, which is what the `f64` sum
+///   weighs by. A truth made out of a rounded number moves whenever the
+///   arithmetic that rounds it does, so it is not a truth about the face.
+/// - **Each triangle's own area, with the sign it faces.** A square root per
+///   triangle, so there is no exact sum for the rounding to be held against.
+/// - **The shadow on the exact vector area**, this one. It is made of the
+///   corners alone, by `+`, `−` and `×` and one division at the end, so it can
+///   be worked out exactly; and its weights add up to `|N|²`, which is `|N|`
+///   times the doubled area [`FaceMeasurement::area_error`] is measured
+///   against — so a face's area and its middle are about the same shadow.
+///
+/// Those three weigh a triangle differently only through how far it leans off
+/// the others times a second small angle — the cosine's own step from one, or
+/// the tilt of the rounded vector area — so they part by a product of two
+/// small angles, far below a rounding of the answer. **What does part them by
+/// a rounding is the triangles themselves**: fanned from
+/// another corner, the same corners off one plane make another surface. So
+/// the fan [`FaceView::for_each_triangle`] hands out is part of the
+/// definition, as it is of the area's and of the solid's volume's.
+///
+/// # How far, worked out
+///
+/// The weights and the weighted corners are summed exactly, and
+/// [`how_far_the_middle_is_from`] holds `middle` against their ratio. A face
+/// whose middle came out on the nose owes exactly nothing, which is every face
+/// of a cube on whole numbers.
+fn how_far_the_middle_of_its_fan_rounded(
+    face: FaceView<'_>,
+    across: i32,
+    twice: &[Vec<f64>; 3],
+    middle: Point,
+) -> f64 {
+    let mut apex = None;
+    let mut moment: [Vec<f64>; 3] = Default::default();
+    face.for_each_triangle(|[a, b, c]| {
+        apex.get_or_insert(a);
+        let along = exactly_along(a, b, across);
+        let down = exactly_along(a, c, across);
+        let turned = crossed(&along, &down);
+        let shadow = packed(&turned.iter().zip(twice).fold(Vec::new(), |total, (part, of)| {
+            added(&total, &multiplied(part, of))
+        }));
+        for (axis, total) in moment.iter_mut().enumerate() {
+            let corners = added(&along[axis], &down[axis]);
+            *total = packed(&added(total, &multiplied(&shadow, &corners)));
+        }
+    });
+    let apex = apex.expect("a face with area has a triangle");
+    let weights = twice.iter().fold(Vec::new(), |total, part| {
+        added(&total, &multiplied(part, part))
+    });
+    let three_times_the_weights = packed(&multiplied(&weights, &[3.0]));
+    how_far_the_middle_is_from(middle, apex, [across; 3], &moment, &three_times_the_weights)
+}
+
+/// `along × down`, exactly, for two sides [`exactly_along`] took.
+fn crossed(along: &[[f64; 2]; 3], down: &[[f64; 2]; 3]) -> [Vec<f64>; 3] {
+    [(1, 2), (2, 0), (0, 1)].map(|(second, third)| {
+        let turning = multiplied(&along[second], &down[third]);
+        let against = multiplied(&along[third], &down[second]);
+        added(&turning, &negated(&against))
+    })
+}
+
+/// How far `volume` is from a sixth of `six_volumes`, the fan's exact sum,
+/// rounded up: the rounding of the sum, of the division by six, and of the
+/// shift back to the model's own units, all three.
 ///
 /// `sixth` is the volume still in the units the shifts picked. The exact six
 /// volumes less six times it is exact in [`rcad_predicates::expansion`], and a
@@ -947,14 +1057,69 @@ fn how_far_the_area_rounded(face: FaceView<'_>, across: i32, length: f64) -> f64
 /// rounding it down. Shifting `sixth` itself back is exact unless the volume
 /// lands among the subnormals, and then it is off by less than their spacing,
 /// which is charged.
-fn how_far_the_volume_rounded(fan: &ExactFan, sixth: f64, volume: f64, whole_shift: i32) -> f64 {
+fn how_far_the_volume_rounded(six_volumes: &[f64], sixth: f64, volume: f64, whole_shift: i32) -> f64 {
     let (six_sixths, lost) = two_product(sixth, 6.0);
-    let off = added(&six_volumes_as_an_expansion(fan), &[-lost, -six_sixths]);
+    let off = added(six_volumes, &[-lost, -six_sixths]);
     let error = shift_up(divided_up(at_most(&off), 6.0), whole_shift);
     if shift(volume, -whole_shift) == sixth {
         return error;
     }
     upward(error + f64::from_bits(1))
+}
+
+/// How far `middle` is from the middle a fan's exact sums stand for, rounded
+/// up: a length, in the model's own unit.
+///
+/// Along each axis the exact middle is `from` plus `moment / weight`, a
+/// ratio of two expansions in units `2^shifts[axis]` of the model's. Its
+/// distance from `middle` is `|offset · weight − moment| / |weight|`, where
+/// `offset` is `middle − from` taken exactly with [`two_diff`], so the top is
+/// exact and only the division and the length of the three distances round,
+/// both upwards. The top is packed before its size is read, because the
+/// entries of an expansion fresh out of a subtraction can nearly cancel, and
+/// adding up their sizes would then charge up to twice the distance.
+/// **Worked out, not bounded in advance**, as the volume's and area's are: a
+/// middle that came out on the nose owes exactly nothing.
+///
+/// Infinite when nothing keeps `weight` away from zero, because then there is
+/// no middle to be near.
+fn how_far_the_middle_is_from(
+    middle: Point,
+    from: Point,
+    shifts: [i32; 3],
+    moment: &[Vec<f64>; 3],
+    weight: &[f64],
+) -> f64 {
+    let floor = at_least(weight);
+    if floor == 0.0 {
+        return f64::INFINITY;
+    }
+    let middle = middle.coordinates();
+    let from = from.coordinates();
+    length_at_most([0, 1, 2].map(|axis| {
+        let (near, lost) = two_diff(middle[axis], from[axis]);
+        let offset = [shift(lost, -shifts[axis]), shift(near, -shifts[axis])];
+        let off = packed(&added(&multiplied(&offset, weight), &negated(&moment[axis])));
+        shift_up(divided_up(at_most(&off), floor), shifts[axis])
+    }))
+}
+
+/// How long a vector whose three sides are no longer than `sides` can be,
+/// rounded up.
+fn length_at_most(sides: [f64; 3]) -> f64 {
+    let squared = sides
+        .into_iter()
+        .fold(0.0, |total, side| upward(total + multiplied_up(side, side)));
+    upward(squared.sqrt())
+}
+
+/// `left × right` for two sizes, rounded up — off zero too, where two sizes
+/// that are not zero multiply to less than the smallest subnormal.
+fn multiplied_up(left: f64, right: f64) -> f64 {
+    if left == 0.0 || right == 0.0 {
+        return 0.0;
+    }
+    (left * right).next_up()
 }
 
 /// `b − a` along each axis, exactly, with both parts shrunk by `2^across`: the
@@ -1031,19 +1196,36 @@ fn six_volumes_exactly(fan: &[[[f64; 2]; 9]]) -> f64 {
     total.iter().sum()
 }
 
-/// The same exact sum as [`six_volumes_exactly`], kept as an expansion and
-/// packed after every triangle.
+/// The same exact sum as [`six_volumes_exactly`], kept as an expansion, and
+/// the first moment about the hub exactly too: the two sums
+/// [`SolidView::volume_and_moment`] rounds, before they rounded.
 ///
-/// **Packed, because this one runs on every flat solid measured** and not
-/// only on one whose sign is in doubt: an expansion that is only ever added to
-/// grows by every entry of every determinant, and adding to it costs its
-/// length each time. [`compress`] keeps it as short as the value needs.
-fn six_volumes_as_an_expansion(fan: &[[[f64; 2]; 9]]) -> Vec<f64> {
-    let mut total: Vec<f64> = Vec::new();
+/// The moment is each triangle's six volumes times the sum of its three
+/// corners, so `hub + moment / (4 × six volumes)` is where the solid's own
+/// triangles balance exactly — every tetrahedron they make with the hub
+/// weighed by its signed volume and standing at its middle, a quarter of the
+/// way from the hub to the sum of the corners. The triangles form a closed
+/// surface, so that point is the same whatever the hub; which triangles they
+/// are is part of it, as it is of the volume (`docs/decisions.md` §338.5).
+///
+/// **Packed after every triangle, because this runs on every flat solid
+/// measured** and not only on one whose sign is in doubt: an expansion that is
+/// only ever added to grows by every entry of every determinant, and adding to
+/// it costs its length each time. [`compress`] keeps it as short as the value
+/// needs.
+fn volume_and_moment_as_expansions(fan: &[[[f64; 2]; 9]]) -> (Vec<f64>, [Vec<f64>; 3]) {
+    let mut six_volumes: Vec<f64> = Vec::new();
+    let mut moment: [Vec<f64>; 3] = Default::default();
     for triangle in fan {
-        total = packed(&added(&total, &determinant_of(triangle)));
+        let six_volume = determinant_of(triangle);
+        six_volumes = packed(&added(&six_volumes, &six_volume));
+        let six_volume = packed(&six_volume);
+        for (axis, total) in moment.iter_mut().enumerate() {
+            let corners = added(&added(&triangle[axis], &triangle[3 + axis]), &triangle[6 + axis]);
+            *total = packed(&added(total, &multiplied(&six_volume, &corners)));
+        }
     }
-    total
+    (six_volumes, moment)
 }
 
 /// The exact determinant of one triangle's three offsets.
@@ -1104,6 +1286,25 @@ fn at_most(expansion: &[f64]) -> f64 {
     expansion
         .iter()
         .fold(0.0, |total, entry| upward(total + entry.abs()))
+}
+
+/// No more than the size of the value `expansion` stands for: its last
+/// entry's size less every other entry's, rounded down, and `0.0` where the
+/// others could cancel it.
+///
+/// The last entry is the largest in every expansion
+/// [`rcad_predicates::expansion`] hands back, and after [`compress`] it is
+/// within a rounding of the whole value, so on a packed expansion this is
+/// within a rounding or two of the size itself.
+fn at_least(expansion: &[f64]) -> f64 {
+    let Some((last, rest)) = expansion.split_last() else {
+        return 0.0;
+    };
+    let rest = at_most(rest);
+    if last.abs() <= rest {
+        return 0.0;
+    }
+    (last.abs() - rest).next_down()
 }
 
 /// The next `f64` up from a sum of sizes, which may have rounded down, so a

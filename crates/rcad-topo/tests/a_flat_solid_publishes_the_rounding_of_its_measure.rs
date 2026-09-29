@@ -20,7 +20,7 @@
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::expansion::{compress, expansion_sum, scale_expansion, two_diff, two_sum};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{FaceView, Model, Rule, SolidKey};
+use rcad_topo::{FaceView, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The two cubes `docs/queue.md` Q81 fused: side two, `b` moved out by
 /// `(2, 0.5, 0.25)` so the two touch face to face, and both turned `0.7` about
@@ -143,6 +143,105 @@ fn a_cube_turned_and_far_away_owns_up_to_what_each_face_rounds_to() {
     );
 }
 
+/// §15.6 for the centroid wobble, of a flat solid and of each of its faces:
+/// where the solid's triangles and each face's fan really balance, worked out
+/// exactly here, is within the published wobble of the measured centroid.
+///
+/// The shapes are ones whose middle cannot come out on the nose — turned, a
+/// million units out, sides that are not whole numbers, a hole — and the check
+/// is on the distance itself, squared and compared exactly, so a wobble of
+/// `0.0` asks for the exact middle and fails on every one of them that is off.
+/// At least one must be, or the test proves nothing.
+///
+/// **The exact middles are `docs/decisions.md` §338.5's, reached by another
+/// route.** The solid's is every triangle's tetrahedron from the world origin
+/// weighed by its signed volume, where the kernel hangs them from a corner; a
+/// face's is every triangle weighed by its shadow on the fan's exact vector
+/// area, with the weights summed one by one and each triangle's cross product
+/// taken as `a × b + b × c + c × a` from the world origin, where the kernel
+/// takes `|N|²` and the sides from the fan's apex.
+///
+/// It prints how close the closest one came, as a share of its wobble, and
+/// floors that too, so a wobble grown loose fails here as well.
+#[test]
+fn the_middle_of_a_flat_solid_and_of_each_face_is_within_its_wobble() {
+    let builders: [fn() -> (Model, Vec<(&'static str, SolidKey)>); 5] = [
+        two_turned_cubes_each_less_the_other,
+        || a_cube_turned_and_far_away("a cube turned and a million units out"),
+        || an_uneven_l("an uneven L", &Isometry::identity()),
+        || {
+            an_uneven_l(
+                "an uneven L turned and a million units out",
+                &turned_and_a_million_units_out(),
+            )
+        },
+        a_plate_with_a_hole_turned_and_far_away,
+    ];
+    let (mut closest_solid, mut closest_face): (f64, f64) = (0.0, 0.0);
+    let mut off_at_all = 0;
+    for build in builders {
+        let (model, solids) = build();
+        for (what, key) in solids {
+            let solid = model.solid(key).expect("a key the model made");
+            let measured = solid
+                .measure(
+                    any_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+            let (moment, weight) = where_the_solid_balances(&model, key);
+            let share = the_share_of_its_wobble(
+                what,
+                measured.centroid(),
+                measured.centroid_wobble(),
+                &moment,
+                &weight,
+            );
+            println!(
+                "{what}: middle within {:e}, {share:.3} of it used",
+                measured.centroid_wobble()
+            );
+            closest_solid = closest_solid.max(share);
+            off_at_all += usize::from(share > 0.0);
+
+            for face in solid.faces() {
+                let measured = solid
+                    .measure_one_face(
+                        face.key(),
+                        any_deflection(),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("a face of {what} measures: {why}"));
+                let (moment, weight) = where_the_face_balances(face);
+                let share = the_share_of_its_wobble(
+                    what,
+                    measured.centroid(),
+                    measured.centroid_wobble(),
+                    &moment,
+                    &weight,
+                );
+                closest_face = closest_face.max(share);
+                off_at_all += usize::from(share > 0.0);
+            }
+        }
+    }
+    println!(
+        "the closest a solid's middle came to its wobble: {closest_solid:.3} of it; a face's: \
+         {closest_face:.3}"
+    );
+    assert!(
+        off_at_all > 0,
+        "no middle here came out off, so nothing was checked"
+    );
+    assert!(
+        closest_solid > 0.99 && closest_face > 0.99,
+        "the closest a solid's middle came to its wobble was {closest_solid} of it, and a face's \
+         {closest_face}"
+    );
+}
+
 /// Where nothing rounds, nothing is owed: a cube on whole numbers is measured
 /// on the nose, and its three errors stay exactly `0.0`. This is what says the
 /// fix charges the rounding the sums did and not a forward bound on what they
@@ -166,9 +265,10 @@ fn a_cube_on_whole_numbers_still_owes_nothing() {
             measured.volume(),
             measured.volume_error(),
             measured.surface_area(),
-            measured.area_error()
+            measured.area_error(),
+            measured.centroid_wobble()
         ],
-        [8.0, 0.0, 24.0, 0.0]
+        [8.0, 0.0, 24.0, 0.0, 0.0]
     );
     for face in solid.faces() {
         let measured = solid
@@ -179,8 +279,64 @@ fn a_cube_on_whole_numbers_still_owes_nothing() {
                 &mut ProvenanceLog::new(),
             )
             .expect("a face of a cube measures");
-        assert_eq!([measured.area(), measured.area_error()], [4.0, 0.0]);
+        assert_eq!(
+            [
+                measured.area(),
+                measured.area_error(),
+                measured.centroid_wobble()
+            ],
+            [4.0, 0.0, 0.0]
+        );
     }
+}
+
+fn a_cube_turned_and_far_away(what: &'static str) -> (Model, Vec<(&'static str, SolidKey)>) {
+    let mut model = a_model();
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
+    model
+        .place_solid(cube, &turned_and_a_million_units_out())
+        .expect("this model made the key");
+    (model, vec![(what, cube)])
+}
+
+/// An L whose sides are none of them whole numbers, nor the same, so its
+/// middle is a ratio no `f64` holds even where it stands.
+fn an_uneven_l(
+    what: &'static str,
+    placement: &Isometry,
+) -> (Model, Vec<(&'static str, SolidKey)>) {
+    let mut model = a_model();
+    let ell = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [4.1, 0.0],
+        [4.1, 0.3],
+        [0.9, 0.3],
+        [0.9, 7.7],
+        [0.0, 7.7],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("an L");
+    let ell = model
+        .add_extrusion(&ell, 2.35, placement)
+        .expect("an L 2.35 thick");
+    (model, vec![(what, ell)])
+}
+
+fn a_plate_with_a_hole_turned_and_far_away() -> (Model, Vec<(&'static str, SolidKey)>) {
+    let mut model = a_model();
+    let plate = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+        .with_hole(vec![[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a hole");
+    let plate = model
+        .add_extrusion(&plate, 3.0, &turned_and_a_million_units_out())
+        .expect("a plate three thick");
+    (
+        model,
+        vec![("a plate with a hole turned and a million units out", plate)],
+    )
 }
 
 fn two_turned_cubes_each_less_the_other() -> (Model, Vec<(&'static str, SolidKey)>) {
@@ -253,16 +409,23 @@ fn turned_and_a_million_units_out() -> Isometry {
 fn six_times_the_volume(model: &Model, solid: SolidKey) -> Vec<f64> {
     let mut total = Vec::new();
     for face in model.solid(solid).expect("a key the model made").faces() {
-        face.for_each_triangle(|[a, b, c]| {
-            let [a, b, c] = [a, b, c].map(|corner| corner.coordinates());
-            for (first, second, third) in [(0, 1, 2), (1, 2, 0), (2, 0, 1)] {
-                let across = plus(
-                    &times(&[b[second]], &[c[third]]),
-                    &negated(&times(&[b[third]], &[c[second]])),
-                );
-                total = plus(&total, &times(&[a[first]], &across));
-            }
+        face.for_each_triangle(|corners| {
+            total = plus(&total, &six_times_the_volume_under(corners.map(|corner| corner.coordinates())));
         });
+    }
+    total
+}
+
+/// `a · (b × c)`, exactly: six times the signed volume of the tetrahedron the
+/// triangle makes with the world origin.
+fn six_times_the_volume_under([a, b, c]: [[f64; 3]; 3]) -> Vec<f64> {
+    let mut total = Vec::new();
+    for (first, second, third) in [(0, 1, 2), (1, 2, 0), (2, 0, 1)] {
+        let across = plus(
+            &times(&[b[second]], &[c[third]]),
+            &negated(&times(&[b[third]], &[c[second]])),
+        );
+        total = plus(&total, &times(&[a[first]], &across));
     }
     total
 }
@@ -272,16 +435,10 @@ fn six_times_the_volume(model: &Model, solid: SolidKey) -> Vec<f64> {
 /// corner they fan from, and its area is that vector's length.
 fn four_times_the_area_squared(face: FaceView<'_>) -> Vec<f64> {
     let mut twice_the_vector_area: [Vec<f64>; 3] = Default::default();
-    face.for_each_triangle(|[a, b, c]| {
-        let [a, b, c] = [a, b, c].map(|corner| corner.coordinates());
-        for (from, to) in [(a, b), (b, c), (c, a)] {
-            for (axis, (second, third)) in [(1, 2), (2, 0), (0, 1)].into_iter().enumerate() {
-                let across = plus(
-                    &times(&[from[second]], &[to[third]]),
-                    &negated(&times(&[from[third]], &[to[second]])),
-                );
-                twice_the_vector_area[axis] = plus(&twice_the_vector_area[axis], &across);
-            }
+    face.for_each_triangle(|corners| {
+        let turned = twice_the_vector_area_of(corners.map(|corner| corner.coordinates()));
+        for (total, part) in twice_the_vector_area.iter_mut().zip(&turned) {
+            *total = plus(total, part);
         }
     });
     twice_the_vector_area
@@ -289,6 +446,113 @@ fn four_times_the_area_squared(face: FaceView<'_>) -> Vec<f64> {
         .fold(Vec::new(), |total, component| {
             plus(&total, &times(component, component))
         })
+}
+
+/// `a × b + b × c + c × a`, exactly: twice one triangle's vector area, which is
+/// `(b − a) × (c − a)` without taking a side.
+fn twice_the_vector_area_of([a, b, c]: [[f64; 3]; 3]) -> [Vec<f64>; 3] {
+    let mut twice: [Vec<f64>; 3] = Default::default();
+    for (from, to) in [(a, b), (b, c), (c, a)] {
+        for (axis, (second, third)) in [(1, 2), (2, 0), (0, 1)].into_iter().enumerate() {
+            let across = plus(
+                &times(&[from[second]], &[to[third]]),
+                &negated(&times(&[from[third]], &[to[second]])),
+            );
+            twice[axis] = plus(&twice[axis], &across);
+        }
+    }
+    twice
+}
+
+/// Where the space the solid's triangles enclose balances, exactly, as a
+/// moment and a weight whose ratio is the middle along each axis.
+///
+/// Every triangle makes a tetrahedron with the world origin, which weighs its
+/// signed volume and stands at a quarter of the sum of its corners; so the
+/// moment is the sum of `a · (b × c)` times `a + b + c`, and the weight four
+/// times the sum of `a · (b × c)`.
+fn where_the_solid_balances(model: &Model, solid: SolidKey) -> ([Vec<f64>; 3], Vec<f64>) {
+    let mut moment: [Vec<f64>; 3] = Default::default();
+    let mut weight = Vec::new();
+    for face in model.solid(solid).expect("a key the model made").faces() {
+        face.for_each_triangle(|corners| {
+            let corners = corners.map(|corner| corner.coordinates());
+            let six_volume = six_times_the_volume_under(corners);
+            weight = plus(&weight, &times(&six_volume, &[4.0]));
+            for (axis, total) in moment.iter_mut().enumerate() {
+                let summed = plus(&plus(&[corners[0][axis]], &[corners[1][axis]]), &[corners[2][axis]]);
+                *total = plus(total, &times(&six_volume, &summed));
+            }
+        });
+    }
+    (moment, weight)
+}
+
+/// Where one face's fan balances exactly under `docs/decisions.md` §338.5's
+/// definition, as a moment and a weight whose ratio is the middle along each
+/// axis: every triangle weighed by its shadow on the fan's exact vector area,
+/// `(a × b + b × c + c × a) · N`, and standing at `(a + b + c) / 3`.
+fn where_the_face_balances(face: FaceView<'_>) -> ([Vec<f64>; 3], Vec<f64>) {
+    let mut triangles = Vec::new();
+    let mut twice: [Vec<f64>; 3] = Default::default();
+    face.for_each_triangle(|corners| {
+        let corners = corners.map(|corner| corner.coordinates());
+        let turned = twice_the_vector_area_of(corners);
+        for (total, part) in twice.iter_mut().zip(&turned) {
+            *total = plus(total, part);
+        }
+        triangles.push((corners, turned));
+    });
+
+    let mut moment: [Vec<f64>; 3] = Default::default();
+    let mut weight = Vec::new();
+    for (corners, turned) in triangles {
+        let shadow = turned
+            .iter()
+            .zip(&twice)
+            .fold(Vec::new(), |total, (part, of)| plus(&total, &times(part, of)));
+        weight = plus(&weight, &times(&shadow, &[3.0]));
+        for (axis, total) in moment.iter_mut().enumerate() {
+            let summed = plus(&plus(&[corners[0][axis]], &[corners[1][axis]]), &[corners[2][axis]]);
+            *total = plus(total, &times(&shadow, &summed));
+        }
+    }
+    (moment, weight)
+}
+
+/// How far `middle` is from `moment / weight`, as a share of `wobble` — and a
+/// panic when it is further than `wobble`, which is checked exactly: the
+/// squared distance times `weight²` against `wobble² · weight²`.
+fn the_share_of_its_wobble(
+    what: &str,
+    middle: Point,
+    wobble: f64,
+    moment: &[Vec<f64>; 3],
+    weight: &[f64],
+) -> f64 {
+    assert!(
+        wobble.is_finite(),
+        "{what}: nothing is worth asserting against an infinite bound (§47.4)"
+    );
+    let middle = middle.coordinates();
+    let squared = moment
+        .iter()
+        .zip(middle)
+        .fold(Vec::new(), |total, (moment, at)| {
+            let off = plus(&times(weight, &[at]), &negated(moment));
+            plus(&total, &times(&off, &off))
+        });
+    let allowed = times(&times(weight, weight), &times(&[wobble], &[wobble]));
+    let distance = roughly(&squared).sqrt() / roughly(weight).abs();
+    assert!(
+        at_least_zero(&plus(&allowed, &negated(&squared))),
+        "{what}: a middle measured at {middle:?} is {distance:e} from where the triangles \
+         balance, and the kernel owned up to {wobble:e}"
+    );
+    if distance == 0.0 {
+        return 0.0;
+    }
+    distance / wobble
 }
 
 /// Whether `value ± error` holds a sixth of `six_volumes`.
