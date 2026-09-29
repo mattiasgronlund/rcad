@@ -1124,11 +1124,27 @@ fn how_far_the_middle_is_from(
 
 /// How long a vector whose three sides are no longer than `sides` can be,
 /// rounded up.
+///
+/// **The sides are scaled so the longest is between one and two before they
+/// are squared, and the length is scaled back after.** A side under about
+/// `1e-162` squares to below the smallest subnormal, and [`multiplied_up`] can
+/// only step that up to `2^-1074`: three sides of `5e-301` came out `5.4e-162`
+/// long, not `8.7e-301`. The longest side is read in the subnormals too, by
+/// first lifting it out of them. Scaling by a power of two is exact, save for a
+/// side so much shorter than the longest that it lands among the subnormals,
+/// and [`shift_up`] rounds that one up, so every step still rounds up.
 fn length_at_most(sides: [f64; 3]) -> f64 {
-    let squared = sides
-        .into_iter()
-        .fold(0.0, |total, side| upward(total + multiplied_up(side, side)));
-    upward(squared.sqrt())
+    let longest = sides.into_iter().fold(0.0, f64::max);
+    let by = if longest.is_subnormal() {
+        shift_for(shift(longest, 64)) - 64
+    } else {
+        shift_for(longest)
+    };
+    let squared = sides.into_iter().fold(0.0, |total, side| {
+        let side = shift_up(side, -by);
+        upward(total + multiplied_up(side, side))
+    });
+    shift_up(upward(squared.sqrt()), by)
 }
 
 /// `left × right` for two sizes, rounded up — off zero too, where two sizes

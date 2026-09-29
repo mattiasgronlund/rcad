@@ -330,16 +330,7 @@ fn a_cube_on_whole_numbers_still_owes_nothing() {
 /// break is the next test.
 #[test]
 fn a_cube_moved_by_a_speck_owns_up_to_what_the_speck_moves() {
-    for speck in [
-        2f64.powi(-100),
-        2f64.powi(-220),
-        2f64.powi(-270),
-        2f64.powi(-400),
-        1e-300,
-        2f64.powi(-1000),
-        2f64.powi(-1060),
-        f64::from_bits(2),
-    ] {
+    for speck in the_specks() {
         let (model, cube) = a_cube_of_side_two_moved_by(speck);
         model
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
@@ -423,6 +414,81 @@ fn a_cube_moved_by_a_speck_owns_up_to_what_the_speck_moves() {
             );
         }
     }
+}
+
+/// `docs/queue.md` Q573: the same cubes publish a wobble no wider than the
+/// speck, for the solid and for each face, however far down the speck goes.
+///
+/// The solid's middle is `√3 · speck / 2`, about `0.87 · speck`, from where it
+/// was measured, and a face's `√2 · speck / 2`, about `0.71 · speck`. The test
+/// above holds that each wobble reaches that far, and this one that it reaches
+/// no further than `speck`: under `1.16` times the truth for the solid and
+/// `1.42` times for a face.
+///
+/// **What this pins is the scaling in `measure.rs`'s `length_at_most`.** A
+/// wobble is the length of three distances, one per axis, and a distance under
+/// about `1e-162` squares to below the smallest subnormal. Squared as they
+/// were, each of those squares was stepped up to `2^-1074`, so a cube moved by
+/// `1e-300` published a wobble of `5.4e-162` for a middle `0.87e-300` off, and
+/// so did every smaller speck here. Scaling the three distances by a power of
+/// two so the longest is between one and two, and the length back, is exact
+/// wherever the square would have dropped.
+///
+/// **The last speck gets seven spacings of the subnormals, `3.5 · speck`.** At
+/// `2^-1073` a spacing is half the speck, and the distance along each axis is
+/// one spacing, but it reaches `length_at_most` as four: the division before
+/// it works in the solid's units of two, where that distance is half the
+/// smallest subnormal, and rounds it up by whole spacings. Three sides of four
+/// spacings are `6.93` spacings long, which is seven once rounded up.
+#[test]
+fn a_cube_moved_by_a_speck_publishes_a_wobble_no_wider_than_the_speck() {
+    let mut too_wide = Vec::new();
+    for speck in the_specks() {
+        let ceiling = speck.max(f64::from_bits(7));
+        let (model, cube) = a_cube_of_side_two_moved_by(speck);
+        let solid = model.solid(cube).expect("this model made the key");
+        let measured = solid
+            .measure(
+                any_deflection(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a moved cube measures");
+        let mut wobbles = vec![("the solid", measured.centroid_wobble())];
+        for face in solid.faces() {
+            let measured = solid
+                .measure_one_face(
+                    face.key(),
+                    any_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a face of a moved cube measures");
+            wobbles.push(("a face", measured.centroid_wobble()));
+        }
+        println!(
+            "a cube moved by {speck:e}: the solid's middle within {:e}, the widest face's within \
+             {:e}",
+            measured.centroid_wobble(),
+            wobbles[1..]
+                .iter()
+                .map(|&(_, wobble)| wobble)
+                .fold(0.0, f64::max)
+        );
+        for (what, wobble) in wobbles {
+            if wobble > ceiling {
+                too_wide.push(format!(
+                    "a cube moved by {speck:e}: {what} publishes a middle within {wobble:e}, \
+                     wider than {ceiling:e}"
+                ));
+            }
+        }
+    }
+    assert!(
+        too_wide.is_empty(),
+        "wobbles wider than their speck:\n{}",
+        too_wide.join("\n")
+    );
 }
 
 /// **The limit, pinned: a cube of side two moved by `2^-1074`, the smallest
@@ -805,6 +871,22 @@ fn the_smallest_part_of_a_corner(model: &Model, solid: SolidKey) -> f64 {
         });
     }
     smallest
+}
+
+/// The moves a cube of side two is checked under: the first speck where each
+/// product behind its errors drops below the subnormals, `1e-300`, and on down
+/// to `2^-1073`, the last one its errors still hold.
+fn the_specks() -> [f64; 8] {
+    [
+        2f64.powi(-100),
+        2f64.powi(-220),
+        2f64.powi(-270),
+        2f64.powi(-400),
+        1e-300,
+        2f64.powi(-1000),
+        2f64.powi(-1060),
+        f64::from_bits(2),
+    ]
 }
 
 /// A cube of side two, moved by `speck` along each axis.

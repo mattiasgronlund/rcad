@@ -88,9 +88,32 @@ bound. `a_cube_on_whole_numbers_still_owes_nothing` pins the zeros.
 - **The exact sums assume nothing underflows.** An offset's lost part scaled by
   its axis's shift, or a product of three of them, could fall below the
   subnormals for a solid whose corners mix coordinates near `1e-300` with ones
-  near one. `Model::validate`'s dynamic-range check refuses such a solid
-  (§19.6). `measure` does not validate, so a deserialised one could reach this.
-  This is argued, not shown.
+  near one.
+
+  *2026-09-29, Q549 (`5d4e60e6`) and Q572: measured, and who can reach it was
+  wrong.* This bullet said `Model::validate`'s dynamic-range check refuses such
+  a solid (§19.6), so only a deserialised one could reach this. The check reads
+  the largest coordinate against the smallest feature, the shortest edge or
+  radius. A cube of side two moved by `(1e-300, 1e-300, 1e-300)` has every edge
+  two long, so validate accepts it, and one moved by `2^-1074` along each axis
+  too. The public API builds both.
+
+  What such a cube does is in `a_flat_solid_publishes_the_rounding_of_its_measure.rs`.
+  A move `s` leaves each offset to a far corner a lost part of `s`, which is
+  `u = s / 2` in the cube's units of two, and products of those are what drop.
+  Of the moves the test tries, a face's moment first drops one below `2^-1074`
+  at `2^-220` (`u⁵`), the solid's moment and a face's weights at `2^-270`
+  (`u⁴`), and the volume at `2^-400` (`u³`). **Every published error still
+  holds the truth down to a move of `2^-1073`**, worked out by hand:
+  `a_cube_moved_by_a_speck_owns_up_to_what_the_speck_moves`. **At `2^-1074`
+  it breaks**, and `a_cube_moved_by_the_smallest_subnormal_publishes_no_error_and_is_off`
+  pins the break. It is not a product that drops there but the step before
+  any: the lost part `2^-1074` halves to `2^-1075` in the cube's units and
+  rounds to zero. So the exact sums are the unmoved cube's, and all five
+  errors (the solid's volume, skin and middle, and each face's area and
+  middle) come out `0.0` with every answer off. The cube is two across and
+  carries a move of `2^-1074`, a spread of `2^1075` against §3.5's `1e11`, so
+  the break is class D (§352.3). 338.5 says what the face's middle adds.
 
 ### 338.4 Pins outside the write set that move
 
@@ -209,8 +232,56 @@ multiplies two cross products, four sides, and its moment multiplies by a
 fifth. The measured middle's offset from `from` is also scaled down by the
 axis's shift, which is one more place where a lost part can fall below the
 subnormals. So a milder mix of coordinate sizes than the volume's could reach
-the subnormals and make a sum inexact. This is argued, not shown, exactly as
-it is for the volume.
+the subnormals and make a sum inexact.
+
+*2026-09-29, Q549, Q571, Q573, Q572 and Q593. This paragraph ended "argued,
+not shown". What has been shown since:*
+
+- **A speck someone drew.** The cube moved by a speck (338.3's second bullet)
+  drops products first in a face's moment, at a move of `2^-220`, and every
+  published error holds down to `2^-1073`.
+- **Parts no one drew, inside §3.5's envelope.** Q571 (`9c888b2a`) turned flat
+  solids in `f64` by quarter and half turns. `cos(π/2)` in `f64` is `6.1e-17`,
+  not zero, and the turns multiply those together into corner parts far
+  smaller than anything asked for. A cube of side two turned by four half
+  turns about `x`, `y`, `x`, `y` has corner parts down to `2^-265.3`, and by
+  eight quarter turns `2^-257.7`. The uneven L and the plate with a hole
+  turned by four half turns reach `2^-265.1` and `2^-264.7`. The lane counted
+  the products the sums take that are not exact, with a probe it did not keep:
+  some in the sums behind a face's middle, some of them below the smallest
+  subnormal outright, and none in the volume, the skin, the solid's middle or a
+  face's area. Every published error of each solid and of each face still
+  holds, against the test's oracle with every corner scaled up by `2^80` so
+  that its own sums lose nothing. The truth used `1.000` of every solid's
+  wobble and of the closest face's, so none has grown loose either:
+  `a_solid_turned_by_half_and_quarter_turns_owns_up_to_what_the_turns_rounded`.
+- **The wobble held there but was loose, and Q573 tightened it.**
+  `length_at_most` squared each axis's distance as it came, and a distance
+  under about `1e-162` squares to below the smallest subnormal, where
+  `multiplied_up` can only step it up to `2^-1074`. So the cube moved by
+  `1e-300` published a wobble of `5.44e-162` for a middle `8.66e-301` off,
+  and so did the moves of `2^-1000`, `2^-1060` and `2^-1073`. It now scales the
+  three distances by a power of two so the longest is between one and two, and
+  the length back. That is exact wherever a square would have dropped, and in
+  the normal range it rounds exactly as before, so the wobbles `measuring.rs`
+  pins to the bit did not move. The same cube now publishes `8.66e-301`.
+  `a_cube_moved_by_a_speck_publishes_a_wobble_no_wider_than_the_speck` asks
+  every move's wobble to be at most the move, which is under `1.16` times the
+  truth for the solid and `1.42` for a face. The one exception is `2^-1073`,
+  held to seven spacings of the subnormals: its distance along each axis is
+  one spacing, and it reaches `length_at_most` as four, rounded up by the
+  division before it, which works in the cube's units of two where that
+  distance is half the smallest subnormal. A probe printed those sides.
+
+**What is still not shown** is the way Q571 named for a dropped product to
+break a published bound: a solid whose rounded answer lands exactly where the
+lossy sums put it, so it publishes an error of `0.0` or a subnormal one, while
+the products that dropped move the truth. On every solid above, the parts that
+move an answer are ones the sums keep, and the smallest error a face publishes
+on the turned solids is `6.4e-79`. Q571 searched every run of up to five
+quarter, half and three-quarter turns, and 300 000 runs of six and of seven,
+and none left a corner of a cube of side two smaller than the four half turns
+do, so turns alone have not reached it. It is row Q594.
 
 **Pins that moved.** All are in this row's write set.
 `a_flat_solids_measurement_is_bit_for_bit_what_it_was` now carries each
