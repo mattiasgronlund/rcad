@@ -308,7 +308,10 @@ const FROM_Y_ROUND_TO_MINUS_X: WhereABendSits = WhereABendSits {
 /// `axis`.
 ///
 /// Turning the axis round turns round each circle a cap plane cuts the ring
-/// in, as it does a cone's; the wall still faces the shell the same way.
+/// in, as it does a cone's; the wall still faces the shell the same way. The
+/// wall is used forwards, as a torus faces out of its tube, and each circle is
+/// walked right-handed about the outward normal of the face it bounds
+/// (`docs/decisions.md` §361).
 fn a_quarter_bend(model: &mut Model, sits: &WhereABendSits, axis: Axis) -> SolidKey {
     use rcad_geom::{Cylinder, HalfSpace, Picker, Torus};
     let turned_round = axis.direction().components()[2] < 0.0;
@@ -372,18 +375,18 @@ fn a_quarter_bend(model: &mut Model, sits: &WhereABendSits, axis: Axis) -> Solid
         &mut builder,
         sits.start_cap_facing,
         start_circle,
-        round(Orientation::Reversed),
+        round(Orientation::Forward),
     );
     let end_cap = cap(
         &mut builder,
         sits.end_cap_facing,
         end_circle,
-        round(Orientation::Forward),
+        round(Orientation::Reversed),
     );
     let round_the_wall = [
-        (start_circle, round(Orientation::Forward)),
+        (start_circle, round(Orientation::Reversed)),
         (seam, Orientation::Forward),
-        (end_circle, round(Orientation::Reversed)),
+        (end_circle, round(Orientation::Forward)),
         (seam, Orientation::Reversed),
     ]
     .map(|(edge, turn)| {
@@ -401,7 +404,7 @@ fn a_quarter_bend(model: &mut Model, sits: &WhereABendSits, axis: Axis) -> Solid
         .add_shell(&[
             (start_cap, Orientation::Forward),
             (end_cap, Orientation::Forward),
-            (side, Orientation::Reversed),
+            (side, Orientation::Forward),
         ])
         .expect("three faces close");
     builder

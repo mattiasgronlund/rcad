@@ -888,17 +888,12 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
             let squared = dot_enclosing(direction, direction);
             core::array::from_fn(|axis| squared * out[axis] - up * direction[axis])
         }
-        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre` is
-        // the quartic's own gradient, divided by four so nothing is normalized,
-        // and it points out of the tube. **This is that turned round**, because
-        // a face's orientation is read against the surface's own normal, and a
-        // ring's points *into* its tube: `Torus::point_at` takes the tube angle
-        // first, and at the outer equator `∂/∂tube × ∂/∂ring` is
-        // `r·w × (R + r)·u`, towards the axis. A bend's wall is stored reversed
-        // for exactly that reason (`tests/rings/mod.rs`). Read the other way, a
-        // ray out of a bend through its wall counted `−1` and one in through a
-        // cap and out through the wall `−2`, which no solid can give
-        // (`docs/decisions.md` §323).
+        // `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for `x = at − centre`: the
+        // quartic's own gradient, divided by four so nothing is normalized. It
+        // points out of the tube, which is the way a torus faces — the
+        // standard's, the reader's and `validate.rs`'s reading, and the
+        // mesher's since it stopped taking the chart's turn for it
+        // (`docs/decisions.md` §329, §361).
         Surface::Torus(ring) => {
             let direction = exactly(ring.axis().direction().components());
             let out = negated(gap_enclosing(at, ring.centre()));
@@ -908,8 +903,8 @@ fn gradient_at(surface: &Surface, at: [Interval; 3]) -> [Interval; 3] {
             let small = Interval::exactly(ring.tube_radius());
             let bulge = dot_enclosing(out, out) - big * big - small * small;
             core::array::from_fn(|axis| {
-                -(squared * bulge * out[axis]
-                    + Interval::exactly(2.0) * big * big * up * direction[axis])
+                squared * bulge * out[axis]
+                    + Interval::exactly(2.0) * big * big * up * direction[axis]
             })
         }
         other => panic!("this crate cannot say which way {other:?} faces"),
@@ -959,11 +954,12 @@ pub(crate) fn decide(
 /// A box on the plane of a block's side and off the side itself, against a
 /// solid that also has a torus face (`docs/decisions.md` §323.3).
 ///
-/// These live here and not in `tests/` because no public call builds such a
-/// solid yet: `tests/a_ray_from_beside_a_box.rs` pins each way there is and
-/// what refuses it. So the solid is written the way a fuse writes an answer of
-/// two pieces that do not touch — one solid holding two shells, here a quarter
-/// bend's and a block's.
+/// These were written here because no public call built such a solid: the
+/// solid is written the way a fuse writes an answer of two pieces that do not
+/// touch — one solid holding two shells, here a quarter bend's and a block's.
+/// `tests/a_ray_from_beside_a_box.rs` pins each public way there is; since the
+/// bend's wall is used forwards, a bend growing out of a block's side builds
+/// through `SolidBuilder` (§361).
 #[cfg(test)]
 mod a_box_beside_a_blocks_side {
     use rcad_geom::{
@@ -1115,18 +1111,18 @@ mod a_box_beside_a_blocks_side {
         let start_cap = cap(
             Vector::new(0.0, -1.0, 0.0),
             start_circle,
-            Orientation::Reversed,
+            Orientation::Forward,
         );
         let end_cap = cap(
             Vector::new(-1.0, 0.0, 0.0),
             end_circle,
-            Orientation::Forward,
+            Orientation::Reversed,
         );
         let mut round_the_wall = Vec::with_capacity(4);
         for (edge, turn) in [
-            (start_circle, Orientation::Forward),
+            (start_circle, Orientation::Reversed),
             (seam, Orientation::Forward),
-            (end_circle, Orientation::Reversed),
+            (end_circle, Orientation::Forward),
             (seam, Orientation::Reversed),
         ] {
             round_the_wall.push(DraftStep::Along(
@@ -1142,7 +1138,7 @@ mod a_box_beside_a_blocks_side {
             .add_shell(&[
                 (start_cap, Orientation::Forward),
                 (end_cap, Orientation::Forward),
-                (wall, Orientation::Reversed),
+                (wall, Orientation::Forward),
             ])
             .expect("one shell");
         builder

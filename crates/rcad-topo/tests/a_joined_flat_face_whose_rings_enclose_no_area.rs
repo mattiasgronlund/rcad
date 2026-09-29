@@ -266,9 +266,12 @@ fn assert_measures(model: &Model, solid: SolidKey, volume: f64, what: &str) {
 /// through `−y` to `+x`. Four faces: the half torus wall, the half ring of
 /// `z = 0` under it, and a half disk of `y = 0` at each end.
 ///
-/// Written out the way `rings.rs` writes a bend: the wall used reversed, every
-/// number turned exactly, and each arc named by the half-spaces and the pipe of
-/// the ring's own radius that pick it.
+/// Written out the way `rings.rs` writes a bend: the wall used forwards, as a
+/// torus faces out of its tube (`docs/decisions.md` §361), every number turned
+/// exactly, and each arc named by the half-spaces and the pipe of the ring's
+/// own radius that pick it. No edge here is closed, so there is no circle to
+/// turn over: the wall's loop already runs right-handed about the way out of
+/// the tube, anticlockwise seen from above.
 fn the_top_half_of_a_half_bend(model: &mut Model, turned: bool) -> rcad_topo::Result<SolidKey> {
     let (ring, tube) = (4.0, 1.0);
     let way = if turned { -1.0 } else { 1.0 };
@@ -359,7 +362,7 @@ fn the_top_half_of_a_half_bend(model: &mut Model, turned: bool) -> rcad_topo::Re
         (floor_face, Orientation::Forward),
         (start_cap, Orientation::Forward),
         (end_cap, Orientation::Forward),
-        (wall_face, Orientation::Reversed),
+        (wall_face, Orientation::Forward),
     ])?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
