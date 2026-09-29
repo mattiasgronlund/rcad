@@ -89,9 +89,9 @@ The two spellings describe the same corners, caps and seam; only the wall's
 cone and the circles' coedge directions differ. Named about the axis pointing
 away from it, a frustum measures short by more than the bound `measure`
 publishes for it. The union measured 48.473055 ± 1.595028 lower-first and
-48.481776 ± 1.598270 upper-first, against 52π/3 = 54.454273. The test does not
-assert a volume for that reason. This is not in this lane's files; it is a new
-row (357.5).
+48.481776 ± 1.598270 upper-first, against 52π/3 = 54.454273. The test did not
+assert a volume for that reason. This was not in this lane's files; it became
+a new row (357.5), and 357.6 is its fix.
 
 ### 357.4 The torus: reachable, and refused further on
 
@@ -127,8 +127,8 @@ pins where it stops rather than an answer.
   `17c1764e`, flipped the assertion to `Ok(SameSurface)` and replaced that
   paragraph with one saying what the test pins now.
 - **The measure finding of 357.3**: a cone face named about the axis pointing
-  away from it measures short beyond its own bound. A trace row for
-  `measure`/the mesher, with the four numbers above as its reproducer.
+  away from it measures short beyond its own bound. Traced in Q510 and fixed
+  in Q560: 357.6.
 - `walk`'s cone arm is still guarded `one == other`
   (`crates/rcad-geom/src/walk.rs` line 727), so a closed run a caller names
   between two spellings of one cone is refused by name there. The frustum
@@ -137,3 +137,86 @@ pins where it stops rather than an answer.
 - The joiner, for cones and tori: Q354 is pipes only.
 - The one-spelling stacked bends refusing `ResultIsNotManifold { count: 4 }`,
   which is not about spellings at all.
+
+### 357.6 The measure finding was `Cone::point_at`, on the nappe with negative `along`
+
+*Queue row Q560, from Q510's trace. Lane
+`lane-q560-a-cone-point-read-back-on-the-other-side`, off `d578df1b`.*
+
+`Cone::coordinates_of` reads the angle off the direction across the axis,
+whichever nappe the point is on, and `along` straight off the axis. The cone
+about `−z` has `along < 0` everywhere above its apex, so the frustum walls of
+357.3 named about `−z` sit wholly on that side. `Cone::point_at` scaled the
+step across by `slope · along`, which is negative there, so it put every such
+point **half a turn round** from where it had been read: `(1, 0, 2)` on the
+cone about `−z` read `(0, −2)` and came back `(−1, 0, 2)`. The mesher reads a
+wall's boundary with `coordinates_of` and puts every point it adds back through
+`point_at`, so the wall came out folded. **The fix is to step across by
+`Cone::radius_at(along)`**, which is never negative; `round` then names the
+same direction across on both nappes and `point_at` undoes `coordinates_of`
+on both.
+
+Rejected: flipping the angle `coordinates_of` reads when `along < 0`. That
+puts the seam of that nappe at `round = π`, and §25.2 fixes it at zero.
+
+**Pinned.** `a_point_on_either_half_of_a_cone_comes_back_to_where_it_was`
+(`crates/rcad-geom/tests/a_round_trip_through_a_surfaces_own_two_coordinates.rs`)
+places points on both nappes **by hand**, never through `point_at`, for the
+cones about `+z` and `−z` and the same two turned and shifted. It has to: a
+round trip that starts in `point_at` passes the old code, because
+`coordinates_of` reads the turned angle and `point_at` turns it back. On the
+base the first point it tried with a negative `along`, `(0.375, 0, −0.75)` on
+the cone about `+z`, moved `2⁴⁴` times the bound.
+`two_frustums_stacked_on_one_cone.rs` now asserts each frustum's volume inside
+its bound in both spellings, and the union's in both orders, at deflection
+`0.01`; on the base the frustum `z ∈ [2, 4]` about `−z` measured
+12.090699 ± 0.781295 against 14π/3 and the union lower-first
+48.473055 ± 1.595028 against 52π/3, both failing.
+
+**What the frustums measure now**, from a throwaway probe in that test file,
+taken out before committing
+(`mise exec -- just t -p rcad-topo --test two_frustums_stacked_on_one_cone q560_probe --no-capture`):
+
+| | `d = 0.01` | `d = 0.001` | true |
+|---|---|---|---|
+| `z ∈ [2, 4]` about `+z` | 14.642664 ± 0.208457 | 14.658959 ± 0.021050 | 14.660766 |
+| `z ∈ [2, 4]` about `−z` | 14.643758 ± 0.208463 | 14.658955 ± 0.021055 | 14.660766 |
+| `z ∈ [4, 6]` about `+z` | 39.761317 ± 0.352550 | 39.790319 ± 0.034920 | 39.793507 |
+| `z ∈ [4, 6]` about `−z` | 39.761238 ± 0.348103 | 39.790283 ± 0.034920 | 39.793507 |
+| union, lower first | 54.403210 ± 0.558633 | 54.449088 ± 0.056224 | 54.454273 |
+| union, upper first | 54.403215 ± 0.558633 | 54.449086 ± 0.056224 | 54.454273 |
+
+Every row is inside its bound. The `+z` rows are the numbers 357.3 gave,
+unchanged, as they should be: nothing about `+z` has a negative `along` here.
+
+**What the gate shows moving: nothing pinned.** `just gate quiet` at
+`50326260` passed, 2761 tests. The same `point_at` is reached by three more
+callers, each through `coordinates_of` and back, and each was wrong the same
+way for a point with a negative `along` until now:
+
+- **the mesher's cut points** (`crates/rcad-topo/src/mesh.rs`, through
+  `Surface::point_at`) — the folded frustum above;
+- **`back_onto_the_surface`** (`crates/rcad-topo/src/fuse/select.rs`), which
+  put every candidate for a piece of such a wall half a turn round before
+  classifying it. §350.1's family 1 rests on "every corner of a piece is on its
+  face's nappe or at the apex, so `along` is at least zero"; a cone named
+  about the axis pointing away from its face breaks the premise, and with this
+  fix the round trip no longer needs it — the landing point keeps its
+  direction across on either nappe. §350.1 is not in Q560's files.
+- **`how_far_off`** (`crates/rcad-step/src/brep.rs`), which reports how far a
+  refused corner is off its face and would have said about a diameter for a
+  corner at negative `along`. It is a report and not a decision.
+
+None of the three has a test here that fails on the base; the union above is
+the one fuse in Q560's files through `back_onto_the_surface` on such a wall,
+and it answered the same faces before the fix. A shape meant to show the
+select path — the frustum `z ∈ [4, 6]` about `−z` cut in half by the block
+`[−10, 0] × [−10, 10] × [2, 12]`, as `a_frustum_cut_in_half_down_its_axis.rs`
+cuts one — **refuses `TwoCurvesTouchWithoutCrossing` in all six fuses, before
+and after the fix**, where the same frustum about `+z` answers all six inside
+their bounds. A throwaway probe in the same test file showed it; it is a new
+row and not this one.
+
+`∂u × ∂v` of the new chart still points out of the material on both nappes:
+`every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
+samples a cone at `along = ±0.75, ±2` and passes.

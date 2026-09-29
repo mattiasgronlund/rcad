@@ -17,9 +17,10 @@
 //!    the trigonometry.
 //! 3. **What family of inputs?** Balls and pipes whose radius runs over
 //!    thirteen orders of magnitude, placed anywhere out to `1e10` and turned
-//!    any way, with points drawn all over them; plus the awkward places one at
-//!    a time — a seam, a pole, an axis, a centre, and a point nowhere near the
-//!    surface at all.
+//!    any way, with points drawn all over them; a cone on both its halves,
+//!    its axis named either way round; plus the awkward places one at a time —
+//!    a seam, a pole, an axis, a centre, and a point nowhere near the surface
+//!    at all.
 //! 4. **Which gap would this have caught?** §12.6's fourth — a constant
 //!    published with a derivation and nothing checking it — in the shape §19
 //!    keeps finding it. A bound stated in `radius · ε` and nothing else reads
@@ -35,7 +36,7 @@
 //! much room the drawn ones leave.
 
 use proptest::prelude::*;
-use rcad_geom::{Axis, Cylinder, Isometry, Plane, Point, Sphere, Surface, Vector};
+use rcad_geom::{Axis, Cone, Cylinder, Isometry, Plane, Point, Sphere, Surface, Vector};
 
 mod support;
 
@@ -121,6 +122,72 @@ fn a_point_on_a_ball_comes_back_to_where_it_was() {
             }
         }
     }
+}
+
+/// A point on either half of a cone comes back to where it was, whichever way
+/// round the cone's axis is named.
+///
+/// **The points are placed by hand and never through `point_at`**: a radius of
+/// `slope · |z|` at an angle, at a height `z`. A round trip that starts in
+/// `point_at` cannot see a `point_at` that puts every point with a negative
+/// `along` half a turn round, because `coordinates_of` then reads the turned
+/// angle and `point_at` turns it straight back.
+///
+/// The cone about `−z` is the same set of points as the cone about `+z`
+/// (`docs/decisions.md` §357.1), with `along` negative wherever `z` is
+/// positive — so the upper half of the cone about `−z` is where a frustum's wall
+/// sits when it names its cone about the axis pointing away from it. `(1, 0, 2)`
+/// on that cone used to come back as `(−1, 0, 2)`, two units away, and a
+/// frustum meshed that way came out folded (§357.3).
+///
+/// The slanted pair moves the same hand-placed points with the cone, so it
+/// holds the same claim about a cone named about any line either way round.
+#[test]
+fn a_point_on_either_half_of_a_cone_comes_back_to_where_it_was() {
+    let slope = 0.5;
+    let movement = Isometry::translation(Vector::new(-30.0, 12.0, 4.0))
+        .expect("a finite shift")
+        .compose(
+            &Isometry::rotation(
+                &Axis::new(Point::new(1.0, 1.0, 1.0), Vector::new(1.0, 2.0, -0.5))
+                    .expect("an axis"),
+                0.9,
+            )
+            .expect("a turn about a real axis"),
+        );
+    let about_z = Cone::new(Axis::z(), slope).expect("a positive slope");
+    let about_minus_z = Cone::new(Axis::z().reversed(), slope).expect("a positive slope");
+
+    let mut checked = 0;
+    for (cone, moved_by, what) in [
+        (about_z, None, "the cone about +z"),
+        (about_minus_z, None, "the cone about -z"),
+        (
+            about_z.transformed(&movement),
+            Some(movement),
+            "the cone about +z turned and shifted",
+        ),
+        (
+            about_minus_z.transformed(&movement),
+            Some(movement),
+            "the cone about -z turned and shifted",
+        ),
+    ] {
+        for round in [0.0, 0.3, 1.0, core::f64::consts::FRAC_PI_2, 3.0, -2.5, 3.1] {
+            for height in [2.0_f64, 0.75, 1e6, -0.75, -4.0, -1e6] {
+                let radius = slope * height.abs();
+                let placed = Point::new(radius * round.cos(), radius * round.sin(), height);
+                let point = moved_by.map_or(placed, |movement| movement.apply_to_point(placed));
+                assert_the_round_trip_stayed_inside_the_bound(
+                    &Surface::from(cone),
+                    point,
+                    &format!("{what}, at angle {round} and height {height}"),
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 168, "every spelling, angle and height was tried");
 }
 
 /// Each arm hands the question to the shape underneath it, bit for bit.

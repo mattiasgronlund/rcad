@@ -200,6 +200,17 @@ impl Cone {
     /// of a ball's pole: the second coordinate pinches the first away to
     /// nothing. Negative `along` walks onto the other nappe.
     ///
+    /// **On either nappe `round` names the same direction across the axis**,
+    /// because the step across is [`Cone::radius_at`], which is never negative.
+    /// That is what makes this undo [`Cone::coordinates_of`], which reads the
+    /// angle off the direction across whichever nappe the point is on. Scaling
+    /// by `slope · along` instead put every point with a negative `along` half a
+    /// turn round from where it was read, and a frustum whose wall names its
+    /// cone about the axis pointing away from it meshed folded
+    /// (`docs/decisions.md` §357.3). Reading the angle the other way round on
+    /// that nappe instead would move the seam there to `round = π`, and §25.2
+    /// fixes it at zero.
+    ///
     /// Only exactly on the cone where the sine and cosine are exact, which in
     /// practice means `round = 0`. No corner of a face is ever made this way,
     /// for the reason [`Cylinder::point_at`](crate::Cylinder::point_at) gives.
@@ -207,7 +218,7 @@ impl Cone {
     pub fn point_at(&self, round: f64, along: f64) -> Point {
         let (u, v) = self.basis();
         self.axis.origin()
-            + (u * round.cos() + v * round.sin()) * (self.slope * along)
+            + (u * round.cos() + v * round.sin()) * self.radius_at(along)
             + self.axis.direction() * along
     }
 

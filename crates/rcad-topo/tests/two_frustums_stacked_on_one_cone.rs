@@ -10,20 +10,43 @@
 //! orders (Q44, §231.5). §357 decides it exactly.
 //!
 //! **What the union is now:** one solid of four faces — the two caps and the
-//! two walls, one per spelling — which validates. The joiner still leaves the
-//! two spellings of the wall apart; that is Q354's for pipes, and this file's
-//! face count is the one to move to three when a joiner reaches cones.
+//! two walls, one per spelling — which validates and measures the frustum from
+//! `z = 2` to `z = 6` inside the bound `measure` publishes. The joiner still
+//! leaves the two spellings of the wall apart; that is Q354's for pipes, and
+//! this file's face count is the one to move to three when a joiner reaches
+//! cones.
 //!
-//! **Its volume is not asserted, and that is a finding and not a choice.** A
-//! frustum whose wall names the cone about the axis pointing *away* from it
-//! measures short of its own volume by more than the bound `measure`
-//! publishes, before any fuse: §357.3 has the numbers.
+//! Each frustum alone measures inside its bound in both spellings too. The one
+//! whose wall names the cone about the axis pointing *away* from it used to
+//! mesh folded and measure well short, before any fuse: `Cone::point_at` put a
+//! point with a negative `along` half a turn round from where `coordinates_of`
+//! had read it (§357.3).
 
-use rcad_geom::{Axis, Cone, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{
+    Axis, Cone, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
 
 const SLOPE: f64 = 0.5;
+
+/// The frustum from `z = 2` to `z = 4` and the one from `z = 4` to `z = 6`,
+/// each in both spellings of its wall, measured alone.
+#[test]
+fn a_frustum_measures_inside_its_bound_whichever_way_round_its_wall_names_the_cone() {
+    for (near, far) in [(2.0, 4.0), (4.0, 6.0)] {
+        for (axis, about) in [(Axis::z(), "+z"), (Axis::z().reversed(), "-z")] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let frustum = a_frustum(&mut model, near, far, axis);
+            assert_it_measures_inside_its_bound(
+                &model,
+                frustum,
+                the_volume_of_the_frustum(near, far),
+                &format!("z in [{near}, {far}] with its wall about {about}"),
+            );
+        }
+    }
+}
 
 #[test]
 fn two_frustums_stacked_on_one_cone_turned_round_unite_either_way_round() {
@@ -80,7 +103,39 @@ fn two_frustums_stacked_on_one_cone_turned_round_unite_either_way_round() {
             surfaces, want,
             "lower first {lower_first}: the two caps, and the wall still in its two spellings"
         );
+        assert_it_measures_inside_its_bound(
+            &model,
+            solids[0],
+            the_volume_of_the_frustum(2.0, 6.0),
+            &format!("the union, lower first {lower_first}"),
+        );
     }
+}
+
+/// `|volume − want|` no more than the error `measure` publishes with it, at
+/// the deflection §357.3's table was measured at.
+fn assert_it_measures_inside_its_bound(model: &Model, solid: SolidKey, want: f64, what: &str) {
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what}: does not measure: {why:?}"));
+    assert!(
+        (measured.volume() - want).abs() <= measured.volume_error(),
+        "{what} is {} against {want}, and the mesh may miss by {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+/// `π·h·(r₁² + r₁r₂ + r₂²)/3`, with each cap's radius half its height.
+fn the_volume_of_the_frustum(near: f64, far: f64) -> f64 {
+    let (low, high) = (SLOPE * near, SLOPE * far);
+    core::f64::consts::PI * (far - near) * (low * low + low * high + high * high) / 3.0
 }
 
 /// A frustum of the cone with its apex at the origin and slope one half, caps at
