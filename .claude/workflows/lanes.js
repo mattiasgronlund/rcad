@@ -234,17 +234,24 @@ function MERGER(lane) {
   }
 }
 
+// §304.4: a row can reach here with the verifier already having said `merge`
+// or `fix_first` and still end up `merged: false` -- the merger returned
+// nothing, or declined for a reason that is its own rather than the row's
+// content. Q124 and Q128 sat held five and a half hours because that only
+// showed up in the log, not in the row's own returned text, and no dispatcher
+// noticed. `verified` below carries it into the line itself.
 function merged(lane, prior, m) {
   const row = { row: lane.queueId, branch: branchOf(lane), merged: false, lines: [] }
+  const verified = !!prior.check && (prior.check.verdict === 'merge' || prior.check.verdict === 'fix_first')
   if (!m) {
-    row.lines.push(`${lane.queueId} ${branchOf(lane)}: the merger returned nothing`)
+    row.lines.push(`${lane.queueId} ${branchOf(lane)}: ${verified ? 'verified, not merged' : 'not merged'} -- the merger returned nothing`)
     row.unlock = treesOf(prior)
     return row
   }
   row.merged = m.merged === true
   row.lines.push(row.merged
     ? `${lane.queueId} ${branchOf(lane)}: pushed ${m.merged_sha} to main, attempt ${m.push_attempts} of ${MERGE_ATTEMPTS}`
-    : `${lane.queueId} ${branchOf(lane)}: not merged -- ${m.not_merged_because || 'the merger gave no reason'}`)
+    : `${lane.queueId} ${branchOf(lane)}: ${verified ? 'verified, not merged' : 'not merged'} -- ${m.not_merged_because || 'the merger gave no reason'}`)
   if (m.push_attempts > MERGE_ATTEMPTS) log(`${lane.label}: the merger reports ${m.push_attempts} push attempts, past the bound of ${MERGE_ATTEMPTS}`)
   if (m.gate_pass_line) row.lines.push(`gate: ${m.gate_pass_line}`)
   if (m.ff_main) row.lines.push(`ff-main: ${m.ff_main}`)
@@ -284,7 +291,8 @@ function pruned(lane, row, trees) {
 }
 
 function handedBack(lane, prior) {
-  const row = { row: lane.queueId, branch: branchOf(lane), merged: false, lines: [`${lane.label}: not merged -- ${prior.stop}`] }
+  const verified = !!prior.check && (prior.check.verdict === 'merge' || prior.check.verdict === 'fix_first')
+  const row = { row: lane.queueId, branch: branchOf(lane), merged: false, lines: [`${lane.label}: ${verified ? 'verified, not merged' : 'not merged'} -- ${prior.stop}`] }
   if (prior.report) {
     row.lines.push(`lane said ${prior.report.outcome}: ${prior.report.summary}`)
     if (prior.report.remaining) row.lines.push(`remaining: ${prior.report.remaining}`)
