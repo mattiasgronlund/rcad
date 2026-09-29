@@ -1022,16 +1022,16 @@ fn is_one_circle_cut_in_two(
 /// argument rests on.
 ///
 /// **Only the family where each step of that is a sign is taken**: a flat face
-/// whose curved sides are arcs of a ball it lies inside or of a cone it lies
-/// inside and crosses in a closed curve, a sphere face whose sides are arcs cut
-/// by planes through its centre, and a cone face cut by planes as
-/// [`is_a_family_this_follows`] sets out. Each arc must be picked by a
+/// whose curved sides are arcs of a ball it lies inside or of a cone or a pipe
+/// it lies inside and crosses in a closed curve, a sphere face whose sides are
+/// arcs cut by planes through its centre, and a cone face or a pipe face cut by
+/// planes as [`is_a_family_this_follows`] sets out. Each arc must be picked by a
 /// half-space that tells it from its sibling ([`the_way_into_an_arc`]), which
 /// asks the picker either to hold both its ends exactly or to have the arc's
 /// whole curve in front of it with that curve's centre behind — and a cone's
-/// ellipse earns that the same way a ball's circle does, through
-/// [`where_a_closed_crossing_is_centred`]. Anything else is refused by name, as
-/// before.
+/// ellipse and a pipe's circle earn that the same way a ball's circle does,
+/// through [`where_a_closed_crossing_is_centred`]. Anything else is refused by
+/// name, as before.
 ///
 /// **All of that is asked of the face where it is stored, and only `point` is
 /// asked where it sits** (§168). Each step is a property a movement keeps —
@@ -1254,8 +1254,8 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// # What the picker has to say, and why the reading is then sound
 ///
 /// The arc's own curve is where the flat one of the two surfaces cuts the round
-/// one, and it has to be a curve that **closes**: a ball's circle, a cone's
-/// circle, or a cone's ellipse ([`where_a_closed_crossing_is_centred`]). Its
+/// one, and it has to be a curve that **closes**: a ball's circle, or a cone's
+/// or a pipe's circle or ellipse ([`where_a_closed_crossing_is_centred`]). Its
 /// chord line splits that curve in two, and the whole of this arc is strictly on
 /// one side of the line, because a line meets a conic at two points and those
 /// two are the arc's own ends. So "which of the two arcs" *is* "which side of
@@ -1505,8 +1505,13 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// function's own [`Lies::Across`], read one side at a time where the side is.
 ///
 /// On a plane, that is half-planes, the insides of balls, and the inside of a
-/// cone whose crossing with the plane **closes** — each of those three leaves a
-/// convex piece of the plane, and any number of convex pieces meet in one.
+/// cone or a pipe whose crossing with the plane **closes** — each of those
+/// leaves a convex piece of the plane, and any number of convex pieces meet in
+/// one. A pipe's closed crossing is a circle or an ellipse
+/// ([`rcad_geom::Cylinder::is_cut_in_a_closed_curve_by`]), whose inside is
+/// convex, so it is the cone's argument word for word. Keeping a pipe's outside
+/// is not admitted either: the outside of an ellipse is not convex, which is
+/// the first of the cone's reasons below.
 ///
 /// What this needs of the cone is that the region be one piece, which is
 /// [`Cone::is_cut_in_a_closed_curve_by`]'s question and not the narrower circle.
@@ -1558,6 +1563,8 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// here has, over a shape nobody here builds: where the ellipse meets the
 /// straight cuts. That is a part with no named consumer (§13), and until one
 /// appears this refuses.
+///
+/// On a pipe it is planes, as [`leaves_a_pipe_in_one_piece`] sets out.
 ///
 /// On a sphere, it is planes through the centre: each cuts the sphere into two
 /// halves, and any number of halves meet in one piece, where planes that miss
@@ -3066,6 +3073,94 @@ mod tests {
                 } else if rate < 0.0 {
                     to = f64::min(to, -at_the_apex / rate);
                 } else if at_the_apex < 0.0 {
+                    return false;
+                }
+            }
+            from <= to
+        };
+        let how_many = 3600;
+        let round_the_rulings: Vec<bool> = (0..how_many)
+            .map(|step| {
+                carries_a_point(core::f64::consts::TAU * f64::from(step) / f64::from(how_many))
+            })
+            .collect();
+        round_the_rulings
+            .iter()
+            .zip(round_the_rulings.iter().cycle().skip(1))
+            .filter(|(now, next)| !**now && **next)
+            .count()
+    }
+
+    /// Why a pipe face cut by a floor, a roof and a plane along the axis is
+    /// followed only when the floor and the roof lie side by side.
+    ///
+    /// On the pipe of radius one up `+z`, keep `x ≥ −½` (along the axis),
+    /// `z ≥ 0` (a floor) and `z ≤ ½ − x` (a roof). The ruling at `φ` is at
+    /// `x = cos φ`: it is in front of the first where `cos φ ≥ −½`, and its
+    /// stretch `0 ≤ z ≤ ½ − cos φ` is there where `cos φ ≤ ½`. So a ruling carries
+    /// a point where `|cos φ| ≤ ½`: **two** runs, round `±90°`, with the rulings
+    /// along `±x` carrying nothing. Two pieces, and no one answer.
+    ///
+    /// Level the roof to `z ≤ 2`, side by side with the floor as a half bar's two
+    /// caps are, and every ruling the first cut leaves carries its whole stretch:
+    /// one run, and [`leaves_a_pipe_in_one_piece`] takes it.
+    #[test]
+    fn a_floor_a_leaned_roof_and_a_cut_along_the_axis_leave_a_pipe_in_two_pieces() {
+        let pipe = Cylinder::new(Axis::z(), 1.0).expect("a positive radius");
+        let cut = |through: [f64; 3], facing: [f64; 3]| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(facing[0], facing[1], facing[2]),
+            )
+            .expect("a normal with a length");
+            Cut {
+                surface: Surface::Plane(plane),
+                placed: Surface::Plane(plane),
+                kept: Decision::Pos,
+                corners_on_it: Vec::new(),
+            }
+        };
+        let along_the_axis = || cut([-0.5, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let floor = || cut([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let leaned_roof = || cut([0.0, 0.0, 0.5], [-1.0, 0.0, -1.0]);
+        let level_roof = || cut([0.0, 0.0, 2.0], [0.0, 0.0, -1.0]);
+
+        let leaned = [along_the_axis(), floor(), leaned_roof()];
+        assert!(
+            !is_a_family_this_follows(&Surface::Cylinder(pipe), &leaned),
+            "a floor and a roof that are not side by side, beside a cut along the axis, are refused"
+        );
+        assert_eq!(runs_of_a_pipes_rulings_that_carry_a_point(&leaned), 2);
+
+        let level = [along_the_axis(), floor(), level_roof()];
+        assert!(
+            is_a_family_this_follows(&Surface::Cylinder(pipe), &level),
+            "a floor and a roof side by side, beside a cut along the axis, are followed"
+        );
+        assert_eq!(runs_of_a_pipes_rulings_that_carry_a_point(&level), 1);
+    }
+
+    /// How many runs of the rulings of the pipe of radius one up `+z` carry a
+    /// point in front of every cut, walked a tenth of a degree at a time.
+    ///
+    /// A plane's value up a ruling is affine in how far up you have gone, so each
+    /// cut keeps a half-line of it, or all of it, or none, and a ruling carries a
+    /// point exactly when what they keep meets.
+    fn runs_of_a_pipes_rulings_that_carry_a_point(cuts: &[Cut]) -> usize {
+        let carries_a_point = |angle: f64| {
+            let foot = [angle.cos(), angle.sin(), 0.0];
+            let (mut from, mut to) = (f64::NEG_INFINITY, f64::INFINITY);
+            for cut in cuts {
+                let plane = cut.surface.as_plane().expect("every cut here is a plane");
+                let normal = plane.normal().components();
+                let at_the_foot: f64 =
+                    (0..3).map(|axis| normal[axis] * foot[axis]).sum::<f64>() - plane.offset();
+                let rate = normal[2];
+                if rate > 0.0 {
+                    from = f64::max(from, -at_the_foot / rate);
+                } else if rate < 0.0 {
+                    to = f64::min(to, -at_the_foot / rate);
+                } else if at_the_foot < 0.0 {
                     return false;
                 }
             }
