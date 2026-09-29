@@ -26,9 +26,7 @@
 use core::f64::consts::PI;
 use std::collections::HashMap;
 
-use rcad_geom::{
-    Deflection, EdgeRun, Orientation, Plane, Point, Scale, Sphere, Surface, Vector,
-};
+use rcad_geom::{Deflection, EdgeRun, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
 
