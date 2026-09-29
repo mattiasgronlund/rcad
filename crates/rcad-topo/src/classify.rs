@@ -995,7 +995,10 @@ mod a_box_beside_a_blocks_side {
         let block = model.solid(block).expect("this model made the key");
         for (at, _) in BESIDE_THE_SIDES {
             let mut log = ProvenanceLog::new();
-            assert!(block.no_face_meets(a_box_round(at), &policy, &mut log), "{at:?}");
+            assert!(
+                block.no_face_meets(a_box_round(at), &policy, &mut log),
+                "{at:?}"
+            );
             assert!(log.is_empty(), "{at:?} was settled exactly: {log:?}");
         }
         let on_the_top = a_box_round([4.0, -1.0, 0.0]);
@@ -1021,11 +1024,8 @@ mod a_box_beside_a_blocks_side {
                 Containment::Outside
             };
             assert_eq!(in_either, should, "{at:?} against each on its own");
-            let placed = both.classify_uncertain_point(
-                a_box_round(at),
-                &policy,
-                &mut ProvenanceLog::new(),
-            );
+            let placed =
+                both.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
             assert_eq!(placed, should, "{at:?}");
         }
     }
@@ -1057,7 +1057,9 @@ mod a_box_beside_a_blocks_side {
 
     fn both_in_one_solid(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {
         let [one, other] = [one, other].map(|key| {
-            let slot = key.try_slot_in(model.id()).expect("this model made the key");
+            let slot = key
+                .try_slot_in(model.id())
+                .expect("this model made the key");
             let [shell] = model.data().solids[slot].shells[..] else {
                 panic!("a solid built here has one shell");
             };

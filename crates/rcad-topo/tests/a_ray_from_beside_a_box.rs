@@ -42,7 +42,9 @@ fn a_bend_growing_out_of_a_blocks_side_is_refused_either_way_round() {
         assert!(
             matches!(
                 built,
-                Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface))
+                Err(Error::Invalid(
+                    Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                ))
             ),
             "the block's side walking the circle {the_side_walks_it:?}: {built:?}"
         );
@@ -59,8 +61,9 @@ fn a_block_with_a_hollow_inside_it_cannot_be_built_face_by_face() {
         let rim = builder.add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)?;
         let coedge = builder.add_coedge(rim, Orientation::Forward)?;
         let wire = builder.add_wire(&[DraftStep::Along(coedge)])?;
-        let plane = Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, 1.0))
-            .expect("a unit normal");
+        let plane =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal");
         builder.add_face(Surface::Plane(plane), &[wire])
     };
     let outer = a_disk(&mut builder, 1.0).expect("a disk is described");
@@ -101,13 +104,9 @@ fn an_l_less_a_bend_wholly_inside_it_is_refused_as_a_quartic() {
         .expect("an L-shaped block");
     let bend = a_quarter_bend(&mut model, 4.0, 1.0);
     for rule in [Rule::Difference, Rule::Union] {
-        let answer = model.clone().fuse(
-            &[l],
-            &[bend],
-            rule,
-            &policy,
-            &mut ProvenanceLog::new(),
-        );
+        let answer = model
+            .clone()
+            .fuse(&[l], &[bend], rule, &policy, &mut ProvenanceLog::new());
         assert!(
             matches!(
                 answer,
@@ -167,18 +166,27 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
         start_corner,
         EdgeRun::RightRoundWhereItsFacesCross,
     )?;
-    let end_circle =
-        builder.add_edge(end_corner, end_corner, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let end_circle = builder.add_edge(
+        end_corner,
+        end_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
 
     let mut straight = BTreeMap::new();
     let mut sides = Vec::new();
     for (normal, round) in [
         ([0, 1, 0], [[2, 0, -2], [2, 0, 2], [6, 0, 2], [6, 0, -2]]),
-        ([0, -1, 0], [[2, -2, -2], [6, -2, -2], [6, -2, 2], [2, -2, 2]]),
+        (
+            [0, -1, 0],
+            [[2, -2, -2], [6, -2, -2], [6, -2, 2], [2, -2, 2]],
+        ),
         ([1, 0, 0], [[6, -2, -2], [6, 0, -2], [6, 0, 2], [6, -2, 2]]),
         ([-1, 0, 0], [[2, -2, -2], [2, -2, 2], [2, 0, 2], [2, 0, -2]]),
         ([0, 0, 1], [[2, -2, 2], [6, -2, 2], [6, 0, 2], [2, 0, 2]]),
-        ([0, 0, -1], [[2, -2, -2], [2, 0, -2], [6, 0, -2], [6, -2, -2]]),
+        (
+            [0, 0, -1],
+            [[2, -2, -2], [2, 0, -2], [6, 0, -2], [6, -2, -2]],
+        ),
     ] {
         let mut steps = Vec::with_capacity(4);
         for position in 0..4 {
