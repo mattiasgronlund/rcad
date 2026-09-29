@@ -51,22 +51,22 @@ enum Piece {
     TheCap,
 }
 
-/// How the rim's run names the second surface of its crossing.
+/// What the rim's run names as the second surface of its crossing.
 #[derive(Clone, Copy, Debug)]
-enum Spelling {
-    ByItsTwoFaces,
-    ByTheLid,
-    ByTheLidTurnedOver,
+enum NamedBy {
+    ItsTwoFaces,
+    TheLid,
+    TheLidTurnedOver,
 }
 
 #[test]
 fn a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures() {
     let spellings = [
-        (Spelling::ByItsTwoFaces, false),
-        (Spelling::ByItsTwoFaces, true),
-        (Spelling::ByTheLid, false),
-        (Spelling::ByTheLid, true),
-        (Spelling::ByTheLidTurnedOver, false),
+        (NamedBy::ItsTwoFaces, false),
+        (NamedBy::ItsTwoFaces, true),
+        (NamedBy::TheLid, false),
+        (NamedBy::TheLid, true),
+        (NamedBy::TheLidTurnedOver, false),
     ];
     let north = Point::new(0.0, 0.0, RADIUS);
     let pieces_and_spellings = [Piece::TheBallLessTheCap, Piece::TheCap]
@@ -111,10 +111,10 @@ fn a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures() {
 /// Which way round the lid walks the rim in the one solid that builds, with the
 /// corner on the pole: the walk's own order, which the lid's plane turned over
 /// turns round, whichever piece is kept.
-fn the_lid_coedge_that_builds_on_the_pole(spelling: Spelling) -> Orientation {
+fn the_lid_coedge_that_builds_on_the_pole(spelling: NamedBy) -> Orientation {
     match spelling {
-        Spelling::ByItsTwoFaces | Spelling::ByTheLid => Orientation::Forward,
-        Spelling::ByTheLidTurnedOver => Orientation::Reversed,
+        NamedBy::ItsTwoFaces | NamedBy::TheLid => Orientation::Forward,
+        NamedBy::TheLidTurnedOver => Orientation::Reversed,
     }
 }
 
@@ -129,9 +129,9 @@ fn off_the_pole_the_longitude_picks_the_way_round_whatever_the_spelling() {
         (Piece::TheCap, Orientation::Reversed),
     ] {
         for spelling in [
-            Spelling::ByItsTwoFaces,
-            Spelling::ByTheLid,
-            Spelling::ByTheLidTurnedOver,
+            NamedBy::ItsTwoFaces,
+            NamedBy::TheLid,
+            NamedBy::TheLidTurnedOver,
         ] {
             let what = format!("{piece:?} cornered off the pole, rim named {spelling:?}");
             let mut model = a_model();
@@ -164,7 +164,7 @@ fn a_model() -> Model {
 fn a_piece_of_the_ball(
     model: &mut Model,
     piece: Piece,
-    spelling: Spelling,
+    spelling: NamedBy,
     corner: Point,
     lid_way: Orientation,
     lid_first: bool,
@@ -179,11 +179,11 @@ fn a_piece_of_the_ball(
     )
     .expect("a plane");
     let run = match spelling {
-        Spelling::ByItsTwoFaces => EdgeRun::RightRoundWhereItsFacesCross,
-        Spelling::ByTheLid => EdgeRun::RightRoundWhereItCrosses {
+        NamedBy::ItsTwoFaces => EdgeRun::RightRoundWhereItsFacesCross,
+        NamedBy::TheLid => EdgeRun::RightRoundWhereItCrosses {
             and: Surface::Plane(lid),
         },
-        Spelling::ByTheLidTurnedOver => EdgeRun::RightRoundWhereItCrosses {
+        NamedBy::TheLidTurnedOver => EdgeRun::RightRoundWhereItCrosses {
             and: Surface::Plane(lid.reversed()),
         },
     };
