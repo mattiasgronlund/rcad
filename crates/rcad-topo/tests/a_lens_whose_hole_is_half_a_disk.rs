@@ -20,21 +20,30 @@
 //! disk from `(0, −1)` to `(0, 1)`. That is this family with both arcs on one
 //! surface.
 //!
-//! **What refuses.** With the two arcs on two pipes — a real lens, where the
-//! bars at `(−3, 0)` and `(3, 0)` meet — the vertical line through each corner
-//! is where both pipes and the plane `x = 0` meet, and every route tried is
-//! refused before the joined face is made: the two walls and the half bar's
-//! plane cross along one ruling, which is §38.2's gap
-//! (`TwoCurvesTouchWithoutCrossing`), or a wall the first fuse cut along those
-//! rulings and did not join back is met by the second
-//! (`AFaceMeetsItsNeighbourOnItsOwnSurface`). A half bar whose corner is the
-//! lens's corner, four surfaces round one vertical line, is refused the same
-//! way or with `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
+//! Run under gdb on base `04a469ad`, with a breakpoint on the first line of
+//! `holds_the_other_rings`, the three fuses that keep the cap each call it
+//! twice: the ring along the one pipe answers that it holds the other, and the
+//! half disk, through the count of turns round a corner, that it holds nothing.
 //!
-//! None of the forty-eight fuses here panics. Where the two rings did reach
-//! `holds_the_other_rings`, the hole's corners lie strictly inside the
-//! outline's two, so the hole's arc puts both outline corners outside its
-//! piece of the plane and the hole is placed as holding nothing.
+//! **What refuses.** With the two arcs on two pipes — a real lens, where the
+//! bars at `(−3, 0)` and `(3, 0)` meet — the plane `x = 0` crosses each pipe
+//! along the vertical line through a corner of the lens, which is where the two
+//! walls meet. Every route tried is refused in the arrangement, before any face
+//! is joined and so before `rings_round`: `TwoCurvesTouchWithoutCrossing` on a
+//! wall bounded by those lines, which is §38.2's two curves along one ruling,
+//! or `AFaceMeetsItsNeighbourOnItsOwnSurface` where a first fuse cut a wall
+//! along them and did not join it back. A half bar whose corner is the lens's
+//! corner, four surfaces round one vertical line, is refused the same way or
+//! with `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Under the same breakpoint
+//! the two tests of those routes stop twelve times and none: six times two,
+//! the one-bar-and-half-bar union one route builds on the way.
+//!
+//! None of the forty-eight fuses here panics. Past those refusals the lens
+//! would not reach the panic either, by `holds_the_other_rings` as it reads on
+//! that base rather than by a run: a half disk inside the lens with its corners
+//! strictly between the lens's two has both of the lens's corners outside its
+//! circle, so it is placed as holding nothing and the lens is the one ring left
+//! unplaced, which `rings_round` takes for the outline.
 
 use core::f64::consts::PI;
 
@@ -43,6 +52,14 @@ use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 const RULES: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
+
+/// A way to build the two solids a fuse is asked about, what it is called, and
+/// the refusal every fuse of them is expected to give.
+type Route = (
+    &'static str,
+    fn(&mut Model) -> [SolidKey; 2],
+    fn(&Error) -> bool,
+);
 
 /// A bar of radius 5 at `(−3, 0)` and the half bar rising out of its cap, by
 /// every rule and both ways round.
@@ -105,8 +122,7 @@ fn a_half_bar_rising_out_of_a_bars_cap_is_fused_by_every_rule_either_way_round()
 ///   the same rulings.
 #[test]
 fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_is_refused_by_every_rule() {
-    type Build = fn(&mut Model) -> [SolidKey; 2];
-    let routes: [(&str, Build, fn(&Error) -> bool); 4] = [
+    let routes: [Route; 4] = [
         (
             "the two bars united, then the half bar",
             |model| {
@@ -128,8 +144,9 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_is_refused_by_every_rule() {
             |model| {
                 let bar = a_bar_at(model, -3.0);
                 let half = a_half_bar_bulging_left(model, 1.0, 0.0);
-                let [both] = fuse(model, bar, half, Rule::Union).expect("one bar and the half bar")
-                    [..] else {
+                let [both] =
+                    fuse(model, bar, half, Rule::Union).expect("one bar and the half bar")[..]
+                else {
                     panic!("one bar and the half bar are one solid");
                 };
                 [both, a_bar_at(model, 3.0)]
@@ -161,8 +178,7 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_is_refused_by_every_rule() {
 /// every rule and both ways round.
 #[test]
 fn a_half_bar_whose_corner_is_the_lens_corner_is_refused_by_every_rule() {
-    type Build = fn(&mut Model) -> [SolidKey; 2];
-    let routes: [(&str, Build, fn(&Error) -> bool); 3] = [
+    let routes: [Route; 3] = [
         (
             "one bar and the half bar",
             |model| {
