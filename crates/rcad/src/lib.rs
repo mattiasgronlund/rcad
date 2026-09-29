@@ -89,6 +89,11 @@
 //! assert_eq!(measured.volume(), 1000.0);
 //! assert_eq!(measured.surface_area(), 600.0);
 //! assert_eq!(measured.centroid(), Point::new(5.0, 5.0, 5.0));
+//! // Each error is how far the fan's own sums rounded, and on this cube
+//! // nothing did. Whole-number corners alone do not promise that: an L
+//! // extruded from a four-by-four square less a two-by-two corner has its
+//! // middle at five thirds along `x` and `y`, which no `f64` holds, and
+//! // publishes a wobble of `1.05e-16` (`docs/decisions.md` §338.5).
 //! assert_eq!(measured.volume_error(), 0.0, "a cubed unit");
 //! assert_eq!(measured.area_error(), 0.0, "a squared one");
 //! assert_eq!(measured.centroid_wobble(), 0.0, "and a length");
@@ -234,8 +239,9 @@
 //! **Measure.** [`SolidView::measure`] gives volume, surface area and centroid
 //! in one pass, straight out of the divergence theorem, each with how far out it
 //! could be. A polyhedron is summed over its own fan — no quadrature, no mesh,
-//! and all three errors exactly zero — and a solid with a curved face is summed
-//! over a [`Mesh`], where [`Measurement::volume_error`],
+//! and its three errors are how far those sums rounded, exactly zero where
+//! nothing did (`docs/decisions.md` §338) — and a solid with a curved face is
+//! summed over a [`Mesh`], where [`Measurement::volume_error`],
 //! [`Measurement::area_error`] and [`Measurement::centroid_wobble`] say what the
 //! triangles could be hiding. Three quantities in three units, deliberately
 //! (`docs/decisions.md` §25.4). [`EdgeView::length`] and [`WireView::length`]
