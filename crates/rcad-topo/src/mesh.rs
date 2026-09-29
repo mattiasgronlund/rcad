@@ -301,10 +301,10 @@ impl SolidView<'_> {
     ///
     /// # Where the work is done, and why it is not where the solid is
     ///
-    /// Each face is cut up **in the frame it is stored in**, and the points are
-    /// moved into place afterwards. A `(u, v)` is a working space and never an
-    /// answer (§23.4), so where a solid sits must not change how it is cut up —
-    /// which is §19 arriving for meshes.
+    /// Each **curved** face is cut up **in the frame it is stored in**, and the
+    /// points are moved into place afterwards. A `(u, v)` is a working space and
+    /// never an answer (§23.4), so where a solid sits must not change how a
+    /// curved face is cut up — which is §19 arriving for meshes.
     ///
     /// It is also the only thing that works. A ball is the same ball however it
     /// is turned, so [`Sphere::transformed`] under a turn about the centre moves
@@ -313,6 +313,16 @@ impl SolidView<'_> {
     /// rectangle in them and does not even cover them. In the frame the ball is
     /// stored in it is a rectangle, and turning the ball turns the mesh and
     /// nothing else.
+    ///
+    /// **A flat face is cut up where the solid sits.** A curved face's frame
+    /// decides where its points go; a flat face has no points of its own, only a
+    /// choice of which of the points round it its triangles join, and points of
+    /// one circle make that choice a tie. Made in the stored frame, the tie went
+    /// one way for a placed cap and the other for the same cap read back out of
+    /// its STEP file, which has no placement (§362). Where the solid sits is the
+    /// frame every copy of a flat face shares, so moving a flat face can change
+    /// which of two tied triangles it gets, and a placed flat face is cut the
+    /// same way as its read-back — see [`the_surface_this_face_is_cut_up_on`].
     ///
     /// [`Sphere::transformed`]: rcad_geom::Sphere::transformed
     ///
@@ -834,18 +844,18 @@ impl BuildingAMesh {
 
     /// Cut one face into triangles and put them in the solid's own table.
     fn cut_up(&mut self, face: FaceView<'_>, log: &mut ProvenanceLog) -> Result<()> {
-        let stored = the_surface_this_face_is_meshed_on(face);
+        let surface = the_surface_this_face_is_cut_up_on(face);
         let room =
             self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
 
         let mut walked = Vec::with_capacity(face.wire_count());
         for wire in face.wires() {
             walked.push(
-                self.walk_a_wire_round(wire, face, &stored)
+                self.walk_a_wire_round(wire, face, &surface)
                     .ok_or(Error::AWireWillNotLieFlatOnItsFace { face: face.key() })?,
             );
         }
-        if let Some(whole) = how_far_the_second_coordinate_wraps(&stored)
+        if let Some(whole) = how_far_the_second_coordinate_wraps(&surface)
             && let Some((first, later)) = walked.split_first_mut()
         {
             for chain in later {
@@ -865,8 +875,8 @@ impl BuildingAMesh {
         {
             return Err(Error::AWireWillNotLieFlatOnItsFace { face: face.key() });
         }
-        for patch in self.cut_off_what_goes_too_far_round(face, &stored, walked, room)? {
-            self.hand_over(face, &stored, patch, room, log)?;
+        for patch in self.cut_off_what_goes_too_far_round(face, &surface, walked, room)? {
+            self.hand_over(face, &surface, patch, room, log)?;
         }
         Ok(())
     }
@@ -1683,7 +1693,7 @@ impl BuildingAMesh {
     fn hand_over(
         &mut self,
         face: FaceView<'_>,
-        stored: &Surface,
+        surface: &Surface,
         patch: Vec<WalkedLoop>,
         room: f64,
         log: &mut ProvenanceLog,
@@ -1718,7 +1728,7 @@ impl BuildingAMesh {
         let (outer, holes) = loops.split_first().ok_or(Invalid::FaceHasNoWires)?;
 
         let domain = TrimmedDomain::new(
-            *stored,
+            *surface,
             outer.clone(),
             holes.to_vec(),
             Deflection::of(room)?,
@@ -1732,9 +1742,9 @@ impl BuildingAMesh {
         // Everything past the corners this patch handed over is a point the
         // refinement put strictly inside it, so it belongs to this patch alone
         // and nothing else will ever name it (§25.1).
-        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
+        let there = back_out_of_the_frame_this_face_is_cut_up_in(face);
         for corner in &cut.corners()[corner_is.len()..] {
-            let inside = stored.point_at(corner[0], corner[1]);
+            let inside = surface.point_at(corner[0], corner[1]);
             corner_is.push(self.remember(there.apply_to_point(inside)));
         }
 
@@ -1771,7 +1781,9 @@ impl BuildingAMesh {
     }
 
     /// One wire, as corners in the face's own two coordinates and the points of
-    /// the solid's table they stand at.
+    /// the solid's table they stand at. The coordinates are those of `surface`,
+    /// which is [`the_surface_this_face_is_cut_up_on`], read off each point
+    /// moved into [`the_frame_this_face_is_cut_up_in`].
     ///
     /// The two lists run together: corner `i` of the loop is point `points[i]`,
     /// and the same point may turn up at two corners. Both ends of a seam do,
@@ -1805,13 +1817,13 @@ impl BuildingAMesh {
         &mut self,
         wire: WireView<'_>,
         face: FaceView<'_>,
-        stored: &Surface,
+        surface: &Surface,
     ) -> Option<WalkedLoop> {
-        let back = the_frame_this_face_is_meshed_in(face);
+        let back = the_frame_this_face_is_cut_up_in(face);
         let poles = poles_of(wire);
         let sits_at_a_pole = |at: Point| {
-            the_surface_pinches_at(stored, stored.coordinates_of(at).1)
-                || the_pole_a_point_sits_within_a_rounding_of(stored, at).is_some()
+            the_surface_pinches_at(surface, surface.coordinates_of(at).1)
+                || the_pole_a_point_sits_within_a_rounding_of(surface, at).is_some()
         };
         let at_a_pole = |vertex: &VertexView<'_>| {
             poles.contains(&vertex.key()) || sits_at_a_pole(back.apply_to_point(vertex.point()))
@@ -1821,8 +1833,8 @@ impl BuildingAMesh {
             .coedges()
             .all(|coedge| used.insert(coedge.edge().key()));
         let mut walk = WalkingAWire::new(
-            how_far_the_longitude_wraps(stored),
-            how_far_the_second_coordinate_wraps(stored),
+            how_far_the_longitude_wraps(surface),
+            how_far_the_second_coordinate_wraps(surface),
             wire.closes_on_one_edge(),
             no_side_of_this_wire_is_a_seam,
         );
@@ -1835,7 +1847,7 @@ impl BuildingAMesh {
                     let at = self.remember_the_corner(start);
                     let where_it_is = back.apply_to_point(start.point());
                     let start_is_a_pole = at_a_pole(&start);
-                    walk.arrive(at, stored.coordinates_of(where_it_is), start_is_a_pole);
+                    walk.arrive(at, surface.coordinates_of(where_it_is), start_is_a_pole);
                     let a_pole_step_came_first =
                         index > 0 && matches!(steps[index - 1], WireStepView::Pole(_));
                     if start_is_a_pole && !a_pole_step_came_first {
@@ -1867,7 +1879,7 @@ impl BuildingAMesh {
                             walked[step]
                         };
                         let where_it_is = back.apply_to_point(self.points[at as usize]);
-                        let sits_at = stored.coordinates_of(where_it_is);
+                        let sits_at = surface.coordinates_of(where_it_is);
                         let passes_a_pole = sits_at_a_pole(where_it_is);
                         walk.arrive(at, sits_at, passes_a_pole);
                         if passes_a_pole {
@@ -1878,7 +1890,7 @@ impl BuildingAMesh {
                 WireStepView::Pole(vertex) => {
                     let at = self.remember_the_corner(vertex);
                     let where_it_is = back.apply_to_point(vertex.point());
-                    walk.arrive(at, stored.coordinates_of(where_it_is), true);
+                    walk.arrive(at, surface.coordinates_of(where_it_is), true);
                     walk.cross_the_pole(a_seam_turns_back_at(&steps, index));
                 }
             }
@@ -4101,6 +4113,59 @@ fn how_far_moving_this_face_rounds(
             &the_frame_this_face_is_meshed_in(face),
             along_each_edge,
         )
+}
+
+/// This face's surface, in the frame the face is cut into triangles in.
+///
+/// **A curved face is cut up on [`the_surface_this_face_is_meshed_on`]**, in
+/// the frame its edges were walked in, for [`SolidView::mesh`]'s reason.
+/// Everything that cuts a curved face into pieces before it is handed over reads
+/// that frame itself, and it is this one.
+///
+/// **A flat face is cut up on its plane where the solid sits.** None of its
+/// mesh points is made here: its corners are the model's, and the points round
+/// a circle on it were walked by the curved face along that circle, or by the
+/// plane the circle's run names. So the one thing decided here is which of those
+/// points the triangles join, and the triangulator's Delaunay test decides it
+/// on the numbers it is handed. Points of one circle are a tie for that test in
+/// any four, and a tie goes whichever way the last bits push it. Moved back
+/// into the frame a placed cap is stored in, each point was a rounded
+/// subtraction away from the mesh point it stands for, and the tie went the
+/// other way from the same cap read back out of its STEP file, which has no
+/// placement: a bar of radius 3 moved by `(0.1, 0.2, 0.3)` had 20 of the 121
+/// triangles on each cap join other points (§362). Cut up where the solid
+/// sits, the test is decided on the mesh points themselves, and a cap is cut
+/// the same way whichever frame it was stored in.
+///
+/// A flat face at no placement was cut up there already. A plane is never
+/// shifted ([`a_shift_that_loses_nothing`]), and moving one by nothing changes
+/// no bit ([`Plane::transformed`](rcad_geom::Plane::transformed)).
+fn the_surface_this_face_is_cut_up_on(face: FaceView<'_>) -> Surface {
+    let located = face.surface();
+    if located.as_plane().is_some() {
+        return located;
+    }
+    the_surface_this_face_is_meshed_on(face)
+}
+
+/// The movement that carries a mesh point into the frame this face is cut into
+/// triangles in: none for a flat face, which is cut up where the solid sits —
+/// see [`the_surface_this_face_is_cut_up_on`].
+fn the_frame_this_face_is_cut_up_in(face: FaceView<'_>) -> Isometry {
+    if face.stored_surface().as_plane().is_some() {
+        return Isometry::identity();
+    }
+    the_frame_this_face_is_meshed_in(face)
+}
+
+/// The movement that carries a point the triangulator made back out of the
+/// frame this face is cut into triangles in: none for a flat face, for
+/// [`the_frame_this_face_is_cut_up_in`]'s reason.
+fn back_out_of_the_frame_this_face_is_cut_up_in(face: FaceView<'_>) -> Isometry {
+    if face.stored_surface().as_plane().is_some() {
+        return Isometry::identity();
+    }
+    back_out_of_the_frame_this_face_is_meshed_in(face)
 }
 
 /// This face's surface, in the frame the face is meshed in.
