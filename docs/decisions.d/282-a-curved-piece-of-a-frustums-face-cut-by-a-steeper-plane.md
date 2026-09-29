@@ -183,8 +183,8 @@ before and after, and `mise exec -- just t -p rcad-topo --no-fail-fast` after
   with a hole beside a cut.
 - §36.3's heading states the rule as exact. §282.2 is where it is not, and the
   row that fixes it should correct that section too.
-- Not demonstrated, and noted only so it is not rediscovered: the curved arm of
-  `the_piece_holds` does not ask which nappe a point is on. A pointed cone's
-  face is held by `z < 8` alone, and the whole lower nappe passes that. Today's
-  candidates for a curved piece are built round its corners, and none reached
-  the lower nappe in these runs. Whether one ever does is unmeasured.
+- The curved arm of `the_piece_holds` did not ask which nappe a point is on.
+  A pointed cone's face is held by `z < 8` alone, and the whole lower nappe
+  passes that. §350 measured whether a candidate ever reaches the other
+  nappe: one does, on every cone whose radius is more than its height, and
+  `the_piece_holds` now turns such a point away (§350.5 first, then §350.3).
