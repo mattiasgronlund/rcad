@@ -312,7 +312,12 @@ fn a_bar_whose_top_corner_is_moved_a_millimetre_in_its_file_reads_back_and_does_
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for placement in every_placement() {
             let bar = Shape::Bar(placement);
-            does_not_validate(bar, OFF_THE_WALL, &policy, &Invalid::VertexOffItsFaceSurface);
+            does_not_validate(
+                bar,
+                OFF_THE_WALL,
+                &policy,
+                &Invalid::VertexOffItsFaceSurface,
+            );
             does_not_validate(
                 bar,
                 OFF_THE_CAP,
@@ -350,7 +355,14 @@ fn a_fuse_that_keeps_the_moved_corner_blames_itself_for_the_broken_file() {
                 (OVER_THE_BOTTOM, Rule::Difference),
                 (OVER_THE_TOP, Rule::Intersection),
             ] {
-                check(shape, moved_to, partner, rule, &policy, Outcome::ItBlamesItself);
+                check(
+                    shape,
+                    moved_to,
+                    partner,
+                    rule,
+                    &policy,
+                    Outcome::ItBlamesItself,
+                );
             }
         }
     }
@@ -385,7 +397,14 @@ fn a_turned_and_shifted_bar_blames_itself_for_a_corner_off_the_cap_with_the_dist
             },
         );
         for moved_to in [OFF_THE_WALL, A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL] {
-            check(bar, moved_to, partner, rule, &policy, Outcome::ItBlamesItself);
+            check(
+                bar,
+                moved_to,
+                partner,
+                rule,
+                &policy,
+                Outcome::ItBlamesItself,
+            );
         }
     }
 }
@@ -402,7 +421,14 @@ fn a_fuse_that_cuts_the_moved_corner_away_gives_the_answer_the_sound_bar_gives()
                 (OVER_THE_RIM_BY_THE_SEAM, Rule::Intersection),
                 (A_NOTCH_A_QUARTER_TURN_ROUND, Rule::Difference),
             ] {
-                check(shape, moved_to, partner, rule, &policy, Outcome::TheSoundAnswer);
+                check(
+                    shape,
+                    moved_to,
+                    partner,
+                    rule,
+                    &policy,
+                    Outcome::TheSoundAnswer,
+                );
             }
         }
     }
@@ -427,7 +453,14 @@ fn a_cut_along_the_seam_refuses_a_corner_moved_in_the_cut_and_answers_one_moved_
         let bar = Shape::Bar(placement);
         for rule in [Rule::Difference, Rule::Intersection] {
             let cut = |moved_to, outcome| {
-                check(bar, moved_to, THE_HALF_PAST_THE_SEAM, rule, &policy, outcome);
+                check(
+                    bar,
+                    moved_to,
+                    THE_HALF_PAST_THE_SEAM,
+                    rule,
+                    &policy,
+                    outcome,
+                );
             };
             cut(OFF_THE_WALL, Outcome::CannotTellTheCellsOfAFaceApart);
             cut(OFF_THE_CAP, Outcome::Undecidable("order along a crossing"));
@@ -448,7 +481,14 @@ fn under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_to
     let bar = Shape::Bar(Isometry::identity());
     for rule in [Rule::Difference, Rule::Intersection] {
         let cut = |moved_to, outcome| {
-            check(bar, moved_to, THE_HALF_PAST_THE_SEAM, rule, &policy, outcome);
+            check(
+                bar,
+                moved_to,
+                THE_HALF_PAST_THE_SEAM,
+                rule,
+                &policy,
+                outcome,
+            );
         };
         cut(OFF_THE_WALL, Outcome::CannotTellTheCellsOfAFaceApart);
         cut(OFF_THE_CAP, Outcome::TwoCurvesTouchWithoutCrossing);
@@ -519,16 +559,36 @@ fn a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for (partner, rule, outcome) in [
             (FAR_AWAY, Rule::Union, Outcome::TheSoundAnswer),
-            (OVER_THE_BALLS_TOP, Rule::Difference, Outcome::TheSoundAnswer),
-            (UNDER_THE_BALLS_BOTTOM, Rule::Difference, Outcome::TheSoundAnswer),
-            (UNDER_THE_BALLS_BOTTOM, Rule::Intersection, Outcome::TheSoundAnswer),
+            (
+                OVER_THE_BALLS_TOP,
+                Rule::Difference,
+                Outcome::TheSoundAnswer,
+            ),
+            (
+                UNDER_THE_BALLS_BOTTOM,
+                Rule::Difference,
+                Outcome::TheSoundAnswer,
+            ),
+            (
+                UNDER_THE_BALLS_BOTTOM,
+                Rule::Intersection,
+                Outcome::TheSoundAnswer,
+            ),
             (
                 ROUND_THE_SOUTH_POLE,
                 Rule::Difference,
                 Outcome::ACurvedFaceGoesRightRoundWithNoSeam,
             ),
-            (THE_BALLS_X_ABOVE_NOUGHT_HALF, Rule::Difference, Outcome::TheSoundAnswer),
-            (THE_BALLS_Y_ABOVE_NOUGHT_HALF, Rule::Difference, Outcome::TheSoundAnswer),
+            (
+                THE_BALLS_X_ABOVE_NOUGHT_HALF,
+                Rule::Difference,
+                Outcome::TheSoundAnswer,
+            ),
+            (
+                THE_BALLS_Y_ABOVE_NOUGHT_HALF,
+                Rule::Difference,
+                Outcome::TheSoundAnswer,
+            ),
         ] {
             check(Shape::Ball, THE_SOUTH_POLE, partner, rule, &policy, outcome);
             for moved_to in EVERY_POLE_MOVE {
@@ -576,9 +636,24 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for (partner, rule, sound, [off_the_wall, off_the_cap, a_quarter_turn_round]) in [
             (FAR_AWAY, Rule::Union, Sound, [Blamed, Blamed, Blamed]),
-            (ACROSS_THE_FRUSTUMS_BOTTOM, Rule::Difference, Sound, [Blamed, Blamed, Blamed]),
-            (OVER_THE_FRUSTUMS_TOP, Rule::Difference, Sound, [Sound, inside_a_piece, Sound]),
-            (OVER_THE_FRUSTUMS_TOP, Rule::Intersection, Sound, [Blamed, inside_a_piece, Blamed]),
+            (
+                ACROSS_THE_FRUSTUMS_BOTTOM,
+                Rule::Difference,
+                Sound,
+                [Blamed, Blamed, Blamed],
+            ),
+            (
+                OVER_THE_FRUSTUMS_TOP,
+                Rule::Difference,
+                Sound,
+                [Sound, inside_a_piece, Sound],
+            ),
+            (
+                OVER_THE_FRUSTUMS_TOP,
+                Rule::Intersection,
+                Sound,
+                [Blamed, inside_a_piece, Blamed],
+            ),
             (
                 OVER_THE_FRUSTUMS_RIM_BY_THE_SEAM,
                 Rule::Difference,
@@ -610,7 +685,10 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
             frustum(WHERE_THE_FRUSTUM_PUTS_IT, sound);
             frustum(THE_FRUSTUMS_CORNER_OFF_THE_WALL, off_the_wall);
             frustum(THE_FRUSTUMS_CORNER_OFF_THE_CAP, off_the_cap);
-            frustum(THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND, a_quarter_turn_round);
+            frustum(
+                THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
+                a_quarter_turn_round,
+            );
         }
     }
 }
@@ -738,7 +816,10 @@ fn refuses_as(
             unreachable!("{refusal:?} is not a refusal")
         }
     };
-    assert!(as_expected, "{case}: expected {refusal:?}, refused with {refused:?}");
+    assert!(
+        as_expected,
+        "{case}: expected {refusal:?}, refused with {refused:?}"
+    );
 }
 
 /// The fuse refuses with `TheFuseWroteABrokenAnswer` carrying `broken`, and
@@ -789,8 +870,15 @@ fn the_same_answer_as_the_sound_solid(
         .unwrap_or_else(|error| panic!("{case} refused: {error:?}"));
     let sound = fuse(shape, shape.corner(), partner, rule, policy)
         .unwrap_or_else(|error| panic!("{case}: the sound solid refused: {error:?}"));
-    assert_eq!(broken.solids.len(), sound.solids.len(), "{case}: how many solids");
-    assert_eq!(broken.corners, sound.corners, "{case}: the corners of the answer");
+    assert_eq!(
+        broken.solids.len(),
+        sound.solids.len(),
+        "{case}: how many solids"
+    );
+    assert_eq!(
+        broken.corners, sound.corners,
+        "{case}: the corners of the answer"
+    );
     assert!(
         (broken.volume - sound.volume).abs() <= 1e-12 * sound.volume,
         "{case}: volume {} against {}",
@@ -877,7 +965,11 @@ fn read_back(shape: Shape, moved_to: [f64; 3]) -> (Model, SolidKey) {
 
     let read_back: Model =
         postcard::from_bytes(&bytes).expect("reading back does not ask where a corner is");
-    let solid = read_back.solids().next().expect("the solid came back").key();
+    let solid = read_back
+        .solids()
+        .next()
+        .expect("the solid came back")
+        .key();
     (read_back, solid)
 }
 
