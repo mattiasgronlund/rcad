@@ -1984,6 +1984,16 @@ check-skills-selftest:
 # defines `DOCS_CATCH_UPS` and hands it to the merger in its brief, so the
 # catch-ups have a bound and a merger cannot loop. And the merger's schema
 # requires `docs_catch_ups`, so every merger says how many it used.
+#
+# **A fifteenth arm holds a verifier to one run of the tests, not two (§370).**
+# Q574's verifier re-ran the lane's tests straight after the gate that had just
+# run, or served, the very same code -- about five minutes for nothing step 3
+# had not already shown. `verifier.md`'s step 6 now takes the pass half of the
+# proof from step 3's gate summary instead, and runs a test or a recipe again
+# only when it is not one of `gate_steps`. The arm checks the one sentence that
+# says so appears in both `lanes.js` -- once in `VERIFY`'s prompt and once in
+# the `pinsOnly` note, so neither path keeps the old double run -- and in
+# `verifier.md` itself.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2016,6 +2026,7 @@ check-lanes-workflow:
     docs_brief='Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.'
     docs_field="      docs_catch_ups: { type: 'integer', minimum: 0,"
     docs_required="'push_attempts', 'docs_catch_ups',"
+    pass_rule='Step 3 already proved the tests pass; do not run them again to watch that (§370)'
     settings=.claude/settings.json
     scan() {
         local n t at prev line types
@@ -2160,6 +2171,15 @@ check-lanes-workflow:
             echo "$1 does not make docs_catch_ups a property the merger's schema requires, so a merger need not say how many catch-ups over docs alone it used (§367)"
             return 14
         fi
+        n=$(grep -cF -- "$pass_rule" "$1" || true)
+        if [ "$n" -lt 2 ]; then
+            echo "$1 does not tell the verifier, in both VERIFY's prompt and the pinsOnly note, that step 3's gate already proves the tests pass; without that a verifier runs the named tests a second time for no new information (§370)"
+            return 15
+        fi
+        if ! grep -qF -- "$pass_rule" "$2/verifier.md"; then
+            echo "$2/verifier.md does not carry the same rule, that step 3's gate already proves the tests pass (§370)"
+            return 15
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -2234,7 +2254,11 @@ check-lanes-workflow:
     grep -vF -- "$docs_field" "$file" > "$dir/no-docs-field/lanes.js"
     fresh docs-count-optional
     sed "s/, 'docs_catch_ups'//" "$file" > "$dir/docs-count-optional/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14)
+    fresh no-pass-rule
+    grep -vF -- "$pass_rule" "$file" > "$dir/no-pass-rule/lanes.js"
+    fresh no-pass-rule-doc
+    grep -vF -- "$pass_rule" "$agents/verifier.md" > "$dir/no-pass-rule-doc/agents/verifier.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}

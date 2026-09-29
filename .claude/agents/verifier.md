@@ -55,15 +55,28 @@ finds it by hand (§263.4).
 
 ## Tests
 
-6. Run the tests the lane names and watch them pass: a test name with
-   `mise exec -- just t <name>`, a recipe with `mise exec -- just <recipe>`.
+6. Say whether step 3's gate already proves the lane's named tests or recipe
+   pass, before running anything again. A test name is always inside `test`,
+   itself in `gate_steps`: nextest finds every compiled test in the workspace
+   unless it is `#[ignore]`d, and an ignored one never ran under a direct
+   `just t <name>` either, so naming one there never proved anything. A
+   `check-*` recipe is always in `gate_steps` too — `check-gate-runs-every-check`
+   pins the count that guarantees it — and so are `lint`, `test` and `deny`
+   themselves. For any of these, step 3's `gate: PASS` line (served or fresh —
+   §337.4) is the proof, and for a test name its `tests:` line too: report
+   `tests_pass_on_branch: true` from them.
+   Step 3 already proved the tests pass; do not run them again to watch that (§370).
+   Only a named recipe that is none of the above needs its own run, because
+   step 3 never touches it — check it literally against `gate_steps` first,
+   and only then `mise exec -- just <recipe>`, once, watching it pass.
 7. Put the source paths back to the base — `git checkout <base> -- <path>` for
    each — and rerun the same tests. They must **fail**; record the exact
    failure, because a test that passes here proves nothing about the change.
    With no source paths declared, say so and skip this step -- expected when
    your brief marks the lane `pinsOnly` (a verdict, a pinned test and a
-   decisions section, nothing in `src/`): report `tests_fail_without_fix:
-   false`, no `reproduced_mutation`, and say in `notes` that pinsOnly is why.
+   decisions section, nothing in `src/`): step 6 above is then the lane's
+   whole proof, so report `tests_fail_without_fix: false`, no
+   `reproduced_mutation`, and say in `notes` that pinsOnly is why.
    Without that mark, a declared-empty source list is the lane's own gap, not
    grounds for `merge`. When a source path also holds the row's new tests,
    revert by hand instead of `git checkout <base> --`: keep the new tests and
@@ -74,7 +87,8 @@ finds it by hand (§263.4).
    `over()` could stop calling with every other test still passing. A run that
    finds no tests to run is not a failure; it means the revert took the tests
    out too. Then put the branch's source back the same way, `git checkout
-   <branch> -- <path>`.
+   <branch> -- <path>`. Its tests passing again is what step 6 already
+   established; this restore does not rerun them.
 
 ## Moved text
 
