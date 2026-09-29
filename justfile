@@ -1927,6 +1927,16 @@ check-skills-selftest:
 # declining, and the lane being handed back -- so each of those, for a row the
 # verifier called either `merge` or `fix_first`, reads "verified, not merged"
 # rather than plain "not merged".
+#
+# **A fourteenth arm keeps a catch-up over docs alone apart from a push attempt
+# (§367).** Q574's merger gated green three times on 09-29 and never pushed: it
+# lost its last attempt to six `docs/queue.md` commits, when the gate after them
+# would have served its slow steps and taken about a minute. The arm checks the
+# three places the rule lives. `merger.md` carries, on a line of its own and
+# once, the diff that tells a merger what `origin/main` gained. `lanes.js`
+# defines `DOCS_CATCH_UPS` and hands it to the merger in its brief, so the
+# catch-ups have a bound and a merger cannot loop. And the merger's schema
+# requires `docs_catch_ups`, so every merger says how many it used.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -1954,6 +1964,11 @@ check-lanes-workflow:
     mark_line='Only if your push went through, after unlocking your own tree: mise exec -- just mark-finished'
     verified_def="  const verified = !!prior.check && (prior.check.verdict === 'merge' || prior.check.verdict === 'fix_first')"
     verified_use="verified ? 'verified, not merged' : 'not merged'"
+    docs_diff='git diff --name-only HEAD...origin/main'
+    docs_constant='^const DOCS_CATCH_UPS = [1-9][0-9]*$'
+    docs_brief='Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.'
+    docs_field="      docs_catch_ups: { type: 'integer', minimum: 0,"
+    docs_required="'push_attempts', 'docs_catch_ups',"
     settings=.claude/settings.json
     scan() {
         local n t at prev line types
@@ -2085,6 +2100,19 @@ check-lanes-workflow:
             echo "$1 does not read that 'verified' flag in all three of a row's own returned lines -- merger-returned-nothing, merger-declined, handed-back (want 3, found $n); a row the verifier called merge or fix_first would still read plain 'not merged', with nothing marking it as verified, not merged (§304.4)"
             return 13
         fi
+        n=$(grep -cxF -- "$docs_diff" "$2/merger.md" || true)
+        if [ "$n" != 1 ]; then
+            echo "$2/merger.md has the line '$docs_diff' $n times, expected once; without it a merger cannot tell a catch-up over docs alone from one over code (§367)"
+            return 14
+        fi
+        if ! grep -qE -- "$docs_constant" "$1" || ! grep -qxF -- "$docs_brief" "$1"; then
+            echo "$1 does not define DOCS_CATCH_UPS and hand it to the merger in the brief line '$docs_brief', so nothing bounds a merger's catch-ups over docs alone (§367)"
+            return 14
+        fi
+        if ! grep -qF -- "$docs_field" "$1" || ! grep -qF -- "$docs_required" "$1"; then
+            echo "$1 does not make docs_catch_ups a property the merger's schema requires, so a merger need not say how many catch-ups over docs alone it used (§367)"
+            return 14
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -2149,7 +2177,17 @@ check-lanes-workflow:
         '$0 == l { print r; next } { print }' "$file" > "$dir/verified-merge-only/lanes.js"
     fresh verified-not-returned
     grep -vF -- '-- ${prior.stop}' "$file" > "$dir/verified-not-returned/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13)
+    fresh no-docs-diff
+    grep -vxF -- "$docs_diff" "$agents/merger.md" > "$dir/no-docs-diff/agents/merger.md"
+    fresh no-docs-constant
+    grep -vE -- "$docs_constant" "$file" > "$dir/no-docs-constant/lanes.js"
+    fresh no-docs-bound
+    awk -v l="$docs_brief" -v r='Push attempts: at most ${MERGE_ATTEMPTS}.' '$0 == l { print r; next } { print }' "$file" > "$dir/no-docs-bound/lanes.js"
+    fresh no-docs-field
+    grep -vF -- "$docs_field" "$file" > "$dir/no-docs-field/lanes.js"
+    fresh docs-count-optional
+    sed "s/, 'docs_catch_ups'//" "$file" > "$dir/docs-count-optional/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}

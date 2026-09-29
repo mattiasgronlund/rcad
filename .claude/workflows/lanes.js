@@ -62,6 +62,7 @@ export const meta = {
 }
 
 const MERGE_ATTEMPTS = 3
+const DOCS_CATCH_UPS = 5
 const RESULT_LINES = 20
 
 const writes = (lane) => Array.isArray(lane.writeSet) && lane.writeSet.length > 0
@@ -250,9 +251,10 @@ function merged(lane, prior, m) {
   }
   row.merged = m.merged === true
   row.lines.push(row.merged
-    ? `${lane.queueId} ${branchOf(lane)}: pushed ${m.merged_sha} to main, attempt ${m.push_attempts} of ${MERGE_ATTEMPTS}`
+    ? `${lane.queueId} ${branchOf(lane)}: pushed ${m.merged_sha} to main, attempt ${m.push_attempts} of ${MERGE_ATTEMPTS}, catch-ups over docs ${m.docs_catch_ups} of ${DOCS_CATCH_UPS}`
     : `${lane.queueId} ${branchOf(lane)}: ${verified ? 'verified, not merged' : 'not merged'} -- ${m.not_merged_because || 'the merger gave no reason'}`)
   if (m.push_attempts > MERGE_ATTEMPTS) log(`${lane.label}: the merger reports ${m.push_attempts} push attempts, past the bound of ${MERGE_ATTEMPTS}`)
+  if (m.docs_catch_ups > DOCS_CATCH_UPS) log(`${lane.label}: the merger reports ${m.docs_catch_ups} catch-ups over docs alone, past the bound of ${DOCS_CATCH_UPS}`)
   if (m.gate_pass_line) row.lines.push(`gate: ${m.gate_pass_line}`)
   if (m.ff_main) row.lines.push(`ff-main: ${m.ff_main}`)
   for (const r of m.rows_closed || []) row.lines.push(`closed ${r}`)
@@ -402,7 +404,7 @@ Your first commands, in this order:
   git fetch origin
   git switch -c ${mergeBranchOf(lane)} origin/main
 If the switch refuses because ${mergeBranchOf(lane)} already exists, stop and report it as not merged. Never reach for \`checkout -B\` or \`switch -C\`.
-Push attempts: at most ${MERGE_ATTEMPTS}.
+Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.
 
 The lane's report (JSON): ${JSON.stringify(r)}
 
@@ -467,7 +469,7 @@ function numberSchema() {
 function mergedSchema() {
   return {
     type: 'object',
-    required: ['start_sha', 'worktree_path', 'merge_branch', 'merged', 'push_attempts', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
+    required: ['start_sha', 'worktree_path', 'merge_branch', 'merged', 'push_attempts', 'docs_catch_ups', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
     properties: {
       start_sha: { type: 'string', description: 'what git log -1 said before your switch' },
       worktree_path: { type: 'string', description: 'the output of git rev-parse --show-toplevel run in your OWN tree' },
@@ -476,6 +478,7 @@ function mergedSchema() {
       merged_sha: { type: 'string', description: 'the sha you pushed to origin/main' },
       gate_pass_line: { type: 'string', description: 'the PASS line of the gate on the tree you pushed, verbatim' },
       push_attempts: { type: 'integer', minimum: 0 },
+      docs_catch_ups: { type: 'integer', minimum: 0, description: 'tries after a catch-up whose diff was all docs/ or .md, which push_attempts does not count (§367)' },
       ff_main: { type: 'string', description: 'the last line just ff-main printed' },
       fixes_applied: { type: 'array', items: { type: 'string' }, description: 'each verifier fix you made, one line each' },
       rows_closed: { type: 'array', items: { type: 'string' }, description: 'e.g. "Q142 done:<sha>"' },

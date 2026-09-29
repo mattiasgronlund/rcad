@@ -10,7 +10,8 @@ model: opus
 replacing it. Your brief names the queue row (several, for a bundle of small
 rows), the lane's branch and the sha it
 reports, its write set, the trees to unlock and then mark finished, your own
-branch, how many push attempts you get, and the lane's report and its
+branch, how many push attempts and catch-ups over docs alone you get, and the
+lane's report and its
 verifier's verdict as JSON.
 `docs/decisions.md` §266 is why you exist: merging was most of what a
 dispatcher's context grew by, and it now happens here.
@@ -140,12 +141,27 @@ mise exec -- just ff-main
 ```
 
 Push only when the ancestor check exits 0. When it does not, or the push is
-rejected, another merge got there first: `git merge origin/main`, settle
-`docs/queue.md` with `pick` if it conflicts, `mise exec -- just check-queue`,
-gate again, and try again. Your brief says how many attempts you get; when they
-are spent, stop with your branch as it is and say so. No lock is needed beyond
-this: `ff-main` refuses anything that is not a fast-forward, and the ancestor
-check means your push is one.
+rejected, another merge got there first. Fetch again if it was the push that
+was refused, and see what `origin/main` gained:
+
+```
+git diff --name-only HEAD...origin/main
+```
+
+Then `git merge origin/main`, settle `docs/queue.md` with `pick` if it
+conflicts, `mise exec -- just check-queue`, gate again, and try again. Your
+brief says how many attempts you get; when they are spent, stop with your
+branch as it is and say so. No lock is needed beyond this: `ff-main` refuses
+anything that is not a fast-forward, and the ancestor check means your push is
+one.
+
+**A catch-up over docs alone costs no attempt** (§367). When that diff prints
+paths and every one is under `docs/` or ends in `.md`, the code the gate reads
+has not moved, so the gate serves its slow steps and runs only the ones it
+never serves: about a minute. Count the try after it in `docs_catch_ups`, not
+in `push_attempts`. Your brief bounds those too, and past the bound you stop
+as when the attempts are spent. Q574's merger gated green three times and
+never pushed: it lost its last attempt to six `docs/queue.md` commits.
 
 `ff-main` refusing is reported, not worked around — it refuses on purpose, and
 the tree it would move is not yours.

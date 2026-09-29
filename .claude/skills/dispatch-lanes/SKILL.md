@@ -213,7 +213,8 @@ locked, and the result names them.
 
 Whatever the merger lists as for you. Two cases come up:
 
-- **It spent its push attempts.** Other merges reached `main` first each time,
+- **It spent its push attempts,** or its catch-ups over docs alone (§367).
+  Other merges reached `main` first each time,
   and its branch `merge-<label>` holds the merged tree. Merge `origin/main` into
   it in a tree of your own, gate, and push, or send the row again.
 - **`ff-main` refused.** It refuses on purpose: the tree holding `main` is
