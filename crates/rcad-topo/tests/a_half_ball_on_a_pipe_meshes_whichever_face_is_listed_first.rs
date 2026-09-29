@@ -33,17 +33,18 @@
 //! shared function (§222.1 item 1) it read the ball and the pipe, no rule
 //! answered, and that way was kept. Reading the ball and the plane, the mesher
 //! walks the rim the way the rule says, and the solid built the other way is
-//! refused by `AWireWillNotLieFlatOnItsFace` on the pipe — which is what
-//! `a_half_ball_on_a_pipe_with_its_rim_stored_against_the_rule_is_refused` pins.
-//! `Model::validate` does not read this rim's way yet: it reads the two faces,
-//! which only touch (§229.4).
+//! refused. `Model::validate` reads this rim's way itself now, against the
+//! plane it names, and refuses it by `AClosedEdgeIsWalkedAgainstItsSurface`
+//! before the mesher ever sees it (§229.4) — which is what
+//! `a_half_ball_on_a_pipe_with_its_rim_stored_against_the_rule_is_refused`
+//! pins.
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Sphere, Surface, Vector,
     which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, SolidBuilder, SolidKey};
 
 /// The radius of the ball and of the pipe.
 const RADIUS: f64 = 1.5;
@@ -189,18 +190,24 @@ fn the_rim_is_stored_the_way_the_ball_and_its_plane_say_whichever_face_is_listed
 }
 
 /// The same solid with the rim's two uses turned round, which is the way it
-/// was first built here, is refused by name rather than measured.
+/// was first built here, is refused by name.
 ///
 /// Walked the way the rule stores it, the ball's face would be the half above
-/// the rim, inside the pipe, and it is the pipe's wire that no longer lies flat.
-/// Refused rather than pinned to one refusal, because `Model::validate` may
-/// come to read this rim's way and refuse it first (§229.4).
+/// the rim, inside the pipe, and it is the pipe's wire that no longer lies
+/// flat. `Model::validate` reads this rim's way and refuses it first, by
+/// `AClosedEdgeIsWalkedAgainstItsSurface`, before the mesher ever gets to it
+/// (§229.4).
 #[test]
 fn a_half_ball_on_a_pipe_with_its_rim_stored_against_the_rule_is_refused() {
     for first in [FirstInTheShell::Ball, FirstInTheShell::Pipe] {
         let (_, built) = built_with_the_ball_using_the_rim(first, Orientation::Reversed);
         assert!(
-            built.is_err(),
+            matches!(
+                built,
+                Err(Error::Invalid(
+                    Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                ))
+            ),
             "the {first:?} listed first: a rim stored against the rule is built into {built:?}"
         );
     }
