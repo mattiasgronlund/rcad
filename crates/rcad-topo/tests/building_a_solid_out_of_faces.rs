@@ -272,7 +272,10 @@ fn a_bend_built_face_by_face_is_the_bend_a_quarter_bend_builds() {
     )
     .expect("the bend less the turned bend is answered");
     let [eighth] = pieces.as_slice() else {
-        panic!("the bend less the turned bend is one piece, not {}", pieces.len());
+        panic!(
+            "the bend less the turned bend is one piece, not {}",
+            pieces.len()
+        );
     };
     let pappus = core::f64::consts::PI * core::f64::consts::PI;
     assert!(

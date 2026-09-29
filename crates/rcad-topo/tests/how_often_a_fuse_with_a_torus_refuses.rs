@@ -492,7 +492,13 @@ fn a_bend_fused_with_a_copy_of_itself_is_the_bend_or_nothing() {
     for rule in [Rule::Union, Rule::Intersection] {
         let mut answer = model.clone();
         let fused = answer
-            .fuse(&[first], &[second], rule, &policy, &mut ProvenanceLog::new())
+            .fuse(
+                &[first],
+                &[second],
+                rule,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
             .unwrap_or_else(|why| panic!("{rule:?} of a bend and a copy of itself: {why}"));
         let [bend] = fused.solids() else {
             panic!("{rule:?} of a bend and a copy of itself: {fused:?}");

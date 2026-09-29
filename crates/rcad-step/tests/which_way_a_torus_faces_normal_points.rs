@@ -123,8 +123,7 @@ fn three_relays_in_the_corpus_import() {
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|why| panic!("{} is in the corpus: {why}", path.display()));
         let file = StepFile::read(&bytes).expect("a corpus file reads");
-        if let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-        {
+        if let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
             panic!("{name} is refused: {refused:?}");
         }
     }
