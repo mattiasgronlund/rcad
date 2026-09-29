@@ -9,9 +9,11 @@
 //! crash files were that (§326), and the harness now counts such a model as
 //! `written_but_a_solid_unsound_alone` rather than panicking on it.
 //!
-//! The thirteenth file is a second cause the harness still panics on, pinned
-//! here so that it is seen to move: the room also depends on where the solid
-//! sits (§326.3).
+//! The thirteenth file was a second cause: the room also depended on where the
+//! solid sits, because `validate` read it where the corners are stored and the
+//! reader where the file puts them (§326.3). `validate` and `validate_solid`
+//! now read it at whichever of the two is smaller (§363), so they refuse that
+//! solid as the reader does.
 
 #![forbid(unsafe_code)]
 
@@ -95,22 +97,39 @@ fn a_bar_whose_corner_is_a_hair_above_its_cap_comes_back_where_it_was_built() {
 /// The same bar moved by `(−4, −3, −2)`, the move the fuzzer gave it. The
 /// file writes it where it now sits, so its largest coordinate is 3 and the
 /// reader gives it about `3e-9` of room, less than the `2⁻²⁸` its corner is
-/// off. Both of this kernel's checks pass it, because both read the corners
-/// where they are stored, and the harness panics on it. This is a gap, not a
-/// limit (§326.3), and the day it closes this test fails and is turned round.
+/// off. Both of this kernel's checks used to pass it, because both read the
+/// corners where they are stored, and the harness panicked on it (§326.3).
+/// They now give it the room of where it sits, and refuse it for the same
+/// corner and the same distance the reader does (§363).
 #[test]
-fn the_same_bar_moved_toward_the_origin_is_refused_by_the_reader() {
+fn the_same_bar_moved_toward_the_origin_is_refused_by_validate_as_by_the_reader() {
     let moved = Isometry::translation(Vector::new(-4.0, -3.0, -2.0)).expect("a finite offset");
     let model = a_bar_a_hair_tall_placed_by(&moved);
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    model
-        .validate(&policy, &mut log)
-        .expect("the model is sound");
+    let whole = model.validate(&policy, &mut log);
     let bar = model.solids().next().expect("one solid").key();
-    model
-        .validate_solid(bar, &policy, &mut log)
-        .expect("the bar is sound on its own");
+    let alone = model.validate_solid(bar, &policy, &mut log);
+    for refusal in [whole, alone] {
+        let Err(rcad_topo::Error::Invalid(Invalid::VertexOffItsFacePlane { distance })) = refusal
+        else {
+            panic!("the kernel refuses the bar's corner off its cap, not {refusal:?}");
+        };
+        assert_eq!(distance, 2.0_f64.powi(-28));
+    }
+
+    let reached = one_model_decoded_and_written(
+        &postcard::to_allocvec(&model).expect("a model always encodes"),
+    );
+    assert_eq!(
+        (
+            reached.written,
+            reached.written_but_unsound,
+            reached.read_back
+        ),
+        (1, 1, 0),
+        "{reached:?}"
+    );
 
     let text = rcad_step::write(&model, "a bar a hair tall").expect("the writer writes a bar");
     let file = StepFile::read(text.as_bytes()).expect("the writer's own file parses");

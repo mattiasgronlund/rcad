@@ -69,6 +69,14 @@
 //! largest coordinate, and a far neighbour makes that room wider
 //! (`docs/decisions.md` §242.6). Twelve of the 2026-09-26 crash files were
 //! that, and nothing else (§326).
+//!
+//! **Both of the kernel's checks size that room where the file puts the
+//! solid, or where it is stored if that gives less** (§363). The writer writes
+//! each solid where its placement puts it and the reader sizes the room from
+//! there, so a solid moved toward the origin gets less room from the reader
+//! than from where it is stored. Two more of those crash files were that, one
+//! on a flat face and one on a curved one (§326.3, §327), and the harness
+//! counts them here too.
 
 // Shared between a test binary and a fuzz target, and each uses a subset.
 #![allow(dead_code)]
@@ -108,7 +116,9 @@ pub struct Reached {
     /// Written models that pass `Model::validate` but hold a solid that
     /// `Model::validate_solid` refuses. The reader builds each solid through
     /// `SolidBuilder::build`, which judges it alone, and a neighbour can widen
-    /// the room `validate` gives a corner (`docs/decisions.md` §242.6).
+    /// the room `validate` gives a corner (`docs/decisions.md` §242.6). A
+    /// solid moved toward the origin is refused here too once its room, sized
+    /// where it sits, is too small for it (§363).
     pub written_but_a_solid_unsound_alone: usize,
     /// Written files the reader turned back into a model.
     pub read_back: usize,

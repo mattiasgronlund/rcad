@@ -115,6 +115,16 @@ The second changes what `validate` accepts, so it is a decision with an argument
 still to have. It goes back to the queue as a row, with `crash-7407c848…` as its
 sample.
 
+**Closed by §363 (Q646), by neither of the two.** Every room is now measured
+against the smaller of where the corners are stored and where the placement
+puts them, so a placement can narrow a room and never widen it. `validate` and
+`validate_solid` refuse this bar moved by `(−4, −3, −2)` for the same `2⁻²⁸`
+the reader does, and the harness counts `crash-7407c848…` as a solid unsound
+alone. The pin above was turned round and renamed
+`the_same_bar_moved_toward_the_origin_is_refused_by_validate_as_by_the_reader`.
+`crash-c8db92e4…` does not move: its solid is still refused where it is stored
+(§363.3).
+
 ### 326.4 The whole directory, before and after
 
 All 22 528 files in `~/rcad-fuzz-logs/2026-09-26/artifacts/no_model_makes_the_writer_panic/`

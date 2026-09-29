@@ -102,6 +102,19 @@ and `the_reader_takes_the_bar_once_its_top_corner_is_past_11_375` fail.
 either. `the_bar_where_it_was_built_comes_back_the_same` is the control and
 passes under both.
 
+**Closed by §363 (Q646), with a third fix.** The curved room, and every other
+room, is measured against the smaller of where the corners are stored and where
+the placement puts them. That is the first fix's question asked inside
+`validate`, in the direction that can only refuse. Two pins turned round and
+were renamed:
+`the_bar_moved_as_the_fuzzer_moved_it_is_refused_by_validate_as_by_the_reader`
+and
+`the_writer_harness_counts_the_bar_moved_as_the_fuzzer_moved_it_rather_than_panicking`.
+The 11.375 pin held, because the reader is unchanged. It now asks `validate`
+beside the reader, which draws the line in the same place, as
+`validate_and_the_reader_both_take_the_bar_once_its_top_corner_is_past_11_375`
+(§363.4). The control passes.
+
 ### 327.6 What this leaves
 
 - **No row of its own.** The lane asked that Q169 be folded into Q334, §326.3's
