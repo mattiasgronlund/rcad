@@ -23,10 +23,12 @@
 //! the box it is really known to be inside, and a sign question about it comes
 //! back undecided, which is the truth.
 
-use rcad_predicates::{Approximation, Cause, Interval, Point as PredicatePoint};
+use rcad_predicates::expansion::two_sum;
+use rcad_predicates::{Approximation, Cause, Decision, Interval, Point as PredicatePoint};
 
+use crate::exact::Exact;
 use crate::isometry::Isometry;
-use crate::point::Point;
+use crate::point::{Axis, Point, Vector};
 use crate::{Error, Result, Surface};
 
 /// How far a point that was exactly on a surface can end up from the **stored**
@@ -136,15 +138,44 @@ pub const CORNER_AFTER_MOVING_ROUNDOFF: f64 = 128.0 * f64::EPSILON;
 /// is what spends it.
 pub const SURFACE_AFTER_SHIFTING_ROUNDOFF: f64 = 8.0 * f64::EPSILON;
 
-/// Where a corner with two surfaces round it lands once `movement` is applied,
-/// as the box it is really known to be inside.
+/// Where a corner lands once `movement` is applied, as the box it is really
+/// known to be inside — which is a point, when the move rounded nothing.
 ///
-/// `corner` must be a point the model already holds as being on both of `on`,
-/// which is what `check_curved_face` certifies. What comes back is
+/// `on` is every surface round the corner, as the model stores them before the
+/// move. What comes back is
 /// [`Point::Constructed`](rcad_predicates::Point::Constructed) with half-width
 /// [`CORNER_AFTER_MOVING_ROUNDOFF`] times the largest number involved, tagged
 /// [`Cause::ConstructedPoint`] — **representation wobble, which refuses
 /// nothing** (§17.2), rather than an approximation anyone chose.
+///
+/// # A shift that rounds nothing gives the moved corner exactly
+///
+/// The box is there because the moved corner and the moved surfaces are each
+/// rounded on the way, separately, so what the corner was to its surfaces
+/// before the move it is only nearly afterwards. When nothing was rounded that
+/// is not so, and a box would turn an exact answer into a refusal: a bar moved
+/// by whole numbers whose seam lies on a block's wall asked *side of plane*
+/// about a box round `(0, 2, 1)` on `x = 0`, where the answer is `Zero`.
+///
+/// So the corner comes back as the exact point, with a wobble of zero, when
+/// **the moved corner is the stored corner plus the movement's shift, and every
+/// moved surface is its stored surface carried along by that shift**, each sum
+/// checked exactly rather than against a tolerance. That is sufficient and not
+/// merely plausible. The side a surface puts a point on is the sign of one
+/// expression in their numbers — `n·p − d` for a plane, `|p − c|² − r²` for a
+/// ball, and the same with the axis origin or the apex for the rest — and
+/// adding one vector to the point and to the surface's place, with `d` gaining
+/// `n·t`, leaves every one of those expressions exactly the number it was. So
+/// every question a surface round the corner answers about the moved corner is
+/// answered as it was before the move, whatever that answer was; the move added
+/// nothing, and there is nothing for a box to cover. It does not rest on the
+/// stored corner being exactly on its surfaces, which the model does not
+/// promise (§75.6), and it does not rest on how [`Surface::transformed`] does
+/// its arithmetic, only on what it handed back.
+///
+/// A movement that turns fails the first sum for every corner off its axis, so
+/// in practice this is a shift and nothing else. A shift whose sums round, or
+/// whose products do, keeps its box: that is what the box is for.
 ///
 /// # Errors
 ///
@@ -152,9 +183,9 @@ pub const SURFACE_AFTER_SHIFTING_ROUNDOFF: f64 = 8.0 * f64::EPSILON;
 /// number that is not finite, or when the moved corner overflows. A box round a
 /// place that is not a place says nothing, and a caller handed one would take it
 /// for a place.
-pub fn where_a_corner_lands_after_moving(
+pub fn where_a_corner_lands_after_moving<'a>(
     corner: Point,
-    on: [&Surface; 2],
+    on: impl IntoIterator<Item = &'a Surface>,
     movement: &Isometry,
 ) -> Result<(PredicatePoint, Approximation)> {
     if !(corner.is_finite() && movement.is_finite()) {
@@ -162,9 +193,19 @@ pub fn where_a_corner_lands_after_moving(
             what: "corner of a curved face",
         });
     }
+    let on: Vec<&Surface> = on.into_iter().collect();
     let moved = movement.apply_to_point(corner);
-    let placed = on.map(|surface| surface.transformed(movement));
-    let size = the_largest_number_involved(corner, moved, on, &placed, movement);
+    if a_shift_that_rounded_nothing(corner, moved, &on, movement) {
+        return Ok((
+            PredicatePoint::from(moved.coordinates()),
+            Approximation::new(0.0, Cause::ConstructedPoint),
+        ));
+    }
+    let placed: Vec<Surface> = on
+        .iter()
+        .map(|surface| surface.transformed(movement))
+        .collect();
+    let size = the_largest_number_involved(corner, moved, &on, &placed, movement);
     let reach = CORNER_AFTER_MOVING_ROUNDOFF * size;
     if !(moved.is_finite() && reach.is_finite()) {
         return Err(Error::NotFinite {
@@ -180,12 +221,101 @@ pub fn where_a_corner_lands_after_moving(
     ))
 }
 
+/// Whether `movement` took the corner and every surface round it to exactly
+/// themselves shifted by its shift, with nothing rounded on the way.
+fn a_shift_that_rounded_nothing(
+    corner: Point,
+    moved: Point,
+    on: &[&Surface],
+    movement: &Isometry,
+) -> bool {
+    let by = movement.translation_part();
+    is_exactly_shifted(corner, moved, by)
+        && on
+            .iter()
+            .all(|surface| is_carried_exactly_by_its_shift(surface, movement, by))
+}
+
+/// Whether `after` is `before` plus `by`, each coordinate summed without a
+/// rounding.
+fn is_exactly_shifted(before: Point, after: Point, by: Vector) -> bool {
+    let [before, after, by] = [before.coordinates(), after.coordinates(), by.components()];
+    (0..3).all(|axis| {
+        let (sum, lost) = two_sum(before[axis], by[axis]);
+        lost == 0.0 && sum == after[axis]
+    })
+}
+
+/// Whether `surface`, moved, is the same surface with its place moved by
+/// exactly `by` and nothing else touched.
+///
+/// Every number a surface stores is compared, the ones a shift must leave alone
+/// as well as the ones it moves, so that the answer is about what
+/// [`Surface::transformed`] handed back and not about how it got there.
+fn is_carried_exactly_by_its_shift(surface: &Surface, movement: &Isometry, by: Vector) -> bool {
+    match surface {
+        Surface::Plane(flat) => {
+            let moved = flat.transformed(movement);
+            moved.normal() == flat.normal()
+                && is_the_offset_it_should_have(moved.offset(), flat.offset(), flat.normal(), by)
+        }
+        Surface::Sphere(ball) => {
+            let moved = ball.transformed(movement);
+            moved.radius() == ball.radius() && is_exactly_shifted(ball.centre(), moved.centre(), by)
+        }
+        Surface::Cylinder(pipe) => {
+            let moved = pipe.transformed(movement);
+            moved.radius() == pipe.radius() && is_the_axis_shifted(pipe.axis(), moved.axis(), by)
+        }
+        Surface::Cone(cone) => {
+            let moved = cone.transformed(movement);
+            moved.slope() == cone.slope() && is_the_axis_shifted(cone.axis(), moved.axis(), by)
+        }
+        Surface::Torus(ring) => {
+            let moved = ring.transformed(movement);
+            moved.ring_radius() == ring.ring_radius()
+                && moved.tube_radius() == ring.tube_radius()
+                && is_the_axis_shifted(ring.axis(), moved.axis(), by)
+        }
+    }
+}
+
+/// Whether a plane shifted by `by` holds exactly `offset + normal · by`.
+///
+/// Summed through [`Exact`], so a dot product that rounds anywhere on the way
+/// is caught whichever order it was worked out in.
+fn is_the_offset_it_should_have(moved: f64, offset: f64, normal: Vector, by: Vector) -> bool {
+    // A product whose low half would fall into the subnormals has no exact
+    // two-term form, so nothing can be proved about it.
+    let Some(carried) = Exact::dot_of(normal.components(), by.components()) else {
+        return false;
+    };
+    match Exact::of(offset)
+        .plus(&carried)
+        .minus(&Exact::of(moved))
+        .sign()
+    {
+        Decision::Zero => true,
+        Decision::Pos | Decision::Neg => false,
+        // An overflow upstream: nothing was proved.
+        Decision::Undecidable { .. } => false,
+        other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    }
+}
+
+/// Whether an axis moved to `after` is `before` with its origin moved by
+/// exactly `by` and its direction untouched.
+fn is_the_axis_shifted(before: Axis, after: Axis, by: Vector) -> bool {
+    after.direction() == before.direction()
+        && is_exactly_shifted(before.origin(), after.origin(), by)
+}
+
 /// The largest magnitude anything in this move was worked out from.
 fn the_largest_number_involved(
     corner: Point,
     moved: Point,
-    before: [&Surface; 2],
-    after: &[Surface; 2],
+    before: &[&Surface],
+    after: &[Surface],
     movement: &Isometry,
 ) -> f64 {
     let widest = [corner, moved, Point::origin() + movement.translation_part()]
@@ -229,9 +359,7 @@ fn how_big_a_surface_is(surface: &Surface) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::exact::Exact;
-    use crate::point::Vector;
-    use crate::{Axis, Cylinder, HalfSpace, Plane, Sphere};
+    use crate::{Cone, Cylinder, HalfSpace, Plane, Sphere, Torus};
 
     use super::*;
 
@@ -328,6 +456,110 @@ mod tests {
             "a search that found no slip at all would pass whatever the \
              constant said, and found {worst:?}"
         );
+    }
+
+    /// A whole-number shift hands back the exact corner round every kind of
+    /// surface there is, each set square to the axes.
+    ///
+    /// Square to the axes because a slanted plane's offset gains a dot product,
+    /// and whole numbers times a normal that is not whole can round.
+    #[test]
+    fn a_whole_number_shift_moves_a_corner_on_any_square_surface_exactly() {
+        let whole = Isometry::translation(Vector::new(-7.0, 11.0, 5.0)).expect("a finite shift");
+        let flat =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane");
+        let rows = [
+            (Point::new(1.0, 2.0, 3.0), Surface::Plane(flat)),
+            (
+                Point::new(0.0, 0.0, 2.0),
+                Surface::Sphere(Sphere::new(Point::origin(), 2.0).expect("a ball")),
+            ),
+            (
+                Point::new(1.0, 0.0, 3.0),
+                Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe")),
+            ),
+            (
+                Point::new(1.0, 0.0, 1.0),
+                Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a cone")),
+            ),
+            (
+                Point::new(4.0, 0.0, 0.0),
+                Surface::Torus(Torus::new(Axis::z(), 3.0, 1.0).expect("a ring")),
+            ),
+        ];
+        for (corner, surface) in rows {
+            let (landed, wobble) = where_a_corner_lands_after_moving(corner, [&surface], &whole)
+                .expect("finite numbers");
+            let [x, y, z] = corner.coordinates();
+            assert_eq!(
+                landed,
+                PredicatePoint::from([x - 7.0, y + 11.0, z + 5.0]),
+                "{corner:?} on {surface:?}"
+            );
+            assert_eq!(wobble.magnitude(), 0.0);
+        }
+    }
+
+    /// A shift that moves the corner without a rounding but rounds a surface
+    /// round it keeps the box, because the corner is then only nearly what it
+    /// was to that surface.
+    ///
+    /// One row for each way a surface can round while its corner does not: a
+    /// pipe written through a far point of its axis, whose origin's sum rounds
+    /// where the corner's does not, and a slanted plane, whose offset gains a dot
+    /// product that rounds where every coordinate's sum is exact. Each is beside
+    /// the same surface under a shift that rounds nothing, so what keeps the box
+    /// is the rounding and not the surface.
+    #[test]
+    fn a_corner_moved_exactly_on_a_surface_that_was_not_keeps_its_box() {
+        let far_on_its_axis = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+                1.0,
+            )
+            .expect("a pipe"),
+        );
+        let slanted = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 1.0, 0.0))
+                .expect("a plane"),
+        );
+        let shift = |x: f64, y: f64, z: f64| {
+            Isometry::translation(Vector::new(x, y, z)).expect("a finite shift")
+        };
+        let rows = [
+            (
+                Point::new(1.0, 0.0, 0.0),
+                far_on_its_axis,
+                shift(0.0, 0.0, 2f64.powi(-53)),
+                shift(0.0, 0.0, 1.0),
+            ),
+            (
+                Point::origin(),
+                slanted,
+                shift(1.0, 2f64.powi(-30), 0.0),
+                shift(1.0, 1.0, 0.0),
+            ),
+        ];
+        for (corner, surface, rounds, whole) in rows {
+            assert!(
+                is_exactly_shifted(
+                    corner,
+                    rounds.apply_to_point(corner),
+                    rounds.translation_part()
+                ),
+                "the corner itself moves exactly, so only the surface can round"
+            );
+            let (boxed, _) = where_a_corner_lands_after_moving(corner, [&surface], &rounds)
+                .expect("finite numbers");
+            assert!(
+                boxed.uncertainty() > 0.0,
+                "{surface:?} moved by {rounds:?} rounds, so the corner is a box: {boxed:?}"
+            );
+            let (exact, _) = where_a_corner_lands_after_moving(corner, [&surface], &whole)
+                .expect("finite numbers");
+            assert_eq!(exact.uncertainty(), 0.0, "{surface:?} moved by {whole:?}");
+        }
     }
 
     /// How far a shifted flat surface is from where it truly goes, as a multiple
