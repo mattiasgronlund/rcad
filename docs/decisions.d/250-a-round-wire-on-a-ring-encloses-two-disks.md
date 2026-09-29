@@ -245,7 +245,24 @@ unwrap the ring angle, and `CornersCoincide` says the wall's loop names one
 chart point twice. That fits, but it was not traced. A half-ring is a sound
 solid, so this refusal is a gap (§16.10). It is wider than 280.6's fix, which
 refuses a torus face that goes right round the ring on purpose. `Deserialize`
-does not call `validate`, so it may be a door to this face. It was not tried.
+does not call `validate`, so it may be a door to this face.
+
+*Q193 (`e5a7d95a`)* tried both doors. Through `Deserialize` the half-ring
+reads back in all eight orientation choices, and its flat face refuses all the
+same: `face_holds_the_point` gives `AFaceTrimmedByACurveThisCannotFollow` at
+the six points above, `classify_point` gives `CannotFollowAFacesTrimming` at
+`(4, 0, 0)` and `(0, 0, 0)`, and both `validate` and `mesh` refuse the wall
+`AWireWillNotLieFlatOnItsFace`. So 250.6's reasoned `NotHeld` does not show on
+this commit, and Q415 owns the flat face.
+
+Through `SolidBuilder`, with the wall split into two faces along its top
+circle, only one wall shape reaches the mesher at all: a rim
+`RightRoundWhereItCrosses` the tangent plane `z = 1`, which refuses
+`AWireWillNotLieFlatOnItsFace` in the eight consistent orientation choices and
+`AClosedEdgeIsWalkedAgainstItsSurface` in the other twenty-four — Q372's band.
+A pipe of radius four, or a `RightRoundWhereItsFacesCross` rim, gives
+`ACrossingBetweenATorusAndAnotherCurvedSurface`, and a rim from
+`PartOfWhereItCrosses` with no seam gives `ADraftWireIsTooShort { steps: 1 }`.
 
 ### 250.8 One lookup, one rule, in `holds.rs` (Q117, Q118, Q199)
 

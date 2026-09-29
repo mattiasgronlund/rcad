@@ -63,12 +63,18 @@ in `write.rs` has the argument, including why the next widest component is
 never smaller than `2⁻²⁷`.
 
 The writer checks the point through `plane_through` in `geometry.rs` — the
-function the reader calls for every `PLANE`, so the two cannot drift apart — and
-refuses by name, `CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries`, where
-the point does not carry the offset. It is a gap and is reached where the
-division overflows, a plane `1.41e308` out
-(`a_plane_too_far_out_to_divide_is_refused_by_name`); none of the 22 528 files
-is refused by it.
+function the reader calls for every `PLANE`, so the two cannot drift apart —
+and refuses by name, `CannotWrite::APlaneWhoseOffsetNoWrittenPointCarries`,
+where the point does not carry the offset. The division-overflow case — a
+plane `1.41e308` out — is now written: `the_offset_itself_along_the_widest`
+builds it a point the reader reads the offset back from, checked on six
+planes up to `f64::MAX`
+(`a_plane_too_far_out_to_divide_is_written_at_a_point_it_reads_back_from`). It
+remains a gap, and is reached only for offsets below `2⁻⁹⁶⁹` that are not
+subnormal, where the reader rounds each product of the dot and drops what it
+lost and `divided_along_the_widest` still counts that loss
+(`some_planes_just_above_the_subnormals_are_still_refused_by_name`, 164 of
+20 000); none of the 22 528 files is refused by it.
 
 On the same 20 000 planes the new point misses none
 (`every_plane_is_written_at_a_point_its_offset_reads_back_from`); half of them are
