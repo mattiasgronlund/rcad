@@ -120,6 +120,16 @@ At unit size a `1e-300` move answers both ways. That fits the ray's `orient3d`
 being unable to decide a sign that small, so it falls through to the
 coincidence check. This was not traced.
 
+**2026-09-29: that row is out of date.** Since §324's second power of two,
+`orient3d` decides a sign this small, and on `665d42d2` the same unit-size
+`1e-300` move refused one way round like the rest of the table, rather than
+answering both ways. §351.3 measured it, Q314 was dropped as moot once §351.3
+pinned it, and `three_flat_seeds_that_fuse_one_way_round.rs`'s
+`every_move_of_a_stored_corner_that_refused_one_way_round_is_one_cube_both_ways`
+carries the row now, with the same two rows' worth of moves this table lists at
+unit size and at the seeds' own size. The table above stays as the history of
+what was measured before §324, not as the current shape of the code.
+
 ### 316.4 Against §48.2 item 5
 
 §48.2 item 5 does not describe an expected refusal. It records that the laws
