@@ -42,7 +42,12 @@ fn a_bar_inside_a_tubes_wall_united_with_it_is_the_tube() {
 fn a_tube_less_a_bar_inside_its_wall_is_hollowed_by_the_bar() {
     let (mut model, tube, thin) = a_tube_and_a_bar_inside_its_wall();
     let answer = the_one_solid(&mut model, tube, thin, Rule::Difference);
-    assert_holds(&model, answer, 32.0 * PI - PI / 2.0, "the tube less the bar");
+    assert_holds(
+        &model,
+        answer,
+        32.0 * PI - PI / 2.0,
+        "the tube less the bar",
+    );
 }
 
 fn a_tube_and_a_bar_inside_its_wall() -> (Model, SolidKey, SolidKey) {

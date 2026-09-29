@@ -1139,9 +1139,10 @@ impl Assembly {
             // bound the region inside it, so a ring along it is not placed.
             _ => return None,
         }
-        if !ring.iter().all(|&dart| {
-            the_curved_one(dart).is_some_and(|curved| one_surface(&curved, &surface))
-        }) {
+        if !ring
+            .iter()
+            .all(|&dart| the_curved_one(dart).is_some_and(|curved| one_surface(&curved, &surface)))
+        {
             return None;
         }
         others.find_map(|other| {
