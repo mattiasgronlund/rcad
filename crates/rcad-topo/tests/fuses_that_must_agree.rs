@@ -3424,7 +3424,6 @@ fn the_refusals_the_upright_answer_turned_would_have_answered<P: Fixture + core:
 ) -> (usize, usize) {
     let demonstrated = Cell::new(0usize);
     let both_refused = Cell::new(0usize);
-    let unsound_when_turned = Cell::new(0usize);
     // The shipped corpus and not [`CASES`]: at forty-eight the bar and the ball
     // draw no refusal at all, and there is nothing to demonstrate.
     measured(fixtures, |fixture, tally| {
@@ -3462,62 +3461,45 @@ fn the_refusals_the_upright_answer_turned_would_have_answered<P: Fixture + core:
                     .place_solid(solid, &turn)
                     .expect("this model made the key");
             }
-            match model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
-                Ok(()) => demonstrated.set(demonstrated.get() + 1),
-                // `a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`
-                // carries this defect by name; here it only means no demonstration.
-                Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface)) => {
-                    unsound_when_turned.set(unsound_when_turned.get() + 1);
-                }
-                Err(why) => {
-                    return Err(TestCaseError::fail(format!(
-                        "the upright {rule:?} of {fixture:?}, turned, is not a sound model: {why}"
-                    )));
-                }
+            if let Err(why) = model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+                return Err(TestCaseError::fail(format!(
+                    "the upright {rule:?} of {fixture:?}, turned, is not a sound model: {why}"
+                )));
             }
+            demonstrated.set(demonstrated.get() + 1);
         }
         Ok(())
     });
-    if unsound_when_turned.get() > 0 {
-        println!(
-            "    {} upright answers were not sound once turned, so no demonstration for them",
-            unsound_when_turned.get()
-        );
-    }
     (demonstrated.get(), both_refused.get())
 }
 
-/// A sound union of a ball and a block, moved by a half turn, is still sound —
-/// and **today `Model::validate` says it is broken**. Left failing on purpose.
+/// A sound union of a ball and a block, moved by a half turn, is still sound.
 ///
 /// §191's volume row found the case on a fresh seed and shrank it to this: a
 /// half turn about `(1, 0, 1)` carries the ball's own axis from `z` to `x`,
-/// give or take the rounding of `cos π`. The turned fixture's union is refused
-/// with `ACurvedFaceGoesRightRoundWithNoSeam`, and the way to classify that
-/// refusal (§16.10) is to turn the upright union by the same `Isometry` and ask
-/// whether the kernel holds it. It does not: the upright union validates,
-/// `place_solid` accepts the turn, and the moved model fails with
-/// `AClosedEdgeIsWalkedAgainstItsSurface`. A rigid movement cannot turn a sound
-/// solid into a broken one, so one of `place_solid` or `validate`'s winding
-/// check is wrong about a moved closed edge. The two inputs turned the same way
-/// validate, and so does a lone unit ball turned the same way — it is the dome
-/// the union leaves, not the ball.
+/// give or take the rounding of `cos π`. The turned fixture's union was refused
+/// then, and the way to classify that refusal (§16.10) is to turn the upright
+/// union by the same `Isometry` and ask whether the kernel holds it. It did
+/// not: the upright union validated, `place_solid` accepted the turn, and the
+/// moved model failed with `AClosedEdgeIsWalkedAgainstItsSurface`. A rigid
+/// movement cannot turn a sound solid into a broken one, and it was
+/// `validate`'s winding check that was wrong: it read the direction rule where
+/// the solid sits, where a ball is wound about the world's `z`, and not where
+/// the faces are stored, where its edges were walked. The two inputs turned the
+/// same way validated, and so did a lone unit ball turned the same way — it is
+/// the dome the union leaves, not the ball.
 ///
-/// Until this is fixed the refusal cannot be classified: the demonstration that
-/// would call it a gap is exactly what fails.
-///
-/// **A second turn does the same**: three quarters of a turn about `-y`, which
-/// the volume row shrank to on another fresh seed. There the turned fuse
-/// *answers*, and measuring its answer is what refuses (a loop with a corner in
-/// the same place twice). Both turns carry the ball's axis onto the world's `x`,
-/// give or take the rounding of the angle — the §124 shape exactly.
+/// **A second turn did the same**: three quarters of a turn about `-y`, which
+/// the volume row shrank to on another fresh seed. Both turns carry the ball's
+/// axis onto the world's `x`, give or take the rounding of the angle — the
+/// §124 shape exactly. **The third** is the plainest turn that does it, half
+/// over about `x`, which turns the ball's own `z` to point down.
 ///
 /// The two seeds are not kept in `fuses_that_must_agree.proptest-regressions`:
 /// every property here replays that file first, so a seed added there reshuffles
 /// the fixed-seed rows of every other family — it moved the skew row out of its
-/// band on the first try (§136.5's hazard). They are these two fixtures instead.
+/// band on the first try (§136.5's hazard). They are these fixtures instead.
 #[test]
-#[ignore = "open: §191, a sound ball-and-block union turned by place_solid fails validate"]
 fn a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model() {
     for turn in [
         Turn {
@@ -3527,6 +3509,10 @@ fn a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model() {
         Turn {
             direction: [0, -1, 0],
             steps: 48,
+        },
+        Turn {
+            direction: [1, 0, 0],
+            steps: 32,
         },
     ] {
         let fixture = Turned {
@@ -3562,6 +3548,58 @@ fn a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model() {
                 )
             });
     }
+}
+
+/// The same union turned about every axis `{-1, 0, 1}³` names, by every
+/// sixty-fourth of a turn short of a whole one, is still sound: 26 axes and 63
+/// steps, 1638 turns.
+///
+/// The three turns above are where §191 happened on the defect; this is how
+/// wide it was. While `validate` read a ball's winding where the solid sits,
+/// 430 of these 1638 were refused `AClosedEdgeIsWalkedAgainstItsSurface`, and
+/// every one of the 430 measured the upright union's volume.
+#[test]
+fn a_ball_and_block_union_turned_about_any_of_26_axes_is_still_a_sound_model() {
+    let fixture = BallAndBlock {
+        side: 4,
+        radius: 1,
+        at: [2, 2],
+    };
+    let (upright, keys) = fixture.built();
+    let (model, solids) = plainly_fused(&upright, &keys[..1], &keys[1..], Rule::Union);
+    let mut refused = Vec::new();
+    for x in -1..=1 {
+        for y in -1..=1 {
+            for z in -1..=1 {
+                if [x, y, z] == [0, 0, 0] {
+                    continue;
+                }
+                for steps in 1..64 {
+                    let turn = Turn {
+                        direction: [x, y, z],
+                        steps,
+                    };
+                    let mut moved = model.clone();
+                    for &solid in &solids {
+                        moved
+                            .place_solid(solid, &turn.isometry())
+                            .expect("this model made the key");
+                    }
+                    if let Err(why) =
+                        moved.validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    {
+                        refused.push((turn, why));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "{} of 1638 turns of a sound union were refused, the first {:?}",
+        refused.len(),
+        refused.first()
+    );
 }
 
 /// A bar leaning through a block, clear of every side wall by more than a unit,
@@ -3913,15 +3951,14 @@ const A_WIRE_THAT_WILL_NOT_LIE_FLAT: &str = "a wire that will not lie flat on it
 const A_HOLED_FACE_TOO_FAR_ROUND: &str = "a curved face with a hole too far round to mesh";
 
 /// What a ball turned half over refuses on: `Error::ACurvedFaceGoesRightRoundWithNoSeam`
-/// (§191). Not yet classified: see
-/// [`a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`].
+/// (§191). A gap where the ball and block reach it (§16.10): their upright
+/// union, turned the same way, is a sound model
+/// ([`a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`]).
 const A_ROUND_FACE_WITH_NO_SEAM: &str = "a curved face right round with no seam to open at";
 
 /// A fuse over a ball turned so its own axis lies along a world axis, give or
-/// take an ulp, stopping because a face it built would not mesh (§191). Not yet
-/// classified, for the reason
-/// [`a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`]
-/// gives.
+/// take an ulp, stopping because a face it built would not mesh (§191). A gap
+/// for the same reason as [`A_ROUND_FACE_WITH_NO_SEAM`].
 const A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH: &str = "a face of the answer the fuse could not mesh";
 
 /// Not a fuse refusing but the mesher, over an answer the fuse gave: a face of

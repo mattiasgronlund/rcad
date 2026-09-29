@@ -987,10 +987,35 @@ impl Model {
     /// its own gradient goes in and the face's side is read against that same
     /// surface, off the corners of the face that are not on it.
     ///
-    /// **The run is the located one**, [`EdgeView::run`], because the faces'
-    /// surfaces and the corner are read through the view too. A partner read in
-    /// the stored frame beside them would be a surface somewhere else once the
-    /// solid has been moved.
+    /// # The rule is read where the faces are stored
+    ///
+    /// The two surfaces, the run and the corner the rule is asked at all come
+    /// unmoved, which is the frame the fuse wrote the edge in and the frame the
+    /// mesher and `holds.rs` read it back in. **A ball is why it has to be.** A
+    /// sphere stores no axis: it is wound about the `z` of whatever frame it is
+    /// read in ([`the_way_it_is_parametrised_about`]), so once
+    /// [`Model::place_solid`] turns a solid, its ball read where the solid sits
+    /// is wound about a different line from the one its edges were walked by. A
+    /// pipe or a cone carries its axis with it and did not notice. Read where
+    /// the solid sits, a ball-and-block union that validates upright was
+    /// refused [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] after a half
+    /// turn about `x`, and turning a model cannot break it.
+    ///
+    /// Which side of the partner the face's material lies on is still read
+    /// where the solid sits, because that is where
+    /// [`the_side_this_face_lies_on`] reads the corners, and a movement keeps
+    /// which side a corner is on. Which surface the partner *is* is settled in
+    /// the stored frame first and then moved into place for that.
+    ///
+    /// # Panics
+    ///
+    /// If the face across an edge is placed anywhere but where this face is.
+    /// That is a broken invariant and not a caller's bytes: the door refuses an
+    /// edge walked from two shells
+    /// ([`Invalid::AnEdgeIsWalkedOnceFromEachOfTwoShells`]) and a face use that
+    /// carries a placement ([`Invalid::AFaceUseCarriesAPlacement`]), so the two
+    /// faces along an edge are one shell's and sit where that shell puts them.
+    /// Reading them in their one stored frame is reading them in one frame.
     fn check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
         &self,
         slot: SolidSlot,
@@ -1014,16 +1039,20 @@ impl Model {
                 let Some(across) = the_face_across(solid, face, edge)? else {
                     continue;
                 };
-                let at = edge.start().point();
+                assert!(
+                    across.location() == face.location(),
+                    "two faces along one edge are placed apart, which the door refuses"
+                );
+                let at = edge.stored_ends()[0];
                 let outward = |used: FaceView<'_>| {
-                    gradient_of(&used.surface(), at) * used.orientation().sign()
+                    gradient_of(&used.stored_surface(), at) * used.orientation().sign()
                 };
                 let names_it = which_two_surfaces_a_run_is_between(
-                    &edge.run(),
-                    [&face.surface(), &across.surface()],
+                    edge.stored_run(),
+                    [&face.stored_surface(), &across.stored_surface()],
                 );
                 let partner = names_it[1];
-                let (partner_outward, material) = if partner == across.surface() {
+                let (partner_outward, material) = if partner == across.stored_surface() {
                     let Some(material) = which_side_of_it_this_face_lies_on(solid, face, across)?
                     else {
                         continue;
@@ -2632,6 +2661,12 @@ fn which_side_of_it_this_face_lies_on(
 /// so, which no rounding can take away ([`Trimming`]). Every other corner is
 /// read.
 ///
+/// `named` is the surface **where the face is stored**, and which runs name it
+/// is asked there too, of the stored runs and surfaces, because that is the
+/// frame the caller found it in. Only the side is read where the face sits,
+/// against `named` moved into place, since that is where
+/// [`the_side_this_face_lies_on`] reads the corners.
+///
 /// `None` when every corner of the face is on it, as
 /// [`which_side_of_it_this_face_lies_on`] gives for a face across.
 fn which_side_of_a_surface_a_run_names_this_face_lies_on(
@@ -2643,8 +2678,11 @@ fn which_side_of_a_surface_a_run_names_this_face_lies_on(
     for coedge in face.wires().flat_map(WireView::coedges) {
         let edge = coedge.edge();
         let beyond = the_face_across(solid, face, edge)?.unwrap_or(face);
-        if which_two_surfaces_a_run_is_between(&edge.run(), [&face.surface(), &beyond.surface()])
-            .contains(&named)
+        if which_two_surfaces_a_run_is_between(
+            edge.stored_run(),
+            [&face.stored_surface(), &beyond.stored_surface()],
+        )
+        .contains(&named)
         {
             corners_on_it.push(edge.start().key());
             corners_on_it.push(edge.end().key());
@@ -2653,7 +2691,7 @@ fn which_side_of_a_surface_a_run_names_this_face_lies_on(
     the_side_this_face_lies_on(
         face,
         &Trimming {
-            surface: named,
+            surface: named.transformed(&face.location()),
             corners_on_it,
         },
     )
