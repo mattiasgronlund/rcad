@@ -294,8 +294,8 @@ impl Predicate for Orient2d {
             Decision::Neg => Some(Decision::Neg),
             Decision::Zero => Some(Decision::Zero),
             Decision::Pos => Some(Decision::Pos),
-            // A product overflowed or underflowed. Exact arithmetic that is
-            // not exact has nothing to offer, so this level cannot run.
+            // A product overflowed, or what fell off the bottom could be
+            // worth more than what was held. Either way no sign is proved.
             Decision::Undecidable { .. } => None,
         }
     }
@@ -367,31 +367,75 @@ const ORIENT2D_ERROR_BOUND: f64 = {
 /// and each of those is one cross product `M(u,v) = u.x*v.y - u.y*v.x`, exact
 /// in four entries. Three of them sum to at most twelve — the capacity below.
 ///
-/// Comes back [`Decision::Undecidable`] when a product overflowed or
-/// underflowed, because then the arithmetic is not exact and there is nothing
-/// honest to report. Additions never need that check: they are exact for every
-/// pair of `f64` that does not overflow.
+/// Comes back [`Decision::Undecidable`] when a product overflowed, because then
+/// there is nothing honest to report, and when products that fell off the
+/// bottom of the range lost more than the rest can outweigh
+/// ([`sign_clear_of_what_fell_off`]).
 fn orient2d_exactly(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Decision {
-    let mut total = [0.0f64; DETERMINANT_ENTRIES];
-    match exact_determinant(a, b, c, &mut total) {
-        Some(total_len) => expansion_sign(&total[..total_len]),
+    let mut held = [0.0f64; DETERMINANT_ENTRIES];
+    match exact_determinant(a, b, c, &mut held) {
+        Some((held_len, fell_off)) => sign_clear_of_what_fell_off(&held[..held_len], fell_off),
         None => Decision::Undecidable {
             enclosure: f64::INFINITY,
         },
     }
 }
 
-/// The determinant itself, written into `total`, and how many entries it took.
+/// The sign of the true determinant, given `held`, which misses it by less
+/// than one smallest subnormal for each of the `fell_off` products that failed
+/// [`product_is_exact`].
 ///
-/// `None` when a product overflowed or underflowed, which is the case
-/// [`orient2d_exactly`] has no honest sign for.
+/// Why less than one: [`two_product`]'s high half is the product rounded, and
+/// the fused multiply-add that makes its low half rounds only when that low
+/// half lands among the subnormals, onto a grid `2^-1074` apart — so the pair
+/// misses by at most `2^-1075`. That covers a product flushed all the way to
+/// zero too, whose low half is then the product rounded onto the same grid.
+/// [`expansion_sum`] loses nothing, subnormal entries included, so the misses
+/// only add up. `rcad-geom`'s `Exact::times_holding_on` rests on the same
+/// bound (`docs/decisions.md` §322.3), and
+/// `the_box_round_what_level_three_held_holds_the_true_determinant` checks it
+/// against the same triangles lifted to where nothing falls off.
+///
+/// So the true value is inside `held ± fell_off * 2^-1074`, and a sign that
+/// holds at both ends of that box is the sign. [`Decision::Zero`] needs every
+/// product exact, since a box of any width round zero holds both signs.
+fn sign_clear_of_what_fell_off(held: &[f64], fell_off: u32) -> Decision {
+    if fell_off == 0 {
+        return expansion_sign(held);
+    }
+    let lost = f64::from(fell_off) * SMALLEST_SUBNORMAL;
+    let mut low = [0.0f64; DETERMINANT_ENTRIES + 1];
+    let mut high = [0.0f64; DETERMINANT_ENTRIES + 1];
+    let low_len = expansion_sum(held, &[-lost], &mut low);
+    let high_len = expansion_sum(held, &[lost], &mut high);
+    match (
+        expansion_sign(&low[..low_len]),
+        expansion_sign(&high[..high_len]),
+    ) {
+        (Decision::Pos, Decision::Pos) => Decision::Pos,
+        (Decision::Neg, Decision::Neg) => Decision::Neg,
+        _ => Decision::Undecidable {
+            enclosure: f64::INFINITY,
+        },
+    }
+}
+
+/// `2^-1074`, the grid the subnormals sit on.
+const SMALLEST_SUBNORMAL: f64 = f64::from_bits(1);
+
+/// The determinant itself, written into `total`, how many entries it took, and
+/// how many of its six products failed [`product_is_exact`] on the way.
+///
+/// `None` when a product overflowed, which is the case [`orient2d_exactly`] has
+/// no honest sign for. A product that fell off the bottom is kept, and
+/// [`sign_clear_of_what_fell_off`] says what that costs.
 fn exact_determinant(
     a: [f64; 2],
     b: [f64; 2],
     c: [f64; 2],
     total: &mut [f64; DETERMINANT_ENTRIES],
-) -> Option<usize> {
-    let (Some((ab, ab_len)), Some((ac, ac_len)), Some((bc, bc_len))) =
+) -> Option<(usize, u32)> {
+    let (Some((ab, ab_len, ab_fell)), Some((ac, ac_len, ac_fell)), Some((bc, bc_len, bc_fell))) =
         (cross(a, b), cross(a, c), cross(b, c))
     else {
         return None;
@@ -404,41 +448,44 @@ fn exact_determinant(
 
     let mut without_bc = [0.0f64; 8];
     let without_bc_len = expansion_sum(&ab[..ab_len], &negated_ac[..ac_len], &mut without_bc);
-    Some(expansion_sum(
-        &without_bc[..without_bc_len],
-        &bc[..bc_len],
-        total,
-    ))
+    let total_len = expansion_sum(&without_bc[..without_bc_len], &bc[..bc_len], total);
+    Some((total_len, ab_fell + ac_fell + bc_fell))
 }
 
 /// Three cross products of four entries each.
 const DETERMINANT_ENTRIES: usize = 12;
 
-/// `u.x * v.y - u.y * v.x`, exactly, or `None` if a product underflowed.
-fn cross(u: [f64; 2], v: [f64; 2]) -> Option<([f64; 4], usize)> {
-    if !product_is_exact(u[0], v[1]) || !product_is_exact(u[1], v[0]) {
+/// `u.x * v.y - u.y * v.x`, how many entries it took, and how many of its two
+/// products failed [`product_is_exact`] — or `None` if a product overflowed.
+fn cross(u: [f64; 2], v: [f64; 2]) -> Option<([f64; 4], usize, u32)> {
+    let factors = [(u[0], v[1]), (u[1], v[0])];
+    if factors.iter().any(|&(x, y)| !(x * y).is_finite()) {
         return None;
     }
-    let (forwards, forwards_roundoff) = two_product(u[0], v[1]);
-    let (backwards, backwards_roundoff) = two_product(u[1], v[0]);
+    let fell_off = factors
+        .iter()
+        .map(|&(x, y)| u32::from(!product_is_exact(x, y)))
+        .sum();
+    let [(forwards, forwards_roundoff), (backwards, backwards_roundoff)] =
+        factors.map(|(x, y)| two_product(x, y));
     let mut out = [0.0; 4];
     let len = expansion_sum(
         &[forwards_roundoff, forwards],
         &[-backwards_roundoff, -backwards],
         &mut out,
     );
-    Some((out, len))
+    Some((out, len, fell_off))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         DETERMINANT_ENTRIES, HIGHEST_BINADE_LEVEL_THREE_TAKES, LARGEST_SUM_OF_FACTOR_BINADES,
-        ORIENT2D, ORIENT2D_ERROR_BOUND, Orient2d, decided_at_scale, each_once_and_never_zero,
-        exact_determinant, exponents_to_try, orient2d, orient2d_exactly, orient2d_reporting_level,
-        orient2d_tolerantly, scaled_by_a_power_of_two,
+        ORIENT2D, ORIENT2D_ERROR_BOUND, Orient2d, SMALLEST_SUBNORMAL, decided_at_scale,
+        each_once_and_never_zero, exact_determinant, exponents_to_try, orient2d, orient2d_exactly,
+        orient2d_reporting_level, orient2d_tolerantly, scaled_by_a_power_of_two,
     };
-    use crate::expansion::{expansion_sum, two_diff};
+    use crate::expansion::{expansion_sign, expansion_sum, two_diff};
     use crate::{
         Decision, Filtered, Level, Policy, Predicate, ProvenanceLog, decide, product_is_normal,
     };
@@ -494,6 +541,125 @@ mod tests {
         assert_eq!(level, Level::Exact);
     }
 
+    /// The turn in the middle of the cut corner `when_it_cannot_tell.rs`
+    /// pinned as undecidable until `docs/decisions.md` §358.
+    ///
+    /// The determinant is `-t (1 - t)`, about `-1e-305`: an ordinary normal
+    /// number, and negative, so the turn is clockwise. Level 3 used to decline
+    /// only because one of its six products, `t * t`, falls below the range.
+    /// That product is worth `1e-610`, and what it loses is less than the
+    /// smallest subnormal, so the other five settle the sign on their own.
+    #[test]
+    fn a_cut_corner_bent_by_1e_305_turns_clockwise() {
+        let t = 1e-305;
+        assert_eq!(
+            orient2d_reporting_level([1.0, t], [0.5, 0.5], [t, 1.0]),
+            (Decision::Neg, Level::Exact)
+        );
+    }
+
+    /// The box [`sign_clear_of_what_fell_off`] draws round what level 3 held,
+    /// run rather than argued.
+    ///
+    /// Every coordinate is zero or sits between `2^-612` and `2^-400`, so the
+    /// products level 3 forms run from `2^-1224` to `2^-800` and many fall off
+    /// the bottom. The same triangle lifted by `2^600` is exact, and there nothing
+    /// falls off: its determinant is exactly `2^1200` times the true one, and
+    /// that is the truth here. The held sum and the box round it, lifted the
+    /// same way — exact, since lifting only moves exponents up — have to
+    /// contain it, and every sign read at the bottom has to be the truth's.
+    ///
+    /// Half the mantissas are small whole numbers, so that some determinants
+    /// cancel down to nearly nothing and the box is tested where it is tight.
+    #[test]
+    fn the_box_round_what_level_three_held_holds_the_true_determinant() {
+        const LIFT: i32 = 600;
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut roll = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut coordinate = move || {
+            let bits = roll();
+            let mantissa = if bits & 2 == 0 {
+                (bits >> 11) as f64
+            } else {
+                ((bits >> 11) % 8) as f64
+            };
+            let exponent = -612 + ((bits >> 2) % 160) as i32;
+            let sign = if bits & 1 == 0 { 1.0 } else { -1.0 };
+            sign * mantissa * 2f64.powi(exponent)
+        };
+
+        let (mut something_fell_off, mut decided_all_the_same) = (0, 0);
+        for _ in 0..20_000 {
+            let corners: [[f64; 2]; 3] = [(); 3].map(|()| [coordinate(), coordinate()]);
+            let [a, b, c] = corners;
+
+            let mut held = [0.0; DETERMINANT_ENTRIES];
+            let (held_len, fell_off) =
+                exact_determinant(a, b, c, &mut held).expect("nothing here can overflow");
+            let [la, lb, lc] = corners.map(|corner| {
+                scaled_by_a_power_of_two(corner, LIFT).expect("every corner lifts exactly")
+            });
+            let mut truth = [0.0; DETERMINANT_ENTRIES];
+            let Some((truth_len, 0)) = exact_determinant(la, lb, lc, &mut truth) else {
+                panic!("lifted by 2^{LIFT}, nothing falls off: {corners:?}");
+            };
+
+            let lifted = |value: f64| value * 2f64.powi(LIFT) * 2f64.powi(LIFT);
+            let held_lifted: Vec<f64> = held[..held_len].iter().map(|&v| lifted(v)).collect();
+            let lost = lifted(f64::from(fell_off) * SMALLEST_SUBNORMAL);
+            let truth_minus_held = subtracted(&truth[..truth_len], &held_lifted);
+            let sign_of_truth_minus_held_plus = |extra: f64| {
+                let mut out = vec![0.0; truth_minus_held.len() + 1];
+                let len = expansion_sum(&truth_minus_held, &[extra], &mut out);
+                expansion_sign(&out[..len])
+            };
+            assert!(
+                matches!(
+                    sign_of_truth_minus_held_plus(lost),
+                    Decision::Pos | Decision::Zero
+                ) && matches!(
+                    sign_of_truth_minus_held_plus(-lost),
+                    Decision::Neg | Decision::Zero
+                ),
+                "the truth is outside the box on {corners:?}"
+            );
+
+            let at_the_bottom = orient2d_exactly(a, b, c);
+            if at_the_bottom.is_certified() {
+                assert_eq!(
+                    at_the_bottom,
+                    expansion_sign(&truth[..truth_len]),
+                    "{corners:?}"
+                );
+            }
+            if fell_off > 0 {
+                something_fell_off += 1;
+                if at_the_bottom.is_certified() {
+                    decided_all_the_same += 1;
+                }
+            }
+        }
+        assert!(
+            something_fell_off > 10_000 && decided_all_the_same > 5_000,
+            "{something_fell_off} triangles dropped a product and {decided_all_the_same} of \
+             them were decided, so the box is not being tested where it matters"
+        );
+    }
+
+    /// `left - right`, exactly.
+    fn subtracted(left: &[f64], right: &[f64]) -> Vec<f64> {
+        let negated: Vec<f64> = right.iter().map(|entry| -entry).collect();
+        let mut out = vec![0.0; left.len() + negated.len()];
+        let len = expansion_sum(left, &negated, &mut out);
+        out.truncate(len);
+        out
+    }
+
     #[test]
     fn a_point_far_off_the_line_is_settled_by_the_cheapest_level() {
         let (decision, level) = orient2d_reporting_level([0.0, 0.0], [1.0, 0.0], [0.3, 1.0]);
@@ -534,7 +700,7 @@ mod tests {
 
     #[test]
     fn an_undecided_answer_names_the_predicate_in_the_log() {
-        let (a, b, c) = spread_wider_than_f64_holds_at_once();
+        let (a, b, c) = a_turn_smaller_than_the_bottom_of_the_range_loses();
         let mut log = ProvenanceLog::new();
         let decision = orient2d_tolerantly(a, b, c, &Policy::certified(), &mut log);
         assert!(matches!(decision, Decision::Undecidable { .. }));
@@ -576,25 +742,48 @@ mod tests {
         );
     }
 
-    /// Three points whose coordinates run from `2^-600` to `2^1000` and whose
-    /// determinant is decided by a difference of `2^-650`.
+    /// Three points whose coordinates run from `2^-600` to `2^1000`, which
+    /// this file used to keep as the refusal that had to survive: no power of
+    /// two lifts `2^-600 * 2^-600` above [`product_is_exact`]'s floor without
+    /// taking `2^1000` off the top.
     ///
-    /// This is the refusal that has to survive. No single power of two brings
-    /// the products of the raw coordinates into range: lifting `2^-600 *
-    /// 2^-600` above the smallest exact product needs a factor of at least
-    /// `2^115`, and keeping `2^1000 * 2^1000` finite needs one of at most
-    /// `2^-488`. The two cheap levels are no help either — the value is `2^350`
-    /// against a permanent of `2^2001`, which no relative bound can separate
-    /// from zero at any scale.
+    /// That was a gap (`docs/decisions.md` §358). Level 3 never multiplies
+    /// `2^1000` by itself here. Its determinant is `2^-1250 - 2^350`: the two
+    /// products `2^-600 * 2^-600` fall off the bottom and lose less than two
+    /// smallest subnormals between them, and the `2^400` products cancel
+    /// exactly, leaving `-2^350` to settle the sign where it stands.
     ///
-    /// So the answer exists in the reals and this technique cannot reach it,
-    /// which is what makes it a limit rather than a gap
-    /// (`docs/decisions.md` §16.9). Refusing is the whole of the right answer.
+    /// [`product_is_exact`]: crate::expansion::product_is_exact
     #[test]
-    fn coordinates_spread_wider_than_f64_holds_at_once_are_still_undecidable() {
-        let (a, b, c) = spread_wider_than_f64_holds_at_once();
+    fn a_spread_whose_far_products_cancel_is_decided_by_what_level_three_holds() {
+        let near = 2f64.powi(-600);
+        let apart = 2f64.powi(-650);
+        let far = 2f64.powi(1000);
+        assert_eq!(
+            orient2d_reporting_level([near, near], [near, near + apart], [far, far]),
+            (Decision::Neg, Level::Exact)
+        );
+    }
+
+    /// A turn that is still refused, and has to be: the middle corner of a
+    /// cut `(1, -t)`, `(0.5, 0.5)`, `(t, 1)` with `t = 1e-318`, a subnormal.
+    ///
+    /// Its determinant is exactly `-t^2`, so it turns clockwise. Level 3 forms
+    /// `1 * 1` and `t * t` in the one sum, and multiplying every coordinate by
+    /// `2^k` multiplies every product by `2^2k`. `1 * 1` runs off the top past
+    /// `k = 511`, and at `k = 511` the whole answer is `2^1022 * t^2`, about
+    /// `4.5e-329` — below half the smallest subnormal, which is the least one
+    /// product falling off the bottom may lose. So at every scale the answer
+    /// sits inside what the arithmetic cannot account for.
+    ///
+    /// The answer exists and no `f64` scaling reaches it; what would is a wider
+    /// exponent, which is a limit of `f64` itself and the territory of §3.5's
+    /// dynamic-range check (`docs/decisions.md` §358).
+    #[test]
+    fn a_turn_smaller_than_the_bottom_of_the_range_loses_is_still_undecidable() {
+        let (a, b, c) = a_turn_smaller_than_the_bottom_of_the_range_loses();
         match orient2d(a, b, c) {
-            Decision::Pos => panic!("the true determinant is negative, so this is a wrong sign"),
+            Decision::Pos => panic!("the true determinant is -t^2, so this is a wrong sign"),
             Decision::Neg | Decision::Zero => panic!("nothing here can prove a sign"),
             Decision::Undecidable { enclosure } => assert!(enclosure > 0.0),
         }
@@ -603,20 +792,22 @@ mod tests {
     /// The paragraph above is an argument that no scaling helps, and
     /// `docs/decisions.md` §16.10 is about exactly how wrong those go
     /// unchecked. So it is executed: every exponent an `f64` could carry is
-    /// tried, not just the one the predicate picks.
+    /// tried, not just the ones the predicate picks.
     ///
     /// The ones that scale exactly are the only ones worth trying — a copy that
     /// lost bits describes different geometry — and not one of them certifies
-    /// anything.
+    /// anything. `t` is a subnormal, so exactness is asked by moving back and
+    /// comparing rather than by asking for a normal number, which would leave
+    /// out the input itself.
     #[test]
-    fn no_power_of_two_at_all_rescues_that_spread() {
-        let (a, b, c) = spread_wider_than_f64_holds_at_once();
+    fn no_power_of_two_at_all_rescues_that_turn() {
+        let (a, b, c) = a_turn_smaller_than_the_bottom_of_the_range_loses();
         let mut tried = 0;
         for exponent in -1100..=1100 {
             let (Some(a), Some(b), Some(c)) = (
-                scaled_by_a_power_of_two(a, exponent),
-                scaled_by_a_power_of_two(b, exponent),
-                scaled_by_a_power_of_two(c, exponent),
+                moved_exactly(a, exponent),
+                moved_exactly(b, exponent),
+                moved_exactly(c, exponent),
             ) else {
                 continue;
             };
@@ -626,14 +817,24 @@ mod tests {
                 "2^{exponent} settled what the comment says nothing settles"
             );
         }
-        assert!(tried > 100, "only {tried} exponents scaled exactly at all");
+        assert_eq!(tried, 1025, "every exponent from -1 to 1023 moves it exactly");
     }
 
-    fn spread_wider_than_f64_holds_at_once() -> ([f64; 2], [f64; 2], [f64; 2]) {
-        let near = 2f64.powi(-600);
-        let apart = 2f64.powi(-650);
-        let far = 2f64.powi(1000);
-        ([near, near], [near, near + apart], [far, far])
+    fn a_turn_smaller_than_the_bottom_of_the_range_loses() -> ([f64; 2], [f64; 2], [f64; 2]) {
+        let t = 1e-318f64;
+        assert!(t > 0.0 && !t.is_normal());
+        ([1.0, -t], [0.5, 0.5], [t, 1.0])
+    }
+
+    /// `point` multiplied by `2^exponent`, or `None` when that is not exact —
+    /// which is when moving it back does not give `point` again.
+    fn moved_exactly(point: [f64; 2], exponent: i32) -> Option<[f64; 2]> {
+        let by = |value: f64, exponent: i32| {
+            let half = exponent / 2;
+            value * 2f64.powi(half) * 2f64.powi(exponent - half)
+        };
+        let moved = point.map(|value| by(value, exponent));
+        (moved.map(|value| by(value, -exponent)) == point).then_some(moved)
     }
 
     /// `HIGHEST_BINADE_LEVEL_THREE_TAKES`'s arithmetic, run rather than argued:
@@ -666,7 +867,7 @@ mod tests {
                 !level_one.value.is_finite()
                     || !level_one.error_bound.is_finite()
                     || level_three
-                        .is_none_or(|length| !total[..length].iter().all(|e| e.is_finite()))
+                        .is_none_or(|(length, _)| !total[..length].iter().all(|e| e.is_finite()))
             })
             .count()
     }
@@ -676,32 +877,46 @@ mod tests {
     /// wide down to one the smallest `f64` wide (`docs/decisions.md` §324.7).
     ///
     /// Eight turns — the two tiny corners that are not the origin, in either
-    /// order, with each corner of the square — are refused by the cascade and
-    /// by the first two exponents alike: their determinants hold
+    /// order, with each corner of the square — have determinants that hold
     /// `tiny * tiny`, which the second exponent leaves under level 3's floor.
-    /// The third exponent is what settles them, and this counts that it does,
-    /// so the test cannot pass by the first two settling everything.
+    /// They used to need the third exponent. Since `docs/decisions.md` §358
+    /// level 3 keeps a product that falls off the bottom, and their `4 tiny`
+    /// outweighs what it lost at the input's own scale or at the second
+    /// exponent, so none of them does any longer. The turn that still needs
+    /// the third exponent is the next test's.
     #[test]
     fn a_spike_at_the_origin_under_a_unit_square_is_decided_on_every_turn() {
         let corners = a_spike_at_the_origin_under_a_unit_square();
         for t in [2f64.powi(-995), 2f64.powi(-1000), f64::from_bits(1)] {
             assert!(t > 0.0 && t <= 2f64.powi(-41), "{t:e}");
-            let mut only_the_third_exponent_settles = 0;
             for (i, j, k) in every_turn(corners.len()) {
                 let (a, b, c) = (corners[i].at(t), corners[j].at(t), corners[k].at(t));
-                let (decision, level) = orient2d_reporting_level(a, b, c);
                 assert_eq!(
-                    decision,
+                    orient2d(a, b, c),
                     the_sign_at_a_tiny_t(corners[i], corners[j], corners[k]),
                     "t = {t:e}, corners {i} {j} {k}"
                 );
-                if refused_before_the_third_exponent(a, b, c) {
-                    only_the_third_exponent_settles += 1;
-                    assert_eq!(level, Level::Exact, "t = {t:e}, corners {i} {j} {k}");
-                }
+                assert!(
+                    !refused_before_the_third_exponent(a, b, c),
+                    "t = {t:e}, corners {i} {j} {k}"
+                );
             }
-            assert_eq!(only_the_third_exponent_settles, 8, "t = {t:e}");
         }
+    }
+
+    /// A turn whose `tiny * 1` products cancel exactly, leaving only
+    /// `tiny * tiny`: `(1, 0)`, `(0, t)`, `(t, t)`, whose determinant is
+    /// `-t^2`. At `t` the smallest subnormal, the second exponent lifts `t`
+    /// to `2^-565`, and `t * t` is still `2^-1130`, below anything a product
+    /// can keep, with nothing else left over to outweigh it. The third lifts
+    /// every coordinate as high as `f64` goes, since no product here is
+    /// `1 * 1`, and there `t * t` is `2^-102`.
+    #[test]
+    fn a_turn_left_with_nothing_but_tiny_times_tiny_still_needs_the_third_exponent() {
+        let t = f64::from_bits(1);
+        let (a, b, c) = ([1.0, 0.0], [0.0, t], [t, t]);
+        assert!(refused_before_the_third_exponent(a, b, c));
+        assert_eq!(orient2d(a, b, c), Decision::Neg);
     }
 
     fn every_turn(corners: usize) -> impl Iterator<Item = (usize, usize, usize)> {
@@ -820,7 +1035,7 @@ mod tests {
                 let [a, b, c] = signed_corners(signs, top_of(x_binade), top_of(y_binade));
                 let mut total = [0.0; DETERMINANT_ENTRIES];
                 exact_determinant(a, b, c, &mut total)
-                    .is_none_or(|length| !total[..length].iter().all(|e| e.is_finite()))
+                    .is_none_or(|(length, _)| !total[..length].iter().all(|e| e.is_finite()))
             })
             .count()
     }
@@ -1116,7 +1331,9 @@ mod tests {
         assert_eq!(value, filtered.value, "the same expression, spelled twice");
 
         let mut determinant = [0.0f64; DETERMINANT_ENTRIES];
-        let length = exact_determinant(a, b, c, &mut determinant)?;
+        let Some((length, 0)) = exact_determinant(a, b, c, &mut determinant) else {
+            return None;
+        };
 
         let mut value_error = [0.0f64; DETERMINANT_ENTRIES + 1];
         let value_error_length = expansion_sum(&determinant[..length], &[-value], &mut value_error);
