@@ -1,10 +1,12 @@
 //! Two places a block edge cuts a ball, whose boxes are the same bits.
 //!
-//! `round_a_closed_crossing` answers `Zero` for two nodes whose boxes are equal
-//! without asking a policy. A box that names one `f64` is one point, so for an
-//! exact point that is a proof. A box with width is not: two different points
-//! can sit in one box, and then the two are folded into one node that nobody
-//! proved is one point (`docs/decisions.md` §248.5, §318).
+//! A box that names one `f64` triple is one point, so two nodes with that box
+//! are one point, proved. A box with width is not: two different points can
+//! sit in one box. `round_a_closed_crossing` used to answer `Zero` for any two
+//! equal boxes without asking a policy, and so fold two nodes into one that
+//! nobody proved is one point (`docs/decisions.md` §248.5, §318). Since §244.5
+//! it answers `Zero` only for boxes of no width, and leaves the rest to the
+//! policy.
 //!
 //! # The shape
 //!
@@ -19,25 +21,28 @@
 //!
 //! On the ball's face both points lie on two closed crossings, the circles the
 //! top and the wall cut. So `merge_points_that_are_one_point` asks
-//! `round_a_closed_crossing` about the pair, and it answers `Zero` before any
-//! arithmetic runs.
+//! `round_a_closed_crossing` about the pair, before any arithmetic runs.
 //!
-//! # What this pins, and what it does not
+//! # What this pins
 //!
-//! **Only what is true today.** Every fuse of this ball and block refuses by
-//! name, under both policies, on the turn where the top's circle and the wall's
-//! circle cross at that one box. The two circles cross one way at one of the
-//! two points and the other way at the other, so the turn is zero somewhere in
-//! any box that holds both, and no box arithmetic can settle it. That refusal
-//! would come just the same with the two meets kept as two nodes, so it says
-//! nothing about whether the fold was right.
+//! Every fuse of this ball and block refuses by name, under both policies, on
+//! the order of the two places, a box `1.3e-5` wide. The tolerant policy's
+//! budget at a 25 mm working size does not stretch that far, so it refuses too.
 //!
-//! The fold itself is not visible through the public API, and a probe that
-//! logged it is recorded in §318, not pinned here.
+//! **What is right:** a refusal, though not this one alone. The order of two
+//! different points exists, and a box this wide cannot give it. Before §244.5
+//! the two were folded without asking, and every fuse refused one step later on
+//! the turn where the top's circle and the wall's circle cross at the box. The
+//! two circles cross one way at one of the points and the other way at the
+//! other, so the turn is zero somewhere in any box that holds both, and kept as
+//! two nodes with one box each, the pair would meet that refusal next (§318.3).
 
 use rcad_geom::{Isometry, MeetOfThree, Scale, Surface, Vector, meet_of_three_surfaces};
-use rcad_predicates::{Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
+use rcad_predicates::{Level, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+
+/// The name `order_along` records a refusal under.
+const ALONG_A_CROSSING: &str = "order along a crossing";
 
 /// How far out the block and the ball sit, on every axis.
 const FAR: f64 = 1.0e10;
@@ -94,17 +99,22 @@ fn the_two_places_the_edge_cuts_the_ball_are_one_box() {
     );
 }
 
-/// What every fuse of the ball and the block answers today: a refusal on the
-/// turn at the one box, whose first input is the ball's gradient there and
-/// whose other two are the normals of the top and the leaning wall.
+/// The regression: every fuse of the ball and the block refuses on the order of
+/// the two places, whose inputs are the one box twice, as wide as that box.
+///
+/// Before §244.5 the two were folded into one node here, and every fuse went
+/// on to refuse on `orient3d`, the turn between the top's circle and the
+/// wall's at that box.
 #[test]
-fn every_fuse_refuses_on_the_turn_where_the_two_circles_cross() {
+fn every_fuse_refuses_on_the_order_of_the_two_places_in_one_box() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
         for rule in EVERY_RULE {
             let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
             let block = a_block_with_a_leaning_wall(&mut model);
             let ball = a_ball(&mut model, RADIUS);
             let [top, wall] = the_top_and_the_leaning_wall(&model, block);
+            let skin = the_only_surface_of(&model, ball);
+            let place = the_one_box_the_two_places_share([top, wall], skin);
             let mut log = ProvenanceLog::new();
             let fused = model.fuse(&[ball], &[block], rule, &policy, &mut log);
             let Err(Error::Undecidable { records }) = fused else {
@@ -115,34 +125,34 @@ fn every_fuse_refuses_on_the_turn_where_the_two_circles_cross() {
             };
             let records = records.records().to_vec();
             assert_eq!(records.len(), 1, "{rule:?} {policy:?}: {records:#?}");
-            assert!(
-                is_the_turn_between_the_top_and_the_wall(&records[0], &top, &wall),
-                "{rule:?} {policy:?}: {records:#?}"
+            let refused = &records[0];
+            assert_eq!(refused.predicate(), ALONG_A_CROSSING, "{rule:?} {policy:?}");
+            assert_eq!(refused.level(), Level::Interval, "{rule:?} {policy:?}");
+            assert_eq!(refused.inputs(), [place, place], "{rule:?} {policy:?}");
+            assert_eq!(
+                refused.enclosure(),
+                place.uncertainty(),
+                "{rule:?} {policy:?}"
             );
         }
     }
 }
 
-/// Whether a refusal is `orient3d` on a box and the two planes' normals, which
-/// is the turn between the two circles those planes cut on the ball.
-fn is_the_turn_between_the_top_and_the_wall(
-    record: &Record,
-    top: &Surface,
-    wall: &Surface,
-) -> bool {
-    let normal = |surface: &Surface| {
-        let Surface::Plane(flat) = surface else {
-            panic!("a plane: {surface:?}");
-        };
-        PredicatePoint::from(flat.normal().components())
+fn the_one_box_the_two_places_share(planes: [Surface; 2], skin: Surface) -> PredicatePoint {
+    let meet = meet_of_three_surfaces(
+        [&planes[0], &planes[1], &skin],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a certified answer");
+    let MeetOfThree::At(places) = meet else {
+        panic!("the edge line cuts the ball: {meet:?}");
     };
-    let inputs = record.inputs();
-    record.predicate() == "orient3d"
-        && record.level() == Level::Interval
-        && inputs.len() == 3
-        && matches!(inputs[0], PredicatePoint::Constructed(_))
-        && inputs[1] == normal(top)
-        && inputs[2] == normal(wall)
+    let [one, other] = places[..] else {
+        panic!("{places:?}");
+    };
+    assert_eq!(one, other, "the two boxes are the same bits");
+    one
 }
 
 /// A block one unit tall whose top is `z = FAR + 0.25`, with a wall leaning at
