@@ -82,6 +82,9 @@ bound. `a_cube_on_whole_numbers_still_owes_nothing` pins the zeros.
   plane, and the fan weighs its triangles by their shadow on the rounded
   vector area, so "the exact centroid" first needs a definition. The doc
   comments now say this. It is a queue row, not part of this one.
+
+  *2026-09-29, Q539: done. 338.5 defines the exact middle of a face, and both
+  wobbles are published against it.*
 - **The exact sums assume nothing underflows.** An offset's lost part scaled by
   its axis's shift, or a product of three of them, could fall below the
   subnormals for a solid whose corners mix coordinates near `1e-300` with ones
@@ -116,3 +119,111 @@ fix publishes — the cube `6.66e-16` and `1.30e-14`, the plate with a hole
 now say their wobble is `0.0` and their area error is above zero and at most
 two spacings at `4`; the doc comment says the error covers the adding up and
 not the placing, which still puts every face `1.25e-10` off `side²`.
+
+### 338.5 The centroid wobble, and which middle is exact
+
+*2026-09-29. Queue row Q539, re-filed from Q401. Lane
+`lane-q539-a-flat-solids-centroid-publishes-its-rounding`, off `a738fa55`.*
+
+338.3's first bullet, done. A flat solid's `centroid_wobble`, and each flat
+face's, is now worked out the way 338.2 works out the volume and area errors:
+the sums behind the middle are taken exactly, and the published number is how
+far the rounded middle landed from their ratio. So it is `0.0` exactly where
+the middle came out on the nose, and every pin on a cube with whole-number
+corners stays as it was.
+
+**The solid needs no new definition.** Its exact middle is where the space its
+triangles enclose balances: every tetrahedron the triangles make with the hub,
+weighed by its signed volume and standing at a quarter of the way from the hub
+to the sum of its corners. The triangles form a closed surface, so that point
+is the same whatever the hub. It is the same triangles 338.1's volume is the
+truth of. `volume_and_moment_as_expansions` sums both exactly from the exact
+offsets `volume_and_moment` already builds.
+
+**A face does need one, and it is the middle of the fan's triangles, each
+weighed by its signed shadow on the fan's exact vector area.** Write `N` for
+twice that vector area, the sum of `(b − a) × (c − a)` over the triangles with
+nothing lost. A triangle weighs `((b − a) × (c − a)) · N` and stands at
+`(a + b + c) / 3`. The face's middle is the weighted average.
+
+Where the corners are in one plane, every sensible choice gives the same point.
+Each cross product is parallel to `N`, so each weight is the triangle's area
+times one common factor, with its sign, and the average is the textbook middle
+of the face, holes and notches taken back. A turned face's corners are rounded
+one by one and are not in one plane, and there the choices part:
+
+- **The shadow on the rounded vector area.** This is what the `f64` code weighs
+  by. A truth built from a rounded number moves whenever the arithmetic that
+  rounds it moves, so it is a fact about the code and not about the face.
+- **Each triangle's own area, with the sign it faces.** That is a square root
+  per triangle, so there is no exact sum to hold the rounding against, and the
+  published number could only be a forward bound. 338.2 turned that down,
+  because it is not zero where nothing rounds.
+- **The shadow on the exact vector area.** This is the one taken. It is built
+  from the corners alone, by `+`, `−` and `×` and one division, so it can be
+  worked out exactly. Its weights add up to `|N|²`, which is `|N|` times the
+  doubled area `area_error` is measured against, so a face's area and its
+  middle are about the same shadow.
+
+These three weigh a triangle differently only through how far it leans off the
+others, times a second small angle: the cosine's own step from one, or the tilt
+of the rounded vector area. So they differ by a product of two small angles,
+far below one rounding of the answer. **What does move the middle by about a
+rounding is the choice of triangles.** Fanned from a different corner, the same
+corners off one plane make a different surface. So the fan
+`FaceView::for_each_triangle` hands out is part of the definition, as it is
+part of the area's and the volume's.
+
+**How it is worked out.** Along each axis the exact middle is `from +
+moment / weight`, with `from` the hub or the fan's apex. `how_far_the_middle_is_from`
+takes `middle − from` exactly with `two_diff`, forms `offset · weight − moment`
+exactly, packs it, and divides its size by a lower bound on `|weight|` (a new
+`at_least`), rounding up. Then it takes the length of the three distances,
+rounding each step up. The packing matters. Without it the entries of the
+difference partly cancel, and summing their sizes charged up to `1.6` times
+the distance: `a less b` published `4.09e-16` for a middle `0.624` of that
+away.
+
+**Held against the truth.** `the_middle_of_a_flat_solid_and_of_each_face_is_within_its_wobble`,
+in `a_flat_solid_publishes_the_rounding_of_its_measure.rs`, works out both
+middles exactly by another route. For the solid, every tetrahedron is taken
+from the world origin. For a face, each triangle's cross product is `a × b + b
+× c + c × a` from the world origin, and the weights are summed one by one
+rather than taken as `|N|²`. It then compares the squared distance with the
+squared wobble exactly. It runs on Q81's two cubes, the cube of side two turned
+a radian and a million units out, an L with uneven sides at the origin and
+turned far out, and a plate with a hole turned far out. From `mise exec -- just t -p rcad-topo --test
+a_flat_solid_publishes_the_rounding_of_its_measure --no-capture`: the solids'
+wobbles are `2.55e-16` and `1.42e-16` for `a less b` and `b less a`,
+`5.94e-11` for the far cube, `4.66e-16` for the L at the origin, `5.80e-11` for
+it far out, and `2.05e-11` for the plate. The closest a solid's middle came to
+its wobble, and the closest a face's came, both print as `1.000` of it. The
+test floors both at `0.99`. With `measure.rs` put back to `a738fa55` and the
+tests kept, it fails on `a less b`: measured `2.55e-16` from where the
+triangles balance, with `0` owned up to.
+
+**Do the exact sums assume nothing underflows?** Yes, as the volume's do (the
+next bullet of 338.3), and they go one factor deeper. The solid's moment
+multiplies a determinant, which is three offsets, by a fourth. A face's weight
+multiplies two cross products, four sides, and its moment multiplies by a
+fifth. The measured middle's offset from `from` is also scaled down by the
+axis's shift, which is one more place where a lost part can fall below the
+subnormals. So a milder mix of coordinate sizes than the volume's could reach
+the subnormals and make a sum inexact. This is argued, not shown, exactly as
+it is for the volume.
+
+**Pins that moved.** All are in this row's write set.
+`a_flat_solids_measurement_is_bit_for_bit_what_it_was` now carries each
+frozen shape's wobble as a third error, and its bits did not move: the turned
+cube `3.43e-16`, the turned plate `1.74e-15`, and the notched extrusion
+`1.05e-16`. The notched extrusion's corners are whole numbers, but its middle
+is five thirds along `x` and `y`, which no `f64` holds: a third of a spacing
+on each axis, √2 times that together. The other three are `0.0`.
+`a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_squared`
+now asks each face's wobble to be at most one spacing of `f64` at a million
+along each axis, and the largest to be above zero. Five faces print `5.8e-11`
+to `8.2e-11`. The sixth face's middle came out exactly on an `f64` and owes
+`0.0`, and the exact test above agrees. The volume and area errors did not
+move a bit. `how_far_the_volume_rounded` reads the same expansion as before,
+now handed in, and the face's exact vector area is the same sum, split out as
+`twice_its_vector_area_exactly`.
