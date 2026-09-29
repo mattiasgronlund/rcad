@@ -1,0 +1,22 @@
+[Unit]
+Description=rcad: strip target/ from the worktrees nobody is using (docs/decisions.md §371)
+
+[Service]
+Type=oneshot
+
+# The tree `main` is checked out in. `clean-targets` keeps the tree it runs
+# from, so this is also the one tree the hour never sweeps.
+WorkingDirectory=%h/git/mattiasgronlund/rcad-worktrees/main
+
+# Set rather than inherited, for rcad-fuzz.service's reason (§108): the user
+# manager's PATH came from a login session until the reboot of 2026-09-15 took
+# it away. The recipe needs git and coreutils, and nothing from `~/.cargo`.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# mise by absolute path, because `just` comes from mise and systemd has no
+# profile to find either in.
+ExecStart=%h/.local/bin/mise exec -- just clean-targets
+
+# Deleting a hundred gigabytes is disk work a lane's compile would rather have.
+Nice=10
+IOSchedulingClass=idle

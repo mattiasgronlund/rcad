@@ -122,8 +122,8 @@ gate_steps := "check-plugins \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
     check-fuzz-triage-selftest \
-    check-fuzz-unit \
-    check-fuzz-unit-selftest \
+    check-systemd-units \
+    check-systemd-units-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
     lint \
@@ -143,7 +143,7 @@ gate_steps := "check-plugins \
 # name because of the second:
 #
 #   It needs a build. `check`, `lint`, `test`, `check-release-build`,
-#   `check-fuzz-builds` and `check-fuzz-unit` obviously; `check-wildcards`
+#   `check-fuzz-builds` and `check-systemd-units` obviously; `check-wildcards`
 #   because it reads clippy's output; `deny` because it resolves the dependency
 #   graph, and a prose commit cannot change `Cargo.lock`.
 #
@@ -156,7 +156,7 @@ gate_steps := "check-plugins \
 #   fixture and never reads the real corpus.
 #
 # On a metered runner this is 1m07s against 9m46s. `docs/decisions.md` §172.
-gate_metered_steps := "check check-fuzz-builds check-wildcards lint test check-release-build check-fuzz-unit deny check-corpus"
+gate_metered_steps := "check check-fuzz-builds check-wildcards lint test check-release-build check-systemd-units deny check-corpus"
 
 # The steps `gate` may serve from an earlier green of the same code instead of
 # running (`docs/decisions.md` §337). The first nine were the slow ones: together
@@ -168,8 +168,8 @@ gate_metered_steps := "check check-fuzz-builds check-wildcards lint test check-r
 # strace of every step settled that (§337.2, §369). `check-hooks` and
 # `check-questions-selftest` are left out because each runs a plugin's own cases
 # from its checkout. `deny` is left out because it fetches the advisory database,
-# `check-corpus` because the corpus is outside the tree, `check-fuzz-unit`
-# because it reads the installed systemd unit, and `check-queue-merge-driver`
+# `check-corpus` because the corpus is outside the tree, `check-systemd-units`
+# because it reads the installed systemd units, and `check-queue-merge-driver`
 # because it reads git's config. Every step that reads `docs/` is left out as
 # well. A step missing from this list runs every time, so a new step is never
 # served by default.
@@ -208,7 +208,7 @@ gate_reusable_steps := "check \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
     check-fuzz-triage-selftest \
-    check-fuzz-unit-selftest \
+    check-systemd-units-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
     lint \
@@ -1063,7 +1063,7 @@ check-gate-verdicts-selftest:
     done <<<"$reusable"
     # These read prose, or something outside the tree that no fingerprint of
     # it can see, which is what the traces behind §337.2 and §369 found.
-    for never in check-plugins check-hooks check-hub check-corpus check-fuzz-unit deny \
+    for never in check-plugins check-hooks check-hub check-corpus check-systemd-units deny \
                  check-decisions check-plan check-queue check-where-the-work-is \
                  check-skills check-lanes-workflow check-questions-selftest \
                  check-queue-merge-driver; do
@@ -4356,7 +4356,7 @@ fuzz_all := "fuzz fuzz-reader fuzz-writer fuzz-fuse fuzz-cones-and-tori"
 # Where a night's logs go. One directory per date, plus a one-line `latest`.
 fuzz_log_root := env_var_or_default("RCAD_FUZZ_LOGS", env_var("HOME") / "rcad-fuzz-logs")
 
-# Where systemd looks for the timer. An argument only so `check-fuzz-unit`'s
+# Where systemd looks for the timers. An argument only so `check-systemd-units`'s
 # selftest can point it somewhere hermetic; nothing else sets it.
 systemd_user_dir := env_var_or_default("RCAD_SYSTEMD_USER", env_var("HOME") / ".config/systemd/user")
 
@@ -4509,7 +4509,7 @@ fuzz-overnight window="28800":
         else
             echo "there is no \`cargo\` on this PATH at all, so the toolchain is not the question:"
             echo "  PATH=$PATH"
-            echo "a systemd run gets no profile. rcad-fuzz.service sets PATH itself for this reason, and \`just check-fuzz-unit\` says whether the copy systemd runs is the one in the tree"
+            echo "a systemd run gets no profile. rcad-fuzz.service sets PATH itself for this reason, and \`just check-systemd-units\` says whether the copy systemd runs is the one in the tree"
         fi
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
@@ -7144,7 +7144,7 @@ check-fuzz-triage-selftest:
     grep -q 'no kind could be read' <<<"$got" \
         || fail "the refusal did not say it could not read a kind"
 
-# The timer's two unit files are tracked here and **copied** into
+# Each timer's two unit files are tracked here and **copied** into
 # `~/.config/systemd/user/`. That is two records of one thing, which §60 says is
 # the shape to delete, and on 2026-09-15 it had a price: the night lost eight
 # hours to a `cargo` that was not on its PATH, and the fix for that lands in
@@ -7165,52 +7165,72 @@ check-fuzz-triage-selftest:
 # **Half an install is a failure, not an absence.** The pair goes in together;
 # one of the two on disk means somebody copied by hand and stopped, which is the
 # same mistake this recipe exists for, one file earlier.
-[doc("The installed rcad-fuzz timer is the one tracked in tooling/systemd.")]
-check-fuzz-unit tracked="tooling/systemd":
+#
+# **Every pair in `tooling/systemd/` is read, and each is its own install.**
+# There were two by §371, the overnight fuzz and the hourly `clean-targets`, so
+# the names come from the directory rather than from a list here that a third
+# timer would have to remember to join.
+[doc("Every installed rcad timer is the one tracked in tooling/systemd.")]
+check-systemd-units tracked="tooling/systemd":
     #!/usr/bin/env bash
     set -euo pipefail
-    units="rcad-fuzz.service rcad-fuzz.timer"
-    present=""
-    missing=""
-    for unit in $units; do
-        [ -f "{{tracked}}/$unit" ] \
-            || { echo "there is no {{tracked}}/$unit here to compare anything against"; exit 1; }
-        if [ -f "{{systemd_user_dir}}/$unit" ]; then
-            present="$present $unit"
-        else
-            missing="$missing $unit"
-        fi
-    done
+    shopt -s nullglob
+    names=$(for file in "{{tracked}}"/*.service "{{tracked}}"/*.timer; do
+        base=$(basename "$file")
+        echo "${base%.*}"
+    done | LC_ALL=C sort -u)
+    [ -n "$names" ] || { echo "there is no unit in {{tracked}} to compare anything against"; exit 1; }
 
-    if [ -z "$present" ]; then
-        echo "no rcad-fuzz timer installed under {{systemd_user_dir}}, so there is nothing to drift"
-        exit 0
-    fi
-    if [ -n "$missing" ]; then
-        echo "half of the timer is installed under {{systemd_user_dir}}:"
-        echo "  there:$present"
-        echo "  not there:$missing"
-        echo "the pair goes in together; copy both and reload:"
-        echo "    cp {{tracked}}/rcad-fuzz.service {{tracked}}/rcad-fuzz.timer {{systemd_user_dir}}/ && systemctl --user daemon-reload"
-        exit 1
-    fi
-
-    drifted=""
-    for unit in $units; do
-        cmp -s "{{tracked}}/$unit" "{{systemd_user_dir}}/$unit" || drifted="$drifted $unit"
-    done
-    if [ -n "$drifted" ]; then
-        for unit in $drifted; do
-            echo "installed $unit is not {{tracked}}/$unit:"
-            diff -u "{{systemd_user_dir}}/$unit" "{{tracked}}/$unit" | sed 's/^/    /' || true
+    failed=0
+    for name in $names; do
+        for unit in "$name.service" "$name.timer"; do
+            [ -f "{{tracked}}/$unit" ] \
+                || { echo "{{tracked}} has $name but no $unit beside it"; exit 1; }
         done
-        echo "systemd runs the installed copy, so the tree is not what fires tonight:"
-        echo "    cp {{tracked}}/rcad-fuzz.service {{tracked}}/rcad-fuzz.timer {{systemd_user_dir}}/ && systemctl --user daemon-reload"
-        exit 1
-    fi
-    echo "the installed rcad-fuzz timer matches {{tracked}}"
+        reinstall="cp {{tracked}}/$name.service {{tracked}}/$name.timer {{systemd_user_dir}}/ && systemctl --user daemon-reload"
 
-# Pins `check-fuzz-unit` against installs this builds itself, because the one
+        present=""
+        missing=""
+        for unit in "$name.service" "$name.timer"; do
+            if [ -f "{{systemd_user_dir}}/$unit" ]; then
+                present="$present $unit"
+            else
+                missing="$missing $unit"
+            fi
+        done
+        if [ -z "$present" ]; then
+            echo "no $name timer installed under {{systemd_user_dir}}, so there is nothing to drift"
+            continue
+        fi
+        if [ -n "$missing" ]; then
+            echo "half of the $name timer is installed under {{systemd_user_dir}}:"
+            echo "  there:$present"
+            echo "  not there:$missing"
+            echo "the pair goes in together; copy both and reload:"
+            echo "    $reinstall"
+            failed=1
+            continue
+        fi
+
+        drifted=""
+        for unit in "$name.service" "$name.timer"; do
+            cmp -s "{{tracked}}/$unit" "{{systemd_user_dir}}/$unit" || drifted="$drifted $unit"
+        done
+        if [ -n "$drifted" ]; then
+            for unit in $drifted; do
+                echo "installed $unit is not {{tracked}}/$unit:"
+                diff -u "{{systemd_user_dir}}/$unit" "{{tracked}}/$unit" | sed 's/^/    /' || true
+            done
+            echo "systemd runs the installed copy, so the tree is not what fires next:"
+            echo "    $reinstall"
+            failed=1
+            continue
+        fi
+        echo "the installed $name timer matches {{tracked}}"
+    done
+    [ "$failed" -eq 0 ]
+
+# Pins `check-systemd-units` against installs this builds itself, because the one
 # case that matters cannot be arranged on the machine running the gate without
 # breaking that machine's timer.
 #
@@ -7219,10 +7239,10 @@ check-fuzz-unit tracked="tooling/systemd":
 # a recipe that always passed would satisfy the two passing ones. The pair of
 # them together is what says it is reading the files.
 [private]
-check-fuzz-unit-selftest:
+check-systemd-units-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
-    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-fuzz-unit-selftest.XXXXXX")
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-systemd-units-selftest.XXXXXX")
     trap 'rm -rf -- "$work"' EXIT
 
     tracked="$work/tracked"
@@ -7236,15 +7256,15 @@ check-fuzz-unit-selftest:
         local name=$1 want_rc=$2 needle=$3
         local out rc=0
         out=$(RCAD_SYSTEMD_USER="$installed" \
-            {{ just_executable() }} check-fuzz-unit "$tracked" 2>&1) || rc=$?
+            {{ just_executable() }} check-systemd-units "$tracked" 2>&1) || rc=$?
         if [ "$rc" -ne "$want_rc" ]; then
-            echo "check-fuzz-unit drifted from its own fixtures: $name wanted exit $want_rc, got $rc"
+            echo "check-systemd-units drifted from its own fixtures: $name wanted exit $want_rc, got $rc"
             sed 's/^/    /' <<<"$out"
             failed=1
             return
         fi
         if ! grep -qF -- "$needle" <<<"$out"; then
-            echo "check-fuzz-unit drifted from its own fixtures: $name did not say \"$needle\""
+            echo "check-systemd-units drifted from its own fixtures: $name did not say \"$needle\""
             sed 's/^/    /' <<<"$out"
             failed=1
         fi
@@ -7270,6 +7290,25 @@ check-fuzz-unit-selftest:
     printf '[Service]\n' >"$installed/rcad-fuzz.service"
     check "installed and stale" 1 "installed rcad-fuzz.service is not"
     check "installed and stale names the missing line" 1 "Environment=PATH="
+    cp "$tracked/rcad-fuzz.service" "$installed/"
+
+    # Five: a second timer, not installed beside a first that matches. Each pair
+    # is its own install, so a machine that runs one and not the other passes.
+    printf '[Service]\nExecStart=just clean-targets\n' >"$tracked/rcad-clean-targets.service"
+    printf '[Timer]\nOnCalendar=hourly\n' >"$tracked/rcad-clean-targets.timer"
+    check "second timer not installed" 0 "no rcad-clean-targets timer installed"
+    check "second timer not installed, first still read" 0 "the installed rcad-fuzz timer matches"
+
+    # Six: the second timer installed and behind the tree. A check that read only
+    # the first pair passes here, and this is the arm §371 added it for.
+    cp "$tracked/rcad-clean-targets.service" "$installed/"
+    printf '[Timer]\nOnCalendar=daily\n' >"$installed/rcad-clean-targets.timer"
+    check "second timer stale" 1 "installed rcad-clean-targets.timer is not"
+    check "second timer stale names the line" 1 "OnCalendar=hourly"
+
+    # Seven: a service tracked with no timer beside it is half a pair in the tree.
+    printf '[Service]\n' >"$tracked/rcad-alone.service"
+    check "service with no timer" 1 "no rcad-alone.timer beside it"
 
     [ "$failed" -eq 0 ]
 
