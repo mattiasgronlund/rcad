@@ -56,26 +56,29 @@ fn a_profile_too_big_for_f64_to_multiply_is_normalised_rather_than_refused() {
 /// A square with one corner cut off, where the cut is bent in the middle by
 /// so little that nothing in `f64` can say which way the bend turns.
 ///
-/// The cut runs from `(1, t)` through `(0.5, 0.5)` to `(t, 1)`, with
-/// `t = 1e-305`. A straight cut would pass `t / √2` further out than the
-/// middle corner does, so the bend turns clockwise. The two cheap levels
-/// cannot see that: the differences they form round `t` away, the two products
-/// the turn is the difference of come out equal, and the interval round the
-/// difference sits over zero.
+/// The cut runs from `(1, -t)` through `(0.5, 0.5)` to `(t, 1)`, with
+/// `t = 1e-318`, a subnormal. The turn at the middle corner is exactly `-t^2`,
+/// so the bend turns clockwise. The two cheap levels cannot see that: the
+/// differences they form round `t` away, the two products the turn is the
+/// difference of come out equal, and the interval round the difference sits
+/// over zero.
 ///
 /// The exact level multiplies raw coordinates, and the one determinant holds
-/// both `1 * 1` and `t * t`. `t * t` is `1e-610`, far below the `2^-969`
-/// under which a product is no longer exact. A power of two that lifts it
-/// above that has to be at least `2^529`, and any power past `2^511` takes
-/// `1 * 1` off the top of the range. So no scaling lets the exact level run,
-/// and
-/// [`no_power_of_two_lets_f64_see_which_way_the_cut_bends`] tries every one.
+/// both `1 * 1` and `t * t`. It keeps a product that falls off the bottom of
+/// the range, and decides whenever the rest outweighs what that lost, which
+/// is less than one smallest subnormal (§358). Here nothing is left to
+/// outweigh it: everything but `t * t` cancels. Multiplying every coordinate
+/// by `2^k` multiplies the turn by `2^2k`, and past `k = 511` `1 * 1` runs off
+/// the top of the range, so the most the turn can ever be is
+/// `2^1022 * t^2`, about `4.5e-329`, below even half the smallest subnormal.
+/// [`no_power_of_two_lets_f64_see_which_way_the_cut_bends`] tries every
+/// scaling.
 ///
-/// This used to be a square with a spike `1e-150` from the origin. The spike's
-/// determinants hold only `tiny * tiny` and `tiny * 1`, never `1 * 1`, so some
-/// power of two always lifts them all into range, and since §324 `orient2d`
-/// finds one. A spike at the origin cannot be made small enough to stay
-/// undecided that way, which is why the shape changed (§324.7).
+/// This used to be the same cut running from `(1, t)` to `(t, 1)` with
+/// `t = 1e-305`. Its turn is `-t (1 - t)`, which is an ordinary `f64`, and it
+/// was refused only because `t * t` made the exact level give up; since §358
+/// it is decided. Before that it was a spike `1e-150` from the origin, decided
+/// since §324 (§324.7).
 ///
 /// Everything else is an ordinary shape at working size. The lowest corner —
 /// the one the winding direction is read off — is settled at the cheapest
@@ -84,15 +87,15 @@ fn a_square_whose_cut_corner_bends_too_little_for_f64_to_see() -> ProfileBuilder
     ProfileBuilder::new(a_cut_corner_bent_by(BEND))
 }
 
-/// How far off `1` or `0` the cut's two ends sit. Normal, and with every bit
-/// of its mantissa in use.
-const BEND: f64 = 1e-305;
+/// How far off `1` or `0` the cut's two ends sit. A subnormal, so that
+/// `2^1022 * BEND^2` is below half the smallest one.
+const BEND: f64 = 1e-318;
 
 fn a_cut_corner_bent_by(t: f64) -> Vec<[f64; 2]> {
     vec![
         [-1.0, -1.0],
         [1.0, -1.0],
-        [1.0, t],
+        [1.0, -t],
         [0.5, 0.5],
         [t, 1.0],
         [-1.0, 1.0],
@@ -104,6 +107,10 @@ fn a_cut_corner_bent_by(t: f64) -> Vec<[f64; 2]> {
 /// approximate is asked again at every power of two that moves all three of
 /// its points exactly, which is every scaling that keeps the geometry the
 /// same. Not one of them is decided.
+///
+/// A corner at `t` scales exactly from `2^-1` up to `2^1023`, where `1` would
+/// run off the top: `t` is `202402 * 2^-1074`, with one factor of two to
+/// spare below. That is 1025 exponents, the input among them.
 #[test]
 fn no_power_of_two_lets_f64_see_which_way_the_cut_bends() {
     let mut log = ProvenanceLog::new();
@@ -129,9 +136,9 @@ fn no_power_of_two_lets_f64_see_which_way_the_cut_bends() {
         let mut tried = 0;
         for exponent in -1100..=1100 {
             let (Some(a), Some(b), Some(c)) = (
-                exactly_scaled(a, exponent),
-                exactly_scaled(b, exponent),
-                exactly_scaled(c, exponent),
+                moved_exactly(a, exponent),
+                moved_exactly(b, exponent),
+                moved_exactly(c, exponent),
             ) else {
                 continue;
             };
@@ -141,39 +148,38 @@ fn no_power_of_two_lets_f64_see_which_way_the_cut_bends() {
                 "2^{exponent} settled which way {a:?} {b:?} {c:?} turns"
             );
         }
-        assert!(tried > 1000, "only {tried} exponents scaled exactly");
+        assert_eq!(tried, 1025, "{a:?} {b:?} {c:?}");
     }
 }
 
-/// The control: bent by `1e-290` instead, the same cut is decided, and a
-/// certified build takes it. So what the test above measures is the size of
-/// the bend, and not something else about the shape.
+/// The control: bent by `1e-305` or `1e-290` instead, the same cut is decided,
+/// and a certified build takes it. So what the test above measures is the size
+/// of the bend, and not something else about the shape. At `1e-305` the turn
+/// is `-1e-610`, which `2^1018` lifts to about `-3e-304`, far clear of what a
+/// product falling off the bottom can lose.
 #[test]
-fn a_cut_corner_bent_by_1e_290_is_decided() {
-    let mut log = ProvenanceLog::new();
-    let built = ProfileBuilder::new(a_cut_corner_bent_by(1e-290))
-        .build(&Policy::certified(), &mut log)
-        .expect("level 3 runs once the whole shape is lifted by 2^509");
-    assert_eq!(built.approximation(), None);
-    assert!(log.is_empty());
+fn a_cut_corner_bent_by_1e_305_or_1e_290_is_decided() {
+    for bend in [1e-305, 1e-290] {
+        let mut log = ProvenanceLog::new();
+        let built = ProfileBuilder::new(a_cut_corner_bent_by(bend))
+            .build(&Policy::certified(), &mut log)
+            .expect("the bend is large enough to see once the shape is lifted by 2^509");
+        assert_eq!(built.approximation(), None, "bent by {bend:e}");
+        assert!(log.is_empty(), "bent by {bend:e}");
+    }
 }
 
 /// `point`, both coordinates multiplied by `2^exponent`, or `None` when that
-/// is not exact. It is exact while every result is a normal number, and a zero
-/// stays zero at any exponent.
-fn exactly_scaled(point: [f64; 2], exponent: i32) -> Option<[f64; 2]> {
-    let half = exponent / 2;
-    let mut scaled = point;
-    for value in &mut scaled {
-        if *value == 0.0 {
-            continue;
-        }
-        *value = *value * 2f64.powi(half) * 2f64.powi(exponent - half);
-        if !value.is_normal() {
-            return None;
-        }
-    }
-    Some(scaled)
+/// is not exact — which is when multiplying back by `2^-exponent` does not
+/// give `point` again. Asked that way rather than by the result being a normal
+/// number, because `BEND` is a subnormal and scales exactly while it stays one.
+fn moved_exactly(point: [f64; 2], exponent: i32) -> Option<[f64; 2]> {
+    let by = |value: f64, exponent: i32| {
+        let half = exponent / 2;
+        value * 2f64.powi(half) * 2f64.powi(exponent - half)
+    };
+    let moved = point.map(|value| by(value, exponent));
+    (moved.map(|value| by(value, -exponent)) == point).then_some(moved)
 }
 
 #[test]

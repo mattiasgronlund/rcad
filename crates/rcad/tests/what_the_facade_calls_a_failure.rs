@@ -194,16 +194,16 @@ fn a_classification_that_lands_on_the_skin_is_an_answer_and_not_an_error() {
 /// to approximate something, the caller gets the shape *and* the account of
 /// what it cost. The same loops under a certified policy get neither.
 ///
-/// The loops are a square with one corner cut off and the cut bent by
-/// `1e-305` in the middle, which no power of two lets `f64` see
-/// (`crates/rcad-topo/tests/when_it_cannot_tell.rs` tries them all).
+/// The loops are a square with one corner cut off, the cut bent in the middle
+/// so that its turn there is `1e-318` squared, which no power of two lets
+/// `f64` see (`crates/rcad-topo/tests/when_it_cannot_tell.rs` tries them all).
 #[test]
 fn a_tolerant_build_hands_back_both_the_shape_and_what_it_cost() {
-    let bend = 1e-305;
+    let bend = 1e-318;
     let loops = vec![
         [-1.0, -1.0],
         [1.0, -1.0],
-        [1.0, bend],
+        [1.0, -bend],
         [0.5, 0.5],
         [bend, 1.0],
         [-1.0, 1.0],

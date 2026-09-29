@@ -249,25 +249,24 @@ fn a_turn_the_cascade_can_prove_costs_a_tolerant_policy_nothing() {
     assert!(log.is_empty(), "a certified answer records nothing at all");
 }
 
-/// Three points whose coordinates run from `2^-600` to `2^1000`. The turn
-/// between them is decided by a difference of `2^-650`, and no single power of
-/// two brings that difference and those coordinates into range together, so
-/// there is no honest sign to report — and the record says which predicate ran
-/// out of road.
+/// The middle corner of a cut from `(1, -t)` through `(0.5, 0.5)` to `(t, 1)`,
+/// with `t = 1e-318`, a subnormal. The turn is exactly `-t^2`, about `2^-2113`
+/// in a sum whose largest term is `1`, and that is wider than `f64` holds at
+/// once: every exact power of two was tried and none decides it
+/// (`docs/decisions.md` §358.4). So there is no honest sign to report — and the
+/// record says which predicate ran out of road.
 ///
 /// A triple that is merely *small* is not this. `orient2d` normalises those and
 /// answers, which is why the input here is spread rather than tiny.
 #[test]
 fn a_turn_spread_wider_than_f64_holds_at_once_names_itself_in_the_log() {
-    let near = 2f64.powi(-600);
-    let apart = 2f64.powi(-650);
-    let far = 2f64.powi(1000);
+    let t = 1e-318;
 
     let mut log = ProvenanceLog::new();
     let decision = orient2d_tolerantly(
-        [near, near],
-        [near, near + apart],
-        [far, far],
+        [1.0, -t],
+        [0.5, 0.5],
+        [t, 1.0],
         &Policy::certified(),
         &mut log,
     );

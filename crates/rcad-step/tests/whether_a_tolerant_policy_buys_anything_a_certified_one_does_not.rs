@@ -171,14 +171,16 @@ fn a_step_file_the_two_policies_disagree_about() {
 /// The other half a corpus file could differ by: a predicate that could not
 /// decide.
 ///
-/// A square with one corner cut off, and the cut bent by `1e-305` in the
-/// middle. The two cheap levels cannot separate the products the bend's turn is
-/// the difference of, and the exact level would have to multiply `1 * 1` and
-/// `1e-305 * 1e-305` in one determinant, which no power of two brings into
-/// range together (`crates/rcad-topo/tests/when_it_cannot_tell.rs` tries them
-/// all). So `orient2d` comes back undecided. A certified policy stops there; a
-/// tolerant one reads the enclosure as zero and files a
-/// [`Cause::UndecidableResolved`] record.
+/// A square with one corner cut off, the cut running from `(1, -t)` through
+/// `(0.5, 0.5)` to `(t, 1)` with `t = 1e-318`, so that the turn in the middle
+/// is exactly `-t^2`. The two cheap levels cannot separate the products the
+/// bend's turn is the difference of, and the exact level holds `1 * 1` and
+/// `t * t` in one determinant: every power of two that keeps `1 * 1` in range
+/// leaves the whole turn below what `t * t` loses falling off the bottom
+/// (`crates/rcad-topo/tests/when_it_cannot_tell.rs` tries them all). So
+/// `orient2d` comes back undecided. A certified policy stops there; a tolerant
+/// one reads the enclosure as zero and files a [`Cause::UndecidableResolved`]
+/// record.
 ///
 /// **Not a STEP file, and that is this lane's finding rather than a hole in
 /// it.** Every coordinate the reader takes is an exact `f64` written in the
@@ -189,11 +191,11 @@ fn a_step_file_the_two_policies_disagree_about() {
 /// at the predicate level.
 #[test]
 fn a_shape_whose_corners_f64_cannot_place() {
-    let bend = 1e-305;
+    let bend = 1e-318;
     let corners = vec![
         [-1.0, -1.0],
         [1.0, -1.0],
-        [1.0, bend],
+        [1.0, -bend],
         [0.5, 0.5],
         [bend, 1.0],
         [-1.0, 1.0],
