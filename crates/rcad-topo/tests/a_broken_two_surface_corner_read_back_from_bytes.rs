@@ -42,9 +42,10 @@
 //!   `0.9999999999999982` where `validate`'s carries `1.0`: the same refusal,
 //!   the distance only to rounding. And turned, the sound bar cut along its
 //!   seam is `Undecidable` on `side of plane`, so every corner moved there is
-//!   too. The point it asks about is a box of about `1e-13` round where the
-//!   bottom seam corner `(3, 0, 0)` lands, which is on the block's face. That
-//!   is the sound bar's refusal, not an answer about the moved corner. Only
+//!   too. The point it asks about is a box round where the bottom seam corner
+//!   `(3, 0, 0)` lands, which is on the block's face: `8.5e-14` either way
+//!   turned, `2.8e-13` turned and shifted. That is the sound bar's refusal,
+//!   not an answer about the moved corner. Only
 //!   shifted, the sound bar answers, because a corner moved by a shift that
 //!   rounds nothing is handed on exact (Q509). Before Q509 it refused
 //!   `side of plane` there as well.
@@ -501,7 +502,8 @@ fn under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_to
 
 /// **This is the sound bar's refusal, not an answer about a moved corner.**
 /// Turned, the bar's bottom seam corner `(3, 0, 0)` lands on the block's face
-/// and is handed on as a box about `1e-13` round where it lands, so which
+/// and is handed on as a box `8.5e-14` either way round where it lands
+/// (`2.8e-13` when shifted as well), so which
 /// side of that face it is on comes out `Undecidable`. The sound bar refuses
 /// that way, and every moved corner with it, turned alone or turned and then
 /// shifted. Shifted alone it answers, which is Q509's exact corner.
