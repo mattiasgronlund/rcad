@@ -315,10 +315,14 @@ impl Assembly {
     ///
     /// Every [`Invalid`] the sweep finds, as
     /// [`Error::TheFuseWroteABrokenAnswer`]: a shape this crate built and cannot
-    /// stand behind, which is a bug here and not bad input — but a bug that
-    /// costs the caller nothing, since nothing was written. The blame is blanket
-    /// because the sweep no longer asks the one question whose answer was the
-    /// caller's geometry rather than this crate's arithmetic.
+    /// stand behind. That can be a gap here or an input that was already
+    /// broken, since nothing above asks [`Model::validate`] of the inputs
+    /// before fusing them — §294.2 measured six fuses that came back this way
+    /// carrying exactly the `Invalid` `validate` gives the caller's own solid
+    /// before the fuse runs. Either way it costs the caller nothing, since
+    /// nothing was written. The blame is blanket because the sweep no longer
+    /// asks the one question whose answer was the caller's geometry rather than
+    /// this crate's arithmetic.
     ///
     /// Whatever else the sweep says, unchanged — [`Error::Undecidable`] where a
     /// predicate gave up on the answer, say. "The kernel wrote something broken"
