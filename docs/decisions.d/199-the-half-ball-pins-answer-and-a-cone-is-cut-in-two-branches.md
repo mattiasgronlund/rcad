@@ -133,4 +133,49 @@ not claimed either way.
   narrow lune; and the named refusal for a closed edge that neither direction rule
   answers.
 
+*2026-09-29, Q580: each item checked against `main` at `e342780e`. Four are
+closed, one is measured where it answers, and one is still open.*
+
+- **The leaned half ball: closed by §200.1** (`lane-leaned-half-ball`,
+  `05206e64`). It was a gap: the cut crosses the flat face, and one more
+  candidate point in `candidate_points` answers it. Its pin is now the answer
+  test `a_half_ball_cut_by_a_plane_leaning_twenty_degrees_answers_at_every_turn`,
+  in the same file.
+- **The plane cut along a cone's other nappe: closed for the shape 199.3
+  built**, one piece at a time: the block's top face since §211, its wall at
+  `z ≈ −20` since §251, and the frustum's own face since §282.
+  `a_block_leaning_through_a_frustum_is_cut_along_the_cone_off_the_frustums_own_face`,
+  in `a_plane_across_a_cone.rs`, answers and measures against a slice integral.
+  Whether a candidate point can land on the other nappe was Q205's: §350
+  (`bd525f4e`) found one does on a cone whose radius is more than its height,
+  and such a point is now turned away (§350.5). What §350.5 left untraced is
+  its own, and Q467 is to pin §350's sweep.
+- **`mesh.rs:839`, the piece of a ball holding both poles: closed by §202.1**
+  (`lane-ball-both-poles-mesh`, `07d1ffcb` and `7b395d1a`), pinned by
+  `a_piece_of_a_ball_holding_both_poles.rs`.
+- **`runs_up`'s short-way sum: closed by §200.2** (`lane-runs-up-other-pole`,
+  `d1f7eab9` and `76204dff`): 63 caps holding the north pole with the rim
+  through the south, at radii 0.5, 1 and 2, in
+  `a_cap_whose_rim_runs_through_the_other_pole.rs`. The mirror case, a ball of
+  radius 5 less a cap whose rim runs through its north pole, was Q373
+  (`e2498262`, done at `938334db`) in `which_pole_this_cap_reaches`, pinned by
+  `a_ball_less_a_cap_whose_rim_runs_through_its_north_pole.rs`. Q577 is to pin
+  it with the rim's corner on the pole itself.
+- **The narrow lune: measured since §200.1 and §330.**
+  `a_narrow_lune_from_a_pole_corner.rs` answers 29 wedges cut by two knives
+  and 30 cut by one prism, each measured against its closed form, and pins
+  every other case as refused by name. Those refusals are still open, and no
+  row names them.
+- **The named refusal for a closed edge that neither direction rule answers:
+  still open.** §202.1 did not add it. Its lane found that the only walks
+  reaching that code are the caps of
+  `a_cap_whose_rim_runs_through_the_other_pole.rs`, and that all of them
+  answer. `walk` in `mesh.rs` still keeps the walker's order when neither
+  `the_way_a_closed_edge_is_stored_running` nor
+  `the_way_a_closed_edge_where_its_faces_touch_runs` answers, and its own
+  comment says that gives a cap walked backwards, a wrong mesh rather than a
+  refusal.
+
+Q580's lane proposed a row for each of the last two, for the merger to file.
+
 Commands: `just decision 198.2`, `198.3`, `197.2`, `167`, `16.10`.
