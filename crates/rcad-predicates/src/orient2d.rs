@@ -411,19 +411,19 @@ fn sign_clear_of_what_fell_off(held: &[f64], fell_off: u32) -> Decision {
         return expansion_sign(held);
     }
     let lost = f64::from(fell_off) * SMALLEST_SUBNORMAL;
-    let mut low = [0.0f64; DETERMINANT_ENTRIES + 1];
-    let mut high = [0.0f64; DETERMINANT_ENTRIES + 1];
-    let low_len = expansion_sum(held, &[-lost], &mut low);
-    let high_len = expansion_sum(held, &[lost], &mut high);
-    match (
-        expansion_sign(&low[..low_len]),
-        expansion_sign(&high[..high_len]),
-    ) {
-        (Decision::Pos, Decision::Pos) => Decision::Pos,
-        (Decision::Neg, Decision::Neg) => Decision::Neg,
-        _ => Decision::Undecidable {
+    let [low, high] = [-lost, lost].map(|end| {
+        let mut moved = [0.0f64; DETERMINANT_ENTRIES + 1];
+        let len = expansion_sum(held, &[end], &mut moved);
+        expansion_sign(&moved[..len])
+    });
+    // The two ends are `2 * lost` apart, exactly, so they are never both zero:
+    // two ends that agree on a certified sign agree on `Pos` or on `Neg`.
+    if low == high && low.is_certified() {
+        low
+    } else {
+        Decision::Undecidable {
             enclosure: f64::INFINITY,
-        },
+        }
     }
 }
 
