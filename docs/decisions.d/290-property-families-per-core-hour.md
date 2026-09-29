@@ -46,6 +46,18 @@ no part of it:
   `PROPTEST_RNG_SEED` and `PROPTEST_CASES` do nothing to these. Two call sites
   use `over_a_fixed_corpus()`, `TestRng::deterministic_rng()`, no environment
   variable moves them at all.
+
+  **2026-09-29:** both the count and the claim are wrong now. `grep -c '=
+  over('` finds 33 call sites, not thirty-four — at Q149's own base
+  `566db6f1` as well as today, so this was a miscount from the start, not
+  something that later changed. And since Q231 (`1a46ffd8`, landed after
+  this row and after Q227 finished it — §290.5's rates were measured before
+  it) `over()` scales its cases through `scaled_by_soak_factor(cases,
+  soak_factor())`, the same way `measured_cases()` scales `MEASURED_CASES`.
+  So `RCAD_SOAK_FACTOR` now does grow `over()`'s draw too, and a soak
+  planned from this section should not count on a split between properties
+  that grow with the factor and properties that do not — that split is
+  gone. See also §290.8.
 - **`fuses_that_touch.rs`** (the touching family, §191.5) defines its own
   `SOAK_FACTOR` and `SOAK_SEED` constants, and both happen to name the same
   two variables, `RCAD_SOAK_FACTOR` and `RCAD_SOAK_SEED` — so the one pair of
@@ -417,3 +429,15 @@ as it is measuring different techniques. And §290.5's 34% gap between the
 two core-hour measures, and its correlation with system load that this run
 did not resolve into a cause, means neither "0.15" nor "0.23" is the row's own
 settled number for "per core-hour" until that is pinned down.
+
+**2026-09-29:** the "kept the same fixed case count every chunk" half of
+this paragraph is no longer true. Since Q231 (`1a46ffd8`) `over()` scales
+its cases by `RCAD_SOAK_FACTOR` the same way `measured_cases()` does, so
+more chunks now buy these properties a bigger draw too, not just a
+different one — see §290.1's own dated note. §290.5's rates are unaffected
+by this: Q231 landed after Q227 finished the 24-chunk run those rates come
+from (`git merge-base --is-ancestor` confirms Q227's merge is an ancestor
+of Q231's), so every chunk behind §290.5 ran while `over()` still drew a
+fixed count. A soak planned from this section now, at a later
+`RCAD_SOAK_FACTOR`, would give the `over()`-based properties a bigger draw
+than any chunk here did.
