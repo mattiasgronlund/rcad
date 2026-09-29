@@ -43,21 +43,23 @@
 //! Selection kept the right pieces for the last two (§245.2); both holes were in
 //! how the kept pieces were named, and both refused `ResultIsNotManifold`.
 //!
-//! **Fusing any of the six answers once more still refuses**
+//! **Fusing any of the six answers once more** used to refuse
 //! `AFaceTrimmedByACurveThisCannotFollow` (§252.8), at the two arcs of the
-//! answer's bottom cap, even with a block that touches nothing. A pipe's circle
-//! has no centre for the arrangement to read which arc an edge is by (§331).
-//! [`a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap`] pins
-//! where, and
+//! answer's bottom cap, even with a block that touches nothing: a pipe's circle
+//! had no centre for the arrangement to read which arc an edge is by (§331).
+//! Now a union or a lens fused with a block that touches nothing comes back as
+//! it was ([`a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`]).
+//! The crescents against that block, and every answer against a block over its
+//! top half, still refuse elsewhere (§331.3), and
 //! [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
-//! shows the answer exists.
+//! shows the top half's answer exists.
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
     Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{FaceKey, Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 5.0;
 const HEIGHT: f64 = 10.0;
@@ -444,35 +446,52 @@ fn where_a_bar_started_its_cap_circle_stays_a_corner_where_the_other_circle_cros
     }
 }
 
-/// **Fusing any of the six answers once more refuses, at the arcs of the
-/// answer's bottom cap, whatever it is fused with.**
+/// **A union or a lens fused once more with a block that touches nothing comes
+/// back as it was: its four corners, its four faces and its volume.**
 ///
-/// Each answer is fused again, by every rule and both ways round, with two
-/// blocks: one over the top half of the answer, and one fifty above it that
-/// touches nothing. Every one of those 72 fuses refuses
-/// `AFaceTrimmedByACurveThisCannotFollow`, naming the answer's face on the
-/// plane `z = 0`. The block that touches nothing refuses too, so what stops the
-/// fuse is not a cut: it is the arrangement reading the answer's own boundary.
+/// Each of the four answers is fused again, by every rule and both ways round,
+/// with a block fifty above it. The union gives the answer and the block, the
+/// intersection gives nothing, and the difference gives the answer with the
+/// answer first and the block with the block first. Every answer that comes
+/// back has the first fuse's corners `(3, ±4, 0)` and `(3, ±4, 10)`, two flat
+/// faces and two round ones, and the first fuse's volume by hand.
 ///
-/// That face is one wire of two arcs, each from `(3, −4, 0)` to `(3, 4, 0)`,
-/// one on each pipe's circle. A first fuse never meets such an edge, because a
-/// bar's cap circle is one closed edge. `Arrangement::which_way_an_edge_runs_round`
-/// in `fuse/arrange.rs` asks which of a circle's two arcs the edge is, and
-/// `the_way_into_an_arc` answers only for a curve whose centre
-/// `where_a_closed_crossing_is_centred` in `holds.rs` can place. That function
-/// knows a ball and a cone, not a pipe (`docs/decisions.md` §331).
+/// What this second fuse reads is the answer's own face on `z = 0`: one wire of
+/// two arcs, each from `(3, −4, 0)` to `(3, 4, 0)`, one on each pipe's circle.
+/// A first fuse never meets such an edge, because a bar's cap circle is one
+/// closed edge. Telling which of a circle's two arcs an edge is needs the
+/// circle's centre, and `where_a_closed_crossing_is_centred` in `holds.rs` gave
+/// one for a ball and a cone and not for a pipe, so all 72 second fuses of the
+/// six answers refused `AFaceTrimmedByACurveThisCannotFollow` on that face,
+/// the block that touches nothing among them (`docs/decisions.md` §331).
 ///
-/// **This test fails the day that is fixed.** Then the block that touches
-/// nothing should answer for the unions and the intersections, and the refusal
-/// that is left moves somewhere else. §331.3 has what a trial fix got.
+/// **Not here, because they still refuse** (§331.3, §331.5): the two crescents
+/// fused with this block, whose unions and whose differences with the crescent
+/// first refuse `ACurvedFaceGoesRightRoundWithNoSeam`, and every fuse of any
+/// answer with a block over its top half, which refuses `Undecidable`. The
+/// answers exist — [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
+/// builds the top half's — so pinning those refusals would keep gaps as if they
+/// were settled.
 #[test]
-fn a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap() {
+fn a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was() {
     let policy = Policy::certified();
     let bottom = Surface::Plane(
         Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
             .expect("the plane of both bars' bottom caps"),
     );
-    for (first, mut model, answer) in every_first_answer() {
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let shared = lens * HEIGHT;
+
+    for (first_rule, first, mut model, answer) in every_first_answer() {
+        let by_hand = match first_rule {
+            Rule::Union => 2.0 * one_bar - shared,
+            Rule::Intersection => shared,
+            Rule::Difference => continue,
+            other => panic!("{first}: a rule this test did not ask for, {other:?}"),
+        };
         let solid = model.solid(answer).expect("this model made the key");
         let cap = solid
             .faces()
@@ -481,35 +500,113 @@ fn a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap() {
             .key();
         the_face_is_two_arcs_of_two_pipes(&model, answer, cap, &first);
 
-        let over_the_top_half = a_block_from(&mut model, HEIGHT / 2.0);
-        let touching_nothing = a_block_from(&mut model, 50.0);
-        for (block, tool) in [
-            ("a block over the top half", over_the_top_half),
-            ("a block touching nothing", touching_nothing),
+        let block = a_block_from(&mut model, 50.0);
+        for (rule, answer_first, expected) in [
+            (Rule::Union, true, &["the answer", "the block"][..]),
+            (Rule::Union, false, &["the answer", "the block"][..]),
+            (Rule::Intersection, true, &[][..]),
+            (Rule::Intersection, false, &[][..]),
+            (Rule::Difference, true, &["the answer"][..]),
+            (Rule::Difference, false, &["the block"][..]),
         ] {
-            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-                for (arguments, tools) in [(answer, tool), (tool, answer)] {
-                    let mut again = model.clone();
-                    let refused = again.fuse(
-                        &[arguments],
-                        &[tools],
-                        rule,
-                        &policy,
-                        &mut ProvenanceLog::new(),
-                    );
-                    assert!(
-                        matches!(
-                            refused,
-                            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == cap
-                        ),
-                        "{first}, then {rule:?} with {block}: expected the refusal at the \
-                         bottom cap {cap:?}, got {:?}",
-                        refused.map(|fused| fused.solids().to_vec())
-                    );
-                }
-            }
+            let asked = format!("{first}, then {rule:?} with the block, answer first {answer_first}");
+            let [arguments, tools] = if answer_first {
+                [answer, block]
+            } else {
+                [block, answer]
+            };
+            let mut again = model.clone();
+            let fused = again
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+            again
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{asked} came back broken: {broken:?}"));
+            let mut came_back: Vec<&str> = fused
+                .solids()
+                .iter()
+                .map(|&solid| which_came_back(&again, solid, by_hand, &asked))
+                .collect();
+            came_back.sort_unstable();
+            assert_eq!(came_back, expected, "{asked}");
         }
     }
+}
+
+/// Whether `solid` is the first answer again — two flat faces and two round,
+/// the corners `(3, ±4, 0)` and `(3, ±4, 10)`, and `by_hand` for its volume —
+/// or the block fifty above, six faces and `30·20·10`; anything else fails.
+fn which_came_back(model: &Model, solid: SolidKey, by_hand: f64, asked: &str) -> &'static str {
+    let policy = Policy::certified();
+    let solid = model.solid(solid).expect("this model made the key");
+    let measured = solid
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a solid measures");
+    let surfaces: Vec<Surface> = solid.faces().map(|face| face.surface()).collect();
+    if surfaces.len() == 6 {
+        assert!(
+            surfaces
+                .iter()
+                .all(|surface| matches!(surface, Surface::Plane(_))),
+            "{asked}: six faces and not all flat: {surfaces:?}"
+        );
+        assert!(
+            (measured.volume() - 6000.0).abs() <= measured.volume_error(),
+            "{asked}: the block measured {} ± {} against 6000",
+            measured.volume(),
+            measured.volume_error()
+        );
+        return "the block";
+    }
+    let flat = surfaces
+        .iter()
+        .filter(|surface| matches!(surface, Surface::Plane(_)))
+        .count();
+    let round = surfaces
+        .iter()
+        .filter(|surface| matches!(surface, Surface::Cylinder(_)))
+        .count();
+    assert_eq!(
+        (surfaces.len(), flat, round),
+        (4, 2, 2),
+        "{asked}: the faces of the answer lie on {surfaces:?}"
+    );
+    let mut corners: Vec<[f64; 3]> = solid
+        .faces()
+        .flat_map(|face| face.wires().collect::<Vec<_>>())
+        .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+        .flat_map(|coedge| [coedge.edge().start(), coedge.edge().end()])
+        .map(|corner| corner.point().coordinates())
+        .collect();
+    corners.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+    corners.dedup();
+    assert_eq!(
+        corners,
+        vec![
+            [3.0, -4.0, 0.0],
+            [3.0, -4.0, HEIGHT],
+            [3.0, 4.0, 0.0],
+            [3.0, 4.0, HEIGHT],
+        ],
+        "{asked}: the corners of the answer"
+    );
+    assert!(
+        (measured.volume() - by_hand).abs() <= measured.volume_error(),
+        "{asked}: measured {} ± {} against {by_hand} by hand",
+        measured.volume(),
+        measured.volume_error()
+    );
+    "the answer"
 }
 
 /// **What the second fuse over the top half should give, reached by the other
@@ -520,11 +617,10 @@ fn a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap() {
 /// `(A ∪ B) − T = (A − T) ∪ (B − T)`, `(A ∩ B) − T = (A − T) ∩ (B − T)` and
 /// `(A − B) − T = (A − T) − (B − T)`. This order never meets an arc of a pipe's
 /// circle as an input edge: each half bar's caps are whole circles again. So
-/// every fuse that
-/// [`a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap`] refuses
-/// with the block over the top half and `Rule::Difference` has an answer this
-/// kernel builds: half of the first answer's volume, with the same four corners
-/// at `z = 0` and `z = 5`.
+/// every second fuse of an answer less the block over its top half, which
+/// refuses `Undecidable` (§331.3), has an answer this kernel builds: half of
+/// the first answer's volume, with the same four corners at `z = 0` and
+/// `z = 5`.
 ///
 /// That is what makes the refusal a gap and not a limit (§16.10).
 #[test]
@@ -616,9 +712,9 @@ fn cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should()
     }
 }
 
-/// Each of the six first fuses, on a model of its own, with the one solid it
-/// answered.
-fn every_first_answer() -> Vec<(String, Model, SolidKey)> {
+/// Each of the six first fuses, on a model of its own, with its rule and the
+/// one solid it answered.
+fn every_first_answer() -> Vec<(Rule, String, Model, SolidKey)> {
     let policy = Policy::certified();
     let (model, here, there) = two_bars_side_by_side();
     let mut answers = Vec::new();
@@ -640,7 +736,7 @@ fn every_first_answer() -> Vec<(String, Model, SolidKey)> {
             let [answer] = fused.solids() else {
                 panic!("{rule:?} {which} is one solid: {:?}", fused.solids());
             };
-            answers.push((format!("{rule:?} {which}"), model, *answer));
+            answers.push((rule, format!("{rule:?} {which}"), model, *answer));
         }
     }
     answers
