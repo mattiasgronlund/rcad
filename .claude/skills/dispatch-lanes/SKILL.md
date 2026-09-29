@@ -9,8 +9,8 @@ argument-hint: "A row id to take first, or nothing to take what `just queue next
 `docs/queue.md` holds every open item as a row, in the tiers of
 `docs/decisions.md` §230.1 and §307. **Every free slot takes the highest ready row that
 fits** (§230.3), and a slot is refilled when its own lane finishes, not when a
-batch does (§230.4). The cap is six slots, verifiers and read-only rows
-included (§230.8).
+batch does (§230.4). The cap is three slots, verifiers and read-only rows
+included (§372, down from §230.8's six).
 
 **`just queue` is what to dispatch next, and `just queue next` is what the free
 slots take.** Every open item is a row of `docs/queue.md` — id, tier, state,

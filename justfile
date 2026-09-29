@@ -8753,11 +8753,11 @@ check-plan-selftest:
     exit 0
 
 # The queue of `docs/decisions.md` §230: one file holding a row per open item,
-# and a fill that gives every free slot the highest ready row that fits. Six
-# slots is §230.8's number. It lives here so that `queue next` and the line
-# `check-queue` prints on a pass count against the same one.
+# and a fill that gives every free slot the highest ready row that fits. Three
+# slots is §372's number, down from §230.8's six. It lives here so that `queue
+# next` and the line `check-queue` prints on a pass count against the same one.
 queue_file := "docs/queue.md"
-queue_slots := "6"
+queue_slots := "3"
 
 # How many rows tagged `small` one lane takes at once (§352.4). Five small rows
 # of about ten minutes each fit the 45 minutes a lane is given (`lane.md`), with
@@ -9570,7 +9570,7 @@ check-queue-selftest:
 
     got=$(q _queue-check "$dir/good.md" "$decisions" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
-    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 6 slots, 1 parked, 2 closed' <<<"$got" \
+    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 3 slots, 1 parked, 2 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
     got=$(q check-queue "$dir/good.md" 2>&1) \
         || fail "check-queue rejected the good queue against the sections in decisions_dir"
@@ -9723,7 +9723,7 @@ check-queue-selftest:
         || fail "a row meeting a running lane was not skipped with the lane named"
     [ "$(takes)" = "Q3 " ] || fail "the slot a blocked tier 1 row left did not go to tier 2"
     drive lane next 6
-    grep -q '^note: 1 running and 6 more is past the 6 slots' <<<"$got" \
+    grep -q '^note: 1 running and 6 more is past the 3 slots' <<<"$got" \
         || fail "a fill past the slots did not say so"
 
     fence items <<'MD'
