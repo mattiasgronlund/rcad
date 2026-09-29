@@ -71,6 +71,13 @@ How bad, worst first:
   harm and sits below `wrong`.
 - **`refuses`**: a named refusal of an input that has an answer.
 
+**The class goes by what the user sees.** `wrong` is only an answer returned
+as `Ok` that is wrong. A named error is `refuses`, even when the kernel built
+the answer wrong and caught it itself (`Error::TheFuseWroteABrokenAnswer`,
+`Invalid(...)`), and so is a `Model::validate` that turns away a sound solid.
+The tagging of the open rows (§352.7) moved thirteen rows from `wrong` to
+`refuses` on this rule.
+
 How likely, as buckets tied to evidence rather than a guessed percentage:
 
 - **A, seen**: a real input met it, such as a file of the STEP corpus.
@@ -159,6 +166,12 @@ These rows have no user who could meet them, so the classes do not fit them.
   lines. This is §230.7's one exception.
 - **Hypotheses are filed.** One that predicts a kernel defect is a tier 1 row
   with a class, C at most until someone runs it. Any other goes in its tier.
+  A row of the form "build a shape that reaches this code, or show none can"
+  is such a hypothesis when reaching the code would be a defect. When the code
+  there is already right and the row only asks for a test that fails without
+  it, the row is tier 2 with no class.
+- **A row that waits on a capability not built yet keeps its tier.** Its
+  `after:` says what it waits on; the tier does not.
 - **Follow-ups about the tooling and the measuring are filed in their tiers**
   (2, 2.2, 2.5), as they are now, and tagged `small` when they are small.
 
@@ -183,7 +196,14 @@ tier 1, open and not parked: N in A or B (w wrong, c crash, r refuses), N in C, 
 ```
 
 The first number is the one to watch. The rows' ages are left to the queue
-page (§352.7).
+page (§352.7). Right after the open rows were tagged it read:
+
+```
+tier 1, open and not parked: 68 in A or B (4 wrong, 1 crash, 63 refuses), 23 in C, 11 in D, 16 with no class; 22 small rows ready, and a bundle is 5
+```
+
+"No class" counts the `small` rows of tier 1 and the rows in `lane:`, which
+were left untagged, as well as the rows that carry no tag at all.
 
 ### 352.7 What this leaves
 
@@ -193,9 +213,17 @@ page (§352.7).
   way to change the header first. Q500, tier 2.2.
 - **The queue page shows the measure and the rows' ages**, after Q284 teaches
   it tier 2.2. Q501, tier 2.2.
-- **The open rows get their tags** in a separate commit, from a read-only sweep
-  that labelled every open row from its text. Its labels are one reader's
-  judgement and were spot-checked before they were applied.
+- **The open rows got their tags** in a separate commit on 2026-09-29, from a
+  read-only sweep that labelled every open row from its text. Its labels are
+  one reader's judgement, and two sessions checked them against the rules in
+  §352.3 and §352.5 before they were applied. That check moved thirteen rows
+  from `wrong` to `refuses` and Q378 from `wrong/D` to `wrong/B`; moved seven
+  rows from tier 2 to tier 1 and two the other way; dropped the sweep's
+  `small` on Q343 (it may need `intersect` to answer a new plane) and Q368 (it
+  re-counts a table as well as un-ignoring two tests), and its class on two
+  tier 3 rows, since only tier 1 carries one. It also tagged the rows filed
+  after the sweep ran. Rows in `lane:` were left alone, so that no merger
+  meets a row changed on both sides.
 - **A merger started before this change** carries the old `merger.md` until
   its dispatcher's process restarts. The rows it adds have no class and go
   just above D, which is where they went before, so nothing breaks; they wait
