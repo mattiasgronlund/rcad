@@ -374,7 +374,7 @@ function reportSchema(lane) {
 function VERIFY(lane, r, kind) {
   const revert = sourcePathsOf(lane).join(', ') || '(none declared; say so and skip the revert)'
   const pinsOnlyNote = lane.pinsOnly === true
-    ? '\nThis lane is marked pinsOnly: a verdict, a pinned test and a decisions section, nothing in src/ to revert. Skip the revert step. Instead run the new tests on the branch and watch them pass, then report tests_fail_without_fix: false with no reproduced_mutation and say in notes that pinsOnly is why -- that is the expected shape here, not a defect.'
+    ? '\nThis lane is marked pinsOnly: a verdict, a pinned test and a decisions section, nothing in src/ to revert. Skip the revert step. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says, then report tests_fail_without_fix: false with no reproduced_mutation and say in notes that pinsOnly is why -- that is the expected shape here, not a defect.'
     : ''
   return `Check lane ${lane.label}, queue ${rowsOf(lane)}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
 Base: ${BASE}
@@ -382,7 +382,7 @@ Branch: ${branchOf(lane)}
 Write set: ${lane.writeSet.join(', ')}
 The lane's worktree, to unlock once you are done with it -- this is not your own tree, and not what you report as worktree_path: ${r.worktree_path}
 Source paths to revert: ${revert}${pinsOnlyNote}
-Revert them and watch the tests fail, then restore them and watch the tests pass -- that is the default proof, and report it as tests_fail_without_fix.
+Revert them and watch the tests fail, then restore them -- that is the default proof for the fail half, and report it as tests_fail_without_fix. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says.
 Only when the revert itself cannot fail -- a fix that just moves a floor or a bound, where a value on the wrong side of the old one can still pass a proptest run at most seeds -- report a reproduced_mutation instead: make a small, uncommitted change to the source that reintroduces the kind of bug the fix is meant to catch, run one command unchanged against the base commit and against this branch, and give the exact scratch change, the command, and both outcomes ('pass' or 'fail'). Say in notes why the revert could not fail here. Do not reach for a mutation when a revert would do.
 Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
 
@@ -432,7 +432,7 @@ function verdictSchema(kind) {
   }
   const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'fixes', 'verdict']
   if (kind === 'tests') {
-    properties.tests_pass_on_branch = { type: 'boolean' }
+    properties.tests_pass_on_branch = { type: 'boolean', description: "from step 3's gate summary (served or fresh), not a separate run -- §370" }
     properties.tests_fail_without_fix = { type: 'boolean', description: 'false if you could not make them fail with the source reverted' }
     properties.reproduced_mutation = {
       type: 'object',
