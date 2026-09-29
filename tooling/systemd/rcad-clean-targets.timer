@@ -1,0 +1,8 @@
+[Unit]
+Description=rcad: strip target/ from the worktrees nobody is using, every hour
+
+[Timer]
+OnCalendar=hourly
+
+[Install]
+WantedBy=timers.target
