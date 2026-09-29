@@ -95,9 +95,17 @@ pub enum MeetOfThree {
     /// Three and four take a torus: a straight line meets a quadric twice and a
     /// ring four times, which is the whole of what makes a torus not a quadric.
     ///
-    /// Each is a box the true meeting point is somewhere inside, because
+    /// Most are a box the true meeting point is somewhere inside, because
     /// solving a quadratic divides and a quotient of two ranges almost never
     /// lands on an `f64`. That width is the point of it (§2.5).
+    ///
+    /// **A point whose every coordinate is an `f64` is that point**, handed back
+    /// as [`PredicatePoint::Exact`], wherever the numbers are known exactly and
+    /// each quotient is checked to land on one. A line that touches a ball
+    /// touches it at `−B/A` along itself, and at a corner such as `(0, 0, 16)` a
+    /// box of any width stops every question whose true answer is zero there —
+    /// which way a wall turns against the ball it touches is one of them. Such
+    /// a point is not a rounding of the box: it is the one number the box holds.
     At(SmallVec<[PredicatePoint; 2]>),
     /// They share a whole curve or a whole surface, so there is no corner here.
     ///
@@ -455,7 +463,8 @@ pub enum WhereALineMeetsIt {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MeetsAt {
     /// A meeting, this far along. A box, because solving for a step divides and
-    /// a quotient of two ranges almost never lands on an `f64` (§2.5).
+    /// a quotient of two ranges almost never lands on an `f64` (§2.5) — and a
+    /// box of no width where the line touches a quadric at a step that does.
     Here(Interval),
     /// A touch somewhere in this range that no `f64` names, so no sign
     /// evaluation anywhere tells it from a near miss.
@@ -1860,8 +1869,6 @@ fn where_a_line_meets_a_quadric(
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 
-    let squared = quadratic.squared.enclosure();
-    let half_linear = quadratic.half_linear.enclosure();
     match ask(
         &the_discriminant_of(named, quadratic),
         Measures::Area,
@@ -1871,7 +1878,7 @@ fn where_a_line_meets_a_quadric(
     )? {
         Decision::Neg => Ok(WhereALineMeetsIt::Nowhere),
         Decision::Zero => Ok(WhereALineMeetsIt::At(smallvec![MeetsAt::Here(
-            quotient_or_everything(-half_linear, squared)
+            where_it_touches(quadratic)
         )])),
         Decision::Pos => {
             let [lower, upper] = the_two_places_along_it(quadratic);
@@ -1882,6 +1889,35 @@ fn where_a_line_meets_a_quadric(
         }
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
+}
+
+/// How far along the line it touches the quadric: `−B/A`, the one root a zero
+/// discriminant leaves.
+///
+/// **That step exactly where it is an `f64`**, as a box of no width. A step with
+/// width places the touching point as a box, and at a touch the questions a
+/// fuse asks next are the ones whose true answer is zero — which way a wall
+/// turns against the ball it touches is `orient3d` of three vectors in one
+/// plane. No box with width round a zero decides that, however narrow; the
+/// exact point does. Where `B` or `A` is not known exactly, or their quotient
+/// is not an `f64`, the step is the box it always was.
+fn where_it_touches(quadratic: &Quadratic) -> Interval {
+    let exactly = quadratic
+        .half_linear
+        .exactly()
+        .zip(quadratic.squared.exactly())
+        .and_then(|(half_linear, squared)| {
+            the_f64_quotient_of(&Exact::of(0.0).minus(&half_linear), &squared)
+        });
+    exactly.map_or_else(
+        || {
+            quotient_or_everything(
+                -quadratic.half_linear.enclosure(),
+                quadratic.squared.enclosure(),
+            )
+        },
+        Interval::exactly,
+    )
 }
 
 /// Where the line meets the quadric when the squared term is exactly zero, so
@@ -1988,8 +2024,12 @@ fn the_tighter(one: Interval, other: Interval) -> Interval {
     }
 }
 
-/// The point `step` of the way along the line.
+/// The point `step` of the way along the line: exactly, where
+/// [`the_point_exactly_at`] can name it, and a box round it everywhere else.
 fn the_point_at(line: &ALine, step: Interval) -> PredicatePoint {
+    if let Some(place) = the_point_exactly_at(line, step) {
+        return PredicatePoint::Exact(place);
+    }
     let divisor = line.divided_by.enclosure();
     PredicatePoint::Constructed(core::array::from_fn(|axis| {
         quotient_or_everything(
@@ -1997,6 +2037,62 @@ fn the_point_at(line: &ALine, step: Interval) -> PredicatePoint {
             divisor,
         )
     }))
+}
+
+/// The point a step of no width names, where the line is known exactly and
+/// each coordinate `(through + step·direction) / divided_by` is an `f64` — or
+/// `None`.
+///
+/// A step of no width is one number and not a box round one, so the point it
+/// names is one point; working it out in intervals would put back the width
+/// [`where_it_touches`] kept out of the step.
+fn the_point_exactly_at(line: &ALine, step: Interval) -> Option<[f64; 3]> {
+    if step.lo() != step.hi() {
+        return None;
+    }
+    let along = Term::of(step.lo());
+    let divisor = line.divided_by.exactly()?;
+    let mut place = [0.0; 3];
+    for (axis, coordinate) in place.iter_mut().enumerate() {
+        let over = line.through[axis].plus(&line.direction[axis].times(&along)?);
+        *coordinate = the_f64_quotient_of(&over.exactly()?, &divisor)?;
+    }
+    Some(place)
+}
+
+/// `over / under`, where that is exactly an `f64` — or `None` where it is not,
+/// or where a product the check takes would round.
+///
+/// **An answer comes back only where `under · q − over` is exactly zero**, so a
+/// guess that misses costs an exact answer and never gives a wrong one.
+///
+/// The first guess divides the two numbers rounded, and each rounding can put
+/// it a unit in the last place further off. One step of Newton's method on
+/// `under · q − over`, whose value at the guess is worked out exactly, takes it
+/// the rest of the way: where the quotient is an `f64` the step is a few units
+/// long and wrong by a rounding of that, far less than the half unit that would
+/// land it on a neighbour.
+/// `an_f64_quotient_is_found_where_the_first_guess_lands_beside_it` counts the
+/// quotients the first guess alone misses and the step does not.
+///
+/// # Panics
+///
+/// If `under` is zero. Both callers divide by a number already decided not to
+/// be: a quadratic's `A` and a line's divisor.
+fn the_f64_quotient_of(over: &Exact, under: &Exact) -> Option<f64> {
+    assert!(
+        matches!(under.sign(), Decision::Pos | Decision::Neg),
+        "a quotient is only asked of a divisor decided not to be zero: {under:?}"
+    );
+    let divisor = under.nearest_f64();
+    let missed_by = |guess: f64| Some(under.times(&Exact::of(guess))?.minus(over));
+    let guess = over.nearest_f64() / divisor;
+    let settled = guess - missed_by(guess)?.nearest_f64() / divisor;
+    match missed_by(settled)?.sign() {
+        Decision::Zero => Some(settled),
+        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => None,
+        other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+    }
 }
 
 /// The sign of a number, as a question the cascade can ask.
@@ -2172,6 +2268,106 @@ mod tests {
             ]),
             Ok(MeetOfThree::Nowhere)
         );
+    }
+
+    /// A line that touches a ball where every coordinate is an `f64` comes
+    /// back as that point, not as a box round it: straight down the lattice,
+    /// and down the `z` axis between two walls whose normals are not on it.
+    ///
+    /// The second is the corner a ball touching a prism's upright edge makes,
+    /// and as a box with width in `z` it stopped every fuse of the two under a
+    /// certified policy: `crates/rcad-topo/tests/a_ball_touching_a_prisms_edge_exactly.rs`.
+    #[test]
+    fn a_line_that_touches_a_ball_at_a_point_f64_holds_touches_it_exactly_there() {
+        let ball = |centre: [f64; 3], radius: f64| {
+            Surface::Sphere(
+                Sphere::new(Point::new(centre[0], centre[1], centre[2]), radius).expect("a radius"),
+            )
+        };
+        assert_eq!(
+            meet([
+                &flat([1.0, 0.0, 0.0], [5.0, 0.0, 0.0]),
+                &flat([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+                &ball([0.0; 3], 5.0),
+            ]),
+            Ok(MeetOfThree::At(smallvec![PredicatePoint::Exact([
+                5.0, 0.0, 0.0
+            ])]))
+        );
+        assert_eq!(
+            meet([
+                &flat([3.0, -4.0, 0.0], [0.0; 3]),
+                &flat([-1.0, -1.0, 0.0], [0.0; 3]),
+                &ball([1.0, 0.0, 16.0], 1.0),
+            ]),
+            Ok(MeetOfThree::At(smallvec![PredicatePoint::Exact([
+                0.0, 0.0, 16.0
+            ])]))
+        );
+    }
+
+    /// Where `over / under` is an `f64`, [`the_f64_quotient_of`] finds it —
+    /// including where the first guess, the two rounded and divided, lands on
+    /// a neighbour of it. And where it is not an `f64`, nothing comes back.
+    ///
+    /// `under` is a number and a part of a unit in its last place, so rounding
+    /// it moves it, and that is one of the three roundings that can move the
+    /// guess. The counts say what each way of guessing does with the same
+    /// quotients. Measured: of 100 000, the first guess alone missed 37 726,
+    /// the first guess and its two neighbours missed 137, and the Newton step
+    /// missed none.
+    #[test]
+    fn an_f64_quotient_is_found_where_the_first_guess_lands_beside_it() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut one_in_one_to_two = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            f64::from_bits((0x3ff << 52) | (state >> 12))
+        };
+        let (mut the_guess_missed, mut a_neighbour_missed) = (0, 0);
+        const TRIES: usize = 100_000;
+        for attempt in 0..TRIES {
+            let quotient = if attempt % 2 == 0 {
+                one_in_one_to_two()
+            } else {
+                -one_in_one_to_two()
+            };
+            let under = Exact::of(one_in_one_to_two())
+                .plus(&Exact::of(one_in_one_to_two() * 2f64.powi(-54)));
+            let over = under
+                .times(&Exact::of(quotient))
+                .expect("nothing here is near the ends of the range");
+            let guess = over.nearest_f64() / under.nearest_f64();
+            if guess != quotient {
+                the_guess_missed += 1;
+            }
+            if ![guess, guess.next_up(), guess.next_down()].contains(&quotient) {
+                a_neighbour_missed += 1;
+            }
+            assert_eq!(
+                the_f64_quotient_of(&over, &under),
+                Some(quotient),
+                "{over:?} / {under:?}"
+            );
+        }
+        println!(
+            "of {TRIES} quotients that are an f64, the first guess missed {the_guess_missed}, \
+             the guess and its two neighbours missed {a_neighbour_missed}, the Newton step none"
+        );
+        assert!(
+            the_guess_missed > 0,
+            "no first guess missed, so this search says nothing about the step"
+        );
+
+        assert_eq!(the_f64_quotient_of(&Exact::of(1.0), &Exact::of(3.0)), None);
+        for under in [3.0, -3.0] {
+            assert_eq!(
+                the_f64_quotient_of(&Exact::of(0.0), &Exact::of(under)).map(f64::to_bits),
+                Some(0.0f64.to_bits()),
+                "a zero over {under} is the zero every other zero is, and not -0.0"
+            );
+        }
     }
 
     #[test]
