@@ -562,7 +562,9 @@ impl Model {
             EdgeRun::RightRoundWhereItCrosses { .. } => {
                 Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes
             }
-            EdgeRun::PartOfWhereItCrosses { .. } => Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes,
+            EdgeRun::PartOfWhereItCrosses { .. } => {
+                Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes
+            }
             EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross | _ => return Ok(()),
         };
         let Some(planes) = self

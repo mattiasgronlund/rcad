@@ -64,8 +64,7 @@ fn the_sweep_refuses_the_tilted_disc_read_back_from_bytes() {
     for disc_first in [false, true] {
         let (model, built) = a_bar_with_its_lid_split_by_a_disc(the_lid(), disc_first);
         built.expect("the disc on the lid's own plane builds");
-        let tilted =
-            with_the_inner_plane_swapped(&model, disc_first, tilted_through_the_corner());
+        let tilted = with_the_inner_plane_swapped(&model, disc_first, tilted_through_the_corner());
 
         let swept = tilted.validate(&Policy::certified(), &mut ProvenanceLog::new());
 
@@ -227,8 +226,7 @@ fn up() -> Vector {
 /// A pipe of `radius` up the bar's axis.
 fn pipe(radius: f64) -> Surface {
     Surface::Cylinder(
-        Cylinder::new(Axis::new(Point::origin(), up()).expect("an axis"), radius)
-            .expect("a pipe"),
+        Cylinder::new(Axis::new(Point::origin(), up()).expect("an axis"), radius).expect("a pipe"),
     )
 }
 
@@ -460,9 +458,8 @@ fn a_tetrahedron_with_an_edge_down_a_pipe(model: &mut Model) -> Result<SolidKey>
     let cd = straight(&mut builder, c, d);
 
     let face = |builder: &mut SolidBuilder, facing: Vector, through: Point, steps: [_; 3]| {
-        let steps = steps.map(|(edge, way)| {
-            DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge"))
-        });
+        let steps = steps
+            .map(|(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")));
         let round = builder.add_wire(&steps).expect("a wire");
         let plane = Plane::from_point_and_normal(through, facing).expect("a plane");
         builder
