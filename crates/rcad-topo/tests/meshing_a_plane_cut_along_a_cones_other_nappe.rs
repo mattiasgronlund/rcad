@@ -1,9 +1,9 @@
-//! Why the mesher refuses the fuses of `a_plane_cut_along_a_cones_other_nappe.rs`
-//! that get past selection and no further (`docs/decisions.md` §285).
+//! Why the mesher refused the fuses of `a_plane_cut_along_a_cones_other_nappe.rs`
+//! that got past selection and no further (`docs/decisions.md` §285).
 //!
-//! Eighteen of them, and every one refused in the check the fuse makes before it
-//! writes a curved answer: the answer meshed as coarsely as a mesh gets, for the
-//! sign of the space it encloses. Two causes:
+//! There were eighteen, and every one was refused in the check the fuse makes
+//! before it writes a curved answer: the answer meshed as coarsely as a mesh
+//! gets, for the sign of the space it encloses. Two causes:
 //!
 //! - **Sixteen caps of the pointed cone.** The piece of the cone inside the
 //!   block runs right round the apex, so the mesher cuts it into four quarters
@@ -17,8 +17,9 @@
 //! - **Two folds on the frustum.** The block's steep face and the frustum's
 //!   face share the two arcs they cross in, each walked as two chords, and both
 //!   faces draw the side between the two arcs' middles:
-//!   `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. Still refused;
-//!   §285.6's experiment B is the retry that answers them.
+//!   `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. That mesh
+//!   retries a fold at half the room now, as §208.3's zero ladder already did,
+//!   and both answer right (§285.6's experiment B).
 
 use core::f64::consts::{FRAC_PI_2, PI};
 use std::collections::BTreeMap;
@@ -38,23 +39,14 @@ use cones::{a_frustum, a_pointed_cone};
 ///
 /// There were eighteen (§285.1). Sixteen were caps of the pointed cone refused
 /// `CornersCoincide { position: 2 }`, and none is refused there since the
-/// quarter cuts leave from four different corners (§354). The two folds on the
-/// frustum are left, for the coarsest mesh's retry (§285.4).
+/// quarter cuts leave from four different corners (§354). The other two were
+/// the frustum's intersection at lean three eighths, crossing `−1/4`, turned 3
+/// and 3.5, refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`
+/// at the coarsest mesh (§285.4), and none is refused there since that mesh
+/// retries a fold at half the room.
 #[test]
-fn the_mesher_refuses_two_folds_on_the_frustum_and_no_cap_of_the_pointed_cone() {
-    let fold = "TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }";
-    let mut want = Vec::new();
-    for turn in [3.0, 3.5] {
-        want.push((
-            "frustum",
-            0.375,
-            -0.25,
-            turn,
-            "intersection",
-            fold.to_owned(),
-        ));
-    }
-    assert_eq!(the_mesher_refusals(), want);
+fn the_mesher_refuses_no_cap_of_the_pointed_cone_and_no_fold_on_the_frustum() {
+    assert_eq!(the_mesher_refusals(), Vec::<MesherRefusal>::new());
 }
 
 /// The sixteen caps, predicted from the shape alone for every block whose steep
@@ -159,12 +151,13 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_do_
 /// down a ladder of five deflections instead of at the finest alone.
 ///
 /// All eighteen refused before there was an answer to check until the quarter
-/// cuts left from four different corners (§354). Now twelve answer right; the
-/// four whose steep face misses the apex by a rounding hold every grid point and
-/// measure at `0.02` and no finer (lean one quarter) or at no rung (lean three
-/// eighths); and the frustum's two folds are refused as they were. It is the
-/// harness for §285's and §354's experiments: with one applied, the same test
-/// prints how many answer right and how the rest refuse.
+/// cuts left from four different corners (§354) and the coarsest mesh retried
+/// a fold. Now fourteen answer right: the twelve caps and the frustum's two
+/// folds. The four whose steep face misses the apex by a rounding hold every
+/// grid point and measure at `0.02` and no finer (lean one quarter) or at no
+/// rung (lean three eighths). It is the harness for §285's and §354's
+/// experiments: with one applied, the same test prints how many answer right
+/// and how the rest refuse.
 #[test]
 fn the_eighteen_held_to_the_familys_four_checks() {
     let mut cases = Vec::new();
@@ -211,15 +204,10 @@ fn the_eighteen_held_to_the_familys_four_checks() {
     assert_eq!(
         tally,
         [
-            ("right".to_owned(), 12),
+            ("right".to_owned(), 14),
             (cuts_off_a_corner(21_610), 1),
             (cuts_off_a_corner(27_214), 1),
             (crosses_itself, 2),
-            (
-                "the fuse refused TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }"
-                    .to_owned(),
-                2
-            ),
         ]
         .into()
     );

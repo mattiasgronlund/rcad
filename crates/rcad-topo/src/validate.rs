@@ -1870,7 +1870,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 }
 
 /// The solid meshed as coarsely as a mesh gets, or — when that mesh's own sides
-/// cross — as coarsely as it can be meshed without them crossing.
+/// cross, or two of its patches fold onto one side — as coarsely as it can be
+/// meshed without either.
 ///
 /// **A chord the sweep chose is not a side of the solid.** At
 /// [`as_coarse_as_a_mesh_gets`] an arc is stepped a quarter turn at a time, and
@@ -1885,6 +1886,18 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// deflection `d` strays at most `d` from its curve, so two pieces of boundary
 /// the solid keeps apart by more than twice that cannot be made to cross by the
 /// mesh; halving reaches such a `d` for any gap the solid really has.
+///
+/// # A fold is asked again the same way
+///
+/// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] is the sweep's sampling too.
+/// A frustum and a block whose steep face crosses it in two arcs keep a piece of
+/// each face between those arcs, and at the coarsest each arc is two chords
+/// with one point between them. Both faces then draw the side between the two
+/// middle points, and four triangles use it. A finer mesh gives each arc more
+/// points and the two faces stop drawing the same side (`docs/decisions.md`
+/// §285.4). The zero ladder in [`how_much_space_a_curved_solid_encloses`]
+/// already retried a fold one step on (§208.3); this is the same retry at the
+/// first mesh.
 ///
 /// # Why this is not a fixed finer deflection
 ///
@@ -1914,9 +1927,14 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// [`Error::MoreMeshPointsThanASolidWillHold`] and a patch with more triangles
 /// than the triangulator will hold each end it too.
 ///
-/// Whichever ends it, **the finest mesh's crossing is what is handed back**. A
-/// face that meshed at a finer deflection was not what stopped the solid, so a
-/// coarse refusal can name a face whose only fault was the sweep's own chords.
+/// A solid that folds at every deflection walks the same ladder, down to the
+/// same floor: the floor is the solid's corners and not which refusal came
+/// back, so a fold costs no more meshes than a crossing does.
+///
+/// Whichever ends it, **the finest mesh's crossing or fold is what is handed
+/// back**. A face that meshed at a finer deflection was not what stopped the
+/// solid, so a coarse refusal can name a face whose only fault was the sweep's
+/// own chords.
 /// That happened: on `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` the coarse
 /// mesh named the disc `#223`, which meshes from 0.869 down (§192.2).
 ///
@@ -1928,23 +1946,23 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 ///
 /// # Errors
 ///
-/// The finest mesh's crossing when no finer mesh clears it, and a finer
-/// mesh's refusal when it is about something other than its sides crossing —
-/// which is the solid's next blocker and the one worth naming.
+/// The finest mesh's crossing or fold when no finer mesh clears it, and a finer
+/// mesh's refusal when it is about something else — which is the solid's next
+/// blocker and the one worth naming.
 fn the_coarsest_mesh_whose_sides_do_not_cross(
     view: SolidView<'_>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Mesh> {
-    let mut finest_crossing = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
-        Err(why) if its_sides_cross(&why) => why,
+    let mut finest_refusal = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
+        Err(why) if a_finer_mesh_may_clear(&why) => why,
         answer => return answer,
     };
     let Some((low, high)) = view.box_around_it() else {
-        return Err(finest_crossing);
+        return Err(finest_refusal);
     };
     let Some(closest) = how_close_two_corners_come(view) else {
-        return Err(finest_crossing);
+        return Err(finest_refusal);
     };
     let finest = closest / 2.0;
     let (low, high) = (low.coordinates(), high.coordinates());
@@ -1955,7 +1973,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         };
         match view.mesh(less, policy, log) {
             Ok(mesh) => return Ok(mesh),
-            Err(why) if its_sides_cross(&why) => finest_crossing = why,
+            Err(why) if a_finer_mesh_may_clear(&why) => finest_refusal = why,
             Err(
                 Error::DeflectionBelowWhatAMeshCanReach { .. }
                 | Error::MoreMeshPointsThanASolidWillHold { .. }
@@ -1968,7 +1986,14 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         }
         room /= 2.0;
     }
-    Err(finest_crossing)
+    Err(finest_refusal)
+}
+
+/// Whether a finer mesh may clear what refused this one, because it is about
+/// where the mesh's own chords and cuts fell and not about the solid: its sides
+/// crossing, or two of its patches drawing one side through their insides.
+fn a_finer_mesh_may_clear(why: &Error) -> bool {
+    its_sides_cross(why) || matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
 }
 
 /// The distance between the two closest corners of the solid that are not in
