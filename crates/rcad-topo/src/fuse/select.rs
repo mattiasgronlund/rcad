@@ -1831,17 +1831,17 @@ fn the_largest_number_placing(surface: &Surface) -> Option<f64> {
 /// **A plane that only just cuts a ball leaves two such pieces.** A block
 /// turned about `z` beside a ball that should touch its face at one point has
 /// that face's plane stored a rounding off, and it cuts the ball in a circle
-/// `1e-8` across, taking off a cap `1e-17` to `8e-16` deep
-/// (`tests/a_ball_shaved_by_a_turned_blocks_face.rs`). A point put back on the
-/// ball comes back as a box `±5.7e-14` wide, thousands of times thicker than
-/// the cap, so no side of the cap can place it and the cap held none of them.
-/// The disk the ball leaves on the plane fares no better: the one point in
-/// the middle of it, a double, was a rounding on the far side of the plane,
-/// where the ball does not reach.
+/// of radius about `1e-8`, taking off a cap `1.3e-17` to `8.5e-16` deep
+/// (`tests/a_ball_shaved_by_a_turned_blocks_face.rs`, `docs/decisions.md`
+/// §346.6). A point put back on the ball comes back as a box `±5.7e-14` wide,
+/// 67 to 4400 times as deep as the cap, so no side of the cap can place it and
+/// the cap held none of them. The disk the ball leaves on the plane fares no
+/// better: the one point offered in the middle of it, a double, came out a
+/// rounding outside the ball.
 ///
-/// Unlike `docs/decisions.md` §346.3's sliver, these hold many points with
-/// `f64` coordinates: 1e-8 long and a fraction of a spacing deep is still
-/// millions of doubles. [`doubles_in_a_sliver`] finds a few of them, each
+/// Unlike §346.3's sliver, these hold points with `f64` coordinates: `1e-8`
+/// long and a fraction of a spacing deep still crosses many doubles, and a
+/// walk along the cut meets them. [`doubles_in_a_sliver`] finds a few, each
 /// **proved** inside the ball and on the right side of every cut, and
 /// [`segments_up_through_a_cap`] and [`points_beyond_a_plane_in_a_ball`] say
 /// what each piece makes of them.
@@ -1953,10 +1953,11 @@ fn points_beyond_a_plane_in_a_ball(piece: &Piece, flat: &Plane) -> Vec<Predicate
 /// **Found by walking along each cut from where the ball's centre is nearest
 /// it**, one spacing of doubles at a time in one of the other two coordinates,
 /// and at each step trying the few doubles next to the cut in the third. The
-/// sliver runs along the cut for its whole length and is a fraction of a
-/// spacing deep, so most steps hold no double inside it and about one in ten
-/// does at the thinnest measured, `1.3e-17` deep. Nothing found is trusted
-/// without the two signs, so where the walk goes decides nothing (§5).
+/// sliver runs along the cut for its whole length and can be a fraction of a
+/// spacing deep, so a step may hold no double inside it; the walk takes up to
+/// 64 each way, and at the thinnest cap measured, `1.3e-17` deep, it found
+/// points the cap holds. Nothing found is trusted without the two signs, so where the walk
+/// goes decides nothing (§5).
 fn doubles_in_a_sliver(
     ball: &Sphere,
     cuts: &[(Plane, Decision)],
@@ -2365,7 +2366,7 @@ mod tests {
     ///
     /// A real candidate is a rounding off its plane, not a tenth of a unit, so
     /// this reaches only a disk the ball is a rounding wider than just off the
-    /// plane — one `1e-8` across (`docs/decisions.md` §346.6). No candidate
+    /// plane — one of radius `1e-8` (`docs/decisions.md` §346.6). No candidate
     /// `candidate_points` offers was seen to land there.
     #[test]
     fn a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it() {

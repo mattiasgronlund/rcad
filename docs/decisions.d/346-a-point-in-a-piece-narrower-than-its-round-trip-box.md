@@ -21,6 +21,7 @@ folds yet.*
   346.3   The grazing block: no double is inside the piece
   346.4   The pins
   346.5   What this leaves
+  346.6   A second shape: a cap a fraction of a spacing deep and `1e-8` wide
 
 ### 346.1 Which piece refused
 
@@ -189,3 +190,111 @@ of doubles. So it gives up for another reason, which was not traced here.
 - **The fold is still shown only by `arrange.rs`'s two unit tests** (§288.5).
   Neither test in `two_meets_reach_one_corner.rs` can show it through a fuse
   yet, and each panics, saying so, on the day its fuse answers.
+
+### 346.6 A second shape: a cap a fraction of a spacing deep and `1e-8` wide
+
+*Queue row Q658, which replaces Q398's trace. Lane
+`lane-q658-a-ball-shaved-by-a-turned-blocks-face`, off `5268282c`.*
+
+**The shape.** A block `[−2, 0] × [−2, 0] × [0, 2]` and a ball of radius 1
+round `(1, off, 1)`, both turned about `z`, united. Unturned the ball touches the
+plane `x = 0` at one point. Turned, that face's plane is stored a rounding off
+and cuts the ball: `the_turned_face_cuts_the_ball_in_every_draw` in
+`tests/a_ball_shaved_by_a_turned_blocks_face.rs` has `intersect` answer one
+curve for each of the fourteen draws. Q398's `q398_room.py` worked out six of
+them exactly: the circle has a radius of `5.2e-9` to `4.1e-8` and the cap is
+`1.3e-17` to `8.5e-16` deep. With `off` negative the circle is on the block's
+face and the union is one solid joined through it; with `off` positive it is
+beside the block, and the union is the two apart, the ball with the cap as a
+face of its own.
+
+**It is not §346.3's piece.** That sliver holds no double at all. This cap is
+as thin, but `1e-8` long. At the height of the ball's centre it is a strip
+along the cut, a fraction of a spacing deep and at least `2 × 5.2e-9`, about
+`1e8` spacings of `1.1e-16`, long, and
+each spacing along it is another chance for a double to fall inside.
+
+**What reaches it, in `select.rs`.** Tried only when no point
+`candidate_points` offered was inside the piece:
+
+1. `doubles_in_a_sliver` walks each cutting plane from the foot of the ball's
+   centre, one spacing at a time, up to 64 each way, and at each step tries the
+   six doubles next to the plane in the other coordinate. It keeps up to four
+   points proved inside the ball and on the given side of every cut. Nothing
+   found is trusted without those signs.
+2. For a piece of the ball, `segments_up_through_a_cap` needs an axis no
+   cutting plane's normal has a part along (`z` here), holds that coordinate at
+   the centre's, and runs a segment from each point up to the first double
+   proved outside the ball. The segment is a box that holds a point of the ball,
+   and every point of it is on the same side of each cut.
+3. For a flat piece bounded by the ball's circle, `points_beyond_a_plane_in_a_ball`
+   keeps only points on the far side of the plane from the centre. A point
+   there inside the ball has its foot nearer the centre, so inside the disk.
+4. `side_of_a_plane` asks a plane about a box with each coordinate its normal
+   has no part along narrowed to one end. Asked as a box, the segment through
+   the cap turned by `1` (`3.6e-17` deep) was never held: the interval sum
+   rounds by more than the cap is deep. Narrowed, it is asked exactly. The same
+   narrowing is used where `select` compares the ray with the stored planes.
+
+**Measured, on the base and after.** A throwaway probe fused every draw with
+both policies and both argument orders (`crates/rcad-topo/tests/q658_probe.rs`,
+taken out). On the base all 56 refused `a point inside a piece of a face`.
+After, each draw answers alike under both policies and both orders:
+
+| draws (`off`, turned) | refused with |
+|---|---|
+| −0.5: 1, 1.5, 2.5, 3; −0.3: 0.3, 0.5, 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` |
+| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` |
+| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` |
+
+`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with` pins that
+table and fails on the base. `mise exec -- just t -p rcad-topo --no-fail-fast`:
+1209 run, 1209 passed, 11 skipped. No other pin moved.
+
+**Why the first row still refuses: the block's ray and its stored plane
+disagree about the cap.** A trace printed each segment's placement against the
+block. In `off −0.5` turned 1.5, 2.5 and 3, and `off −0.3` turned 1.5 and 2.5,
+the ray says `Outside` and `the_ray_and_the_stored_planes_disagree_about` says
+the two disagree: the segment is proved on the block's side of the stored plane
+`x = 0`, which is inside it by §17.1, and the ray fans that face from its
+stored corners, whose triangles leave the segment outside. `select` drops such
+a point, as §200.1 has it, and every point of the cap is within `8.5e-16` of
+the plane. In `off −0.3` turned 0.3 the ray answers `Undecidable` (certified)
+and `OnBoundary` (tolerant). **The guard is right to drop these, and the cause
+is not in `select.rs`**: it is `classify.rs`'s reading of a flat face by its
+corner triangles rather than its stored plane (`count_a_polygon`). Why the
+other first-row draws refuse was not traced one by one.
+
+**The second row gets past `select`**, and the mesher refuses a face of the
+ball with a hole of radius about `1e-8`. The refusal is `cut_up`'s fallback in
+`mesh.rs`, after `cut_a_ring_across` and `cut_a_hole_up_to_both_poles` both
+declined. Whether the face is refused for the hole's size or for its shape — a
+ball face whose outer loop and hole reach no pole, which neither cut takes —
+was not traced; that second reading is a guess nobody has run, so it carries no
+class.
+
+**The third row gets past `select` and the answer's own check refuses it.** In
+`off +0.5` turned 5 the segment through the cap was placed `Outside` the block,
+which is right: the cap is beside the block. What `validate` then found two
+faces disagreeing about was not traced.
+
+**A guess Q658 named, demonstrated.** A flat piece's candidate is three doubles
+off its plane by a rounding, and a round wire's partner is asked about the point
+where it is, not about its foot. So a disk the ball is wider than just off the
+plane can hold a point whose foot is outside it.
+`a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it` in
+`select.rs` shows it on a disk of radius `0.661`, with the point a tenth of a
+unit off. A real candidate is a rounding off, so it reaches only a disk of
+radius about `1e-8`, and no candidate `candidate_points` offers was seen to land
+there. The new flat candidates in item 3 are built on the far side for this
+reason. The existing ones are not changed; closing it for them is asking the
+partner on a box from the point to its foot, or the far-side test for a ball.
+
+**What this leaves**, each for a row of its own:
+
+- The first row needs `classify.rs` to read a flat face's crossing by its stored
+  plane, or `select` to place a piece some other way (§346.3 family 6).
+- The second row needs `mesh.rs`'s `cut_up` traced for a ball face with a
+  small hole.
+- The third row needs the answer's check traced for which two faces disagree.
+- The demonstrated guess, for the candidates `candidate_points` offers.

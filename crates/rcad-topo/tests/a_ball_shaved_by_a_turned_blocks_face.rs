@@ -5,8 +5,9 @@
 //! The block is `[−2, 0] × [−2, 0] × [0, 2]` and the ball has radius 1 round
 //! `(1, off, 1)`, one unit out from the face `x = 0`, before the turn. Turned,
 //! the plane of that face is stored a rounding off, and on the stored numbers
-//! it cuts the ball in a circle `5e-9` to `4e-8` across, taking off a cap
-//! `1e-17` to `8e-16` deep. With `off` negative the circle is on the block's
+//! it cuts the ball in a circle, of radius `5.2e-9` to `4.1e-8` and taking off
+//! a cap `1.3e-17` to `8.5e-16` deep in the six draws whose exact numbers were
+//! worked out (§346.6). With `off` negative the circle is on the block's
 //! face, so the right union is one solid joined through it. With `off` positive
 //! it is off the face, beside the block, and the union is the block and the
 //! ball apart, the ball with the cap as a face of its own.
@@ -24,13 +25,13 @@ use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 /// What a draw is refused with, whichever policy and argument order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Refused {
-    /// A point was found inside the cap, and the block could not place it: the
+    /// A point was found inside the cap, and the block could not place it. The
     /// block's ray reads its face `x = 0` by the triangles of its stored
-    /// corners, which put the cap outside the block where the stored plane puts
-    /// it inside, or it cannot say at all.
+    /// corners and put the point outside, where the stored plane puts it
+    /// inside, so `select` dropped it; or the ray could not say at all.
     NoPointEverySolidCouldPlace,
-    /// Every piece was placed, and the ball's face with a hole `1e-8` across in
-    /// it could not be meshed.
+    /// Every piece was placed, and a face of the ball with a hole of radius
+    /// about `1e-8` in it could not be meshed.
     AHoleGoesTooFarRound,
     /// Every piece was placed, and the answer's own check found two faces that
     /// do not agree which way they face.
