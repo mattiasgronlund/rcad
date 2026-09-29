@@ -150,6 +150,13 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// through the apex, where the two crossings are one root and rounding put the
 /// discriminant below zero. Read as that one root, four of the eight answer and
 /// four give up meshing: sixty-four right, sixteen meshing.
+///
+/// **The sixteen were caps cut into quarters with two cuts from one corner**
+/// (§285.2). With the cuts from four different corners, twelve answer right
+/// (§354). The other four are the intersection and the block less the cone of
+/// the two blocks whose steep face is meant to pass through the apex, at turn
+/// one, where the crossing passes a rounding above it (§285.3): they hold every
+/// grid point they are asked about, and do not measure at `0.002`.
 #[test]
 fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -167,10 +174,10 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 64,
+            right: 76,
             refused: [
-                ("CannotMeshAFace", 16),
                 ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 16),
+                ("the answer does not measure: CannotMeshAFace", 4),
             ]
             .into()
         }
@@ -638,12 +645,14 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
     Isometry::translation(Vector::new(x, y, z)).expect("a finite move")
 }
 
-/// Every way a fuse in this file refuses today, and the one way an answer
-/// that holds every grid point it is asked about can still not be checked.
-const REFUSALS: [&str; 7] = [
+/// Every way a fuse in this file refuses today, and the two ways an answer
+/// that holds every grid point it is asked about can still not be checked:
+/// a mesh finer than the mesher reaches, and a face it cannot mesh.
+const REFUSALS: [&str; 8] = [
     "a point inside a piece of a face",
     "ResultIsNotManifold",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
+    "the answer does not measure: CannotMeshAFace",
     "order along a crossing",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
     "CannotMeshAFace",

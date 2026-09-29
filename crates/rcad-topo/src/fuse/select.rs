@@ -575,8 +575,8 @@ fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
 /// become answers — a bar cut by one plane off its axis, the control of the
 /// tangent-wall row, and two tools meeting on a plane that cuts a round wall —
 /// and `fusing_two_bars_side_by_side.rs`'s two orders, which used to give out in
-/// different searches, now give out in the same one. Two side-by-side bars still
-/// do not fuse; they die at the next rule, which is what §218.5 predicted.
+/// different searches, now give out in the same one. Two side-by-side bars now
+/// fuse by every rule, both ways round.
 ///
 /// **A cone is counted where the plane cuts it in a curve that closes**, which
 /// is a circle for a cap's own plane and an ellipse for every plane leaned off
@@ -1022,15 +1022,37 @@ fn do_they_face_the_same_way(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<bool>> {
-    if let (Some(mine), Some(theirs)) = (mine, outward_plane_of_face(face)) {
-        return Ok(match agreement_of_two_planes(&mine, &theirs, log)? {
-            PlaneAgreement::SameWay => Some(true),
-            PlaneAgreement::OppositeWay => Some(false),
-            PlaneAgreement::Different => None,
-            other => {
-                panic!("plane agreement came back with an answer nothing here knows: {other:?}")
-            }
-        });
+    match (mine, outward_plane_of_face(face)) {
+        (Some(mine), Some(theirs)) => {
+            return Ok(match agreement_of_two_planes(&mine, &theirs, log)? {
+                PlaneAgreement::SameWay => Some(true),
+                PlaneAgreement::OppositeWay => Some(false),
+                PlaneAgreement::Different => None,
+                other => {
+                    panic!("plane agreement came back with an answer nothing here knows: {other:?}")
+                }
+            });
+        }
+        // A plane and a curved surface are never one surface, so their whole
+        // crossing is not asked for. `intersect` refuses a plane against a ring
+        // as a quartic however far apart the two are, and that refused the
+        // fuse (`docs/decisions.md` §322.7, Q326).
+        //
+        // No curved surface rcad-geom builds is a plane. A ball's radius and a
+        // ring's two radii are finite and above zero, so a ball and a ring are
+        // bounded and a plane is not. A pipe's radius is finite and above zero,
+        // so every point of it is that far from its axis, and a plane runs
+        // further than that from any line. A cone's slope is finite and above
+        // zero, so on the plane square to its axis through its apex the cone
+        // has one point, the apex, and a plane meets that plane in a line, in
+        // the whole of it, or nowhere. The cone that is a plane, a half-angle
+        // of a right angle, is refused by `Cone::from_half_angle`, and its
+        // infinite slope by `Cone::new`. Each type checks again when it is read
+        // from bytes. `intersect` never answered `SameSurface` for such a pair
+        // either, so what skipping it drops is a refusal, or the records of a
+        // crossing nothing here used.
+        (Some(_), None) | (None, Some(_)) => return Ok(None),
+        (None, None) => (),
     }
     if !matches!(
         intersect(&piece.surface, &face.surface, policy, log)?,
@@ -1182,9 +1204,10 @@ impl InPlane {
     /// abandoned, so which one lands decides nothing. **The second is the same
     /// distance the other way**, and it is what a plane out at `1e308` needs,
     /// where stepping further from the origin overflows and stepping towards it
-    /// cannot. `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` is where
-    /// that runs: with only the first try the fuse there stops before reaching
-    /// any arithmetic. Stepping towards the origin *first* was measured too, and
+    /// cannot. `two_towers_1e308_tall_are_united_by_proof_alone` in
+    /// `tests/fusing_solids.rs` is where that runs, and the fuse there now
+    /// answers: with only the first try it refuses on [`OFF_A_PLANE`] before it
+    /// reaches any arithmetic. Stepping towards the origin *first* was measured too, and
     /// it is the 37.9% again — a face far from the origin ends up with a
     /// reference point a whole offset away from it, and the fan degenerates.
     pub(crate) fn of(plane: &Plane) -> Option<Self> {
@@ -1762,13 +1785,28 @@ fn the_largest_number_placing(surface: &Surface) -> Option<f64> {
     }
 }
 
-/// Halfway between two points, which is exact whenever both ends are.
+/// Halfway between two points, which is exact whenever both ends are and the
+/// middle is a double.
+///
+/// **Two ways to halve, and each is exact where the other is not.** Adding
+/// first overflows once the two ends add up past the largest double: two
+/// corners at `z = 1e308` make `2e308`, and every point blended from a tower's
+/// top came back as a box reaching up to infinity, which no winding could
+/// place (`docs/decisions.md` §353). Halving first loses the last bit of a
+/// subnormal end. Both enclose the same middle, so the part they share does
+/// too, and it is one double whenever either of them was.
 fn midway_between(one: PredicatePoint, other: PredicatePoint) -> PredicatePoint {
     let (one, other) = (one.enclosure(), other.enclosure());
     let half = Interval::exactly(0.5);
-    as_exact_as_it_is(PredicatePoint::Constructed(
-        [0, 1, 2].map(|axis| (one[axis] + other[axis]) * half),
-    ))
+    as_exact_as_it_is(PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+        let added_first = (one[axis] + other[axis]) * half;
+        let halved_first = one[axis] * half + other[axis] * half;
+        Interval::new(
+            added_first.lo().max(halved_first.lo()),
+            added_first.hi().min(halved_first.hi()),
+        )
+        .expect("two enclosures of one middle both hold it")
+    })))
 }
 
 /// The name the search for a point inside a piece goes by in provenance records.
@@ -1806,11 +1844,34 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, candidate_points, corners_of, every_picker_keeps,
+        InPlane, Piece, candidate_points, corners_of, every_picker_keeps, midway_between,
         the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::{FaceMeet, MeetPoint};
+
+    /// Adding first overflows here: `1e308 + 1.5e308` is past the largest
+    /// double, and the middle, `1.25e308`, is not.
+    #[test]
+    fn the_middle_of_two_corners_past_half_the_largest_double_is_exact() {
+        let middle = midway_between(
+            PredicatePoint::from([0.5, -1e308, 1e308]),
+            PredicatePoint::from([1.0, -1.5e308, 1.5e308]),
+        );
+        assert_eq!(middle, PredicatePoint::Exact([0.75, -1.25e308, 1.25e308]));
+    }
+
+    /// Halving first loses the last bit of the smallest subnormal: half of
+    /// `2⁻¹⁰⁷⁴` is no double. The middle of it and `3 × 2⁻¹⁰⁷⁴` is `2⁻¹⁰⁷³`, which is.
+    #[test]
+    fn the_middle_of_two_subnormal_corners_is_exact() {
+        let smallest = f64::from_bits(1);
+        let middle = midway_between(
+            PredicatePoint::from([smallest, 0.0, 0.0]),
+            PredicatePoint::from([3.0 * smallest, 0.0, 0.0]),
+        );
+        assert_eq!(middle, PredicatePoint::Exact([2.0 * smallest, 0.0, 0.0]));
+    }
 
     /// The torus `a_quarter_bend(4, 1)` is drawn on, and the plane `y = 0` its
     /// end cap lies on.
