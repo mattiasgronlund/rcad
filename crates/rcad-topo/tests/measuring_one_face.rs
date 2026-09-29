@@ -176,6 +176,15 @@ fn a_flat_face_measures_exactly_the_textbooks_area_and_middle() {
 /// it. What would cover that too is an error that charges the corners' own
 /// rounding — for the solid and every face at once, since the faces add up to
 /// the solid.
+///
+/// **So does the wobble** (`docs/decisions.md` §338.5): it is how far the
+/// measured middle is from where the fan of the corners the solid holds
+/// balances exactly, which is the rounding of putting a middle back a million
+/// out, at most one spacing of `f64` there along each axis. Five faces'
+/// middles rounded, from `5.8e-11` to `8.2e-11`; one came out on an `f64`
+/// and owes nothing, which
+/// `the_middle_of_a_flat_solid_and_of_each_face_is_within_its_wobble` checks
+/// exactly from the world origin.
 #[test]
 fn a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_squared() {
     let mut model = a_model();
@@ -187,10 +196,19 @@ fn a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_square
         .place_solid(cube, &placement)
         .expect("this model made the key");
 
-    let mut worst: (f64, f64) = (0.0, 0.0);
+    let spacing = 2.0_f64.powi(-33);
+    let a_corner_moved = 0.5 * spacing * 3.0_f64.sqrt();
+    let mut worst: (f64, f64, f64) = (0.0, 0.0, 0.0);
     for face in faces_of(&model, cube) {
         let measured = one_face(&model, cube, face, 0.1);
-        assert_eq!(measured.wobble, 0.0);
+        println!("a face's middle rounded by {:e}", measured.wobble);
+        assert!(
+            // The fan's own middle rounds a few times near the face's size, and
+            // then once more on each axis when it is put back a million out.
+            measured.wobble <= 2.0 * a_corner_moved,
+            "a face's middle rounded by {}",
+            measured.wobble
+        );
         assert!(
             measured.area_error > 0.0 && measured.area_error <= 2.0 * 4.0 * f64::EPSILON,
             "a face's sum rounded by {}",
@@ -212,10 +230,14 @@ fn a_cube_turned_and_far_away_measures_within_a_few_roundings_of_its_side_square
         worst = (
             worst.0.max((measured.area - 4.0).abs()),
             worst.1.max(off_the_middle),
+            worst.2.max(measured.wobble),
         );
     }
-    let spacing = 2.0_f64.powi(-33);
-    let a_corner_moved = 0.5 * spacing * 3.0_f64.sqrt();
+    assert!(
+        worst.2 > 0.0,
+        "no face's middle rounded, so the wobble a turned cube a million out \
+         publishes was never seen above zero"
+    );
     assert!(
         worst.0 > 0.0 && worst.0 <= 8.0 * a_corner_moved,
         "a face of a turned cube is {} off side²",

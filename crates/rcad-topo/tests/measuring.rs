@@ -308,8 +308,8 @@ fn a_deflection() -> Deflection {
 
 /// A shape, how to build it, the five numbers M0 measured it as — volume,
 /// area, and the three coordinates of the centroid, as bits — and how far §338
-/// says its volume and area rounded.
-type FrozenShape = (&'static str, fn() -> (Model, SolidKey), [u64; 5], [f64; 2]);
+/// says its volume, area and centroid rounded.
+type FrozenShape = (&'static str, fn() -> (Model, SolidKey), [u64; 5], [f64; 3]);
 
 /// **The test this whole change is judged by** (`docs/decisions.md` §23.7).
 ///
@@ -324,13 +324,15 @@ type FrozenShape = (&'static str, fn() -> (Model, SolidKey), [u64; 5], [f64; 2])
 /// the exact path and the risk has arrived. There is no tolerance here on
 /// purpose: "close enough" is exactly what this test exists not to accept.
 ///
-/// The centroid's wobble is exactly zero, and so are the volume and area errors
-/// of every shape whose corners are whole numbers, where adding up in `f64`
-/// rounds nothing. The two turned shapes have corners with every bit in use, so
-/// their sums round, and §338 publishes how far; that is pinned to the bit here
-/// too, and `a_flat_solid_publishes_the_rounding_of_its_measure.rs` checks that
-/// such an error holds the exact answer. None of it moves when the deflection
-/// does — which is what says the deflection is ignored rather than merely small.
+/// The volume and area errors are exactly zero for every shape whose corners
+/// are whole numbers, where adding up in `f64` rounds nothing, and so is the
+/// centroid's wobble wherever the middle is an `f64` — every such shape but
+/// the notched one, whose middle is at five thirds. The two turned shapes have
+/// corners with every bit in use, so their sums round, and §338 publishes how
+/// far; that is pinned to the bit here too, and
+/// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` checks that such an
+/// error holds the exact answer. None of it moves when the deflection does —
+/// which is what says the deflection is ignored rather than merely small.
 #[test]
 fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
     let shapes: [FrozenShape; 6] = [
@@ -344,7 +346,7 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
                 4607182418800017408,
                 4607182418800017408,
             ],
-            [0.0, 0.0],
+            [0.0, 0.0, 0.0],
         ),
         (
             "a cube of side three, turned a third of a turn",
@@ -361,7 +363,11 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
                 13826050856027422708,
                 4617315517961601023,
             ],
-            [6.66133814775089e-16, 1.3026616822268522e-14],
+            [
+                6.66133814775089e-16,
+                1.3026616822268522e-14,
+                3.4319282584296813e-16,
+            ],
         ),
         (
             "a plate with a hole",
@@ -373,7 +379,7 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
                 4617315517961601024,
                 4609434218613702656,
             ],
-            [0.0, 0.0],
+            [0.0, 0.0, 0.0],
         ),
         (
             "a plate with a hole, turned",
@@ -390,7 +396,11 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
                 4613937818241073156,
                 4620974692658839552,
             ],
-            [1.7467508920769096e-14, 6.528111384795927e-14],
+            [
+                1.7467508920769096e-14,
+                6.528111384795927e-14,
+                1.7421014537715881e-15,
+            ],
         ),
         (
             "a notched extrusion",
@@ -402,7 +412,10 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
                 4610184818551597739,
                 4604930618986332160,
             ],
-            [0.0, 0.0],
+            // The middle is at five thirds along `x` and `y`, which no `f64`
+            // holds: each is a third of a spacing off, and the two together
+            // √2 times that.
+            [0.0, 0.0, 1.0467283057891842e-16],
         ),
         (
             "a cube a long way out",
@@ -414,7 +427,7 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
                 13913128586354622464,
                 4679718643993411584,
             ],
-            [0.0, 0.0],
+            [0.0, 0.0, 0.0],
         ),
     ];
 
@@ -446,11 +459,14 @@ fn a_flat_solids_measurement_is_bit_for_bit_what_it_was() {
                  measured, which is the risk §23.7 named"
             );
             assert_eq!(
-                [measured.volume_error(), measured.area_error()],
+                [
+                    measured.volume_error(),
+                    measured.area_error(),
+                    measured.centroid_wobble()
+                ],
                 rounded_by,
-                "{what}: the rounding §338 publishes"
+                "{what}: the rounding §338 publishes, the last of the three a length"
             );
-            assert_eq!(measured.centroid_wobble(), 0.0, "{what}: and a length");
             assert!(
                 log.is_empty(),
                 "{what}: a polyhedron's measurement approximates nothing, got {:?}",
