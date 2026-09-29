@@ -99,6 +99,7 @@ every product there is near `1e-318` and loses bits. That box is sound, and
 too loose for `every_point_where_three_surfaces_meet_somewhere_else_in_f64_is_on_all_three_of_them`
 to tell the corner from a surface moved clear of it, and that test failed. The
 uniformly tiny case is the scaling family's to answer, and it refuses as it did.
+(§349 answers it; this stays as it was written.)
 A line crossing one plane keeps refusing on any loss, because three planes
 have Cramer's rule behind it. A ring keeps refusing too, because its quartic
 needs its coefficients exactly.
@@ -146,4 +147,5 @@ as it was.
   Asking less there would not have hit this refusal at all. That file was the
   Q102 lane's while this ran, so it is named and not touched.
 - The uniformly tiny triple §322.4 keeps refused is a gap for the scaling
-  family. It was refused before this section and is refused after it.
+  family. It was refused before this section and is refused after it. (§349
+  answers it; this bullet stays as history.)
