@@ -16,12 +16,15 @@
 //!
 //! # Where such a circle is
 //!
-//! **Not in a fuse's answer.** Two bars stacked on one pipe written opposite
-//! ways, united, come back with one wall on the lower spelling and no circle
-//! between the bars
+//! **Not in the answer of any fuse of two such bars that this file's lane
+//! tried**: stacked (`z` 0 to 2 and 2 to 4) or overlapping (0 to 4 and 2 to 6),
+//! either spelling for each, united, intersected and differenced, the overlapping
+//! intersection and difference being refused (row Q385). Two bars stacked on one
+//! pipe written opposite ways, united, come back with one wall on the lower
+//! spelling and no circle between the bars
 //! (`two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written` in
-//! `fuse/assemble.rs`); what that leaves to check is the two cap circles, and
-//! the first test does. **Through the builder, yes**: a bar in two bands, one on
+//! `fuse/assemble.rs`), so what is left to check there is the two cap circles,
+//! and the first test does. **Through the builder, yes**: a bar in two bands, one on
 //! each spelling, with the circle between them naming its plane — the run the
 //! STEP reader writes for a closed circle between two curved faces that are not
 //! one surface bit for bit (§222.2). The second test builds that.
