@@ -34,6 +34,12 @@ outside them goes in `out_of_write_set_needs`, and you do not make it. A brief
 that names no files makes you read-only: write no tracked file and make no
 commit.
 
+Run `mise exec -- just fmt` before each commit. It reformats the whole tree,
+but staging by explicit path already keeps that harmless — only your own
+files get added. Skip it and your first gate can fail at `lint` over
+formatting alone, the way Q574's did, leaving its recorded tip a
+rustfmt-only commit instead of the real change.
+
 Stage with an explicit `git add <path>`, never `-A`, and commit as you go.
 Report `landed_sha` from `git rev-parse HEAD`, not from memory: a merger lands
 the branch by that sha.
