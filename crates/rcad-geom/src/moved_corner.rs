@@ -566,6 +566,38 @@ mod tests {
         }
     }
 
+    /// Pins the claim `bake.rs`'s `where_the_model_puts_a_corner` makes for
+    /// keeping its identity short-cut: without it, the general road below would
+    /// turn a stored `-0.0` into `0.0` even though the movement is the identity
+    /// and rounds nothing.
+    #[test]
+    fn the_general_road_turns_a_stored_negative_zero_into_zero_under_identity() {
+        let corner = Point::new(-0.0, 1.0, -0.0);
+        let (landed, wobble) = where_a_corner_lands_after_moving(
+            corner,
+            Vec::<&Surface>::new(),
+            &Isometry::identity(),
+        )
+        .expect("finite numbers");
+        assert_eq!(
+            wobble.magnitude(),
+            0.0,
+            "the identity movement rounds nothing"
+        );
+        let PredicatePoint::Exact([x, y, z]) = landed else {
+            panic!("a shift that rounds nothing comes back exact, not a box: {landed:?}")
+        };
+        assert!(
+            x.is_sign_positive(),
+            "x came back {x}, still a negative zero"
+        );
+        assert_eq!(y, 1.0);
+        assert!(
+            z.is_sign_positive(),
+            "z came back {z}, still a negative zero"
+        );
+    }
+
     /// How far a shifted flat surface is from where it truly goes, as a multiple
     /// of the largest number involved.
     ///
