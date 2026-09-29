@@ -122,7 +122,11 @@ fn the_same_bar_moved_toward_the_origin_is_refused_by_validate_as_by_the_reader(
         &postcard::to_allocvec(&model).expect("a model always encodes"),
     );
     assert_eq!(
-        (reached.written, reached.written_but_unsound, reached.read_back),
+        (
+            reached.written,
+            reached.written_but_unsound,
+            reached.read_back
+        ),
         (1, 1, 0),
         "{reached:?}"
     );

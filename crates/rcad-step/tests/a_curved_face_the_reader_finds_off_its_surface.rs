@@ -93,7 +93,11 @@ fn the_writer_harness_counts_the_bar_moved_as_the_fuzzer_moved_it_rather_than_pa
     .expect("a model always encodes");
     let reached = one_model_decoded_and_written(&bytes);
     assert_eq!(
-        (reached.written, reached.written_but_unsound, reached.read_back),
+        (
+            reached.written,
+            reached.written_but_unsound,
+            reached.read_back
+        ),
         (1, 1, 0),
         "{reached:?}"
     );
