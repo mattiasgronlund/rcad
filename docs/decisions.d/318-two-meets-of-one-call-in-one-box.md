@@ -7,12 +7,14 @@ ball grazing a leaning block edge far from the origin puts the two meets of one
 `meet_of_three_surfaces` call on the ball's two closed crossings with boxes
 that are the same bits, and the arm folds them. **No wrong answer came of it:**
 every such fuse refuses by name, on the turn at that box, and would refuse there
-with the two meets kept apart. No `src/` changed.*
+with the two meets kept apart. No `src/` changed.* **Q663 closed the arm
+(318.5).**
 
   318.1   What the suites bring to the arm
   318.2   The family that reaches it, and why this one
   318.3   The fuse, the two meets and what the kernel answers
   318.4   What this leaves
+  318.5   The arm asks the policy
 
 ### 318.1 What the suites bring to the arm
 
@@ -132,3 +134,38 @@ refuses on, and nothing else. The test pins that refusal, and says so.
   wrong answer this row did not close.
 - The probe was not run over `rcad-step`'s tests or the nightly fuzz corpus
   beyond what `every_model_the_fuse_fuzzer_kept_is_fused_again` replays.
+
+*The first bullet is done in 318.5, and the routes in the second no longer
+pass an unasked fold.*
+
+### 318.5 The arm asks the policy
+
+*Queue row Q663, with §244.5. Lane
+`lane-q663-a-closed-crossing-zero-only-when-exact`, off `7fc73410`.*
+
+`round_a_closed_crossing` now answers two equal boxes through
+`one_point_if_both_are_exact`: `Zero` when the box has no width, which is one
+point and a proof, and `Undecidable` as wide as the box otherwise. The overlap
+arm of §244 answers the same way. `merge_points_that_are_one_point` reaches
+them through `order_along`, so the policy merges the pair or the fuse refuses
+(§17.4).
+
+**What 318.3's fuse answers now.** Every rule under both policies, with the
+ball first, refuses with one record: `order along a crossing` at `Interval`,
+the one box twice, as wide as the box, `1.33514404296875e-5`. With the block
+first a probe saw the same predicate, one record each. A tolerant policy at a 25 mm working size
+refuses too, so its budget is under that box. The test is
+`every_fuse_refuses_on_the_order_of_the_two_places_in_one_box`, and against the
+base `arrange.rs` it fails on the `orient3d` record 318.3 pinned.
+
+**The routes 318.4 left open.** Two meets of different calls in one box, and a
+start and the point across a circle smaller than its box, reach the same arm
+as any two equal boxes, so neither is folded without the policy now. A
+tolerant policy whose budget refuses the fold now refuses, as above.
+
+**One thing this does not settle.** The enclosure the two arms hand back is a
+box's width, a length, and `order_along` files every refusal on a closed
+crossing as `Measures::Volume`, as `the_one_the_start_is` already did. A
+tolerant policy reads a volume's enclosure divided by its working size twice,
+so it merges boxes up to `s²` times wider than its budget for a length: 625
+times at 25 mm. Not changed here, and no fuse was searched for that it misleads.

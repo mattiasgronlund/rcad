@@ -9,12 +9,14 @@ between two different nodes, in a fuse anyone can call. Where those two nodes'
 boxes are apart the fuse refuses, as the code says it should. Where the boxes
 touch, a different line folds the pair first — the check in `place_the_meets`
 that throws away a meet already on the list. So this arm was never the one
-that did it, and nothing here reaches it.*
+that did it, and nothing here reaches it.* **Since §248 it does, and since
+Q663 the arm asks the policy (244.5).**
 
   244.1   Which proved zeros reach the arm
   244.2   A block edge grazing a ball puts the start between two nodes
   244.3   Where the boxes touch, `place_the_meets` folds the pair first
   244.4   What is not shown
+  244.5   The premise lapsed with §248, and the arm now asks the policy
 
 ### 244.1 Which proved zeros reach the arm
 
@@ -128,6 +130,9 @@ fn fuse_a_block_edge_grazing_a_ball(centre_x: f64, rule: Rule) -> rcad_topo::Res
 
 ### 244.4 What is not shown
 
+*The first two bullets are answered in 244.5. The third went with the dedupe
+in §248.*
+
 - **A fuse that reaches the overlap arm with two different nodes.** Its two
   nodes must be on the closed crossing and on *different* second crossings,
   or the dedupe takes them first (244.3). In the family of 244.1 that means
@@ -149,3 +154,65 @@ fn fuse_a_block_edge_grazing_a_ball(centre_x: f64, rule: Rule) -> rcad_topo::Res
   unproved fold one step earlier — **reported as a defect in the certified
   sense** (§17.4: overlapping boxes are for the policy to merge or refuse) —
   and whether any fuse carries it through to an answer is not measured.
+
+### 244.5 The premise lapsed with §248, and the arm now asks the policy
+
+*Queue row Q663, from Q73 and Q74, which were read-only. Lane
+`lane-q663-a-closed-crossing-zero-only-when-exact`, off `7fc73410`.*
+
+**The premise of 244.4 lapsed with §248.** Its first bullet asked for meets
+of *different* calls only because `place_the_meets` dropped the second meet of
+one call. §248 removed that drop, so both meets of one call are kept, and
+244.3's own shape at `cx = 16` hands the overlap arm its two places: the start
+`(16, 1, −2⁻²⁵)` and both places lie on the edge line, the sweep is exactly
+`[0, 0]`, and the boxes touch at `16`. Q73 found it with a temporary print in
+the arm.
+
+**The second bullet is answered: a tilted plane reaches the arm too.** Q74's
+prism on the triangle `(0, 0)`, `(4, 3)`, `(−3, 3)`, 32 tall, has two walls
+through the `z` axis whose stored normals are `(0.6, −0.8, 0)` and
+`(−0.7071067811865476, −0.7071067811865476, 0)`, offsets exactly zero. A ball
+of radius `1 + 2⁻⁵¹` at `(1, 2⁻²⁵, 16)` grazes that axis. Both walls' circles
+start at exactly `(0, 0, 16)`; the meet of the two walls and the ball is two
+boxes with `x` and `y` exactly zero and `z` overlapping round `16`; and
+`which_comes_first_round_a_crossing` answers `Zero` on both walls.
+`crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs` checks
+each of those. Q74 also reported a circle where two balls meet reaching the
+arm, two balls `2⁻²⁴` apart along `x` cut by `z = 1`; that was not re-run here.
+
+**A circle plane whose normal has three non-zero parts cannot reach the arm.**
+This is Q74's argument, not a search. `inari` rounds outward, so the sweep
+comes out `[0, 0]` only if every coordinate of a box with width is multiplied
+by an exact zero. With no zero in the normal, either both nodes lie on one line
+along an axis through the start, and such a line crosses the plane once, so
+the two are one place; or one box is exactly the start, a box of no width.
+Every box of no width is made an exact point (`as_exact_as_it_is` for meets and
+corners), and `one == from` answers that before the sum is asked.
+
+**Why the answer no longer carries weight.** Reaching the arm mattered because
+the arm answered `Zero`, and `merge_points_that_are_one_point` folded on it
+without a policy. Q663 makes the arm, and the arm for two equal boxes (§318.4),
+answer `Zero` only when both boxes have no width, which is a proof, and
+`Undecidable` as wide as the wider box otherwise. So any family that reaches
+it now meets the policy, whether or not the argument above has a hole.
+
+**What the fuses answer now**, measured with a probe in this row's test file,
+each rule, each argument order:
+
+| shape | `Policy::certified` | `Policy::tolerant(25.0)` |
+|---|---|---|
+| 244.3's edge, `cx = 16` | refuses: `order along a crossing` on the two places, `2⁻⁴⁸` | intersection answers `2.0933739 ± 0.0062779`; union and difference `CannotMeshAFace { CornersCoincide }` |
+| the prism above, ball first | refuses: `order along a crossing` on the two places, `2.3e-14`, `Volume` | intersection answers `0.43528013 ± 0.0025147`, the cap past the first wall; union and difference `CannotMeshAFace { CornersCoincide }` |
+| the prism above, prism first | refuses: `order along a crossing` on the two places along the walls' shared edge, `4.4e-14`, `Length` | as above |
+
+Before Q663 a certified fuse of either shape with the ball first refused on
+`orient3d`, the turn at the folded node (§317, Q74); run against the base
+`arrange.rs`, the pins below fail on exactly that record. The prism's
+tolerant intersection is within its error of the exact cap, which its test
+checks; the edge's was not compared with an exact volume here. The
+tolerant union and difference of the prism are queue row Q659's, which found
+the fuse right and the mesher at fault, and are not pinned here.
+`a_block_edge_grazing_a_ball_at_cx_16.rs`'s pin that §317.4 names as the test
+to flip is now `a_certified_fuse_refuses_on_the_order_of_the_two_places`: the
+order refuses before the turn is asked, so §317's gap no longer shows through
+that fuse under a certified policy, only in the file's measurement of the turn.
