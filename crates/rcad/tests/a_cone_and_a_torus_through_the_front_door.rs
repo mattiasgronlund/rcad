@@ -370,19 +370,19 @@ fn a_quarter_bend(model: &mut Model) -> SolidKey {
         &mut builder,
         Vector::new(0.0, -1.0, 0.0),
         start_circle,
-        Orientation::Reversed,
+        Orientation::Forward,
     );
     let end_cap = cap(
         &mut builder,
         Vector::new(-1.0, 0.0, 0.0),
         end_circle,
-        Orientation::Forward,
+        Orientation::Reversed,
     );
 
     let round_the_wall: Vec<DraftStep> = [
-        (start_circle, Orientation::Forward),
+        (start_circle, Orientation::Reversed),
         (seam, Orientation::Forward),
-        (end_circle, Orientation::Reversed),
+        (end_circle, Orientation::Forward),
         (seam, Orientation::Reversed),
     ]
     .into_iter()
@@ -405,7 +405,7 @@ fn a_quarter_bend(model: &mut Model) -> SolidKey {
         .add_shell(&[
             (start_cap, Orientation::Forward),
             (end_cap, Orientation::Forward),
-            (side, Orientation::Reversed),
+            (side, Orientation::Forward),
         ])
         .expect("three faces close");
     builder

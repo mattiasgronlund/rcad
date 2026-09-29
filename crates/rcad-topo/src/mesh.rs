@@ -1748,7 +1748,13 @@ impl BuildingAMesh {
             corner_is.push(self.remember(there.apply_to_point(inside)));
         }
 
-        let inside_out = face.orientation().is_reversed();
+        // The triangulator draws every triangle anticlockwise in the chart, and
+        // for every surface but a torus `∂first × ∂second` points out of it the
+        // way its own normal does. A torus's chart takes the tube angle first
+        // (for its seam, `Torus::point_at`), so there the chart's turn points
+        // into the tube while the torus itself faces out of it, as the standard,
+        // the reader and `validate.rs` read it (`docs/decisions.md` §329.1).
+        let inside_out = face.orientation().is_reversed() != matches!(stored, Surface::Torus(_));
         for triangle in cut.triangles() {
             let [first, second, third] = triangle.map(|corner| corner_is[corner as usize]);
             // A pole is a *side* of the patch whose two corners are one point in
@@ -6741,7 +6747,7 @@ mod tests {
     ///
     /// `Forward` is the quarter from the first circle anticlockwise to the
     /// second, built as `tests/rings/mod.rs` builds a bend with its seam left
-    /// out: caps facing `(0, −1, 0)` and `(−1, 0, 0)`, the wall used reversed.
+    /// out: caps facing `(0, −1, 0)` and `(−1, 0, 0)`, the wall used forwards.
     /// `Reversed` is the rest of the ring between the same two circles: every
     /// closed-edge coedge and both cap normals are turned over, and the shell
     /// is the same.
@@ -6769,17 +6775,17 @@ mod tests {
             model,
             Vector::new(0.0, -facing, 0.0),
             first_circle,
-            the_way_round.reversed(),
+            the_way_round,
         );
         let second_cap = cap(
             model,
             Vector::new(-facing, 0.0, 0.0),
             second_circle,
-            the_way_round,
+            the_way_round.reversed(),
         );
         let wires = [
-            (first_circle, the_way_round),
-            (second_circle, the_way_round.reversed()),
+            (first_circle, the_way_round.reversed()),
+            (second_circle, the_way_round),
         ]
         .map(|(circle, turn)| {
             let round_it = model.add_coedge(circle, turn);
@@ -6794,7 +6800,7 @@ mod tests {
             [
                 (first_cap, Orientation::Forward),
                 (second_cap, Orientation::Forward),
-                (wall, Orientation::Reversed),
+                (wall, Orientation::Forward),
             ]
             .into_iter()
             .map(|(face, orient)| crate::model::FaceUse {

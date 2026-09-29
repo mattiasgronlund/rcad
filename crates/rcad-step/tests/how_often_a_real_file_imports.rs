@@ -928,6 +928,13 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// that close to a pole the pole (`docs/decisions.md` §198). Which of those two
 /// freed this file is not measured, and the solid it imports as is checked by
 /// `Model::validate` and nothing else.
+///
+/// **Turning the mesher's torus faces moved it from 161 to 164**, with nothing
+/// dropping out: `Relay_1-Form-A_Schrack-RYII_RM5mm`,
+/// `Relay_1-Form-B_Schrack-RYII_RM5mm` and `Relay_SPDT_Finder_34.51_Vertical`,
+/// each with torus faces used forwards, which the mesher faced into the tube
+/// and refused `FacesDoNotAgreeWhichWayTheyFace` (`docs/decisions.md` §329.4,
+/// §361).
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -1021,6 +1028,8 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "PinHeader_2x34_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x36_P2.54mm_Vertical.step",
     "PinHeader_2x39_P2.54mm_Horizontal.step",
+    "Relay_1-Form-A_Schrack-RYII_RM5mm.step",
+    "Relay_1-Form-B_Schrack-RYII_RM5mm.step",
     "Relay_3PST_COTO_3650.step",
     "Relay_3PST_COTO_3660.step",
     "Relay_DPDT_FCL_FTR-B4C.step",
@@ -1045,6 +1054,7 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Relay_DPST_Schrack-RT2-FormA_RM5mm.step",
     "Relay_SPDT_CUI_SR5.step",
     "Relay_SPDT_Finder_32.21-x000.step",
+    "Relay_SPDT_Finder_34.51_Vertical.step",
     "Relay_SPDT_Finder_36.11.step",
     "Relay_SPDT_Finder_40.31.step",
     "Relay_SPDT_Finder_40.51.step",

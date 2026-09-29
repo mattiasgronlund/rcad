@@ -22,8 +22,8 @@
 //! `a_band_between_two_circles_meshes_the_way_round_its_circles_are_walked`.
 //!
 //! Every bend here is built the way `tests/rings/mod.rs` builds one, with the
-//! wall used reversed and the seam left out, so the torus orientation §329 found
-//! turned round is turned round here too.
+//! wall used forwards, as a torus faces out of its tube, and the seam left out
+//! (§329, §361).
 
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
@@ -153,8 +153,8 @@ fn as_pappus_says(volume: f64, error: f64, quarters: f64, length: f64) {
 ///
 /// Anticlockwise is `tests/rings/mod.rs`'s bend from `+x` with its seam left
 /// out: the first cap faces `(0, −1, 0)`, the second faces on round the ring,
-/// the wall walks the first circle forward and the second backward and is used
-/// reversed. Clockwise is the rest of the ring between the same two circles:
+/// the wall walks the first circle backward and the second forward and is used
+/// forwards. Clockwise is the rest of the ring between the same two circles:
 /// both caps face the other way and every coedge on a circle is turned over.
 fn a_band(model: &mut Model, [cos, sin]: [f64; 2], way: Way) -> Result<SolidKey> {
     let inner = RING - TUBE;
@@ -173,8 +173,8 @@ fn a_band(model: &mut Model, [cos, sin]: [f64; 2], way: Way) -> Result<SolidKey>
     )?;
 
     let (facing, first_on_the_wall) = match way {
-        Way::Anticlockwise => (1.0, Orientation::Forward),
-        Way::Clockwise => (-1.0, Orientation::Reversed),
+        Way::Anticlockwise => (1.0, Orientation::Reversed),
+        Way::Clockwise => (-1.0, Orientation::Forward),
     };
     let second_on_the_wall = first_on_the_wall.reversed();
     let cap = |builder: &mut SolidBuilder, facing: Vector, circle, turn| -> Result<_> {
@@ -211,7 +211,7 @@ fn a_band(model: &mut Model, [cos, sin]: [f64; 2], way: Way) -> Result<SolidKey>
     builder.add_shell(&[
         (first_cap, Orientation::Forward),
         (second_cap, Orientation::Forward),
-        (wall, Orientation::Reversed),
+        (wall, Orientation::Forward),
     ])?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
