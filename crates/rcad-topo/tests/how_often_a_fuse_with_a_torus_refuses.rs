@@ -58,7 +58,12 @@
 //! and both are **gaps** in `rcad-geom` rather than anything topology can close:
 //! the curves are all there and none of them can be named with the runs this
 //! kernel has. So the first two rows are the theorem above, and the last three
-//! are §36.20's quartic-and-worse, still weighed and still left.
+//! are §36.20's quartic-and-worse, still weighed and still left. Neither
+//! refusal touches `a_bend_fused_with_a_copy_of_itself_is_the_bend_or_nothing`
+//! below — the one test in this file that does reach the arrangement,
+//! `select::choose` and `assemble`'s `join_up_what_is_one_face`, under all
+//! three rules — because fusing a bend with an exact copy of itself draws no
+//! plane-and-torus crossing at all.
 //!
 //! The rate has not moved through any of this — 0 of 96, three times over. That
 //! is the finding rather than a disappointment: a refusal walking down the
@@ -76,7 +81,7 @@
 //!
 //! | tool | a bend | a round bar in its place |
 //! |---|---:|---:|
-//! | a slab square to the axis | 0 of 96 answered | **24 of 96** |
+//! | a slab square to the axis | 0 of 96 answered | **96 of 96** |
 //! | a wedge through the axis | 0 of 96 | **96 of 96** |
 //! | a bar through the hole | 0 of 96 | **96 of 96** |
 //! | a ball in the bend | 0 of 96 | 0 of 96 |
