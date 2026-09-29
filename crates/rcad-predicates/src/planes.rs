@@ -3,7 +3,7 @@ use crate::expansion::{
 };
 use crate::interval::determinant;
 use crate::power_of_two::{exponent_that_brings_into_range, scaled_by_a_power_of_two};
-use crate::{Decision, Error, Filtered, Interval, Point, Predicate, decide};
+use crate::{Decision, Error, Filtered, Interval, Point, Predicate, decide, orient3d};
 
 /// Where three planes meet.
 ///
@@ -312,6 +312,70 @@ fn multiplies_back_to(candidate: f64, volume: &[f64], numerator: &[f64]) -> bool
     expansion_sign(&difference[..difference_len]) == Decision::Zero
 }
 
+/// Which comes first along the line where the two `line` planes meet: the point
+/// where `first` crosses it, or the point where `second` does.
+///
+/// The line is walked along `n₀ × n₁`, the cross product of the two `line`
+/// normals in the order given. [`Decision::Pos`] when `first`'s point comes
+/// first, [`Decision::Zero`] when the two are one point, [`Decision::Neg`] when
+/// `second`'s does. Planes are written as for [`meet_of_three_planes`], and
+/// which way `first` and `second` face does not matter.
+///
+/// # Why this and not the two meets
+///
+/// Each point is a meet of three planes and so a box, and where the two points
+/// are a rounding apart the boxes overlap and cannot be put in order. Two
+/// turned cubes a rounding apart stop there: a corner of one against the point
+/// where the other's face crosses that corner's edge.
+///
+/// Walk the line as `p(t) = p₀ + t·(n₀ × n₁)`, with `first`'s point at `t₁`
+/// and `second`'s at `t₂`. `second`'s value along the line is linear in `t`
+/// and nothing at `t₂`, so at `t₁` it is `(t₁ − t₂)·(n₂ · (n₀ × n₁))`, and
+/// `n₂ · (n₀ × n₁)` is `det(n₀, n₁, n₂)`. So `t₂ − t₁`, which is positive
+/// exactly when `first`'s point comes first, has the sign of
+/// `−side · det(n₀, n₁, n₂)`, where `side` is which side of `second` the point
+/// `first` makes lies on — [`side_of_a_plane_where_three_planes_meet`]. Both
+/// signs are worked out exactly where the intervals cannot tell, so two points
+/// a rounding apart are still put in order and one point is still called one.
+///
+/// # Errors
+///
+/// [`Error::PlanesDoNotMeetInAPoint`] when `first` or `second` is proved to run
+/// along the line, so that it crosses it nowhere or everywhere.
+///
+/// ```
+/// # use rcad_predicates::{Decision, which_meet_comes_first_along_a_line};
+/// // z = 0 and y = 0 meet in the x axis, walked along (0, 0, 1) × (0, 1, 0),
+/// // which is -x. Walking that way, x = 2 comes before x = 1.
+/// let line = [[0.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 0.0]];
+/// assert_eq!(
+///     which_meet_comes_first_along_a_line(line, [1.0, 0.0, 0.0, -2.0], [1.0, 0.0, 0.0, -1.0]),
+///     Ok(Decision::Pos)
+/// );
+/// ```
+pub fn which_meet_comes_first_along_a_line(
+    line: [[f64; 4]; 2],
+    first: [f64; 4],
+    second: [f64; 4],
+) -> Result<Decision, Error> {
+    let normal = |[nx, ny, nz, _]: [f64; 4]| [nx, ny, nz];
+    let into_second = orient3d(normal(line[0]), normal(line[1]), normal(second), [0.0; 3]);
+    if into_second == Decision::Zero {
+        return Err(Error::PlanesDoNotMeetInAPoint {
+            determinant_enclosure: 0.0,
+        });
+    }
+    let side = side_of_a_plane_where_three_planes_meet([line[0], line[1], first], second)?;
+    Ok(match (side, into_second) {
+        (undecided @ Decision::Undecidable { .. }, _)
+        | (_, undecided @ Decision::Undecidable { .. }) => undecided,
+        (Decision::Zero, _) => Decision::Zero,
+        (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Decision::Neg,
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Decision::Pos,
+        (_, Decision::Zero) => unreachable!("a second plane along the line was refused above"),
+    })
+}
+
 /// Which side of `plane` the point where the `three` planes meet lies on.
 ///
 /// Planes are written as for [`meet_of_three_planes`], and the side is the sign
@@ -552,6 +616,7 @@ const DETERMINANT_ENTRIES: usize = 24;
 mod tests {
     use super::{
         meet_of_three_planes, scaled_by_a_power_of_two, side_of_a_plane_where_three_planes_meet,
+        which_meet_comes_first_along_a_line,
     };
     use crate::{Decision, Error, Interval, Point};
 
@@ -912,6 +977,133 @@ mod tests {
             side_of_a_plane_where_three_planes_meet(three, moved),
             Ok(Decision::Neg)
         );
+    }
+
+    /// Queue row Q676's witness, one stage on from Q397's: along the edge the
+    /// first two of the corner's planes cross in, the corner, where the first
+    /// cube's face crosses the edge, against the point a rounding past it where
+    /// the second cube's face does. The two meets' boxes overlap on every axis,
+    /// so nothing read off them can put the two in order, and the planes can.
+    ///
+    /// Which way round is checked against the same face moved half a unit
+    /// further from the corner, where the boxes are far apart and say it
+    /// themselves. The corner is in front of the face, so that is a move back
+    /// along the face's normal, and it cannot carry the face past the corner:
+    /// the two orders are one order.
+    #[test]
+    fn a_corner_and_the_point_a_rounding_past_it_on_its_edge_are_put_in_order() {
+        let (three, the_other_face) = a_corner_a_rounding_short_of_the_other_cubes_face();
+        let line = [three[0], three[1]];
+        let corner = meet_of_three_planes(line[0], line[1], three[2]).expect("a corner");
+        let past_it = meet_of_three_planes(line[0], line[1], the_other_face).expect("a point");
+        for (mine, theirs) in corner.enclosure().into_iter().zip(past_it.enclosure()) {
+            assert!(
+                mine.lo() <= theirs.hi() && theirs.lo() <= mine.hi(),
+                "the two boxes overlap on every axis: {mine:?} {theirs:?}"
+            );
+        }
+
+        let mut further_out = the_other_face;
+        further_out[3] += 0.5;
+        assert_eq!(
+            side_of_a_plane_where_three_planes_meet(three, further_out),
+            Ok(Decision::Pos),
+            "the corner is still in front of the face"
+        );
+        let far_past_it = meet_of_three_planes(line[0], line[1], further_out).expect("a point");
+        let [n0, n1] = line.map(|[nx, ny, nz, _]| [nx, ny, nz].map(Interval::exactly));
+        let along = [
+            n0[1] * n1[2] - n0[2] * n1[1],
+            n0[2] * n1[0] - n0[0] * n1[2],
+            n0[0] * n1[1] - n0[1] * n1[0],
+        ];
+        let how_far_on = (0..3)
+            .map(|axis| (far_past_it.enclosure()[axis] - corner.enclosure()[axis]) * along[axis])
+            .fold(Interval::exactly(0.0), |total, term| total + term);
+        let the_boxes_say = how_far_on.sign();
+        assert!(matches!(the_boxes_say, Decision::Pos | Decision::Neg));
+
+        assert_eq!(
+            which_meet_comes_first_along_a_line(line, three[2], further_out),
+            Ok(the_boxes_say)
+        );
+        assert_eq!(
+            which_meet_comes_first_along_a_line(line, three[2], the_other_face),
+            Ok(the_boxes_say)
+        );
+    }
+
+    /// Swapping the two points swaps which comes first, turning the line round
+    /// does too, and turning either point's plane round moves nothing: the
+    /// plane is the same plane and crosses the line at the same point.
+    #[test]
+    fn the_order_turns_with_the_line_and_the_two_points_and_nothing_else() {
+        let (three, the_other_face) = a_corner_a_rounding_short_of_the_other_cubes_face();
+        let line = [three[0], three[1]];
+        let order = which_meet_comes_first_along_a_line(line, three[2], the_other_face)
+            .expect("both cross the line");
+        let the_other_way = match order {
+            Decision::Pos => Decision::Neg,
+            Decision::Neg => Decision::Pos,
+            decided => panic!("a rounding apart is two points in some order, not {decided:?}"),
+        };
+        let turned = |plane: [f64; 4]| plane.map(|coefficient| -coefficient);
+        assert_eq!(
+            which_meet_comes_first_along_a_line(line, the_other_face, three[2]),
+            Ok(the_other_way)
+        );
+        assert_eq!(
+            which_meet_comes_first_along_a_line(
+                [turned(line[0]), line[1]],
+                three[2],
+                the_other_face
+            ),
+            Ok(the_other_way)
+        );
+        assert_eq!(
+            which_meet_comes_first_along_a_line([line[1], line[0]], three[2], the_other_face),
+            Ok(the_other_way)
+        );
+        assert_eq!(
+            which_meet_comes_first_along_a_line(line, turned(three[2]), the_other_face),
+            Ok(order)
+        );
+        assert_eq!(
+            which_meet_comes_first_along_a_line(line, three[2], turned(the_other_face)),
+            Ok(order)
+        );
+    }
+
+    /// A plane turned round crosses the line where it did, so the two points
+    /// are one point: nothing, exactly, and not a rounding of it.
+    #[test]
+    fn a_plane_and_itself_turned_round_cross_the_line_at_one_point() {
+        let (three, _) = a_corner_a_rounding_short_of_the_other_cubes_face();
+        assert_eq!(
+            which_meet_comes_first_along_a_line(
+                [three[0], three[1]],
+                three[2],
+                three[2].map(|coefficient| -coefficient)
+            ),
+            Ok(Decision::Zero)
+        );
+    }
+
+    /// `y = 1` runs along the x axis, which `z = 0` and `y = 0` meet in, so it
+    /// crosses it nowhere, whichever of the two points it is asked for.
+    #[test]
+    fn a_plane_along_the_line_crosses_it_at_no_one_point() {
+        let line = [[0.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 0.0]];
+        let across = [1.0, 0.0, 0.0, -1.0];
+        let along = [0.0, 1.0, 0.0, -1.0];
+        for (first, second) in [(across, along), (along, across)] {
+            assert_eq!(
+                which_meet_comes_first_along_a_line(line, first, second),
+                Err(Error::PlanesDoNotMeetInAPoint {
+                    determinant_enclosure: 0.0
+                })
+            );
+        }
     }
 
     #[test]
