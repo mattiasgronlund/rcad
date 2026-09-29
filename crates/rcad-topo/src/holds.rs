@@ -1122,11 +1122,36 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
         } else {
             held
         })
-    } else if behind_all && matches!(surface, Surface::Sphere(_)) {
+    } else if behind_all
+        && (matches!(surface, Surface::Sphere(_)) || is_two_discs_taken_together(&surface, &cuts))
+    {
         held_in_front_of_any(&cuts, point)
     } else {
         Err(cannot())
     }
+}
+
+/// Whether a flat face whose every side lies behind the other cut is the
+/// insides of two pipes running the same way taken together, the cap of two
+/// side-by-side bars fused into one (`docs/decisions.md` §331.5).
+///
+/// **Its sides are the rim of the two together.** Each side is an arc of one
+/// curve with both ends on the other and lying outside it
+/// ([`where_an_arc_between_two_points_of_a_pipe_lies`]). The two curves meet in
+/// at most two points ([`is_a_pair_of_pipes_running_the_same_way`]) and cross at
+/// both, so each has exactly one arc outside the other, and the sides are those
+/// two arcs: one closed curve round the two insides taken together. The face
+/// keeps the inside of each pipe along its arc, and next to that arc the inside
+/// of that pipe is the inside of the two together. So the face is the part of
+/// the plane inside either, and a point is held when either pipe holds it.
+///
+/// Both have to be kept inside. Kept outside, the same arcs bound the part of
+/// the plane outside both, which runs on for ever and is no face of a solid.
+fn is_two_discs_taken_together(surface: &Surface, cuts: &[Cut]) -> bool {
+    surface.as_plane().is_some_and(|flat| {
+        is_a_pair_of_pipes_running_the_same_way(flat, cuts)
+            && cuts.iter().all(|cut| cut.kept == Decision::Neg)
+    })
 }
 
 /// One side of a face in the frame the face is stored in, with the surface of
@@ -1659,6 +1684,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// [`Cone::is_cut_in_a_closed_curve_by`]: rcad_geom::Cone::is_cut_in_a_closed_curve_by
 fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
     match surface {
+        Surface::Plane(flat) if is_a_pair_of_pipes_running_the_same_way(flat, cuts) => {
+            cuts.iter().any(|cut| cut.kept == Decision::Neg)
+        }
         Surface::Plane(flat) => cuts.iter().all(|cut| match cut.surface {
             Surface::Plane(_) => true,
             Surface::Sphere(_) => cut.kept == Decision::Neg,
@@ -1705,6 +1733,50 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
     }
 }
 
+/// Whether `cuts` are exactly two pipes whose axes run the same way, each cut
+/// by `flat` in a curve that closes: the two cap circles of two bars side by
+/// side, on a cap of anything fused from them (`docs/decisions.md` §331.5).
+///
+/// **Two such curves are one curve moved and scaled.** A pipe's sign is
+/// `|w|²|x − o|² − (w·(x − o))² − r²|w|²`, and its part of degree two,
+/// `|w|²|x|² − (w·x)²`, changes only by a positive factor between two pipes
+/// whose axes run the same way. So one sign less the other, scaled, is a
+/// plane's sign, and three things follow on `flat`:
+///
+/// - **The two curves meet in at most two points**, because those are on both
+///   curves and on that plane, and a line meets a closed curve in at most two
+///   points — or they are the same curve, which reads as a touch
+///   ([`where_an_arc_between_two_points_of_a_pipe_lies`]) and is refused.
+/// - **Some affine map of `flat` makes both circles**, the one that makes the
+///   first a circle. Being inside, outside, one piece and a chord are all kept
+///   by such a map, so what follows is argued on circles.
+/// - **The part of `flat` in front of both cuts is one piece** when the face
+///   keeps the inside of at least one, which is what
+///   [`is_a_family_this_follows`] asks. Inside both is two discs meeting, which
+///   is convex. Inside one disc and outside the other: walk from any of its
+///   points straight away from the second disc's centre. The walk stays outside
+///   the second disc, since its distance from that centre only grows, and stays
+///   in the first until it crosses the first circle — at a point outside the
+///   second disc, so on the one arc of the first circle outside the second.
+///   Every point is joined to that one arc, so the whole is one piece.
+///
+/// Outside both is refused. It is not a region a closed solid's face can be,
+/// since it runs on for ever.
+fn is_a_pair_of_pipes_running_the_same_way(flat: &Plane, cuts: &[Cut]) -> bool {
+    let [one, other] = cuts else {
+        return false;
+    };
+    are_pipes_running_the_same_way(&one.surface, &other.surface)
+        && [one, other].iter().all(|cut| match cut.surface {
+            Surface::Cylinder(pipe) => pipe.is_cut_in_a_closed_curve_by(flat) == Some(true),
+            Surface::Plane(_)
+            | Surface::Sphere(_)
+            | Surface::Cone(_)
+            | Surface::Torus(_)
+            | _ => false,
+        })
+}
+
 /// Whether the part of `pipe` in front of every cut is one piece, for the cuts
 /// this can show it of: planes, at most one of them lying along the axis, at
 /// most one keeping the pipe's far end and at most one keeping its near end —
@@ -1735,6 +1807,15 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
 ///   depend on `φ` at all, and the first arc is all or nothing. A half bar's two
 ///   caps are that.
 ///
+/// **A second pipe running the same way is a cut along the axis too**, which is
+/// what a wall of two bars side by side, fused, is cut by. On this pipe the
+/// other one's sign is a plane's sign, the plane through the two lines the
+/// pipes cross in ([`is_a_pair_of_pipes_running_the_same_way`]), and a pipe's
+/// sign does not change up its own axis, so neither does this: it is the same
+/// all the way up a ruling and affine in `cos φ` and `sin φ`, as a plane along
+/// the axis is. Whichever side of it the face keeps, it keeps one arc of
+/// rulings.
+///
 /// Anything else is refused, and none of it is shown to be a limit. Two cuts
 /// along the axis or two floors are each two arcs, which can meet in two pieces
 /// as above (a slab `|x| ≤ ½` across the same pipe), and telling that from one
@@ -1749,6 +1830,12 @@ fn leaves_a_pipe_in_one_piece(pipe: &rcad_geom::Cylinder, cuts: &[Cut]) -> bool 
     let mut floors = Vec::new();
     let mut roofs = Vec::new();
     for cut in cuts {
+        if let Surface::Cylinder(other) = cut.surface
+            && lie_along_one_line(axis, other.axis().direction().components())
+        {
+            along_the_axis += 1;
+            continue;
+        }
         let Some(flat) = cut.surface.as_plane() else {
             return false;
         };
@@ -1772,18 +1859,33 @@ fn leaves_a_pipe_in_one_piece(pipe: &rcad_geom::Cylinder, cuts: &[Cut]) -> bool 
     }
 }
 
-/// Whether two planes' stored normals lie along one line, which is every
-/// component of their cross product exactly zero; `false` when any of the three
-/// could not be settled.
+/// Whether two planes' stored normals lie along one line ([`lie_along_one_line`]).
+fn the_normals_lie_along_one_line(one: &Plane, other: &Plane) -> bool {
+    lie_along_one_line(one.normal().components(), other.normal().components())
+}
+
+/// Whether two pipes' stored axis directions lie along one line
+/// ([`lie_along_one_line`]); `false` when either is not a pipe.
+fn are_pipes_running_the_same_way(one: &Surface, other: &Surface) -> bool {
+    let (Surface::Cylinder(one), Surface::Cylinder(other)) = (one, other) else {
+        return false;
+    };
+    lie_along_one_line(
+        one.axis().direction().components(),
+        other.axis().direction().components(),
+    )
+}
+
+/// Whether `u` and `v` lie along one line, which is every component of `u × v`
+/// exactly zero; `false` when any of the three could not be settled.
 ///
 /// Each component is `u_i·v_j − u_j·v_i`, the dot of `(u_i, −u_j)` with
 /// `(v_j, v_i)`, and turning a stored number round is exact, so each is the
 /// same sum of stored products [`SquareToTheAxis`] settles.
-fn the_normals_lie_along_one_line(one: &Plane, other: &Plane) -> bool {
-    let [u, v] = [one, other].map(|flat| flat.normal().components());
+fn lie_along_one_line(u: [f64; 3], v: [f64; 3]) -> bool {
     [(1, 2), (2, 0), (0, 1)].into_iter().all(|(i, j)| {
         let (component, _) = rcad_predicates::decide(&SquareToTheAxis {
-            named: WHETHER_TWO_PLANES_LIE_SIDE_BY_SIDE,
+            named: WHETHER_TWO_DIRECTIONS_LIE_ALONG_ONE_LINE,
             normal: [u[i], -u[j], 0.0],
             along: [v[j], v[i], 0.0],
         });
@@ -1791,9 +1893,9 @@ fn the_normals_lie_along_one_line(one: &Plane, other: &Plane) -> bool {
     })
 }
 
-/// The name the test of whether two planes' normals lie along one line goes by
-/// in provenance records.
-const WHETHER_TWO_PLANES_LIE_SIDE_BY_SIDE: &str = "whether two planes lie side by side";
+/// The name the test of whether two planes' normals, or two pipes' axes, lie
+/// along one line goes by in provenance records.
+const WHETHER_TWO_DIRECTIONS_LIE_ALONG_ONE_LINE: &str = "whether two directions lie along one line";
 
 /// Which side of the surface across `side` the face keeps, read off the way the
 /// wire runs.
@@ -1801,10 +1903,20 @@ const WHETHER_TWO_PLANES_LIE_SIDE_BY_SIDE: &str = "whether two planes lie side b
 /// A wire keeps its face's material on its left, and left of `∇S × ∇T` is always
 /// `T`'s negative side (§36.6, `a_closed_crossing_is_walked_the_way_it_is_stored`).
 /// So the face keeps `T`'s negative side exactly when the side runs along
-/// `∇S × ∇T` at its start, with `∇S` the face's own outward gradient. A straight
-/// side runs from its start to its end. An arc leaves either of its ends into
-/// itself, and into itself reads positive against [`the_way_into_an_arc`], so
-/// the sign of that against `∇S × ∇T` is the sign of the way it runs.
+/// `∇S × ∇T` at its start. A straight side runs from its start to its end. An
+/// arc leaves either of its ends into itself, and into itself reads positive
+/// against [`the_way_into_an_arc`], so the sign of that against `∇S × ∇T` is the
+/// sign of the way it runs.
+///
+/// **`∇S` is the stored surface's own gradient, whichever way the face is
+/// used**, because that is the normal the wire, as a view hands it, keeps the
+/// material on the left of. The arena has the two coedges of every edge run
+/// opposite ways (`Model::validate`), so a face used reversed is stored with its
+/// wire walked round its *used* normal — `fuse/assemble.rs`'s `sides_of` writes
+/// a curved piece that way — and [`WireView::coedges`] walks it back the other
+/// way round. Turning `∇S` round for a reversed face as well, as this did until
+/// `docs/decisions.md` §331.5's note of 2026-09-29, read every cut of the
+/// crescent's inner wall as keeping the far side, and that wall refused.
 ///
 /// **A straight side on a curved face is read the same way as one between two
 /// planes**, which is what a half bar's wall needs: its two sides along `x = 0`
@@ -1827,11 +1939,8 @@ fn which_side_of_its_neighbour_a_side_keeps(
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let at = side.start.at;
-    let mut along_the_crossing =
+    let along_the_crossing =
         the_way_the_crossing_runs(surface, &side.across, at).ok_or_else(cannot)?;
-    if face.orientation().is_reversed() {
-        along_the_crossing = along_the_crossing.map(core::ops::Neg::neg);
-    }
     let flat = [surface, &side.across].map(|one| one.as_plane().is_some());
     let runs = match &side.run {
         SideRun::Straight => {
@@ -1953,7 +2062,25 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
         },
         SideRun::Arc { into_the_arc } => {
             let Surface::Plane(flat) = cut.surface else {
-                return Lies::Across;
+                let arcs_own_pipe = match (surface.as_plane(), side.across.as_plane()) {
+                    (Some(_), None) => Some(&side.across),
+                    (None, Some(_)) => Some(surface),
+                    (Some(_), Some(_)) | (None, None) => None,
+                };
+                let on_a_pipe_running_the_same_way = arcs_own_pipe
+                    .is_some_and(|own| are_pipes_running_the_same_way(own, &cut.surface));
+                return if on_a_pipe_running_the_same_way
+                    && ends == [Decision::Zero, Decision::Zero]
+                {
+                    where_an_arc_between_two_points_of_a_pipe_lies(
+                        surface,
+                        side,
+                        *into_the_arc,
+                        &cut.surface,
+                    )
+                } else {
+                    Lies::Across
+                };
             };
             let on_the_cut = |end: Corner, far| {
                 where_an_arc_with_one_end_on_a_cut_lies(
@@ -2041,6 +2168,44 @@ fn where_an_arc_with_one_end_on_a_cut_lies(
         Lies::Beside(far)
     } else {
         Lies::Across
+    }
+}
+
+/// Where an arc of the curve a plane cuts one pipe in lies against another pipe
+/// running the same way, when both of the arc's ends are on that pipe: on the
+/// side the arc leaves its start into. The arc may be a side of the flat face or
+/// of the pipe's own wall.
+///
+/// **It stays on that side all the way.** The arc lies on the plane, so it can
+/// meet the cut only where the plane cuts the cut's pipe, and the two curves the
+/// plane cuts two pipes running the same way in meet in at most two points
+/// ([`is_a_pair_of_pipes_running_the_same_way`]). The arc's two ends are two of
+/// them, so nothing between its ends is on the cut.
+///
+/// Which side it leaves into is the way the crossing runs at the start, turned
+/// round to point into the arc as [`where_an_arc_with_one_end_on_a_cut_lies`]
+/// turns it, read against the cut's own gradient there, which points out of
+/// the pipe.
+///
+/// [`Lies::Across`] when that reads zero or could not be settled. Zero is the
+/// arc leaving along the cut's curve — the two touching at the start, or being
+/// one curve — and neither is a side the arc lies on.
+fn where_an_arc_between_two_points_of_a_pipe_lies(
+    surface: &Surface,
+    side: &Side,
+    into_the_arc: [Interval; 3],
+    cut: &Surface,
+) -> Lies {
+    let at = side.start.at;
+    let (Some(along), Some(out_of_the_cut)) = (
+        the_way_the_crossing_runs(surface, &side.across, at),
+        gradient_at(cut, at),
+    ) else {
+        return Lies::Across;
+    };
+    match (dot(along, into_the_arc) * dot(along, out_of_the_cut)).sign() {
+        found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
+        Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
     }
 }
 

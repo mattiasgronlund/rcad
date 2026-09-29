@@ -48,9 +48,11 @@
 //! answer's bottom cap, even with a block that touches nothing: a pipe's circle
 //! had no centre for the arrangement to read which arc an edge is by (§331).
 //! Now a union or a lens fused with a block that touches nothing comes back as
-//! it was ([`a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`]).
-//! The crescents against that block, and every answer against a block over its
-//! top half, still refuse elsewhere (§331.3), and
+//! it was ([`a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`]),
+//! and a union or a lens fused with a block over its top half gives what
+//! cutting each bar first gives
+//! ([`a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_first_does`]).
+//! The crescents against either block still refuse elsewhere (§331.5), and
 //! [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
 //! shows the top half's answer exists.
 
@@ -59,7 +61,7 @@ use rcad_geom::{
     Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{FaceKey, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, FaceKey, Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 5.0;
 const HEIGHT: f64 = 10.0;
@@ -467,11 +469,8 @@ fn where_a_bar_started_its_cap_circle_stays_a_corner_where_the_other_circle_cros
 ///
 /// **Not here, because they still refuse** (§331.3, §331.5): the two crescents
 /// fused with this block, whose unions and whose differences with the crescent
-/// first refuse `ACurvedFaceGoesRightRoundWithNoSeam`, and every fuse of any
-/// answer with a block over its top half, which refuses `Undecidable`. The
-/// answers exist — [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
-/// builds the top half's — so pinning those refusals would keep gaps as if they
-/// were settled.
+/// first refuse `ACurvedFaceGoesRightRoundWithNoSeam`. The answers exist, so
+/// pinning those refusals would keep gaps as if they were settled.
 #[test]
 fn a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was() {
     let policy = Policy::certified();
@@ -619,7 +618,8 @@ fn which_came_back(model: &Model, solid: SolidKey, by_hand: f64, asked: &str) ->
 /// `(A − B) − T = (A − T) − (B − T)`. This order never meets an arc of a pipe's
 /// circle as an input edge: each half bar's caps are whole circles again. So
 /// every second fuse of an answer less the block over its top half, which
-/// refuses `Undecidable` (§331.3), has an answer this kernel builds: half of
+/// refused `Undecidable` for all six answers (§331.3) and still does for the
+/// two crescents (§331.5), has an answer this kernel builds: half of
 /// the first answer's volume, with the same four corners at `z = 0` and
 /// `z = 5`.
 ///
@@ -709,6 +709,165 @@ fn cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should()
                 measured.volume(),
                 measured.volume_error()
             );
+        }
+    }
+}
+
+/// **A block over the top half of a union or a lens cuts it as cutting each bar
+/// first does**, by every rule and both ways round.
+///
+/// The block is `30·20·10` from `z = 5` up and holds the whole top half, so with
+/// `V` the first answer's volume by hand: the union is `V/2 + 6000`, the
+/// intersection is the top half, `V/2`, with corners `(3, ±4, 5)` and
+/// `(3, ±4, 10)`, the difference with the answer first is the bottom half,
+/// `V/2`, with corners `(3, ±4, 0)` and `(3, ±4, 5)` — what
+/// [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
+/// builds — and the difference with the block first is `6000 − V/2`.
+///
+/// All 24 used to refuse `Undecidable`, "a point in a piece that every solid
+/// could place" (§331.3). The piece was the block's floor cut by the two pipes,
+/// and the point in it could not be placed against the answer because
+/// `classify_point` could not follow the answer's top cap, a flat face bounded
+/// by one arc of each pipe, nor then its walls, each a pipe cut by the other
+/// pipe ([`every_first_answer_says_which_points_it_holds`]).
+///
+/// **Not here, because they still refuse** (`docs/decisions.md` §331.5): the
+/// two crescents, whose twelve fuses with this block refuse "a point inside a
+/// piece of a face", on a piece of the inner wall with corners at `z = 15`,
+/// where the wall stops at `z = 10`.
+#[test]
+fn a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_first_does() {
+    let policy = Policy::certified();
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let shared = lens * HEIGHT;
+    let half = HEIGHT / 2.0;
+    let block = 30.0 * 20.0 * HEIGHT;
+    let corners_at = |low: f64, high: f64| {
+        Some(vec![
+            [3.0, -4.0, low],
+            [3.0, -4.0, high],
+            [3.0, 4.0, low],
+            [3.0, 4.0, high],
+        ])
+    };
+
+    for (first_rule, first, mut model, answer) in every_first_answer() {
+        let whole = match first_rule {
+            Rule::Union => 2.0 * one_bar - shared,
+            Rule::Intersection => shared,
+            Rule::Difference => continue,
+            other => panic!("{first}: a rule this test did not ask for, {other:?}"),
+        };
+        let top_half = a_block_from(&mut model, half);
+        for (rule, answer_first, by_hand, corners) in [
+            (Rule::Union, true, whole / 2.0 + block, None),
+            (Rule::Union, false, whole / 2.0 + block, None),
+            (Rule::Intersection, true, whole / 2.0, corners_at(half, HEIGHT)),
+            (Rule::Intersection, false, whole / 2.0, corners_at(half, HEIGHT)),
+            (Rule::Difference, true, whole / 2.0, corners_at(0.0, half)),
+            (Rule::Difference, false, block - whole / 2.0, None),
+        ] {
+            let asked = format!("{first}, then {rule:?} with the top half, answer first {answer_first}");
+            let [arguments, tools] = if answer_first {
+                [answer, top_half]
+            } else {
+                [top_half, answer]
+            };
+            let mut again = model.clone();
+            let fused = again
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+            again
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{asked} came back broken: {broken:?}"));
+            let [solid] = fused.solids() else {
+                panic!("{asked} is one solid: {:?}", fused.solids());
+            };
+            let solid = again.solid(*solid).expect("this model made the key");
+            if let Some(corners) = corners {
+                let mut found: Vec<[f64; 3]> = solid
+                    .faces()
+                    .flat_map(|face| face.wires().collect::<Vec<_>>())
+                    .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+                    .flat_map(|coedge| [coedge.edge().start(), coedge.edge().end()])
+                    .map(|corner| corner.point().coordinates())
+                    .collect();
+                found.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+                found.dedup();
+                assert_eq!(found, corners, "{asked}: the corners of the answer");
+            }
+            let measured = solid
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a solid measures");
+            assert!(
+                (measured.volume() - by_hand).abs() <= measured.volume_error(),
+                "{asked}: measured {} ± {} against {by_hand} by hand",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
+/// **Each of the six answers says which of four points at half height it
+/// holds**: `(−3, 0, 5)` in the first bar only, `(3, 0, 5)` in both,
+/// `(9, 0, 5)` in the second bar only, and `(3, 4.5, 5)` in neither but inside
+/// the answers' box, so a ray and not the box decides it.
+///
+/// `classify_point` used to refuse all 24, `CannotFollowAFacesTrimming`, first
+/// on the top cap and, past that, on a wall (§331.5):
+///
+/// - **The top cap is bounded by one arc of each pipe.** An arc against a pipe
+///   was read as crossing it, and the cap of the union, the two discs taken
+///   together, was no family `holds.rs` followed. Two pipes running the same
+///   way cut a plane in two curves that meet in at most two points, so an arc
+///   between those two is on one side of the other pipe all the way.
+/// - **Each wall is a pipe cut by the other pipe**, which on a pipe running the
+///   same way is a cut along the axis, like a plane through it.
+/// - **A crescent's inner wall is used reversed**, and `holds.rs` turned its
+///   wire round once more than the model does, so it read every cut as keeping
+///   the far side.
+#[test]
+fn every_first_answer_says_which_points_it_holds() {
+    let policy = Policy::certified();
+    let points = [
+        Point::new(-3.0, 0.0, 5.0),
+        Point::new(3.0, 0.0, 5.0),
+        Point::new(9.0, 0.0, 5.0),
+        Point::new(3.0, 4.5, 5.0),
+    ];
+    for (_, first, model, answer) in every_first_answer() {
+        let expected = match first.as_str() {
+            "Union here on there" | "Union there on here" => [true, true, true, false],
+            "Intersection here on there" | "Intersection there on here" => {
+                [false, true, false, false]
+            }
+            "Difference here on there" => [true, false, false, false],
+            "Difference there on here" => [false, false, true, false],
+            other => panic!("an answer this test did not ask for: {other}"),
+        };
+        let solid = model.solid(answer).expect("this model made the key");
+        for (point, inside) in points.into_iter().zip(expected) {
+            let placed = solid.classify_point(point, &policy, &mut ProvenanceLog::new());
+            let wanted = if inside {
+                Containment::Inside
+            } else {
+                Containment::Outside
+            };
+            assert_eq!(placed, wanted, "{first} at {point:?}");
         }
     }
 }
