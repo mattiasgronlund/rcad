@@ -2,14 +2,15 @@ use std::collections::HashMap;
 
 use rcad_geom::{
     Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
-    Plane, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS,
-    Scale, Surface, Vector, which_two_surfaces_a_run_is_between, which_way_a_closed_crossing_turns,
+    Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE,
+    SIDE_OF_TORUS, Scale, Surface, Vector, which_two_surfaces_a_run_is_between,
+    which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
 };
 use rcad_predicates::{
-    Approximation, Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN,
+    Approximation, Decision, Filtered, Interval, Level, Measures, NOTHING_IS_KNOWN, ORIENT2D,
     Point as PredicatePoint, Policy, Predicate, ProvenanceLog, Record, SideOfSurface,
     are_real_numbers, decide,
 };
@@ -387,6 +388,7 @@ impl Model {
 
         self.check_edge_is_walked_by_two_opposite_coedges(slot)?;
         self.check_something_curved_says_where_this_edge_bends(slot)?;
+        self.check_flat_faces_along_a_closed_edge_are_one_plane(slot, start.point, rounding)?;
 
         // The other half of Q16's invariant, and the half that keeps an
         // edge's *name* honest. An edge named by a crossing has to be on
@@ -514,6 +516,86 @@ impl Model {
             }
         }
         .into())
+    }
+
+    /// A closed edge whose every face is flat has all of them on one plane.
+    ///
+    /// Its run names a curved surface — the rule above has refused it
+    /// otherwise — and the curve is where that surface crosses a face's plane.
+    /// A closed plane section of a surface lies in that plane and in no other,
+    /// so two faces on two planes put the edge in two places, and the one drawn
+    /// was the first face's (Q386, Q574).
+    ///
+    /// **One plane spelt two ways is one plane.** [`Plane::agreement_with`]
+    /// answers the exact question first, which takes a plane turned round or
+    /// scaled. Two planes it proves different may still be one plane a file
+    /// wrote twice a hair apart — a `PLANE` of the face's own, whose normal
+    /// comes out `1e-17` or `5.2e-16` off the other face's
+    /// (`docs/decisions.md` §219.6) — so those are then asked how far the
+    /// curve on each plane can reach off the other, against `rounding`, the
+    /// room [`Model::what_writing_a_plane_down_costs`] gives a corner against
+    /// its own face's plane. Only a pipe has that bound
+    /// ([`how_far_a_closed_crossing_reaches_off_another_plane`]); a closed edge
+    /// that names any other curved surface between two planes proved different
+    /// is refused, which is the safe way for a missing bound to fall.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes`], and
+    /// [`Error::Undecidable`] where [`Plane::agreement_with`] cannot tell —
+    /// an answer nobody could reach is not taken for "one plane".
+    fn check_flat_faces_along_a_closed_edge_are_one_plane(
+        &self,
+        slot: EdgeSlot,
+        corner: Point,
+        rounding: f64,
+    ) -> Result<()> {
+        let EdgeRun::RightRoundWhereItCrosses { and } = &self.data().edges[slot].run else {
+            return Ok(());
+        };
+        let Some(planes) = self
+            .faces_along_edge(slot)
+            .map(|face| self.data().faces[face].surface.as_plane().copied())
+            .collect::<Option<Vec<Plane>>>()
+        else {
+            return Ok(());
+        };
+        let Some((first, others)) = planes.split_first() else {
+            return Ok(());
+        };
+        for other in others {
+            match first.agreement_with(other) {
+                PlaneAgreement::SameWay | PlaneAgreement::OppositeWay => continue,
+                PlaneAgreement::Different => {}
+                PlaneAgreement::CannotTell => {
+                    let mut records = ProvenanceLog::new();
+                    records.push(Record::new(
+                        ORIENT2D,
+                        &[
+                            PredicatePoint::from(first.normal().components()),
+                            PredicatePoint::from(other.normal().components()),
+                        ],
+                        Level::Interval,
+                        f64::INFINITY,
+                        Measures::Area,
+                    ));
+                    return Err(Error::Undecidable { records });
+                }
+                unknown => {
+                    panic!(
+                        "plane agreement came back with an answer nothing here knows: {unknown:?}"
+                    )
+                }
+            }
+            let within = |on: &Plane, off: &Plane| {
+                how_far_a_closed_crossing_reaches_off_another_plane(on, off, and, corner)
+                    .is_some_and(|reach| reach <= rounding)
+            };
+            if !(within(first, other) && within(other, first)) {
+                return Err(Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes.into());
+            }
+        }
+        Ok(())
     }
 
     /// Whether every face of this solid sits on a plane.
@@ -1723,6 +1805,42 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
         | EdgeRun::PartOfWhereItCrosses { .. }
         | _ => None,
     }
+}
+
+/// The furthest any point of the closed curve `and` cuts out of `on` can be
+/// from `off`, with `corner` a point of that curve; `None` where `and` is a
+/// surface this has no bound for.
+///
+/// Write `n` and `m` for the two unit normals and `X` for a point of the
+/// curve, which is on `on` exactly, and `V` for the corner projected onto
+/// `on`. Then `off`'s distance at `X` is its distance at the corner, plus at
+/// most the corner's distance from `on` (the step from the corner to `V` is
+/// along `n`, and `|m·n| ≤ 1`), plus `m·(X − V)` — and `X − V` lies in `on`,
+/// so only the part of `m` square to `n` reads it, which is `|n × m|` long.
+///
+/// **A pipe** of radius `R` about the unit axis `a` is crossed by `on` in an
+/// ellipse whose longest half-width is `R / |n·a|`, so `|X − V|` is at most
+/// twice that. What the corner misses the ellipse by is left out: it is
+/// multiplied by `|n × m|`, which is a rounding wherever the answer is near
+/// the room it is held to. A plane along the axis crosses the pipe in two
+/// lines, `R / 0` is infinite, and the answer is a NaN or infinite, which no
+/// room holds.
+///
+/// Worked in plain `f64` as [`off_a_plane_by_no_more_than_writing_it_down_cost`]
+/// is: the two distances are what [`Plane::signed_distance_to`] rounds, and
+/// the caller's room is sixteen times that.
+fn how_far_a_closed_crossing_reaches_off_another_plane(
+    on: &Plane,
+    off: &Plane,
+    and: &Surface,
+    corner: Point,
+) -> Option<f64> {
+    let Surface::Cylinder(pipe) = and else {
+        return None;
+    };
+    let widest = 2.0 * pipe.radius() / on.normal().dot(pipe.axis().direction()).abs();
+    let tilt = on.normal().cross(off.normal()).length();
+    Some(off.signed_distance_to(corner).abs() + on.signed_distance_to(corner).abs() + widest * tilt)
 }
 
 /// Every one of `held` named exactly once by `named`, and none of them left out.
