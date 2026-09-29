@@ -126,6 +126,15 @@ fn a_block_turned_to_lean_through_a_bars_rim_start_cannot_order_two_points_round
 /// the wall claimed that edge twice. With the plane in the name those are two
 /// edges, the cap's arc claimed by the cap and the wall, and the ellipse's by
 /// the wall alone.
+///
+/// **The turned face keeps the meet because it has no rim start to fold it
+/// into** (§284.7). The rim start is the bar's vertex, so only the bar's faces
+/// have a node for it. Folding the meet into it drops the meet's name, so the
+/// cap and the wall hand on the rim start and the turned face the meet, and
+/// `assemble` names those two corners. A probe that gave them one name made all
+/// six fuses answer and measure within `volume_error` of the volumes these
+/// messages carry. That is a gap, and the fix is to carry the name through the
+/// fold in `arrange.rs`. This pin fails the day it lands.
 #[test]
 fn under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner() {
     let (model, bar, block) = a_bar_and(a_block_turned_to_lean_along_z_equals_y);

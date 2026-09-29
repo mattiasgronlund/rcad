@@ -185,12 +185,103 @@ measured one. It is a **gap**, since the table in 284.4 holds.
 - **Name an arc by its plane as well** where two planes cut one curved
   surface between the same corners (284.5). `crates/rcad-topo/src/fuse/assemble.rs`.
   Its check is
-  `a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_get_one_name`.
+  `a_plane_exactly_through_a_bars_rim_start_answers_all_six_fuses_right_under_both_policies`.
   `which_curve_it_is`'s doc says why the plane is left out, and it has to be
-  read before this is changed.
+  read before this is changed. **Done by §330**, which renamed the check from
+  `a_plane_exactly_through_a_bars_rim_start_is_ordered_and_two_arcs_on_its_wall_get_one_name`
+  when all six fuses of the exact plane came to answer.
 - **§39.4's table** has one row for "order along a crossing", the turned
   notched bar. This is a second cause of that refusal, and the table should
   gain a row when either item above lands. `docs/decisions.d/039-*.md` is
   outside this lane's write set.
 - §252.8's sentence "a plane leaning through a bar's rim start" describes the
   turned block. It stays as written, and this section corrects it.
+
+### 284.7 Why the turned face keeps the meet, under a tolerant policy — 2026-09-29
+
+*Q363, what §330.7 left of Q210. Lane
+`lane-q363-a-plane-leaning-through-a-bars-rim-start-tolerant`, off `34052a6d`.
+No code changed: the fix needs `arrange.rs` and `mod.rs`, which were not this
+lane's.*
+
+**The turned face has no rim start to fold the meet into.** Each face is cut
+by its own `Arrangement`, and an arrangement makes corner nodes only from its
+own face's wire (`Arrangement::place_the_corners`). The rim start is a vertex
+of the bar, so the cap and the wall have a node for it and the turned face,
+which is the block's, does not. On the cap and on the wall the meet of the cap
+plane, the wall and the turned face is folded into the rim start under the
+tolerant policy (284.2). `Arrangement::fold_the_nodes` lets the input corner
+win, and in doing so drops the meet's `made_of`, the three surfaces and which
+of their meets it was; `Arrangement::meet_point` then hands the corner on as
+`MeetPoint::Existing` with nothing else. On the turned face the same meet is a
+node of its own and comes out as `MeetPoint::OfThreeSurfaces`. `Corners::of`
+in `assemble.rs` names the one `Vertex` and the other `Meet`, so they are two
+corners.
+
+A print of every kept side's two ends, in `Assembly::from_the_pieces`, since
+removed, showed it for the union with the bar first
+(`PROBE_Q363=1 mise exec -- just t -p rcad-topo --test a_plane_leaning_through_a_bars_rim_start --no-capture under_a_tolerant_policy`).
+The three surfaces are the turned face, the cap plane and the wall; their two
+meets are `which 0`, far, at `(−5, 2.5e-15, 0)`, and `which 1`, near:
+
+```
+cap   (piece 1)      Vertex(1v1) at (5, 0, 0)  and  Meet(which 0)
+wall  (piece 4)      Vertex(1v1) at (5, 0, 0)  and  Meet(which 0)
+turned (pieces 10, 11)  Meet(which 1)          and  Meet(which 0)
+```
+
+**That is the whole gap.** A second probe, also removed, took the name
+`Meet(which 1)` over to the rim start's corner in `Corners::taken_over` before
+any piece was walked, and changed nothing else. It picked the pair by
+coordinates, within `1e-9`, which is why it is a probe and not a fix
+(`CornerName` says why a coordinate never names a corner). With it, all six
+fuses answer, `Model::validate` passes, and each is one solid inside
+`measure`'s own `volume_error` of 284.4's volume by hand, at a deflection of
+`0.01`:
+
+| fuse | measured | by hand |
+|---|---|---|
+| union, either way round | `64701.787 ± 2.641` | `64702.065` |
+| intersection, either way round | `83.286 ± 0.496` | `83.333` |
+| bar less block | `701.787 ± 2.641` | `702.065` |
+| block less bar | `63916.714 ± 0.496` | `63916.667` |
+
+Run as `PROBE_Q363_JOIN=1 mise exec -- just t -p rcad-topo --test
+a_plane_leaning_through_a_bars_rim_start --no-capture probe_q363_measure`, a
+test since removed. The take-over fired 48 times over the six fuses, every
+time `Meet(which 1)` to vertex `1v1`.
+
+**The fix is to carry the fold, not to guess it in `assemble`.** Families
+considered:
+
+- **Carry the names a node stands for.** `fold_the_nodes` keeps every
+  absorbed `(surfaces, which)` on the node that survives, `meet_point` hands
+  them on in `MeetPoint`, and `assemble` puts each one into
+  `Corners::taken_over` before any piece is walked, so the order of the faces
+  cannot matter. This records a decision the arrangement already made, under
+  the policy it was asked under. It is the one to build.
+- **Infer the join in `assemble` from the names alone.** The cap's wire puts
+  the rim start between a side on the wall and a side on the turned face, so
+  it is at one of the three surfaces' meets, and the cap names the other meet
+  itself, which leaves `which 1`. That elimination is right for this shape.
+  It is a guess wherever a face with the vertex does not reach every meet, and
+  a wrong guess joins two points ten apart, which is a corrupt solid.
+- **Infer it from coordinates.** The probe's rule. `CornerName` rules it out.
+- **Ask the policy again in `assemble`.** The fold was decided on the order
+  round the cap circle, whose enclosure straddles zero. A distance between
+  the two points is proved non-zero, since the meet's `y` side is above zero,
+  so any other question refuses the join the arrangement made.
+
+Carrying the names has more to do than this shape needs. A meet that folds
+into another meet loses its name the same way, and
+`Arrangement::place_the_meets` drops a place outright when
+`a_corner_is_this_place` says a corner already is it, so that corner must
+record the place too. One meet taken over by two input vertices, each on a
+face of a different solid, would join those two, so `taken_over` wants a
+union of names rather than a map from one name to one corner. None of that
+was built or measured.
+
+`under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner`
+stays the check, and it trips once the names agree: under the second probe
+its first fuse, the union with the bar first, answered where the pin wants
+`ResultIsNotManifold { count: 1 }`.
