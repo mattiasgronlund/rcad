@@ -7417,7 +7417,11 @@ fuzz-yield from="" to="":
 # fixture night has a fuzz log but no matching entry in the fake
 # nightly-fuzz reflog at all, checking the other way "unknown" can come back:
 # not just a target outside §298.1's table, but a real target whose build
-# night the reflog cannot place.
+# night the reflog cannot place. A fifth fixture night's own checkout is in
+# the reflog but the night before it has none at all (Q289): the one arm of
+# `changed_status` those first four do not reach, where the night itself is
+# placed but the night before it cannot be, so "unknown" has to name the
+# earlier date rather than the later one.
 [private]
 check-fuzz-yield-selftest:
     #!/usr/bin/env bash
@@ -7499,6 +7503,9 @@ check-fuzz-yield-selftest:
     printf 'two\n' >"$nightly_repo/README.md"
     git -C "$nightly_repo" commit -qam "touch an unrelated file"
     nightly_unchanged=$(git -C "$nightly_repo" rev-parse HEAD)
+    printf 'three\n' >"$nightly_repo/README.md"
+    git -C "$nightly_repo" commit -qam "touch an unrelated file again"
+    nightly_no_prev=$(git -C "$nightly_repo" rev-parse HEAD)
 
     nightly_reflog="$nightly_repo/.git/logs/HEAD"
     nightly_tab=$'\t'
@@ -7512,11 +7519,16 @@ check-fuzz-yield-selftest:
     checkout_as_night "$nightly_base" 2026-09-11 00:12:00
     checkout_as_night "$nightly_changed" 2026-09-12 00:13:00
     checkout_as_night "$nightly_unchanged" 2026-09-13 00:14:00
+    # No checkout is stamped for 2026-09-14 at all (as for night5 below), so
+    # this one's own night is placed but the night before it, 2026-09-14, is
+    # not — the arm §298's fixtures had not reached (Q289).
+    checkout_as_night "$nightly_no_prev" 2026-09-15 00:16:00
 
     night3="$logs/2026-09-12"
     night4="$logs/2026-09-13"
     night5="$logs/2026-09-14"
-    mkdir -p "$night3" "$night4" "$night5"
+    night6="$logs/2026-09-15"
+    mkdir -p "$night3" "$night4" "$night5" "$night6"
     { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night3/fuzz-cross.log"
     { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night4/fuzz-cross.log"
     # No fourth `checkout_as_night` call happens for this date, so the
@@ -7524,6 +7536,7 @@ check-fuzz-yield-selftest:
     # 2026-09-14 itself — the arm Q232's lane hand-probed and no fixture
     # exercised (§298.7, Q250).
     { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night5/fuzz-cross.log"
+    { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night6/fuzz-cross.log"
 
     fail() {
         echo "fuzz-yield drifted from its own fixtures: $1"
@@ -7594,6 +7607,10 @@ check-fuzz-yield-selftest:
     no_checkout=$(yield 2026-09-14 2026-09-14) || fail "the no-checkout-night range made the recipe fail"
     grep -qF 'code changed since the previous night: unknown (reflog shows no 00:10-00:16 checkout for 2026-09-14)' <<<"$no_checkout" \
         || fail "09-14 has no checkout in the fixture reflog and should say unknown, not guess yes or no"
+
+    no_prev_checkout=$(yield 2026-09-15 2026-09-15) || fail "the no-checkout-night-before range made the recipe fail"
+    grep -qF 'code changed since the previous night: unknown (reflog shows no checkout for the night before, 2026-09-14)' <<<"$no_prev_checkout" \
+        || fail "09-15 has a checkout itself but 09-14 has none, and should say unknown naming 09-14, not guess yes or no"
 
     echo "fuzz-yield: coverage arithmetic, the artifact diff, the fault count, and the changed-night check all match their fixtures"
 

@@ -83,8 +83,9 @@ face meets the grown box, the exact point's answer is the answer for every
 point of it, and the box the caller handed over is inside the grown one.
 
 `no_face_meets` asks each face by the description the ray counts it by. A flat
-face with straight sides is its fanned triangles, so the box has to be off the
-plane through every one of them — a decided `orient3d` each. Every other face
+face with straight sides is its fanned triangles, so the box has to miss every
+one of them: apart from it along a coordinate axis, or off the plane through it
+by a decided `orient3d` (Q342, below). Every other face
 is the part of its surface it holds, so either the surface's sign is decided
 over the box, or `what_this_face_holds` says `NotHeld` of the box.
 
@@ -98,9 +99,35 @@ and is asserted against rather than answered.
 
 What is not answered, and stays refused: a box a face meets — the new test
 pins a box on the first bend's own wall refused against that bend — and a box
-with an infinite end, which has no finite middle. A box near the plane of a
-straight-sided face's fan triangle is refused too, where a finer test could
-answer; no consumer asks for it.
+with an infinite end, which has no finite middle.
+
+A box on the plane of a straight-sided face's fan triangle and off the
+triangle is answered now (row Q342). It was refused, because only the plane
+was asked; `misses_the_triangle` first holds the box and the triangle up
+against each coordinate axis, and corners all below the box's lower end, or
+all above its upper end, is a sign decided about the whole box with nothing
+rounded. `classify.rs`'s tests `a_box_beside_a_blocks_side` pin seven boxes on
+the planes of a block's sides, beside a quarter bend: on the base,
+`(6, 1, 0)` was `CannotFireARayAtAFacesSurface`. Two boxes off such a face are
+still refused and no test builds either: one inside a triangle's own bounding
+box and off it, which the axes across the triangle's sides would settle, and
+one that a fan triangle of a face that is not convex covers although the face
+does not.
+
+**No public call builds a solid that asks it yet**, and that is demonstrated,
+not argued: `tests/a_ray_from_beside_a_box.rs` pins the three ways there are.
+A fuse never asks such a box, since it asks a piece of one solid against the
+other alone. A bend glued onto a block's side through `SolidBuilder` is
+refused `AClosedEdgeIsWalkedAgainstItsSurface` whichever way the cap circle
+is walked, though one of the two is right — so the pins above use one solid
+holding a bend's shell and a block's, written in-crate the way a fuse writes
+two pieces that do not touch. A block with a hollow cannot be described face
+by face (`ASolidBuiltFaceByFaceHasOneShell`), and an L-shaped block less a
+bend wholly inside it is refused as a quartic before any piece is placed. The
+glued bend's refusal is a gap of its own, not traced: its likely cause is
+323.7's open question, `validate.rs` multiplying the torus's out-of-the-tube
+gradient by the wall's `Reversed`, which reads the wall's material as lying
+outside its tube.
 
 ### 323.4 A ring's face counted its crossings backwards
 
