@@ -142,6 +142,10 @@ fn a_bend_round_y_plus_z() -> (Model, SolidKey, FaceKey) {
 /// — the one inside the pipe of the ring's own radius — and which piece of it:
 /// `x ≥ 0` holds the whole of the short way round from `(3, 0, 0)` to
 /// `(1, 2, −2)` and not the long way.
+///
+/// The wall is used forwards, because a torus faces out of its tube, and each
+/// circle is walked right-handed about the outward normal of the face it bounds
+/// (`docs/decisions.md` §361).
 fn described(model: &mut Model) -> Result<SolidKey> {
     let along = Vector::new(0.0, 1.0, 1.0);
     let axis = Axis::new(Point::origin(), along).expect("a direction with a length");
@@ -187,20 +191,20 @@ fn described(model: &mut Model) -> Result<SolidKey> {
         &mut builder,
         Vector::new(0.0, -1.0, 1.0),
         near_circle,
-        Orientation::Reversed,
+        Orientation::Forward,
     )?;
     let far_cap = cap(
         &mut builder,
         Vector::new(-4.0, 1.0, -1.0),
         far_circle,
-        Orientation::Forward,
+        Orientation::Reversed,
     )?;
 
     let mut round_the_wall = Vec::with_capacity(4);
     for (edge, turn) in [
-        (near_circle, Orientation::Forward),
+        (near_circle, Orientation::Reversed),
         (seam, Orientation::Forward),
-        (far_circle, Orientation::Reversed),
+        (far_circle, Orientation::Forward),
         (seam, Orientation::Reversed),
     ] {
         round_the_wall.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
@@ -211,7 +215,7 @@ fn described(model: &mut Model) -> Result<SolidKey> {
     builder.add_shell(&[
         (near_cap, Orientation::Forward),
         (far_cap, Orientation::Forward),
-        (wall, Orientation::Reversed),
+        (wall, Orientation::Forward),
     ])?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
