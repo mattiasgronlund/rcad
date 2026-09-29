@@ -309,10 +309,11 @@ impl SolidView<'_> {
     /// Whether no face of this solid holds any point of `point`'s box.
     ///
     /// A face is kept clear of the box by the same description the ray counts
-    /// it by. A flat face with straight sides is its fanned triangles, so the
-    /// box has to be off the plane through every one of them. Every other face
-    /// is the part of its surface it holds, so the box has to be off the
-    /// surface, or the face has to hold none of the box.
+    /// it by. A flat face with straight sides is its fanned triangles, and the
+    /// fan covers the face, so the box has to miss every one of them
+    /// ([`misses_the_triangle`]). Every other face is the part of its surface
+    /// it holds, so the box has to be off the surface, or the face has to hold
+    /// none of the box.
     fn no_face_meets(
         self,
         point: PredicatePoint,
@@ -322,11 +323,8 @@ impl SolidView<'_> {
         self.faces().all(|face| {
             if face.surface().as_plane().is_some() && every_side_of_it_is_straight(face) {
                 let mut clear = true;
-                face.for_each_triangle(|[a, b, c]| {
-                    clear &= matches!(
-                        decide(a, b, c, point, policy, log),
-                        Decision::Pos | Decision::Neg
-                    );
+                face.for_each_triangle(|corners| {
+                    clear &= misses_the_triangle(corners, point, policy, log);
                 });
                 return clear;
             }
@@ -649,6 +647,44 @@ fn the_box_round_both(point: PredicatePoint, beside: PredicatePoint) -> Predicat
     }))
 }
 
+/// Whether no point of `point`'s box is on the triangle `corners`.
+///
+/// **Off the triangle's plane is not the only way to miss it.** A box beside a
+/// block's side, on the plane through that side and nowhere near the side
+/// itself, is on the plane of both its triangles, and asking only the plane
+/// refused it (`docs/decisions.md` §323.3). So the box and the triangle are
+/// first held up against each coordinate axis in turn: where the triangle's
+/// corners all lie below the box's lower end, or all above its upper end, the
+/// two are apart. That compares numbers the model holds with the box's own
+/// ends, nothing is rounded, and it is a sign decided about the whole box —
+/// the contract §323.3 rests on. It goes first because it is exact and cheap,
+/// and a box it settles leaves nothing in `log`.
+///
+/// Two boxes off the face are still refused. One sits inside a triangle's own
+/// bounding box and off the triangle, which only a face not lined up with the
+/// axes has room for; the axes across the triangle's sides would settle it,
+/// and they are not tried. The other is covered by a triangle of the fan and
+/// not by the face, because the fan of a face that is not convex reaches
+/// outside it and no axis settles that. No test builds either yet.
+fn misses_the_triangle(
+    [a, b, c]: [Point; 3],
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    let reach = point.enclosure();
+    let corners = [a, b, c].map(|corner| corner.coordinates());
+    let apart_along = |axis: usize| {
+        corners.iter().all(|corner| corner[axis] < reach[axis].lo())
+            || corners.iter().all(|corner| corner[axis] > reach[axis].hi())
+    };
+    (0..3).any(apart_along)
+        || matches!(
+            decide(a, b, c, point, policy, log),
+            Decision::Pos | Decision::Neg
+        )
+}
+
 /// What one triangle had to say about the ray.
 enum Hit {
     /// The ray does not pass through this triangle.
@@ -918,4 +954,199 @@ pub(crate) fn decide(
         policy,
         log,
     )
+}
+
+/// A box on the plane of a block's side and off the side itself, against a
+/// solid that also has a torus face (`docs/decisions.md` §323.3).
+///
+/// These live here and not in `tests/` because no public call builds such a
+/// solid yet: `tests/a_ray_from_beside_a_box.rs` pins each way there is and
+/// what refuses it. So the solid is written the way a fuse writes an answer of
+/// two pieces that do not touch — one solid holding two shells, here a quarter
+/// bend's and a block's.
+#[cfg(test)]
+mod a_box_beside_a_blocks_side {
+    use rcad_geom::{
+        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+        Surface, Torus, Vector,
+    };
+    use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
+    use smallvec::smallvec;
+
+    use crate::{Containment, DraftStep, Model, ProfileBuilder, SolidBuilder, SolidKey};
+
+    /// Boxes on the planes of the block's sides, none on a side, and what
+    /// every point of each is against the bend and the block together.
+    const BESIDE_THE_SIDES: [([f64; 3], Containment); 7] = [
+        ([6.0, 1.0, 0.0], Containment::Outside),
+        ([2.0, 1.0, 0.0], Containment::Outside),
+        ([2.0, 3.5, 0.0], Containment::Inside),
+        ([2.0, 3.5, 0.5], Containment::Inside),
+        ([4.0, 1.0, 2.0], Containment::Outside),
+        ([4.0, 1.0, -2.0], Containment::Outside),
+        ([1.0, -1.0, 0.0], Containment::Outside),
+    ];
+
+    #[test]
+    fn a_box_on_the_plane_of_a_side_and_off_it_meets_no_face() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = the_block(&mut model);
+        let block = model.solid(block).expect("this model made the key");
+        for (at, _) in BESIDE_THE_SIDES {
+            let mut log = ProvenanceLog::new();
+            assert!(
+                block.no_face_meets(a_box_round(at), &policy, &mut log),
+                "{at:?}"
+            );
+            assert!(log.is_empty(), "{at:?} was settled exactly: {log:?}");
+        }
+        let on_the_top = a_box_round([4.0, -1.0, 0.0]);
+        assert!(!block.no_face_meets(on_the_top, &policy, &mut ProvenanceLog::new()));
+    }
+
+    #[test]
+    fn a_box_on_the_plane_of_a_blocks_side_is_answered_beside_a_bend() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bend = a_quarter_bend(&mut model);
+        let block = the_block(&mut model);
+        let both = both_in_one_solid(&mut model, bend, block);
+        let [both, bend, block] =
+            [both, bend, block].map(|key| model.solid(key).expect("this model made the key"));
+        for (at, should) in BESIDE_THE_SIDES {
+            let exactly = |solid: crate::SolidView<'_>| {
+                solid.classify_point(Point::from(at), &policy, &mut ProvenanceLog::new())
+            };
+            let in_either = if [exactly(bend), exactly(block)].contains(&Containment::Inside) {
+                Containment::Inside
+            } else {
+                Containment::Outside
+            };
+            assert_eq!(in_either, should, "{at:?} against each on its own");
+            let placed =
+                both.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
+            assert_eq!(placed, should, "{at:?}");
+        }
+    }
+
+    /// A box the size `select.rs` puts round a point it puts back onto a
+    /// curved surface: `256 ε` for every unit out from the origin.
+    fn a_box_round(at: [f64; 3]) -> PredicatePoint {
+        let reach =
+            256.0 * f64::EPSILON * at.iter().fold(1.0f64, |most, each| most.max(each.abs()));
+        PredicatePoint::Constructed(
+            at.map(|coordinate| Interval::around(coordinate, reach).expect("a finite place")),
+        )
+    }
+
+    /// The block `[2, 6] × [−3, −1] × [−2, 2]`, a unit clear of the bend's cap
+    /// on `y = 0`.
+    fn the_block(model: &mut Model) -> SolidKey {
+        let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 2.0], [0.0, 2.0]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a rectangle");
+        model
+            .add_extrusion(
+                &rectangle,
+                4.0,
+                &Isometry::translation(Vector::new(2.0, -3.0, -2.0)).expect("a finite shift"),
+            )
+            .expect("a block")
+    }
+
+    fn both_in_one_solid(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {
+        let [one, other] = [one, other].map(|key| {
+            let slot = key
+                .try_slot_in(model.id())
+                .expect("this model made the key");
+            let [shell] = model.data().solids[slot].shells[..] else {
+                panic!("a solid built here has one shell");
+            };
+            shell
+        });
+        let slot = model.add_solid(smallvec![one, other]);
+        model.key_for_solid(slot)
+    }
+
+    /// `tests/rings/mod.rs`'s quarter bend of ring four and tube one, from its
+    /// cap on `y = 0` to its cap on `x = 0`.
+    fn a_quarter_bend(model: &mut Model) -> SolidKey {
+        let mut builder = SolidBuilder::new();
+        let start = builder
+            .add_vertex(Point::new(3.0, 0.0, 0.0))
+            .expect("a corner");
+        let end = builder
+            .add_vertex(Point::new(0.0, 3.0, 0.0))
+            .expect("a corner");
+        let through_the_middle =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal");
+        let seam = builder
+            .add_edge(
+                start,
+                end,
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(through_the_middle),
+                    picked_by: smallvec![
+                        Picker::InsideAPipe(Cylinder::new(Axis::z(), 4.0).expect("a radius")),
+                        Picker::from(
+                            HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0).expect("a normal")
+                        ),
+                    ],
+                },
+            )
+            .expect("the seam");
+        let [start_circle, end_circle] = [start, end].map(|corner| {
+            builder
+                .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
+                .expect("a cap's circle")
+        });
+        let mut cap = |facing: Vector, edge, turn| {
+            let plane = Plane::from_point_and_normal(Point::origin(), facing).expect("a normal");
+            let coedge = builder.add_coedge(edge, turn).expect("a coedge");
+            let wire = builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("a circle");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a cap")
+        };
+        let start_cap = cap(
+            Vector::new(0.0, -1.0, 0.0),
+            start_circle,
+            Orientation::Reversed,
+        );
+        let end_cap = cap(
+            Vector::new(-1.0, 0.0, 0.0),
+            end_circle,
+            Orientation::Forward,
+        );
+        let mut round_the_wall = Vec::with_capacity(4);
+        for (edge, turn) in [
+            (start_circle, Orientation::Forward),
+            (seam, Orientation::Forward),
+            (end_circle, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ] {
+            round_the_wall.push(DraftStep::Along(
+                builder.add_coedge(edge, turn).expect("a coedge"),
+            ));
+        }
+        let wire = builder.add_wire(&round_the_wall).expect("round the wall");
+        let ring = Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+        let wall = builder
+            .add_face(Surface::Torus(ring), &[wire])
+            .expect("the wall");
+        builder
+            .add_shell(&[
+                (start_cap, Orientation::Forward),
+                (end_cap, Orientation::Forward),
+                (wall, Orientation::Reversed),
+            ])
+            .expect("one shell");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a quarter bend is a solid")
+    }
 }
