@@ -163,8 +163,12 @@ Three things follow.
    points and the volume is one ulp off. Deciding which way to split a face into
    triangles is done on the points in the frame the face is meshed in. That is
    the stored frame going in and the world coming back, so the same frame
-   difference can flip a choice without moving a point. Which decision flipped
-   was not traced.
+   difference can flip a choice without moving a point. **Traced since, by
+   Q108, and fixed in §362:** the flip was on the two flat caps, 20 of the 121
+   triangles on each, and the decision was the triangulator's Delaunay test on
+   four points of the cap circle, a true tie decided on the mesh points moved
+   back into the stored frame. A flat face is now cut up where the solid sits,
+   and this bar comes back cut and measured the same bits.
 3. **The cube-and-bar crash had a turn in it, or a changed byte.** With no turn
    at `(9, −7, −15)`, the bar comes back the same bits; that row goes in at
    `452.10882097631367` and comes back at the same. Every eighth about `z` fails.
@@ -275,5 +279,5 @@ purpose, so changing it is a change to that decision.
 - Change the comparison: every located number bit for bit for every solid, and `measure` bit for bit only for a solid that is wholly flat or at no placement, in `read_back_and_compared`, `crates/rcad-step/tests/fuzzing/writer.rs`, with §129.5 item 3 amended to match.
 - Hold the limit in place with a test: the eighth turn about `z` and its twin with `w` one ulp higher write the same three columns and place a bar that measures differently, in a new `crates/rcad-step/tests/two_turns_that_write_the_same_placement.rs`.
 - Decide whether `BuildingAMesh::walk` should give the walk a placed face's stored corners rather than its located corners moved back (249.3's side finding), in `crates/rcad-topo/src/mesh.rs`.
-- Find which triangle choice flips when a bar is moved by `(0.1, 0.2, 0.3)` and every mesh point stays the same (249.4 item 2), in `BuildingAMesh::cut_up`, `crates/rcad-topo/src/mesh.rs`.
+- ~~Find which triangle choice flips when a bar is moved by `(0.1, 0.2, 0.3)` and every mesh point stays the same (249.4 item 2), in `BuildingAMesh::cut_up`, `crates/rcad-topo/src/mesh.rs`.~~ Done: the caps' Delaunay tie, fixed in §362.
 - Correct §241.5 item 2's "the same bar also moved by (3, −5, 7) fails the same way": moved alone it passes, and turned then moved it fails. The fix goes in `docs/decisions.d/241-the-writer-fuzz-target-mutates-models-rather-than-bytes.md`.
