@@ -1190,8 +1190,15 @@ impl Assembly {
             });
         }
 
+        /// An arc of a ring, the surface it runs along, and whether it bulges
+        /// to the left of the chord from its first end to its second.
+        struct Bulging {
+            ends: [[f64; 3]; 2],
+            surface: Surface,
+            left: bool,
+        }
         let normal = plane.normal().components();
-        let arcs: Vec<Option<([[f64; 3]; 2], Surface, bool)>> = ring
+        let arcs: Vec<Option<Bulging>> = ring
             .iter()
             .map(|&dart| {
                 let side = self.side_of(dart);
@@ -1216,15 +1223,17 @@ impl Assembly {
                 }
                 let ends = [from, to].map(|at| self.corners[at].point.coordinates());
                 let into_the_arc = (self.corners[corner].point + towards).coordinates();
-                let bulges_left = match winding_round(&[ends[0], ends[1], into_the_arc], normal)
-                    .ok()?
-                {
+                let left = match winding_round(&[ends[0], ends[1], into_the_arc], normal).ok()? {
                     Decision::Pos => true,
                     Decision::Neg => false,
-                    Decision::Zero => return None,
+                    Decision::Zero | Decision::Undecidable { .. } => return None,
                     other => panic!("which side of its chord an arc bulges came back as {other:?}"),
                 };
-                Some(Some((ends, surface, bulges_left)))
+                Some(Some(Bulging {
+                    ends,
+                    surface,
+                    left,
+                }))
             })
             .collect::<Option<_>>()?;
 
@@ -1244,8 +1253,8 @@ impl Assembly {
         let turns_round = |at: [f64; 3]| -> Option<i32> {
             arcs.iter()
                 .flatten()
-                .map(|&(ends, surface, bulges_left)| {
-                    match crate::validate::side_of_surface(&surface, PredicatePoint::from(at)) {
+                .map(|arc| {
+                    match crate::validate::side_of_surface(&arc.surface, PredicatePoint::from(at)) {
                         Decision::Pos | Decision::Zero => return Some(0),
                         Decision::Neg => (),
                         Decision::Undecidable { .. } => return None,
@@ -1254,15 +1263,15 @@ impl Assembly {
                              nothing here knows: {other:?}"
                         ),
                     }
-                    let left = match winding_round(&[ends[0], ends[1], at], normal).ok()? {
+                    let left = match winding_round(&[arc.ends[0], arc.ends[1], at], normal).ok()? {
                         Decision::Pos => true,
                         Decision::Neg => false,
-                        Decision::Zero => return None,
+                        Decision::Zero | Decision::Undecidable { .. } => return None,
                         other => {
                             panic!("which side of a chord a corner is on came back as {other:?}")
                         }
                     };
-                    Some(match (left == bulges_left, bulges_left) {
+                    Some(match (left == arc.left, arc.left) {
                         (false, _) => 0,
                         (true, true) => -1,
                         (true, false) => 1,
