@@ -51,11 +51,15 @@
 //!
 //! # What it found, on the fixed seed
 //!
-//! - A turned pair: 109 of 144 fuses decided from exact text, and **every one
-//!   of the 109 refused** at 11, 12 and 13 digits, `Undecidable` at "where
-//!   three surfaces meet". A gap —
-//!   [`a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing`].
-//! - A skew pair: no refusal introduced at 11 or 12 digits, 77 of 119 at 13.
+//! - A turned pair: 109 of 144 fuses decided from exact text, and 107, 105 and
+//!   111 decided at 11, 12 and 13 digits. Rounding introduces 8, 10 and 4
+//!   refusals and rescues 6 at each. Before §368 **every one of the 109 was
+//!   refused** at all three digit counts, `Undecidable` at "where three
+//!   surfaces meet": a gap, shown on its smallest case by
+//!   [`a_turned_cube_read_back_from_thirteen_digits_is_united_with_nothing`].
+//! - A skew pair: 122 of 144 decided from exact text, and no refusal
+//!   introduced at any of the three digit counts. Before §368, 77 of the 122
+//!   were refused at 13 digits.
 //! - A lattice pair and a bar through a block: no real moves at any of the three
 //!   digit counts, because every number is a whole one, so those rows are
 //!   controls and not measurements.
@@ -227,22 +231,22 @@ fn a_cube_moved_along_x_is_written_where_it_was_moved_to() {
     );
 }
 
-/// **A gap and not a limit** (§16.10), shown on the smallest thing that has it:
-/// one turned cube, read back from thirteen-digit text, united with nothing.
+/// **A gap and not a limit** (§16.10), shown on the smallest thing that had
+/// it: one turned cube, read back from thirteen-digit text, united with
+/// nothing. §368 closed it.
 ///
 /// The answer exists and is known without computing it — a solid united with
 /// nothing is itself, and [`Model::validate`] accepts that solid, so it is a
-/// sound model the fuse is asked to hand back unchanged. The fuse refuses it
-/// anyway, `Undecidable` at "where three surfaces meet": rounding put each
-/// corner a few ulps off the meet of its three rounded planes, and the certified
-/// corner is asked to agree with the stored one exactly. That is §75.6's
-/// forbidden direction — validate accepts what the fuse cannot bake — and the
-/// shape of §130–§136's pin-header corner.
-///
-/// This pins the refusal as it stands, so the day it is fixed this fails and
-/// the turned family's row in the tests above drops from 109 of 109.
+/// sound model the fuse is asked to hand back unchanged. Rounding puts each
+/// corner a few ulps off the meet of its three rounded planes. Until §368 the
+/// fuse asked the stored corner to agree with that meet within the corner's own
+/// rounding alone and refused, `Undecidable` at "where three surfaces meet":
+/// §75.6's forbidden direction, validate accepting what the fuse cannot bake,
+/// and the shape of §130–§136's pin-header corner. Now the fuse grants the
+/// corner the room validate allows it, and hands back the cube as it was
+/// read, to within what rounding the file can move a volume by.
 #[test]
-fn a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing() {
+fn a_turned_cube_read_back_from_thirteen_digits_is_united_with_nothing() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
     let cube = model
@@ -265,6 +269,10 @@ fn a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing() 
             &mut ProvenanceLog::new(),
         )
         .expect("the cube as built unites with nothing");
+    let built = model
+        .solid(cube)
+        .and_then(|solid| solid.measure(the_mesh(), &policy, &mut ProvenanceLog::new()))
+        .expect("a cube measures");
 
     let text = rcad_step::write(&model, "a turned cube").expect("a cube is written");
     let (rounded, moved) = with_every_real_rounded(&text, 13);
@@ -276,9 +284,10 @@ fn a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing() 
     back.model()
         .validate(&policy, &mut ProvenanceLog::new())
         .expect("the rounded cube is a sound model");
+    let largest = back.model().scale().nominal_size();
     let (_, turned) = *back.solids().last().expect("the baked cube");
     let mut scratch = back.into_model();
-    let refused = scratch
+    let answer = scratch
         .fuse(
             &[turned],
             &[],
@@ -286,11 +295,32 @@ fn a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing() 
             &policy,
             &mut ProvenanceLog::new(),
         )
-        .map(|answer| answer.solids().len());
-    let said = format!("{refused:?}");
+        .expect("a solid validate accepts is one the fuse has to be able to bake");
+
+    let [itself] = answer.solids() else {
+        panic!(
+            "a cube united with nothing is one cube, not {} solids",
+            answer.solids().len()
+        )
+    };
+    scratch
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("the answer is as sound as the cube read back");
+    let united = scratch
+        .solid(*itself)
+        .and_then(|solid| solid.measure(the_mesh(), &policy, &mut ProvenanceLog::new()))
+        .expect("the answer measures");
+    let moved = (united.volume() - built.volume()).abs();
+    let allowed =
+        how_far_rounding_can_move_a_volume(13, largest, built.surface_area() + built.area_error())
+            + built.volume_error()
+            + united.volume_error();
     assert!(
-        said.starts_with("Err(Undecidable") && said.contains("where three surfaces meet"),
-        "expected a rounded corner to stop the fuse, got {said}"
+        moved <= allowed,
+        "the cube was built with volume {} and came back {}, {moved:e} apart where rounding can \
+         move it {allowed:e}",
+        built.volume(),
+        united.volume()
     );
 }
 

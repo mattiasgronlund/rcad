@@ -1549,6 +1549,29 @@ impl Model {
         !provably_away_from_every_pinch(corner.point, reach, &where_it_pinches(surface))
     }
 
+    /// How far off its surfaces [`Model::validate_solid`] lets a corner of
+    /// `solid` sit: [`Model::allowed_wobble`] off a plane and
+    /// [`Model::what_writing_a_point_down_costs`] off a curved surface, both at
+    /// the size that sweep measures `solid` against.
+    ///
+    /// **The fuse grants a corner it solves again this room**, read from here
+    /// and not copied, because a solid the sweep accepts is one the fuse has to
+    /// be able to bake (`docs/decisions.md` §75.6, §368) and two copies of a
+    /// formula drift.
+    ///
+    /// It is `validate_solid`'s size and not `validate`'s. A solid far out in
+    /// the same model widens the room `validate` gives every corner, and a
+    /// corner that passes only because of a neighbour is one `validate_solid`
+    /// refuses, for the reason its own doc comment gives.
+    pub(crate) fn room_a_corner_of_this_solid_gets(&self, solid: SolidSlot) -> CornerRoom {
+        let largest_coordinate =
+            self.largest_coordinate_in(&Scope::what_this_solid_reaches(self.data(), solid));
+        CornerRoom {
+            off_a_plane: self.allowed_wobble(largest_coordinate),
+            off_a_curved_surface: self.what_writing_a_point_down_costs(largest_coordinate),
+        }
+    }
+
     /// How far off its own plane a face's corner is allowed to sit.
     ///
     /// Two separate things added together. The first is how far off the model
@@ -1704,6 +1727,31 @@ impl Model {
                 })
             })
             .fold(0.0, f64::max)
+    }
+}
+
+/// How far off each kind of surface the sweep lets one solid's corner sit
+/// ([`Model::room_a_corner_of_this_solid_gets`]).
+///
+/// Two numbers and not one, because the sweep grants a flat face a modelling
+/// tolerance and a curved face only the width of the number
+/// ([`Model::what_writing_a_point_down_costs`] says why).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CornerRoom {
+    /// [`Model::allowed_wobble`].
+    pub(crate) off_a_plane: f64,
+    /// [`Model::what_writing_a_point_down_costs`].
+    pub(crate) off_a_curved_surface: f64,
+}
+
+impl CornerRoom {
+    /// The room the sweep grants a corner off `surface`.
+    pub(crate) fn off(self, surface: &Surface) -> f64 {
+        if surface.as_plane().is_some() {
+            self.off_a_plane
+        } else {
+            self.off_a_curved_surface
+        }
     }
 }
 
