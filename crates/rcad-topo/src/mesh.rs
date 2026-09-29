@@ -1246,6 +1246,23 @@ impl BuildingAMesh {
     /// case analysis (§36.6). So the step says which side of `T` the material is
     /// on, and the pole on that side is the one this face reaches.
     ///
+    /// **Never the pole the rim runs through.** That pole is on the face's
+    /// edge, not inside it, so a cap whose rim runs through one pole reaches the
+    /// other. The side of `T` cannot say so: a plane written through a pole
+    /// holds it only to a rounding, and the pole then reads as on whichever
+    /// side the rounding put it. A ball of radius 5 less the cap
+    /// `y + 3z ≥ 15` had its north pole read as inside the plane, and the pole
+    /// on its own rim was taken for the one it reaches. Three of the four
+    /// quarter cuts then left from corners on that pole side and ran nowhere,
+    /// two corners in one place, refused `CornersCoincide`. At radius 4 the plane
+    /// holds the pole exactly and it reads as on it; the mirror at radius 5,
+    /// through the south pole, is asked about the north one first and answers
+    /// before its own pole is read (`docs/decisions.md` §199.4,
+    /// `a_ball_less_a_cap_whose_rim_runs_through_its_north_pole.rs`). The walk
+    /// already put that pole on the rim as a corner at its latitude
+    /// ([`put_in_the_poles_a_closed_crossing_passes`]), so that corner is what
+    /// is read here, and no distance is compared with anything.
+    ///
     /// `None` when the face is not a cap this can read: it has no partner
     /// surface to be cut by, or its loop is too short to take a step along.
     fn which_pole_this_cap_reaches(
@@ -1278,6 +1295,9 @@ impl BuildingAMesh {
         let inside = step.dot(forward) > 0.0;
 
         for towards in [pole, -pole] {
+            if cap.corners.iter().any(|corner| corner[1] == towards) {
+                continue;
+            }
             let corner = PredicatePoint::from(stored.point_at(0.0, towards).coordinates());
             let side = side_of_surface(&partner, corner);
             if (side == Decision::Neg) == inside {
