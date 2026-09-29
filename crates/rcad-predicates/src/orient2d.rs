@@ -473,8 +473,10 @@ fn cross(u: [f64; 2], v: [f64; 2]) -> Option<([f64; 4], usize, u32)> {
         .iter()
         .map(|&(x, y)| u32::from(!product_is_exact(x, y)))
         .sum();
-    let [(forwards, forwards_roundoff), (backwards, backwards_roundoff)] =
-        factors.map(|(x, y)| two_product(x, y));
+    let [
+        (forwards, forwards_roundoff),
+        (backwards, backwards_roundoff),
+    ] = factors.map(|(x, y)| two_product(x, y));
     let mut out = [0.0; 4];
     let len = expansion_sum(
         &[forwards_roundoff, forwards],
@@ -824,7 +826,10 @@ mod tests {
                 "2^{exponent} settled what the comment says nothing settles"
             );
         }
-        assert_eq!(tried, 1025, "every exponent from -1 to 1023 moves it exactly");
+        assert_eq!(
+            tried, 1025,
+            "every exponent from -1 to 1023 moves it exactly"
+        );
     }
 
     fn a_turn_smaller_than_the_bottom_of_the_range_loses() -> ([f64; 2], [f64; 2], [f64; 2]) {
