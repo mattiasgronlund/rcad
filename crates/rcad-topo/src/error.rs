@@ -1281,6 +1281,26 @@ pub enum Invalid {
     )]
     ClosedEdgeBetweenTwoFlatFaces,
 
+    /// A closed edge sits between two flat faces on two different planes, and
+    /// its run names a curved surface to say where it goes.
+    ///
+    /// The curve the run names is where that surface crosses a face's plane —
+    /// a circle or an ellipse — and it lies in that one plane and leaves every
+    /// other. So the two faces put the edge in two different places, and which
+    /// one the kernel drew depended on which face the solid listed first: a
+    /// bar of radius 3 whose lid is split by a disc tilted through the circle's
+    /// corner measured `113.003` one way round and `111.644` the other, each
+    /// `± 0.376`, where the bar is `36π` (Q386, Q574).
+    ///
+    /// Two faces on one plane are not this, however that plane is spelt: turned
+    /// round, or written twice a hair apart, which is what a file writes when
+    /// it gives each face its own `PLANE` (`docs/decisions.md` §22.6, §219.6).
+    #[error(
+        "a closed edge is walked between two flat faces on different planes, and a closed curve \
+         drawn on one plane leaves every other"
+    )]
+    ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes,
+
     /// An edge bends, every face along it is flat, and its run names no curved
     /// surface that would say where it bends.
     ///
