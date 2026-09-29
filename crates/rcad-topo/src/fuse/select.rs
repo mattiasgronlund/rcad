@@ -427,6 +427,15 @@ fn place_the_piece(
 /// partner leaves one region on the plane. A torus leaves two, so
 /// `also_picked_by` — one entry per wire, from [`what_else_each_round_wire_asks`]
 /// — says what else must hold the point, or `None` where nothing can say.
+///
+/// **A flat piece's curved partners are asked about the point and a point of
+/// the plane beside it at once**, through [`side_of_a_partner_by_its_plane`]. A
+/// candidate can be a rounding off the plane, and where a ball only just cuts
+/// the plane it is wider a rounding off it than on it by far more than a
+/// rounding: a point inside the ball beside a disk `1e-8` wide can have its
+/// foot outside the disk, and asked about the point alone the disk held it
+/// (`docs/decisions.md` §346.6). The corners are still wound round the point
+/// itself, as they were.
 fn the_piece_holds(
     piece: &Piece,
     in_plane: Option<&InPlane>,
@@ -462,34 +471,37 @@ fn the_piece_holds(
     // piece does not hold. What rules it out is the sign the arrangement already
     // wrote down — the side of the partner this piece's material is on — read
     // here for a flat piece exactly as the curved branch above reads it.
+    let flat = piece
+        .surface
+        .as_plane()
+        .expect("a piece measured from inside a plane is a flat piece");
+    let reaching_the_plane = stretched_to_the_plane(flat, point)?;
     for side in piece.wires.iter().flatten() {
         if side.carried_by[1].as_plane().is_some() {
             continue;
         }
-        match side_of_surface(&side.carried_by[1], point) {
+        match side_of_a_partner_by_its_plane(flat, &side.carried_by[1], point, reaching_the_plane) {
             found if found == side.material_side => (),
             Decision::Neg | Decision::Pos | Decision::Zero => return Some(false),
             Decision::Undecidable { .. } | _ => return None,
         }
     }
-    let flat = piece
-        .surface
-        .as_plane()
-        .expect("a piece measured from inside a plane is a flat piece");
     let mut winding = 0;
     for (position, wire) in piece.wires.iter().enumerate() {
         let inwards = if position == 0 { 1 } else { -1 };
         match round_wire_of(wire) {
-            Some(partner) => match side_of_surface(&partner, point) {
-                Decision::Neg => {
-                    let pickers = also_picked_by[position].as_deref()?;
-                    if every_picker_keeps(pickers, point)? {
-                        winding += inwards;
+            Some(partner) => {
+                match side_of_a_partner_by_its_plane(flat, &partner, point, reaching_the_plane) {
+                    Decision::Neg => {
+                        let pickers = also_picked_by[position].as_deref()?;
+                        if every_picker_keeps(pickers, reaching_the_plane)? {
+                            winding += inwards;
+                        }
                     }
+                    Decision::Pos => (),
+                    Decision::Zero | Decision::Undecidable { .. } | _ => return None,
                 }
-                Decision::Pos => (),
-                Decision::Zero | Decision::Undecidable { .. } | _ => return None,
-            },
+            }
             None => {
                 let corners: Vec<PredicatePoint> =
                     wire.iter().map(|side| side.ends[0].point()).collect();
@@ -501,6 +513,134 @@ fn the_piece_holds(
         }
     }
     Some(winding == 1)
+}
+
+/// Which side of `partner` both `point` and a point of `flat` beside it are
+/// on, or undecided where that could not be shown.
+///
+/// It is read over `reaching_the_plane`, the point's box stretched until it
+/// reaches the plane ([`stretched_to_the_plane`]), which holds both: a sign over
+/// a box is the sign of every point in it. That holds whatever the partner is,
+/// and it is what a hole needs as much as a disk. A point outside a ball on the
+/// far side of the plane from its centre can have its foot in the hole the ball
+/// cuts, because the ball is narrower there than on the plane
+/// (`a_point_outside_a_ball_whose_foot_is_in_its_hole_is_not_held`).
+///
+/// **A ball is first asked about the point alone, where the far side makes that
+/// enough.** A point there inside the ball has its foot nearer the centre, and
+/// every point on the way down to it too, so all of them are inside. It is the
+/// only reading that reaches a cap a fraction of a spacing deep: over the
+/// stretched box the ball's sign is too near zero for the interval sum to
+/// settle, and the points [`points_beyond_a_plane_in_a_ball`] builds for such a
+/// disk are all on that side
+/// (`a_point_a_rounding_off_a_thin_disks_middle_is_held_from_either_side`).
+fn side_of_a_partner_by_its_plane(
+    flat: &Plane,
+    partner: &Surface,
+    point: PredicatePoint,
+    reaching_the_plane: PredicatePoint,
+) -> Decision {
+    if let Surface::Sphere(ball) = partner
+        && is_beyond_the_plane_from_the_centre(flat, ball, point)
+        && ball.side_of(point) == Decision::Neg
+    {
+        return Decision::Neg;
+    }
+    side_of_surface(partner, reaching_the_plane)
+}
+
+/// Whether `point` is certainly on one side of `flat` and the centre of `ball`
+/// is on the other, or on the plane.
+fn is_beyond_the_plane_from_the_centre(flat: &Plane, ball: &Sphere, point: PredicatePoint) -> bool {
+    let centres_side = flat.side_of_point(PredicatePoint::from(ball.centre().coordinates()));
+    matches!(
+        (side_of_a_plane(flat, point), centres_side),
+        (Decision::Pos, Decision::Neg | Decision::Zero)
+            | (Decision::Neg, Decision::Pos | Decision::Zero)
+    )
+}
+
+/// `point`'s box stretched along one axis until it holds a point of `flat`
+/// too, or `None` when no stretch could be proved to reach the plane. A point
+/// the plane holds comes back as it is.
+///
+/// The axis is the one the plane's normal has most of, and the box keeps its
+/// other two sides. Each of its two ends across that axis is moved out until
+/// the plane's own sign puts that end's face on its own side of the plane, or
+/// on it. Every line along the axis through the box then crosses the plane
+/// between the two faces, so the box holds a point of the plane as well as
+/// every point it held. The first try past the point is where the plane
+/// crosses the axis through the middle of the box, worked out in `f64`; nothing
+/// about it is trusted, and a try the sign does not prove is passed over.
+fn stretched_to_the_plane(flat: &Plane, point: PredicatePoint) -> Option<PredicatePoint> {
+    if flat.side_of_point(point) == Decision::Zero {
+        return Some(point);
+    }
+    let normal = flat.normal().components();
+    let along = (0..3)
+        .max_by(|&one, &other| normal[one].abs().total_cmp(&normal[other].abs()))
+        .expect("three axes");
+    let middle = middle_of(point).coordinates();
+    let crossing = (0..3)
+        .filter(|&axis| axis != along)
+        .fold(flat.offset(), |rest, axis| {
+            rest - normal[axis] * middle[axis]
+        })
+        / normal[along];
+    let mut boxed = point.enclosure();
+    let low = an_end_on_its_side(flat, boxed, along, boxed[along].lo(), crossing, -1.0)?;
+    let high = an_end_on_its_side(flat, boxed, along, boxed[along].hi(), crossing, 1.0)?;
+    boxed[along] = Interval::new(low, high).expect("each end only ever moves away from the other");
+    Some(as_exact_as_it_is(PredicatePoint::Constructed(boxed)))
+}
+
+/// Where along `along` the face of `boxed` on the `way` end is on that end's
+/// side of `flat`, or on it: `own_end` when its face already is, and otherwise
+/// the first of a run of tries from `crossing`, or from `own_end` when the
+/// crossing is not past it, each step twice the one before. `way` is `-1.0` for
+/// the low end and `1.0` for the high one. `None` when no try is proved.
+fn an_end_on_its_side(
+    flat: &Plane,
+    boxed: [Interval; 3],
+    along: usize,
+    own_end: f64,
+    crossing: f64,
+    way: f64,
+) -> Option<f64> {
+    let ends_side = if (flat.normal().components()[along] > 0.0) == (way > 0.0) {
+        Decision::Pos
+    } else {
+        Decision::Neg
+    };
+    let is_on_its_side = |end: f64| {
+        let mut face = boxed;
+        face[along] = Interval::exactly(end);
+        let side = side_of_a_plane(flat, PredicatePoint::Constructed(face));
+        side == ends_side || side == Decision::Zero
+    };
+    if is_on_its_side(own_end) {
+        return Some(own_end);
+    }
+    let size = boxed.iter().fold(flat.offset().abs(), |largest, side| {
+        largest.max(side.lo().abs()).max(side.hi().abs())
+    });
+    let mut step = size.max(f64::MIN_POSITIVE) * f64::EPSILON;
+    let mut end = if (crossing - own_end) * way > 0.0 {
+        crossing
+    } else {
+        own_end + way * step
+    };
+    for _ in 0..64 {
+        if !end.is_finite() {
+            return None;
+        }
+        if is_on_its_side(end) {
+            return Some(end);
+        }
+        end += way * step;
+        step *= 2.0;
+    }
+    None
 }
 
 /// Whether `point`, taken as being on `cone`, is on the half of it `piece` is
@@ -1918,7 +2058,9 @@ fn a_segment_out_of_the_ball(ball: &Sphere, inside: [f64; 3], up: usize) -> Opti
 /// which is inside the disk. A point on the near side proves nothing of the
 /// kind: the ball is wider there than on the plane, and a point inside it can
 /// have its foot outside the disk
-/// (`a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it`).
+/// (`a_point_inside_a_ball_whose_foot_is_outside_its_disk_is_not_held`). The
+/// same argument is what lets [`side_of_a_partner_by_its_plane`] read the ball
+/// at such a point alone.
 fn points_beyond_a_plane_in_a_ball(piece: &Piece, flat: &Plane) -> Vec<PredicatePoint> {
     let balls: Vec<Sphere> = piece
         .wires
@@ -2360,18 +2502,18 @@ mod tests {
     /// A disk on `z = 0` cut by a ball of radius 1 round `(0, 0, −0.75)`, so
     /// `√0.4375 ≈ 0.661` across from its middle. `(0.67, 0, −0.1)` is inside
     /// the ball, on the centre's side of the plane, and its foot `(0.67, 0, 0)`
-    /// is outside the ball and so outside the disk. The disk is read as holding
-    /// it all the same, because a round wire's partner is asked about the point
-    /// where it is and not about its foot.
+    /// is outside the ball and so outside the disk. Asked about the point where
+    /// it is, the ball held it, and so did the disk.
     ///
-    /// A real candidate is a rounding off its plane, not a tenth of a unit, so
-    /// this reaches only a disk the ball is a rounding wider than just off the
-    /// plane — one of radius `1e-8` (`docs/decisions.md` §346.6). No candidate
-    /// `candidate_points` offers was seen to land there.
+    /// **No fuse is known to reach this.** A real candidate is a rounding off
+    /// its plane, not a tenth of a unit, so it reaches only a disk the ball is a
+    /// rounding wider than just off the plane, one of radius about `1e-8`
+    /// (`docs/decisions.md` §346.6), and no candidate `candidate_points` offers
+    /// was seen to land there. The numbers here are big so that each step can
+    /// be checked by hand.
     #[test]
-    fn a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it() {
-        let ball = Sphere::new(Point::from([0.0, 0.0, -0.75]), 1.0).expect("a positive radius");
-        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+    fn a_point_inside_a_ball_whose_foot_is_outside_its_disk_is_not_held() {
+        let (ball, flat) = a_ball_cutting_z_0_round_the_origin(0.75);
         let disk = a_flat_piece_inside_the_ring(
             Surface::Sphere(ball),
             flat,
@@ -2383,12 +2525,179 @@ mod tests {
         assert_eq!(ball.side_of(foot), Decision::Pos);
         assert_eq!(
             the_piece_holds_asked_as_selection_asks(&disk, off_the_plane),
-            Some(true)
+            None,
+            "the ball cannot say one thing of the point and of its foot"
         );
         assert_eq!(
             the_piece_holds_asked_as_selection_asks(&disk, foot),
             Some(false)
         );
+    }
+
+    /// The same ball and point against the half of that disk on `x > 0`: an arc
+    /// of the ball's circle and the chord `x = 0` across it. The arc is a curved
+    /// side rather than a round wire, and its ball is asked before the
+    /// corners are wound. No fuse is known to reach this either.
+    #[test]
+    fn a_point_inside_a_ball_whose_foot_is_outside_its_half_disk_is_not_held() {
+        let (ball, flat) = a_ball_cutting_z_0_round_the_origin(0.75);
+        let chord = Plane::from_coefficients([1.0, 0.0, 0.0, 0.0]).expect("a normal");
+        let reach = 0.4375_f64.sqrt();
+        let corner = |at: [f64; 3], which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [
+                Surface::Plane(flat),
+                Surface::Sphere(ball),
+                Surface::Plane(chord),
+            ],
+            which,
+            point: PredicatePoint::from(at),
+        };
+        let [low, high] = [[0.0, -reach, 0.0], [0.0, reach, 0.0]];
+        let half_disk = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![vec![
+                FaceMeet {
+                    carried_by: [Surface::Plane(flat), Surface::Sphere(ball)],
+                    ends: [corner(low, 0), corner(high, 1)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+                FaceMeet {
+                    carried_by: [Surface::Plane(flat), Surface::Plane(chord)],
+                    ends: [corner(high, 1), corner(low, 0)],
+                    material_side: Decision::Pos,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+            ]],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&half_disk, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([0.3, 0.0, 0.0]), Some(true), "inside the half disk");
+        assert_eq!(holds([0.67, 0.0, 0.0]), Some(false), "past its arc");
+        assert_eq!(
+            holds([0.67, 0.0, -0.1]),
+            None,
+            "inside the ball, with its foot past the arc"
+        );
+    }
+
+    /// A square on `z = 0` with the same ball's disk taken out of it. On the
+    /// far side of the plane from the ball's centre the ball is narrower than
+    /// the hole, so `(0.6, 0, 0.1)` is outside the ball while its foot
+    /// `(0.6, 0, 0)` is in the hole. Reading the sign at the point where it is
+    /// held it; the far side is where a point *inside* the ball can be trusted,
+    /// and this one is outside. No fuse is known to reach this either.
+    #[test]
+    fn a_point_outside_a_ball_whose_foot_is_in_its_hole_is_not_held() {
+        let (ball, flat) = a_ball_cutting_z_0_round_the_origin(0.75);
+        let walls = [
+            [1.0, 0.0, 0.0, -2.0],
+            [0.0, 1.0, 0.0, -2.0],
+            [1.0, 0.0, 0.0, 2.0],
+            [0.0, 1.0, 0.0, 2.0],
+        ]
+        .map(|wall| Plane::from_coefficients(wall).expect("a normal"));
+        let corners = [
+            [2.0, 2.0, 0.0],
+            [-2.0, 2.0, 0.0],
+            [-2.0, -2.0, 0.0],
+            [2.0, -2.0, 0.0],
+        ];
+        let corner = |which: usize| MeetPoint::OfThreeSurfaces {
+            surfaces: [
+                Surface::Plane(flat),
+                Surface::Plane(walls[which]),
+                Surface::Plane(walls[(which + 1) % 4]),
+            ],
+            which: 0,
+            point: PredicatePoint::from(corners[which]),
+        };
+        let square = (0..4)
+            .map(|which| FaceMeet {
+                carried_by: [Surface::Plane(flat), Surface::Plane(walls[(which + 1) % 4])],
+                ends: [corner(which), corner((which + 1) % 4)],
+                material_side: Decision::Neg,
+                along: SmallVec::new(),
+                approximation: None,
+            })
+            .collect();
+        let hole_starts = MeetPoint::WhereAClosedCurveStarts {
+            carried_by: [Surface::Plane(flat), Surface::Sphere(ball)],
+            point: PredicatePoint::from([0.4375_f64.sqrt(), 0.0, 0.0]),
+        };
+        let hole = vec![FaceMeet {
+            carried_by: [Surface::Plane(flat), Surface::Sphere(ball)],
+            ends: [hole_starts.clone(), hole_starts],
+            material_side: Decision::Pos,
+            along: SmallVec::new(),
+            approximation: None,
+        }];
+        let with_a_hole = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![square, hole],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&with_a_hole, PredicatePoint::from(at))
+        };
+        assert_eq!(
+            holds([1.5, 0.0, 0.0]),
+            Some(true),
+            "between the hole and the rim"
+        );
+        assert_eq!(holds([0.6, 0.0, 0.0]), Some(false), "in the hole");
+        assert_eq!(
+            ball.side_of(PredicatePoint::from([0.6, 0.0, 0.1])),
+            Decision::Pos
+        );
+        assert_eq!(
+            holds([0.6, 0.0, 0.1]),
+            None,
+            "outside the ball, with its foot in the hole"
+        );
+    }
+
+    /// A ball that cuts `z = 0` in a disk about `1.5e-8` across, the width of
+    /// the disk §346.6 is about: `(1 − 2⁻⁵³)` below the plane, one unit round.
+    /// A point `1e-16` off the plane over the disk's middle is held from
+    /// either side. Below it, the ball is certainly inside over the whole way
+    /// up to the plane; above it, in the cap a fraction of a spacing deep, the
+    /// ball's sign over that way is too close to zero to settle, and the point
+    /// is held because it is on the far side of the plane from the centre and
+    /// inside the ball, so its foot is nearer the centre and inside too.
+    #[test]
+    fn a_point_a_rounding_off_a_thin_disks_middle_is_held_from_either_side() {
+        let (ball, flat) = a_ball_cutting_z_0_round_the_origin(1.0 - f64::EPSILON / 2.0);
+        let disk = a_flat_piece_inside_the_ring(
+            Surface::Sphere(ball),
+            flat,
+            &[[f64::EPSILON.sqrt(), 0.0, 0.0]],
+        );
+        for height in [-1e-16, 1e-16] {
+            let point = PredicatePoint::from([0.0, 0.0, height]);
+            assert_eq!(ball.side_of(point), Decision::Neg, "at {height}");
+            assert_eq!(
+                the_piece_holds_asked_as_selection_asks(&disk, point),
+                Some(true),
+                "at {height}"
+            );
+        }
+    }
+
+    /// A ball of radius 1 whose centre is `below` under the origin, and the
+    /// plane `z = 0` it cuts.
+    fn a_ball_cutting_z_0_round_the_origin(below: f64) -> (Sphere, Plane) {
+        let ball = Sphere::new(Point::from([0.0, 0.0, -below]), 1.0).expect("a positive radius");
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        (ball, flat)
     }
 
     /// [`the_piece_holds`] with the pickers worked out the way

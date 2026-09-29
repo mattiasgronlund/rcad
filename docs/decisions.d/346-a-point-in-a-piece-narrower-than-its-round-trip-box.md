@@ -281,14 +281,69 @@ faces disagreeing about was not traced.
 **A guess Q658 named, demonstrated.** A flat piece's candidate is three doubles
 off its plane by a rounding, and a round wire's partner is asked about the point
 where it is, not about its foot. So a disk the ball is wider than just off the
-plane can hold a point whose foot is outside it.
-`a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it` in
-`select.rs` shows it on a disk of radius `0.661`, with the point a tenth of a
-unit off. A real candidate is a rounding off, so it reaches only a disk of
-radius about `1e-8`, and no candidate `candidate_points` offers was seen to land
-there. The new flat candidates in item 3 are built on the far side for this
-reason. The existing ones are not changed; closing it for them is asking the
-partner on a box from the point to its foot, or the far-side test for a ball.
+plane can hold a point whose foot is outside it. A unit test in `select.rs`
+showed it on a disk of radius `0.661`, with the point a tenth of a unit off; it
+is `a_point_inside_a_ball_whose_foot_is_outside_its_disk_is_not_held` now. A
+real candidate is a rounding off, so it reaches only a disk of radius about
+`1e-8`, and no candidate `candidate_points` offers was seen to land there. The
+new flat candidates in item 3 are built on the far side for this reason. Q671
+closed it for the rest, below.
+
+**Closed for every candidate, by two readings (Q671).** *Queue row Q671, lane
+`lane-q671-a-flat-pieces-candidate-asked-at-its-foot`, off `86be3100`.*
+`the_piece_holds` now asks each curved partner of a flat piece, a round wire's
+and each curved side's alike, through `side_of_a_partner_by_its_plane`:
+
+- **Over the point's box stretched to the plane.** `stretched_to_the_plane`
+  moves the box's two ends along the axis the plane's normal has most of, until
+  the plane's own sign puts each end's face on its own side of the plane. The
+  box then holds a point of the plane as well as the point. A sign over a box
+  is the sign of every point in it, so it says the same thing of the point and
+  of a point of the plane beside it, whatever the partner is. **That is why the
+  box, and not the far-side test alone**: the far-side test is an argument
+  about a ball's centre, and it covers a point *inside* the ball only. A point
+  outside a ball on the far side can have its foot in the hole the ball cuts,
+  because the ball is narrower there than on the plane
+  (`a_point_outside_a_ball_whose_foot_is_in_its_hole_is_not_held`). A pipe, a
+  cone and a ring have no centre to be on the far side of.
+- **And, for a ball, at the point alone where the point is inside it on the far
+  side of the plane from its centre.** Its foot is nearer the centre then, and
+  so is every point on the way down to it, so the reading holds there too. The
+  box cannot read the cap: over it the ball's sign is too near zero for the
+  interval sum to settle. With this reading switched off,
+  `a_point_a_rounding_off_a_thin_disks_middle_is_held_from_either_side` failed
+  at `+1e-16`. Q658's pin moved too: draws went back to refusing `a point inside
+  a piece of a face`, among them `off −0.5` turned 1 and `off −0.3` turned 0.3,
+  0.5 and 2.
+
+Switching the box off instead failed the three `…_is_not_held` tests in
+`select.rs`: the one above, the hole's, and the half disk's, whose arc is a
+curved side rather than a round wire. The partner was read at the point, with
+the far-side reading kept. Nothing else in `fuse::select` or Q658's pin failed.
+All three tests fail on the base with the hold they assert against.
+
+**What it costs, measured.** A probe ran `the_piece_holds` both ways over
+`mise exec -- just t -p rcad-topo --no-fail-fast` (1214 tests; the probe is
+taken out). Every answer that changed became `None`. 111 of them had been
+`Some(false)`, which the caller reads the same way. 9 had been `Some(true)`:
+the three new unit tests, and six in
+`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with`, on the disks of
+`off −0.3` turned 0.3 and turned 2. The probe also wrote two lines that were cut
+by two test processes writing at once. In each of the six, the point was within
+`2.1e-17` of the disk's centre, on the ball's side of the plane. Exact
+rational arithmetic (`q671_foot.py`, in the lane's scratchpad) put each point's
+foot inside its disk. So the old answers were right. At the foot the ball's sign
+is only `-1.7e-16` and `-4.2e-17`, which the stretched box cannot settle. Those
+draws then find their point in item 3's search, and their pinned answers do not
+move. `mise exec -- just t --workspace --no-fail-fast`: 2810 run, 2810 passed,
+11 skipped. **So no fuse in the suite reached the wrong reading**, and the fix
+costs one fuse some correct first candidates without changing its answer.
+
+**What it does not change.** A flat piece's corners are still wound round the
+point itself. `InPlane` reads a point that is off the plane at the place where
+the line from its reference point through that point meets the plane. Whether
+that place can be far enough from the point's foot to matter was not traced.
+It is a guess nobody has run, so it carries no class.
 
 **What this leaves**, each for a row of its own:
 
@@ -297,4 +352,4 @@ partner on a box from the point to its foot, or the far-side test for a ball.
 - The second row needs `mesh.rs`'s `cut_up` traced for a ball face with a
   small hole.
 - The third row needs the answer's check traced for which two faces disagree.
-- The demonstrated guess, for the candidates `candidate_points` offers.
+- The winding of a point off a flat piece's plane, above, if anyone runs it.
