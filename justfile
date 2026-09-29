@@ -1911,6 +1911,22 @@ check-skills-selftest:
 # form stops to ask and nobody is there to answer. And the merger is told to
 # mark its run's trees finished, because without the mark `prune-worktrees`
 # keeps all three for an hour.
+#
+# **A thirteenth arm holds a verified row's own line when it still did not
+# merge (§304.4).** Q124 and Q128 sat held five and a half hours because
+# `merged()` and `handedBack()` could return `merged: false` for a row whose
+# verifier had already said `merge` or `fix_first` -- the merger returned
+# nothing, or declined for its own reason -- and that only showed in the log,
+# not in the row's own returned text, so no dispatcher noticed. The arm checks
+# two things against `lanes.js` itself, the only fixture it ever cuts: the exact
+# line that defines `verified` from `prior.check.verdict` appears twice, once in
+# `merged()` and once in `handedBack()`, so a row is only ever called verified
+# when the verifier said `merge` or `fix_first`; and the ternary that reads it
+# into the row's own line appears in all three places a row can end up
+# `merged: false` after that -- the merger returning nothing, the merger
+# declining, and the lane being handed back -- so each of those, for a row the
+# verifier called either `merge` or `fix_first`, reads "verified, not merged"
+# rather than plain "not merged".
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -1936,6 +1952,8 @@ check-lanes-workflow:
     prune_command='  mise exec -- just prune-worktrees'
     prune_allowed='"Bash(mise exec -- just prune-worktrees)",'
     mark_line='Only if your push went through, after unlocking your own tree: mise exec -- just mark-finished'
+    verified_def="  const verified = !!prior.check && (prior.check.verdict === 'merge' || prior.check.verdict === 'fix_first')"
+    verified_use="verified ? 'verified, not merged' : 'not merged'"
     settings=.claude/settings.json
     scan() {
         local n t at prev line types
@@ -2057,6 +2075,16 @@ check-lanes-workflow:
             echo "$1 does not tell the merger to mark its run's trees finished, so prune-worktrees keeps them for an hour (§315.2)"
             return 12
         fi
+        n=$(grep -cxF -- "$verified_def" "$1" || true)
+        if [ "$n" != 2 ]; then
+            echo "$1 does not define 'verified' as the verifier having said merge or fix_first, once in merged() and once in handedBack() (want 2, found $n); a row the verifier called ready that still did not merge would then have no way to say so in its own line (§304.4)"
+            return 13
+        fi
+        n=$(grep -cF -- "$verified_use" "$1" || true)
+        if [ "$n" != 3 ]; then
+            echo "$1 does not read that 'verified' flag in all three of a row's own returned lines -- merger-returned-nothing, merger-declined, handed-back (want 3, found $n); a row the verifier called merge or fix_first would still read plain 'not merged', with nothing marking it as verified, not merged (§304.4)"
+            return 13
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
     dir=$(mktemp -d)
@@ -2114,7 +2142,14 @@ check-lanes-workflow:
     awk -v l="$prune_command" -v r='  mise exec -- just prune-worktrees .' '$0 == l { print r; next } { print }' "$file" > "$dir/prune-command-drifts/lanes.js"
     fresh no-mark-line
     grep -vF -- "$mark_line" "$file" > "$dir/no-mark-line/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12)
+    fresh no-verified-def
+    grep -vF -- "$verified_def" "$file" > "$dir/no-verified-def/lanes.js"
+    fresh verified-merge-only
+    awk -v l="$verified_def" -v r="  const verified = !!prior.check && (prior.check.verdict === 'merge')" \
+        '$0 == l { print r; next } { print }' "$file" > "$dir/verified-merge-only/lanes.js"
+    fresh verified-not-returned
+    grep -vF -- '-- ${prior.stop}' "$file" > "$dir/verified-not-returned/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
