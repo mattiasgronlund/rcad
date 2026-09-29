@@ -1,4 +1,5 @@
-//! Two cubes of side two that a turn leaves a rounding apart (queue row Q397).
+//! Two cubes of side two that a turn leaves a rounding apart (queue rows Q397
+//! and Q676).
 //!
 //! The second cube is moved by `(2, 0.5, 0.25)`, so upright the two touch face
 //! to face, and both are turned about the axis through `(1, 0, 0)` along
@@ -10,13 +11,22 @@
 //! **Where it stops now.** Every fuse used to refuse at the first question:
 //! which side of the second cube's face `x = 0` a corner of the first cube lies
 //! on, asked of the corner's box, which the face runs straight through.
-//! `Arrangement::passes_through` now asks the three planes the corner is the
-//! meet of instead, and they decide it. The fuse then refuses one step on, in
-//! `Arrangement::order_along`, ordering that corner and the point where the
-//! other face crosses the corner's edge, two boxes a rounding apart along one
-//! line. Both are meets of three planes that share two, so the order is the
-//! same side-of-a-plane question times which way the edge runs through the
-//! other face; that stage is not this row's.
+//! `Arrangement::passes_through` asks the three planes the corner is the meet
+//! of instead, and they decide it (Q397). The fuse then refused one step on, in
+//! `Arrangement::order_along`, ordering that corner and the point a rounding
+//! past it where the other face crosses the corner's edge. Both are meets of
+//! three planes that share two, and the planes now put them in order too
+//! (Q676, `which_meet_comes_first_along_a_line`).
+//!
+//! Every fuse then stops in selection. The first cube's face `x = 2` comes out
+//! of the arrangement whole, and so does the second's face `x = 0`; each has to
+//! be placed against the other cube. The point picked inside it lies on its
+//! own plane and so a rounding off the other cube's face, and the ray cast from
+//! that point's box into the other cube cannot say which side of that face it
+//! starts on: every candidate came back undecided, which a probe of
+//! `settle_against_each` showed at 1.1. The answer is the inputs as they stand
+//! — the union two solids of eight faces, `A \ B` is `A`, `B \ A` is `B`, and
+//! the intersection nothing — so this is still a gap.
 //!
 //! **0.3 is a limit.** The faces overlap by `2^-52`, so the union and the
 //! intersection keep a sliver whose edges are about `2.2e-16` long at a
@@ -50,15 +60,17 @@ fn the_touching_faces_lie_a_rounding_apart_at_1_1_and_2_5_and_overlap_at_0_3() {
     );
 }
 
-/// The corner is decided now, and every fuse gets one step further before it
-/// gives up. Before, each refusal named `side of plane` at a corner of one
-/// cube; now each names `order along a crossing`.
+/// The corner and the point a rounding past it on its edge are put in order
+/// now, and every fuse gets past the arrangement. Before Q397 each refusal
+/// named `side of plane` at a corner of one cube, before Q676 each named
+/// `order along a crossing`, and now each names the search for a point in the
+/// touching face that the other cube can place.
 #[test]
-fn a_corner_a_rounding_short_of_the_other_face_no_longer_stops_the_fuse() {
+fn a_corner_and_the_point_a_rounding_past_it_no_longer_stop_the_fuse() {
     for (angle, _) in A_ROUNDING_APART {
         for (what, refused_at) in every_fuse_refused(angle) {
             assert_eq!(
-                refused_at, "order along a crossing",
+                refused_at, "a point in a piece that every solid could place",
                 "{angle} {what} refused at {refused_at}"
             );
         }
@@ -66,11 +78,14 @@ fn a_corner_a_rounding_short_of_the_other_face_no_longer_stops_the_fuse() {
 }
 
 /// A limit, not a gap: every answer needs an edge `2.2e-16` long at `2.18`.
+/// Since Q676 orders the corners along their edges it is refused in
+/// selection, at the search for a point inside a piece; which piece was not
+/// traced.
 #[test]
 fn two_cubes_overlapping_by_a_rounding_are_refused_for_the_sliver_between_them() {
     for (what, refused_at) in every_fuse_refused(A_ROUNDING_INTO_EACH_OTHER) {
         assert_eq!(
-            refused_at, "order along a crossing",
+            refused_at, "a point inside a piece of a face",
             "{what} refused at {refused_at}"
         );
     }
