@@ -1001,10 +1001,15 @@ impl Assembly {
     /// ([`Assembly::holds_the_other_rings`]). A tube's cap cut by the pipe of a
     /// bar standing inside the tube's wall is two pieces, and joined back up it
     /// is two whole circles of one corner each (`a_bar_inside_a_tubes_wall.rs`).
+    /// A bar across the tube's wall, united with it, leaves an outline along
+    /// two pipes and a hole along two pipes, two corners each
+    /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
     /// A ring shown to hold the others is the outline and the rest are holes;
     /// with none shown to, and only one ring left that nothing could place,
     /// that one is the outline by the rule above. Two or more left unplaced
-    /// still panics: no answer reaches it yet, so it is not demonstrated.
+    /// still panics — a ring along a torus, or with a side along a hyperbola —
+    /// and no answer is known to reach it: a torus refuses every fuse before
+    /// here (`how_often_a_fuse_with_a_torus_refuses.rs`).
     fn rings_round(
         &self,
         members: &[usize],
@@ -1060,7 +1065,7 @@ impl Assembly {
                             .filter(|&(other, _)| other != ring)
                             .map(|(_, other)| other)
                             .chain(&holes);
-                        self.holds_the_other_rings(&enclosing_nothing[ring], others)
+                        self.holds_the_other_rings(&enclosing_nothing[ring], others, &plane)
                     })
                     .collect();
                 let holding: Vec<usize> = (0..held.len())
@@ -1109,10 +1114,35 @@ impl Assembly {
     /// arithmetic cannot place, is passed over for the next, the way
     /// [`Assembly::one_shell_is_inside_another`] passes over a corner.
     ///
-    /// `None` for a ring with a straight side or a side along a second curved
-    /// surface, for a ring along a torus — a plane square to its axis cuts it
-    /// in two circles with the torus between them, so the inside of the torus
-    /// is not the region either circle bounds — and where no corner is placed.
+    /// **A ring whose sides run along more than one surface, or straight, is
+    /// placed by how its arcs bulge**, where its corners all lie on one line.
+    /// The polygon through its corners then sweeps nothing, so what the ring
+    /// winds round a point is the sum, over its arcs, of what each arc and its
+    /// chord wind round it: one turn, the way the arc runs, for a point between
+    /// the two, and nothing for any other. The piece of the plane between an
+    /// arc and its chord is the part inside the arc's surface on the side of
+    /// the chord the arc bulges to, because every arc counted is of a crossing
+    /// that closes round the inside of its surface — a circle or an ellipse. A
+    /// straight side is its own chord and adds nothing. So a corner is held
+    /// when the turns add up to one, either way round, and not when they add
+    /// up to none. The outline of a bar united across a tube's wall runs along
+    /// two pipes and so does its hole
+    /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
+    ///
+    /// A corner on an arc's surface is outside that arc's piece: it is not on
+    /// this ring, so it is on the rest of the curve, which lies across the
+    /// chord. A corner of this ring, one on a chord inside its arc's surface,
+    /// or one the arithmetic cannot place, is passed over. Which side of its
+    /// chord an arc bulges is read off the direction it leaves its named corner
+    /// ([`WhichArc::LeavingACorner`]); every other sign is exact.
+    ///
+    /// `None` for a ring along a torus — a plane square to its axis cuts it in
+    /// two circles with the torus between them, so the inside of the torus is
+    /// not the region either circle bounds — and where no corner is placed. Of
+    /// a ring along more than one surface, `None` too where its corners are not
+    /// on one line, where a closed side is one of several, for an arc along a
+    /// torus or along a cone's parabola or hyperbola, and for an arc whose
+    /// bulge reads along its chord.
     ///
     /// # Panics
     ///
@@ -1122,6 +1152,7 @@ impl Assembly {
         &self,
         ring: &[Dart],
         mut others: impl Iterator<Item = &'a Vec<Dart>>,
+        plane: &Plane,
     ) -> Option<bool> {
         let the_curved_one = |dart: Dart| {
             let [one, other] = self.edges[self.edge_of(dart)].carried_by;
@@ -1131,31 +1162,126 @@ impl Assembly {
                 (Some(_), Some(_)) | (None, None) => None,
             }
         };
-        let surface = the_curved_one(*ring.first()?)?;
-        match surface {
-            Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Cone(_) => (),
-            Surface::Plane(_) | Surface::Torus(_) => return None,
-            // A kind added to `rcad-geom` after this has not been shown to
-            // bound the region inside it, so a ring along it is not placed.
-            _ => return None,
+        let along_one = the_curved_one(*ring.first()?).filter(|first| {
+            ring.iter()
+                .all(|&dart| the_curved_one(dart).is_some_and(|curved| one_surface(&curved, first)))
+        });
+        if let Some(surface) = along_one {
+            match surface {
+                Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Cone(_) => (),
+                Surface::Plane(_) | Surface::Torus(_) => return None,
+                // A kind added to `rcad-geom` after this has not been shown to
+                // bound the region inside it, so a ring along it is not placed.
+                _ => return None,
+            }
+            return others.find_map(|other| {
+                other.iter().find_map(|&dart| {
+                    let at = self.corners[self.starts_at(dart)].point.coordinates();
+                    match crate::validate::side_of_surface(&surface, PredicatePoint::from(at)) {
+                        Decision::Neg => Some(true),
+                        Decision::Pos => Some(false),
+                        Decision::Zero | Decision::Undecidable { .. } => None,
+                        other => panic!(
+                            "which side of a surface a corner is on came back as a decision \
+                             nothing here knows: {other:?}"
+                        ),
+                    }
+                })
+            });
         }
-        if !ring
+
+        let normal = plane.normal().components();
+        let arcs: Vec<Option<([[f64; 3]; 2], Surface, bool)>> = ring
             .iter()
-            .all(|&dart| the_curved_one(dart).is_some_and(|curved| one_surface(&curved, &surface)))
-        {
-            return None;
+            .map(|&dart| {
+                let side = self.side_of(dart);
+                let [from, to] = [self.starts_at(dart), self.stops_at(side)];
+                if from == to {
+                    return None;
+                }
+                let WhichArc::LeavingACorner { corner, towards } = self.edges[side.edge].arc else {
+                    return Some(None);
+                };
+                let surface = the_curved_one(dart)?;
+                match surface {
+                    Surface::Cylinder(_) | Surface::Sphere(_) => (),
+                    Surface::Cone(_) => {
+                        where_a_closed_crossing_is_centred(&surface, plane)?;
+                    }
+                    Surface::Plane(_) | Surface::Torus(_) => return None,
+                    // A kind added to `rcad-geom` after this has not been shown
+                    // to bound the region inside it, so an arc along it is not
+                    // counted.
+                    _ => return None,
+                }
+                let ends = [from, to].map(|at| self.corners[at].point.coordinates());
+                let into_the_arc = (self.corners[corner].point + towards).coordinates();
+                let bulges_left = match winding_round(&[ends[0], ends[1], into_the_arc], normal)
+                    .ok()?
+                {
+                    Decision::Pos => true,
+                    Decision::Neg => false,
+                    Decision::Zero => return None,
+                    other => panic!("which side of its chord an arc bulges came back as {other:?}"),
+                };
+                Some(Some((ends, surface, bulges_left)))
+            })
+            .collect::<Option<_>>()?;
+
+        let own: Vec<usize> = ring.iter().map(|&dart| self.starts_at(dart)).collect();
+        let at_corner = |corner: usize| self.corners[corner].point.coordinates();
+        if let Some(&apart) = own.iter().find(|&&corner| corner != own[0]) {
+            let line = [at_corner(own[0]), at_corner(apart)];
+            let on_the_line = |corner: usize| {
+                winding_round(&[line[0], line[1], at_corner(corner)], normal).ok()
+                    == Some(Decision::Zero)
+            };
+            if !own.iter().all(|&corner| on_the_line(corner)) {
+                return None;
+            }
         }
+
+        let turns_round = |at: [f64; 3]| -> Option<i32> {
+            arcs.iter()
+                .flatten()
+                .map(|&(ends, surface, bulges_left)| {
+                    match crate::validate::side_of_surface(&surface, PredicatePoint::from(at)) {
+                        Decision::Pos | Decision::Zero => return Some(0),
+                        Decision::Neg => (),
+                        Decision::Undecidable { .. } => return None,
+                        other => panic!(
+                            "which side of a surface a corner is on came back as a decision \
+                             nothing here knows: {other:?}"
+                        ),
+                    }
+                    let left = match winding_round(&[ends[0], ends[1], at], normal).ok()? {
+                        Decision::Pos => true,
+                        Decision::Neg => false,
+                        Decision::Zero => return None,
+                        other => {
+                            panic!("which side of a chord a corner is on came back as {other:?}")
+                        }
+                    };
+                    Some(match (left == bulges_left, bulges_left) {
+                        (false, _) => 0,
+                        (true, true) => -1,
+                        (true, false) => 1,
+                    })
+                })
+                .sum()
+        };
         others.find_map(|other| {
             other.iter().find_map(|&dart| {
-                let at = self.corners[self.starts_at(dart)].point.coordinates();
-                match crate::validate::side_of_surface(&surface, PredicatePoint::from(at)) {
-                    Decision::Neg => Some(true),
-                    Decision::Pos => Some(false),
-                    Decision::Zero | Decision::Undecidable { .. } => None,
-                    other => panic!(
-                        "which side of a surface a corner is on came back as a decision nothing \
-                         here knows: {other:?}"
-                    ),
+                let corner = self.starts_at(dart);
+                if own.contains(&corner) {
+                    return None;
+                }
+                match turns_round(at_corner(corner))? {
+                    0 => Some(false),
+                    1 | -1 => Some(true),
+                    // A simple ring winds round a point once at most, so this
+                    // is an arc whose bulge was read the wrong way round.
+                    _ => None,
                 }
             })
         })
