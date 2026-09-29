@@ -114,16 +114,18 @@ pins where it stops rather than an answer.
 
 ### 357.5 What this leaves
 
-- **One pin outside this lane's files moves with it.**
+- **One pin outside Q355's files moved with it, in Q502.**
   `two_cones_holding_the_same_numbers_are_one_surface`
-  (`crates/rcad-geom/tests/the_seven_shapes_a_plane_cuts_a_cone_in.rs` line
-  674) asserts the cone about `−z` is refused against the cone about `+z`, and
-  now gets `Ok(SameSurface)`; it is the only failure in a `--no-fail-fast` run
-  of the workspace (2725 of 2726 pass). Its doc comment says calling the pair
-  `SameSurface` "would need a canonical spelling that `transformed` could not
-  round away". It does not: 357.2 compares the two spellings exactly without
-  choosing either, so the assertion flips to `Ok(SameSurface)` and that
-  paragraph goes.
+  (`crates/rcad-geom/tests/the_seven_shapes_a_plane_cuts_a_cone_in.rs`)
+  asserted the cone about `−z` is refused against the cone about `+z`, and
+  with 357.2 gets `Ok(SameSurface)`; Q355's lane found it the only failure in
+  a `--no-fail-fast` run of the workspace (2725 of 2726 pass). Its doc comment
+  said calling the pair `SameSurface` "would need a canonical spelling that
+  `transformed` could not round away". It does not: 357.2 compares the two
+  spellings exactly without choosing either. Q502, lane
+  `lane-q502-a-cone-turned-round-is-one-surface`, merged Q355's branch at
+  `17c1764e`, flipped the assertion to `Ok(SameSurface)` and replaced that
+  paragraph with one saying what the test pins now.
 - **The measure finding of 357.3**: a cone face named about the axis pointing
   away from it measures short beyond its own bound. A trace row for
   `measure`/the mesher, with the four numbers above as its reproducer.

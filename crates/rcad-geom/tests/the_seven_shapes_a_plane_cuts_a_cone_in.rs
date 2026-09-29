@@ -647,14 +647,14 @@ fn a_cone_against_a_ball_a_pipe_off_its_axis_or_another_cone_is_refused_by_name(
 /// Two cones holding the same numbers are one surface, which is the answer a
 /// fuse needs when two solids press coincident cone faces together.
 ///
-/// **The same cone written with its axis reversed is not caught**, and that is
-/// reported rather than fixed: reversing the axis direction leaves the double
-/// cone exactly where it was, so two spellings name one surface. A
-/// [`Cylinder`](rcad_geom::Cylinder) has had the same two spellings since M2 and
-/// the kernel has always lived with it — a face's surface is compared on the
-/// numbers it stores (§32.5), and neither type has a canonical form. Refusing
-/// the reversed pair is safe; calling it `SameSurface` would need a canonical
-/// spelling that `transformed` could not round away.
+/// **So is the same cone written with its axis reversed.** Reversing the axis
+/// direction leaves the double cone exactly where it was, and `intersect`
+/// knows two spellings of one cone exactly, without choosing a canonical one
+/// (§357.2): same apex, same slope, axes along one line. So the
+/// cone about `−z` against the cone about `+z` is `SameSurface` too. A cone one
+/// ulp off its own reverse is still two surfaces; the unit test
+/// `a_cone_or_ring_a_hair_off_its_own_reverse_is_another_surface` in
+/// `intersect.rs` pins that side.
 #[test]
 fn two_cones_holding_the_same_numbers_are_one_surface() {
     let cone = Surface::Cone(a_right_angled_cone());
@@ -678,8 +678,8 @@ fn two_cones_holding_the_same_numbers_are_one_surface() {
             &Policy::certified(),
             &mut ProvenanceLog::new()
         ),
-        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-        "the same surface in two spellings is refused rather than answered wrongly"
+        Ok(SurfaceMeet::SameSurface),
+        "the same double cone written with its axis reversed is one surface"
     );
 }
 
