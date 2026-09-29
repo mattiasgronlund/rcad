@@ -252,9 +252,10 @@ fn what_is_wrong_with_each_face(
     let mut wrong = Vec::new();
     for face in view.faces() {
         let (low, high) = the_span_of_its_corners(face, height);
-        let closed_form = match face.surface() {
-            Surface::Plane(_) => core::f64::consts::PI * RADIUS * RADIUS,
-            _ => 2.0 * core::f64::consts::PI * RADIUS * (high - low),
+        let closed_form = if face.surface().as_plane().is_some() {
+            core::f64::consts::PI * RADIUS * RADIUS
+        } else {
+            2.0 * core::f64::consts::PI * RADIUS * (high - low)
         };
         let (area, beyond) = what_this_face_was_meshed_as(&mesh, face, height, (low, high));
         let under = (closed_form - area) / closed_form;
