@@ -180,6 +180,14 @@ pub(crate) struct BakedCorner {
     /// through a corner is then a question about the model rather than about
     /// arithmetic, which is what keeps the arrangement from having to prove a
     /// corner is on a curve it is on by construction.
+    ///
+    /// **Three or more, and every one of them was asked about the corner.**
+    /// [`derive_a_corner`] solves such a corner from one triple and then asks
+    /// each surface here about it, grown by [`what_writing_the_corner_down_cost`],
+    /// and a surface that proves it off is a refusal. Fewer than three, and the
+    /// corner was read out of the model and nothing here asked (§286).
+    /// `a_corner_is_this_place` in the arrangement leans on the first half:
+    /// a meet of three planes from this list is this corner (§356).
     pub(crate) around: Vec<Surface>,
 }
 
