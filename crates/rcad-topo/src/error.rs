@@ -1301,6 +1301,28 @@ pub enum Invalid {
     )]
     ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes,
 
+    /// An open arc sits between two flat faces on two different planes, and
+    /// its run names a curved surface to say where it goes.
+    ///
+    /// [`Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes`] for a piece
+    /// of the curve rather than the whole of it. Both ends of the arc are on
+    /// both planes, so on the line where the two planes cross, but the arc
+    /// between them is drawn on one plane and bends off every other. So the
+    /// two faces put the edge in two different places, and which one the
+    /// kernel drew depended on which face the solid listed first: a bar of
+    /// radius 3 whose lid is split by a half disc, tilted along its chord,
+    /// measured `113.088` with the lid listed first and `113.488` with the half
+    /// disc first, each `± 0.038`, where the bar is `36π` (Q604).
+    ///
+    /// Two faces on one plane are not this, however that plane is spelt; nor
+    /// are two faces that cross in one of a pipe's own straight lines, where
+    /// the arc the run names is that line.
+    #[error(
+        "an arc is walked between two flat faces on different planes, and a curve drawn on one \
+         plane bends off every other"
+    )]
+    AnArcBetweenTwoFlatFacesOnDifferentPlanes,
+
     /// An edge bends, every face along it is flat, and its run names no curved
     /// surface that would say where it bends.
     ///
