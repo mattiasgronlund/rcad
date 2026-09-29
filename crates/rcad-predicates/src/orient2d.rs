@@ -28,13 +28,19 @@ pub const ORIENT2D: &str = "orient2d";
 /// ([`decided_after_normalising`]). So are points near the origin whose
 /// differences reach from ordinary sizes down to `1e-300`, lifted instead as
 /// high as the top of the range allows, and a spike at the origin under a unit
-/// square, down to a spike the smallest `f64` wide.
+/// square, down to a spike the smallest `f64` wide. And the exact level keeps a
+/// product that falls off the bottom, so a turn is decided wherever the
+/// products that stayed in range outweigh what the rest lost
+/// ([`sign_clear_of_what_fell_off`]).
 ///
-/// What is left as [`Decision::Undecidable`] is a genuine *spread* — a model
-/// whose coordinates sit far from the origin while its differences are far
-/// below it, so that no single scaling brings both into range at once. That is
-/// the case decisions.md §3.5's dynamic-range check is for, and being a ratio
-/// is exactly what lets it see this and not the uniform cases (§16.11).
+/// What is left as [`Decision::Undecidable`] is a determinant that, at every
+/// scale that moves the input exactly, is either within what the products
+/// falling off the bottom may have lost or has a product running off the top.
+/// The cut corner `(1, -t)`, `(0.5, 0.5)`, `(t, 1)` with `t` a subnormal is
+/// one: its answer is `-t^2`, and the `1 * 1` in the same sum caps the
+/// scaling well before `t^2` could show. Reaching it needs a wider exponent
+/// than `f64` has, which is the case decisions.md §3.5's dynamic-range check is
+/// for (§358).
 ///
 /// A coordinate that is not a real number at all gets [`NOTHING_IS_KNOWN`]
 /// before any of that runs. [`are_real_numbers`] says why.
@@ -124,17 +130,17 @@ fn at_height_zero(point: [f64; 2]) -> Point {
 /// (`docs/decisions.md` §324): the largest difference into `[1, 2)` first, and
 /// then the largest coordinate into [`HIGHEST_BINADE_LEVEL_THREE_TAKES`], for
 /// three points near the origin whose differences reach down to `1e-300` —
-/// where the first exponent is zero and level 3 refuses products below
-/// [`product_is_exact`]'s floor. The third lifts the products level 3 forms
-/// as high as they go, for a spike at the origin that the second leaves under
-/// that floor; [`exponents_to_try`] says why.
+/// where the first exponent is zero and a determinant that is exactly zero
+/// needs every product above [`product_is_exact`]'s floor. The third lifts
+/// the products level 3 forms as high as they go, for a turn the second leaves
+/// with nothing but products under that floor; [`exponents_to_try`] says why.
 ///
 /// Only reached from an [`Decision::Undecidable`], so the path that already
 /// works pays nothing. The retry re-enters at the top rather than inside
 /// [`Orient2d::on_floats`] because all three levels fail together on these
 /// inputs — a determinant of `1e-400` has subnormal products at level 1,
-/// interval products that collapse to zero at level 2, and an expansion that
-/// declines to run at level 3.
+/// interval products that collapse to zero at level 2, and at level 3 a held
+/// sum of zero with a product that fell off the bottom.
 ///
 /// # Why `ORIENT2D_ERROR_BOUND` carries over untouched
 ///
@@ -161,16 +167,18 @@ fn decided_after_normalising(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<(D
 /// The exponents [`decided_after_normalising`] tries, in the order it tries
 /// them.
 ///
-/// The third is for a spike at the origin under a unit square
-/// (`docs/decisions.md` §324.7), whose determinants hold `tiny * tiny` and
-/// `tiny * 1` and never `1 * 1`. The second lifts the largest coordinate only
-/// as far as `1 * 1` could go, which leaves `tiny * tiny` under
-/// [`product_is_exact`]'s floor below `tiny = 2^-994`. The third reads the six
-/// products level 3 forms one by one and lifts until the one closest to the top
-/// reaches [`LARGEST_SUM_OF_FACTOR_BINADES`], which for a spike `2^-995` wide
-/// is `2^1007`. It never lands below the second, because no product is larger
-/// than the largest coordinate squared. It comes last so that nothing the first
-/// two settle can move.
+/// The third is for a determinant that holds `tiny * tiny` and `tiny * 1` and
+/// never `1 * 1` (`docs/decisions.md` §324.7). The second lifts the largest
+/// coordinate only as far as `1 * 1` could go, which leaves `tiny * tiny`
+/// under [`product_is_exact`]'s floor below `tiny = 2^-994`. Since §358 level 3
+/// keeps such a product and decides whenever the `tiny * 1` terms outweigh
+/// what it lost, which covers every turn of a spike at the origin under a unit
+/// square. What is left for the third is a turn whose `tiny * 1` terms cancel,
+/// such as `(1, 0)`, `(0, t)`, `(t, t)`. The third reads the six products level
+/// 3 forms one by one and lifts until the one closest to the top reaches
+/// [`LARGEST_SUM_OF_FACTOR_BINADES`]. It never lands below the second, because
+/// no product is larger than the largest coordinate squared. It comes last so
+/// that nothing the first two settle can move.
 ///
 /// Levels 1 and 2 multiply differences, and at the third exponent those can
 /// overflow. That costs them their answer and nothing else: an infinite level 1
@@ -209,8 +217,8 @@ fn exponents_to_try(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> [Option<i32>; 3] {
 /// `the_highest_sum_of_factor_binades_overflows_nothing_in_level_three` runs it.
 ///
 /// Like [`HIGHEST_BINADE_LEVEL_THREE_TAKES`], this decides reach and not
-/// soundness: an overflowed product is refused by [`product_is_exact`], and an
-/// overflowed sum by [`expansion_sign`].
+/// soundness: an overflowed product is refused by [`cross`], and an overflowed
+/// sum by [`expansion_sign`].
 const LARGEST_SUM_OF_FACTOR_BINADES: i32 = 1020;
 
 /// The binade [`decided_after_normalising`]'s second exponent lifts the largest
@@ -225,9 +233,8 @@ const LARGEST_SUM_OF_FACTOR_BINADES: i32 = 1020;
 /// `the_highest_binade_the_retry_lifts_into_overflows_nothing` runs it.
 ///
 /// Going past it would only cost reach, never soundness — an overflowed level 1
-/// bound is refused by [`decide`] and an overflowed product by
-/// [`product_is_exact`] — so the one thing this number decides is how far the
-/// retry gets.
+/// bound is refused by [`decide`] and an overflowed product by [`cross`] — so
+/// the one thing this number decides is how far the retry gets.
 const HIGHEST_BINADE_LEVEL_THREE_TAKES: i32 = 509;
 
 /// [`decide`] on the three points scaled by `2^exponent`, if that is exact and
