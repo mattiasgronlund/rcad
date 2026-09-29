@@ -420,7 +420,11 @@ impl FourPlanes {
     /// expanded along the offset column: `-`, `+`, `-`, `+` down the rows.
     fn signed_offset(&self, row: usize) -> f64 {
         let offset = self.rows[row][3];
-        if row % 2 == 0 { -offset } else { offset }
+        if row.is_multiple_of(2) {
+            -offset
+        } else {
+            offset
+        }
     }
 }
 
