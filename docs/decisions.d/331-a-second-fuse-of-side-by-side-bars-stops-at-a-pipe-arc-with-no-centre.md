@@ -171,5 +171,59 @@ without any other change.
   of a face"` for the crescents with the crescent first. `select.rs` is Q102's
   file. Whether it is the top cap `classify_point` refuses is the first thing
   to find out.
+
+  *2026-09-29, Q596, off `8d42d3ab`.* It was, and it was `holds.rs`, not
+  `select.rs`. The record's inputs `(3, ±4, 5)` are the corners of the piece
+  (`corners_of(piece)`), the block's floor inside the two pipes, and not the
+  point that was tried, so the third leg of the brief (a point on a trimming
+  curve) was not it. A temporary trace in
+  `what_a_face_cut_by_part_of_a_crossing_holds` showed the top cap `8v1`
+  refusing at two places. For the unions and lenses, `where_a_side_lies` read
+  an arc against a pipe as `Lies::Across`, because its arc arm answered only a
+  flat cut. For the crescents, `is_a_family_this_follows` refused a face
+  keeping a pipe's outside, with `kept` of `[Neg, Pos]`. Past the cap, each
+  wall refused next (`9v1`): `leaves_a_pipe_in_one_piece` took only planes, and
+  the wall is cut by the other pipe. Past that, each crescent's inner wall
+  (`10v1`, used reversed) read every cut as keeping the far side. The printed
+  `kept` was `Pos` for the floor, the roof and the other pipe.
+  `which_side_of_its_neighbour_a_side_keeps` turned `∇S` round for a reversed
+  face, and the view's walk already does that. `fuse/assemble.rs`'s `sides_of`
+  stores a reversed curved piece's wire the used way round, so that every
+  edge's two coedges run opposite ways in the arena, and `WireView::coedges`
+  walks it back. Printed through the view, the forward outer wall and the
+  reversed inner wall both walk the ruling at `(3, 4)` from `z = 10` down.
+
+  What `holds.rs` now follows, each argued in its doc comment. Two pipes whose
+  axes run the same way cut a plane in two curves that meet in at most two
+  points, because one sign less the other, scaled, is a plane's sign. So an
+  arc of one with both ends on the other lies on one side of it, the side it
+  leaves its start into. The cap of the union is the two insides taken
+  together (`is_two_discs_taken_together`), and a disc less a disc is one
+  piece. On a wall, a pipe running the same way is a cut along the axis. The
+  reversed-face turn is gone. With it, all 24 second fuses of the unions and
+  lenses with the top block answer, one solid each, validated, at the volume by
+  hand: `V/2 + 6000`, `V/2`, `V/2` and `6000 − V/2`.
+  `a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_first_does`
+  checks them, and `every_first_answer_says_which_points_it_holds` checks four
+  points on each of the six answers. Both fail with `holds.rs` at the base. The
+  second also fails with only the reversed-face turn put back:
+  `CannotFollowAFacesTrimming` on `10v1` at `(−3, 0, 5)` of the crescent.
+  `mise exec -- just t -p rcad-topo --no-fail-fast` ran 1180 tests and all 1180
+  passed, with 11 skipped.
+
+  **Still refusing: the twelve fuses of the two crescents with the top
+  block**, every rule both ways round, `"a point inside a piece of a face"`
+  (`INSIDE_A_PIECE`). The piece has corners `(3, ±4, 15)` and `(3, ±4, 10)`,
+  on the inner wall's pipe, and the inner wall stops at `z = 10`. So the
+  arrangement cut a piece off the part of that pipe the face does not hold.
+  `classify_point` now answers on the crescents, so this is the fuse's own
+  reading of the reversed wall. What is known: `bake_one_face` reads the wire
+  through `model.face_at`, which is `Orientation::Forward`, so it gets the
+  stored walk, the used way round. It then records `orientation: Reversed`
+  beside it. Whether `fuse/arrange.rs` turns that walk round once more, as
+  `holds.rs` did, is **not traced**. It is a hypothesis on two legs, bake's
+  forward read and arrange's reading of `orientation`, and both files are
+  outside Q596's write set. It is a gap: every one of the twelve has an
+  answer, and cutting each bar first builds the crescent less the block.
 - **The crescents against a block that touches nothing, after the arm.**
   `ACurvedFaceGoesRightRoundWithNoSeam`, not traced.
