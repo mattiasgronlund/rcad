@@ -51,7 +51,8 @@
 
 use rcad_geom::{
     EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet,
-    WHERE_A_PLANE_AND_A_TORUS_CROSS, intersect, which_two_surfaces_a_run_is_between,
+    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS, intersect,
+    which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
@@ -727,6 +728,7 @@ fn what_a_ring_face_between_two_planes_holds(
 /// the two signs it is says nothing more.
 fn how_the_axis_lies_on(flat: &Plane, torus: &rcad_geom::Torus) -> Decision {
     let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
+        named: WHERE_A_PLANE_AND_A_TORUS_CROSS,
         normal: flat.normal().components(),
         along: torus.axis().direction().components(),
     });
@@ -741,21 +743,23 @@ fn how_the_axis_lies_on(flat: &Plane, torus: &rcad_geom::Torus) -> Decision {
     }
 }
 
-/// Whether a plane's normal is square to a ring's axis: the sign of the dot of
-/// the two as stored.
+/// Whether a plane's normal is square to a ring's or a pipe's axis: the sign of
+/// the dot of the two as stored. [`the_normals_lie_along_one_line`] asks it of
+/// each component of a cross product, which is the same kind of sum.
 ///
 /// A sum of three products of `f64`s, so level 3 settles it exactly — unless
 /// one of those products is not zero and is below `2^-969`, where
 /// [`product_is_exact`] says its rounding can no longer be held. `intersect`
 /// stops at the same place (`docs/decisions.md` §328).
 struct SquareToTheAxis {
+    named: &'static str,
     normal: [f64; 3],
     along: [f64; 3],
 }
 
 impl Predicate for SquareToTheAxis {
     fn name(&self) -> &'static str {
-        WHERE_A_PLANE_AND_A_TORUS_CROSS
+        self.named
     }
 
     fn on_floats(&self) -> Option<Filtered> {
@@ -1427,6 +1431,11 @@ pub(crate) struct WhereTheCurveIsCentred {
 /// than a gap: a parabola has no centre at all, and a hyperbola's two branches
 /// are not one closed curve for a chord to split in two.
 ///
+/// A **pipe** hands back its axis origin and its stored axis direction, turned
+/// round where it reads negative against the plane's normal
+/// ([`a_pipes_axis_turned_to_cross`]). Every component of that is stored
+/// exactly too, as the ball's is.
+///
 /// [`Cone::which_way_a_closed_crossings_centre_lies`]: rcad_geom::Cone::which_way_a_closed_crossings_centre_lies
 pub(crate) fn where_a_closed_crossing_is_centred(
     surface: &Surface,
@@ -1441,7 +1450,45 @@ pub(crate) fn where_a_closed_crossing_is_centred(
             from: cone.apex(),
             along: cone.which_way_a_closed_crossings_centre_lies(flat)?,
         }),
-        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => None,
+        Surface::Cylinder(pipe) => Some(WhereTheCurveIsCentred {
+            from: pipe.axis().origin(),
+            along: exactly(a_pipes_axis_turned_to_cross(pipe, flat)?),
+        }),
+        Surface::Plane(_) | Surface::Torus(_) | _ => None,
+    }
+}
+
+/// `pipe`'s stored axis direction, turned round if it reads negative against
+/// `flat`'s normal; `None` when the plane lies along the axis, and when that
+/// could not be settled.
+///
+/// **Where the axis crosses the plane is the centre** of the curve the plane
+/// cuts the pipe in, whether that is a circle or an ellipse. Turning space a
+/// half turn about that point — every `p` to `2c − p` — carries the pipe onto
+/// itself, as it does about any point of the axis, and carries the plane onto
+/// itself because `c` is on it. So it carries the curve onto itself, and a
+/// curve that is its own image through `c` is centred at `c`. Walking `along`
+/// from the axis origin until the plane is reached lands there, and
+/// [`where_the_curves_centre_sits`] wants `n·along` positive, which the turn
+/// gives it.
+///
+/// **`n·a` of zero is refused, and that is a limit**: the plane then holds the
+/// axis's direction and cuts the pipe in two lines, one, or none, and none of
+/// those closes ([`rcad_geom::Cylinder::is_cut_in_a_closed_curve_by`] reads the
+/// same sign). An undecided sign is refused with it, so it costs a refusal and
+/// never picks a direction.
+fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Option<[f64; 3]> {
+    let along = pipe.axis().direction().components();
+    let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
+        named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+        normal: flat.normal().components(),
+        along,
+    });
+    match leans {
+        Decision::Pos => Some(along),
+        Decision::Neg => Some(along.map(core::ops::Neg::neg)),
+        Decision::Zero | Decision::Undecidable { .. } => None,
+        other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
     }
 }
 
@@ -1611,7 +1658,10 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
             Surface::Cone(cone) => {
                 cut.kept == Decision::Neg && cone.is_cut_in_a_closed_curve_by(flat) == Some(true)
             }
-            Surface::Cylinder(_) | Surface::Torus(_) | _ => false,
+            Surface::Cylinder(pipe) => {
+                cut.kept == Decision::Neg && pipe.is_cut_in_a_closed_curve_by(flat) == Some(true)
+            }
+            Surface::Torus(_) | _ => false,
         }),
         Surface::Sphere(ball) => {
             let centre = PredicatePoint::from(ball.centre().coordinates());
@@ -1643,9 +1693,100 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                 [_, _, ..] => false,
             }
         }
-        Surface::Cylinder(_) | Surface::Torus(_) | _ => false,
+        Surface::Cylinder(pipe) => leaves_a_pipe_in_one_piece(pipe, cuts),
+        Surface::Torus(_) | _ => false,
     }
 }
+
+/// Whether the part of `pipe` in front of every cut is one piece, for the cuts
+/// this can show it of: planes, at most one of them lying along the axis, at
+/// most one keeping the pipe's far end and at most one keeping its near end —
+/// and with all three kinds present, those last two side by side.
+///
+/// **Walk the pipe along its rulings**, the straight lines up its wall, one for
+/// each angle `φ` round the axis. A plane lying along the axis has the same
+/// value all the way up a ruling, and that value is affine in `cos φ` and
+/// `sin φ`, so it keeps one arc of the circle of rulings, or all of it, or none.
+/// A plane across the axis grows at the one rate `n·a` up every ruling, so it
+/// keeps each ruling from a point `α(φ)` on: up the axis if `n·a` has the sign
+/// of the side it keeps (a floor), and back down if not (a roof). `α(φ)` is
+/// again affine in `cos φ` and `sin φ`.
+///
+/// - With **at most a floor**, every ruling the cut along the axis leaves holds
+///   a half-line, whose start moves smoothly with `φ`: one piece. A roof alone is
+///   the same turned round.
+/// - With **a floor and a roof**, a ruling holds `[α_floor, α_roof]`, which is
+///   there where `α_roof − α_floor ≥ 0`. That difference is affine in `cos φ`
+///   and `sin φ` too, so it holds on one arc, or all, or none. Alone, that is one
+///   piece.
+/// - With **both and a cut along the axis** there are two arcs, and two arcs of
+///   a circle can meet in two pieces: on the pipe of radius one up `z`, keeping
+///   `x ≥ −½`, `z ≥ 0` and `z ≤ ½ − x` leaves the rulings with `|x| ≤ ½`, one
+///   run round `+y` and one round `−y`. So the floor and the roof are asked to be
+///   **side by side**, their normals along one line
+///   ([`the_normals_lie_along_one_line`]); then `α_roof − α_floor` does not
+///   depend on `φ` at all, and the first arc is all or nothing. A half bar's two
+///   caps are that.
+///
+/// Anything else is refused, and none of it is shown to be a limit. Two cuts
+/// along the axis or two floors are each two arcs, which can meet in two pieces
+/// as above (a slab `|x| ≤ ½` across the same pipe), and telling that from one
+/// piece wants the arcs' ends compared; a floor and a roof that are not side by
+/// side beside a cut along the axis could be settled the same way. No face here
+/// has asked for either (§13). A cut that is not a plane, or a sign that could
+/// not be settled, is refused too, so an undecided sign costs a refusal and
+/// never a wrong answer.
+fn leaves_a_pipe_in_one_piece(pipe: &rcad_geom::Cylinder, cuts: &[Cut]) -> bool {
+    let axis = pipe.axis().direction().components();
+    let mut along_the_axis = 0;
+    let mut floors = Vec::new();
+    let mut roofs = Vec::new();
+    for cut in cuts {
+        let Some(flat) = cut.surface.as_plane() else {
+            return false;
+        };
+        let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
+            named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+            normal: flat.normal().components(),
+            along: axis,
+        });
+        match leans {
+            Decision::Zero => along_the_axis += 1,
+            Decision::Pos | Decision::Neg if leans == cut.kept => floors.push(flat),
+            Decision::Pos | Decision::Neg => roofs.push(flat),
+            Decision::Undecidable { .. } => return false,
+            other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    match (along_the_axis, floors.as_slice(), roofs.as_slice()) {
+        (0 | 1, [] | [_], []) | (0 | 1, [], [_]) | (0, [_], [_]) => true,
+        (1, [floor], [roof]) => the_normals_lie_along_one_line(floor, roof),
+        _ => false,
+    }
+}
+
+/// Whether two planes' stored normals lie along one line, which is every
+/// component of their cross product exactly zero; `false` when any of the three
+/// could not be settled.
+///
+/// Each component is `u_i·v_j − u_j·v_i`, the dot of `(u_i, −u_j)` with
+/// `(v_j, v_i)`, and turning a stored number round is exact, so each is the
+/// same sum of stored products [`SquareToTheAxis`] settles.
+fn the_normals_lie_along_one_line(one: &Plane, other: &Plane) -> bool {
+    let [u, v] = [one, other].map(|flat| flat.normal().components());
+    [(1, 2), (2, 0), (0, 1)].into_iter().all(|(i, j)| {
+        let (component, _) = rcad_predicates::decide(&SquareToTheAxis {
+            named: WHETHER_TWO_PLANES_LIE_SIDE_BY_SIDE,
+            normal: [u[i], -u[j], 0.0],
+            along: [v[j], v[i], 0.0],
+        });
+        component == Decision::Zero
+    })
+}
+
+/// The name the test of whether two planes' normals lie along one line goes by
+/// in provenance records.
+const WHETHER_TWO_PLANES_LIE_SIDE_BY_SIDE: &str = "whether two planes lie side by side";
 
 /// Which side of the surface across `side` the face keeps, read off the way the
 /// wire runs.
@@ -1658,11 +1799,20 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
 /// itself, and into itself reads positive against [`the_way_into_an_arc`], so
 /// the sign of that against `∇S × ∇T` is the sign of the way it runs.
 ///
+/// **A straight side on a curved face is read the same way as one between two
+/// planes**, which is what a half bar's wall needs: its two sides along `x = 0`
+/// are rulings of the pipe. The whole segment lies on both surfaces, so it is
+/// part of the curve they cross in, and that curve's direction at the start is
+/// along the segment. The one way that fails is `∇S × ∇T` being nothing there,
+/// the plane touching the pipe along the ruling rather than crossing it, and
+/// that reads [`Decision::Zero`] and is refused.
+///
 /// # Errors
 ///
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a straight side on a
-/// curved face or an arc between two planes, which are not sides of this
-/// family, and [`Error::Undecidable`] when the sign could not be settled.
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc between two
+/// planes, which is not a side of this family, or a side along which the two
+/// surfaces touch, and [`Error::Undecidable`] when the sign could not be
+/// settled.
 fn which_side_of_its_neighbour_a_side_keeps(
     face: FaceView<'_>,
     surface: &Surface,
@@ -1677,7 +1827,7 @@ fn which_side_of_its_neighbour_a_side_keeps(
     }
     let flat = [surface, &side.across].map(|one| one.as_plane().is_some());
     let runs = match &side.run {
-        SideRun::Straight if flat == [true, true] => {
+        SideRun::Straight => {
             let to = side.end.at.coordinates();
             let from = at.coordinates();
             let step = core::array::from_fn(|axis| {
@@ -1688,7 +1838,7 @@ fn which_side_of_its_neighbour_a_side_keeps(
         SideRun::Arc { into_the_arc } if flat == [true, false] || flat == [false, true] => {
             dot(*into_the_arc, along_the_crossing)
         }
-        SideRun::Straight | SideRun::Arc { .. } => return Err(cannot()),
+        SideRun::Arc { .. } => return Err(cannot()),
     };
     match runs.sign() {
         Decision::Pos => Ok(Decision::Neg),
@@ -1718,12 +1868,12 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 /// - A straight side against a plane lies where its ends do.
 /// - A straight side against a ball it has both ends in or on is inside it,
 ///   because a ball holds every segment between two of its points.
-/// - A straight side of a **flat** face against a cone it crosses in a curve
-///   that closes, both ends in or on it, is inside it too — not because the cone
-///   is convex, which a double cone is not, but because what it leaves on such a
-///   plane is one convex region, and a convex region holds every segment between
-///   two of its points. A closed crossing is what [`is_a_family_this_follows`]
-///   has already asked of every cone here.
+/// - A straight side of a **flat** face against a cone or a pipe it crosses in a
+///   curve that closes, both ends in or on it, is inside it too — not because the
+///   cone is convex, which a double cone is not, but because what either leaves
+///   on such a plane is one convex region, and a convex region holds every
+///   segment between two of its points. A closed crossing is what
+///   [`is_a_family_this_follows`] has already asked of every cone and pipe here.
 /// - An arc against a plane that holds both its ends: that plane meets the arc's
 ///   own plane in the line through the two ends, which is the chord, and the arc
 ///   is the whole of the side of the chord [`the_way_into_an_arc`] points to. So
@@ -1732,6 +1882,11 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   in-plane directions compared.
 /// - An arc against a plane that holds **one** of its ends, which is the pie
 ///   slice: [`where_an_arc_with_one_end_on_a_cut_lies`].
+/// - An arc against a plane side by side with the arc's own plane
+///   ([`the_normals_lie_along_one_line`]), both ends on the same side of it: the
+///   two planes never meet, so the whole of the arc's plane is on that side. A
+///   half bar's wall is cut by its two caps, and each cap's arc is this against
+///   the other cap.
 ///
 /// Everything else is [`Lies::Across`]: an arc with neither end on the plane may
 /// bulge across it, and nothing here builds the point where it would.
@@ -1775,6 +1930,14 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             {
                 Lies::Beside(Decision::Neg)
             }
+            Surface::Cylinder(pipe)
+                if surface
+                    .as_plane()
+                    .is_some_and(|own| pipe.is_cut_in_a_closed_curve_by(own) == Some(true))
+                    && ends.iter().all(|end| *end != Decision::Pos) =>
+            {
+                Lies::Beside(Decision::Neg)
+            }
             Surface::Sphere(_)
             | Surface::Cylinder(_)
             | Surface::Cone(_)
@@ -1813,6 +1976,15 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 }
                 [far @ (Decision::Pos | Decision::Neg), Decision::Zero] => {
                     on_the_cut(side.end, far)
+                }
+                [one @ (Decision::Pos | Decision::Neg), other]
+                    if one == other
+                        && surface
+                            .as_plane()
+                            .or(side.across.as_plane())
+                            .is_some_and(|own| the_normals_lie_along_one_line(own, &flat)) =>
+                {
+                    Lies::Beside(one)
                 }
                 [..] => Lies::Across,
             }
@@ -1922,8 +2094,8 @@ fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
     })
 }
 
-/// The gradient of a plane, a ball or a cone at `at`, as a box, as the surface
-/// is stored; `None` for any other kind.
+/// The gradient of a plane, a ball, a cone or a pipe at `at`, as a box, as the
+/// surface is stored; `None` for any other kind.
 ///
 /// Only the sign of a dot against this is ever read, so a positive factor is
 /// dropped where one falls out. A cone's own sign is
@@ -1936,6 +2108,11 @@ fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
 /// along `w`, and then `s²` times a non-zero number would have to be zero. No
 /// corner of an arc this reads is the apex, because an arc has a circle of its
 /// own with two different ends on it.
+///
+/// A pipe's sign is `|x|²|w|² − (x·w)² − r²|w|²` for `x = at − origin`, whose
+/// gradient is twice `|w|²x − (x·w)w`: the part of `x` square to the axis,
+/// scaled by `|w|²`. It points out of the pipe and is zero only on the axis,
+/// which no point of the pipe's skin is on.
 fn gradient_at(surface: &Surface, at: Point) -> Option<[Interval; 3]> {
     match surface {
         Surface::Plane(flat) => Some(exactly(flat.normal().components())),
@@ -1960,7 +2137,20 @@ fn gradient_at(surface: &Surface, at: Point) -> Option<[Interval; 3]> {
                 squared * out[axis] - steepened * along[axis]
             }))
         }
-        Surface::Cylinder(_) | Surface::Torus(_) | _ => None,
+        Surface::Cylinder(pipe) => {
+            let at = at.coordinates();
+            let origin = pipe.axis().origin().coordinates();
+            let out: [Interval; 3] = core::array::from_fn(|axis| {
+                Interval::exactly(at[axis]) - Interval::exactly(origin[axis])
+            });
+            let along = exactly(pipe.axis().direction().components());
+            let how_far_along = dot(out, along);
+            let squared = dot(along, along);
+            Some(core::array::from_fn(|axis| {
+                squared * out[axis] - how_far_along * along[axis]
+            }))
+        }
+        Surface::Torus(_) | _ => None,
     }
 }
 
@@ -3486,6 +3676,7 @@ mod tests {
                     .expect("a normal with a length");
             let straddles = matches!(
                 SquareToTheAxis {
+                    named: WHERE_A_PLANE_AND_A_TORUS_CROSS,
                     normal: flat.normal().components(),
                     along: axis.direction().components(),
                 }
