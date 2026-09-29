@@ -15,15 +15,15 @@
 //! kernel stores what it was handed. §16.10's test for an unreachability claim
 //! is the public door, not today's callers.
 //!
-//! **What this file measures is that the second spelling costs one face and
-//! nothing else.** Two bars stacked end to end on one axis share their wall
-//! pipe. The union used to stop at `"a point in a piece that every solid could
-//! place"` before any corner was named, which masked the spelling; once that
-//! lifted, the circle between two spellings of one wall was read as two pipes
-//! crossing, and nothing could walk it (§231). Now all four unions — one
-//! spelling and two, each either way round — answer one bar with the volume
-//! worked out by hand, and each spelling answers the same either way round.
-//! What stays is that two spellings leave the wall as two faces.
+//! **What this file measures is that the second spelling costs nothing.** Two
+//! bars stacked end to end on one axis share their wall pipe. The union used to
+//! stop at `"a point in a piece that every solid could place"` before any
+//! corner was named, which masked the spelling; once that lifted, the circle
+//! between two spellings of one wall was read as two pipes crossing, and
+//! nothing could walk it (§231). Then two spellings left the wall as two faces,
+//! and every later fuse of the answer refused on the circle between them
+//! (§325.4). Now all four unions — one spelling and two, each either way round
+//! — answer one bar of three faces with the volume worked out by hand.
 //!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
@@ -252,23 +252,24 @@ struct Said {
     bound: f64,
 }
 
-/// **The measurement.** Spelling the wall twice changes nothing but how many
-/// faces the wall is.
+/// **The measurement.** Spelling the wall twice leaves the wall one face, on
+/// the same spelling whichever bar went first.
 ///
 /// Four runs: one spelling and two, each fused both ways round. Each spelling
 /// gives the same faces either way round, and all four are the one bar four
 /// tall ([`the_stacked_bars_unite_into_one_bar_however_the_wall_is_written`]).
-/// The two spellings are one surface to the fuse (§231), but the joiner joins
-/// pieces of a curved face only when their surfaces are the same bits
-/// (§229.2), so with two spellings the wall stays two faces meeting on the
-/// circle at `z = 2`.
+/// The two spellings are one surface to the fuse (§231), and the joiner joins
+/// pieces of one pipe however it is written, onto the lowest spelling by bits,
+/// which is the lower bar's here. Before that it joined only pieces with the
+/// same bits (§229.2), the wall stayed two faces meeting on the circle at
+/// `z = 2`, and every later fuse of the answer refused on that circle (§325.4).
 ///
 /// The faces and not the volumes are compared across the order: with one
 /// spelling the two orders measure 50.20344246266881 and 50.20344246266873,
 /// both within their bound of 16π, so bit-identical volumes are not something
 /// the fuse gives either way round even with nothing spelled twice.
 #[test]
-fn spelling_the_wall_of_a_stacked_bar_twice_changes_only_how_many_faces_the_wall_is() {
+fn spelling_the_wall_of_a_stacked_bar_twice_leaves_the_wall_one_face() {
     let [one_spelling_forwards, one_spelling_backwards] = what_the_union_says(LOWER_ORIGIN);
     let [two_spellings_forwards, two_spellings_backwards] = what_the_union_says(UPPER_ORIGIN);
 
@@ -281,13 +282,12 @@ fn spelling_the_wall_of_a_stacked_bar_twice_changes_only_how_many_faces_the_wall
         "with two spellings of the wall the two orders of the union disagreed"
     );
     assert_eq!(
-        one_spelling_forwards.faces.matches("Cylinder(").count(),
-        1,
-        "{one_spelling_forwards:?}"
+        two_spellings_forwards.faces, one_spelling_forwards.faces,
+        "the wall spelled twice came back as other faces than the wall spelled once"
     );
     assert_eq!(
         two_spellings_forwards.faces.matches("Cylinder(").count(),
-        2,
+        1,
         "{two_spellings_forwards:?}"
     );
 }
