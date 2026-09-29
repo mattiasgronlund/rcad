@@ -16,7 +16,7 @@ answers Q39 and Q82.*
 
 - **`mesh.rs`'s `hand_over`** reads `inside_out` as
   `face.orientation().is_reversed() != matches!(stored, Surface::Torus(_))`,
-  the one line §329.3's "turned" rows ran. The triangulator draws every
+  the one line §329.3's "turned" rows ran (`surface` since the merge, 361.4). The triangulator draws every
   triangle anticlockwise in the chart, and a torus's chart takes the tube angle
   first, so the chart's turn points into the tube (§329.1 (c)).
 - **`classify.rs`'s `gradient_at`**: the torus arm is no longer negated.
@@ -85,7 +85,7 @@ disagreeing, and Q103's premise stands. `mise exec -- just t -p rcad-topo -E
 
 **The change does not land green on this row's write set alone.** Five files
 outside it build a bend turned round, and fail with `FacesDoNotAgreeWhichWayTheyFace`
-or a moved answer until each is rebuilt the same way:
+or a moved answer until each is rebuilt the same way (Q667 did, 361.4):
 
 - `crates/rcad-step/tests/fuzzing/writer.rs`'s `a_quarter_bend`, behind both
   failing tests in `every_model_the_writer_fuzzer_kept_is_written_again.rs`
@@ -107,3 +107,51 @@ removed; that example no longer refuses.
 because no public call built a solid with a torus face and a flat face with
 straight sides. `a_ray_from_beside_a_box.rs` now builds one, so they can move
 out.
+
+### 361.4 Landed with the bends it left (Q667)
+
+*Row Q667 (`lane-q667-land-the-turned-torus-mesh`, off `7fc73410`) merged
+Q644's branch at `3e51e291` and did 361.3's list.*
+
+- **The merge** had no textual conflict and one line that did not compile:
+  Q645 renamed `hand_over`'s `stored` to `surface`, because a flat face is now
+  cut up where the solid sits. For a torus face the surface it is cut up on is
+  still the one it is meshed on, so the turn reads `surface`. After it,
+  `mise exec -- just t --workspace --no-fail-fast` ran 2821 tests: 7 failed,
+  10 skipped, exactly the tests of 361.3's five files.
+- **Four bends rebuilt**, each wall `Forward` with every closed-edge coedge
+  turned over: `fuzzing/writer.rs`'s `a_quarter_bend` (its `a_wall` now takes
+  which way round the first circle goes, `Forward` for the frustum),
+  `a_bend_round_a_slanted_axis.rs`, and `two_frustums_stacked_on_one_cone.rs`.
+  The half bend in `a_joined_flat_face_whose_rings_enclose_no_area.rs` has no
+  closed edge. Its wall's loop, two arcs and two short sides, already runs
+  anticlockwise seen from above, which is right-handed about the way out of the
+  tube, so only the wall's use turns. It validates, measures `2π²` and is
+  refused as before.
+- **A bend and a copy turned an eighth of a turn answer under every rule**
+  (Q341). Each answer is one solid, and `Model::validate` passes. At
+  deflection `0.01` the difference and the intersection each hold `π²`, an
+  eighth of the ring by Pappus, and the union holds `3π²`, all within
+  `measure`'s bound. The difference and the intersection have 3 faces. The
+  union has 5, because its wall stays in three pieces. `mise exec -- just t
+  -p rcad-topo --test a_bend_less_a_turned_copy_of_itself`.
+- **A bend's cap against a block: its control answers 90 of 90**, 105 laws
+  checked. It was 45, the fuses that keep the bend having stopped writing it
+  back. The touching row still refuses all 66 as a quartic. `mise exec -- just
+  t -p rcad-topo --test fuses_that_touch a_bends_cap_flush_against_a_block
+  --no-capture`.
+- `error.rs`'s first example for `TheFuseWroteABrokenAnswer` is now history.
+  No test in `rcad-topo` pins a sound pair that still ends there.
+
+**One test still fails: the writer fuzzer's checked-in seed.**
+`fuzz/corpus/no_model_makes_the_writer_panic/a_quarter_bend_of_pipe` holds
+the old bend as `postcard` bytes, and it measures `VolumeIsNotPositive {
+volume: -84.29124343776743 }`, so `every_shape_seed_is_the_shape_it_is_named_for`
+fails until the seed is drawn again. The builder alone was enough for the
+mutator: `every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model`
+passes. A throwaway probe drew `a_quarter_bend(model, 6, 2)` in a 100 mm model
+again. The new bytes are 681 long like the old, differ from them in 5 bytes,
+validate, have faces plane, plane and torus, have their middle at
+`(3.9254, 3.9255, −0.0021)` against the test's `3.9257`, and are refused by
+the writer. Those are the test's four checks. The corpus is outside Q667's
+write set.
