@@ -195,3 +195,9 @@ in the throwaway tree):
   right because two turns cancel, and it moves again with step 3.
 - `three_relays_in_the_corpus_are_refused_by_the_mesh_today` — moves to
   "imports".
+
+**§361 made 329.5's change and moved all three**: the first test is now
+`a_bend_written_as_the_standard_says_validates_and_places_every_point_as_the_shape_does`,
+the second `a_bend_written_with_every_turn_turned_over_is_refused`, the third
+`three_relays_in_the_corpus_import`. Item 6 came out the other way: the
+three-quarter bend built the standard way is still refused by the sweep.

@@ -97,7 +97,9 @@ of `y = 0`.
   refuses a wall whose two circles run the same way was not run. Read from the
   code, `cut_a_ring_across` did the same before this change, on a cylinder's
   ring as well as a torus's.
-- The torus orientation §329 found turned round, and Q372's cutting in the
-  ring angle, are untouched. A three-quarter band spans `3π/2` in the ring
+- The torus orientation §329 found turned round was turned by §361, which
+  rebuilt this section's bands with the wall used forwards; they pass as
+  they did, as 343.2 reasoned. Q372's cutting in the ring angle is
+  untouched. A three-quarter band spans `3π/2` in the ring
   angle in one patch per quarter of the tube, and it measured right at all
   three deflections without cuts in the ring angle.
