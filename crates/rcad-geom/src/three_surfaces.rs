@@ -2281,8 +2281,7 @@ mod tests {
     fn a_line_that_touches_a_ball_at_a_point_f64_holds_touches_it_exactly_there() {
         let ball = |centre: [f64; 3], radius: f64| {
             Surface::Sphere(
-                Sphere::new(Point::new(centre[0], centre[1], centre[2]), radius)
-                    .expect("a radius"),
+                Sphere::new(Point::new(centre[0], centre[1], centre[2]), radius).expect("a radius"),
             )
         };
         assert_eq!(
