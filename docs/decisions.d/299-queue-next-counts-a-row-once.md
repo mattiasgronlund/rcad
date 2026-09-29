@@ -47,7 +47,7 @@ case, so a landed-but-still-held row keeps the old, over-counting behaviour
 (erring toward full, §263.4's cheaper mistake) rather than being wrongly
 absorbed into someone else's tree.
 
-### 299.3 What this does not fix
+### 299.3 What this does not fix — closed by Q234, §299.5
 
 If a row's lane branch is deleted outright (not just its worktree removed)
 while the row is still held and its verifier's tree is detached, no signal
@@ -67,3 +67,65 @@ miscount: two held runs must not collapse onto one slot). Reverting
 fails the first case (`5 running` instead of `4`, with `lane-gone` showing "no
 tree yet" beside its own already-counted verifier tree); the tests were not
 reverted.
+
+### 299.5 Q234 closes §299.3, by matching on count rather than identity
+
+*748f6342, `queue: count a held row once when its lane branch is deleted
+outright`.*
+
+**Why nothing persisted outlives the branch.** A `take` event records the
+dispatcher's own tree and the branch name (`Claims.holds()` stores `time`,
+`tree`, `branch` and `write_set` — nothing else), never the lane's own tree and
+never a tip. That is not an oversight to fix by adding one: a tip recorded at
+take time would only be the base commit, since `take` happens as the branch is
+created off it, before the lane has made a commit of its own — indistinguishable
+from every other row taken off the same base, and useless for telling rows
+apart once one of them is gone. So once `git branch -D` removes the branch,
+`branch_tip`'s `git rev-parse --verify` has nothing left to read, and
+`has_a_tree`'s ancestry test — the only thing that ties a row to its detached
+verifier tree — has no tip left to test ancestry against.
+
+**The design.** `has_a_tree` now returns `None` for a branch with no ref left
+to resolve, kept apart from `False` (a row with a live branch and provably no
+tree of its own). `running` sets every such row aside in a `branch_gone` list
+instead of deciding on the spot, finishes matching every row that still has a
+live branch — each ancestry match claims its detached tree's path into a
+`claimed` set shared across the whole call, so two rows never claim the same
+tree — and then counts the detached lane trees no row's ancestry claimed
+(`spare`). That many of the `branch_gone` rows are given a pass: no "no tree
+yet" fallback line, on the assumption that a spare tree is theirs. The rest of
+`branch_gone` get the fallback line, as before. This is a match by **count**,
+one row to one tree, not by identity: once the tip is gone there is no signal
+left that could say which branch-gone row a given spare tree belongs to.
+
+**`check-queue-api-selftest`'s two cases** (`justfile`, added by 748f6342).
+Both build a row in exactly this state — a lane worktree removed, its
+verifier's detached tree still held and locked, then the lane branch itself
+deleted with `git branch -D` — and read `running`'s output:
+
+- one row in this state: its detached verifier tree must be counted once, and
+  the row must not also print a "no tree yet" line beside it;
+- a second, independent row in the same state at the same time: both detached
+  trees must be counted, and neither row may print "no tree yet" — the reverse
+  miscount, two held runs collapsing onto one slot.
+
+Both fail against `queue.py` reverted to base, with the exact miscount §299.3
+named.
+
+**What the match does not cover.** The count-only match assumes every spare
+tree belongs to a branch-gone row, and nothing checks that. A detached tree
+left over from a row that has already landed on `main` while its claims hold
+outlived it — §299.1's Q124/Q128 shape — is real, still locked, and never
+added to `claimed`: `has_a_tree` returns `False` rather than `True` for a
+landed tip **on purpose**, so that a stale hold is counted rather than hidden
+behind an unrelated tree (its own doc comment says so). The same is true of a
+tree whose row was instead matched by exact branch name or by its `merge-`
+branch — but those two never leave a *detached* tree behind to spare, since
+the lane's own tree and the merger's tree both carry a real branch name, not
+`(detached)`. The landed-tip case does, though: it counts as `spare` like any
+other unclaimed detached tree. So if a branch-gone row with genuinely no tree
+left anywhere coexists with a landed-but-still-held row's leftover detached
+tree, the spare count can absorb the branch-gone row against a tree that is
+not its own, and its fallback line is wrongly dropped — undercounting
+`running` by one. This was read out of the code at merge time, not reproduced
+with a test, so it is named here as a reasoned gap rather than a measured one.
