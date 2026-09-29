@@ -784,6 +784,15 @@ impl BuildingAMesh {
         // in whichever order the walker produced them, and half the caps of a
         // ball come out walked backwards — a mesh that is wrong rather than one
         // that was refused.
+        //
+        // **Where neither rule answers, the walk's own order stands, and that is
+        // not the same thing.** It is a corner where every curved surface either
+        // side has no longitude: a ball's pole, with a plane across it. That
+        // order is fixed by the run and its two surfaces, and `Model::validate`
+        // meshes the solid with this same walk and refuses the coedges that run
+        // against it `FacesDoNotAgreeWhichWayTheyFace`. So a rim cornered on the
+        // pole builds one way round per spelling, and that way meshes closed
+        // (`a_closed_edge_neither_direction_rule_answers.rs`, §199.4).
         if edge.is_closed()? {
             let corner = ends[0];
             if let Some(first) = points.first()
