@@ -564,22 +564,28 @@ fn where_the_model_puts_a_corner(
         "the faces round one corner are at different placements, so the corner is in two places"
     );
     let stored = model.data().vertices[slot].point;
-    // A solid standing where it was built is not moved at all, and a box round
-    // a move that rounded nothing would turn an exact corner into an inexact
-    // one — which is the whole of §17.7's lattice control.
+    // A solid standing where it was built hands on the very bits it stored.
+    // The general road would give the same place, exact, but only after adding
+    // a shift of zero, which turns a stored `-0.0` into `0.0` on the path every
+    // unplaced solid takes.
     if movement == Isometry::identity() {
         return Ok(PredicatePoint::from(stored.coordinates()));
     }
-    // A pole of a ball has one face round it and one surface, and its box is
-    // that surface's rounding counted once for each of the two chains the bound
-    // is derived over. Handing the same surface twice is what says so.
-    let on = [around[0].stored, around[around.len() - 1].stored];
+    // Every surface round the corner and not two of them: a shift that rounds
+    // nothing hands the corner back exact, and that is only true of a corner
+    // whose every surface was carried exactly (§34.6's confident sign about a
+    // rounding, otherwise).
+    //
     // The width of the box is the whole of what the move cost, and the
     // `Approximation` beside it says the same number a second time. §34.9's trap
     // is that the box is for asking predicates and its middle is for storing, so
     // the one thing that must not happen is the two drifting apart — and the way
     // to make that impossible is to keep only one of them.
-    let (point, _) = where_a_corner_lands_after_moving(stored, [&on[0], &on[1]], &movement)?;
+    let (point, _) = where_a_corner_lands_after_moving(
+        stored,
+        around.iter().map(|face| &face.stored),
+        &movement,
+    )?;
     Ok(as_exact_as_it_is(point))
 }
 
