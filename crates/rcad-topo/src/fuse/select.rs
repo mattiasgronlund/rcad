@@ -37,11 +37,11 @@
 //! nothing is projected into two dimensions, which is §15.5's rule.
 
 use rcad_geom::{
-    Cone, EdgeRun, Picker, Plane, PlaneAgreement, Point, Surface, SurfaceMeet, Torus, Vector,
-    intersect,
+    Cone, EdgeRun, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
+    Vector, intersect,
 };
 use rcad_predicates::{
-    Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
+    Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
     orient3d_of_points,
 };
 
@@ -357,18 +357,38 @@ fn place_the_piece(
         return Ok(Placement::Outside);
     }
     let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
+    let try_one =
+        |candidate: PredicatePoint, log: &mut ProvenanceLog| -> Result<Option<Option<Placement>>> {
+            if the_piece_holds(piece, in_plane, &also_picked_by, candidate) != Some(true) {
+                return Ok(None);
+            }
+            let mut trial = ProvenanceLog::new();
+            let settled =
+                settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
+            if settled.is_some() {
+                trial.drain_into(log);
+            }
+            Ok(Some(settled))
+        };
     let mut one_was_inside = false;
     for &candidate in candidates {
-        if the_piece_holds(piece, in_plane, &also_picked_by, candidate) != Some(true) {
+        let Some(settled) = try_one(candidate, log)? else {
             continue;
-        }
+        };
         one_was_inside = true;
-        let mut trial = ProvenanceLog::new();
-        let settled =
-            settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
         if let Some(placement) = settled {
-            trial.drain_into(log);
             return Ok(placement);
+        }
+    }
+    if !one_was_inside {
+        for candidate in points_in_a_sliver_of_a_ball(piece) {
+            let Some(settled) = try_one(candidate, log)? else {
+                continue;
+            };
+            one_was_inside = true;
+            if let Some(placement) = settled {
+                return Ok(placement);
+            }
         }
     }
     let which_search_gave_up = if one_was_inside {
@@ -426,13 +446,13 @@ fn the_piece_holds(
         {
             return Some(false);
         }
-        return Some(
-            piece
-                .wires
-                .iter()
-                .flatten()
-                .all(|side| side_of_surface(&side.carried_by[1], point) == side.material_side),
-        );
+        return Some(piece.wires.iter().flatten().all(|side| {
+            let found = match side.carried_by[1].as_plane() {
+                Some(flat) => side_of_a_plane(flat, point),
+                None => side_of_surface(&side.carried_by[1], point),
+            };
+            found == side.material_side
+        }));
     };
     // **A flat piece's corners are a polygon and its sides need not be**
     // (§38.5). Where a bar's wall cuts a plane the side between two corners is an
@@ -951,7 +971,7 @@ fn the_ray_and_the_stored_planes_disagree_about(
         let Some(off_the_plane) = InPlane::of(&plane) else {
             return false;
         };
-        let on_the_side_of_the_reference = match plane.side_of_point(point) {
+        let on_the_side_of_the_reference = match side_of_a_plane(&plane, point) {
             Decision::Pos => off_the_plane.turned_round,
             Decision::Neg => !off_the_plane.turned_round,
             Decision::Zero | Decision::Undecidable { .. } => return false,
@@ -972,6 +992,31 @@ fn the_ray_and_the_stored_planes_disagree_about(
         });
         disagree
     })
+}
+
+/// Which side of `flat` a point is on, asked of the point with each coordinate
+/// the plane cannot see narrowed to one end of its interval.
+///
+/// **A plane whose normal has no part along an axis cannot tell apart two
+/// points that differ only along it**, so narrowing that coordinate changes
+/// nothing about the answer and everything about whether it can be given. A
+/// segment up through a cap a fraction of a spacing deep
+/// ([`segments_up_through_a_cap`]) is one double in the two coordinates such a
+/// plane sees, and narrowed it is asked exactly. Asked as a box, the interval
+/// sum rounds by more than the cap is deep and cannot say: the cap of
+/// `tests/a_ball_shaved_by_a_turned_blocks_face.rs` turned by `1` about `z`
+/// is `3.6e-17` deep, and no segment through it was held until this narrowed
+/// it.
+fn side_of_a_plane(flat: &Plane, point: PredicatePoint) -> Decision {
+    let PredicatePoint::Constructed(mut boxed) = point else {
+        return flat.side_of_point(point);
+    };
+    for (axis, part) in flat.normal().components().into_iter().enumerate() {
+        if part == 0.0 {
+            boxed[axis] = Interval::exactly(boxed[axis].lo());
+        }
+    }
+    flat.side_of_point(as_exact_as_it_is(PredicatePoint::Constructed(boxed)))
 }
 
 /// Whether the face of `solid` that `point` lies on faces the same way as
@@ -1779,6 +1824,199 @@ fn the_largest_number_placing(surface: &Surface) -> Option<f64> {
     }
 }
 
+/// Points inside a piece cut from a ball, or from a plane inside a ball, that
+/// is far thinner than the box [`back_onto_the_surface`] puts a point in; tried
+/// only once no point [`candidate_points`] offered was inside the piece.
+///
+/// **A plane that only just cuts a ball leaves two such pieces.** A block
+/// turned about `z` beside a ball that should touch its face at one point has
+/// that face's plane stored a rounding off, and it cuts the ball in a circle
+/// `1e-8` across, taking off a cap `1e-17` to `8e-16` deep
+/// (`tests/a_ball_shaved_by_a_turned_blocks_face.rs`). A point put back on the
+/// ball comes back as a box `±5.7e-14` wide, thousands of times thicker than
+/// the cap, so no side of the cap can place it and the cap held none of them.
+/// The disk the ball leaves on the plane fares no better: the one point in
+/// the middle of it, a double, was a rounding on the far side of the plane,
+/// where the ball does not reach.
+///
+/// Unlike `docs/decisions.md` §346.3's sliver, these hold many points with
+/// `f64` coordinates: 1e-8 long and a fraction of a spacing deep is still
+/// millions of doubles. [`doubles_in_a_sliver`] finds a few of them, each
+/// **proved** inside the ball and on the right side of every cut, and
+/// [`segments_up_through_a_cap`] and [`points_beyond_a_plane_in_a_ball`] say
+/// what each piece makes of them.
+fn points_in_a_sliver_of_a_ball(piece: &Piece) -> Vec<PredicatePoint> {
+    match &piece.surface {
+        Surface::Sphere(ball) => segments_up_through_a_cap(piece, ball),
+        Surface::Plane(flat) => points_beyond_a_plane_in_a_ball(piece, flat),
+        Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => Vec::new(),
+    }
+}
+
+/// For a piece of a ball's skin whose every side a plane cut, segments along
+/// an axis no cutting plane's normal has a part along, each from a double
+/// point proved inside the ball to one proved outside it.
+///
+/// **A segment is a box that holds a point of the ball**: its two ends are on
+/// either side of the ball's surface, so the surface crosses it. And every
+/// point of it is on the same side of each cutting plane, exactly, because a
+/// plane with no part along the segment cannot tell its points apart. So the
+/// sides [`the_piece_holds`] asks decide on it as they would on one double,
+/// where on a box as wide as the round trip's they decided nothing.
+fn segments_up_through_a_cap(piece: &Piece, ball: &Sphere) -> Vec<PredicatePoint> {
+    let mut cuts = Vec::new();
+    for side in piece.wires.iter().flatten() {
+        let Some(flat) = side.carried_by[1].as_plane() else {
+            return Vec::new();
+        };
+        cuts.push((*flat, side.material_side));
+    }
+    let Some(up) = (0..3).find(|&axis| {
+        cuts.iter()
+            .all(|(flat, _)| flat.normal().components()[axis] == 0.0)
+    }) else {
+        return Vec::new();
+    };
+    let height = ball.centre().coordinates()[up];
+    doubles_in_a_sliver(ball, &cuts, up, height)
+        .into_iter()
+        .filter_map(|inside| a_segment_out_of_the_ball(ball, inside, up))
+        .collect()
+}
+
+/// The segment from `inside` along `up` to the first double point proved
+/// outside `ball`, or `None` when no step reached one.
+fn a_segment_out_of_the_ball(ball: &Sphere, inside: [f64; 3], up: usize) -> Option<PredicatePoint> {
+    let centre = ball.centre().coordinates();
+    let aside: f64 = (0..3)
+        .filter(|&axis| axis != up)
+        .map(|axis| (inside[axis] - centre[axis]).powi(2))
+        .sum();
+    let mut reach =
+        (2.0 * (ball.radius().powi(2) - aside).max(0.0).sqrt()).max(ball.radius() * f64::EPSILON);
+    for _ in 0..64 {
+        let mut outside = inside;
+        outside[up] += reach;
+        if ball.side_of(PredicatePoint::from(outside)) == Decision::Pos {
+            let mut segment = inside.map(Interval::exactly);
+            segment[up] = Interval::new(inside[up], outside[up])
+                .expect("an end with the other sign is a step above the one inside");
+            return Some(PredicatePoint::Constructed(segment));
+        }
+        reach *= 2.0;
+    }
+    None
+}
+
+/// For a flat piece bounded by a ball's circle, double points on the far side
+/// of the piece's plane from the ball's centre, proved inside the ball.
+///
+/// **The far side is what makes such a point stand for the disk.** The disk is
+/// the part of the plane inside the ball, and a point's foot on the plane is
+/// nearer the centre than the point itself whenever the point is on the far
+/// side, so a point there inside the ball has its foot inside the ball too,
+/// which is inside the disk. A point on the near side proves nothing of the
+/// kind: the ball is wider there than on the plane, and a point inside it can
+/// have its foot outside the disk
+/// (`a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it`).
+fn points_beyond_a_plane_in_a_ball(piece: &Piece, flat: &Plane) -> Vec<PredicatePoint> {
+    let balls: Vec<Sphere> = piece
+        .wires
+        .iter()
+        .filter_map(|wire| match round_wire_of(wire) {
+            Some(Surface::Sphere(ball)) => Some(ball),
+            Some(_) | None => None,
+        })
+        .collect();
+    let [ball] = balls[..] else {
+        return Vec::new();
+    };
+    let far_side = match flat.side_of_point(PredicatePoint::from(ball.centre().coordinates())) {
+        Decision::Pos => Decision::Neg,
+        Decision::Neg => Decision::Pos,
+        Decision::Zero | Decision::Undecidable { .. } | _ => return Vec::new(),
+    };
+    let normal = flat.normal().components();
+    let held = (0..3)
+        .min_by(|&one, &other| normal[one].abs().total_cmp(&normal[other].abs()))
+        .expect("three axes");
+    let foot = flat.project(ball.centre()).coordinates();
+    doubles_in_a_sliver(&ball, &[(*flat, far_side)], held, foot[held])
+        .into_iter()
+        .map(PredicatePoint::from)
+        .collect()
+}
+
+/// Up to four double points proved inside `ball` and on the given side of each
+/// of `cuts`, with coordinate `held` at `height`.
+///
+/// **Found by walking along each cut from where the ball's centre is nearest
+/// it**, one spacing of doubles at a time in one of the other two coordinates,
+/// and at each step trying the few doubles next to the cut in the third. The
+/// sliver runs along the cut for its whole length and is a fraction of a
+/// spacing deep, so most steps hold no double inside it and about one in ten
+/// does at the thinnest measured, `1.3e-17` deep. Nothing found is trusted
+/// without the two signs, so where the walk goes decides nothing (§5).
+fn doubles_in_a_sliver(
+    ball: &Sphere,
+    cuts: &[(Plane, Decision)],
+    held: usize,
+    height: f64,
+) -> Vec<[f64; 3]> {
+    const STEPS_EACH_WAY: usize = 64;
+    const WANTED: usize = 4;
+    let [one, other] = match held {
+        0 => [1, 2],
+        1 => [0, 2],
+        _ => [0, 1],
+    };
+    let inside_everything = |at: [f64; 3]| {
+        let point = PredicatePoint::from(at);
+        ball.side_of(point) == Decision::Neg
+            && cuts
+                .iter()
+                .all(|(flat, side)| flat.side_of_point(point) == *side)
+    };
+    let mut found = Vec::new();
+    for (cut, _) in cuts {
+        let normal = cut.normal().components();
+        let [solved, walked] = if normal[one].abs() >= normal[other].abs() {
+            [one, other]
+        } else {
+            [other, one]
+        };
+        if normal[solved] == 0.0 {
+            continue;
+        }
+        let foot = cut.project(ball.centre()).coordinates();
+        let mut ahead = foot[walked];
+        let mut behind = foot[walked].next_down();
+        for _ in 0..STEPS_EACH_WAY {
+            for along in [ahead, behind] {
+                let on_the_cut = (cut.offset() - normal[walked] * along - normal[held] * height)
+                    / normal[solved];
+                let mut at = [0.0; 3];
+                at[held] = height;
+                at[walked] = along;
+                let mut near = on_the_cut.next_down().next_down();
+                for _ in 0..6 {
+                    at[solved] = near;
+                    if inside_everything(at) {
+                        found.push(at);
+                        if found.len() == WANTED {
+                            return found;
+                        }
+                    }
+                    near = near.next_up();
+                }
+            }
+            ahead = ahead.next_up();
+            behind = behind.next_down();
+        }
+    }
+    found
+}
+
 /// Halfway between two points, which is exact whenever both ends are and the
 /// middle is a double.
 ///
@@ -1833,8 +2071,10 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cone, Orientation, Plane, Surface, Torus};
-    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+    use rcad_geom::{Axis, Cone, Orientation, Plane, Point, Sphere, Surface, Torus};
+    use rcad_predicates::{
+        Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
+    };
     use smallvec::SmallVec;
 
     use super::{
@@ -2114,6 +2354,40 @@ mod tests {
         assert_eq!(holds([2.0, 0.0, 10.0]), Some(true), "inside the triangle");
         assert_eq!(holds([0.0, 0.0, -10.0]), Some(false), "the opposite wedge");
         assert_eq!(holds([1.0, 0.0, -10.0]), Some(false), "the opposite wedge");
+    }
+
+    /// A disk on `z = 0` cut by a ball of radius 1 round `(0, 0, −0.75)`, so
+    /// `√0.4375 ≈ 0.661` across from its middle. `(0.67, 0, −0.1)` is inside
+    /// the ball, on the centre's side of the plane, and its foot `(0.67, 0, 0)`
+    /// is outside the ball and so outside the disk. The disk is read as holding
+    /// it all the same, because a round wire's partner is asked about the point
+    /// where it is and not about its foot.
+    ///
+    /// A real candidate is a rounding off its plane, not a tenth of a unit, so
+    /// this reaches only a disk the ball is a rounding wider than just off the
+    /// plane — one `1e-8` across (`docs/decisions.md` §346.6). No candidate
+    /// `candidate_points` offers was seen to land there.
+    #[test]
+    fn a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it() {
+        let ball = Sphere::new(Point::from([0.0, 0.0, -0.75]), 1.0).expect("a positive radius");
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let disk = a_flat_piece_inside_the_ring(
+            Surface::Sphere(ball),
+            flat,
+            &[[0.4375_f64.sqrt(), 0.0, 0.0]],
+        );
+        let off_the_plane = PredicatePoint::from([0.67, 0.0, -0.1]);
+        let foot = PredicatePoint::from([0.67, 0.0, 0.0]);
+        assert_eq!(ball.side_of(off_the_plane), Decision::Neg);
+        assert_eq!(ball.side_of(foot), Decision::Pos);
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&disk, off_the_plane),
+            Some(true)
+        );
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&disk, foot),
+            Some(false)
+        );
     }
 
     /// [`the_piece_holds`] with the pickers worked out the way
