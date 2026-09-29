@@ -1422,8 +1422,11 @@ impl<'f> Arrangement<'f> {
     /// **So the fold takes the model's word only as far as rounding reaches.**
     /// Every point `place`'s box holds has to lie inside the corner's box grown
     /// by [`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost).
-    /// That is the allowance `bake.rs` uses to let a meet stand in for a
-    /// stored corner, from the same function. Within it, the two are one point
+    /// That is the half of `bake.rs`'s room that follows the corner, from the
+    /// same function. `bake.rs` lets a meet stand in for a stored corner within
+    /// that plus the room `validate` allows a corner of its solid
+    /// (`Model::room_a_corner_of_this_solid_gets`, §368), so the fold's room is
+    /// the narrower of the two. Within the rounding, the two are one point
     /// written down two ways. That is representation wobble, not a decision
     /// anybody failed to prove (§17.2), so no policy is asked. Every fold the
     /// suites make under `Policy::certified` lies within a quarter of that
@@ -1432,7 +1435,7 @@ impl<'f> Arrangement<'f> {
     ///
     /// **Or when the three are planes `bake` solved the corner among**, however
     /// far the meet's box reaches. Those three were each asked about the corner
-    /// grown by the same room, and none proved it off;
+    /// grown by `bake.rs`'s whole room, and none proved it off;
     /// a meet of three of them can then sit many rooms away in space only
     /// because two of them are nearly one plane
     /// ([`Arrangement::bake_placed_the_corner_on_the_three_planes`]). A turned
@@ -1498,12 +1501,14 @@ impl<'f> Arrangement<'f> {
     ///
     /// A corner with three or more surfaces round it is solved from its
     /// best-conditioned triple, and every surface round it is then asked about
-    /// the corner grown by the room writing it down cost; one that proves it
+    /// the corner grown by the room writing it down cost plus the room
+    /// `validate` allows a corner of its solid off that surface
+    /// (`Model::room_a_corner_of_this_solid_gets`, §368); one that proves it
     /// off is a refusal ([`BakedCorner::around`](super::bake::BakedCorner)).
     /// So each of the three passes through the corner's box grown by that room.
     /// **That is a room across each plane**, which is where the room is a room
-    /// at all: it is how far a plane through one corner of a face misses the
-    /// next.
+    /// at all: it is how far a plane through one corner of a face may miss the
+    /// next, by rounding and by the modelling tolerance `validate` grants.
     ///
     /// Carried to the point where the three meet, that room grows by how badly
     /// the three are placed to pin a point down. Where two of them are nearly
