@@ -954,11 +954,12 @@ pub(crate) fn decide(
 /// A box on the plane of a block's side and off the side itself, against a
 /// solid that also has a torus face (`docs/decisions.md` §323.3).
 ///
-/// These live here and not in `tests/` because no public call builds such a
-/// solid yet: `tests/a_ray_from_beside_a_box.rs` pins each way there is and
-/// what refuses it. So the solid is written the way a fuse writes an answer of
-/// two pieces that do not touch — one solid holding two shells, here a quarter
-/// bend's and a block's.
+/// These were written here because no public call built such a solid: the
+/// solid is written the way a fuse writes an answer of two pieces that do not
+/// touch — one solid holding two shells, here a quarter bend's and a block's.
+/// `tests/a_ray_from_beside_a_box.rs` pins each public way there is; since the
+/// bend's wall is used forwards, a bend growing out of a block's side builds
+/// through `SolidBuilder` (§361).
 #[cfg(test)]
 mod a_box_beside_a_blocks_side {
     use rcad_geom::{
