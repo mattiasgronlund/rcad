@@ -9,9 +9,13 @@
 //! satisfies both. There is nothing to solve, so such a corner is read out of the
 //! model rather than re-derived (`docs/decisions.md` §31.3).
 //!
-//! Read, it is exact and better than a Cramer solve: `check_curved_face` has
-//! already certified it [`Decision::Zero`](rcad_predicates::Decision::Zero) on
-//! its surface, which is a stronger promise than a box.
+//! Read, it is exact and better than a Cramer solve: it is the stored value
+//! itself, with no arithmetic on the way to round it away. That is not a
+//! certificate that it sits exactly on its surface — nothing runs
+//! `Model::validate` before a fuse bakes, and `validate` itself only asks
+//! whether a corner is not provably off its surface, within its modelling
+//! tolerance, never that it is [`Decision::Zero`](rcad_predicates::Decision::Zero)
+//! on it (§75.6).
 //!
 //! **Moved, it is not.** `bake` composes placement, and both the point and the
 //! surface round it are rounded on the way — separately, and in different ways.
