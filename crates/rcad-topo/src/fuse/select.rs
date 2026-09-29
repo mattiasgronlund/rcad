@@ -490,21 +490,18 @@ fn the_piece_holds(
     for (position, wire) in piece.wires.iter().enumerate() {
         let inwards = if position == 0 { 1 } else { -1 };
         match round_wire_of(wire) {
-            Some(partner) => match side_of_a_partner_by_its_plane(
-                flat,
-                &partner,
-                point,
-                reaching_the_plane,
-            ) {
-                Decision::Neg => {
-                    let pickers = also_picked_by[position].as_deref()?;
-                    if every_picker_keeps(pickers, reaching_the_plane)? {
-                        winding += inwards;
+            Some(partner) => {
+                match side_of_a_partner_by_its_plane(flat, &partner, point, reaching_the_plane) {
+                    Decision::Neg => {
+                        let pickers = also_picked_by[position].as_deref()?;
+                        if every_picker_keeps(pickers, reaching_the_plane)? {
+                            winding += inwards;
+                        }
                     }
+                    Decision::Pos => (),
+                    Decision::Zero | Decision::Undecidable { .. } | _ => return None,
                 }
-                Decision::Pos => (),
-                Decision::Zero | Decision::Undecidable { .. } | _ => return None,
-            },
+            }
             None => {
                 let corners: Vec<PredicatePoint> =
                     wire.iter().map(|side| side.ends[0].point()).collect();
@@ -558,7 +555,8 @@ fn is_beyond_the_plane_from_the_centre(flat: &Plane, ball: &Sphere, point: Predi
     let centres_side = flat.side_of_point(PredicatePoint::from(ball.centre().coordinates()));
     matches!(
         (side_of_a_plane(flat, point), centres_side),
-        (Decision::Pos, Decision::Neg | Decision::Zero) | (Decision::Neg, Decision::Pos | Decision::Zero)
+        (Decision::Pos, Decision::Neg | Decision::Zero)
+            | (Decision::Neg, Decision::Pos | Decision::Zero)
     )
 }
 
@@ -585,7 +583,9 @@ fn stretched_to_the_plane(flat: &Plane, point: PredicatePoint) -> Option<Predica
     let middle = middle_of(point).coordinates();
     let crossing = (0..3)
         .filter(|&axis| axis != along)
-        .fold(flat.offset(), |rest, axis| rest - normal[axis] * middle[axis])
+        .fold(flat.offset(), |rest, axis| {
+            rest - normal[axis] * middle[axis]
+        })
         / normal[along];
     let mut boxed = point.enclosure();
     let low = an_end_on_its_side(flat, boxed, along, boxed[along].lo(), crossing, -1.0)?;
@@ -2058,7 +2058,9 @@ fn a_segment_out_of_the_ball(ball: &Sphere, inside: [f64; 3], up: usize) -> Opti
 /// which is inside the disk. A point on the near side proves nothing of the
 /// kind: the ball is wider there than on the plane, and a point inside it can
 /// have its foot outside the disk
-/// (`a_point_inside_a_ball_near_its_disk_can_have_its_foot_outside_it`).
+/// (`a_point_inside_a_ball_whose_foot_is_outside_its_disk_is_not_held`). The
+/// same argument is what lets [`side_of_a_partner_by_its_plane`] read the ball
+/// at such a point alone.
 fn points_beyond_a_plane_in_a_ball(piece: &Piece, flat: &Plane) -> Vec<PredicatePoint> {
     let balls: Vec<Sphere> = piece
         .wires
@@ -2646,7 +2648,11 @@ mod tests {
         let holds = |at: [f64; 3]| {
             the_piece_holds_asked_as_selection_asks(&with_a_hole, PredicatePoint::from(at))
         };
-        assert_eq!(holds([1.5, 0.0, 0.0]), Some(true), "between the hole and the rim");
+        assert_eq!(
+            holds([1.5, 0.0, 0.0]),
+            Some(true),
+            "between the hole and the rim"
+        );
         assert_eq!(holds([0.6, 0.0, 0.0]), Some(false), "in the hole");
         assert_eq!(
             ball.side_of(PredicatePoint::from([0.6, 0.0, 0.1])),
