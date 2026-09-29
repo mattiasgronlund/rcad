@@ -3990,9 +3990,9 @@ mod tests {
     use super::super::Scratch;
     use super::super::select::choose;
     use super::{
-        Assembly, Corner, Corners, Edge, EdgeKey, Error, Face, FaceMeet, Lump, MeetPoint, Model,
-        Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep, Written, assemble,
-        names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
+        Assembly, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, Lump, MeetPoint,
+        Model, Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep, Written,
+        assemble, names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
         the_half_space_both_ends_are_on, vertices_that_only_start_a_closed_edge,
     };
 
@@ -4827,6 +4827,60 @@ mod tests {
             ])
             .expect("a closed skin");
         draft.build(model, policy, log).expect("a round bar")
+    }
+
+    /// A ring counted against one spelling of a pipe, whose side names the pipe
+    /// by the other spelling, still has the cap's plane for a partner.
+    ///
+    /// The count runs before the joined face is written onto one spelling, so
+    /// a side cut from the upper bar still says its pipe is the upper bar's
+    /// while the face is counted against the lower one. Read bit for bit, the
+    /// pipe itself was taken for the partner, it is not a plane, and the count
+    /// gave up — which leaves a wall that needed a seam in pieces.
+    #[test]
+    fn a_side_naming_its_pipe_by_the_other_spelling_is_still_counted_round() {
+        let up = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a radius"));
+        let down = Surface::Cylinder(Cylinder::new(Axis::z().reversed(), 2.0).expect("a radius"));
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let assembly = Assembly {
+            corners: vec![Corner {
+                point: Point::new(2.0, 0.0, 4.0),
+                wobble: 0.0,
+                from: None,
+            }],
+            edges: vec![Edge {
+                ends: [0, 0],
+                carried_by: [up, cap],
+                arc: WhichArc::TheOnlyOne,
+                from: Vec::new(),
+            }],
+            runs: Vec::new(),
+            faces: vec![Face {
+                ancestors: Vec::new(),
+                surface: down,
+                used: Orientation::Forward,
+                wires: vec![vec![Side {
+                    edge: 0,
+                    forward: true,
+                }]],
+                is_a_whole_closed_surface: false,
+            }],
+            shells: Vec::new(),
+            solids: Vec::new(),
+        };
+        let ring = [Dart {
+            face: 0,
+            wire: 0,
+            position: 0,
+        }];
+        assert_eq!(
+            assembly.a_ring_goes_right_round(&ring, &down),
+            Some(true),
+            "a whole cap circle goes right round the pipe once"
+        );
     }
 
     /// A triangle walked forwards and then walked forwards again, which is one
