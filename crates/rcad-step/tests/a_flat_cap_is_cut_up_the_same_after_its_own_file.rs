@@ -12,8 +12,9 @@
 //! placement and was cut up where it sits, from the mesh points themselves.
 
 use std::collections::BTreeMap;
+use std::f64::consts::FRAC_PI_4;
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Measurement, Mesh, Model, SolidView};
@@ -29,15 +30,8 @@ fn a_bar_moved_a_tenth_has_its_caps_cut_up_the_same_after_its_own_file() {
     let mesh_read_back = meshed(solid_read_back, deflection);
 
     assert_eq!(
-        mesh.points()
-            .iter()
-            .map(|point| point.coordinates().map(f64::to_bits))
-            .collect::<Vec<_>>(),
-        mesh_read_back
-            .points()
-            .iter()
-            .map(|point| point.coordinates().map(f64::to_bits))
-            .collect::<Vec<_>>(),
+        the_bits_of_every_point(&mesh),
+        the_bits_of_every_point(&mesh_read_back),
         "the mesh points no longer come back the same bits, so the triangles below \
          cannot be compared by which points they join"
     );
@@ -94,6 +88,77 @@ fn a_bar_moved_a_tenth_measures_the_same_bits_after_its_own_file() {
         going_in, coming_back,
         "the bar measures differently after its own file"
     );
+}
+
+/// A cube's face is a square, and a square's four corners are a tie for the
+/// Delaunay test, so which diagonal it is cut along is the last bits' to say.
+/// Turned and moved, a cube comes back from its file with every corner the same
+/// bits, and 17 of these 21 turns used to cut from one to four of its faces
+/// along the other diagonal (§362.4).
+#[test]
+fn a_turned_cube_has_every_face_cut_up_the_same_after_its_own_file() {
+    let mut differing = Vec::new();
+    for axis in [
+        Vector::new(0.0, 0.0, 1.0),
+        Vector::new(1.0, 2.0, 3.0),
+        Vector::new(-2.0, 0.5, 1.0),
+    ] {
+        for eighths in 1..8 {
+            let turn = Isometry::rotation(
+                &Axis::new(Point::origin(), axis).expect("a direction that is not zero"),
+                f64::from(eighths) * FRAC_PI_4,
+            )
+            .expect("a finite angle about a unit axis");
+            let here = a_cube_turned_and_moved(&turn);
+            let there = read_back(&here);
+            let deflection = Deflection::for_scale(there.scale());
+            let [going_in, coming_back] = [&here, &there].map(|model| {
+                let solid = the_one_solid(model);
+                let mesh = meshed(solid, deflection);
+                (the_bits_of_every_point(&mesh), each_flat_face_cut_up(solid, &mesh))
+            });
+            assert_eq!(
+                going_in.0, coming_back.0,
+                "{eighths} eighths about {axis:?}: the cube's corners no longer come back the \
+                 same bits, so its triangles cannot be compared by which corners they join"
+            );
+            let faces = going_in
+                .1
+                .iter()
+                .filter(|(plane, triangles)| coming_back.1.get(*plane) != Some(triangles))
+                .count();
+            if faces > 0 {
+                differing.push(format!("{eighths} eighths about {axis:?}: {faces} faces"));
+            }
+        }
+    }
+    assert!(
+        differing.is_empty(),
+        "turned cubes cut up differently after their own file: {differing:?}"
+    );
+}
+
+/// A cube of side 2 at the origin, turned and then moved by `(3, −5, 7)`.
+fn a_cube_turned_and_moved(turn: &Isometry) -> Model {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side 2 fits in a model this size");
+    let shift = Isometry::translation(Vector::new(3.0, -5.0, 7.0)).expect("a finite shift");
+    model
+        .place_solid(solid, turn)
+        .expect("the key came from this model");
+    model
+        .place_solid(solid, &shift)
+        .expect("the key came from this model");
+    model
+}
+
+fn the_bits_of_every_point(mesh: &Mesh) -> Vec<[u64; 3]> {
+    mesh.points()
+        .iter()
+        .map(|point| point.coordinates().map(f64::to_bits))
+        .collect()
 }
 
 /// A round bar of radius 3 and height 5, built at the origin and then moved,
