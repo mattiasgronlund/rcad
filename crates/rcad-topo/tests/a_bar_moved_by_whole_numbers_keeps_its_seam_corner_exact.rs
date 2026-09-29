@@ -15,7 +15,8 @@
 use std::collections::BTreeSet;
 
 use rcad_geom::{
-    Isometry, Plane, Point, Scale, Surface, Vector, where_a_corner_lands_after_moving,
+    Axis, Cylinder, Isometry, Plane, Point, Scale, Surface, Vector,
+    where_a_corner_lands_after_moving,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -96,20 +97,21 @@ fn the_seam_corner_of_a_bar_and_its_surfaces() -> (Point, [Surface; 2]) {
         model.vertices().any(|vertex| vertex.point() == corner),
         "a bar of radius one stands its seam at (1, 0, 0)"
     );
-    let surfaces: Vec<Surface> = model
+    let cap = Surface::Plane(
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal"),
+    );
+    let wall = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius of one"));
+    let held: Vec<Surface> = model
         .solid(bar)
         .expect("the bar was just built")
         .faces()
         .map(|face| face.surface())
-        .filter(|surface| match surface {
-            Surface::Plane(cap) => cap.offset() == 0.0,
-            Surface::Cylinder(_) => true,
-            other => panic!("a bar has two caps and a wall and nothing else, not {other:?}"),
-        })
         .collect();
-    let [cap, wall] = surfaces[..] else {
-        panic!("the bottom cap and the wall, and not {surfaces:?}");
-    };
+    assert!(
+        held.contains(&cap) && held.contains(&wall),
+        "the bar holds its bottom cap and its wall as these numbers: {held:?}"
+    );
     (corner, [cap, wall])
 }
 
