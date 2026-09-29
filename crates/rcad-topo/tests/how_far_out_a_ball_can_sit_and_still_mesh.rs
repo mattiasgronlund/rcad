@@ -246,8 +246,10 @@ fn what_the_refusal_out_there_is_called() {
     assert_eq!(
         what_happened(1.0, EVEN, COARSE),
         "the triangulator found two corners in the same place",
-        "the two poles landing on the centre is a boundary with corners on top \
-         of each other, and that is what the triangulator says about it"
+        "along x the poles come back untouched at (0, 0, ±1); it is the \
+         seam's middle that lands on the axis between them, a boundary with \
+         corners on top of each other, and that is what the triangulator \
+         says about it"
     );
 }
 

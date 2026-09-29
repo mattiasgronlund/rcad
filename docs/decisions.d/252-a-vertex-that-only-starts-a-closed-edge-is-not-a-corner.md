@@ -206,8 +206,17 @@ merge, with the correction to 252.5 made above.
 - **Mutations.** Dropping the pairing test, or its "does not come back"
   check, fails five tests in `a_rim_a_fuse_cut_round_one_cone.rs` and
   `fuse_laws_over_a_cone.rs`. **Dropping test 1, or test 2, passes every
-  suite.** Test 2 is covered by test 3. Test 1 guards a shape no test reaches
-  today. Neither blocks the merge, and a row pins both on hand-built sides.
+  suite**, because no fuse in the suites reaches the shape test 1 guards, and
+  test 3's "does not come back" check compares the two ends as whole
+  `MeetPoint`s, points included, while test 2 compares only the vertex, so
+  test 3 covers test 2 only while the arrangement gives both ends of one
+  closed side the same point and no kept wire runs along one closed edge
+  twice. Neither test is asserted anywhere.
+  `a_side_that_closes_on_itself_keeps_its_one_corner` (Q125, `a91dc003`) now
+  stands in for both. Test 1 is pinned by
+  `a_vertex_passed_along_anything_but_the_closed_edge_that_starts_there_stays_a_corner`,
+  and the drop case by
+  `where_a_bar_started_its_cap_circle_is_dropped_when_the_kept_arc_only_passes_it`.
 - **Fusing an answer again** refuses `AFaceTrimmedByACurveThisCannotFollow`
   (§35) for every one of the six answers, the lens included, and did on the
   base. So the 254° arc is not the cause.
