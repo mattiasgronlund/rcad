@@ -46,9 +46,14 @@ hub_aligned := shell('bash "$1/tooling/hub-align/align.sh" "$1" || true', justfi
 list:
     @{{ just_executable() }} --list --unsorted
 
-# Every step of the gate, in the order CI runs them, and the one place that
-# order is written down. `check-gate-runs-every-check` reads this block to prove
-# no `check-*` recipe was written and then never run.
+# Every step of the gate, and the one place their order is written down.
+# `check-gate-runs-every-check` reads this block to prove no `check-*` recipe
+# was written and then never run.
+#
+# **The steps run at once since §372, so the order no longer says what runs
+# first.** It says three things: which failure the block names first when
+# several fail, the order in which steps take a free slot, and the order of the
+# steps that build with cargo, which still run one after another.
 #
 # **One step per line, joined by `\` into a single-line value.** The value is
 # what it always was — every consumer below word-splits it and none can tell —
@@ -68,8 +73,9 @@ list:
 # thing a reader actually wants, could only ever have been printed on a pass.
 # Driving the steps from a loop is what lets the same block describe both.
 #
-# **`check-wildcards-selftest` runs before `check-wildcards`, and the order is
-# the finding of §173.** The ledger check judges the tree with an instrument it
+# **`check-wildcards-selftest` comes before `check-wildcards`, and the order is
+# the finding of §173.** With both failing, the block names the selftest first,
+# and that is the point: the ledger check judges the tree with an instrument it
 # does not itself prove; the selftest proves the instrument against fixtures
 # whose answer is known. With the ledger first, a broken scan is reported as
 # "a new one, or a new variant reaching an old one" — a sentence about the tree,
@@ -2488,8 +2494,18 @@ check-kache-off-on-ci:
 # 1 and names the install command, while `check-hooks` and
 # `check-questions-selftest` exit **127** on a missing `selftest.sh` — no
 # message, no remedy, and the failure a CI log explains worst. Found by rcad-c2,
-# who also noticed that nothing held the ordering it depends on.
-[doc("Every check-* recipe is in `gate`, and check-plugins is first.")]
+# who also noticed that nothing held the ordering it depends on. Since the steps
+# run at once (§372) all three fail, and the order is what makes the block name
+# `check-plugins` first and print its tail.
+#
+# **The arm after it holds `gate`'s `cargo_steps` line to the steps whose recipes
+# run cargo.** Those run one after another, and one left off the line would wait
+# on cargo's lock beside `test`: slower, never wrong, so nothing else would
+# notice (§372.10). A recipe runs cargo if a line of it, not a comment, starts a
+# command with `cargo` and a subcommand that builds, or calls the `t` recipe. The
+# line is read out of `just --show gate`, and an empty read fails, for the
+# reason the count above is pinned.
+[doc("Every check-* recipe is in `gate`, check-plugins is first, and every step that builds with cargo is in gate's chain.")]
 check-gate-runs-every-check:
     @steps=$(printf '%s\n' {{ gate_steps }}); \
     defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
@@ -2528,12 +2544,28 @@ check-gate-runs-every-check:
     fi; \
     first=$(printf '%s\n' "$steps" | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
-        echo "gate runs '$first' first, expected 'check-plugins'"; \
-        echo "CLAUDE.md says check-plugins runs first thing in just gate, and"; \
+        echo "gate names '$first' first, expected 'check-plugins'"; \
+        echo "CLAUDE.md says check-plugins fails first thing in just gate, and"; \
         echo "ci.yml leans on it: with no plugins, check-hooks and"; \
         echo "check-questions-selftest exit 127 on a missing selftest.sh, which is"; \
         echo "the failure a runner explains worst, while check-plugins exits 1 and"; \
         echo "names the command that installs them"; \
+        exit 1; \
+    fi; \
+    chain=$({{ just_executable() }} --show gate | sed -n 's/^ *cargo_steps="\(.*\)"$/\1/p' | tr ' ' '\n' | grep . | sort); \
+    if [ -z "$chain" ]; then \
+        echo "found no cargo_steps line in just --show gate, so the arm below would compare nothing"; \
+        exit 1; \
+    fi; \
+    builds='(^[[:space:]]*@?|\$\(|&& *|; *|! *)([A-Z_]+=[^ ]* +)*cargo +(\+[a-z]+ +)?(build|check|clippy|nextest|test|run|bench|doc|llvm-cov|fuzz)( |$)|just_executable\(\) *\}\} +t( |$)'; \
+    cargo=$(for step in $steps; do \
+        {{ just_executable() }} --show "$step" | grep -v '^ *#' | grep -qE "$builds" && echo "$step"; \
+    done | sort); \
+    if [ "$cargo" != "$chain" ]; then \
+        echo "gate's cargo_steps line and the steps whose recipes run cargo disagree:"; \
+        for step in $cargo; do printf '%s\n' "$chain" | grep -qx "$step" || echo "  $step runs cargo and is not on the line"; done; \
+        for step in $chain; do printf '%s\n' "$cargo" | grep -qx "$step" || echo "  $step is on the line and its recipe builds nothing with cargo"; done; \
+        echo "a cargo step off the line waits on cargo's lock beside test (docs/decisions.md §372.10)"; \
         exit 1; \
     fi
 
