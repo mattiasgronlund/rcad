@@ -9047,7 +9047,7 @@ queue mode="" *args:
                 if (n == "") { n = slots - running; if (n < 0) n = 0 }
                 n += 0
                 if (running + n > slots)
-                    printf "note: %d running and %d more is past the %d slots of §230.8\n", running, n, slots
+                    printf "note: %d running and %d more is past the %d slots of §372\n", running, n, slots
                 lanes_n = 0; taken_n = 0; skipped = 0
                 if (n > 0) {
                     m = 0
@@ -9796,8 +9796,8 @@ check-queue-selftest:
         || fail "a row meeting a running lane was not skipped with the lane named"
     [ "$(takes)" = "Q3 " ] || fail "the slot a blocked tier 1 row left did not go to tier 2"
     drive lane next 6
-    grep -q '^note: 1 running and 6 more is past the 3 slots' <<<"$got" \
-        || fail "a fill past the slots did not say so"
+    grep -qx 'note: 1 running and 6 more is past the 3 slots of §372' <<<"$got" \
+        || fail "a fill past the slots did not say so, citing the section that sets them"
 
     fence items <<'MD'
     Q1  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#a  one function §230
