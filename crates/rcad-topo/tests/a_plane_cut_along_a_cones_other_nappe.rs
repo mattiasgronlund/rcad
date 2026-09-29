@@ -191,20 +191,47 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
 /// **This is the family where the stray cut is the only cut**, and every fuse
 /// that answers hands both solids back as they were.
 ///
-/// **One block of it is not below the frustum at all.** Leaned at `2` and
-/// reaching up to `1.5`, a corner of it rises into the frustum: the column sum
-/// of [`shared_volume`] puts `2.917` of the two in common, and the fuse, once it
-/// answered, united them into one solid. It was written apart with the rest and
-/// nothing read that while it refused, so which pair shares something is worked
-/// out from the shapes now, as the steeper family works it out.
+/// **Two blocks of it are not below the frustum at all.** Leaned at `2`, the one
+/// reaching up to `1.5` and the one reaching up to `1` each have an edge that
+/// rises into the frustum: the column sum of [`shared_volume`] puts `2.917` and
+/// `2.847` of the two in common. The first, once it answered, was united with
+/// the frustum into one solid. Both were written apart with the rest and
+/// nothing read that while they refused, so which pair shares something is
+/// worked out from the shapes now, as the steeper family works it out.
 ///
 /// **Twenty refused on a piece glued out of two cells** until §36.3's sign rule
 /// stopped doing that (§282.7 named them). Six of them answer right now, eight
 /// still find no point in a piece that is one cell, four refuse
 /// `ResultIsNotManifold` further on, and two are the union and a difference of
-/// the block that reaches into the frustum: they hold every grid point they
-/// are asked about and do not measure, because a piece of the cone they keep
-/// is bounded by an arc of a parabola the mesher cannot follow finely enough.
+/// the block that reaches up to `1.5`: they hold every grid point they are
+/// asked about and do not measure, because a piece of the cone they keep is
+/// bounded by an arc of a parabola the mesher cannot follow finely enough.
+///
+/// **The four that refuse `ResultIsNotManifold` are every rule of one block**:
+/// leaned at `2`, from `−3` up to `1`, turned `0`. Its top face is parallel to a
+/// ruling of the cone, so it cuts the upper nappe in a parabola, and the ridge
+/// where the top face meets the leaning face passes through the frustum at
+/// `(1.3416, ±0.9266, 3.2610)`. The frustum's face and the leaning face are cut
+/// there, and **the top face is not**: `arrange.rs`'s
+/// `work_out_how_each_crossing_runs` drops the parabola as a cut that misses
+/// the face, because every node on it is provably outside `bake.rs`'s box round
+/// the face. The two nodes on the ridge are not off the face. They are the
+/// meets of the top face's plane, the leaning face's plane and the cone, with
+/// `x` from `1.341640786499873` to `1.3416407864998736`, and the box is the box
+/// round the face's *stored* corners, whose `x` rounded to `1.341640786499874`,
+/// a rounding further out. So the top face has no piece inside the cone, no rule
+/// keeps one, and the parabola's arc and the ridge between the two meets each
+/// have one face along them.
+///
+/// **That is a gap** (§16.10): the face reaches its ridge where its planes
+/// cross, not where its corners were rounded to. With the box grown by what
+/// writing a corner down costs, in the tree that traced this, all four answer
+/// and none of them wrongly. The intersection and both differences hold every
+/// grid point asked and do not measure, `DeflectionBelowWhatAMeshCanReach`, like
+/// the block reaching up to `1.5`; the union holds every one of the 6986 grid
+/// points it decides, which is short of the 7 000 an answer that does not
+/// measure is held to. Turned `1`, the same block refuses `order along a
+/// crossing` instead, and those four are among the twenty counted below.
 #[test]
 fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right() {
     let mut cases = Vec::new();
