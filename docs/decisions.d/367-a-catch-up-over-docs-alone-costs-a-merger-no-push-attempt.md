@@ -59,7 +59,8 @@ and timed one by one on 09-29 they took 55.6 s:
 - about 40 s are tooling selftests that §337.2 never looked at, because a step
   is not served until someone adds it. The largest are `check-queue-selftest`
   13.0 s, `check-gate-verdicts-selftest` 4.2, `check-questions-selftest` 3.7
-  and `check-status-selftest` 3.3.
+  and `check-status-selftest` 3.3. §367.7 traces what they read, and five of
+  them read the docs or something outside the tree after all.
 
 Two served gates seen that day took 1m33s (Q574's verifier) and 1m13s (the
 dispatcher's). A tree whose sha starts with `0` runs every step (§337), so
@@ -119,3 +120,44 @@ and the new `lanes.js` only from such a process or when launched by
   gate failed at `lint`.
 - **Q689**: a verifier's step 6 runs the lane's tests right after its own gate
   ran them on the same code, about five minutes for Q574.
+
+### 367.7 What the unserved steps read, traced
+
+§367.3's third group was a guess: steps nobody had checked, so nobody knew
+what they read. On 09-29, at `b873f7f4`, each of the 35 steps outside its
+first two groups was run under `strace -f -y -e trace=%file,fchdir`. strace 6.8
+prints the directory every relative path resolves against, so every path could
+be made absolute. A read through git never shows as a docs path, so every git
+command a step ran against the real repository was listed too. None of them
+reads a file's content: they are `rev-parse`, `worktree list`, `ls-files` and
+`config --get`.
+
+The same day a served gate took 43.7 s end to end, and the 47 steps it still
+runs added up to 42.1 s. That is less than §367.3's 55.6 s, mostly because
+`check-queue-selftest` took 5.5 s where it had taken 13.0. Why it differed was
+not looked into.
+
+- **Two read the real `docs/`, through their fixtures.** `check-queue-selftest`
+  runs the real `check-queue` on a fixture queue "against the real decisions",
+  and opens all 357 files in `docs/decisions.d/`. Its fixture rows cite §13,
+  §226, §226.3, §230 and §230.3, so it passes only while those sections exist.
+  `check-skills-selftest`'s fixture skill names `docs/no-such-file.md`, and it
+  passes only while the real tree has no such file.
+- **Three read outside the tree.** `check-questions-selftest` runs the
+  `questions` plugin's own selftest from its checkout, as `check-hooks` does for
+  `guardrails`. `check-queue-merge-driver` reads the merge driver's line from
+  git's config. `check-prune-worktrees-selftest` lists `/proc`; whether its
+  result depends on what it finds there was not checked.
+- **The other 30 read the tree and nothing else**, 16.5 s of the 42.1. Past
+  what every recipe does (`just` runs `git worktree list` for the justfile's
+  own variables, and git reads its config), nine start `mise`, which reads its
+  configuration in `$HOME`. Two run cargo, which looks for each crate's
+  `README.md` and finds none, as §337.2 found for `test`, and reads its own
+  package cache.
+
+Mattias, on 09-29, on §367.3's second group: those "should not need to run
+every time, as it checks things that should be validated when the 'main' agent
+starts, or when the test is updated." With `check-questions-selftest` and
+`check-queue-merge-driver` added to that group, it is 12.3 s of the 43.7. That is
+**Q693**. Q687 serves the 30, and it can take the two fixtures above off the
+real docs, so that their steps can be served too.
