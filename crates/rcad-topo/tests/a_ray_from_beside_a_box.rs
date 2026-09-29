@@ -6,7 +6,8 @@
 //! face with straight sides is its fan of triangles, and a box on the plane of
 //! one and off the face was refused until `classify.rs` held the two up against
 //! the coordinate axes too. Only a solid with both kinds of face can ask that,
-//! and none of these three builds one today — so the answers are pinned in
+//! and none of these three built one until the bend's wall was used forwards
+//! (§361), when the first began to — so the answers are pinned in
 //! `classify.rs`'s own tests, on one solid holding two shells, the way a fuse
 //! writes two pieces that do not touch. Each test here fails the day its way
 //! opens, and that is the day the pin can move out here.
@@ -14,8 +15,8 @@
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
-    Surface, Torus, Vector,
+    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
+    Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
@@ -27,28 +28,53 @@ mod rings;
 
 use rings::a_quarter_bend;
 
-/// A quarter bend whose first cap is glued onto a block's side is refused,
-/// whichever way round the cap's circle is walked.
+/// A quarter bend whose first cap is glued onto a block's side builds when the
+/// side walks the cap's circle forwards, measures the block and the bend
+/// together, and is refused walked the other way.
 ///
 /// The solid is real: the block `[2, 6] × [−2, 0] × [−2, 2]` and a bend of
 /// ring four and tube one standing on its side `y = 0`, the side holding the
 /// bend's cap circle as a hole. One of the two walks has to be the right one,
-/// because the side and the wall walk the circle once each way.
+/// because the side and the wall walk the circle once each way. It holds
+/// `4·2·4 = 32` and `2π²` by Pappus. Until the bend's wall was used forwards
+/// both walks were refused `AClosedEdgeIsWalkedAgainstItsSurface` (§361).
 #[test]
-fn a_bend_growing_out_of_a_blocks_side_is_refused_either_way_round() {
-    for the_side_walks_it in [Orientation::Reversed, Orientation::Forward] {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let built = a_bend_out_of_a_block(&mut model, the_side_walks_it);
-        assert!(
-            matches!(
-                built,
-                Err(Error::Invalid(
-                    Invalid::AClosedEdgeIsWalkedAgainstItsSurface
-                ))
-            ),
-            "the block's side walking the circle {the_side_walks_it:?}: {built:?}"
-        );
-    }
+fn a_bend_growing_out_of_a_blocks_side_builds_walked_the_one_way_round() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let built = a_bend_out_of_a_block(&mut model, Orientation::Forward)
+        .expect("a bend growing out of a block's side is a solid");
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("the block and the bend validate");
+    let measured = model
+        .solid(built)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a hundredth of the tube"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the block and the bend measure");
+    let holds = 32.0 + 2.0 * core::f64::consts::PI * core::f64::consts::PI;
+    assert!(
+        (measured.volume() - holds).abs() <= measured.volume_error(),
+        "the block and the bend hold {holds}, and measure {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+
+    let mut elsewhere = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turned_over = a_bend_out_of_a_block(&mut elsewhere, Orientation::Reversed);
+    assert!(
+        matches!(
+            turned_over,
+            Err(Error::Invalid(
+                Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+            ))
+        ),
+        "the block's side walking the circle the same way as the wall: {turned_over:?}"
+    );
 }
 
 /// A solid built face by face has one shell, so a block with a bend-shaped
@@ -219,7 +245,7 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
     let end_cap = {
         let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.0))
             .expect("a coordinate direction is a unit normal");
-        let coedge = builder.add_coedge(end_circle, Orientation::Forward)?;
+        let coedge = builder.add_coedge(end_circle, Orientation::Reversed)?;
         let wire = builder.add_wire(&[DraftStep::Along(coedge)])?;
         builder.add_face(Surface::Plane(plane), &[wire])?
     };
@@ -228,7 +254,7 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
     for (edge, turn) in [
         (start_circle, the_wall_walks_it),
         (seam, Orientation::Forward),
-        (end_circle, Orientation::Reversed),
+        (end_circle, Orientation::Forward),
         (seam, Orientation::Reversed),
     ] {
         round_the_wall.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
@@ -242,7 +268,7 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
         .map(|side| (side, Orientation::Forward))
         .collect();
     shell.push((end_cap, Orientation::Forward));
-    shell.push((wall, Orientation::Reversed));
+    shell.push((wall, Orientation::Forward));
     builder.add_shell(&shell)?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }

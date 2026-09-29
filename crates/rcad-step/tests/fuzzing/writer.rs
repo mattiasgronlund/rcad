@@ -733,7 +733,7 @@ fn a_frustum(model: &mut Model, slope: f64, near: f64, far: f64) -> rcad_topo::R
     let side = a_wall(
         &mut builder,
         Surface::Cone(skin),
-        bottom_circle,
+        (bottom_circle, Orientation::Forward),
         seam,
         top_circle,
     );
@@ -790,6 +790,11 @@ fn a_pointed_cone(model: &mut Model, slope: f64, far: f64) -> rcad_topo::Result<
 /// sizes. The seam names which of the two circles the plane `z = 0` cuts by
 /// saying it is inside the pipe of the ring's own radius, and which quarter of
 /// that circle by a half-space.
+///
+/// The wall is used forwards, because a torus faces out of its tube, and each
+/// circle is walked right-handed about the outward normal of the face it
+/// bounds — the way a file written as the standard says holds a bend
+/// (`docs/decisions.md` §361).
 fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<SolidKey> {
     let skin = Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring");
     let mut builder = SolidBuilder::new();
@@ -843,19 +848,19 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
         Point::origin(),
         Vector::new(0.0, -1.0, 0.0),
         start_circle,
-        Orientation::Reversed,
+        Orientation::Forward,
     );
     let end_cap = a_cap(
         &mut builder,
         Point::origin(),
         Vector::new(-1.0, 0.0, 0.0),
         end_circle,
-        Orientation::Forward,
+        Orientation::Reversed,
     );
     let side = a_wall(
         &mut builder,
         Surface::Torus(skin),
-        start_circle,
+        (start_circle, Orientation::Reversed),
         seam,
         end_circle,
     );
@@ -863,7 +868,7 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
         .add_shell(&[
             (start_cap, Orientation::Forward),
             (end_cap, Orientation::Forward),
-            (side, Orientation::Reversed),
+            (side, Orientation::Forward),
         ])
         .expect("three faces close");
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
@@ -889,20 +894,21 @@ fn a_cap(
         .expect("a cap is a plane trimmed by its circle")
 }
 
-/// The curved face between two closed edges: round the first, along the seam,
-/// back round the second, and back down the seam — the seam's two coedges in
-/// one wire, which is what makes it a seam.
+/// The curved face between two closed edges: round the first the way it is
+/// used, along the seam, back round the second the other way, and back down
+/// the seam — the seam's two coedges in one wire, which is what makes it a
+/// seam.
 fn a_wall(
     builder: &mut SolidBuilder,
     surface: Surface,
-    first: rcad_topo::DraftEdge,
+    (first, round_the_first): (rcad_topo::DraftEdge, Orientation),
     seam: rcad_topo::DraftEdge,
     second: rcad_topo::DraftEdge,
 ) -> rcad_topo::DraftFace {
     let round_the_wall: Vec<DraftStep> = [
-        (first, Orientation::Forward),
+        (first, round_the_first),
         (seam, Orientation::Forward),
-        (second, Orientation::Reversed),
+        (second, round_the_first.reversed()),
         (seam, Orientation::Reversed),
     ]
     .into_iter()
