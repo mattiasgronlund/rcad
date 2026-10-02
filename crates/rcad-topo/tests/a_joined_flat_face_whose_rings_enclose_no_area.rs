@@ -636,18 +636,19 @@ fn a_bar_touching_a_tubes_inner_wall_is_answered_but_for_the_union() {
                 Vec::new(),
                 "{what}: the bar is in the hole, so the two share no solid"
             ),
-            (_, false) => assert_holds(
+            (Rule::Difference, false) => assert_holds(
                 &model,
                 the_only(answer, &what),
                 4.0 * 40.0 * PI,
                 "the tube less the bar",
             ),
-            (_, true) => assert_holds(
+            (Rule::Difference, true) => assert_holds(
                 &model,
                 the_only(answer, &what),
                 4.0 * PI,
                 "the bar less the tube",
             ),
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         }
     }
 }
