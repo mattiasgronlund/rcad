@@ -432,7 +432,7 @@ fn every_shape_seed_is_the_shape_it_is_named_for() {
             seed: "a_round_bar_turned_a_quarter_about_x",
             faces: &["cylinder", "plane", "plane"],
             centroid: [0.0, -2.5, 0.0],
-            comes_back: false,
+            comes_back: true,
         },
         Shape {
             seed: "a_ball_of_radius_three",

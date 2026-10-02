@@ -472,6 +472,9 @@ impl Writing {
             second: kind_of(second),
             closed,
         };
+        if !closed && *run == EdgeRun::Straight {
+            return Ok(self.line(start, end - start));
+        }
         match (first, second) {
             (Surface::Plane(_), Surface::Plane(_)) if !closed => Ok(self.line(start, end - start)),
             (Surface::Plane(flat), Surface::Cylinder(pipe))
