@@ -22,7 +22,7 @@
 //! `docs/decisions.md` §24.3, and it is also what a STEP `EDGE_CURVE` is. This
 //! writer takes each edge's two neighbouring faces off the shell as it walks it
 //! and works the curve out from their two surfaces — two planes cross in a
-//! line, a plane square across a pipe crosses it in a circle. **Where those two
+//! line, a plane across a pipe crosses it in a circle or an ellipse. **Where those two
 //! surfaces do not name a curve, it refuses by name and writes nothing**, and
 //! [`CannotWrite::ACurveTheFacesEitherSideOfItDoNotName`] says what closes it.
 //!
@@ -33,7 +33,7 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{EdgeRun, Picker, Plane, Point, Scale, Sphere, Surface, Unit, Vector};
+use rcad_geom::{Cylinder, EdgeRun, Picker, Plane, Point, Scale, Sphere, Surface, Unit, Vector};
 use rcad_predicates::expansion::two_product;
 use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
 
@@ -455,8 +455,10 @@ impl Writing {
     /// a guess:
     ///
     /// - **two planes** cross in one straight line;
-    /// - **a plane square across a pipe** — its normal along the pipe's axis —
-    ///   crosses it in one circle, centred where the axis meets the plane;
+    /// - **a plane across a pipe** crosses it in one closed curve, centred
+    ///   where the axis meets the plane: a circle where the plane is square to
+    ///   the axis or so nearly square that the two sizes round to one, and an
+    ///   ellipse otherwise — see [`Writing::where_a_plane_crosses_a_pipe`];
     /// - **a seam of one pipe**, where the pipe is on both sides, joining two
     ///   corners that stand at the same place around the axis. A plane section
     ///   of a cylinder that is not parallel to the axis meets each straight
@@ -495,14 +497,8 @@ impl Writing {
             | (Surface::Cylinder(pipe), Surface::Plane(flat))
                 if closed =>
             {
-                let along = pipe.axis().direction();
-                let facing = flat.normal().dot(along);
-                if flat.normal().cross(along) != Vector::zero() || facing == 0.0 {
-                    return Err(refuse());
-                }
-                let from = pipe.axis().origin();
-                let reached = (flat.offset() - flat.normal().dot(from - Point::origin())) / facing;
-                Ok(self.circle(from + along * reached, along, pipe.radius()))
+                self.where_a_plane_crosses_a_pipe(flat, pipe)
+                    .ok_or_else(refuse)
             }
             (Surface::Cylinder(pipe), Surface::Cylinder(other)) if !closed && pipe == other => {
                 let along = pipe.axis().direction();
@@ -548,6 +544,69 @@ impl Writing {
             // yet, since every one that exists today has its own line above.
             _ => Err(refuse()),
         }
+    }
+
+    /// The closed curve a plane crosses a pipe in, or `None` where the plane
+    /// runs along the pipe and crosses it in no closed curve at all.
+    ///
+    /// With `n` the plane's normal and `a` the pipe's axis, the curve is centred
+    /// where the axis meets the plane. It is a circle of the pipe's radius `r`
+    /// where `n` and `a` are one line, and an ellipse in the plane otherwise:
+    /// `r` along `n × a`, which is square to the axis, and `r / cos θ` across
+    /// that, with `θ` the angle between `n` and `a`.
+    ///
+    /// **That second size is `r·√(1 + tan²θ)`, with `tan θ = |n × a| / |n·a|`**,
+    /// which is the same number whatever lengths `n` and `a` have. `cos θ`
+    /// worked out from `n·a` alone would not be: a normal a turn left an ulp off
+    /// length one moves the dot by an ulp, and that ulp would be the only thing
+    /// telling the two sizes apart.
+    ///
+    /// **A plane a few ulps off square to its pipe crosses it in a circle in
+    /// `f64`**, and that is where real files have it: KiCad's round bars carry
+    /// caps whose normal is `1e-16` off the axis (Q763), and a bar can be built
+    /// whose axis is off its cap's normal by a subnormal (Q409). Under a tilt of
+    /// about `1e-8` the long size rounds to `r`, so the two sizes are one
+    /// number and the curve is the circle of radius `r` **in the plane, about
+    /// its normal** — not about the pipe's axis, whose circle stands up off the
+    /// plane by up to `r·sin θ`. The normal is turned to face the way the axis
+    /// does, so the circle runs round the same way the axis's would, which is
+    /// the way `rcad-topo` stores a closed edge.
+    ///
+    /// Where the two sizes differ the curve is an `ELLIPSE`, its first size
+    /// along `n × a`. The reader names a closed edge between a flat face and a
+    /// curved one by where the faces cross, so it reads the curve's centre and
+    /// axis back but never its sizes.
+    fn where_a_plane_crosses_a_pipe(&mut self, flat: &Plane, pipe: &Cylinder) -> Option<u64> {
+        let along = pipe.axis().direction();
+        let facing = flat.normal().dot(along);
+        if facing == 0.0 {
+            return None;
+        }
+        let from = pipe.axis().origin();
+        let reached = (flat.offset() - flat.normal().dot(from - Point::origin())) / facing;
+        let centre = from + along * reached;
+        let across = flat.normal().cross(along);
+        if across == Vector::zero() {
+            return Some(self.circle(centre, along, pipe.radius()));
+        }
+        let turned = if facing > 0.0 {
+            flat.normal()
+        } else {
+            -flat.normal()
+        };
+        let leaning = across.length() / facing.abs();
+        let long = if leaning <= 1.0 {
+            pipe.radius() * leaning.mul_add(leaning, 1.0).sqrt()
+        } else {
+            pipe.radius() * leaning * (1.0 / leaning).mul_add(1.0 / leaning, 1.0).sqrt()
+        };
+        if long == pipe.radius() {
+            return Some(self.circle(centre, turned, pipe.radius()));
+        }
+        if !long.is_finite() {
+            return None;
+        }
+        Some(self.ellipse(centre, turned, across, [pipe.radius(), long]))
     }
 
     /// The half of a great circle a ball's seam runs along from `start` to
@@ -612,6 +671,21 @@ impl Writing {
     fn circle(&mut self, centre: Point, axis: Vector, radius: f64) -> u64 {
         let place = self.placement(centre, axis);
         self.entity(&format!("CIRCLE('',#{place},{})", real(radius)))
+    }
+
+    /// An `ELLIPSE` whose first size runs along `first_way`, so its placement
+    /// carries that as its reference direction: without one, which way the
+    /// long size runs would be a default the schema picks.
+    fn ellipse(&mut self, centre: Point, axis: Vector, first_way: Vector, sizes: [f64; 2]) -> u64 {
+        let at = self.cartesian_point(centre);
+        let way = self.direction(axis);
+        let reference = self.direction(first_way);
+        let place = self.entity(&format!("AXIS2_PLACEMENT_3D('',#{at},#{way},#{reference})"));
+        self.entity(&format!(
+            "ELLIPSE('',#{place},{},{})",
+            real(sizes[0]),
+            real(sizes[1])
+        ))
     }
 
     /// One of the five surfaces this kernel holds, in the parametrisation STEP
@@ -688,10 +762,11 @@ impl Writing {
 
     /// An `AXIS2_PLACEMENT_3D` with no reference direction.
     ///
-    /// The third attribute is optional in the schema and nothing this kernel
-    /// reads back needs one — an arc is picked by its two ends and its axis,
+    /// The third attribute is optional in the schema and nothing written
+    /// through here needs one — an arc is picked by its two ends and its axis,
     /// never by where the parametrisation starts — so it is written `$` rather
-    /// than filled in with a direction nothing chose.
+    /// than filled in with a direction nothing chose. An ellipse does need one,
+    /// and [`Writing::ellipse`] writes its own.
     fn placement(&mut self, origin: Point, axis: Vector) -> u64 {
         let at = self.cartesian_point(origin);
         let way = self.direction(axis);

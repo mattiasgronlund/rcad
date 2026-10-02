@@ -121,21 +121,25 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     assert_pinned_round_trips(&round_tripped);
 }
 
-/// The 45 imported KiCad files this kernel can write back out and read back as
+/// The 59 imported KiCad files this kernel can write back out and read back as
 /// the same solid, out of the 164 that import.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
 /// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
 /// assertion, which prints what appeared and what disappeared.
 ///
-/// # The 69 that are missing are the writer's gap and not the reader's
+/// # The 105 that are missing are the writer's gap and not the reader's
 ///
-/// Every one of them fails as *writer refuses: an edge between a plane and a
-/// pipe names no curve* — 64 of those, four more for a pipe against a pipe, and
-/// one for a plane against a ball. A file only reaches here **after** importing
-/// and passing the full sweep, so the solid is sound and the kernel simply has
-/// no `SURFACE_CURVE` to write for the circle where a flat face meets a round
-/// one.
+/// Every one of them fails as *writer refuses: an edge … names no curve*, and
+/// the run prints how many for each pair of surfaces. A file only reaches here
+/// **after** importing and passing the full sweep, so the solid is sound and
+/// the writer simply has no curve to write for an edge between those faces.
+///
+/// **Fourteen came in with Q763**: nine `LED_D1.8mm` horizontals, the two
+/// `LED_D2.0mm` flat tops and three Finder relays. Each holds a round bar whose
+/// cap's normal is about `1e-16` off its pipe's axis, which the writer used to
+/// refuse; it now writes the circle the cap's plane crosses the pipe in, about
+/// the cap's own normal (`Writing::where_a_plane_crosses_a_pipe`).
 ///
 /// **That gap is older than this list, and neither the curved rounding nor the
 /// two-step wire created it.** At `d23c700` this run said 45 of 46 with one such
@@ -146,8 +150,19 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// thirteen (§115), the equal-pipes lane's two and the homogeneous-cylinder
 /// lane's two (§118.10) — runs into the same writer.
 /// Closing that is a writer lane and not this list's business. What this list is
-/// for is that the 45 which do round trip cannot quietly become 44.
+/// for is that the 59 which do round trip cannot quietly become 58.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z1.6mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z4.9mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z8.2mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O3.81mm_Z1.6mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O3.81mm_Z4.9mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O3.81mm_Z8.2mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z1.6mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z4.9mm.step",
+    "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z8.2mm.step",
+    "LED_D2.0mm_W4.0mm_H2.8mm_FlatTop.step",
+    "LED_D2.0mm_W4.8mm_H2.5mm_FlatTop.step",
     "LED_Rectangular_W3.0mm_H2.0mm.step",
     "LED_Rectangular_W3.9mm_H1.8mm.step",
     "LED_Rectangular_W3.9mm_H1.9mm.step",
@@ -174,7 +189,10 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "PinHeader_2x22_P2.54mm_Vertical.step",
     "PinHeader_2x29_P2.54mm_Vertical.step",
     "PinHeader_2x36_P2.54mm_Vertical.step",
+    "Relay_DPDT_Finder_40.52.step",
     "Relay_DPDT_Omron_G5V-2.step",
+    "Relay_SPDT_Finder_40.31.step",
+    "Relay_SPDT_Finder_40.51.step",
     "Relay_SPDT_HJR-4102.step",
     "Relay_SPDT_Omron_G6E.step",
     "Relay_SPDT_Omron_G6EK.step",
