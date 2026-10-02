@@ -139,15 +139,19 @@ pub enum CannotWrite {
     /// seam.
     ///
     /// This writer derives the curve from the two surfaces either
-    /// side, which is what §24.3 says an edge *is*. It reads three things off
+    /// side, which is what §24.3 says an edge *is*. It reads five things off
     /// the run instead. An open edge whose run is straight is a `LINE`,
     /// because the reader reads every `LINE` back as straight. A ball's
     /// seam: it runs between the two poles, which are in a line with the
     /// centre, so no plane through them is picked out by the ends, and the
     /// located run [`EdgeView::run`](rcad_topo::EdgeView::run) hands out — it is
-    /// `pub` now — names the plane it was cut from. And which of the two arcs
-    /// an open edge between a flat face and a pipe is, which the two ends do
-    /// not say and the run's pickers do (Q766).
+    /// `pub` now — names the plane it was cut from. Which of the two arcs an
+    /// open edge between a flat face and a pipe or a ball is, which the two
+    /// ends do not say and the run's pickers do (Q766). The plane an open arc
+    /// between two curved faces lies in, which the reader walks and which the
+    /// faces cross in no single curve of their own (Q767). And the pipe an arc
+    /// drawn on a flat face is named by, since the faces either side are one
+    /// plane.
     #[error(
         "an edge between a {first} and a {second} runs along a curve those two do not name \
          (closed: {closed})"
@@ -457,7 +461,11 @@ impl Writing {
         let curve = self.curve(first, second, run, start.1, end.1, closed)?;
         let from = self.vertex_point(corners, start);
         let to = self.vertex_point(corners, end);
-        Ok(self.entity(&format!("EDGE_CURVE('',#{from},#{to},#{curve},.T.)")))
+        Ok(self.entity(&format!(
+            "EDGE_CURVE('',#{from},#{to},#{},{})",
+            curve.id,
+            flag(curve.the_edge_runs_its_way)
+        )))
     }
 
     /// The curve an edge runs along, worked out from the two surfaces either
@@ -487,11 +495,16 @@ impl Writing {
     ///   line of the surface once, so it cannot hold two points at one angle;
     ///   a section parallel to the axis is a pair of those straight lines. So
     ///   of everything this kernel can put on a cylinder, only the straight one
-    ///   joins two such corners.
+    ///   joins two such corners;
+    /// - **an arc where a plane crosses a ball** is one of the two arcs its ends
+    ///   cut the circle into, which [`where_a_plane_crosses_a_ball`] names and
+    ///   the run picks, as for a pipe.
     ///
-    /// And one the surfaces do not name, which is read off the run instead:
+    /// And two the surfaces do not name, which are read off the run instead:
     /// **a seam of one ball from pole to pole** — see
-    /// [`Writing::a_seam_of_one_ball`].
+    /// [`Writing::a_seam_of_one_ball`] — and **an arc between two curved faces
+    /// that lies in a plane the run names** — see
+    /// [`Writing::an_arc_its_own_plane_names`].
     ///
     /// Everything else refuses by name, and
     /// [`CannotWrite::ACurveTheFacesEitherSideOfItDoNotName`] says what closes
@@ -504,17 +517,25 @@ impl Writing {
         start: Point,
         end: Point,
         closed: bool,
-    ) -> Result<u64, CannotWrite> {
+    ) -> Result<Curve, CannotWrite> {
         let refuse = || CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
             first: kind_of(first),
             second: kind_of(second),
             closed,
         };
         if !closed && *run == EdgeRun::Straight {
-            return Ok(self.line(start, end - start));
+            return Ok(Curve::along(self.line(start, end - start)));
         }
         match (first, second) {
-            (Surface::Plane(_), Surface::Plane(_)) if !closed => Ok(self.line(start, end - start)),
+            (Surface::Plane(_), Surface::Plane(_)) if !closed => match run {
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(round),
+                    ..
+                } => self
+                    .an_arc_of_a_circle_on_a_flat_face(round, run, start, end)
+                    .ok_or_else(refuse),
+                _ => Ok(Curve::along(self.line(start, end - start))),
+            },
             (Surface::Plane(flat), Surface::Cylinder(pipe))
             | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
                 let crossing = where_a_plane_crosses_a_pipe(flat, pipe).ok_or_else(refuse)?;
@@ -525,7 +546,17 @@ impl Writing {
                         .the_way_round_the_arc(run, start, end)
                         .ok_or_else(refuse)?
                 };
-                Ok(self.round(&crossing, turning))
+                Ok(Curve::along(self.round(&crossing, turning)))
+            }
+            (Surface::Plane(flat), Surface::Sphere(ball))
+            | (Surface::Sphere(ball), Surface::Plane(flat))
+                if !closed =>
+            {
+                let crossing = where_a_plane_crosses_a_ball(flat, ball).ok_or_else(refuse)?;
+                let turning = crossing
+                    .the_way_round_the_arc(run, start, end)
+                    .ok_or_else(refuse)?;
+                Ok(Curve::along(self.round(&crossing, turning)))
             }
             (Surface::Cylinder(pipe), Surface::Cylinder(other)) if !closed && pipe == other => {
                 let along = pipe.axis().direction();
@@ -536,11 +567,22 @@ impl Writing {
                 if across(start) != across(end) {
                     return Err(refuse());
                 }
-                Ok(self.line(start, end - start))
+                Ok(Curve::along(self.line(start, end - start)))
             }
             (Surface::Sphere(ball), Surface::Sphere(other)) if !closed && ball == other => self
                 .a_seam_of_one_ball(ball, run, start, end)
+                .map(Curve::along)
+                .or_else(|| self.an_arc_its_own_plane_names(first, second, run, start, end))
                 .ok_or_else(refuse),
+            (Surface::Cylinder(_), Surface::Sphere(_))
+            | (Surface::Sphere(_), Surface::Cylinder(_))
+            | (Surface::Cylinder(_), Surface::Cylinder(_))
+            | (Surface::Sphere(_), Surface::Sphere(_))
+                if !closed =>
+            {
+                self.an_arc_its_own_plane_names(first, second, run, start, end)
+                    .ok_or_else(refuse)
+            }
             (Surface::Plane(_), Surface::Plane(_))
             | (Surface::Cylinder(_), Surface::Cylinder(_))
             | (Surface::Plane(_), Surface::Sphere(_))
@@ -633,6 +675,111 @@ impl Writing {
             return None;
         };
         Some(self.circle(ball.centre(), axis, ball.radius()))
+    }
+
+    /// The arc between two curved faces that lies in the plane its run names,
+    /// or `None` where the run names no such plane or the plane would not
+    /// read back as itself.
+    ///
+    /// **The reader names such an arc by the plane the file's curve lies in**,
+    /// once it has checked that every face holds the curve
+    /// (`Walk::the_surface_that_names_the_curve`), and then walks where the
+    /// plane crosses one of the faces (`which_two_surfaces_a_run_is_between`).
+    /// So the plane the run carries *is* walked, unlike the plane beside an arc
+    /// of a flat face, and it has to come back bit for bit: the curve is
+    /// written in it, about its own normal, at a centre from which the reader's
+    /// `Plane::from_point_and_normal` gives back exactly that plane — which is
+    /// asked of that function here rather than trusted.
+    ///
+    /// **The curve is where the plane crosses a pipe along the edge, or else a
+    /// ball** ([`where_a_plane_crosses_a_pipe`], [`where_a_plane_crosses_a_ball`]):
+    /// the curve the reader will check every face holds. A ball whose centre
+    /// is on a pipe's axis, two pipes of one radius whose axes cross, and a
+    /// ball's seam that stops short of a pole all meet in such a curve (Q767).
+    ///
+    /// **Which arc is the way the edge runs along the curve**: the plane is
+    /// written facing the way it faces, so the arc the run picks is chosen by
+    /// `EDGE_CURVE.same_sense` rather than by turning the curve over, which
+    /// would read back as the plane reversed.
+    fn an_arc_its_own_plane_names(
+        &mut self,
+        first: &Surface,
+        second: &Surface,
+        run: &EdgeRun,
+        start: Point,
+        end: Point,
+    ) -> Option<Curve> {
+        let EdgeRun::PartOfWhereItCrosses { and, .. } = run else {
+            return None;
+        };
+        let Surface::Plane(cut) = and else {
+            return None;
+        };
+        if and == first || and == second {
+            return None;
+        }
+        let crossing = match (first, second) {
+            (Surface::Cylinder(pipe), _) | (_, Surface::Cylinder(pipe)) => {
+                where_a_plane_crosses_a_pipe(cut, pipe)?
+            }
+            (Surface::Sphere(ball), _) | (_, Surface::Sphere(ball)) => {
+                where_a_plane_crosses_a_ball(cut, ball)?
+            }
+            _ => return None,
+        };
+        let crossing = Crossing {
+            centre: a_centre_its_plane_reads_back_from(cut, crossing.centre)?,
+            turning: cut.normal(),
+            shape: crossing.shape,
+        };
+        let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
+        Some(Curve {
+            id: self.round(&crossing, crossing.turning),
+            the_edge_runs_its_way,
+        })
+    }
+
+    /// An arc of a circle drawn on a flat face, which the run names by the pipe
+    /// of the circle's radius about its axis; `None` where that pipe would not
+    /// read back as itself or the run's pickers do not tell the two arcs apart.
+    ///
+    /// **Two flat faces either side of an edge that bends are one plane**, and
+    /// a plane crossed with itself names nothing, so the reader names such an
+    /// arc by that pipe (`Walk::the_surface_that_names_the_curve`) and walks
+    /// where it crosses the face. The pipe is written as the `CIRCLE` of its
+    /// own axis and radius, and the reader's `Axis::new` and `Cylinder::new`
+    /// are asked here whether they give the same pipe back. Writing the chord
+    /// instead, as this writer did for every open edge between two flat
+    /// faces, drew a face whose edge cut through its own holes: twenty KiCad
+    /// LEDs, once Q767 let them past their domes, came back refused as
+    /// `BoundaryCrossesItself`.
+    fn an_arc_of_a_circle_on_a_flat_face(
+        &mut self,
+        round: &Cylinder,
+        run: &EdgeRun,
+        start: Point,
+        end: Point,
+    ) -> Option<Curve> {
+        let centre = round.axis().origin();
+        let axis = round.axis().direction();
+        let read_back = rcad_geom::Axis::new(centre, axis)
+            .and_then(|line| Cylinder::new(line, round.radius()))
+            .ok()?;
+        if read_back != *round {
+            return None;
+        }
+        let crossing = Crossing {
+            centre,
+            turning: axis,
+            shape: Shape::Circle {
+                radius: round.radius(),
+            },
+        };
+        let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
+        Some(Curve {
+            id: self.circle(centre, axis, round.radius()),
+            the_edge_runs_its_way,
+        })
     }
 
     fn line(&mut self, from: Point, along: Vector) -> u64 {
@@ -797,7 +944,23 @@ fn the_wire_turns_back_at(walk: &[WireStepView<'_>], position: usize) -> bool {
         && there.end().key() == back.start().key()
 }
 
-/// The closed curve a plane crosses a pipe in.
+/// A curve written under an edge, and whether the edge runs along it the way
+/// the curve itself runs — `EDGE_CURVE.same_sense`.
+struct Curve {
+    id: u64,
+    the_edge_runs_its_way: bool,
+}
+
+impl Curve {
+    fn along(id: u64) -> Self {
+        Self {
+            id,
+            the_edge_runs_its_way: true,
+        }
+    }
+}
+
+/// The closed curve a plane crosses a pipe or a ball in.
 struct Crossing {
     /// Where the pipe's axis meets the plane.
     centre: Point,
@@ -898,6 +1061,83 @@ fn where_a_plane_crosses_a_pipe(flat: &Plane, pipe: &Cylinder) -> Option<Crossin
     })
 }
 
+/// The circle a plane crosses a ball in, about the plane's normal, or `None`
+/// where the plane misses the ball or only touches it.
+///
+/// Centred at the foot of the ball's centre on the plane, with radius
+/// `√((ρ − h)(ρ + h))` for a ball of radius `ρ` whose centre is `h` off the
+/// plane. Where `h` is zero the radius is the ball's own, with no rounding: a
+/// dome on a flat face and a ball's seam both have their plane through the
+/// centre.
+fn where_a_plane_crosses_a_ball(flat: &Plane, ball: &Sphere) -> Option<Crossing> {
+    let off = flat.signed_distance_to(ball.centre());
+    let reach = ball.radius();
+    if !(off.abs() < reach) {
+        return None;
+    }
+    let radius = if off == 0.0 {
+        reach
+    } else {
+        ((reach - off.abs()) * (reach + off.abs())).sqrt()
+    };
+    Some(Crossing {
+        centre: ball.centre() - flat.normal() * off,
+        turning: flat.normal(),
+        shape: Shape::Circle { radius },
+    })
+}
+
+/// A point near `near` from which the reader's `Plane::from_point_and_normal`
+/// gives back `cut`, normal and offset bit for bit, or `None` where none of
+/// the few tried does.
+///
+/// `near` is where a pipe's axis or a ball's centre meets `cut`, worked out in
+/// `f64`, so it can miss the offset by a rounding or two. The reader dots the
+/// point with the normal and rounds once, which rises with any one coordinate
+/// whose component of the normal is positive and falls with one whose
+/// component is negative, so one coordinate is stepped an `f64` at a time
+/// towards the offset until the dot lands on it or steps past it.
+///
+/// **The coordinate that moves the dot least per step is tried first**, then
+/// the others: a step of one coordinate can move the dot by more than an ulp
+/// of the offset and jump straight over it — `5.85` along a normal of
+/// `−1/√2` does, on the two pipes of `Relay_SPDT_SANYOU_SRD_Series_Form_C`
+/// — where a step of the other lands on it. A normal that does not come back
+/// as itself is not helped by any point, and refuses at once.
+fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point> {
+    let normal = cut.normal();
+    let read = |at: [f64; 3]| {
+        Plane::from_point_and_normal(Point::new(at[0], at[1], at[2]), normal)
+            .ok()
+            .filter(|back| back.normal() == normal)
+            .map(|back| back.offset())
+    };
+    let components = normal.components();
+    let start = near.coordinates();
+    let step_of = |axis: usize| components[axis].abs() * (start[axis].next_up() - start[axis]);
+    let mut finest_first: Vec<usize> = (0..3).filter(|&axis| components[axis] != 0.0).collect();
+    finest_first.sort_by(|&a, &b| step_of(a).total_cmp(&step_of(b)));
+    let below = read(start)? < cut.offset();
+    for axis in finest_first {
+        let mut at = start;
+        for _ in 0..16 {
+            let offset = read(at)?;
+            if offset.to_bits() == cut.offset().to_bits() {
+                return Some(Point::new(at[0], at[1], at[2]));
+            }
+            if (offset < cut.offset()) != below {
+                break;
+            }
+            at[axis] = if below == (components[axis] > 0.0) {
+                at[axis].next_up()
+            } else {
+                at[axis].next_down()
+            };
+        }
+    }
+    None
+}
+
 impl Crossing {
     /// Which way round this curve to write an arc of it, so that the arc from
     /// `start` to `end` is the one `run` picks; `None` where the run's
@@ -922,14 +1162,26 @@ impl Crossing {
     /// probe that rounding moves across a picker leaves both held or both
     /// ruled out, which refuses.
     fn the_way_round_the_arc(&self, run: &EdgeRun, start: Point, end: Point) -> Option<Vector> {
+        let its_own_way = self.the_arc_runs_its_own_way(run, start, end)?;
+        Some(if its_own_way {
+            self.turning
+        } else {
+            -self.turning
+        })
+    }
+
+    /// Whether the arc from `start` to `end` that `run` picks is the one this
+    /// curve's own way round takes; `None` where the run's pickers do not tell
+    /// the two arcs apart. See [`Crossing::the_way_round_the_arc`].
+    fn the_arc_runs_its_own_way(&self, run: &EdgeRun, start: Point, end: Point) -> Option<bool> {
         let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run else {
             return None;
         };
         let into_the_arc = (end - start).cross(self.turning);
         let furthest = self.furthest_either_way_along(into_the_arc)?;
         match furthest.map(|point| what_the_pickers_make_of(picked_by, point)) {
-            [Verdict::Holds, Verdict::RuledOut] => Some(self.turning),
-            [Verdict::RuledOut, Verdict::Holds] => Some(-self.turning),
+            [Verdict::Holds, Verdict::RuledOut] => Some(true),
+            [Verdict::RuledOut, Verdict::Holds] => Some(false),
             _ => None,
         }
     }

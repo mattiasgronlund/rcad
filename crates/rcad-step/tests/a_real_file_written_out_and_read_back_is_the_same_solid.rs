@@ -56,7 +56,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     let mut pieces_compared = 0;
     let mut no_fuse_to_compare = 0;
     let mut scale_metadata_differed = 0;
-    let mut failures: BTreeMap<String, usize> = BTreeMap::new();
+    let mut failures: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut no_fuse_reasons: BTreeMap<&'static str, usize> = BTreeMap::new();
 
     for path in &files {
@@ -88,7 +88,10 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
                 }
             }
             Outcome::Failed(reason) => {
-                *failures.entry(canonical(&reason)).or_default() += 1;
+                failures
+                    .entry(canonical(&reason))
+                    .or_default()
+                    .push(name_of(path));
             }
         }
     }
@@ -104,9 +107,12 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
         println!("    {count:>4}  no fuse to compare: {because}");
     }
     let mut reasons: Vec<_> = failures.iter().collect();
-    reasons.sort_by_key(|&(name, count)| (std::cmp::Reverse(*count), name.clone()));
-    for (reason, count) in reasons {
-        println!("    {count:>4}  {reason}");
+    reasons.sort_by_key(|&(reason, names)| (std::cmp::Reverse(names.len()), reason.clone()));
+    for (reason, names) in reasons {
+        println!("    {:>4}  {reason}", names.len());
+        for name in names {
+            println!("            {name}");
+        }
     }
 
     assert_eq!(
@@ -121,19 +127,33 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     assert_pinned_round_trips(&round_tripped);
 }
 
-/// The 109 imported KiCad files this kernel can write back out and read back as
+/// The 161 imported KiCad files this kernel can write back out and read back as
 /// the same solid, out of the 164 that import.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
 /// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
 /// assertion, which prints what appeared and what disappeared.
 ///
-/// # The 55 that are missing are the writer's gap and not the reader's
+/// # The 3 that are missing are the writer's gap and not the reader's
 ///
-/// Every one of them fails as *writer refuses: an edge … names no curve*, and
-/// the run prints how many for each pair of surfaces. A file only reaches here
-/// **after** importing and passing the full sweep, so the solid is sound and
-/// the writer simply has no curve to write for an edge between those faces.
+/// Each of them fails as *writer refuses: an edge between a plane and a ring
+/// names no curve*, and the run prints every reason with the files under it:
+/// the two `Relay_1-Form-*_Schrack-RYII` relays and
+/// `Relay_SPDT_Finder_34.51_Vertical`. A file only reaches here **after**
+/// importing and passing the full sweep, so the solid is sound and the writer
+/// simply has no curve to write for an edge between those faces.
+///
+/// **Fifty-two came in with Q767 and Q773**: the twenty horizontal `LED_D3.0mm`
+/// and `LED_D5.0mm` and `LED_D5.0mm-3`, `LED_SideEmitter`, the fuseholder and
+/// twenty-nine relays. Each held an open arc between two curved faces — a dome
+/// on a pipe, two pipes meeting at a mitre, a dome's seam from its rim to its
+/// pole — or between a flat face and a ball, which the writer refused. It now writes the arc in the plane the run names, about that
+/// plane's own normal and picked by `same_sense`, so the plane the reader walks
+/// comes back bit for bit (`Writing::an_arc_its_own_plane_names` in
+/// `write.rs`). The twenty horizontal LEDs then came back refused as
+/// `BoundaryCrossesItself`, because the writer wrote an arc of a circle drawn
+/// on a flat face as its chord; it now writes that circle
+/// (`Writing::an_arc_of_a_circle_on_a_flat_face`).
 ///
 /// **Fifty came in with Q766**: the five `Fuse_` chips, twenty-seven pin
 /// headers, twelve DIP switches, five relays and `SW_NKK_BB15AH`. The writer
@@ -161,13 +181,14 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// thirteen (§115), the equal-pipes lane's two and the homogeneous-cylinder
 /// lane's two (§118.10) — runs into the same writer.
 /// Closing that is a writer lane and not this list's business. What this list is
-/// for is that the 109 which do round trip cannot quietly become 108.
+/// for is that the 161 which do round trip cannot quietly become 160.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
     "Fuse_0805_2012Metric.step",
     "Fuse_1206_3216Metric.step",
     "Fuse_1210_3225Metric.step",
+    "Fuseholder_Cylinder-5x20mm_Stelvio-Kontek_PTF78_Horizontal_Open.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z1.6mm.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z4.9mm.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z8.2mm.step",
@@ -179,6 +200,27 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O6.35mm_Z8.2mm.step",
     "LED_D2.0mm_W4.0mm_H2.8mm_FlatTop.step",
     "LED_D2.0mm_W4.8mm_H2.5mm_FlatTop.step",
+    "LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step",
+    "LED_D3.0mm_Horizontal_O1.27mm_Z6.0mm.step",
+    "LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step",
+    "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
+    "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
+    "LED_D5.0mm-3.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_Clear.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_IRBlack.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_IRGrey.step",
+    "LED_D5.0mm_Horizontal_O1.27mm_Z9.0mm.step",
+    "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
+    "LED_D5.0mm_Horizontal_O3.81mm_Z3.0mm.step",
+    "LED_D5.0mm_Horizontal_O3.81mm_Z9.0mm.step",
+    "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
+    "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
+    "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
     "LED_Rectangular_W3.0mm_H2.0mm.step",
     "LED_Rectangular_W3.9mm_H1.8mm.step",
     "LED_Rectangular_W3.9mm_H1.9mm.step",
@@ -193,6 +235,7 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z3.0mm.step",
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z5.0mm.step",
     "LED_Rectangular_W5.0mm_H5.0mm.step",
+    "LED_SideEmitter_Rectangular_W4.5mm_H1.6mm.step",
     "PinHeader_1x03_P2.54mm_Horizontal.step",
     "PinHeader_1x04_P2.54mm_Vertical.step",
     "PinHeader_1x06_P2.54mm_Vertical_SMD_Pin1Right.step",
@@ -232,17 +275,46 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "PinHeader_2x34_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x36_P2.54mm_Vertical.step",
     "PinHeader_2x39_P2.54mm_Horizontal.step",
+    "Relay_3PST_COTO_3650.step",
+    "Relay_3PST_COTO_3660.step",
+    "Relay_DPDT_FCL_FTR-B4C.step",
     "Relay_DPDT_Finder_30.22.step",
     "Relay_DPDT_Finder_40.52.step",
+    "Relay_DPDT_Hongfa_HF115F-2Z-x4.step",
+    "Relay_DPDT_Kemet_EC2_NJ.step",
+    "Relay_DPDT_Kemet_EC2_NJ_DoubleCoil.step",
+    "Relay_DPDT_Kemet_EC2_NU.step",
+    "Relay_DPDT_Kemet_EC2_NU_DoubleCoil.step",
+    "Relay_DPDT_Kemet_UA2-NE_NU_NJ.step",
+    "Relay_DPDT_Omron_G2RL.step",
     "Relay_DPDT_Omron_G5V-2.step",
+    "Relay_DPDT_Omron_G6A.step",
+    "Relay_DPDT_Omron_G6AK.step",
     "Relay_DPDT_Omron_G6H-2.step",
+    "Relay_DPDT_Omron_G6K-2P-Y.step",
+    "Relay_DPDT_Omron_G6K-2P.step",
     "Relay_DPDT_Panasonic_JW2.step",
+    "Relay_DPDT_Schrack-RT2-FormC-Dual-Coil_RM5mm.step",
+    "Relay_DPDT_Schrack-RT2-FormC_RM5mm.step",
+    "Relay_DPST_Schrack-RT2-FormA_RM5mm.step",
+    "Relay_SPDT_CUI_SR5.step",
+    "Relay_SPDT_Finder_32.21-x000.step",
+    "Relay_SPDT_Finder_36.11.step",
     "Relay_SPDT_Finder_40.31.step",
     "Relay_SPDT_Finder_40.51.step",
     "Relay_SPDT_HJR-4102.step",
+    "Relay_SPDT_Omron-G5LE-1.step",
     "Relay_SPDT_Omron_G6E.step",
     "Relay_SPDT_Omron_G6EK.step",
+    "Relay_SPDT_SANYOU_SRD_Series_Form_C.step",
+    "Relay_SPDT_Schrack-RT1-FormC_RM5mm.step",
     "Relay_SPDT_StandexMeder_SIL_Form1C.step",
+    "Relay_SPST_Finder_32.21-x300.step",
+    "Relay_SPST_Omron_G5NB.step",
+    "Relay_SPST_SANYOU_SRD_Series_Form_A.step",
+    "Relay_SPST_SANYOU_SRD_Series_Form_B.step",
+    "Relay_SPST_Schrack-RT1-16A-FormA_RM5mm.step",
+    "Relay_SPST_Schrack-RT1-FormA_RM5mm.step",
     "Relay_SPST_StandexMeder_SIL_Form1A.step",
     "Relay_SPST_StandexMeder_SIL_Form1B.step",
     "Relay_StandexMeder_DIP_HighProfile.step",
