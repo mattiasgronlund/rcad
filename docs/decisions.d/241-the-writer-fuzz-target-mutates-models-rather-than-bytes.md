@@ -198,3 +198,9 @@ refused `AWireThatStandsStillAtAPole` (`a_ball_turned_off_z_is_refused_at_its_po
 - A night of this target in fork mode will collect item 1 and item 2 over and
   over. That is the target working, but it will fill a night's crash count with
   two causes until they are fixed.
+
+*Since Q405 (2026-10-02) a turned cylinder's seam is named: an open edge the
+model says runs straight is written as a `LINE`, and the seed
+`a_round_bar_turned_a_quarter_about_x` is written and comes back the same
+(`every_shape_seed_is_the_shape_it_is_named_for`). The plane–cone and
+plane–torus circles are still refused (Q662, Q407).*

@@ -263,11 +263,11 @@ fn a_ball_turned_off_z_is_refused_at_its_pole() {
 /// the pipe — the round bar above is that same pair, accepted. So the check is
 /// asking something.
 ///
-/// The gap it stands for is `EdgeView::run` being `pub(crate)`: the model knows
-/// exactly what this edge runs along, and a located run wants an
-/// `EdgeRun::transformed`, which wants a `HalfSpace::transformed` in
-/// `rcad-geom`. §42.5's lane reported that missing function for a placement
-/// argument and §42.10's for a turned arc; this is its third consumer.
+/// The gap it stands for is the writer reading the run only where it is
+/// straight or a ball's seam: the model knows exactly what this edge runs
+/// along, and `EdgeView::run` is `pub` and hands out the located run, since
+/// `EdgeRun::transformed` landed — the function §42.5's lane reported missing
+/// for a placement argument and §42.10's for a turned arc.
 #[test]
 fn an_ellipse_where_a_slanted_cap_meets_a_bar_is_a_curve_the_writer_cannot_name() {
     let policy = Policy::certified();

@@ -25,6 +25,11 @@
 //! line, a plane square across a pipe crosses it in a circle. **Where those two
 //! surfaces do not name a curve, it refuses by name and writes nothing**, and
 //! [`CannotWrite::ACurveTheFacesEitherSideOfItDoNotName`] says what closes it.
+//!
+//! One edge is named before the surfaces are asked: an open edge the model
+//! says runs straight is a `LINE`, whatever the faces either side, because the
+//! reader reads every `LINE` back as straight. A round bar turned off `z` is
+//! why: the two surfaces alone refused its seam (Q405).
 
 use std::collections::HashMap;
 
@@ -129,14 +134,17 @@ pub enum CannotWrite {
     /// `EdgeView::run` hands the located run out since `EdgeRun::transformed`
     /// landed — the function §42.5's lane reported missing for a placement
     /// argument and §42.10's for a turned arc. What closes the gap is reading
-    /// it for every edge rather than for a ball's seam alone.
+    /// it for the curved runs too, not only for straight ones and a ball's
+    /// seam.
     ///
     /// This writer derives the curve from the two surfaces either
-    /// side, which is what §24.3 says an edge *is*. The one curve it reads off
-    /// the run instead is a ball's seam: it runs between the two poles, which
-    /// are in a line with the centre, so no plane through them is picked out by
-    /// the ends, and the located run [`EdgeView::run`](rcad_topo::EdgeView::run)
-    /// hands out — it is `pub` now — names the plane it was cut from.
+    /// side, which is what §24.3 says an edge *is*. It reads two kinds of edge
+    /// off the run instead. An open edge whose run is straight is a `LINE`,
+    /// because the reader reads every `LINE` back as straight. And a ball's
+    /// seam: it runs between the two poles, which are in a line with the
+    /// centre, so no plane through them is picked out by the ends, and the
+    /// located run [`EdgeView::run`](rcad_topo::EdgeView::run) hands out — it is
+    /// `pub` now — names the plane it was cut from.
     #[error(
         "an edge between a {first} and a {second} runs along a curve those two do not name \
          (closed: {closed})"
@@ -436,7 +444,13 @@ impl Writing {
     /// The curve an edge runs along, worked out from the two surfaces either
     /// side of it.
     ///
-    /// Three shapes, and each is the *only* curve of this kernel's vocabulary
+    /// First, before the surfaces: **an open edge whose located run is
+    /// [`EdgeRun::Straight`] is a `LINE`**, whatever the faces either side. The
+    /// reader turns every `LINE` back into `Straight`, so this is its rule run
+    /// backwards. Without it the surfaces below refuse the seam of a round bar
+    /// turned off `z` (Q405).
+    ///
+    /// Then three shapes, and each is the *only* curve of this kernel's vocabulary
     /// that the pair admits, which is what makes this a derivation rather than
     /// a guess:
     ///
@@ -472,6 +486,9 @@ impl Writing {
             second: kind_of(second),
             closed,
         };
+        if !closed && *run == EdgeRun::Straight {
+            return Ok(self.line(start, end - start));
+        }
         match (first, second) {
             (Surface::Plane(_), Surface::Plane(_)) if !closed => Ok(self.line(start, end - start)),
             (Surface::Plane(flat), Surface::Cylinder(pipe))
