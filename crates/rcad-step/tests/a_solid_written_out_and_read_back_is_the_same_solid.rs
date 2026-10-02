@@ -1028,6 +1028,39 @@ fn a_disc_drawn_on_the_top_of_a_bar_is_written_with_arcs_and_comes_back_the_same
     );
 }
 
+/// The outer side of a rod bent round a ring, whose ring meets a pipe in four
+/// arcs: the tube's circle where a straight pipe carries on from the bend, and
+/// the circles where the pipe about the ring's own axis crosses it.
+///
+/// `kicad/Relay_SPDT_Finder_34.51_Vertical.step` bends its pins this way, and
+/// until Q773 the writer refused an edge between a pipe and a ring. It is
+/// written the way an arc between a pipe and a ball is, in the plane its run
+/// names, where that plane crosses the pipe. The relay itself still stops on
+/// an edge between a flat face and a ring.
+#[test]
+fn the_outer_side_of_a_rod_bent_round_a_ring_is_written_with_its_arcs_and_comes_back_the_same() {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 5.75).expect("a working size"));
+    let built = the_outer_side_of_a_rod_bent_round_a_ring(&mut model);
+    assert_eq!(
+        open_bends(&model, built),
+        [
+            ["pipe", "plane"],
+            ["pipe", "plane"],
+            ["pipe", "ring"],
+            ["pipe", "ring"],
+            ["pipe", "ring"],
+            ["pipe", "ring"],
+        ],
+        "four arcs where the ring meets a pipe, and an arc on each end"
+    );
+    comes_back_the_same(
+        "the outer side of a rod bent round a ring",
+        &model,
+        built,
+        &|model| a_block(model, [2.0, 2.0, 4.0], Vector::new(4.0, 4.0, -2.0)),
+    );
+}
+
 /// Write `built` out, read it back, and require the same solid: sound, the
 /// same corners bit for bit, the same volume, area and centroid, and the same
 /// answer to a cut by `cutter`, refusal and all. Hands back what was written.
@@ -1140,12 +1173,14 @@ enum Step {
 
 /// A solid built face by face from three tables: its corners, its edges as
 /// `(from, to, run)` between them, and each face's surface and wires. Every
-/// face is used the way its surface faces.
+/// face is used the way its surface faces but those numbered in `inside_out`,
+/// which the shell uses the other way round.
 fn a_solid_drawn_face_by_face(
     model: &mut Model,
     corners: &[Point],
     edges: Vec<(usize, usize, EdgeRun)>,
     faces: Vec<(Surface, Vec<Vec<Step>>)>,
+    inside_out: &[usize],
 ) -> SolidKey {
     use rcad_geom::Orientation;
     use rcad_topo::{DraftStep, SolidBuilder};
@@ -1164,7 +1199,7 @@ fn a_solid_drawn_face_by_face(
         })
         .collect();
     let mut skin = Vec::with_capacity(faces.len());
-    for (surface, wires) in faces {
+    for (which, (surface, wires)) in faces.into_iter().enumerate() {
         let wires: Vec<_> = wires
             .iter()
             .map(|steps| {
@@ -1187,10 +1222,12 @@ fn a_solid_drawn_face_by_face(
                 builder.add_wire(&walked).expect("a wire that closes")
             })
             .collect();
-        skin.push((
-            builder.add_face(surface, &wires).expect("a face"),
-            Orientation::Forward,
-        ));
+        let used = if inside_out.contains(&which) {
+            Orientation::Reversed
+        } else {
+            Orientation::Forward
+        };
+        skin.push((builder.add_face(surface, &wires).expect("a face"), used));
     }
     builder.add_shell(&skin).expect("a shell");
     builder
@@ -1275,6 +1312,7 @@ fn a_bar_with_a_dome_on_top(model: &mut Model) -> SolidKey {
                 ]],
             ),
         ],
+        &[],
     )
 }
 
@@ -1319,6 +1357,7 @@ fn a_slice_off_the_side_of_a_ball(model: &mut Model) -> SolidKey {
             (Surface::Plane(floor), vec![vec![Reversed(0), Forward(2)]]),
             (Surface::Plane(wall), vec![vec![Reversed(1), Reversed(2)]]),
         ],
+        &[],
     )
 }
 
@@ -1397,6 +1436,7 @@ fn two_bars_meeting_at_a_mitre(model: &mut Model) -> SolidKey {
                 vec![vec![Forward(7), Forward(8)]],
             ),
         ],
+        &[],
     )
 }
 
@@ -1444,6 +1484,128 @@ fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> SolidKey {
             (top, vec![vec![Forward(2)], vec![Reversed(4), Reversed(3)]]),
             (top, vec![vec![Forward(3), Forward(4)]]),
         ],
+        &[],
+    )
+}
+
+/// The outer side of a rod bent round a ring, `r ≥ 5.75` about `z`: a pipe of
+/// radius `1.25` along `y` at `x = 5` from its end at `y = −4` up to `y = 0`,
+/// a quarter of the ring of radius five with that tube from there round to
+/// `x = 0`, and a pipe along `x` at `y = 5` on to its end at `x = −4`. The cut
+/// is the plane `x = 5.75` beside the first pipe, the pipe of radius `5.75`
+/// about `z` beside the ring and the plane `y = 5.75` beside the second pipe.
+///
+/// So the ring meets a pipe in four arcs: two halves of its tube's circle
+/// where a pipe carries on from it, and two quarters of the circles at
+/// `z = ±1` where the pipe about its own axis crosses it.
+fn the_outer_side_of_a_rod_bent_round_a_ring(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder, Torus};
+
+    let x = Vector::new(1.0, 0.0, 0.0);
+    let y = Vector::new(0.0, 1.0, 0.0);
+    let z = Vector::new(0.0, 0.0, 1.0);
+    let flat = |at: Point, facing: Vector| Surface::Plane(a_plane(at, facing));
+    let pipe = |at: Point, along: Vector, radius: f64| {
+        Surface::Cylinder(
+            Cylinder::new(Axis::new(at, along).expect("a direction"), radius)
+                .expect("a positive radius"),
+        )
+    };
+    let round_the_ring = |height: f64| {
+        part_of(
+            flat(Point::new(0.0, 0.0, height), z),
+            Point::new(5.75, 0.0, height),
+            Vector::new(1.0, 1.0, 0.0),
+        )
+    };
+    a_solid_drawn_face_by_face(
+        model,
+        &[
+            Point::new(5.75, 0.0, 1.0),
+            Point::new(5.75, 0.0, -1.0),
+            Point::new(0.0, 5.75, 1.0),
+            Point::new(0.0, 5.75, -1.0),
+            Point::new(5.75, -4.0, 1.0),
+            Point::new(5.75, -4.0, -1.0),
+            Point::new(-4.0, 5.75, 1.0),
+            Point::new(-4.0, 5.75, -1.0),
+        ],
+        vec![
+            (
+                0,
+                1,
+                part_of(flat(Point::origin(), y), Point::new(5.75, 0.0, 0.0), x),
+            ),
+            (
+                2,
+                3,
+                part_of(flat(Point::origin(), x), Point::new(0.0, 5.75, 0.0), y),
+            ),
+            (0, 2, round_the_ring(1.0)),
+            (1, 3, round_the_ring(-1.0)),
+            (4, 0, EdgeRun::Straight),
+            (5, 1, EdgeRun::Straight),
+            (1, 0, EdgeRun::Straight),
+            (3, 2, EdgeRun::Straight),
+            (2, 6, EdgeRun::Straight),
+            (3, 7, EdgeRun::Straight),
+            (
+                4,
+                5,
+                part_of(
+                    flat(Point::new(0.0, -4.0, 0.0), -y),
+                    Point::new(5.75, 0.0, 0.0),
+                    x,
+                ),
+            ),
+            (5, 4, EdgeRun::Straight),
+            (
+                6,
+                7,
+                part_of(
+                    flat(Point::new(-4.0, 0.0, 0.0), -x),
+                    Point::new(0.0, 5.75, 0.0),
+                    y,
+                ),
+            ),
+            (7, 6, EdgeRun::Straight),
+        ],
+        vec![
+            (
+                Surface::Torus(Torus::new(Axis::z(), 5.0, 1.25).expect("a working ring")),
+                vec![vec![Forward(0), Forward(3), Reversed(1), Reversed(2)]],
+            ),
+            (
+                pipe(Point::new(5.0, 0.0, 0.0), y, 1.25),
+                vec![vec![Reversed(4), Forward(10), Forward(5), Reversed(0)]],
+            ),
+            (
+                pipe(Point::new(0.0, 5.0, 0.0), x, 1.25),
+                vec![vec![Forward(1), Forward(9), Reversed(12), Reversed(8)]],
+            ),
+            (
+                flat(Point::new(5.75, 0.0, 0.0), -x),
+                vec![vec![Forward(4), Reversed(6), Reversed(5), Forward(11)]],
+            ),
+            (
+                pipe(Point::origin(), z, 5.75),
+                vec![vec![Forward(2), Reversed(7), Reversed(3), Forward(6)]],
+            ),
+            (
+                flat(Point::new(0.0, 5.75, 0.0), -y),
+                vec![vec![Forward(7), Forward(8), Reversed(13), Reversed(9)]],
+            ),
+            (
+                flat(Point::new(0.0, -4.0, 0.0), -y),
+                vec![vec![Reversed(10), Reversed(11)]],
+            ),
+            (
+                flat(Point::new(-4.0, 0.0, 0.0), -x),
+                vec![vec![Forward(12), Forward(13)]],
+            ),
+        ],
+        &[4],
     )
 }
 

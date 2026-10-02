@@ -577,6 +577,8 @@ impl Writing {
             (Surface::Cylinder(_), Surface::Sphere(_))
             | (Surface::Sphere(_), Surface::Cylinder(_))
             | (Surface::Cylinder(_), Surface::Cylinder(_))
+            | (Surface::Cylinder(_), Surface::Torus(_))
+            | (Surface::Torus(_), Surface::Cylinder(_))
             | (Surface::Sphere(_), Surface::Sphere(_))
                 if !closed =>
             {
@@ -695,7 +697,9 @@ impl Writing {
     /// ball** ([`where_a_plane_crosses_a_pipe`], [`where_a_plane_crosses_a_ball`]):
     /// the curve the reader will check every face holds. A ball whose centre
     /// is on a pipe's axis, two pipes of one radius whose axes cross, and a
-    /// ball's seam that stops short of a pole all meet in such a curve (Q767).
+    /// ball's seam that stops short of a pole all meet in such a curve (Q767),
+    /// and so do a pipe and a ring about one axis, and a pipe that carries on
+    /// where a ring's tube stops (Q773).
     ///
     /// **Which arc is the way the edge runs along the curve**: the plane is
     /// written facing the way it faces, so the arc the run picks is chosen by
