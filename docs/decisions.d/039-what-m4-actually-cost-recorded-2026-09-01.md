@@ -336,9 +336,10 @@ moved them.
 > (`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`). A bar
 > clear of a wall, in an inside corner, or beside another bar answers its
 > intersection and both differences, and its union refuses
-> `ResultIsNotManifold { count: 4 }`: both solids keep every face along the
-> line, so it is one edge with four faces round it. That union's answer is the
-> two solids as they stand, so it is a gap too, and it is queue row Q371's
+> `ResultIsNotManifold { count: 4 }`. The likely cause is that both solids keep
+> every face along the line, so it comes out one edge with four faces round it,
+> but nobody has traced that. That union's answer is the two solids as they
+> stand, so it is a gap too, and queue row Q371 traces and fixes it
 > (`a_bar_lying_along_a_plane_or_a_bar.rs`). The block on a bar's cap refuses
 > `TwoCurvesTouchWithoutCrossing` again, under every rule, and why is not traced
 > (`a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch`). A plane

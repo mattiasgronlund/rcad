@@ -12,10 +12,11 @@
 //! **The intersection and both differences are answered**, and they are the
 //! answers that exist: the insides are apart, so the intersection is no solid at
 //! all and each difference is the first solid as it stood. **The union is
-//! refused** `ResultIsNotManifold { count: 4 }`: both solids keep every face
-//! along the touch, so the line comes out one edge with four faces round it.
-//! Its answer is the two solids as they stand, so that refusal is a gap, and it
-//! is queue row Q371's (`fuse/assemble.rs`), pinned here as it refuses.
+//! refused** `ResultIsNotManifold { count: 4 }`. The likely cause is that both
+//! solids keep every face along the touch, so the line comes out one edge with
+//! four faces round it, but nobody has traced that. Its answer is the two solids
+//! as they stand, so that refusal is a gap, and queue row Q371
+//! (`fuse/assemble.rs`) traces and fixes it. It is pinned here as it refuses.
 
 use core::f64::consts::PI;
 
@@ -108,7 +109,7 @@ fn every_rule_of(build: fn(&mut Model) -> [(SolidKey, f64); 2], pair: &str) {
             if rule == Rule::Union {
                 assert!(
                     matches!(answer, Err(Error::ResultIsNotManifold { count: 4, .. })),
-                    "{what}: the touching line is one edge with four faces, got {answer:?}"
+                    "{what}: an edge with four faces round it, got {answer:?}"
                 );
                 continue;
             }

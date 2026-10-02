@@ -72,8 +72,9 @@
 //! refusal in the "touch alone" column of an apart cell is a **gap**:
 //!
 //! - `ResultIsNotManifold`, every union of a wall or a second pipe lying along a
-//!   pipe's ruling: both solids keep every face along the touching line, so it
-//!   comes out one edge with four faces round it. Queue row Q371's, in
+//!   pipe's ruling. The likely cause is that both solids keep every face along
+//!   the touching line, so it comes out one edge with four faces round it, but
+//!   nobody has traced that. Queue row Q371 traces and fixes it, in
 //!   `fuse/assemble.rs`; `a_bar_lying_along_a_plane_or_a_bar.rs` pins it. Until
 //!   queue row Q649 every fuse of these three cells refused before that, on
 //!   *which way a crossing runs*: the two surfaces' normals are parallel along

@@ -607,9 +607,9 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells() 
 ///
 /// So the intersection is no solid, the tube less the bar is the tube, and the
 /// bar less the tube is the bar. **The union is refused before the ring above
-/// is reached**: `ResultIsNotManifold { count: 4 }`, the touching line one edge
-/// with four faces round it, which is queue row Q371's. That ring is still
-/// unreached.
+/// is reached**: `ResultIsNotManifold { count: 4 }`, an edge with four faces
+/// round it. Which edge, and why, nobody has traced; queue row Q371 traces and
+/// fixes it. That ring is still unreached.
 #[test]
 fn a_bar_touching_a_tubes_inner_wall_is_answered_but_for_the_union() {
     for (rule, swapped) in every_rule_both_ways() {
