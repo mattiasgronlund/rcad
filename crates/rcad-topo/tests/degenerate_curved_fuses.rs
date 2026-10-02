@@ -501,56 +501,65 @@ fn a_block_whose_wall_touches_a_bar(model: &mut Model) -> Pair {
     Pair::of(bar, touching)
 }
 
-/// The tangency is refused, and what it gives up on is the tangency: the wall
-/// lies **on** the bar's skin, so that one crossing has no direction.
+/// The tangency is answered under every rule: the wall lies **on** the bar's
+/// skin along the ruling `(0, -2, z)`, and that crossing runs up the bar's axis.
 ///
-/// **The two curves the old name spoke of are ordered now, and they were on the
+/// **The two curves the old name spoke of are ordered, and they were on the
 /// caps and not on the wall.** On the plane `z = 0`, and again on `z = 8`, the
 /// cap's own boundary circle and the line the wall `y = -2` cuts in the cap
 /// plane touch at `(0, -2, 0)` and `(0, -2, 8)`; the three ways out of that node
-/// come back in the order their curvatures put them, and both caps are then
-/// arranged, grouped into cells and wound without complaint.
+/// come back in the order their curvatures put them.
 ///
-/// **What stops it is a stage further in and a different degeneracy.** The wall
-/// `y = -2` is tangent to the bar's *surface* along the whole ruling
-/// `(0, -2, z)`, where the plane's normal `(0, -1, 0)` and the pipe's gradient
-/// `(0, -2, 0)` are parallel. `∇S × ∇Q` is exactly the zero vector there, and
-/// that cross product is this kernel's one name for which way a crossing runs,
-/// so `dominant_axis_of_a_direction` has nothing to name. That is why the
-/// predicate below is *which way a crossing runs* and not a point or a turn.
-/// `arrange.rs`'s `how_a_crossing_runs` carries the four families of fix and why
-/// none of them is small.
+/// **What stopped it until queue row Q649 was a stage further in.** The wall
+/// `y = -2` is tangent to the bar's *surface* along the whole ruling, where the
+/// plane's normal `(0, -1, 0)` and the pipe's gradient `(0, -2, 0)` are
+/// parallel. `∇S × ∇Q`, which every other crossing runs along, is exactly the
+/// zero vector there, and every rule was refused `Undecidable` on *which way a
+/// crossing runs*. It was a gap: the line runs along the pipe's stored axis,
+/// which `arrange.rs`'s `AlongATouch` now carries, along with the one side of
+/// the wall both sides of the line lie on.
 ///
-/// **The control is one coordinate moved by a tenth, and it is answered.** With
-/// the wall at `y = -1.9` it cuts the bar in two curves that really do cross,
-/// and the fuse goes all the way through. It used to refuse by a different name
-/// — `Undecidable` over a point inside a piece of a face, §36.28's chord-and-arc
-/// gap — and counting a pipe's bulge in `select.rs` closed that, which leaves
-/// this row's control sharper than it was: a refusal on one side of one number
-/// and an answer on the other.
+/// The block also crosses the bar: its wall `x = 1` cuts it. So the shared
+/// piece is the slab `3 ≤ z ≤ 5` of the bar with `x ≥ 1` and `y ≤ 1`, and the
+/// wall at `y = -2` cuts nothing off it. Its area is `∫(√(4 − y²) − 1) dy` from
+/// `−√3` to `1`, which is exactly `π − 1`, as in
+/// [`a_bar_with_a_tab_on_it_is_answered_rather_than_left_with_a_hole_in_its_skin`].
 ///
-/// The shared piece is the slab `3 ≤ z ≤ 5` of the bar with `x ≥ 1` and
-/// `y ≤ 1.1`. `x ≥ 1` already forces `|y| ≤ √3`, so the wall at `y = -1.9` cuts
-/// nothing off it and the closed form is the one integral
-/// `∫(√(4 − y²) − 1) dy` from `−√3` to `1.1`.
+/// **The control is one coordinate moved by a tenth, and it is answered too.**
+/// With the wall at `y = -1.9` it cuts the bar in two curves that really do
+/// cross. It used to refuse by a different name — `Undecidable` over a point
+/// inside a piece of a face, §36.28's chord-and-arc gap — until counting a
+/// pipe's bulge in `select.rs` closed that. Its shared piece is the same
+/// integral up to `1.1`.
 ///
-/// A tolerant policy makes no difference, which is the other half: this is a
-/// statement about the shape and not about a budget.
+/// A tolerant policy answers too: the touch is decided by the shape and no
+/// budget is spent on it.
 #[test]
-fn a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction() {
-    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-            let mut model = a_model();
-            let pair = a_block_whose_wall_touches_a_bar(&mut model);
-            match refusal(&mut model, &pair, rule, &policy) {
-                why @ Error::Undecidable { .. } => assert_eq!(
-                    what_it_gave_up_on(&why),
-                    "which way a crossing runs",
-                    "a wall lying on a bar's skin gives that crossing no direction"
-                ),
-                other => panic!("a wall lying on a bar's skin refused with {other:?}"),
-            }
-        }
+fn a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered() {
+    let shared = 2.0 * (PI - 1.0);
+    for (rule, closed_form) in [
+        (Rule::Union, A_BAR + 12.0 - shared),
+        (Rule::Intersection, shared),
+        (Rule::Difference, A_BAR - shared),
+    ] {
+        let mut model = a_model();
+        let pair = a_block_whose_wall_touches_a_bar(&mut model);
+        let answer = fused(&mut model, &pair, rule);
+        assert_eq!(answer.solids().len(), 1, "{rule:?}");
+        measures(volume_of(&model, answer.solids()), closed_form, Side::Under);
+
+        let mut model = a_model();
+        let pair = a_block_whose_wall_touches_a_bar(&mut model);
+        let tolerant = model
+            .fuse(
+                &pair.arguments,
+                &pair.tools,
+                rule,
+                &Policy::tolerant(100.0),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("a tolerant {rule:?} refused: {why}"));
+        assert_eq!(tolerant.solids().len(), 1, "a tolerant {rule:?}");
     }
 
     let mut model = a_model();
@@ -560,7 +569,7 @@ fn a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction() {
     assert_eq!(
         united.solids().len(),
         1,
-        "moving the wall off the tangent gets an answer where the tangent refuses"
+        "moving the wall off the tangent gets the same kind of answer"
     );
     let shared = 2.0
         * (0.55 * 2.79_f64.sqrt() + 2.0 * 0.55_f64.asin() + 2.0 * PI / 3.0
@@ -844,20 +853,16 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 /// slanted face lies **on** the cone's side, so that one crossing has no
 /// direction.
 ///
-/// This is [`a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction`]
-/// asked of a cone, and it is the same gap arriving by the same road. `∇S × ∇Q`
-/// is the only form this kernel has for which way a crossing runs, and along a
-/// ruling a plane rests on, the plane's normal and the cone's gradient are
-/// parallel at every point of it, so that cross product is exactly the zero
-/// vector. `arrange.rs`'s `how_a_crossing_runs` carries the four families of fix
-/// and why none of them is small.
+/// This is [`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`]
+/// asked of a cone, and the gap that row used to be. Along a ruling a plane
+/// rests on, the plane's normal and the cone's gradient are parallel at every
+/// point of it, so `∇S × ∇Q` is exactly the zero vector. A bar's touch reads its
+/// stored axis instead (`arrange.rs`'s `AlongATouch`, queue row Q649); a cone's
+/// ruling has no stored direction, and is queue row Q473's.
 ///
-/// **A gap and not a limit** (§16.10), and the same gap the bar's row leaves.
-/// The direction is there to be had — it is the ruling's own, `(1, 0, 8)` up to
-/// length — and what runs out is the single form this kernel writes a crossing's
-/// direction in. A cone adds no new one: it is the bar's gap reached by a second
-/// road, which is what says the gap is about a plane resting on a curved surface
-/// and not about a pipe.
+/// **A gap and not a limit** (§16.10). The direction is there to be had — it is
+/// the ruling's own, `(1, 0, 8)` up to length — and what runs out is that no
+/// stored triple names it.
 ///
 /// **The unit test next to that note is not this test.** `arrange.rs`'s
 /// `the_two_rulings_a_plane_through_a_cones_apex_cuts_are_ordered_along_an_axis`
@@ -1901,38 +1906,38 @@ fn a_ball_touching_a_wall_at_the_one_point_that_can_place_it_keeps_both() {
     );
 }
 
-/// A block sitting on a bar's cap with its corner on the rim: the same shape as
-/// [`a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction`] and it
-/// stops in the same place, one plane along.
+/// A block sitting on a bar's cap with its corner on the rim gets past the
+/// touch [`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`]
+/// gets past, and is refused one stage on, as two curves that touch.
 ///
 /// The block covers `2 ≤ x ≤ 4`, so the plane its near wall lies in, `x = 2`,
 /// rests on the bar of radius two along the ruling `(2, 0, z)` — the bar's own
 /// seam. A cut is by a plane and not by the face carrying it (`cuts.rs` says
 /// why), so it does not matter that the wall itself sits above the bar. There
 /// the plane's normal `(-1, 0, 0)` and the pipe's gradient `(2, 0, 0)` are
-/// parallel, the cross product that names a crossing's direction is exactly
-/// nothing, and the fuse gives up naming it.
+/// parallel. Until queue row Q649 that refused `Undecidable` on *which way a
+/// crossing runs*; the line runs up the bar's axis now.
 ///
-/// Two shapes reaching one refusal through different
-/// coordinates is what says the refusal is about a plane lying on a pipe and not
-/// about either shape.
+/// **What refuses now is `TwoCurvesTouchWithoutCrossing`, and its cause is not
+/// traced.** The ruling is also the line the block's two walls `x = 2` and
+/// `y = 0` meet along, so on the wall `x = 2` the touch and that edge are two
+/// crossings on one line, and a plane and a pipe are never folded into one
+/// crossing. That is a guess at the cause and nothing has run it.
 #[test]
-fn a_block_sitting_on_a_bars_cap_leaves_that_crossing_with_no_direction() {
-    let mut model = a_model();
-    let bar = a_bar(&mut model);
-    let sitting = block(&mut model, [2.0, 2.0, 2.0], Vector::new(2.0, 0.0, 8.0));
-    match refusal(
-        &mut model,
-        &Pair::of(bar, sitting),
-        Rule::Union,
-        &Policy::certified(),
-    ) {
-        why @ Error::Undecidable { .. } => assert_eq!(
-            what_it_gave_up_on(&why),
-            "which way a crossing runs",
-            "a block wall lying on a bar's skin gives that crossing no direction"
-        ),
-        other => panic!("a block on a bar's cap refused with {other:?}"),
+fn a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch() {
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        let mut model = a_model();
+        let bar = a_bar(&mut model);
+        let sitting = block(&mut model, [2.0, 2.0, 2.0], Vector::new(2.0, 0.0, 8.0));
+        match refusal(
+            &mut model,
+            &Pair::of(bar, sitting),
+            rule,
+            &Policy::certified(),
+        ) {
+            Error::TwoCurvesTouchWithoutCrossing { .. } => (),
+            other => panic!("a block on a bar's cap, {rule:?}, refused with {other:?}"),
+        }
     }
 }
 
@@ -2173,7 +2178,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             case: Case::Fused {
                 build: a_block_whose_wall_touches_a_bar,
                 rule: Rule::Difference,
-                outcome: Outcome::GaveUp("which way a crossing runs"),
+                outcome: Outcome::Answered,
             },
         },
         Entry {
@@ -2318,7 +2323,7 @@ fn the_rest() -> Vec<Entry> {
             pair: "a block sitting on a bar's cap",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_block_sitting_on_a_bars_cap_leaves_that_crossing_with_no_direction",
+                test: "a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch",
             },
         },
         Entry {

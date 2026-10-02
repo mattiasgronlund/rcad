@@ -600,11 +600,18 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells() 
 /// side's one corner, so this family needs a touch at a corner, and a touch
 /// along a line is how two round solids make one.
 ///
-/// **Refused before any of that**, under every rule, both ways round, while
-/// `fuse/arrange.rs` reads which way the crossing runs where the two walls
-/// touch — the same gap §191.5 measures for bars touching along a line (Q616).
+/// **The touch is followed now** (queue row Q649): the line runs up the bars'
+/// axis, and the small bar lies inside the hole's pipe on both sides of it. It
+/// used to be refused `Undecidable` on *which way a crossing runs* under every
+/// rule (Q616), the gap §191.5 measures for bars touching along a line.
+///
+/// So the intersection is no solid, the tube less the bar is the tube, and the
+/// bar less the tube is the bar. **The union is refused before the ring above
+/// is reached**: `ResultIsNotManifold { count: 4 }`, the touching line one edge
+/// with four faces round it, which is queue row Q371's. That ring is still
+/// unreached.
 #[test]
-fn a_bar_touching_a_tubes_inner_wall_is_refused_while_the_touch_is_followed() {
+fn a_bar_touching_a_tubes_inner_wall_is_answered_but_for_the_union() {
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let outer = model
@@ -617,13 +624,38 @@ fn a_bar_touching_a_tubes_inner_wall_is_refused_while_the_touch_is_followed() {
         let inside = model
             .add_round_bar(1.0, 4.0, &at(2.0, 0.0, 0.0))
             .expect("a bar of radius one");
-        let refused = fused_in_order(&mut model, [tube, inside], rule, swapped);
-        assert_undecidable_on(
-            &refused,
-            "which way a crossing runs",
-            &format!("{rule:?}, swapped {swapped}"),
-        );
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, [tube, inside], rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => assert!(
+                matches!(answer, Err(Error::ResultIsNotManifold { count: 4, .. })),
+                "{what}: {answer:?}"
+            ),
+            (Rule::Intersection, _) => assert_eq!(
+                answer.unwrap_or_else(|why| panic!("{what} refused: {why}")),
+                Vec::new(),
+                "{what}: the bar is in the hole, so the two share no solid"
+            ),
+            (_, false) => assert_holds(
+                &model,
+                the_only(answer, &what),
+                4.0 * 40.0 * PI,
+                "the tube less the bar",
+            ),
+            (_, true) => assert_holds(
+                &model,
+                the_only(answer, &what),
+                4.0 * PI,
+                "the bar less the tube",
+            ),
+        }
     }
+}
+
+fn the_only(answer: rcad_topo::Result<Vec<SolidKey>>, what: &str) -> SolidKey {
+    let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
+    assert_eq!(solids.len(), 1, "{what}: {solids:?}");
+    solids[0]
 }
 
 /// The corners of the bow tie cap, in the order its ring runs: two on the
