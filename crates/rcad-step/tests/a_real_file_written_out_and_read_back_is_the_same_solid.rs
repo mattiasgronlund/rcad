@@ -121,25 +121,36 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     assert_pinned_round_trips(&round_tripped);
 }
 
-/// The 59 imported KiCad files this kernel can write back out and read back as
+/// The 106 imported KiCad files this kernel can write back out and read back as
 /// the same solid, out of the 164 that import.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
 /// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
 /// assertion, which prints what appeared and what disappeared.
 ///
-/// # The 105 that are missing are the writer's gap and not the reader's
+/// # What stops the 58 that are missing
 ///
-/// Every one of them fails as *writer refuses: an edge … names no curve*, and
-/// the run prints how many for each pair of surfaces. A file only reaches here
+/// Fifty-five fail as *writer refuses: an edge … names no curve*, and the run
+/// prints how many for each pair of surfaces. A file only reaches here
 /// **after** importing and passing the full sweep, so the solid is sound and
 /// the writer simply has no curve to write for an edge between those faces.
+/// The other three — the two `Relay_StandexMeder_DIP` relays and
+/// `SW_NKK_BB15AH` — are written, and the reader refuses what was written
+/// because a loop of a pipe face used reversed does not close.
+///
+/// **Forty-seven came in with Q766**: the five `Fuse_` chips, twenty-seven
+/// pin headers, twelve DIP switches and three relays. The writer used to
+/// refuse every arc where a flat face stops short of right round a pipe, and
+/// that was the first thing 80 of the 105 then missing stopped on; it now
+/// writes the circle or ellipse the face's plane crosses the pipe in, turned so
+/// that the arc the reader picks is the one the model holds
+/// (`Crossing::the_way_round_the_arc` in `write.rs`).
 ///
 /// **Fourteen came in with Q763**: nine `LED_D1.8mm` horizontals, the two
 /// `LED_D2.0mm` flat tops and three Finder relays. Each holds a round bar whose
 /// cap's normal is about `1e-16` off its pipe's axis, which the writer used to
 /// refuse; it now writes the circle the cap's plane crosses the pipe in, about
-/// the cap's own normal (`Writing::where_a_plane_crosses_a_pipe`).
+/// the cap's own normal (`where_a_plane_crosses_a_pipe` in `write.rs`).
 ///
 /// **That gap is older than this list, and neither the curved rounding nor the
 /// two-step wire created it.** At `d23c700` this run said 45 of 46 with one such
@@ -150,8 +161,13 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// thirteen (§115), the equal-pipes lane's two and the homogeneous-cylinder
 /// lane's two (§118.10) — runs into the same writer.
 /// Closing that is a writer lane and not this list's business. What this list is
-/// for is that the 59 which do round trip cannot quietly become 58.
+/// for is that the 106 which do round trip cannot quietly become 105.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
+    "Fuse_0402_1005Metric.step",
+    "Fuse_0603_1608Metric.step",
+    "Fuse_0805_2012Metric.step",
+    "Fuse_1206_3216Metric.step",
+    "Fuse_1210_3225Metric.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z1.6mm.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z4.9mm.step",
     "LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z8.2mm.step",
@@ -177,20 +193,50 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z3.0mm.step",
     "LED_Rectangular_W5.0mm_H2.0mm_Horizontal_O6.35mm_Z5.0mm.step",
     "LED_Rectangular_W5.0mm_H5.0mm.step",
+    "PinHeader_1x03_P2.54mm_Horizontal.step",
     "PinHeader_1x04_P2.54mm_Vertical.step",
+    "PinHeader_1x06_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x08_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x10_P2.54mm_Horizontal.step",
     "PinHeader_1x11_P2.54mm_Vertical.step",
+    "PinHeader_1x13_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x15_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x17_P2.54mm_Horizontal.step",
     "PinHeader_1x18_P2.54mm_Vertical.step",
+    "PinHeader_1x20_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x22_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x24_P2.54mm_Horizontal.step",
     "PinHeader_1x25_P2.54mm_Vertical.step",
+    "PinHeader_1x27_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x29_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x31_P2.54mm_Horizontal.step",
     "PinHeader_1x32_P2.54mm_Vertical.step",
+    "PinHeader_1x34_P2.54mm_Vertical_SMD_Pin1Right.step",
+    "PinHeader_1x36_P2.54mm_Vertical_SMD_Pin1Left.step",
+    "PinHeader_1x38_P2.54mm_Horizontal.step",
     "PinHeader_1x39_P2.54mm_Vertical.step",
     "PinHeader_2x01_P2.54mm_Vertical.step",
+    "PinHeader_2x04_P2.54mm_Horizontal.step",
+    "PinHeader_2x06_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x08_P2.54mm_Vertical.step",
+    "PinHeader_2x11_P2.54mm_Horizontal.step",
+    "PinHeader_2x13_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x15_P2.54mm_Vertical.step",
+    "PinHeader_2x18_P2.54mm_Horizontal.step",
+    "PinHeader_2x20_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x22_P2.54mm_Vertical.step",
+    "PinHeader_2x25_P2.54mm_Horizontal.step",
+    "PinHeader_2x27_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x29_P2.54mm_Vertical.step",
+    "PinHeader_2x32_P2.54mm_Horizontal.step",
+    "PinHeader_2x34_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x36_P2.54mm_Vertical.step",
+    "PinHeader_2x39_P2.54mm_Horizontal.step",
+    "Relay_DPDT_Finder_30.22.step",
     "Relay_DPDT_Finder_40.52.step",
     "Relay_DPDT_Omron_G5V-2.step",
+    "Relay_DPDT_Omron_G6H-2.step",
+    "Relay_DPDT_Panasonic_JW2.step",
     "Relay_SPDT_Finder_40.31.step",
     "Relay_SPDT_Finder_40.51.step",
     "Relay_SPDT_HJR-4102.step",
@@ -200,16 +246,28 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "Relay_SPST_StandexMeder_SIL_Form1A.step",
     "Relay_SPST_StandexMeder_SIL_Form1B.step",
     "Relay_StandexMeder_UMS.step",
+    "SW_DIP_SPSTx01_Piano_10.8x4.1mm_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx02_Piano_10.8x6.64mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx02_Piano_CTS_Series194-2MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx03_Piano_10.8x9.18mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx03_Piano_CTS_Series194-3MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx04_Piano_10.8x11.72mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx04_Piano_CTS_Series194-4MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx05_Piano_10.8x14.26mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx05_Piano_CTS_Series194-5MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx06_Piano_10.8x16.8mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx06_Piano_CTS_Series194-6MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx07_Piano_10.8x19.34mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx07_Piano_CTS_Series194-7MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx08_Piano_10.8x21.88mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx08_Piano_CTS_Series194-8MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx09_Piano_10.8x24.42mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx09_Piano_CTS_Series194-9MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx10_Piano_10.8x26.96mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx10_Piano_CTS_Series194-10MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx11_Piano_10.8x29.5mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx11_Piano_CTS_Series194-11MSTN_W7.62mm_P2.54mm.step",
+    "SW_DIP_SPSTx12_Piano_10.8x32.04mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx12_Piano_CTS_Series194-12MSTN_W7.62mm_P2.54mm.step",
 ];
 
