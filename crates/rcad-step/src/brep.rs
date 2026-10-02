@@ -20,14 +20,20 @@ use rcad_topo::{
 };
 use smallvec::smallvec;
 
+use crate::Value;
 use crate::geometry::Reading;
 use crate::graph::EntityId;
 use crate::names::{
-    ADVANCED_FACE, CIRCLE, CLOSED_SHELL, EDGE_CURVE, EDGE_LOOP, ELLIPSE, FACE_BOUND,
-    FACE_OUTER_BOUND, FACE_SURFACE, Keyword, LINE, MANIFOLD_SOLID_BREP, ORIENTED_EDGE,
+    ADVANCED_FACE, CIRCLE, CLOSED_SHELL, CONICAL_SURFACE, EDGE_CURVE, EDGE_LOOP, ELLIPSE,
+    FACE_BOUND, FACE_OUTER_BOUND, FACE_SURFACE, Keyword, LINE, MANIFOLD_SOLID_BREP, ORIENTED_EDGE,
     VERTEX_POINT,
 };
 use crate::refusal::Refusal;
+
+/// The one loop keyword the walk reads by spelling rather than from
+/// `names.rs`, which with `fuzz/step.dict` lay outside Q746's write set; it
+/// belongs in that list like every other name the reader reads.
+const A_LOOP_OF_ONE_CORNER: &str = "VERTEX_LOOP";
 
 /// Turn one `MANIFOLD_SOLID_BREP` into one solid in `model`.
 pub(crate) fn solid_from(
@@ -274,7 +280,7 @@ impl Walk {
         let keyword = reading.keyword_of(self.brep, face, &[ADVANCED_FACE, FACE_SURFACE])?;
         let (surface, used) = self.surface_of_the_face(reading, face, keyword)?;
 
-        let bounds = reading.references_at(face, keyword, 1)?;
+        let bounds = self.the_bounds_that_bound_something(reading, face, keyword, &surface)?;
         let outer_first = self.outer_bound_first(reading, face, &bounds, &surface)?;
         let mut wires = Vec::with_capacity(outer_first.len());
         for bound in outer_first {
@@ -308,6 +314,96 @@ impl Walk {
             (Some(flat), false) => (Surface::Plane(flat.reversed()), Orientation::Forward),
             (None, false) => (written, Orientation::Reversed),
         })
+    }
+
+    /// A face's bounds, less a `VERTEX_LOOP` standing on the apex of the cone
+    /// the face sits on.
+    ///
+    /// **This kernel's pointed cone has no wire at its apex**, so that is the
+    /// one loop that is read as bounding nothing. A cone face that comes to a
+    /// point is its base circle and nothing else: the mesher closes the face
+    /// up at the apex the cone stores, and `Model::validate` asks nothing of a
+    /// corner there because there is none. A file says the same face with a
+    /// second bound, a `VERTEX_LOOP` of the apex, in 136 `CONICAL_SURFACE`
+    /// faces of the NIST files (`nist_ctc_05` `#1340`; `docs/decisions.md`
+    /// §376).
+    ///
+    /// **The corner has to be at the apex as `Model::validate` would judge a
+    /// pole there**, because dropping the loop drops the corner and nothing
+    /// after this sees it again. [`with_a_pole_where_it_turns_back`] can ask a
+    /// ball exactly, with [`Surface::the_way_its_first_coordinate_runs_at`],
+    /// because the pole it puts back is still a corner the validator checks
+    /// against the pinch. On a cone that test answers `None` on the whole axis
+    /// and not only at the apex, and 118 of the 136 corners are `2.5e3` to
+    /// `1.0e6` roundings from the apex, 87 of them on the axis exactly and a
+    /// little along it, which is a modelling tolerance and not where the cone
+    /// pinches (§376). So the
+    /// question asked is the validator's own for a pole —
+    /// `stands_where_it_pinches`: is the apex inside the box of
+    /// [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] roundings round the corner, the
+    /// sixteen `Model::validate` gives a corner of a curved face. The rounding
+    /// is of the numbers the apex is made from rather than of the whole
+    /// model's largest coordinate, which the validator reads and this crate
+    /// cannot, so for a cone that is not the solid's largest part this refuses
+    /// where the validator might have passed. 18 of the 136 corners are inside
+    /// it, the furthest `8.5` roundings out.
+    ///
+    /// Any other `VERTEX_LOOP` — on a face that is not a cone, or at a corner
+    /// off its apex — is kept, and [`Walk::loop_of_bound`] refuses it by name.
+    fn the_bounds_that_bound_something(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        keyword: Keyword,
+        surface: &Surface,
+    ) -> Result<Vec<EntityId>, Refusal> {
+        let bounds = reading.references_at(face, keyword, 1)?;
+        let Surface::Cone(cone) = surface else {
+            return Ok(bounds);
+        };
+        let mut bounding = Vec::with_capacity(bounds.len());
+        for bound in bounds {
+            if !self.a_loop_standing_on_the_apex(reading, face, keyword, bound, cone)? {
+                bounding.push(bound);
+            }
+        }
+        Ok(bounding)
+    }
+
+    /// Whether `bound` holds a `VERTEX_LOOP` whose one corner is the apex of
+    /// `cone` — see [`Walk::the_bounds_that_bound_something`].
+    ///
+    /// **The roundings are measured against the numbers the apex was worked
+    /// out from**, and not against the apex alone. A file places a cone at its
+    /// base and the reader moves back `radius / slope` along the axis to the
+    /// apex, so a cone whose tip is at the origin has an apex a rounding of
+    /// that length from zero, and a box sized by the apex's own coordinates
+    /// would be no box at all. The radius is read off the file's
+    /// `CONICAL_SURFACE` again for this, because [`Cone`](rcad_geom::Cone)
+    /// keeps the apex and not where the file placed it.
+    fn a_loop_standing_on_the_apex(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        face_keyword: Keyword,
+        bound: EntityId,
+        cone: &rcad_geom::Cone,
+    ) -> Result<bool, Refusal> {
+        let keyword = reading.keyword_of(face, bound, &[FACE_OUTER_BOUND, FACE_BOUND])?;
+        let loop_id = reading.reference_at(bound, keyword, 1)?;
+        let Some(corner) = reading
+            .file()
+            .instance(loop_id)
+            .and_then(|held| held.part(A_LOOP_OF_ONE_CORNER))
+            .and_then(|record| record.attribute(1))
+            .and_then(Value::as_reference)
+        else {
+            return Ok(false);
+        };
+        let at = self.point_of_vertex(reading, corner)?;
+        let sits_on = reading.reference_at(face, face_keyword, 2)?;
+        let back_to_the_apex = reading.real_at(sits_on, CONICAL_SURFACE, 2)? / cone.slope();
+        Ok(a_corner_at_the_apex(at, cone.apex(), back_to_the_apex))
     }
 
     /// The bounds of a face with the outer one first, which is the order
@@ -1437,7 +1533,7 @@ impl Walk {
             if surface.as_plane().is_some() {
                 continue;
             }
-            let Ok(corners) = self.corners_of_face(reading, *face) else {
+            let Ok(corners) = self.corners_of_face(reading, *face, surface) else {
                 continue;
             };
             for (corner, point) in corners {
@@ -1543,14 +1639,18 @@ impl Walk {
     }
 
     /// Every corner of one face, with the `VERTEX_POINT` it was written under.
+    ///
+    /// A cone's apex loop is passed over, the way the walk passed it over: it
+    /// put no corner into the description for the sweep to have refused.
     fn corners_of_face(
         &self,
         reading: &Reading<'_>,
         face: EntityId,
+        surface: &Surface,
     ) -> Result<Vec<(EntityId, Point)>, Refusal> {
         let keyword = reading.keyword_of(self.brep, face, &[ADVANCED_FACE, FACE_SURFACE])?;
         let mut corners = Vec::new();
-        for bound in reading.references_at(face, keyword, 1)? {
+        for bound in self.the_bounds_that_bound_something(reading, face, keyword, surface)? {
             let (loop_id, _) = self.loop_of_bound(reading, face, bound)?;
             for use_of_an_edge in reading.references_at(loop_id, EDGE_LOOP, 1)? {
                 let edge_curve = reading.reference_at(use_of_an_edge, ORIENTED_EDGE, 3)?;
@@ -1711,7 +1811,10 @@ impl ProbeWalk {
             (None, false) => (written, Orientation::Reversed),
         };
 
-        let bounds = self.record(reading.references_at(face, keyword, 1))?;
+        let bounds = self.record(
+            self.walk
+                .the_bounds_that_bound_something(reading, face, keyword, &surface),
+        )?;
         let outer_first = self.record(
             self.walk
                 .outer_bound_first(reading, face, &bounds, &surface),
@@ -1860,6 +1963,26 @@ fn with_a_pole_where_it_turns_back(walked: &[Walked], surface: &Surface) -> Vec<
         }
     }
     steps
+}
+
+/// Whether the apex is inside the box of [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`]
+/// roundings round `corner`, a rounding being [`NEAREST_F64_POINT_ROUNDOFF`]
+/// of the largest of the two points' coordinates and `back_to_the_apex`, how
+/// far the apex was worked out from where the file placed the cone — see
+/// [`Walk::the_bounds_that_bound_something`].
+///
+/// This is the box test `rcad-topo`'s `provably_away_from_every_pinch` makes
+/// with intervals, made in `f64`: a subtraction here rounds only by a part of
+/// its own size, so the two can disagree only about a corner within a rounding
+/// of the edge of the box.
+fn a_corner_at_the_apex(corner: Point, apex: Point, back_to_the_apex: f64) -> bool {
+    let reach = A_CIRCLE_MAY_MISS_ITS_FACE_BY
+        * NEAREST_F64_POINT_ROUNDOFF
+        * largest_of(&[corner, apex], &[back_to_the_apex]);
+    (corner - apex)
+        .components()
+        .iter()
+        .all(|apart| apart.abs() <= reach)
 }
 
 /// The half-space facing `facing` whose flat surface stands on the chord, low

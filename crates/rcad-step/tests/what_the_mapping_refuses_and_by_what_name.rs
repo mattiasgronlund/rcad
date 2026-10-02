@@ -16,9 +16,12 @@ mod written_by_hand;
 use std::path::PathBuf;
 use std::{env, fs};
 
+use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{EntityId, Import, Refusal, StepFile};
-use written_by_hand::{a_block, a_plate_bounded_by_an_arc_and_its_chord, a_quarter_disc_plate};
+use written_by_hand::{
+    a_block, a_header, a_plate_bounded_by_an_arc_and_its_chord, a_quarter_disc_plate, real,
+};
 
 /// A block of sides two, four and eight, in millimetres.
 fn a_working_block() -> String {
@@ -114,6 +117,8 @@ fn a_curve_kind_this_kernel_does_not_hold_is_refused_by_the_name_the_file_gives_
     assert_eq!(keyword, "B_SPLINE_CURVE_WITH_KNOTS");
 }
 
+/// A `VERTEX_LOOP` on a flat face is refused by name: a plane pinches nowhere,
+/// so there is no apex for it to be read as.
 #[test]
 fn a_loop_that_is_not_an_edge_loop_is_refused_by_name() {
     let standing_still = a_working_block().replace(
@@ -125,6 +130,113 @@ fn a_loop_that_is_not_an_edge_loop_is_refused_by_name() {
     };
     assert_eq!(id, EntityId(430));
     assert_eq!(keyword, "VERTEX_LOOP");
+}
+
+/// A cone face's apex written as a second bound, a `VERTEX_LOOP` of the one
+/// corner, is read as no bound at all, and the cone imports as the cone.
+///
+/// This kernel's pointed cone has no wire at its apex, so the face is its base
+/// circle and nothing else. The cone is placed at its base, which is how the
+/// NIST files place theirs, so the reader works the apex out with a `tan` and a
+/// division and the corner the file writes at the origin is a rounding or so
+/// from it (`docs/decisions.md` §376). `πr²h/3` is a number nothing in this
+/// kernel supplied.
+#[test]
+fn a_vertex_loop_at_a_cones_apex_bounds_nothing_and_the_cone_imports() {
+    let import = read(&a_pointed_cone_with_its_apex_written_as_a_loop([0.0; 3]))
+        .unwrap_or_else(|why| panic!("a cone whose apex is a vertex loop imports: {why}"));
+    let mut log = ProvenanceLog::new();
+    import
+        .model()
+        .validate(&Policy::certified(), &mut log)
+        .expect("and the model it makes is sound");
+    let [(_, key)] = import.solids() else {
+        panic!("one MANIFOLD_SOLID_BREP is one solid");
+    };
+    let measured = import
+        .model()
+        .solid(*key)
+        .expect("this model made the key")
+        .measure(
+            Deflection::for_scale(import.model().scale()),
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("a pointed cone measures");
+    let radius = A_CONES_SLOPE * A_CONES_HEIGHT;
+    let space = core::f64::consts::PI * radius * radius * A_CONES_HEIGHT / 3.0;
+    assert!(
+        (measured.volume() - space).abs() <= measured.volume_error(),
+        "a cone of radius {radius} and height {A_CONES_HEIGHT} encloses {space} and this one \
+         says {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+/// The same `VERTEX_LOOP` with its corner off the apex is refused by name,
+/// whether the corner is on the cone's axis or off it.
+///
+/// Reading the loop as no bound drops its corner, so a corner that is not where
+/// the cone pinches would be a corner of the file's face that no check after
+/// the reader ever sees. A little along the axis is the shape 87 of the NIST
+/// corners have, there by a modelling tolerance (§376).
+#[test]
+fn a_vertex_loop_off_a_cones_apex_is_refused_by_name() {
+    for off_the_apex in [[0.0, 0.0, 1e-6], [1e-6, 0.0, 0.0]] {
+        let Refusal::ALoopThisReaderDoesNotWalk { face, id, keyword } = refusal(
+            &a_pointed_cone_with_its_apex_written_as_a_loop(off_the_apex),
+        ) else {
+            panic!("a vertex loop {off_the_apex:?} off the apex is refused by its own name");
+        };
+        assert_eq!(face, EntityId(135));
+        assert_eq!(id, EntityId(132));
+        assert_eq!(keyword, "VERTEX_LOOP");
+    }
+}
+
+const A_CONES_SLOPE: f64 = 0.5;
+const A_CONES_HEIGHT: f64 = 8.0;
+
+/// A cone of slope one half standing on its apex at the origin, eight tall and
+/// capped flat at the top, whose cone face carries `apex` as a second bound:
+/// a `VERTEX_LOOP` of one corner, the way `nist_ctc_05` `#1340` writes one.
+fn a_pointed_cone_with_its_apex_written_as_a_loop(apex: [f64; 3]) -> String {
+    let radius = A_CONES_SLOPE * A_CONES_HEIGHT;
+    let [x, y, z] = apex.map(real);
+    format!(
+        "{header}\
+         #100=CARTESIAN_POINT('',({radius},0.,{height}));\n\
+         #101=VERTEX_POINT('',#100);\n\
+         #102=CARTESIAN_POINT('',(0.,0.,{height}));\n\
+         #103=DIRECTION('',(0.,0.,1.));\n\
+         #104=DIRECTION('',(1.,0.,0.));\n\
+         #105=AXIS2_PLACEMENT_3D('',#102,#103,#104);\n\
+         #106=CIRCLE('',#105,{radius});\n\
+         #107=EDGE_CURVE('',#101,#101,#106,.T.);\n\
+         #110=ORIENTED_EDGE('',*,*,#107,.T.);\n\
+         #111=EDGE_LOOP('',(#110));\n\
+         #112=FACE_OUTER_BOUND('',#111,.T.);\n\
+         #113=PLANE('',#105);\n\
+         #114=ADVANCED_FACE('',(#112),#113,.T.);\n\
+         #120=ORIENTED_EDGE('',*,*,#107,.F.);\n\
+         #121=EDGE_LOOP('',(#120));\n\
+         #122=FACE_OUTER_BOUND('',#121,.T.);\n\
+         #130=CARTESIAN_POINT('',({x},{y},{z}));\n\
+         #131=VERTEX_POINT('',#130);\n\
+         #132=VERTEX_LOOP('',#131);\n\
+         #133=FACE_BOUND('',#132,.T.);\n\
+         #134=CONICAL_SURFACE('',#105,{radius},{half_angle});\n\
+         #135=ADVANCED_FACE('',(#122,#133),#134,.T.);\n\
+         #140=CLOSED_SHELL('',(#114,#135));\n\
+         #141=MANIFOLD_SOLID_BREP('',#140);\n\
+         ENDSEC;\n\
+         END-ISO-10303-21;\n",
+        header = a_header(".MILLI."),
+        radius = real(radius),
+        height = real(A_CONES_HEIGHT),
+        half_angle = real(A_CONES_SLOPE.atan()),
+    )
 }
 
 #[test]
