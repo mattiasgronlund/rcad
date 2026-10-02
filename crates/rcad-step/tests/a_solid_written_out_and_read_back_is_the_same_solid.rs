@@ -31,10 +31,10 @@
 //! answer. The test asserts the two scales came out equal rather than assuming
 //! it.
 
-use rcad_geom::{Deflection, Isometry, Plane, Point, Scale, Surface, Unit, Vector};
+use rcad_geom::{Deflection, EdgeRun, Isometry, Plane, Point, Scale, Surface, Unit, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{CannotWrite, Import, StepFile};
-use rcad_topo::{Measurement, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{EdgeKey, Measurement, Model, ProfileBuilder, Rule, SolidKey};
 
 /// How fine the mesh the measurement sums over is.
 ///
@@ -430,6 +430,497 @@ fn the_axis_leans_off_a_cap_by(model: &Model, bar: SolidKey, lean: f64) {
         leaning_caps > 0,
         "no cap's normal leans off the axis {axis:?}, so this would not reach the comparison"
     );
+}
+
+/// The short side of a bar sliced along its length is written with an arc
+/// where each cap stops short of right round the pipe, and comes back the same.
+///
+/// The pipe has radius five and the slice is the plane `y = −3`, so the two
+/// corners of each cap are at `(±4, −3)` and on the pipe exactly. This side
+/// keeps the short arc of each cap's circle, under the slice, and the long side
+/// below keeps the long one: the two arcs with the same two ends, so the arc
+/// written has to be the one the model holds and not its sibling. Until Q766
+/// the writer refused both: it named a plane and a pipe only for an edge that
+/// goes right round.
+///
+/// **Both orders of the two faces**, because the writer is handed them in the
+/// order the solid lists its faces and matches on that order. The bar is built
+/// face by face with its bottom cap listed before its pipe and its top cap
+/// after, so it hands the writer one arc flat face first and one pipe first,
+/// and the test counts that.
+#[test]
+fn the_short_side_of_a_bar_sliced_along_its_length_is_written_with_arcs_and_comes_back_the_same() {
+    let scale = Scale::new(Unit::Millimetre, 4.0).expect("a working size");
+    let build = |model: &mut Model| a_bar_sliced_along_its_length(model, Side::Short);
+    let mut model = Model::new(scale);
+    let built = build(&mut model);
+    assert_eq!(
+        arcs_between_a_flat_face_and_a_pipe(&model, built),
+        [1, 1],
+        "one arc flat face first and one pipe first"
+    );
+
+    let mut covered = Covered::new();
+    covered.the_same_solid_comes_back(
+        "the short side of a bar sliced along its length",
+        scale,
+        &build,
+        // Across the top cap's arc, where the pipe is furthest from the slice.
+        &|model| a_block(model, [2.0, 2.0, 2.0], Vector::new(-1.0, -6.0, 3.0)),
+    );
+    covered.report("the short side of a bar sliced along its length");
+}
+
+/// The long side of the same bar is written with its two long arcs and comes
+/// back the same solid, corner for corner and bit for bit — **and the fuse
+/// then refuses the copy read back where it cuts the original**, which is the
+/// reader's gap and not this writer's.
+///
+/// The model names each long arc by a half-space whose plane is the slice, so
+/// both corners are on it. The reader names an arc by a half-space through the
+/// corners that it lowers by a few roundings so that both are sure to be in
+/// front (`Walk::the_arc_between`). For a short arc that is a picker the fuse
+/// reads, because the circle's centre is behind it. For a long arc the centre
+/// is in front too, and `a_picker_that_tells_the_two_arcs_apart` in
+/// `rcad-topo` reads a picker only when its plane holds both ends or the centre
+/// is not in front, so the cut stops at
+/// [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`]. The test
+/// checks both pickers on both sides, so it is not the writer's arc that
+/// fails here: the arc the copy holds is the one that went out, measured the
+/// same.
+#[test]
+fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_its_long_arcs_stop_a_fuse()
+ {
+    use rcad_geom::Picker;
+    use rcad_predicates::{Decision, Point as PredicatePoint};
+
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let built = a_bar_sliced_along_its_length(&mut model, Side::Long);
+    assert_eq!(
+        arcs_between_a_flat_face_and_a_pipe(&model, built),
+        [1, 1],
+        "one arc flat face first and one pipe first"
+    );
+
+    let text = rcad_step::write(&model, "the long side of a bar sliced along its length")
+        .unwrap_or_else(|why| panic!("the long side is not written: {why}"));
+    let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("the long side is refused on the way back in: {why}"));
+    let [(_, came)] = import.solids() else {
+        panic!("one solid came back as {}", import.solids().len());
+    };
+    let came = *came;
+    let there = import.model();
+    there
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("the long side comes back unsound: {why}"));
+    assert_eq!(there.scale(), model.scale(), "the scale moved");
+
+    let [went_solid, came_solid] = [(&model, built), (there, came)]
+        .map(|(from, key)| from.solid(key).expect("this model made the key"));
+    assert_eq!(
+        where_its_corners_are(went_solid),
+        where_its_corners_are(came_solid),
+        "corners"
+    );
+    let deflection = the_same_mesh_on_both_sides();
+    let [here, back] = [went_solid, came_solid].map(|solid| {
+        solid
+            .measure(deflection, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the long side does not measure: {why}"))
+    });
+    assert_eq!(here.volume(), back.volume(), "volume");
+    assert_eq!(here.surface_area(), back.surface_area(), "area");
+    assert_eq!(here.centroid(), back.centroid(), "centroid");
+
+    let where_the_arcs_ends_and_centre_are = |model: &Model, solid: SolidKey| {
+        let mut sides = Vec::new();
+        for face in model.solid(solid).expect("this model made the key").faces() {
+            for wire in face.wires() {
+                for coedge in wire.coedges() {
+                    let edge = coedge.edge();
+                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = edge.run() else {
+                        continue;
+                    };
+                    let [Picker::InFrontOf(half)] = picked_by.as_slice() else {
+                        panic!("a long arc picked by {picked_by:?}");
+                    };
+                    let [start, end] = [edge.start().point(), edge.end().point()];
+                    let centre = Point::new(0.0, 0.0, start.z());
+                    sides.push(
+                        [start, end, centre]
+                            .map(|at| half.side_of_point(PredicatePoint::from(at.coordinates()))),
+                    );
+                }
+            }
+        }
+        sides
+    };
+    let built_sides = where_the_arcs_ends_and_centre_are(&model, built);
+    let read_sides = where_the_arcs_ends_and_centre_are(there, came);
+    assert_eq!(built_sides.len(), 4, "two arcs, each walked by two faces");
+    assert!(
+        built_sides
+            .iter()
+            .all(|[start, end, _]| *start == Decision::Zero && *end == Decision::Zero),
+        "the model's own pickers hold both ends of each arc: {built_sides:?}"
+    );
+    assert_eq!(read_sides.len(), 4, "two arcs, each walked by two faces");
+    assert!(
+        read_sides
+            .iter()
+            .all(|sides| sides.iter().all(|side| *side == Decision::Pos)),
+        "the reader's pickers have both ends and the centre in front: {read_sides:?}"
+    );
+
+    let cutter = |model: &mut Model| a_block(model, [2.0, 3.0, 2.0], Vector::new(-1.0, 3.0, 3.0));
+    let cut_here = cut_by_a_third_solid(&model, built, &cutter, deflection)
+        .unwrap_or_else(|why| panic!("the long side is not cut: {why}"));
+    assert!(!cut_here.is_empty(), "the cut left nothing");
+    let cut_back = cut_by_a_third_solid(there, came, &cutter, deflection);
+    assert!(
+        matches!(
+            cut_back,
+            Err(rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+        ),
+        "the copy read back was expected to stop the cut where the reader's picker is one \
+         the fuse does not read, and got {:?}; if it now cuts, compare the pieces here",
+        cut_back.map(|pieces| pieces.len())
+    );
+}
+
+/// Which side of the slice [`a_bar_sliced_along_its_length`] keeps.
+#[derive(Clone, Copy)]
+enum Side {
+    /// Over `y = −3`, with the long arc of each cap's circle.
+    Long,
+    /// Under it, with the short arc.
+    Short,
+}
+
+/// A bar of radius five about `z`, four tall, sliced along its length by the
+/// plane `y = −3` and kept on `side`, built face by face: bottom cap, pipe, top
+/// cap, slice.
+fn a_bar_sliced_along_its_length(model: &mut Model, side: Side) -> SolidKey {
+    use rcad_geom::{Axis, Cylinder, HalfSpace, Orientation, Picker};
+    use rcad_topo::{DraftStep, SolidBuilder};
+
+    let height = 4.0;
+    let over = match side {
+        Side::Long => 1.0,
+        Side::Short => -1.0,
+    };
+    let a_plane = |at: Point, facing: Vector| {
+        Plane::from_point_and_normal(at, facing).expect("an axis direction has length")
+    };
+    let bottom = a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0));
+    let top = a_plane(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0));
+    let slice = a_plane(Point::new(0.0, -3.0, 0.0), Vector::new(0.0, -over, 0.0));
+    let pipe = Cylinder::new(Axis::z(), 5.0).expect("a positive radius");
+    let the_arc_on = |cap: Plane| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cap),
+        picked_by: [Picker::from(
+            HalfSpace::through_a_point_facing(
+                Point::new(0.0, -3.0, 0.0),
+                Vector::new(0.0, over, 0.0),
+            )
+            .expect("an axis direction has length"),
+        )]
+        .into(),
+    };
+
+    let mut builder = SolidBuilder::new();
+    let corners = [(4.0, 0.0), (-4.0, 0.0), (4.0, height), (-4.0, height)].map(|(x, z)| {
+        builder
+            .add_vertex(Point::new(x, -3.0, z))
+            .expect("a finite corner")
+    });
+    let edges = [
+        (0, 1, the_arc_on(bottom)),
+        (1, 0, EdgeRun::Straight),
+        (2, 3, the_arc_on(top)),
+        (3, 2, EdgeRun::Straight),
+        (0, 2, EdgeRun::Straight),
+        (1, 3, EdgeRun::Straight),
+    ]
+    .map(|(from, to, run)| {
+        builder
+            .add_edge(corners[from], corners[to], run)
+            .expect("an edge between two corners")
+    });
+
+    let (forward, back) = (Orientation::Forward, Orientation::Reversed);
+    let wires: [&[(usize, Orientation)]; 4] = match side {
+        Side::Long => [
+            &[(1, back), (0, back)],
+            &[(0, forward), (5, forward), (2, back), (4, back)],
+            &[(2, forward), (3, forward)],
+            &[(1, forward), (4, forward), (3, back), (5, back)],
+        ],
+        Side::Short => [
+            &[(0, forward), (1, forward)],
+            &[(0, back), (4, forward), (2, forward), (5, back)],
+            &[(2, back), (3, back)],
+            &[(1, back), (5, forward), (3, forward), (4, back)],
+        ],
+    };
+    let surfaces = [
+        Surface::Plane(bottom),
+        Surface::Cylinder(pipe),
+        Surface::Plane(top),
+        Surface::Plane(slice),
+    ];
+    let mut skin = Vec::with_capacity(surfaces.len());
+    for (surface, steps) in surfaces.into_iter().zip(wires) {
+        let walked: Vec<DraftStep> = steps
+            .iter()
+            .map(|&(which, way)| {
+                DraftStep::Along(builder.add_coedge(edges[which], way).expect("a coedge"))
+            })
+            .collect();
+        let wire = builder.add_wire(&walked).expect("a wire that closes");
+        skin.push((
+            builder.add_face(surface, &[wire]).expect("a face"),
+            Orientation::Forward,
+        ));
+    }
+    builder.add_shell(&skin).expect("a shell");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the bar sliced along its length is not sound: {why}"))
+}
+
+/// A slab with a round scoop out of its top, whose curved face is a pipe used
+/// the other way round, is written with each loop closing and comes back the
+/// same.
+///
+/// The slab is `|x| ≤ 4`, `−6 ≤ y ≤ −3`, four tall, less the pipe of radius
+/// five about `z`, which takes a scoop down to `y = −5`. Its curved face has the
+/// material outside the pipe, so the shell uses it reversed, and its one wire
+/// is four edges: the two short arcs and two straight sides. A wire of a face
+/// used reversed comes out of `WireView::steps` walked the other way, and the
+/// writer used to write that walk with each coedge's own way along its edge,
+/// so the loop it wrote did not close and the reader refused it by name
+/// (`ADraftWireDoesNotClose`) — what stopped `SW_NKK_BB15AH` and the two
+/// `Relay_StandexMeder_DIP` relays once Q766 let them past the writer.
+///
+/// Not [`Covered::the_same_solid_comes_back`], because the fuse cannot cut the
+/// slab as built — a block through its flat back leaves a decision the fuse
+/// cannot settle, before any round trip — so the cut is required to come out
+/// the same on both sides, refusal and all.
+#[test]
+fn a_slab_with_a_round_scoop_out_of_it_is_written_with_loops_that_close_and_comes_back_the_same() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 6.0).expect("a working size"));
+    let built = a_slab_with_a_round_scoop_out_of_it(&mut model);
+    assert!(
+        model
+            .solid(built)
+            .expect("this model made the key")
+            .faces()
+            .any(|face| face.orientation().is_reversed() && face.surface().as_plane().is_none()),
+        "the scoop is a curved face used reversed, or this test does not reach the writer's walk"
+    );
+    assert_eq!(
+        arcs_between_a_flat_face_and_a_pipe(&model, built),
+        [1, 1],
+        "one arc flat face first and one pipe first"
+    );
+
+    let text = rcad_step::write(&model, "a slab with a round scoop out of it")
+        .unwrap_or_else(|why| panic!("the slab is not written: {why}"));
+    let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("the slab is refused on the way back in: {why}"));
+    let [(_, came)] = import.solids() else {
+        panic!("one solid came back as {}", import.solids().len());
+    };
+    let came = *came;
+    let there = import.model();
+    there
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("the slab comes back unsound: {why}"));
+    assert_eq!(there.scale(), model.scale(), "the scale moved");
+
+    let [went_solid, came_solid] = [(&model, built), (there, came)]
+        .map(|(from, key)| from.solid(key).expect("this model made the key"));
+    assert_eq!(
+        where_its_corners_are(went_solid),
+        where_its_corners_are(came_solid),
+        "corners"
+    );
+    let deflection = the_same_mesh_on_both_sides();
+    let [here, back] = [went_solid, came_solid].map(|solid| {
+        solid
+            .measure(deflection, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the slab does not measure: {why}"))
+    });
+    assert_eq!(here.volume(), back.volume(), "volume");
+    assert_eq!(here.surface_area(), back.surface_area(), "area");
+    assert_eq!(here.centroid(), back.centroid(), "centroid");
+
+    let cutter = |model: &mut Model| a_block(model, [2.0, 1.5, 2.0], Vector::new(-1.0, -7.0, 1.0));
+    let [cut_here, cut_back] = [(&model, built), (there, came)].map(|(from, key)| {
+        cut_by_a_third_solid(from, key, &cutter, deflection)
+            .map(|pieces| {
+                pieces
+                    .iter()
+                    .map(|piece| (piece.volume(), piece.surface_area(), piece.centroid()))
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|why| why.to_string())
+    });
+    assert_eq!(cut_here, cut_back, "the cut");
+}
+
+/// The slab of the test above, built face by face: bottom cap, scoop, top cap,
+/// then the three flat sides.
+fn a_slab_with_a_round_scoop_out_of_it(model: &mut Model) -> SolidKey {
+    use rcad_geom::{Axis, Cylinder, HalfSpace, Orientation, Picker};
+    use rcad_topo::{DraftStep, SolidBuilder};
+
+    let height = 4.0;
+    let a_plane = |at: Point, facing: Vector| {
+        Plane::from_point_and_normal(at, facing).expect("an axis direction has length")
+    };
+    let bottom = a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0));
+    let top = a_plane(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0));
+    let the_short_arc_on = |cap: Plane| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cap),
+        picked_by: [Picker::from(
+            HalfSpace::through_a_point_facing(
+                Point::new(0.0, -3.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+            )
+            .expect("an axis direction has length"),
+        )]
+        .into(),
+    };
+
+    let mut builder = SolidBuilder::new();
+    let corners = [
+        (4.0, -3.0, 0.0),
+        (-4.0, -3.0, 0.0),
+        (4.0, -3.0, height),
+        (-4.0, -3.0, height),
+        (4.0, -6.0, 0.0),
+        (-4.0, -6.0, 0.0),
+        (4.0, -6.0, height),
+        (-4.0, -6.0, height),
+    ]
+    .map(|(x, y, z)| {
+        builder
+            .add_vertex(Point::new(x, y, z))
+            .expect("a finite corner")
+    });
+    let edges = [
+        (0, 1, the_short_arc_on(bottom)),
+        (2, 3, the_short_arc_on(top)),
+        (0, 2, EdgeRun::Straight),
+        (1, 3, EdgeRun::Straight),
+        (4, 5, EdgeRun::Straight),
+        (6, 7, EdgeRun::Straight),
+        (0, 4, EdgeRun::Straight),
+        (1, 5, EdgeRun::Straight),
+        (2, 6, EdgeRun::Straight),
+        (3, 7, EdgeRun::Straight),
+        (4, 6, EdgeRun::Straight),
+        (5, 7, EdgeRun::Straight),
+    ]
+    .map(|(from, to, run)| {
+        builder
+            .add_edge(corners[from], corners[to], run)
+            .expect("an edge between two corners")
+    });
+
+    let (forward, back) = (Orientation::Forward, Orientation::Reversed);
+    let faces = [
+        (Surface::Plane(bottom), forward),
+        (
+            Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a positive radius")),
+            back,
+        ),
+        (Surface::Plane(top), forward),
+        (
+            Surface::Plane(a_plane(
+                Point::new(4.0, 0.0, 0.0),
+                Vector::new(1.0, 0.0, 0.0),
+            )),
+            forward,
+        ),
+        (
+            Surface::Plane(a_plane(
+                Point::new(-4.0, 0.0, 0.0),
+                Vector::new(-1.0, 0.0, 0.0),
+            )),
+            forward,
+        ),
+        (
+            Surface::Plane(a_plane(
+                Point::new(0.0, -6.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+            )),
+            forward,
+        ),
+    ];
+    let wires: [&[(usize, Orientation)]; 6] = [
+        &[(4, forward), (7, back), (0, back), (6, forward)],
+        &[(0, forward), (3, forward), (1, back), (2, back)],
+        &[(8, back), (1, forward), (9, forward), (5, back)],
+        &[(6, back), (2, forward), (8, forward), (10, back)],
+        &[(7, forward), (11, forward), (9, back), (3, back)],
+        &[(4, back), (10, forward), (5, forward), (11, back)],
+    ];
+    let mut skin = Vec::with_capacity(faces.len());
+    for ((surface, used), steps) in faces.into_iter().zip(wires) {
+        let walked: Vec<DraftStep> = steps
+            .iter()
+            .map(|&(which, way)| {
+                DraftStep::Along(builder.add_coedge(edges[which], way).expect("a coedge"))
+            })
+            .collect();
+        let wire = builder.add_wire(&walked).expect("a wire that closes");
+        skin.push((builder.add_face(surface, &[wire]).expect("a face"), used));
+    }
+    builder.add_shell(&skin).expect("a shell");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the slab with a round scoop out of it is not sound: {why}"))
+}
+
+/// How many open edges of `solid` that bend run between a flat face and a
+/// pipe: with the flat face walked first, and with the pipe walked first. That
+/// is the order the writer is handed the two faces in, since it walks the
+/// faces in the order the solid lists them.
+fn arcs_between_a_flat_face_and_a_pipe(model: &Model, solid: SolidKey) -> [usize; 2] {
+    let mut either_side: Vec<(EdgeKey, Vec<Surface>)> = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let edge = coedge.edge();
+                if !matches!(edge.run(), EdgeRun::PartOfWhereItCrosses { .. }) {
+                    continue;
+                }
+                match either_side.iter_mut().find(|(key, _)| *key == edge.key()) {
+                    Some((_, faces)) => faces.push(face.surface()),
+                    None => either_side.push((edge.key(), vec![face.surface()])),
+                }
+            }
+        }
+    }
+    let flat_first = either_side
+        .iter()
+        .filter(|(_, faces)| matches!(faces.as_slice(), [Surface::Plane(_), Surface::Cylinder(_)]))
+        .count();
+    let pipe_first = either_side
+        .iter()
+        .filter(|(_, faces)| matches!(faces.as_slice(), [Surface::Cylinder(_), Surface::Plane(_)]))
+        .count();
+    [flat_first, pipe_first]
 }
 
 /// A model with no solid in it is refused rather than written as a file with no

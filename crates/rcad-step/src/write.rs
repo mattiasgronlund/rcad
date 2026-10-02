@@ -35,6 +35,7 @@ use std::collections::HashMap;
 
 use rcad_geom::{Cylinder, EdgeRun, Picker, Plane, Point, Scale, Sphere, Surface, Unit, Vector};
 use rcad_predicates::expansion::two_product;
+use rcad_predicates::{Decision, Point as PredicatePoint};
 use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
 
 use crate::geometry::plane_through;
@@ -138,13 +139,15 @@ pub enum CannotWrite {
     /// seam.
     ///
     /// This writer derives the curve from the two surfaces either
-    /// side, which is what §24.3 says an edge *is*. It reads two kinds of edge
-    /// off the run instead. An open edge whose run is straight is a `LINE`,
-    /// because the reader reads every `LINE` back as straight. And a ball's
+    /// side, which is what §24.3 says an edge *is*. It reads three things off
+    /// the run instead. An open edge whose run is straight is a `LINE`,
+    /// because the reader reads every `LINE` back as straight. A ball's
     /// seam: it runs between the two poles, which are in a line with the
     /// centre, so no plane through them is picked out by the ends, and the
     /// located run [`EdgeView::run`](rcad_topo::EdgeView::run) hands out — it is
-    /// `pub` now — names the plane it was cut from.
+    /// `pub` now — names the plane it was cut from. And which of the two arcs
+    /// an open edge between a flat face and a pipe is, which the two ends do
+    /// not say and the run's pickers do (Q766).
     #[error(
         "an edge between a {first} and a {second} runs along a curve those two do not name \
          (closed: {closed})"
@@ -317,6 +320,17 @@ impl Writing {
     /// has just walked**, the way a real file writes a ball, and the reader puts
     /// it back at exactly that turn. See [`CannotWrite::AWireThatStandsStillAtAPole`]
     /// for the poles that are refused instead.
+    ///
+    /// **A loop is written as the reader will store it.** The reader keeps a
+    /// file's loop as the wire and, for a curved face whose `same_sense` is
+    /// false, uses the face reversed (`Walk::describe_the_face`). A wire of a
+    /// face used reversed comes out of `WireView::steps` walked the other way
+    /// round with each edge turned, so for such a face the walk is turned back
+    /// to the order the wire is stored in, each step with it. Every other face
+    /// is written as walked, each edge the way the walk takes it — a plane used
+    /// reversed is written already turned round, which the reader uses forwards.
+    /// Writing the walk in one sense and each edge's way along it in the other
+    /// wrote a loop that does not close, and the reader refused it by name.
     fn solid_from_shell(&mut self, model: &Model, shell: ShellView<'_>) -> Result<(), CannotWrite> {
         let mut either_side: HashMap<EdgeKey, Vec<Surface>> = HashMap::new();
         for face in shell.faces() {
@@ -359,19 +373,23 @@ impl Writing {
 
             let mut bounds = Vec::with_capacity(face.wire_count());
             for (which, wire) in face.wires().enumerate() {
-                let mut steps = Vec::with_capacity(wire.step_count());
-                for step in wire.steps() {
+                let mut walk: Vec<WireStepView<'_>> = wire.steps().collect();
+                if turned {
+                    walk.reverse();
+                }
+                let mut steps = Vec::with_capacity(walk.len());
+                for step in walk {
                     // Every pole left here was found to be one the file can
                     // leave unwritten by the pass above.
                     let WireStepView::Along(coedge) = step else {
                         continue;
                     };
                     let key = coedge.edge().key();
-                    let forwards = !coedge.orientation_on_its_edge().is_reversed();
+                    let along_its_edge = !coedge.edge().orientation().is_reversed();
                     let edge = match edges.get(&key) {
                         Some(&already) => already,
                         None => {
-                            let (start, end) = if forwards {
+                            let (start, end) = if along_its_edge {
                                 (coedge.start(), coedge.end())
                             } else {
                                 (coedge.end(), coedge.start())
@@ -388,9 +406,10 @@ impl Writing {
                             written
                         }
                     };
-                    steps.push(
-                        self.entity(&format!("ORIENTED_EDGE('',*,*,#{edge},{})", flag(forwards))),
-                    );
+                    steps.push(self.entity(&format!(
+                        "ORIENTED_EDGE('',*,*,#{edge},{})",
+                        flag(along_its_edge != turned)
+                    )));
                 }
                 let ring = self.entity(&format!("EDGE_LOOP('',({}))", references(&steps)));
                 let keyword = if which == 0 {
@@ -458,7 +477,10 @@ impl Writing {
     /// - **a plane across a pipe** crosses it in one closed curve, centred
     ///   where the axis meets the plane: a circle where the plane is square to
     ///   the axis or so nearly square that the two sizes round to one, and an
-    ///   ellipse otherwise — see [`Writing::where_a_plane_crosses_a_pipe`];
+    ///   ellipse otherwise — see [`where_a_plane_crosses_a_pipe`]. An edge
+    ///   that stops short of right round is one of the two arcs its ends cut
+    ///   that curve into, and which one is read off the run — see
+    ///   [`Crossing::the_way_round_the_arc`];
     /// - **a seam of one pipe**, where the pipe is on both sides, joining two
     ///   corners that stand at the same place around the axis. A plane section
     ///   of a cylinder that is not parallel to the axis meets each straight
@@ -494,11 +516,16 @@ impl Writing {
         match (first, second) {
             (Surface::Plane(_), Surface::Plane(_)) if !closed => Ok(self.line(start, end - start)),
             (Surface::Plane(flat), Surface::Cylinder(pipe))
-            | (Surface::Cylinder(pipe), Surface::Plane(flat))
-                if closed =>
-            {
-                self.where_a_plane_crosses_a_pipe(flat, pipe)
-                    .ok_or_else(refuse)
+            | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
+                let crossing = where_a_plane_crosses_a_pipe(flat, pipe).ok_or_else(refuse)?;
+                let turning = if closed {
+                    crossing.turning
+                } else {
+                    crossing
+                        .the_way_round_the_arc(run, start, end)
+                        .ok_or_else(refuse)?
+                };
+                Ok(self.round(&crossing, turning))
             }
             (Surface::Cylinder(pipe), Surface::Cylinder(other)) if !closed && pipe == other => {
                 let along = pipe.axis().direction();
@@ -515,8 +542,6 @@ impl Writing {
                 .a_seam_of_one_ball(ball, run, start, end)
                 .ok_or_else(refuse),
             (Surface::Plane(_), Surface::Plane(_))
-            | (Surface::Plane(_), Surface::Cylinder(_))
-            | (Surface::Cylinder(_), Surface::Plane(_))
             | (Surface::Cylinder(_), Surface::Cylinder(_))
             | (Surface::Plane(_), Surface::Sphere(_))
             | (Surface::Sphere(_), Surface::Plane(_))
@@ -546,67 +571,16 @@ impl Writing {
         }
     }
 
-    /// The closed curve a plane crosses a pipe in, or `None` where the plane
-    /// runs along the pipe and crosses it in no closed curve at all.
-    ///
-    /// With `n` the plane's normal and `a` the pipe's axis, the curve is centred
-    /// where the axis meets the plane. It is a circle of the pipe's radius `r`
-    /// where `n` and `a` are one line, and an ellipse in the plane otherwise:
-    /// `r` along `n × a`, which is square to the axis, and `r / cos θ` across
-    /// that, with `θ` the angle between `n` and `a`.
-    ///
-    /// **That second size is `r·√(1 + tan²θ)`, with `tan θ = |n × a| / |n·a|`**,
-    /// which is the same number whatever lengths `n` and `a` have. `cos θ`
-    /// worked out from `n·a` alone would not be: a normal a turn left an ulp off
-    /// length one moves the dot by an ulp, and that ulp would be the only thing
-    /// telling the two sizes apart.
-    ///
-    /// **A plane a few ulps off square to its pipe crosses it in a circle in
-    /// `f64`**, and that is where real files have it: KiCad's round bars carry
-    /// caps whose normal is `1e-16` off the axis (Q763), and a bar can be built
-    /// whose axis is off its cap's normal by a subnormal (Q409). Under a tilt of
-    /// about `1e-8` the long size rounds to `r`, so the two sizes are one
-    /// number and the curve is the circle of radius `r` **in the plane, about
-    /// its normal** — not about the pipe's axis, whose circle stands up off the
-    /// plane by up to `r·sin θ`. The normal is turned to face the way the axis
-    /// does, so the circle runs round the same way the axis's would, which is
-    /// the way `rcad-topo` stores a closed edge.
-    ///
-    /// Where the two sizes differ the curve is an `ELLIPSE`, its first size
-    /// along `n × a`. The reader names a closed edge between a flat face and a
-    /// curved one by where the faces cross, so it reads the curve's centre and
-    /// axis back but never its sizes.
-    fn where_a_plane_crosses_a_pipe(&mut self, flat: &Plane, pipe: &Cylinder) -> Option<u64> {
-        let along = pipe.axis().direction();
-        let facing = flat.normal().dot(along);
-        if facing == 0.0 {
-            return None;
+    /// The `CIRCLE` or `ELLIPSE` a plane crosses a pipe in, turning about
+    /// `turning`: the crossing's own way round for a closed edge, and either
+    /// way for an arc, which the way round is what picks.
+    fn round(&mut self, crossing: &Crossing, turning: Vector) -> u64 {
+        match crossing.shape {
+            Shape::Circle { radius } => self.circle(crossing.centre, turning, radius),
+            Shape::Ellipse { first_way, sizes } => {
+                self.ellipse(crossing.centre, turning, first_way, sizes)
+            }
         }
-        let from = pipe.axis().origin();
-        let reached = (flat.offset() - flat.normal().dot(from - Point::origin())) / facing;
-        let centre = from + along * reached;
-        let across = flat.normal().cross(along);
-        if across == Vector::zero() {
-            return Some(self.circle(centre, along, pipe.radius()));
-        }
-        let turned = if facing > 0.0 {
-            flat.normal()
-        } else {
-            -flat.normal()
-        };
-        let leaning = across.length() / facing.abs();
-        let long = if leaning <= 1.0 {
-            pipe.radius() * leaning.mul_add(leaning, 1.0).sqrt()
-        } else {
-            pipe.radius() * leaning * (1.0 / leaning).mul_add(1.0 / leaning, 1.0).sqrt()
-        };
-        if long == pipe.radius() {
-            return Some(self.circle(centre, turned, pipe.radius()));
-        }
-        if !long.is_finite() {
-            return None;
-        }
-        Some(self.ellipse(centre, turned, across, [pipe.radius(), long]))
     }
 
     /// The half of a great circle a ball's seam runs along from `start` to
@@ -821,6 +795,197 @@ fn the_wire_turns_back_at(walk: &[WireStepView<'_>], position: usize) -> bool {
     there.edge().key() == back.edge().key()
         && there.start().key() != there.end().key()
         && there.end().key() == back.start().key()
+}
+
+/// The closed curve a plane crosses a pipe in.
+struct Crossing {
+    /// Where the pipe's axis meets the plane.
+    centre: Point,
+    /// The way a closed edge runs round it, which is the way `rcad-topo`
+    /// stores one: the pipe's axis where the plane is exactly square to it,
+    /// and otherwise the plane's normal turned to face the way the axis does.
+    turning: Vector,
+    shape: Shape,
+}
+
+enum Shape {
+    Circle {
+        radius: f64,
+    },
+    /// The first size runs along `first_way`, which lies in the plane and is
+    /// square to the pipe's axis.
+    Ellipse {
+        first_way: Vector,
+        sizes: [f64; 2],
+    },
+}
+
+/// The closed curve a plane crosses a pipe in, or `None` where the plane
+/// runs along the pipe and crosses it in no closed curve at all.
+///
+/// With `n` the plane's normal and `a` the pipe's axis, the curve is centred
+/// where the axis meets the plane. It is a circle of the pipe's radius `r`
+/// where `n` and `a` are one line, and an ellipse in the plane otherwise:
+/// `r` along `n × a`, which is square to the axis, and `r / cos θ` across
+/// that, with `θ` the angle between `n` and `a`.
+///
+/// **That second size is `r·√(1 + tan²θ)`, with `tan θ = |n × a| / |n·a|`**,
+/// which is the same number whatever lengths `n` and `a` have. `cos θ`
+/// worked out from `n·a` alone would not be: a normal a turn left an ulp off
+/// length one moves the dot by an ulp, and that ulp would be the only thing
+/// telling the two sizes apart.
+///
+/// **A plane a few ulps off square to its pipe crosses it in a circle in
+/// `f64`**, and that is where real files have it: KiCad's round bars carry
+/// caps whose normal is `1e-16` off the axis (Q763), and a bar can be built
+/// whose axis is off its cap's normal by a subnormal (Q409). Under a tilt of
+/// about `1e-8` the long size rounds to `r`, so the two sizes are one
+/// number and the curve is the circle of radius `r` **in the plane, about
+/// its normal** — not about the pipe's axis, whose circle stands up off the
+/// plane by up to `r·sin θ`.
+///
+/// Where the two sizes differ the curve is an `ELLIPSE`, its first size
+/// along `n × a`. The reader names a closed edge between a flat face and a
+/// curved one by where the faces cross, and an arc by those faces and the
+/// curve's own plane, so it reads the curve's centre and axis back but never
+/// its sizes.
+fn where_a_plane_crosses_a_pipe(flat: &Plane, pipe: &Cylinder) -> Option<Crossing> {
+    let along = pipe.axis().direction();
+    let facing = flat.normal().dot(along);
+    if facing == 0.0 {
+        return None;
+    }
+    let from = pipe.axis().origin();
+    let reached = (flat.offset() - flat.normal().dot(from - Point::origin())) / facing;
+    let centre = from + along * reached;
+    let radius = pipe.radius();
+    let across = flat.normal().cross(along);
+    if across == Vector::zero() {
+        return Some(Crossing {
+            centre,
+            turning: along,
+            shape: Shape::Circle { radius },
+        });
+    }
+    let turning = if facing > 0.0 {
+        flat.normal()
+    } else {
+        -flat.normal()
+    };
+    let leaning = across.length() / facing.abs();
+    let long = if leaning <= 1.0 {
+        radius * leaning.mul_add(leaning, 1.0).sqrt()
+    } else {
+        radius * leaning * (1.0 / leaning).mul_add(1.0 / leaning, 1.0).sqrt()
+    };
+    if long == radius {
+        return Some(Crossing {
+            centre,
+            turning,
+            shape: Shape::Circle { radius },
+        });
+    }
+    if !long.is_finite() {
+        return None;
+    }
+    Some(Crossing {
+        centre,
+        turning,
+        shape: Shape::Ellipse {
+            first_way: across,
+            sizes: [radius, long],
+        },
+    })
+}
+
+impl Crossing {
+    /// Which way round this curve to write an arc of it, so that the arc from
+    /// `start` to `end` is the one `run` picks; `None` where the run's
+    /// pickers do not tell the two arcs apart.
+    ///
+    /// **The reader's rule, run backwards.** A `CIRCLE` or an `ELLIPSE` runs
+    /// the way a right hand turns about its axis `w`, and the reader names the
+    /// arc from `A` to `B` by the half-space facing `(B − A) × w`, which every
+    /// point of that arc is strictly in front of (`Walk::the_arc_between`).
+    /// So `w` is this curve's own way round where the arc the run picks is in
+    /// front of `(B − A) × w`, and the other way where it is behind.
+    ///
+    /// **Which arc the run picks is asked of its own pickers**, at the one
+    /// point of each arc furthest from the chord: the curve's furthest point
+    /// either way along `(B − A) × w`. One of the two has to be held by every
+    /// picker and the other ruled out by one, or this refuses. That is how
+    /// `rcad-topo` reads a picked arc too (`EdgeView::length`), and it never
+    /// picks the wrong arc on rounding alone: a picker that tells the arcs
+    /// apart rules the other arc's furthest point out, so the wrong answer
+    /// takes both points on the wrong side at once — the picked arc's ruled
+    /// out by some picker *and* the other's held by every one — and a single
+    /// probe that rounding moves across a picker leaves both held or both
+    /// ruled out, which refuses.
+    fn the_way_round_the_arc(&self, run: &EdgeRun, start: Point, end: Point) -> Option<Vector> {
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run else {
+            return None;
+        };
+        let into_the_arc = (end - start).cross(self.turning);
+        let furthest = self.furthest_either_way_along(into_the_arc)?;
+        match furthest.map(|point| what_the_pickers_make_of(picked_by, point)) {
+            [Verdict::Holds, Verdict::RuledOut] => Some(self.turning),
+            [Verdict::RuledOut, Verdict::Holds] => Some(-self.turning),
+            _ => None,
+        }
+    }
+
+    /// The point of this curve furthest along `way`, and the one furthest
+    /// against it; `way` lies in the curve's plane.
+    ///
+    /// On an ellipse `c + p·cos t·e₁ + q·sin t·e₂` the distance along `way` is
+    /// `P·cos t + Q·sin t` with `P = p·(e₁·way)` and `Q = q·(e₂·way)`, which is
+    /// furthest where `(cos t, sin t)` is `(P, Q)` scaled to length one. A
+    /// circle is the ellipse whose two sizes are one, which puts that point a
+    /// radius along `way` itself.
+    fn furthest_either_way_along(&self, way: Vector) -> Option<[Point; 2]> {
+        let reach = match self.shape {
+            Shape::Circle { radius } => way.normalized().ok()? * radius,
+            Shape::Ellipse { first_way, sizes } => {
+                let first_way = first_way.normalized().ok()?;
+                let second_way = self.turning.normalized().ok()?.cross(first_way);
+                let [p, q] = [
+                    sizes[0] * first_way.dot(way),
+                    sizes[1] * second_way.dot(way),
+                ];
+                let length = p.hypot(q);
+                if !(length > 0.0 && length.is_finite()) {
+                    return None;
+                }
+                first_way * (sizes[0] * p / length) + second_way * (sizes[1] * q / length)
+            }
+        };
+        Some([self.centre + reach, self.centre - reach])
+    }
+}
+
+/// What the pickers of a run make of one point.
+enum Verdict {
+    /// Every picker holds it, on its boundary or inside.
+    Holds,
+    /// Some picker rules it out.
+    RuledOut,
+    /// No picker rules it out, and some picker cannot tell.
+    CannotTell,
+}
+
+fn what_the_pickers_make_of(pickers: &[Picker], point: Point) -> Verdict {
+    let at = PredicatePoint::from(point.coordinates());
+    let mut verdict = Verdict::Holds;
+    for picker in pickers {
+        match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => {}
+            Decision::Neg => return Verdict::RuledOut,
+            // `Decision` grows (docs/decisions.md §40), and a sign this has
+            // never seen tells it nothing about which arc this is.
+            Decision::Undecidable { .. } | _ => verdict = Verdict::CannotTell,
+        }
+    }
+    verdict
 }
 
 /// A point on `flat` from which this crate's reader works out `flat`'s own
