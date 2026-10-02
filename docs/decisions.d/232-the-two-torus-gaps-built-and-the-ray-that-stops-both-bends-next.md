@@ -166,7 +166,9 @@ Those fuses still refuse, somewhere else:
   so this is probably Q102's cause: a curved piece's points are boxes. That is
   not traced. The verifier reproduced 6 of 6 fuses refusing, but not the lane's
   count of refusal lines, because `select.rs` swallows the answer into
-  `Ok(None)` without logging it.
+  `Ok(None)` without logging it. *2026-10-02, Q754: no longer reached.
+  Selection places every piece in all six fuses; four answer, and the two
+  unions refuse later, `ResultIsNotManifold { count: 4 }` (§378).*
 - **A half bend with a quarter bend.** `classify_uncertain_point` answers
   `CannotFollowAFacesTrimming` on the half bend's torus face at every point
   the lane tried, the centre of its own cap included. A half bend's two end
