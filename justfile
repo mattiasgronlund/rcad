@@ -1613,7 +1613,13 @@ check-fuzz-builds:
 # One more: `fuses_that_touch.rs`'s
 # `a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule`
 # names every `Containment` it refuses and keeps the arm for ones not yet made.
-wildcard_arms := "98"
+#
+#     Q649's lane  98 -> 97
+#
+# One fewer. `degenerate_curved_fuses.rs`'s wall lying on a bar's skin matched
+# its `Undecidable` and sent every other `Error` to `panic!`; that fuse now
+# answers every rule, and the test that replaced it has no match on a refusal.
+wildcard_arms := "97"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:

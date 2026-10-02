@@ -34,12 +34,12 @@
 //! | cell | touching | clear by one | what the touch alone refuses |
 //! |---|---|---|---|
 //! | two blocks, one flush on the other | 66 of 66 | 84 of 84 | — |
-//! | a bar beside a block's wall | 0 of 78 | 78 of 78 | *which way a crossing runs* 78 |
-//! | a bar in an inside corner (a fillet) | 0 of 78 | 72 of 72 | *which way a crossing runs* 78 |
+//! | a bar beside a block's wall | 52 of 78 | 78 of 78 | `ResultIsNotManifold` 26, every union |
+//! | a bar in an inside corner (a fillet) | 56 of 84 | 72 of 72 | `ResultIsNotManifold` 28, every union |
 //! | a bar's cap flush on a block | 0 of 66 | 84 of 84 | *a point inside a piece of a face* 66 |
 //! | a ball resting on a block | 54 of 72 | 78 of 78 | `NotFinite` 9, `ResultIsNotManifold` 9 |
 //! | a ball against a block's wall | 57 of 78 | 72 of 72 | `ResultIsNotManifold` 21 |
-//! | two bars touching along a line | 0 of 60 | 96 of 96 | *which way a crossing runs* 60 |
+//! | two bars touching along a line | 40 of 60 | 96 of 96 | `ResultIsNotManifold` 20, every union |
 //! | a bar inside a bar, touching | panics on its control | — | see below |
 //! | two balls touching at a point | 54 of 54 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 54 of 54 | 96 of 96 | — |
@@ -55,9 +55,10 @@
 //! **panic** on a bar standing inside a bar and touching nothing —
 //! [`a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_panic`]
 //! — which the property meets on its control row before its touching row, so
-//! that cell's table is not printed until the panic is fixed. By hand, the
-//! touching row (radius three, radius one at `(0, 2)`) refuses every fuse on
-//! *which way a crossing runs*.
+//! that cell's table is not printed until the panic is fixed. By hand, before
+//! queue row Q649, the touching row (radius three, radius one at `(0, 2)`)
+//! refused every fuse on *which way a crossing runs*; it has not been asked
+//! again since.
 //!
 //! # Which refusals are gaps and which are limits
 //!
@@ -70,16 +71,20 @@
 //! against a bar, a ball of radius one on a block, and every control. So every
 //! refusal in the "touch alone" column of an apart cell is a **gap**:
 //!
-//! - *which way a crossing runs*: a wall or a second pipe lying along a pipe's
-//!   ruling, where the two surfaces' normals are parallel and their cross
-//!   product — this kernel's one name for which way a crossing runs — is exactly
-//!   nothing. Known: §39.4 files it a gap and `degenerate_curved_fuses.rs`'s
-//!   `a_wall_lying_on_a_bars_skin_leaves_that_crossing_with_no_direction`
-//!   demonstrates it. Handed over first, a bar touching on its seam used to stop
-//!   earlier, on *side of plane* or *side of cylinder*, asked about a box round
-//!   its seam corner that a whole-number move had put there without rounding
-//!   anything; `a_bar_moved_by_whole_numbers_keeps_its_seam_corner_exact.rs` is
-//!   that gap, closed.
+//! - `ResultIsNotManifold`, every union of a wall or a second pipe lying along a
+//!   pipe's ruling. The likely cause is that both solids keep every face along
+//!   the touching line, so it comes out one edge with four faces round it, but
+//!   nobody has traced that. Queue row Q371 traces and fixes it, in
+//!   `fuse/assemble.rs`; `a_bar_lying_along_a_plane_or_a_bar.rs` pins it. Until
+//!   queue row Q649 every fuse of these three cells refused before that, on
+//!   *which way a crossing runs*: the two surfaces' normals are parallel along
+//!   the line, so their cross product is exactly nothing. The line runs along
+//!   the pipe's stored axis, and `fuse/arrange.rs`'s `AlongATouch` reads it now.
+//!   Handed over first, a bar touching on its seam used to stop earlier still,
+//!   on *side of plane* or *side of cylinder*, asked about a box round its seam
+//!   corner that a whole-number move had put there without rounding anything;
+//!   `a_bar_moved_by_whole_numbers_keeps_its_seam_corner_exact.rs` is that gap,
+//!   closed.
 //! - *a point inside a piece of a face*, a flat cap flush on a flat face with a
 //!   circle round it: known, §39.4's coincident-face row and §38.9.
 //! - `ResultIsNotManifold` and `NotFinite` on a ball resting on a block:

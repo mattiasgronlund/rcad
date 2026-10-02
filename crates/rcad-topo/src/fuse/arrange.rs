@@ -703,6 +703,29 @@ struct Crossing {
     /// Where it runs through a cone's apex, for one of the two rulings a plane
     /// through the apex cuts, and `None` for every other crossing (§347).
     through_an_apex: Option<ThroughAnApex>,
+    /// Where the partner rests along the face's surface on one straight line
+    /// and crosses it nowhere, and `None` for every other crossing.
+    touching: Option<AlongATouch>,
+}
+
+/// One straight line a plane or a pipe rests along a pipe on, the fillet's
+/// touch among them: a wall on `y = −2` against a bar of radius two, or two
+/// bars side by side, two radii apart.
+///
+/// **`∇S × ∇Q` is nothing along the whole line**, because the two surfaces are
+/// tangent there and their gradients are parallel. So neither of the two things
+/// every other crossing reads off that cross product is there to read. Its
+/// direction is the pipe's own axis, which is a stored triple; and the region
+/// left of it is not the partner's negative side, because the face lies on one
+/// side of the partner on **both** sides of the line.
+#[derive(Clone, Copy)]
+struct AlongATouch {
+    /// The pipe's axis direction, exactly as stored. Which way it points is
+    /// the crossing's forward direction, and nothing else reads it: no
+    /// gradient is there to agree with.
+    along: [Interval; 3],
+    /// Which side of the partner the face lies on, either side of the line.
+    face_lies_on: Decision,
 }
 
 /// A ruling that runs through a cone's apex, and the one direction it runs
@@ -1093,9 +1116,16 @@ impl<'f> Arrangement<'f> {
                 None => {
                     let through_an_apex =
                         a_ruling_through_an_apex(&self.surface, &partner, &run, policy, log)?;
+                    let touching = a_line_one_surface_rests_on_another_along(
+                        &self.surface,
+                        &partner,
+                        &run,
+                        log,
+                    )?;
                     self.crossings.push(Crossing {
                         partner,
                         through_an_apex,
+                        touching,
                         run,
                         // Filled in once there is a node to read it at.
                         order: HowItRuns::AlongAnAxis {
@@ -2672,9 +2702,7 @@ impl<'f> Arrangement<'f> {
         if first.crossing == second.crossing {
             return Ok(Decision::Zero);
         }
-        if self.crossings[first.crossing].through_an_apex.is_some()
-            || self.crossings[second.crossing].through_an_apex.is_some()
-        {
+        if self.has_a_way_of_its_own(first.crossing) || self.has_a_way_of_its_own(second.crossing) {
             return self.turn_between_two_ways_out(node, first, second, policy, log);
         }
         let at = self.nodes[node].point;
@@ -2697,10 +2725,14 @@ impl<'f> Arrangement<'f> {
     }
 
     /// [`Arrangement::turns_anticlockwise`] for a pair one of which is a ruling
-    /// through a cone's apex: `N · (t₁ × t₂)` for the two ways out themselves,
-    /// which is the determinant above before `(a×b)×(a×c) = a·((a×b)·c)` took
-    /// it apart. A ruling's way out is its own line ([`ThroughAnApex`]), so
-    /// there is no partner gradient to put in a row of that determinant.
+    /// through a cone's apex or a line one surface rests on another along:
+    /// `N · (t₁ × t₂)` for the two ways out themselves, which is the
+    /// determinant above before `(a×b)×(a×c) = a·((a×b)·c)` took it apart.
+    /// Either one's way out is its own line ([`ThroughAnApex`],
+    /// [`AlongATouch`]), so there is no partner gradient to put in a row of
+    /// that determinant. Along a touch there is one, and it is the trouble: it
+    /// is parallel to `N`, so the determinant is nothing against every other
+    /// crossing, whichever way round the two really turn.
     ///
     /// `N` is the face's gradient, except where there is none: at the apex of
     /// a face on the cone itself ([`Arrangement::what_a_turn_at_the_apex_is_about`]).
@@ -2733,6 +2765,12 @@ impl<'f> Arrangement<'f> {
             policy,
             log,
         )
+    }
+
+    /// Whether a crossing's way out is a line it carries, rather than `∇S × ∇Q`.
+    fn has_a_way_of_its_own(&self, crossing: usize) -> bool {
+        self.crossings[crossing].through_an_apex.is_some()
+            || self.crossings[crossing].touching.is_some()
     }
 
     /// The cone the face lies on, when `node` is that cone's apex exactly.
@@ -2950,14 +2988,17 @@ impl<'f> Arrangement<'f> {
     /// The direction a half-edge leaves a node in: `±(∇S × ∇Q)` for the crossing
     /// it runs on, the sign being which way along the crossing it goes, and
     /// `±` the line's own direction for a ruling through a cone's apex
-    /// ([`ThroughAnApex`]).
+    /// ([`ThroughAnApex`]) and for a line one surface rests on another along
+    /// ([`AlongATouch`]).
     fn way_out_of(&self, node: usize, direction: Direction) -> [Interval; 3] {
         let at = self.nodes[node].point;
-        let run = match self.crossings[direction.crossing].through_an_apex {
-            Some(line) => line.along,
-            None => cross_of(
+        let crossing = &self.crossings[direction.crossing];
+        let run = match (crossing.through_an_apex, crossing.touching) {
+            (Some(line), _) => line.along,
+            (None, Some(touch)) => touch.along,
+            (None, None) => cross_of(
                 gradient_at(&self.surface, at),
-                gradient_at(&self.crossings[direction.crossing].partner, at),
+                gradient_at(&crossing.partner, at),
             ),
         };
         if direction.forward {
@@ -3621,7 +3662,12 @@ impl<'f> Arrangement<'f> {
         let (_, arc) = nearest?;
         // An arc's forward half-edge has the negative side of its partner on its
         // left: on the plane `z = 0` the line `x = 0` runs along `z × x = +y`,
-        // and walking up `y` with `z` overhead leaves `x < 0` on the left.
+        // and walking up `y` with `z` overhead leaves `x < 0` on the left. Along
+        // a touch both sides are on one side of the partner, so that says
+        // nothing about which side of the line `from` is on.
+        if self.crossings[self.arcs[arc].crossing].touching.is_some() {
+            return None;
+        }
         let partner = self.crossings[self.arcs[arc].crossing].partner;
         let half_edge = match side_of_surface(&partner, self.nodes[from].point) {
             Decision::Neg => 2 * arc,
@@ -4032,12 +4078,15 @@ impl<'f> Arrangement<'f> {
             .iter()
             .map(|&half_edge| {
                 let arc = &self.arcs[half_edge / 2];
+                let crossing = &self.crossings[arc.crossing];
                 Ok(FaceMeet {
-                    carried_by: [self.surface, self.crossings[arc.crossing].partner],
-                    material_side: if half_edge.is_multiple_of(2) != arc.against_its_gradients {
-                        Decision::Neg
-                    } else {
-                        Decision::Pos
+                    carried_by: [self.surface, crossing.partner],
+                    material_side: match crossing.touching {
+                        Some(touch) => touch.face_lies_on,
+                        None if half_edge.is_multiple_of(2) != arc.against_its_gradients => {
+                            Decision::Neg
+                        }
+                        None => Decision::Pos,
                     },
                     ends: [
                         self.meet_point(self.from(half_edge)),
@@ -4834,40 +4883,24 @@ fn how_a_crossing_runs(
             forward_climbs_the_axis,
         });
     }
-    // **A plane resting *on* a pipe hands the zero vector to the line below, and
-    // that is an open gap.** A wall on `y = -2` against a bar of radius two is
+    // **A plane or a pipe resting *on* a pipe runs along the pipe's axis**, and
+    // not along `∇S × ∇Q`. A wall on `y = -2` against a bar of radius two is
     // tangent along the ruling `(0, -2, z)`, where the plane's normal `(0,-1,0)`
-    // and the pipe's gradient `(0,-2,0)` are parallel, so `∇S × ∇Q` — the only
-    // form this kernel has for the *direction* of a crossing, here, in
-    // `dominant_axis` and in `Arrangement::way_out_of` alike — is exactly
-    // nothing.
-    // The direction *exists*: it is the pipe's own axis. Four families of fix,
-    // and why none of them is a small change:
-    //
-    // 1. Read the pipe's axis here instead of the cross product. Closes this
-    //    line and nothing else: `Arrangement::way_out_of` is the same cross
-    //    product and is still nothing, so the wall face has no directions to
-    //    sort.
-    // 2. Recover the sign by hand. There is none to recover. The two rulings of
-    //    a plane that really cuts a pipe get *opposite* orientations from this
-    //    very cross product, so a rule handing back the axis uniformly would
-    //    turn one of them round and change answers that are right today.
-    // 3. Store one direction on `Crossing` and read it everywhere. This is the
-    //    one that works, and it is necessary but **not sufficient**:
-    //    `Arrangement::turns_anticlockwise` is `det(∇S, ∇Q₁, ∇Q₂)`, which is
-    //    identically nothing against *every* other crossing once `∇Q₁` is along
-    //    `∇S`, and `Arrangement::which_way_two_tangent_curves_bend` dies with it
-    //    because its `B` works out to `−c|∇S × ∇Q|²`. Both derivatives taken
-    //    here are blind there, so the turn predicate needs a second form too.
-    // 4. Leave the crossing undrawn — it touches the wall and cuts nothing off
-    //    it. `cuts.rs`'s own module comment turns down the same shape of skip
-    //    for the same reason: leave a pair out and only one side of a shared
-    //    edge gets split, and the answer is not a manifold (§17.4).
+    // and the pipe's gradient `(0,-2,0)` are parallel, so that cross product is
+    // exactly nothing. Handing back the axis for every straight run instead
+    // would be wrong: the two lines of a plane that really cuts a pipe get
+    // *opposite* directions from the cross product, and the rest of the
+    // arrangement reads their sides off it. So only a touch reads the axis, and
+    // `Arrangement::way_out_of`, `Arrangement::turns_anticlockwise` and
+    // `Arrangement::wire_from` read the same line off [`AlongATouch`]. A plane
+    // resting along a cone's ruling is the same shape and is not read here yet
+    // (queue row Q473).
     if a_pair_that_crosses_in_straight_lines(surface, partner, log)? {
-        let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(
-            cross_of(gradient_at(surface, at), gradient_at(partner, at)),
-            log,
-        )?;
+        let direction = match the_axis_one_surface_rests_on_another_along(surface, partner, run) {
+            Some(axis) => axis.map(Interval::exactly),
+            None => cross_of(gradient_at(surface, at), gradient_at(partner, at)),
+        };
+        let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(direction, log)?;
         return Ok(HowItRuns::AlongAnAxis {
             axis,
             forward_climbs_the_axis,
@@ -4915,6 +4948,98 @@ fn how_a_crossing_runs(
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
+}
+
+/// The pipe's axis direction, where `surface` and `partner` are a plane and a
+/// pipe or two pipes and `run` is the one line they rest against each other
+/// along; `None` for every other pair and every other run.
+///
+/// **`intersect` has already told a touch from a cut**, and this reads its
+/// answer rather than asking again. A plane along a pipe's axis and two pipes
+/// side by side come back as two lines a half-space picks apart where they
+/// really cross, and as one bare [`EdgeRun::Straight`] where they touch. Two
+/// planes cross in a bare straight run too, and are not a plane and a pipe. A
+/// plane resting along a cone's ruling is one as well, and is left out until
+/// queue row Q473: its direction is the ruling's and not a stored one.
+fn the_axis_one_surface_rests_on_another_along(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> Option<[f64; 3]> {
+    if !matches!(run.run(), EdgeRun::Straight) {
+        return None;
+    }
+    if let Surface::Cylinder(pipe) = surface
+        && matches!(partner, Surface::Plane(_) | Surface::Cylinder(_))
+    {
+        return Some(pipe.axis().direction().components());
+    }
+    if let (Surface::Plane(_), Surface::Cylinder(pipe)) = (surface, partner) {
+        return Some(pipe.axis().direction().components());
+    }
+    None
+}
+
+/// [`AlongATouch`] for one crossing, or `None` when the partner does not rest
+/// on the face's surface along a line.
+///
+/// **Which side of the partner the face lies on is read off an axis, never off
+/// the line**, where every sign is nothing:
+///
+/// - a plane resting on a pipe is outside it everywhere off the line, so `Pos`;
+/// - a pipe a plane rests on lies within its radius of its own axis, and the
+///   plane is exactly that far from the axis, so the pipe is on the side of the
+///   plane its axis is on;
+/// - two pipes resting on each other are each outside the other, unless the
+///   thinner is inside the thicker and touching its wall. Then the thinner is
+///   inside, and so is its axis, which is `r₂ − r₁` from the thicker one's
+///   axis rather than the `r₁ + r₂` of a touch from outside. The thicker is
+///   outside the thinner either way.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when the side of a stored
+/// axis origin cannot be proved. It is a radius off the plane or the other
+/// pipe's skin, so `Zero` is arithmetic that ran out and not a shape.
+fn a_line_one_surface_rests_on_another_along(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<Option<AlongATouch>> {
+    let Some(along) = the_axis_one_surface_rests_on_another_along(surface, partner, run) else {
+        return Ok(None);
+    };
+    let Surface::Cylinder(pipe) = surface else {
+        return Ok(Some(AlongATouch {
+            along: along.map(Interval::exactly),
+            face_lies_on: Decision::Pos,
+        }));
+    };
+    if let Surface::Cylinder(other) = partner
+        && pipe.radius() >= other.radius()
+    {
+        return Ok(Some(AlongATouch {
+            along: along.map(Interval::exactly),
+            face_lies_on: Decision::Pos,
+        }));
+    }
+    let axis = PredicatePoint::from(pipe.axis().origin().coordinates());
+    let face_lies_on = match side_of_surface(partner, axis) {
+        side @ (Decision::Pos | Decision::Neg) => side,
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
+            return Err(gave_up(
+                name_of_surface(partner),
+                &[axis],
+                Measures::Length,
+                log,
+            ));
+        }
+    };
+    Ok(Some(AlongATouch {
+        along: along.map(Interval::exactly),
+        face_lies_on,
+    }))
 }
 
 /// The apex and the line's direction, for one of the two rulings a plane
@@ -5250,15 +5375,13 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
 /// `two_pipes_side_by_side_run_up_their_common_axis` measures what it answers
 /// now rather than what it used to refuse.
 ///
-/// **Two pipes exactly touching along one ruling are still refused, and that is
-/// the same limit as a plane resting on a pipe.** The axes are parallel, so this
-/// says `true` and the line under the gate is `∇S × ∇Q` — which for two pipes
-/// touching along a ruling is exactly nothing, both gradients pointing along the
-/// line between the axes. The refusal moves from
-/// [`Error::ACrossingThisCannotBeOrderedAlong`] to [`Error::Undecidable`], which
-/// is [`how_a_crossing_runs`]'s own note on the four families of fix and why the
-/// working one is not a small change.
-/// `two_pipes_resting_against_each_other_have_no_direction_to_read` pins it.
+/// **Two pipes exactly touching along one ruling run up their axis too, and so
+/// does a plane resting on a pipe.** The axes are parallel, so this says `true`,
+/// and under the gate `∇S × ∇Q` is exactly nothing, both gradients pointing
+/// along the line between the axes. It used to be refused `Undecidable` for that
+/// and called a limit; it was a gap, since the direction is the pipe's stored
+/// axis, and [`AlongATouch`] is that axis.
+/// `two_pipes_resting_against_each_other_run_up_their_common_axis` pins it.
 ///
 /// The `_`
 /// at the bottom is for a sixth kind and nothing else (§40) — but a sixth kind
@@ -6952,7 +7075,8 @@ mod what_the_curved_arrangement_reaches {
     use super::super::bake::bake;
     use super::super::cuts;
     use super::{
-        HowItRuns, a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
+        HowItRuns, a_line_one_surface_rests_on_another_along,
+        a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
         round_a_closed_crossing, side_of_surface, split_a_face, two_pipes_run_along_one_line,
@@ -7576,12 +7700,13 @@ mod what_the_curved_arrangement_reaches {
             "a plane cutting across a cone still runs round a closed curve"
         );
 
-        // **A tangent plane's one ruling is still refused, and by the same gap
-        // as a plane resting on a pipe.** The gate lets it through now, and the
-        // line under the gate is `∇S × ∇Q`, which for a plane lying along a
-        // cone's own side is exactly nothing — the two gradients are parallel
-        // everywhere on the ruling. `how_a_crossing_runs`'s own note names the
-        // four families of fix and why the working one is not a small change.
+        // **A tangent plane's one ruling is still refused**, the gap a plane
+        // resting on a pipe was until `AlongATouch`. The gate lets it through,
+        // and the line under the gate is `∇S × ∇Q`, which for a plane lying
+        // along a cone's own side is exactly nothing — the two gradients are
+        // parallel everywhere on the ruling. A pipe's touch reads the pipe's
+        // stored axis instead; a cone's ruling has no stored direction, and is
+        // queue row Q473's.
         let touching = Surface::Plane(
             Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.5))
                 .expect("a plane resting along one ruling"),
@@ -7694,21 +7819,18 @@ mod what_the_curved_arrangement_reaches {
         }
     }
 
-    /// **Two pipes resting against each other have no direction to read, the
-    /// same way a plane resting on a pipe has none.**
+    /// **Two pipes resting against each other run up their common axis, though
+    /// `∇S × ∇Q` is nothing along the whole line they touch on.**
     ///
     /// Two pipes of radius five whose axes are ten apart touch along the one
     /// ruling through `(5, 0, z)`. The axes are parallel, so the straight gate
-    /// lets the pair through — and what gives up under it is `∇S × ∇Q`, which is
-    /// `(10, 0, 0) × (−10, 0, 0)` and exactly nothing. Both gradients point
-    /// along the line between the axes.
-    ///
-    /// So the refusal moved from [`Error::ACrossingThisCannotBeOrderedAlong`] to
-    /// [`Error::Undecidable`], which is the limit `how_a_crossing_runs`'s own
-    /// note names the four families of fix for. Closing the side-by-side gap
-    /// does not close this and does not claim to.
+    /// lets the pair through, and under it `∇S × ∇Q` is `(10, 0, 0) × (−10, 0,
+    /// 0)`, exactly nothing: both gradients point along the line between the
+    /// axes. That was refused `Undecidable` on *which way a crossing runs* and
+    /// called a limit. It was a gap: the line runs along the pipe's stored axis,
+    /// which is what is read now ([`AlongATouch`]).
     #[test]
-    fn two_pipes_resting_against_each_other_have_no_direction_to_read() {
+    fn two_pipes_resting_against_each_other_run_up_their_common_axis() {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
         let here = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe of radius five"));
@@ -7742,9 +7864,20 @@ mod what_the_curved_arrangement_reaches {
         assert!(
             matches!(
                 how_a_crossing_runs(&here, &there, &runs[0], at, &mut log),
-                Err(Error::Undecidable { .. })
+                Ok(HowItRuns::AlongAnAxis {
+                    axis: 2,
+                    forward_climbs_the_axis: true
+                })
             ),
-            "the direction of the shared ruling is `∇S × ∇Q`, which is nothing"
+            "the shared ruling runs up `z`, the pipes' own axis"
+        );
+        let touch = a_line_one_surface_rests_on_another_along(&here, &there, &runs[0], &mut log)
+            .expect("two stored axis origins ten apart are proved outside each pipe")
+            .expect("one bare straight run between two pipes is a touch");
+        assert_eq!(
+            touch.face_lies_on,
+            Decision::Pos,
+            "each of two pipes resting side by side is outside the other"
         );
     }
 
