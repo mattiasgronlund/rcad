@@ -78,8 +78,8 @@ pub enum Refusal {
         keyword: String,
     },
 
-    /// A face bound that is not an `EDGE_LOOP` — a `VERTEX_LOOP` standing on a
-    /// cone's apex, or a `POLY_LOOP`.
+    /// A face bound that is not an `EDGE_LOOP` — a `VERTEX_LOOP` anywhere but
+    /// a cone's apex, or a `POLY_LOOP`.
     ///
     /// **Not how a ball's pole reaches this reader.** A real file leaves a
     /// ball's pole unwritten and turns its loop straight back along the seam,
@@ -88,16 +88,18 @@ pub enum Refusal {
     /// `CONICAL_SURFACE` faces of the NIST files bound their apex with one, as
     /// a second bound of the face (`nist_ctc_05` `#1340`).
     ///
-    /// **Gap, with two ways to close it, neither tried.** A wire of *only* a
-    /// pole is one step that is not an edge, and neither door takes it: both
-    /// ask for three steps, or one edge that closes already, or two different
-    /// edges that are not both straight (§44.11 item 3). One way is a fourth
-    /// arm on that rule — one pole meaning "this whole bound is that point" —
-    /// in `SolidBuilder::add_wire` and `Invalid::WireTooShort` together, which
-    /// is where the two-step arm went. The other asks nothing of `rcad-topo`:
-    /// this kernel's pointed cone has no wire at its apex at all, so a
-    /// `VERTEX_LOOP` whose corner is where the face's surface pinches could be
-    /// read as no bound.
+    /// **A `VERTEX_LOOP` at the apex of the cone its face sits on is read as no
+    /// bound**, because this kernel's pointed cone has no wire at its apex
+    /// (`docs/decisions.md` §376). That takes 18 of the 136, whose corners are
+    /// within `8.5` roundings of the apex. **The other 118 are still this
+    /// refusal, and are a modelling tolerance**: each corner is `2.5e3` to
+    /// `1.0e6` roundings from where its cone pinches, most of them on the axis
+    /// exactly and a little along it, and a corner that far off its face is
+    /// one `Model::validate` refuses wherever it stands. A `VERTEX_LOOP` on any
+    /// other surface is a gap with no file behind it: a wire of only a pole
+    /// would need a fourth arm in `SolidBuilder::add_wire` and
+    /// `Invalid::WireTooShort` together, which is where the two-step arm went
+    /// (§44.11 item 3).
     #[error("{id} is a {keyword} and this reader walks EDGE_LOOPs (on face {face})")]
     ALoopThisReaderDoesNotWalk {
         /// The face it bounds.
