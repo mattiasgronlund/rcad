@@ -2139,6 +2139,25 @@ check-skills-selftest:
 # says so appears in both `lanes.js` -- once in `VERIFY`'s prompt and once in
 # the `pinsOnly` note, so neither path keeps the old double run -- and in
 # `verifier.md` itself.
+#
+# **A sixteenth arm holds the road for a change that alters nothing that runs
+# (§375).** Q519, Q601 and the bundle Q440,Q619,Q720,Q624,Q684 waited on
+# Mattias's hand: a doc-comment edit in a `.rs` file always met the moved-text
+# step's "any file not ending in `.md`" bar, and a pinned test inside `src/`
+# met `unproven`'s demand for a revert. `LINES_THAT_RUN` in `lanes.js` now
+# prints every changed line that could change what runs -- none from `.md`
+# files, comments, or test code -- and an empty print is what waives the
+# revert. The arm runs that awk program, cut out of `lanes.js` itself, on a
+# small repo it builds, and wants back exactly the lines that run: a code line
+# in a plain `mod`, a function after a `#[cfg(test)]` module closes, a shebang
+# in a recipe that is not a `check-*`, and a source file renamed. It skips a
+# comment, a doc comment, a test inside `#[cfg(test)]`, a file under
+# `tests/`, a fuzz seed renamed, a `check-*` recipe's body and a `.md` file.
+# The arm also checks the lines that use the print: `unproven` waives the
+# revert only on an empty one and refuses a lane with no test whose print is
+# not empty, a print the verifier did not report or got from another command
+# is refused, the schema requires both, `VERIFY` hands the command over, and
+# `verifier.md` carries the new moved-text rule and not the old one.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2172,9 +2191,62 @@ check-lanes-workflow:
     docs_field="      docs_catch_ups: { type: 'integer', minimum: 0,"
     docs_required="'push_attempts', 'docs_catch_ups',"
     pass_rule='Step 3 already proved the tests pass; do not run them again to watch that (§370)'
+    runs_prefix='const LINES_THAT_RUN = String.raw`awk '"'"
+    runs_command='  return `git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 ${BASE} ${branchOf(lane)} | ${LINES_THAT_RUN}`'
+    runs_handed='  ${linesThatRunCommand(lane)}'
+    runs_waive="    if (!pinsOnly && runs !== '') {"
+    runs_refusal='names no test that fails without them'
+    runs_unreported='the verifier did not report what the lines-that-run command printed'
+    runs_other='the verifier ran another command than the lines-that-run command it was given'
+    runs_required="'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']"
+    runs_rule='6. If step 1'"'"'s `lines_that_run` is not empty, the verdict cannot be `merge`: a'
+    old_md_rule='6. If any changed file does not end in `.md`, the verdict cannot be `merge`: a'
+    runs_want=$(printf '%s\n' \
+        'crates/k/src/lib.rs: -        2' \
+        'crates/k/src/lib.rs: +        3' \
+        'crates/k/src/lib.rs: +pub fn three() -> u32 {' \
+        'crates/k/src/lib.rs: +    3' \
+        'crates/k/src/moved.rs: rename from crates/k/src/old.rs' \
+        'crates/k/src/moved.rs: rename to crates/k/src/moved.rs' \
+        'justfile: +    #!/usr/bin/env bash')
+    runs_empty='git diff printed nothing, so it shows nothing'
     settings=.claude/settings.json
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    commit() {
+        git -C "$1" add -A
+        git -C "$1" -c user.name=check -c user.email=check@localhost -c commit.gpgsign=false commit -q --no-verify -m "$2"
+    }
+    fixture="$dir/fixture"
+    mkdir -p "$fixture/crates/k/src" "$fixture/crates/k/tests" "$fixture/fuzz/corpus/t" "$fixture/docs"
+    git -C "$fixture" init -q
+    printf '%s\n' '//! A crate.' '' '/// Adds one.' 'pub fn one(x: u32) -> u32 {' '    x + 1' '}' '' \
+        'mod inner {' '    pub fn two() -> u32 {' '        2' '    }' '}' '' \
+        '#[cfg(test)]' 'mod tests {' '    #[test]' '    fn one_adds_one() {' '        assert_eq!(super::one(1), 2);' '    }' '}' \
+        > "$fixture/crates/k/src/lib.rs"
+    printf '%s\n' 'pub fn old() {}' > "$fixture/crates/k/src/old.rs"
+    printf '%s\n' '#[test]' 'fn pinned() {}' > "$fixture/crates/k/tests/pins.rs"
+    printf '%s\n' 'seed' > "$fixture/fuzz/corpus/t/seed_old"
+    printf '%s\n' '# Notes.' > "$fixture/docs/a.md"
+    printf '%s\n' '# Builds.' 'build:' '    cargo build' '' '# Checks.' 'check-things:' '    #!/usr/bin/env bash' '    echo "fine"' \
+        > "$fixture/justfile"
+    commit "$fixture" base
+    printf '%s\n' '//! A crate that adds.' '' '/// Adds one to x.' 'pub fn one(x: u32) -> u32 {' '    x + 1' '}' '' \
+        'mod inner {' '    pub fn two() -> u32 {' '        3' '    }' '}' '' \
+        '#[cfg(test)]' 'mod tests {' '    #[test]' '    fn one_adds_one() {' '        assert_eq!(super::one(1), 2);' '    }' '' \
+        '    #[test]' '    fn one_adds_one_to_two() {' '        assert_eq!(super::one(2), 3);' '    }' '}' '' \
+        'pub fn three() -> u32 {' '    3' '}' \
+        > "$fixture/crates/k/src/lib.rs"
+    git -C "$fixture" mv crates/k/src/old.rs crates/k/src/moved.rs
+    git -C "$fixture" mv fuzz/corpus/t/seed_old fuzz/corpus/t/seed_new
+    printf '%s\n' '#[test]' 'fn pinned() {' '    assert!(true);' '}' > "$fixture/crates/k/tests/pins.rs"
+    printf '%s\n' '# Notes, and more.' > "$fixture/docs/a.md"
+    printf '%s\n' '# Builds it all.' 'build:' '    #!/usr/bin/env bash' '    cargo build' '' '# Checks.' 'check-things:' \
+        '    #!/usr/bin/env bash' '    echo "all fine"' '    test -f justfile' \
+        > "$fixture/justfile"
+    commit "$fixture" branch
     scan() {
-        local n t at prev line types
+        local n t at prev line types prog got
         n=$(grep -cxF -- "$create" "$1" || true)
         if [ "$n" != 1 ]; then
             echo "$1 has the line '$create' $n times, expected once"
@@ -2325,10 +2397,50 @@ check-lanes-workflow:
             echo "$2/verifier.md does not carry the same rule, that step 3's gate already proves the tests pass (§370)"
             return 15
         fi
+        if ! grep -qxF -- "$runs_command" "$1" || ! grep -qxF -- "$runs_handed" "$1"; then
+            echo "$1 does not hand the verifier the lines-that-run command, the whole-file diff of the branch piped into LINES_THAT_RUN; without it there is no print for an empty one to be (§375)"
+            return 16
+        fi
+        if ! grep -qF -- "$runs_waive" "$1"; then
+            echo "$1 does not waive the revert on an empty lines-that-run print alone ('$runs_waive'); a lane that changes what runs would then merge on a test that never failed (§375)"
+            return 16
+        fi
+        for t in "$runs_refusal" "$runs_unreported" "$runs_other"; do
+            if ! grep -qF -- "$t" "$1"; then
+                echo "$1 no longer refuses with '$t'; a lane would then merge on a print that is not empty, missing, or from another command (§375)"
+                return 16
+            fi
+        done
+        if ! grep -qF -- "$runs_required" "$1"; then
+            echo "$1 does not make the verdict schema require lines_that_run_command and lines_that_run, so a verifier need not report the print at all (§375)"
+            return 16
+        fi
+        if ! grep -qF -- "$runs_rule" "$2/verifier.md" || grep -qF -- "$old_md_rule" "$2/verifier.md"; then
+            echo "$2/verifier.md does not carry the moved-text rule on the lines-that-run print in place of the old 'any file not ending in .md' bar (§375)"
+            return 16
+        fi
+        line=$(grep -F -- "$runs_prefix" "$1" || true)
+        prog=${line#*"$runs_prefix"}
+        prog=${prog%"'\`"}
+        got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$got" != "$runs_want" ]; then
+            echo "LINES_THAT_RUN in $1 printed, on the fixture repo:"
+            printf '%s\n' "$got"
+            echo "and should have printed exactly:"
+            printf '%s\n' "$runs_want"
+            echo "a line it skips that runs lets a behaviour change merge with no failing test (§375)"
+            return 16
+        fi
+        got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD HEAD | awk "$prog" 2>&1 || true)
+        if [ "$got" != "$runs_empty" ]; then
+            echo "LINES_THAT_RUN in $1 printed '$got' for an empty diff, not '$runs_empty'; a git diff that failed would read as nothing that runs changed (§375)"
+            return 16
+        fi
     }
     scan "$file" "$agents" "$claude" || exit 1
-    dir=$(mktemp -d)
-    trap 'rm -rf "$dir"' EXIT
+    swap() {
+        S="$2" R="$3" awk '{ i = index($0, ENVIRON["S"]); if (i) $0 = substr($0, 1, i - 1) ENVIRON["R"] substr($0, i + length(ENVIRON["S"])); print }' "$1"
+    }
     fresh() {
         mkdir "$dir/$1"
         cp "$file" "$dir/$1/lanes.js"
@@ -2403,7 +2515,31 @@ check-lanes-workflow:
     grep -vF -- "$pass_rule" "$file" > "$dir/no-pass-rule/lanes.js"
     fresh no-pass-rule-doc
     grep -vF -- "$pass_rule" "$agents/verifier.md" > "$dir/no-pass-rule-doc/agents/verifier.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15)
+    fresh runs-not-handed
+    grep -vxF -- "$runs_handed" "$file" > "$dir/runs-not-handed/lanes.js"
+    fresh runs-waive-any
+    swap "$file" "$runs_waive" '    if (!pinsOnly && runs === null) {' > "$dir/runs-waive-any/lanes.js"
+    fresh runs-no-refusal
+    grep -vF -- "$runs_refusal" "$file" > "$dir/runs-no-refusal/lanes.js"
+    fresh runs-unreported-ok
+    grep -vF -- "$runs_unreported" "$file" > "$dir/runs-unreported-ok/lanes.js"
+    fresh runs-any-command
+    grep -vF -- "$runs_other" "$file" > "$dir/runs-any-command/lanes.js"
+    fresh runs-optional
+    swap "$file" "'lines_that_run_command', 'lines_that_run', 'verdict']" "'verdict']" > "$dir/runs-optional/lanes.js"
+    fresh runs-old-md-rule
+    printf '\n%s\n' "$old_md_rule" >> "$dir/runs-old-md-rule/agents/verifier.md"
+    fresh runs-no-md-rule
+    grep -vF -- "$runs_rule" "$agents/verifier.md" > "$dir/runs-no-md-rule/agents/verifier.md"
+    fresh runs-src-is-test
+    swap "$file" '/^crates\/[^\/]+\/tests\//' '/^crates\/[^\/]+\/(tests|src)\//' > "$dir/runs-src-is-test/lanes.js"
+    fresh runs-test-never-ends
+    swap "$file" 'if (c ~ /^}/) in_test[s] = 0; ' '' > "$dir/runs-test-never-ends/lanes.js"
+    fresh runs-shebang-is-comment
+    swap "$file" '(#([^!].*)?)?' '(#.*)?' > "$dir/runs-shebang-is-comment/lanes.js"
+    fresh runs-nothing-is-silent
+    swap "$file" 'END { if (!seen) print "git diff printed nothing, so it shows nothing" }' 'END { }' > "$dir/runs-nothing-is-silent/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}

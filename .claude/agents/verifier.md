@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane marked pinsOnly (nothing in src/ to revert) that its new tests pass on the branch, or for a lane that changed only .md files that every paragraph it moved landed once and unchanged — and that its numbers and claims hold. Use once per writing lane, when that lane reports.
+description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane marked pinsOnly (nothing in src/ to revert) that its new tests pass on the branch, or for a lane whose lines-that-run command prints nothing (comments and test code only) that its tests pass, or for a lane that names no test that every paragraph it moved landed once and unchanged — and that its numbers and claims hold. Use once per writing lane, when that lane reports.
 model: sonnet
 ---
 
@@ -40,7 +40,16 @@ finds it by hand (§263.4).
 
 1. `git log --oneline <base>..<branch>` — the branch exists and sits on the
    base. Then `git diff --name-only <base>..<branch>`, and list every file
-   outside the write set in `files_outside_write_set`.
+   outside the write set in `files_outside_write_set`. Then run the
+   lines-that-run command your brief gives, once, exactly as written, and
+   report it as `lines_that_run_command` and what it prints, verbatim, as
+   `lines_that_run`. It prints every changed line that could change what
+   runs: none from `.md` files, comment lines or test code. Its print is the
+   evidence (§375), not your reading of the diff: a line it misses is a defect
+   in the command, so say so in `notes`, and never drop a line it printed. It
+   skips test code whole, so read what the branch takes out of a test: a test
+   or an assertion removed or weakened with no word from the lane on why is a
+   `fix_first`.
 2. `git checkout --detach <branch>`.
 3. `mise exec -- just gate quiet` on the branch tip, including any docs commit —
    one plain Bash call, `timeout` 600000, no redirect and no pipe through `tail`.
@@ -72,6 +81,10 @@ finds it by hand (§263.4).
 7. Put the source paths back to the base — `git checkout <base> -- <path>` for
    each — and rerun the same tests. They must **fail**; record the exact
    failure, because a test that passes here proves nothing about the change.
+   When step 1's `lines_that_run` is empty, skip this step: nothing that runs
+   changed, so a revert takes out nothing a test could see. Report
+   `tests_fail_without_fix: false`, no `reproduced_mutation`, and say in
+   `notes` that the empty print is why (§375).
    With no source paths declared, say so and skip this step -- expected when
    your brief marks the lane `pinsOnly` (a verdict, a pinned test and a
    decisions section, nothing in `src/`): step 6 above is then the lane's
@@ -92,11 +105,14 @@ finds it by hand (§263.4).
 
 ## Moved text
 
-A lane that names no failing test changed only `.md` files, or it should have.
+A lane that names no failing test changed only `.md` files, comments and test
+code, or it should have.
 
-6. If any changed file does not end in `.md`, the verdict cannot be `merge`: a
-   change outside the docs with no test that fails without it breaks
-   `CLAUDE.md`'s second principle.
+6. If step 1's `lines_that_run` is not empty, the verdict cannot be `merge`: a
+   change to what runs with no test that fails without it breaks `CLAUDE.md`'s
+   second principle. A changed file that does not end in `.md` is no bar on
+   its own; when the command printed nothing for it, its change is comments or
+   test code, and step 3's gate is what shows the test code passes (§375).
 7. For every paragraph the diff removes, find where it landed: in exactly one
    place, with its meaning unchanged, or cut with the record that holds it
    named — the lane's section or its report says which. A paragraph that landed

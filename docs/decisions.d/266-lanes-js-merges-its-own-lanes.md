@@ -138,9 +138,10 @@ attempts are spent it stops with its branch as it is and says so.
 its change, so Q141's CLAUDE.md split needed an audit of its own, which checked
 that every moved paragraph landed in exactly one place with its meaning
 unchanged. That audit is now the verifier's **moved text** steps: the script
-picks them when `tests_that_fail_without_the_change` is empty. Any changed file
-not ending in `.md` makes `merge` impossible, since such a change owes a test
-(`CLAUDE.md`'s second principle). Every removed paragraph is traced to one
+picks them when `tests_that_fail_without_the_change` is empty. Any changed line
+that could change what runs makes `merge` impossible, since such a change owes
+a test (`CLAUDE.md`'s second principle); until §375 that was any changed file
+not ending in `.md`. Every removed paragraph is traced to one
 place, or to the record the lane says holds it; every new sentence stating a
 fact about the repo is checked against the tree.
 
