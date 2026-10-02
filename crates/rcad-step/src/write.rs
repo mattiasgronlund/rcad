@@ -724,14 +724,25 @@ impl Writing {
         if and == first || and == second {
             return None;
         }
-        let crossing = match (first, second) {
-            (Surface::Cylinder(pipe), _) | (_, Surface::Cylinder(pipe)) => {
-                where_a_plane_crosses_a_pipe(cut, pipe)?
+        let a_pipe = |face: &Surface| {
+            if let Surface::Cylinder(pipe) = face {
+                Some(*pipe)
+            } else {
+                None
             }
-            (Surface::Sphere(ball), _) | (_, Surface::Sphere(ball)) => {
-                where_a_plane_crosses_a_ball(cut, ball)?
+        };
+        let a_ball = |face: &Surface| {
+            if let Surface::Sphere(ball) = face {
+                Some(*ball)
+            } else {
+                None
             }
-            _ => return None,
+        };
+        let crossing = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
+            where_a_plane_crosses_a_pipe(cut, &pipe)?
+        } else {
+            let ball = a_ball(first).or_else(|| a_ball(second))?;
+            where_a_plane_crosses_a_ball(cut, &ball)?
         };
         let crossing = Crossing {
             centre: a_centre_its_plane_reads_back_from(cut, crossing.centre)?,
