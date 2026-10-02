@@ -136,3 +136,8 @@ the fallback if Q729 finds the cost of fewer binaries too high.
 
 If the edit-one-test rebuild costs more than the relinks it saves, the lane
 records the numbers and lands nothing else.
+
+**§374 has since compressed every test binary's debug info**, so 373.3's 3,793 MB
+is no longer rcad-topo's before: §374.6 counts 1,460 MB in 173 binaries, and
+the relinks Q729 would save are that much smaller. The lane measures its own
+before.
