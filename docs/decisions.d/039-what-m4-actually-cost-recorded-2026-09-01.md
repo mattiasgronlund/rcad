@@ -324,6 +324,27 @@ moved them.
 | `Undecidable`, *which piece of a face a hole is in* | no ray through a lump of endless curves gave an answer | **gap**, unchanged from §17 | |
 | `Undecidable`, *which way a crossing runs* | the direction worked out at a box straddles every axis | **gap**, and unreached since §36.8 | |
 
+> **2026-10-02 note (Q649): a plane or a bar lying along a bar.** The
+> `TwoCurvesTouchWithoutCrossing` row for "a plane tangent to a bar's wall, or a
+> block sitting exactly on a bar's cap" had stopped describing either: both
+> refused `Undecidable` on *which way a crossing runs*, and not for the cause the
+> last row names. Along the line where a plane or a pipe rests on a pipe the two
+> gradients are parallel, so `∇S × ∇Q` is exactly nothing there. That is a
+> **gap**: the line runs along the pipe's stored axis, which
+> `fuse/arrange.rs`'s `AlongATouch` now carries. A wall on a bar's skin that
+> also cuts the bar answers every rule, with the closed-form volumes
+> (`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`). A bar
+> clear of a wall, in an inside corner, or beside another bar answers its
+> intersection and both differences, and its union refuses
+> `ResultIsNotManifold { count: 4 }`: both solids keep every face along the
+> line, so it is one edge with four faces round it. That union's answer is the
+> two solids as they stand, so it is a gap too, and it is queue row Q371's
+> (`a_bar_lying_along_a_plane_or_a_bar.rs`). The block on a bar's cap refuses
+> `TwoCurvesTouchWithoutCrossing` again, under every rule, and why is not traced
+> (`a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch`). A plane
+> lying along a cone's ruling still refuses on *which way a crossing runs*,
+> unchanged: a ruling has no stored direction, and it is queue row Q473's.
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
