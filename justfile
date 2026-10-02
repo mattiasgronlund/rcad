@@ -5535,8 +5535,22 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="" step_corp
 # Pins `fuzz-overnight` against a `cargo` it brings with it, because the real one
 # wants a sanitizer build and eight hours before it says anything at all. The
 # stub sleeps half the time it was granted and logs when it started, so both the
-# clock the recipe runs against and the order it starts things in are real, and
-# the whole thing still runs in about thirty seconds.
+# clock the recipe runs against and the order it starts things in are real.
+#
+# **It takes about thirty seconds, and arm Twenty-six fails it past 60.** Three
+# runs of `just check-fuzz-overnight-selftest` on 24 idle cores took 29.3, 30.4
+# and 30.4 s, with 12.6 to 13.8 CPU-seconds each by bash's `time`, and two runs
+# of `just gate quiet fresh` gave the step 31.7 and 33.1 s, starting at a load
+# of 10 and 19 (Q709, 2026-10-02). Most arms run beside each other, and the end
+# of the body says which and why; run in turn they took 86 s. About 27 s of the
+# thirty is the stub asleep: eleven seconds while Four overruns with the other
+# arms beside it, then four seconds for each of the four arms run alone that
+# sleep. Load cannot stretch a sleep, only the 13 CPU-seconds, and all of them
+# added one after another to the sleep make 41 s. Reaching 60 takes that and
+# every CPU-second also taking two and a half. On CI's four-core runner the
+# gate runs four steps at once (§372.12), so this step shares four cores with
+# three others; it has not been run there, since the Actions allowance is
+# spent. The shape this replaced fails the bound on its own, by 26 s.
 #
 # Two things about the window, and neither can be seen from the clock alone.
 # **It is a deadline and not a budget**: a recipe that gave each of five targets
@@ -5573,11 +5587,17 @@ check-fuzz-overnight-selftest:
     # arm failed, and `prune-worktrees` then kept the tree for ever (§315.3).
     # The trap runs on TERM, INT and HUP too, but not on KILL, and what a killed
     # run leaves is `prune-worktrees`' to ignore.
+    #
+    # An arm run beside others writes under `<arm>-$tag` (see `beside`, at the
+    # end), so every name either kind of arm writes still ends in `-$tag`. The
+    # trap first waits for any such arm still running: one that went on writing
+    # after the files were taken away would leave its own behind.
     tag="overnight-selftest-$$-${RANDOM}"
     clean_up() {
+        wait
         rm -rf "$dir"
         rm -f fuzz/artifacts/*/*-"$tag"
-        rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-"$tag"
+        rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*"$tag"
     }
     trap clean_up EXIT
     mkdir -p "$dir/bin"
@@ -5778,12 +5798,16 @@ check-fuzz-overnight-selftest:
     # `fuzz-watermark` would move that tree onto the tip of `origin/main` — a
     # lane's tree, checked out from under it by its own gate. So `run` tells the
     # night it has already advanced, and the watermark is never asked here; the
-    # HEAD assertion after arm three is what says so. The arm that does want the
+    # HEAD assertion after the last arm is what says so. The arm that does want the
     # night to move does it in a fixture repository with an origin of its own.
     head_before=$(git rev-parse HEAD)
 
+    # Each arm is a function named after it, and `arm` holds that name while it
+    # runs, so a failure says which arm it came from even when several run at
+    # once. Which run at once, and why that is safe, is at the end.
+    arm=""
     fail() {
-        echo "fuzz-overnight drifted from its own fixtures: $1"
+        echo "fuzz-overnight drifted from its own fixtures, in arm $arm: $1"
         [ -f "$dir/log" ] && sed 's/^/    /' "$dir/log"
         exit 1
     }
@@ -5821,6 +5845,7 @@ check-fuzz-overnight-selftest:
     # what each target was *told*: one window, five times over, against five
     # shares that shrink. 16 still catches the mutation the clock can see —
     # handing every target the whole window and then running them in turn.
+    one_and_two() {
     : >"$dir/log"
     started=$(date +%s)
     status=0
@@ -5965,6 +5990,7 @@ check-fuzz-overnight-selftest:
     # `where_two_surfaces_cross`.
     [ "$(grep -c 'max_len=65536' "$dir/log")" -eq 1 ] \
         || fail "-max_len=65536 belongs to the reader's STEP-corpus branch and to nothing else"
+    }
 
     # A machine with nothing fetched at `RCAD_STEP_CORPUS` yet still fuzzes the
     # reader rather than failing on it: the directory is a bonus seed, not a
@@ -5980,6 +6006,7 @@ check-fuzz-overnight-selftest:
     # second, untagged `selftest-notag` directory, and the sancov guard a few
     # arms down finds *that* rlib by name (`find | head -n1`) instead of this
     # run's own — a stale, untagged fixture masking arm Sixteen's real one.
+    two_with_no_step_corpus() {
     : >"$dir/log"
     status=0
     RCAD_STEP_CORPUS="$dir/no-such-step-corpus" STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
@@ -6000,6 +6027,7 @@ check-fuzz-overnight-selftest:
         || fail "a night with no STEP corpus fetched yet still made a scratch directory for the reader"
     ! grep -q -- '-merge=1' "$dir/log" \
         || fail "a night with no STEP corpus fetched yet still ran the reader's nightly merge"
+    }
 
     # Three: a night with no crash-class artifacts exits 0, and the routine slow
     # unit every target leaves behind is named rather than folded into "nothing
@@ -6007,13 +6035,14 @@ check-fuzz-overnight-selftest:
     # a pile it never said was old. No clock assertions here, so the window only
     # has to be wide enough that every target gets a slice worth having.
     #
-    # Arms One and Two above already left `slow-unit-$tag` sitting in every
-    # target's real `fuzz/artifacts/` — the stub's default kind, rewritten
-    # unchanged by each of their own runs. §270.3's fix goes by name, so a name
-    # two arms have already written would no longer read as tonight's own find;
-    # clearing it here is what makes this arm's write the first this tag has
-    # made under these names, the freshness the old mtime check assumed for
-    # free.
+    # Cleared first because §270.3's fix goes by name: a `slow-unit-$tag` an
+    # earlier arm under this same tag had left in a target's real
+    # `fuzz/artifacts/` would no longer read as tonight's own find. Today none
+    # has, since this is the first arm run alone and the arms before it each
+    # ran under a tag of their own. The clearing is what keeps that true if the
+    # order changes, and what makes this arm's write the first this tag has made
+    # under these names, the freshness the old mtime check assumed for free.
+    three() {
     rm -f fuzz/artifacts/*/slow-unit-"$tag"
     : >"$dir/log"
     run 8 || fail "a night with no crash-class artifacts exited non-zero"
@@ -6024,13 +6053,16 @@ check-fuzz-overnight-selftest:
     grep -q "$(git rev-parse --short HEAD) ([0-9]* days old, [0-9?]* behind main)" "$dir/logs/latest" \
         || fail "the summary line does not say which commit was fuzzed and how far behind main it is, so a timer left on a stale one reads as a good night"
     rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    }
 
     # The tree the gate ran in is where it was. `fuzz-watermark` is the only
     # thing here that can move a worktree, and it follows the tip — so a `run`
     # that stopped saying the night had already advanced would have `just gate`
-    # check out somebody else's commit under them.
+    # check out somebody else's commit under them. Asked once every arm is done.
+    head_did_not_move() {
     [ "$(git rev-parse HEAD)" = "$head_before" ] \
         || fail "the night moved the tree it ran in, from $head_before to $(git rev-parse HEAD)"
+    }
 
     # Four: an overrun in one target costs the other four nothing.
     #
@@ -6045,6 +6077,7 @@ check-fuzz-overnight-selftest:
     # Six and eight, so the overrunner is eleven seconds into a six-second
     # window when it returns while the other four have been done since three.
     # The skip path it used to reach on the way is arm Nine's now.
+    four() {
     : >"$dir/log"
     : >"$dir/rendezvous"
     started=$(date +%s)
@@ -6081,9 +6114,11 @@ check-fuzz-overnight-selftest:
         || fail "the five targets never met at one instant, so they are still waiting for each other: $(grep '^rendezvous ' "$dir/log" | tr '\n' ' ')"
 
     [ "$elapsed" -le 20 ] || fail "one eight-second overrun cost the night $elapsed s"
+    }
 
     # Five: the hub is refused before anything is built, so a timer pointed at
     # it fails on the first night rather than on the night it matters.
+    five() {
     hub="$dir/hub"
     git init -q -b main "$hub"
     cp justfile "$hub/justfile"
@@ -6100,6 +6135,7 @@ check-fuzz-overnight-selftest:
         || fail "the hub was refused without saying why: $(cat "$dir/out")"
     [ ! -s "$dir/log" ] \
         || fail "the hub was refused only after cargo had been run"
+    }
 
     # Six: a night runs the justfile it checked out, and not the one it woke up
     # on. `just` reads the whole recipe body before the first line of it runs, so
@@ -6112,6 +6148,7 @@ check-fuzz-overnight-selftest:
     # The fixture says which body ran by making the two commits disagree: the
     # night starts on the real recipe and the commit it advances to carries a
     # `fuzz-overnight` that does nothing but name itself.
+    six_and_seven() {
     night_repo="$dir/night"
     git init -q -b main "$night_repo"
     mkdir -p "$night_repo/fuzz"
@@ -6186,6 +6223,7 @@ check-fuzz-overnight-selftest:
     # meaning "every target ran" if that ever changes.
     [ "$(grep -c 'fuzz run.*max_total_time' "$dir/log")" -eq "$targets" ] \
         || fail "the night that took over did not go on to fuzz all $targets targets: $(cat "$dir/out")"
+    }
 
     # Eight: with no `cargo` on the PATH at all, the night says that and does not
     # offer to install a nightly toolchain. This is 2026-09-15 exactly (§108.2):
@@ -6203,6 +6241,7 @@ check-fuzz-overnight-selftest:
     # directory. That list was tried and it is not a list anybody can finish:
     # the first attempt died on `id`, which this justfile runs in a top-level
     # backtick before any recipe body starts.
+    eight() {
     bare=""
     IFS=: read -ra path_parts <<<"$PATH"
     for part in "${path_parts[@]}"; do
@@ -6236,6 +6275,7 @@ check-fuzz-overnight-selftest:
     fi
     grep -q 'BUILD FAILED' "$dir/logs/latest" \
         || fail "a night that could not build did not say BUILD FAILED in the summary line"
+    }
 
     # Nine: a window with nothing left in it skips every target and says so,
     # rather than starting five fresh eight-hour runs past the deadline.
@@ -6244,6 +6284,7 @@ check-fuzz-overnight-selftest:
     # any more: the five no longer wait for each other, so there is no longer a
     # way for one of them to spend the window before the others are started.
     # A window of zero is what is left of that case, and it is the whole of it.
+    nine() {
     : >"$dir/log"
     status=0
     run 0 || status=$?
@@ -6252,6 +6293,7 @@ check-fuzz-overnight-selftest:
         || fail "a window with no seconds in it still started a target"
     grep -q 'TO LOOK AT.*no-time' "$dir/logs/latest" \
         || fail "a night that skipped every target did not say so: $(cat "$dir/logs/latest")"
+    }
 
     # Ten: what a target found is carried out of the worktree on a clock, and
     # not only when a target finishes.
@@ -6263,10 +6305,11 @@ check-fuzz-overnight-selftest:
     # waited for them would keep nothing from a night killed at 04:00 — strictly
     # worse than what it replaced.
     #
-    # Its own log root, because the arms above have already written this date's
-    # artifacts into `$dir/logs` and the question here is whether *this* run
-    # copied anything yet. Four seconds into a twelve-second window: the targets
-    # are six seconds from returning, so nothing but the clock can have done it.
+    # Its own log root, where nothing but this run's copier can have put
+    # anything, because the question here is whether *this* run copied anything
+    # yet. Four seconds into a twelve-second window: the targets are six seconds
+    # from returning, so nothing but the clock can have done it.
+    ten() {
     : >"$dir/log"
     copier_logs="$dir/logs-copier"
     RCAD_FUZZ_COPY_EVERY=1 STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
@@ -6289,12 +6332,14 @@ check-fuzz-overnight-selftest:
     wait "$night_pid" || fail "the night under the copier exited non-zero: $(cat "$dir/out")"
     [ "$carried" -ge 1 ] \
         || fail "four seconds into a twelve-second window nothing had been carried out of the worktree, so a night killed before its targets finish keeps nothing"
+    }
 
     # Eleven: exit 70 is not a crash. This is §133.7 as an arm, and it is the one
     # the recipe this replaced would fail: every target fuzzed the whole window,
     # found nothing, and exited 70 because the last of its jobs happened to time
     # out. Two real runs of the same command on the same corpus exited 70 and 0,
     # so a night that read the status would have called one of them a find.
+    eleven() {
     : >"$dir/log"
     status=0
     STUB_CRASH=run run 8 || status=$?
@@ -6302,12 +6347,14 @@ check-fuzz-overnight-selftest:
         || fail "every target exited 70 after fuzzing its whole window and the night reported $status: $(cat "$dir/logs/latest")"
     ! grep -q 'TO LOOK AT' "$dir/logs/latest" \
         || fail "a night whose targets exited 70 was reported as needing a look: $(cat "$dir/logs/latest")"
+    }
 
     # Twelve: a crash is found by what it wrote, not by what anything exited.
     # **The night exits 0 everywhere here** — which is fork mode's other half and
     # the more dangerous one: a crash in job 3 of 40 000 leaves the parent's
     # `ExitCode` holding whichever job was collected last, so a status mapping
     # that trusted zero would report this night clean.
+    twelve() {
     : >"$dir/log"
     status=0
     STUB_ARTIFACT_KIND=crash- STUB_ARTIFACT_KIND_TARGET=two_solids_fused_by_a_stranger \
@@ -6317,6 +6364,7 @@ check-fuzz-overnight-selftest:
     grep -q 'TO LOOK AT.*crashed:' "$dir/logs/latest" \
         || fail "the summary line does not say a crash was written: $(cat "$dir/logs/latest")"
     rm -f fuzz/artifacts/two_solids_fused_by_a_stranger/crash-"$tag"
+    }
 
     # Thirteen: and it is **tonight's** crash that fails tonight, not one from a
     # week ago. `fuzz/artifacts/` is gitignored and never cleaned, so it
@@ -6327,6 +6375,7 @@ check-fuzz-overnight-selftest:
     # Dated a day back rather than merely written before the run: the marker is
     # made seconds before the targets start, and a file written in the same second
     # cannot be told from one written just after it.
+    thirteen() {
     : >"$dir/log"
     mkdir -p fuzz/artifacts/where_two_surfaces_cross
     stale="fuzz/artifacts/where_two_surfaces_cross/crash-stale-$tag"
@@ -6341,6 +6390,7 @@ check-fuzz-overnight-selftest:
         || fail "a carried-over crash artifact triggered a look tonight: $(cat "$dir/logs/latest")"
     ! grep -q 'where_two_surfaces_cross:.*crash' "$dir/logs/latest" \
         || fail "a carried-over crash artifact was named as tonight's find: $(cat "$dir/logs/latest")"
+    }
 
     # Fourteen: a `timeout-` artifact is a measurement and not a fault (§135),
     # but it still has to be named, against a pile of old ones and not added to
@@ -6351,6 +6401,7 @@ check-fuzz-overnight-selftest:
     # seconds — the replay writes one before any fuzzing starts. A night that
     # failed on it would fail every night, and a night that always fails is a
     # night nobody reads.
+    fourteen() {
     : >"$dir/log"
     mkdir -p fuzz/artifacts/where_two_surfaces_cross
     old_timeout="fuzz/artifacts/where_two_surfaces_cross/timeout-old-$tag"
@@ -6371,6 +6422,7 @@ check-fuzz-overnight-selftest:
     [ -f "$night/artifacts/where_two_surfaces_cross/timeout-$tag" ] \
         || fail "a timed-out input was not carried out of the worktree, so nobody can see a new one appear"
     rm -f fuzz/artifacts/where_two_surfaces_cross/timeout-"$tag"
+    }
 
     # Fifteen: **a hand run gets neither flag**, and that is not tidiness.
     # `-ignore_timeouts` is a fork-mode flag, so without `-fork` a timeout kills
@@ -6381,6 +6433,7 @@ check-fuzz-overnight-selftest:
     # Run against `fuzz-target` through `fuzz` rather than through `fuzz-overnight`,
     # because the hand path is the one call site the night never takes. It lives in
     # this arm's file because this is where the stub `cargo` is.
+    fifteen() {
     : >"$dir/log"
     STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" {{just_executable()}} fuzz 2 >"$dir/out" 2>&1 \
         || fail "a hand-run \`just fuzz\` failed: $(cat "$dir/out")"
@@ -6393,6 +6446,7 @@ check-fuzz-overnight-selftest:
         || fail "a hand run was given a per-input timeout, which without -fork kills it on its own corpus replay"
     ! grep -q 'fork=' "$dir/log" \
         || fail "a hand run was given -fork, so a crash no longer stops it and prints"
+    }
 
     # Sixteen: the guard that reads `rcad-fuzz-timing`'s own rlib back after the
     # build (docs/decisions.d/267.4, §292) fails the night loudly when that rlib
@@ -6401,6 +6455,12 @@ check-fuzz-overnight-selftest:
     # silently. The stub `cargo` above writes this arm's fixture rlib itself
     # (`STUB_TIMING_SANCOV=1`), so this is a test of the guard and not of the
     # stand-in, which 267.5 already measured on a real build.
+    #
+    # The guard reads whichever rlib `find | head -n1` meets first, so this arm
+    # runs alone, after the clean rlibs the arms run beside each other left
+    # under their own tags are gone (see the end): any one of those, met first,
+    # would pass this night and fail the arm.
+    sixteen() {
     : >"$dir/log"
     status=0
     STUB_TIMING_SANCOV=1 run 8 || status=$?
@@ -6412,14 +6472,17 @@ check-fuzz-overnight-selftest:
         || fail "an instrumented timing rlib did not read as a build failure in the summary: $(cat "$dir/logs/latest")"
     [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
         || fail "the night fuzzed targets after finding a sancov reference in rcad-fuzz-timing's rlib"
+    }
 
     # Seventeen: the same guard passes a night whose rlib has none, which is the
     # ordinary case — every arm above already relies on this, and this one says
     # so directly rather than leaving it to be inferred from the rest passing.
+    seventeen() {
     : >"$dir/log"
     run 8 || fail "a night with a clean timing rlib failed: $(cat "$dir/out")"
     ! grep -q 'sancov reference' "$dir/out" \
         || fail "a clean timing rlib was still read as carrying a sancov reference"
+    }
 
     # Eighteen: the reader's nightly merge itself (§295.7, Q237) — folding
     # tonight's scratch corpus into the small persistent one at -max_len=5110,
@@ -6429,6 +6492,7 @@ check-fuzz-overnight-selftest:
     # RCAD_FUZZ_TIMINGS unset (Q263, §295.6, §295.7), since it replays finds
     # through timed() the same as any other draw, and it writes its own
     # wall-clock seconds to reader-corpus-merge.log.
+    eighteen() {
     : >"$dir/log"
     run 8 || fail "a night with the reader's STEP corpus seeded in failed: $(cat "$dir/out")"
     [ "$(grep -c -- '-merge=1' "$dir/log")" -eq 1 ] \
@@ -6441,12 +6505,14 @@ check-fuzz-overnight-selftest:
         || fail "the merge's wall-clock seconds were not written to reader-corpus-merge.log: $(cat "$dir/logs/$(date +%Y-%m-%d)/reader-corpus-merge.log" 2>/dev/null || true)"
     [ ! -d "$dir/corpus/no_step_file_makes_the_reader_panic-scratch" ] \
         || fail "the scratch directory survived a successful merge"
+    }
 
     # Nineteen: a failing merge — anything that makes libFuzzer's own
     # `-merge=1` exit non-zero — never touches the persistent corpus and never
     # silently drops tonight's scratch directory: the scratch is moved aside
     # with a timestamp, the persistent corpus is left exactly as it was, and
     # the night names it under TO LOOK AT (Q237 item 5).
+    nineteen() {
     : >"$dir/log"
     reader_persistent="$dir/corpus/no_step_file_makes_the_reader_panic"
     rm -rf "$reader_persistent"
@@ -6466,6 +6532,7 @@ check-fuzz-overnight-selftest:
     grep -q 'TO LOOK AT.*reader-merge:failed' "$dir/logs/latest" \
         || fail "a failing merge was not named in the summary: $(cat "$dir/logs/latest")"
     rm -rf "$reader_persistent" "$failed_scratch"
+    }
 
     # Twenty: a scratch directory left over from a night that died before its
     # own merge — the whole `fuzz-overnight` process killed between its
@@ -6477,6 +6544,7 @@ check-fuzz-overnight-selftest:
     # in together at the end of `fuzz-overnight` — simpler than teaching
     # `fuzz-target`, which has no `to_look_at` of its own, to name a leftover
     # directory in the night's summary.
+    twenty() {
     : >"$dir/log"
     scratch_dir="$dir/corpus/no_step_file_makes_the_reader_panic-scratch"
     rm -rf "$scratch_dir"
@@ -6489,6 +6557,7 @@ check-fuzz-overnight-selftest:
     [ -f "$scratch_dir/leftover" ] \
         || fail "a scratch directory left over from an unmerged night was thrown away instead of kept for tonight's merge"
     rm -rf "$scratch_dir"
+    }
 
     # Twenty-one: the merge itself is bounded, so a merge that hangs takes the
     # failure path rather than running past the night's own outer deadline
@@ -6497,6 +6566,7 @@ check-fuzz-overnight-selftest:
     # `RCAD_FUZZ_MERGE_TIMEOUT` overrides the real 120 s bound for exactly this
     # arm; nothing else in this file sets it, so every other arm's merge keeps
     # the real one.
+    twenty_one() {
     : >"$dir/log"
     reader_persistent="$dir/corpus/no_step_file_makes_the_reader_panic"
     rm -rf "$reader_persistent"
@@ -6514,6 +6584,7 @@ check-fuzz-overnight-selftest:
     grep -q 'TO LOOK AT.*reader-merge:failed' "$dir/logs/latest" \
         || fail "a merge killed by its own timeout was not named in the summary: $(cat "$dir/logs/latest")"
     rm -rf "$reader_persistent" "$failed_scratch"
+    }
 
     # Twenty-two: the corpus-name lists (Q53) are written before any target
     # starts, name exactly what was already in each target's writable corpus
@@ -6522,6 +6593,7 @@ check-fuzz-overnight-selftest:
     # of taking the list first: §240.3's rewrite gives an old file a new mtime
     # under its old name, so only a list written *before* the night's own
     # merge runs can say a given name was already there.
+    twenty_two() {
     : >"$dir/log"
     night="$dir/logs/$(date +%Y-%m-%d)"
     rm -rf "$dir/corpus"
@@ -6561,6 +6633,7 @@ check-fuzz-overnight-selftest:
         || fail "STUB_CORPUS_ADD did not write into the target's own writable corpus, so the exclusion above proves nothing"
     ! grep -q '^found-tonight$' "$night/corpus-names/where_two_surfaces_cross" \
         || fail "the corpus-names list named a file this same run added, not just what was there before it started"
+    }
 
     # Twenty-three: an artifact already sitting under `fuzz/artifacts/<target>/`
     # before `.started` is written, and then rewritten under that same name
@@ -6575,11 +6648,12 @@ check-fuzz-overnight-selftest:
     # second time — its mtime lands *after* `.started`, indistinguishable by
     # mtime alone from a genuine new find, which is exactly what the old check
     # could not do and this one, going by name, does not need to.
-    # Every earlier arm's own `run` also rewrote `slow-unit-$tag` into every
-    # target's real `fuzz/artifacts/`, none of it cleared since: cleared here
-    # so `no_model_makes_the_writer_panic`'s write below is this tag's first
-    # under that name, and the "still counts as new" half of this arm proves
-    # what it claims to.
+    # Every arm run alone before this one also wrote `slow-unit-$tag` into
+    # every target's real `fuzz/artifacts/`, none of it cleared since: cleared
+    # here so `no_model_makes_the_writer_panic`'s write below is this tag's
+    # first under that name, and the "still counts as new" half of this arm
+    # proves what it claims to.
+    twenty_three() {
     rm -f fuzz/artifacts/*/slow-unit-"$tag"
     : >"$dir/log"
     mkdir -p fuzz/artifacts/where_two_surfaces_cross
@@ -6602,6 +6676,7 @@ check-fuzz-overnight-selftest:
     line=$(grep -o 'no_model_makes_the_writer_panic: [0-9]* slow-unit' "$dir/logs/latest" || true)
     [ "$line" = "no_model_makes_the_writer_panic: 1 slow-unit" ] \
         || fail "a target with nothing before tonight was not counted as new: $(cat "$dir/logs/latest")"
+    }
 
     # Twenty-four: the scan for a timing-crate call that reaches libFuzzer's
     # memcmp-family hook from outside `SlowRun::is` (docs/decisions.d/273,
@@ -6611,6 +6686,7 @@ check-fuzz-overnight-selftest:
     # and not of the scan's own logic, which a stub can never exercise
     # because it never disassembles a real binary; docs/decisions.d/273
     # demonstrates the scan itself against a real build of 3319f838.
+    twenty_four() {
     : >"$dir/log"
     status=0
     STUB_TIMING_HOOKED=1 run 8 || status=$?
@@ -6622,15 +6698,96 @@ check-fuzz-overnight-selftest:
         || fail "a hooked timing-crate call did not read as a build failure in the summary: $(cat "$dir/logs/latest")"
     [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
         || fail "the night fuzzed targets after finding a timing-crate call reaching a hook"
+    }
 
     # Twenty-five: the same check passes a night whose scan finds nothing to
     # report, which is the ordinary case — every arm above already relies on
     # this, since `run()` defaults every one of them to the clean stub, and
     # this one says so directly.
+    twenty_five() {
     : >"$dir/log"
     run 8 || fail "a night with a clean timing-hooked-calls scan failed: $(cat "$dir/out")"
     ! grep -q 'reaches a memcmp-family hook' "$dir/out" \
         || fail "a clean scan was still read as finding a hooked call"
+    }
+
+    # **Which arms run at once, and why each still asserts what it says.** Run
+    # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
+    # most of them run beside each other.
+    #
+    # An arm run beside others gets a directory of its own, as `$dir`, and a
+    # tag of its own, `<arm>-$tag`, as `$tag`. So its log, out, logs, corpus,
+    # rendezvous file and fixture repositories are its own, and so are the
+    # artifact names its stub writes and the timing rlib its build writes. One
+    # thing is shared, and no arm can be given its own: the real
+    # `fuzz/artifacts/`, which every night that gets as far as its summary
+    # scans whole. A night beside others sees their slow units as new tonight.
+    # That decides which arms may share the tree:
+    #
+    #   - Beside each other: arms whose stubs write slow units only, or
+    #     Fourteen's timeouts, and whose assertions no extra slow unit or
+    #     timeout can change. None of them counts slow units, and none writes
+    #     a crash, which would fail every night that asserts it exited 0.
+    #   - Alone, after them: Three and Twenty-three count slow units exactly,
+    #     Twelve and Thirteen write crashes, and Sixteen writes the sancov rlib
+    #     that any other night's guard could meet first.
+    #
+    # The clock arms. One, Four and Ten start first, together. One's ceiling
+    # of 16 s is about 10 s above what it takes, and Four's 20 s about 9 s
+    # above; extra arms cost each of them only CPU time. One's grants are read
+    # against its own `started`, and Four's five targets meet at its own
+    # barrier, which waits up to 15 s for them.
+    # Ten's check is the tight one: its copier must have copied by four
+    # seconds in, and it first copies a second after its night starts it, so
+    # a burst of fifteen arms starting beside it is what could make it late.
+    # So the rest start only once Ten has returned, while One and Four are
+    # still asleep. None of the rest asserts on the clock.
+    beside() {
+        local name
+        for name in "$@"; do
+            (
+                arm="$name"
+                dir="$dir/$name"
+                tag="$name-$tag"
+                mkdir "$dir"
+                ln -s ../bin "$dir/bin"
+                ln -s ../step-corpus "$dir/step-corpus"
+                "$name"
+            ) >"$dir/$name.out" 2>&1 &
+            running[$name]=$!
+        done
+    }
+    # Waits for the arms named, or for every one still running, and prints
+    # what a failed arm printed. Its `fail` line names it.
+    settle() {
+        local name names=("$@") failed=0
+        [ "$#" -gt 0 ] || names=("${!running[@]}")
+        for name in "${names[@]}"; do
+            wait "${running[$name]}" || { failed=1; cat "$dir/$name.out"; }
+            unset "running[$name]"
+        done
+        [ "$failed" -eq 0 ] || exit 1
+    }
+    alone() {
+        arm="$1"
+        "$1"
+    }
+
+    declare -A running=()
+    beside one_and_two four ten
+    settle ten
+    beside two_with_no_step_corpus five six_and_seven eight nine eleven \
+        fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
+        twenty_two twenty_four twenty_five
+    settle
+    rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
+    alone three
+    alone twelve
+    alone thirteen
+    alone sixteen
+    alone twenty_three
+    arm="after the last"
+    head_did_not_move
 
     # Twenty-three leaves its `timeout-` for `clean_up` rather than removing
     # it itself. That is how this recipe checks that the trap takes every kind
@@ -6639,6 +6796,12 @@ check-fuzz-overnight-selftest:
     clean_up
     left=$(find fuzz/artifacts -name "*-$tag")
     [ -z "$left" ] || { echo "the trap leaves this run's artifacts behind: $left"; exit 1; }
+
+    # Twenty-six: the whole selftest inside its bound (§15.6), counted by bash
+    # from the moment it started, so time lost anywhere in it counts.
+    bound=60
+    [ "$SECONDS" -le "$bound" ] \
+        || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: arms that should run beside each other are running in turn, or one of them is waiting on something new"; exit 1; }
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
