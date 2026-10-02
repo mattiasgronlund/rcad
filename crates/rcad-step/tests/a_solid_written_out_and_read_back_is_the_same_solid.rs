@@ -693,6 +693,209 @@ fn a_bar_sliced_along_its_length(model: &mut Model, side: Side) -> SolidKey {
         .unwrap_or_else(|why| panic!("the bar sliced along its length is not sound: {why}"))
 }
 
+/// A slab with a round scoop out of its top, whose curved face is a pipe used
+/// the other way round, is written with each loop closing and comes back the
+/// same.
+///
+/// The slab is `|x| ≤ 4`, `−6 ≤ y ≤ −3`, four tall, less the pipe of radius
+/// five about `z`, which takes a scoop down to `y = −5`. Its curved face has the
+/// material outside the pipe, so the shell uses it reversed, and its one wire
+/// is four edges: the two short arcs and two straight sides. A wire of a face
+/// used reversed comes out of `WireView::steps` walked the other way, and the
+/// writer used to write that walk with each coedge's own way along its edge,
+/// so the loop it wrote did not close and the reader refused it by name
+/// (`ADraftWireDoesNotClose`) — what stopped `SW_NKK_BB15AH` and the two
+/// `Relay_StandexMeder_DIP` relays once Q766 let them past the writer.
+///
+/// Not [`Covered::the_same_solid_comes_back`], because the fuse cannot cut the
+/// slab as built — a block through its flat back leaves a decision the fuse
+/// cannot settle, before any round trip — so the cut is required to come out
+/// the same on both sides, refusal and all.
+#[test]
+fn a_slab_with_a_round_scoop_out_of_it_is_written_with_loops_that_close_and_comes_back_the_same() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 6.0).expect("a working size"));
+    let built = a_slab_with_a_round_scoop_out_of_it(&mut model);
+    assert!(
+        model
+            .solid(built)
+            .expect("this model made the key")
+            .faces()
+            .any(|face| face.orientation().is_reversed() && face.surface().as_plane().is_none()),
+        "the scoop is a curved face used reversed, or this test does not reach the writer's walk"
+    );
+    assert_eq!(
+        arcs_between_a_flat_face_and_a_pipe(&model, built),
+        [1, 1],
+        "one arc flat face first and one pipe first"
+    );
+
+    let text = rcad_step::write(&model, "a slab with a round scoop out of it")
+        .unwrap_or_else(|why| panic!("the slab is not written: {why}"));
+    let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("the slab is refused on the way back in: {why}"));
+    let [(_, came)] = import.solids() else {
+        panic!("one solid came back as {}", import.solids().len());
+    };
+    let came = *came;
+    let there = import.model();
+    there
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("the slab comes back unsound: {why}"));
+    assert_eq!(there.scale(), model.scale(), "the scale moved");
+
+    let [went_solid, came_solid] = [(&model, built), (there, came)]
+        .map(|(from, key)| from.solid(key).expect("this model made the key"));
+    assert_eq!(
+        where_its_corners_are(went_solid),
+        where_its_corners_are(came_solid),
+        "corners"
+    );
+    let deflection = the_same_mesh_on_both_sides();
+    let [here, back] = [went_solid, came_solid].map(|solid| {
+        solid
+            .measure(deflection, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the slab does not measure: {why}"))
+    });
+    assert_eq!(here.volume(), back.volume(), "volume");
+    assert_eq!(here.surface_area(), back.surface_area(), "area");
+    assert_eq!(here.centroid(), back.centroid(), "centroid");
+
+    let cutter = |model: &mut Model| a_block(model, [2.0, 1.5, 2.0], Vector::new(-1.0, -7.0, 1.0));
+    let [cut_here, cut_back] = [(&model, built), (there, came)].map(|(from, key)| {
+        cut_by_a_third_solid(from, key, &cutter, deflection)
+            .map(|pieces| {
+                pieces
+                    .iter()
+                    .map(|piece| (piece.volume(), piece.surface_area(), piece.centroid()))
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|why| why.to_string())
+    });
+    assert_eq!(cut_here, cut_back, "the cut");
+}
+
+/// The slab of the test above, built face by face: bottom cap, scoop, top cap,
+/// then the three flat sides.
+fn a_slab_with_a_round_scoop_out_of_it(model: &mut Model) -> SolidKey {
+    use rcad_geom::{Axis, Cylinder, HalfSpace, Orientation, Picker};
+    use rcad_topo::{DraftStep, SolidBuilder};
+
+    let height = 4.0;
+    let a_plane = |at: Point, facing: Vector| {
+        Plane::from_point_and_normal(at, facing).expect("an axis direction has length")
+    };
+    let bottom = a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0));
+    let top = a_plane(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0));
+    let the_short_arc_on = |cap: Plane| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cap),
+        picked_by: [Picker::from(
+            HalfSpace::through_a_point_facing(
+                Point::new(0.0, -3.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+            )
+            .expect("an axis direction has length"),
+        )]
+        .into(),
+    };
+
+    let mut builder = SolidBuilder::new();
+    let corners = [
+        (4.0, -3.0, 0.0),
+        (-4.0, -3.0, 0.0),
+        (4.0, -3.0, height),
+        (-4.0, -3.0, height),
+        (4.0, -6.0, 0.0),
+        (-4.0, -6.0, 0.0),
+        (4.0, -6.0, height),
+        (-4.0, -6.0, height),
+    ]
+    .map(|(x, y, z)| {
+        builder
+            .add_vertex(Point::new(x, y, z))
+            .expect("a finite corner")
+    });
+    let edges = [
+        (0, 1, the_short_arc_on(bottom)),
+        (2, 3, the_short_arc_on(top)),
+        (0, 2, EdgeRun::Straight),
+        (1, 3, EdgeRun::Straight),
+        (4, 5, EdgeRun::Straight),
+        (6, 7, EdgeRun::Straight),
+        (0, 4, EdgeRun::Straight),
+        (1, 5, EdgeRun::Straight),
+        (2, 6, EdgeRun::Straight),
+        (3, 7, EdgeRun::Straight),
+        (4, 6, EdgeRun::Straight),
+        (5, 7, EdgeRun::Straight),
+    ]
+    .map(|(from, to, run)| {
+        builder
+            .add_edge(corners[from], corners[to], run)
+            .expect("an edge between two corners")
+    });
+
+    let (forward, back) = (Orientation::Forward, Orientation::Reversed);
+    let faces: [(Surface, Orientation, &[(usize, Orientation)]); 6] = [
+        (
+            Surface::Plane(bottom),
+            forward,
+            &[(4, forward), (7, back), (0, back), (6, forward)],
+        ),
+        (
+            Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a positive radius")),
+            back,
+            &[(0, forward), (3, forward), (1, back), (2, back)],
+        ),
+        (
+            Surface::Plane(top),
+            forward,
+            &[(8, back), (1, forward), (9, forward), (5, back)],
+        ),
+        (
+            Surface::Plane(a_plane(
+                Point::new(4.0, 0.0, 0.0),
+                Vector::new(1.0, 0.0, 0.0),
+            )),
+            forward,
+            &[(6, back), (2, forward), (8, forward), (10, back)],
+        ),
+        (
+            Surface::Plane(a_plane(
+                Point::new(-4.0, 0.0, 0.0),
+                Vector::new(-1.0, 0.0, 0.0),
+            )),
+            forward,
+            &[(7, forward), (11, forward), (9, back), (3, back)],
+        ),
+        (
+            Surface::Plane(a_plane(
+                Point::new(0.0, -6.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+            )),
+            forward,
+            &[(4, back), (10, forward), (5, forward), (11, back)],
+        ),
+    ];
+    let mut skin = Vec::with_capacity(faces.len());
+    for (surface, used, steps) in faces {
+        let walked: Vec<DraftStep> = steps
+            .iter()
+            .map(|&(which, way)| {
+                DraftStep::Along(builder.add_coedge(edges[which], way).expect("a coedge"))
+            })
+            .collect();
+        let wire = builder.add_wire(&walked).expect("a wire that closes");
+        skin.push((builder.add_face(surface, &[wire]).expect("a face"), used));
+    }
+    builder.add_shell(&skin).expect("a shell");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the slab with a round scoop out of it is not sound: {why}"))
+}
+
 /// How many open edges of `solid` that bend run between a flat face and a
 /// pipe: with the flat face walked first, and with the pipe walked first. That
 /// is the order the writer is handed the two faces in, since it walks the

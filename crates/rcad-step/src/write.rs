@@ -320,6 +320,17 @@ impl Writing {
     /// has just walked**, the way a real file writes a ball, and the reader puts
     /// it back at exactly that turn. See [`CannotWrite::AWireThatStandsStillAtAPole`]
     /// for the poles that are refused instead.
+    ///
+    /// **A loop is written as the reader will store it.** The reader keeps a
+    /// file's loop as the wire and, for a curved face whose `same_sense` is
+    /// false, uses the face reversed (`Walk::describe_the_face`). A wire of a
+    /// face used reversed comes out of `WireView::steps` walked the other way
+    /// round with each edge turned, so for such a face the walk is turned back
+    /// to the order the wire is stored in, each step with it. Every other face
+    /// is written as walked, each edge the way the walk takes it — a plane used
+    /// reversed is written already turned round, which the reader uses forwards.
+    /// Writing the walk in one sense and each edge's way along it in the other
+    /// wrote a loop that does not close, and the reader refused it by name.
     fn solid_from_shell(&mut self, model: &Model, shell: ShellView<'_>) -> Result<(), CannotWrite> {
         let mut either_side: HashMap<EdgeKey, Vec<Surface>> = HashMap::new();
         for face in shell.faces() {
@@ -362,19 +373,23 @@ impl Writing {
 
             let mut bounds = Vec::with_capacity(face.wire_count());
             for (which, wire) in face.wires().enumerate() {
-                let mut steps = Vec::with_capacity(wire.step_count());
-                for step in wire.steps() {
+                let mut walk: Vec<WireStepView<'_>> = wire.steps().collect();
+                if turned {
+                    walk.reverse();
+                }
+                let mut steps = Vec::with_capacity(walk.len());
+                for step in walk {
                     // Every pole left here was found to be one the file can
                     // leave unwritten by the pass above.
                     let WireStepView::Along(coedge) = step else {
                         continue;
                     };
                     let key = coedge.edge().key();
-                    let forwards = !coedge.orientation_on_its_edge().is_reversed();
+                    let along_its_edge = !coedge.edge().orientation().is_reversed();
                     let edge = match edges.get(&key) {
                         Some(&already) => already,
                         None => {
-                            let (start, end) = if forwards {
+                            let (start, end) = if along_its_edge {
                                 (coedge.start(), coedge.end())
                             } else {
                                 (coedge.end(), coedge.start())
@@ -391,9 +406,10 @@ impl Writing {
                             written
                         }
                     };
-                    steps.push(
-                        self.entity(&format!("ORIENTED_EDGE('',*,*,#{edge},{})", flag(forwards))),
-                    );
+                    steps.push(self.entity(&format!(
+                        "ORIENTED_EDGE('',*,*,#{edge},{})",
+                        flag(along_its_edge != turned)
+                    )));
                 }
                 let ring = self.entity(&format!("EDGE_LOOP('',({}))", references(&steps)));
                 let keyword = if which == 0 {

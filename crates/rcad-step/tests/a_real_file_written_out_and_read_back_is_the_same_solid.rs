@@ -121,30 +121,30 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     assert_pinned_round_trips(&round_tripped);
 }
 
-/// The 106 imported KiCad files this kernel can write back out and read back as
+/// The 109 imported KiCad files this kernel can write back out and read back as
 /// the same solid, out of the 164 that import.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
 /// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
 /// assertion, which prints what appeared and what disappeared.
 ///
-/// # What stops the 58 that are missing
+/// # The 55 that are missing are the writer's gap and not the reader's
 ///
-/// Fifty-five fail as *writer refuses: an edge … names no curve*, and the run
-/// prints how many for each pair of surfaces. A file only reaches here
+/// Every one of them fails as *writer refuses: an edge … names no curve*, and
+/// the run prints how many for each pair of surfaces. A file only reaches here
 /// **after** importing and passing the full sweep, so the solid is sound and
 /// the writer simply has no curve to write for an edge between those faces.
-/// The other three — the two `Relay_StandexMeder_DIP` relays and
-/// `SW_NKK_BB15AH` — are written, and the reader refuses what was written
-/// because a loop of a pipe face used reversed does not close.
 ///
-/// **Forty-seven came in with Q766**: the five `Fuse_` chips, twenty-seven
-/// pin headers, twelve DIP switches and three relays. The writer used to
-/// refuse every arc where a flat face stops short of right round a pipe, and
-/// that was the first thing 80 of the 105 then missing stopped on; it now
-/// writes the circle or ellipse the face's plane crosses the pipe in, turned so
-/// that the arc the reader picks is the one the model holds
-/// (`Crossing::the_way_round_the_arc` in `write.rs`).
+/// **Fifty came in with Q766**: the five `Fuse_` chips, twenty-seven pin
+/// headers, twelve DIP switches, five relays and `SW_NKK_BB15AH`. The writer
+/// used to refuse every arc where a flat face stops short of right round a
+/// pipe, and that was the first thing 80 of the 105 then missing stopped on; it
+/// now writes the circle or ellipse the face's plane crosses the pipe in,
+/// turned so that the arc the reader picks is the one the model holds
+/// (`Crossing::the_way_round_the_arc` in `write.rs`). Three of the fifty — the
+/// two `Relay_StandexMeder_DIP` relays and `SW_NKK_BB15AH` — then wrote a loop
+/// of a pipe face used reversed that did not close, until the writer walked
+/// such a loop the way the reader stores it.
 ///
 /// **Fourteen came in with Q763**: nine `LED_D1.8mm` horizontals, the two
 /// `LED_D2.0mm` flat tops and three Finder relays. Each holds a round bar whose
@@ -161,7 +161,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// thirteen (§115), the equal-pipes lane's two and the homogeneous-cylinder
 /// lane's two (§118.10) — runs into the same writer.
 /// Closing that is a writer lane and not this list's business. What this list is
-/// for is that the 106 which do round trip cannot quietly become 105.
+/// for is that the 109 which do round trip cannot quietly become 108.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -245,6 +245,8 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "Relay_SPDT_StandexMeder_SIL_Form1C.step",
     "Relay_SPST_StandexMeder_SIL_Form1A.step",
     "Relay_SPST_StandexMeder_SIL_Form1B.step",
+    "Relay_StandexMeder_DIP_HighProfile.step",
+    "Relay_StandexMeder_DIP_LowProfile.step",
     "Relay_StandexMeder_UMS.step",
     "SW_DIP_SPSTx01_Piano_10.8x4.1mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx02_Piano_10.8x6.64mm_W7.62mm_P2.54mm.step",
@@ -269,6 +271,7 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "SW_DIP_SPSTx11_Piano_CTS_Series194-11MSTN_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx12_Piano_10.8x32.04mm_W7.62mm_P2.54mm.step",
     "SW_DIP_SPSTx12_Piano_CTS_Series194-12MSTN_W7.62mm_P2.54mm.step",
+    "SW_NKK_BB15AH.step",
 ];
 
 /// Every KiCad file that round-trips must be one of
