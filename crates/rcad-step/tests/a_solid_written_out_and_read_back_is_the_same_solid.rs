@@ -31,7 +31,7 @@
 //! answer. The test asserts the two scales came out equal rather than assuming
 //! it.
 
-use rcad_geom::{Deflection, Isometry, Plane, Point, Scale, Unit, Vector};
+use rcad_geom::{Deflection, Isometry, Plane, Point, Scale, Surface, Unit, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{CannotWrite, Import, StepFile};
 use rcad_topo::{Measurement, Model, ProfileBuilder, Rule, SolidKey};
@@ -253,48 +253,182 @@ fn a_ball_turned_off_z_is_refused_at_its_pole() {
     );
 }
 
-/// A bar cut off by a slanted plane meets it in an **ellipse**, and two
-/// surfaces that cross in an ellipse are two surfaces this writer will not
-/// guess a circle from.
+/// A bar cut off by a slanted plane meets it in an **ellipse**, and it is
+/// written as one and comes back the same bar.
 ///
-/// This is the demonstration [`CannotWrite::ACurveTheFacesEitherSideOfItDoNotName`]
-/// needs (§16.10): the refusal is reachable from a shape this kernel builds,
-/// and it fires on a pair the writer *can* name when the plane is square across
-/// the pipe — the round bar above is that same pair, accepted. So the check is
-/// asking something.
-///
-/// The gap it stands for is the writer reading the run only where it is
-/// straight or a ball's seam: the model knows exactly what this edge runs
-/// along, and `EdgeView::run` is `pub` and hands out the located run, since
-/// `EdgeRun::transformed` landed — the function §42.5's lane reported missing
-/// for a placement argument and §42.10's for a turned arc.
+/// The plane leans `θ` off square with `tan θ = 1/2`, so the ellipse is the
+/// pipe's radius `2` one way and `2/cos θ = √5` the other. Until Q409 the
+/// writer refused every cap that was not exactly square to its pipe.
 #[test]
-fn an_ellipse_where_a_slanted_cap_meets_a_bar_is_a_curve_the_writer_cannot_name() {
+fn a_bar_with_a_slanted_cap_is_written_with_an_ellipse_and_comes_back_the_same() {
+    let build = |model: &mut Model| {
+        let flat =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0))
+                .expect("the z axis is a unit normal");
+        let slanted =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 8.0), Vector::new(0.0, 1.0, 2.0))
+                .expect("a normal with a length");
+        model
+            .add_bar_cut_off_by(
+                2.0,
+                [flat, slanted],
+                &Isometry::identity(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar with one slanted cap")
+    };
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 8.0).expect("a working size"));
+    build(&mut model);
+    let text = rcad_step::write(&model, "a bar with a slanted cap")
+        .unwrap_or_else(|why| panic!("the slanted cap is not written: {why}"));
+    assert_eq!(
+        text.matches("ELLIPSE(").count(),
+        1,
+        "one cap leans and one is square, so one ellipse: {text}"
+    );
+
+    let mut covered = Covered::new();
+    covered.the_same_solid_comes_back(
+        "a bar of radius two with a slanted cap",
+        Scale::new(Unit::Millimetre, 8.0).expect("a working size"),
+        &build,
+        &|model| a_block(model, [2.0, 2.0, 2.0], Vector::new(1.0, -1.0, 3.0)),
+    );
+    covered.report("a bar with a slanted cap");
+}
+
+/// A bar whose axis leans off its caps' normals by a subnormal angle is
+/// written with a circle about each cap's normal and comes back the same bar.
+///
+/// The writer fuzzer's byte-nudged bars had such axes (Q409): an `x` part of
+/// `4.78e-299`, `6.2e-320` or `8e-323` and caps square to `z`. The cap's normal
+/// then crosses the axis to a vector that is not zero, which the writer used to
+/// refuse. At that lean the ellipse the cap cuts has two sizes that round to
+/// the same `f64`, so it is a circle in the cap's plane.
+///
+/// **Two round trips, and the second is the one compared bit for bit.** The bar
+/// is built turned, and a turned solid is measured in its own frame, where its
+/// caps lean and its axis does not; the bar read back has no turn, so its mesh
+/// is another mesh and its centroid differs in the sixteenth digit for that
+/// reason alone. The bar read back from the first file is the same shape
+/// without the turn — it is checked to lean the same way — and it is written
+/// and read back again and compared corner for corner and bit for bit.
+///
+/// Not [`Covered::the_same_solid_comes_back`], because a fuse with this bar
+/// refuses for a reason of its own: the cut's crossing with the leaning pipe
+/// comes in two pieces no `f64` half-space tells apart. It is required to
+/// refuse the same way on both sides.
+#[test]
+fn a_bar_whose_axis_leans_off_its_caps_by_a_subnormal_comes_back_the_same() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    let mut model = Model::new(Scale::new(Unit::Millimetre, 8.0).expect("a working size"));
-    let flat = Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0))
-        .expect("the z axis is a unit normal");
-    let slanted =
-        Plane::from_point_and_normal(Point::new(0.0, 0.0, 8.0), Vector::new(0.0, 1.0, 2.0))
-            .expect("a normal with a length");
+    let round_trip = |called: &str, model: &Model, log: &mut ProvenanceLog| {
+        let text = rcad_step::write(model, called)
+            .unwrap_or_else(|why| panic!("{called} is not written: {why}"));
+        let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+        let import = Import::read(&file, &policy, log)
+            .unwrap_or_else(|why| panic!("{called} is refused on the way back in: {why}"));
+        let [(_, read_back)] = import.solids() else {
+            panic!("{called} came back as {} solids", import.solids().len());
+        };
+        let read_back = *read_back;
+        import
+            .model()
+            .validate(&policy, log)
+            .unwrap_or_else(|why| panic!("{called} comes back unsound: {why}"));
+        (import.model().clone(), read_back)
+    };
+    for lean in [4.78e-299, 6.2e-320, 8e-323] {
+        let called = format!("a bar leaning {lean:e} off its caps");
+        let mut turned = Model::new(Scale::new(Unit::Millimetre, 8.0).expect("a working size"));
+        let bar = a_bar_leaning_off_its_caps(&mut turned, lean);
+        the_axis_leans_off_a_cap_by(&turned, bar, lean);
+
+        let (once, went) = round_trip(&called, &turned, &mut log);
+        the_axis_leans_off_a_cap_by(&once, went, lean);
+        let (twice, came) = round_trip(&called, &once, &mut log);
+
+        let [went, came] = [(&once, went), (&twice, came)]
+            .map(|(model, key)| model.solid(key).expect("this model made the key"));
+        assert_eq!(
+            where_its_corners_are(went),
+            where_its_corners_are(came),
+            "{called}: corners"
+        );
+        let deflection = the_same_mesh_on_both_sides();
+        let [here, back] = [went, came].map(|solid| {
+            solid
+                .measure(deflection, &policy, &mut log)
+                .unwrap_or_else(|why| panic!("{called} does not measure: {why}"))
+        });
+        assert_eq!(here.volume(), back.volume(), "{called}: volume");
+        assert_eq!(here.surface_area(), back.surface_area(), "{called}: area");
+        assert_eq!(here.centroid(), back.centroid(), "{called}: centroid");
+
+        let cutter =
+            |model: &mut Model| a_block(model, [2.0, 2.0, 2.0], Vector::new(1.0, -1.0, 3.0));
+        let [cut_here, cut_back] =
+            [(&once, went.key()), (&twice, came.key())].map(|(model, key)| {
+                cut_by_a_third_solid(model, key, &cutter, deflection)
+                    .map(|pieces| pieces.len())
+                    .map_err(|why| why.to_string())
+            });
+        assert_eq!(cut_here, cut_back, "{called}: the cut");
+    }
+}
+
+/// A bar of radius two, eight tall, turned by `lean` about `y`, whose caps
+/// are leaned back by `lean` before the turn so that they end up square to `z`
+/// while the pipe's axis does not.
+fn a_bar_leaning_off_its_caps(model: &mut Model, lean: f64) -> SolidKey {
+    let bottom = Plane::from_point_and_normal(Point::origin(), Vector::new(lean, 0.0, -1.0))
+        .expect("a normal with a length");
+    let top = Plane::from_point_and_normal(Point::new(0.0, 0.0, 8.0), Vector::new(-lean, 0.0, 1.0))
+        .expect("a normal with a length");
+    let turned = Isometry::rotation(&rcad_geom::Axis::y(), lean).expect("a finite angle");
     model
         .add_bar_cut_off_by(
             2.0,
-            [flat, slanted],
-            &Isometry::identity(),
-            &policy,
-            &mut log,
+            [bottom, top],
+            &turned,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
         )
-        .expect("a bar with one slanted cap");
+        .expect("a bar leaning off its caps")
+}
 
-    let refused = rcad_step::write(&model, "a bar with a slanted cap");
+/// That the bar built is the shape the test says: the pipe's axis has a part
+/// off `z` no bigger than `lean`, and some cap's normal crosses it to a vector
+/// that is not zero, which is the comparison the writer used to refuse on.
+fn the_axis_leans_off_a_cap_by(model: &Model, bar: SolidKey, lean: f64) {
+    let surfaces: Vec<Surface> = model
+        .solid(bar)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.surface())
+        .collect();
+    let pipes: Vec<_> = surfaces
+        .iter()
+        .filter(|surface| surface.as_plane().is_none())
+        .collect();
+    let [Surface::Cylinder(pipe)] = pipes.as_slice() else {
+        panic!("a bar has one curved face and it is a pipe, not {pipes:?}");
+    };
+    let axis = pipe.axis().direction();
+    let [x, y, _] = axis.components();
     assert!(
-        matches!(
-            refused,
-            Err(CannotWrite::ACurveTheFacesEitherSideOfItDoNotName { closed: true, .. })
-        ),
-        "expected the ellipse to stop it, got {refused:?}"
+        (x != 0.0 || y != 0.0) && x.abs().max(y.abs()) <= lean,
+        "the axis {axis:?} does not lean by a part of {lean:e}"
+    );
+    let leaning_caps = surfaces
+        .iter()
+        .filter_map(Surface::as_plane)
+        .filter(|flat| flat.normal().cross(axis) != Vector::zero())
+        .count();
+    assert!(
+        leaning_caps > 0,
+        "no cap's normal leans off the axis {axis:?}, so this would not reach the comparison"
     );
 }
 
