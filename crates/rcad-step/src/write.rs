@@ -527,15 +527,17 @@ impl Writing {
             return Ok(Curve::along(self.line(start, end - start)));
         }
         match (first, second) {
-            (Surface::Plane(_), Surface::Plane(_)) if !closed => match run {
-                EdgeRun::PartOfWhereItCrosses {
+            (Surface::Plane(_), Surface::Plane(_)) if !closed => {
+                let EdgeRun::PartOfWhereItCrosses {
                     and: Surface::Cylinder(round),
                     ..
-                } => self
-                    .an_arc_of_a_circle_on_a_flat_face(round, run, start, end)
-                    .ok_or_else(refuse),
-                _ => Ok(Curve::along(self.line(start, end - start))),
-            },
+                } = run
+                else {
+                    return Ok(Curve::along(self.line(start, end - start)));
+                };
+                self.an_arc_of_a_circle_on_a_flat_face(round, run, start, end)
+                    .ok_or_else(refuse)
+            }
             (Surface::Plane(flat), Surface::Cylinder(pipe))
             | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
                 let crossing = where_a_plane_crosses_a_pipe(flat, pipe).ok_or_else(refuse)?;
@@ -1076,7 +1078,7 @@ fn where_a_plane_crosses_a_pipe(flat: &Plane, pipe: &Cylinder) -> Option<Crossin
 fn where_a_plane_crosses_a_ball(flat: &Plane, ball: &Sphere) -> Option<Crossing> {
     let off = flat.signed_distance_to(ball.centre());
     let reach = ball.radius();
-    if !(off.abs() < reach) {
+    if !off.is_finite() || off.abs() >= reach {
         return None;
     }
     let radius = if off == 0.0 {
