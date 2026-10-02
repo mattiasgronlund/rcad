@@ -408,13 +408,14 @@ fn the_axis_leans_off_a_cap_by(model: &Model, bar: SolidKey, lean: f64) {
         .faces()
         .map(|face| face.surface())
         .collect();
-    let axis = surfaces
+    let pipes: Vec<_> = surfaces
         .iter()
-        .find_map(|surface| match surface {
-            Surface::Cylinder(pipe) => Some(pipe.axis().direction()),
-            _ => None,
-        })
-        .expect("a bar has a pipe");
+        .filter(|surface| surface.as_plane().is_none())
+        .collect();
+    let [Surface::Cylinder(pipe)] = pipes.as_slice() else {
+        panic!("a bar has one curved face and it is a pipe, not {pipes:?}");
+    };
+    let axis = pipe.axis().direction();
     let [x, y, _] = axis.components();
     assert!(
         (x != 0.0 || y != 0.0) && x.abs().max(y.abs()) <= lean,
@@ -422,10 +423,8 @@ fn the_axis_leans_off_a_cap_by(model: &Model, bar: SolidKey, lean: f64) {
     );
     let leaning_caps = surfaces
         .iter()
-        .filter(|surface| match surface {
-            Surface::Plane(flat) => flat.normal().cross(axis) != Vector::zero(),
-            _ => false,
-        })
+        .filter_map(Surface::as_plane)
+        .filter(|flat| flat.normal().cross(axis) != Vector::zero())
         .count();
     assert!(
         leaning_caps > 0,
