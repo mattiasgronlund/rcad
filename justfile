@@ -1618,15 +1618,39 @@ wildcard_arms := "98"
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
     #!/usr/bin/env bash
+    # The mtime snapshot below is taken before `set -uo pipefail` rather than
+    # after, on purpose: that is the one spot nothing can land in front of by
+    # being written in as "the recipe's first command", which is where the
+    # touch this recipe used to open with would be put back.
+    before=$(find crates -type f -printf '%p %T@\n' | sort -k1,1)
     set -uo pipefail
-    find crates -name lib.rs -path '*/src/*' -exec touch {} +
     mkdir -p target
     log=target/last-wildcard-clippy.log
+    # No touch of the sources before this (there used to be one, with no
+    # reason written beside it, and it left every crate needing a relink on
+    # whatever cargo step ran next in the gate — Q708, 383 CPU-seconds on
+    # `check-ignored` alone). Two things were checked and both hold: a crate
+    # left exactly as the last identical clippy invocation saw it still has
+    # its warnings replayed, not swallowed (two runs back to back, the second
+    # recompiling nothing, printed the same count both times); and the
+    # arguments after clippy's `--` are themselves part of the fingerprint, so
+    # a crate last linted by `lint`'s `-D warnings` is genuinely re-checked
+    # here rather than silently answered from that unrelated run (switching
+    # between the two forces a real recheck each way, confirmed). Nothing a
+    # touch bought was not already covered by cargo's own fingerprint.
     if ! CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
             -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
         grep '^error' "$log" | head -5
         echo "clippy did not finish, so this counted nothing"
         echo "full log: $log"
+        exit 1
+    fi
+    after=$(find crates -type f -printf '%p %T@\n' | sort -k1,1)
+    touched=$(join -j1 <(echo "$before") <(echo "$after") \
+            | awk '$3 > $2 { print $1; exit }')
+    if [ -n "$touched" ]; then
+        echo "check-wildcards left $touched newer than it found it"
+        echo "a count must not touch what it inspects"
         exit 1
     fi
     direct=$({{ just_executable() }} _wildcard-direct-count "$log")
