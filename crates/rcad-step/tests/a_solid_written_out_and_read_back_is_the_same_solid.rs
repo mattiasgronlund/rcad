@@ -838,29 +838,19 @@ fn a_slab_with_a_round_scoop_out_of_it(model: &mut Model) -> SolidKey {
     });
 
     let (forward, back) = (Orientation::Forward, Orientation::Reversed);
-    let faces: [(Surface, Orientation, &[(usize, Orientation)]); 6] = [
-        (
-            Surface::Plane(bottom),
-            forward,
-            &[(4, forward), (7, back), (0, back), (6, forward)],
-        ),
+    let faces = [
+        (Surface::Plane(bottom), forward),
         (
             Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a positive radius")),
             back,
-            &[(0, forward), (3, forward), (1, back), (2, back)],
         ),
-        (
-            Surface::Plane(top),
-            forward,
-            &[(8, back), (1, forward), (9, forward), (5, back)],
-        ),
+        (Surface::Plane(top), forward),
         (
             Surface::Plane(a_plane(
                 Point::new(4.0, 0.0, 0.0),
                 Vector::new(1.0, 0.0, 0.0),
             )),
             forward,
-            &[(6, back), (2, forward), (8, forward), (10, back)],
         ),
         (
             Surface::Plane(a_plane(
@@ -868,7 +858,6 @@ fn a_slab_with_a_round_scoop_out_of_it(model: &mut Model) -> SolidKey {
                 Vector::new(-1.0, 0.0, 0.0),
             )),
             forward,
-            &[(7, forward), (11, forward), (9, back), (3, back)],
         ),
         (
             Surface::Plane(a_plane(
@@ -876,11 +865,18 @@ fn a_slab_with_a_round_scoop_out_of_it(model: &mut Model) -> SolidKey {
                 Vector::new(0.0, -1.0, 0.0),
             )),
             forward,
-            &[(4, back), (10, forward), (5, forward), (11, back)],
         ),
     ];
+    let wires: [&[(usize, Orientation)]; 6] = [
+        &[(4, forward), (7, back), (0, back), (6, forward)],
+        &[(0, forward), (3, forward), (1, back), (2, back)],
+        &[(8, back), (1, forward), (9, forward), (5, back)],
+        &[(6, back), (2, forward), (8, forward), (10, back)],
+        &[(7, forward), (11, forward), (9, back), (3, back)],
+        &[(4, back), (10, forward), (5, forward), (11, back)],
+    ];
     let mut skin = Vec::with_capacity(faces.len());
-    for (surface, used, steps) in faces {
+    for ((surface, used), steps) in faces.into_iter().zip(wires) {
         let walked: Vec<DraftStep> = steps
             .iter()
             .map(|&(which, way)| {
