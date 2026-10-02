@@ -378,7 +378,7 @@ function reportSchema(lane) {
     core.landed_sha = { type: 'string', description: 'your last commit' }
     core.decisions_section = { type: 'string', description: 'the section number you claimed with just claim-section, if any' }
     core.files_changed = { type: 'array', items: { type: 'string' } }
-    core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' }, description: 'empty for a lane that changed only .md files' }
+    core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' }, description: 'empty for a lane that changed only .md files and comments (§375)' }
     required.push('landed_sha', 'files_changed', 'tests_that_fail_without_the_change')
   } else {
     core.outcome = { type: 'string', enum: ['answered', 'partial', 'blocked'] }
