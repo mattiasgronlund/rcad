@@ -6,9 +6,12 @@
 //! plane it lies in (`EdgeRun::RightRoundWhereItCrosses`), and the ball and
 //! that plane are the pair `rcad_geom::which_two_surfaces_a_run_is_between`
 //! hands everyone who reads the run. The ball is written about its own `z` and
-//! the rim lies in `y = 0`, so the rim runs through both of the ball's poles,
-//! and its one corner `(RADIUS, 0, 0)` is on the ball's equator, where the
-//! ball's longitude is square to the rim and the rule reads the latitude.
+//! the rim lies in `y = 0`, so the rim runs through both of the ball's poles.
+//! Its one corner is put in one of two places. At `(RADIUS, 0, 0)`, on the
+//! ball's equator, the ball's longitude is square to the rim and the rule reads
+//! the latitude. At `(0, 0, RADIUS)`, on the ball's pole, both are zero, the
+//! rule reads nothing, and the solid is sound whichever way the ball uses the
+//! rim (`docs/decisions.md` §341.5).
 //!
 //! **Validate used to read the rim against the face across**, the pipe for the
 //! ball's use and the ball for the pipe's. They only touch, so the rule had

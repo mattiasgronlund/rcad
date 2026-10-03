@@ -4166,7 +4166,7 @@ fn the_way_a_closed_edge_where_its_faces_touch_runs(
 /// round with whichever way the rim's plane faces. A half ball on a pipe of its
 /// own radius with its rim cornered on the pole built in two of the four ways
 /// it can be written, and which two depended on that plane
-/// (`a_half_ball_on_a_pipe_of_its_own_radius.rs`, §189.3).
+/// (`a_half_ball_on_a_pipe_of_its_own_radius.rs`, §341.5).
 ///
 /// Asked of the face walking the edge first and then of the face across. The
 /// ball's half of that rim has every corner on the rim's plane, so it has no

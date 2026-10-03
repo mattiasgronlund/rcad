@@ -81,9 +81,68 @@ The same in both face orders. Each one that builds meshes each face on its own
 side of `y = 0` and measures the closed form at `0.05`, `0.0137` and `0.001`.
 So which way round a hand-built solid has to be written depends on which way
 its rim's plane faces, which is not a fact about the shape. That is Q399's to
-decide.
+decide. §341.5 decides it.
 
 Commands: `mise exec -- just t -p rcad-topo`, `mise exec -- just t -p
 rcad-step`; the forced branch was `if partner == across.surface() || true`, run
 as `mise exec -- just t -p rcad-topo -p rcad-step -E
 'test(/frustum_in_two_bands|half_ball_on_a_pipe|cone_written_twice/)'`.
+
+### 341.5 At the pole the faces' own walks name the way
+
+*Queue row Q665, which was Q417 and Q399. Lane
+`lane-q665-a-half-ball-on-a-pipe-cornered-on-its-pole`, off `fc6d6c00`.*
+
+**All four ways are one solid.** Where the rule reads nothing at the corner,
+validate skips the edge, so nothing fixes which way the edge is stored running:
+the ball using the rim forwards and the pipe backwards is the same solid as the
+other way round with the edge's direction turned. What is a fact is which way
+each face walks it. A face's material lies on its left, and left of
+`outward × ∇P` is `P`'s negative side (§36.6), with `P` the second surface the
+run is between. So a use walks along `outward × ∇P` when its face lies inside
+`P`, against it when outside, and the edge runs the way its forward use walks.
+That is validate's own rule with the reference that vanishes at the pole left
+out, so it needs no longitude at all.
+
+`BuildingAMesh::walk` reads it only where both readings at the corner, the rule
+and the touch fallback, have said nothing, because it reads every corner of a
+face. It asks the face walking the edge first and then the face across. The
+ball's face has no corner off the rim's plane, so it has no side to read, and
+the pipe's corner on the lid answers. The sides are read on the corners
+validate reads, by a copy of validate's private
+`which_side_of_a_surface_a_run_names_this_face_lies_on` in `mesh.rs`, which
+§341.6 leaves to be made one.
+
+The probe of §341.4 is now
+`a_half_ball_on_a_pipe_cornered_on_its_pole_builds_however_it_is_written`, and
+on this lane's tree every one of the eight builds, validates, meshes each face
+on its own side of `y = 0` and measures `π·r²(2r/3 + h)` at `0.05`, `0.0137`
+and `0.001`:
+
+| rim's plane faces | ball uses the rim | before | after |
+|---|---|---|---|
+| up | forward | refused `AWireWillNotLieFlatOnItsFace` | builds |
+| up | reversed | builds | builds |
+| down | forward | builds | builds |
+| down | reversed | refused `AWireWillNotLieFlatOnItsFace` | builds |
+
+The same in both face orders. The "before" column was measured again here on
+`fc6d6c00`, and matches §341.4. With the corner on the equator nothing moved:
+forward builds in all four, reversed is refused
+`AClosedEdgeIsWalkedAgainstItsSurface` in all four.
+
+Commands: `mise exec -- just t -p rcad-topo --test
+a_half_ball_on_a_pipe_of_its_own_radius`, and `mise exec -- just t -p
+rcad-topo` (1261 run, 1261 passed).
+
+### 341.6 What this leaves
+
+- **One reading of a face's side, not two.** `mesh.rs` and `validate.rs` each
+  hold `which_side_of_a_surface_a_run_names_this_face_lies_on`; validate's is
+  private and outside this lane's files. Make one `pub(crate)` and drop the
+  other. Small.
+- **A circle through a ball's pole where the faces cross, not touch,** with
+  both faces curved: a ball and a cone on one axis meeting in the ball's great
+  circle through its pole. The touch fallback is asked before the faces' walks
+  and would answer with the cone's longitude, which turns with the way the
+  cone's axis is written. Nobody has built it.
