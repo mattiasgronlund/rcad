@@ -272,18 +272,25 @@ fn what_a_flat_face_holds(
 /// as surely as this one's (§232.2). What tells them apart is the flat
 /// half-space [`intersect`] names each circle by, having proved it clears both:
 /// each disk is exactly the part of the tube on its own circle's side, and the
-/// wire's corner says which side that is. A plane square to the axis cuts
-/// circles round it, and neither circle's disk is the tube's inside there, so
-/// a round wire on such a plane is refused rather than read off the sign.
+/// wire's corner says which side that is.
+///
+/// **A plane square to the axis cuts two circles round it**, and neither
+/// circle's disk is the tube's inside there: the tube's inside is the band
+/// between them. The pipe of the ring's own radius [`intersect`] names each
+/// circle by says which circle the wire is and, with the ring's sign, which
+/// side of it a point is on ([`what_a_circle_round_the_axis_encloses`],
+/// `docs/decisions.md` §250.9).
 ///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the wire is not one
 /// whole closed crossing of two surfaces, or when its neighbour is a ring and
-/// the face's plane does not hold the ring's axis.
+/// [`intersect`] names no one circle through the wire's corner: a plane that
+/// rests on the tube and touches it in one circle has no picker to name it by.
 ///
-/// [`Error::Undecidable`] when the half-space naming a meridian circle cannot
-/// say which side of it `point` is on.
+/// [`Error::Undecidable`] when the half-space naming a meridian circle, or the
+/// pipe naming a circle round the axis, cannot say which side of it `point` is
+/// on.
 ///
 /// Whatever [`intersect`] makes of the face's plane and a ring beside it.
 fn what_a_round_wire_encloses(
@@ -322,7 +329,7 @@ fn what_a_round_wire_encloses(
         return Ok(side);
     }
     let corner = wire.points().next().ok_or_else(cannot)?;
-    let Some(this_circle) = the_half_space_naming_the_meridian_circle_through(
+    let Some(this_circle) = the_picker_naming_the_circle_through(
         &face.surface(),
         &surface,
         PredicatePoint::from(corner.coordinates()),
@@ -332,15 +339,88 @@ fn what_a_round_wire_encloses(
     else {
         return Err(cannot());
     };
-    if side == Decision::Pos {
-        return Ok(side);
+    match this_circle {
+        Picker::InFrontOf(_) => {
+            if side == Decision::Pos {
+                return Ok(side);
+            }
+            // The tube holds the point, so it is in one of the two disks or on
+            // one of the two circles; the half-space says which.
+            Ok(if the_meridian_half_space_keeps(&this_circle, point)? {
+                side
+            } else {
+                Decision::Pos
+            })
+        }
+        Picker::OutsideAPipe(_) => {
+            what_a_circle_round_the_axis_encloses(&this_circle, true, side, point)
+        }
+        Picker::InsideAPipe(_) => {
+            what_a_circle_round_the_axis_encloses(&this_circle, false, side, point)
+        }
+        Picker::OutsideABall(_) | _ => Err(cannot()),
     }
-    // The tube holds the point, so it is in one of the two disks or on one of
-    // the two circles; the half-space says which.
-    Ok(if the_meridian_half_space_keeps(&this_circle, point)? {
-        side
-    } else {
-        Decision::Pos
+}
+
+/// Which side of a circle round a ring's axis `point` is on, for a circle on a
+/// plane square to that axis: [`Decision::Neg`] nearer the axis than the
+/// circle, [`Decision::Pos`] further, [`Decision::Zero`] on it. `side` is the
+/// ring's own sign at `point`, already settled.
+///
+/// **Such a plane cuts the ring in two circles round the axis**, at `R ± s`
+/// from it, where `R` is the ring's radius and `s` is strictly positive, and
+/// [`intersect`] names the outer by the outside of the pipe of radius `R` and
+/// the inner by its inside. On the plane the ring holds the band between the
+/// two (`Neg`), has the two circles on its skin (`Zero`), and leaves the rest
+/// out (`Pos`). So the band is inside the outer circle and outside the inner,
+/// and the pipe says which circle a point the ring does not hold is on, or which
+/// side of both it lies:
+///
+/// | circle | ring `Neg` | ring `Zero` or `Pos`, kept by the pipe | not kept |
+/// |---|---|---|---|
+/// | outer, `OutsideAPipe` | `Neg` | the ring's sign | `Neg`: nearer the axis than `R` |
+/// | inner, `InsideAPipe` | `Pos` | the ring's sign turned round | `Pos`: further from the axis than `R` |
+///
+/// A point on the pipe itself is kept, as a picker keeps what is on it, and on
+/// the plane such a point is in the band, where the pipe is not asked. Off the
+/// plane the answer is whatever the two signs give, as everywhere in this file:
+/// [`SolidView::face_holds_the_point`] takes its point as on the face.
+///
+/// `outer` says which of the two circles `this_circle`, the side of the pipe
+/// naming it, picks.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`], naming the pipe, when it cannot say.
+fn what_a_circle_round_the_axis_encloses(
+    this_circle: &Picker,
+    outer: bool,
+    side: Decision,
+    point: PredicatePoint,
+) -> Result<Decision> {
+    if side == Decision::Neg {
+        return Ok(if outer { Decision::Neg } else { Decision::Pos });
+    }
+    let kept = match this_circle.side_of_point(point) {
+        Decision::Pos | Decision::Zero => true,
+        Decision::Neg => false,
+        Decision::Undecidable { enclosure } => {
+            return Err(gave_up(
+                this_circle.predicate_name(),
+                point,
+                Level::Exact,
+                enclosure,
+                Measures::Area,
+            ));
+        }
+        other => panic!("a pipe came back with a decision nothing here knows: {other:?}"),
+    };
+    Ok(match (outer, kept, side) {
+        (true, true, side) => side,
+        (true, false, _) => Decision::Neg,
+        (false, true, Decision::Pos) => Decision::Neg,
+        (false, true, side) => side,
+        (false, false, _) => Decision::Pos,
     })
 }
 
@@ -348,9 +428,10 @@ fn what_a_round_wire_encloses(
 /// in through `corner`, or `None` when the plane does not cut the ring in
 /// meridian circles or no one of them certainly keeps the corner.
 ///
-/// **The one place this is looked up**: `fuse/select.rs` asks it of a flat
-/// piece through this function, and [`what_a_round_wire_encloses`] of a face
-/// of a solid (`docs/decisions.md` §250.5).
+/// `fuse/select.rs` asks it of a flat piece; [`what_a_round_wire_encloses`]
+/// asks [`the_picker_naming_the_circle_through`] of a face of a solid, which is
+/// this with the circles round the axis left in (`docs/decisions.md` §250.5,
+/// §250.9).
 ///
 /// **One half-space, not a list.** A run is taken only when exactly one
 /// [`Picker::InFrontOf`] picks it, because that is what [`intersect`] makes of a
@@ -368,14 +449,36 @@ pub(crate) fn the_half_space_naming_the_meridian_circle_through(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Picker>> {
+    Ok(
+        the_picker_naming_the_circle_through(flat, ring, corner, policy, log)?
+            .filter(|picker| matches!(picker, Picker::InFrontOf(_))),
+    )
+}
+
+/// The one picker [`intersect`] names the circle `flat` cuts `ring` in through
+/// `corner` by, or `None` when no one circle certainly keeps the corner.
+///
+/// **The one place this is looked up.** A plane through the ring's axis gives
+/// each meridian circle one flat half-space, and a plane square to the axis
+/// gives each circle round the axis one side of the pipe of the ring's own
+/// radius. A run is taken only when exactly one picker picks it.
+///
+/// # Errors
+///
+/// Whatever [`intersect`] gives for the two.
+fn the_picker_naming_the_circle_through(
+    flat: &Surface,
+    ring: &Surface,
+    corner: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Picker>> {
     let SurfaceMeet::Curves(runs) = intersect(flat, ring, policy, log)? else {
         return Ok(None);
     };
     let mut keeping = runs.iter().filter_map(|run| match run.run() {
         EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
-            [flat @ Picker::InFrontOf(_)] if flat.side_of_point(corner) == Decision::Pos => {
-                Some(*flat)
-            }
+            [only] if only.side_of_point(corner) == Decision::Pos => Some(*only),
             _ => None,
         },
         EdgeRun::Straight
@@ -3962,8 +4065,11 @@ mod tests {
     /// the ring of radius four and tube one along the lid's own circle. The
     /// ring's inside on that plane is empty, so the ring's sign put every point
     /// of the lid but its circle outside it: the lid's own centre `(0, 0, 1)`
-    /// came back not held. A plane square to a ring's axis names no meridian
-    /// circle, so there is no half-space to ask, and the lid is refused (§250).
+    /// came back not held. A plane square to the axis that cuts the tube in two
+    /// circles names each by a side of the pipe of the ring's own radius, and
+    /// is answered (§250.9); this one rests on the tube and touches it in one
+    /// circle, which `intersect` names by no picker at all, so the lid is
+    /// refused (§250).
     #[test]
     fn a_pucks_lid_is_refused_rather_than_holding_nothing_but_its_rim() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
