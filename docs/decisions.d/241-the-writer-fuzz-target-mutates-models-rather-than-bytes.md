@@ -209,3 +209,11 @@ model says runs straight is written as a `LINE`, and the seed
 `a_round_bar_turned_a_quarter_about_x` is written and comes back the same
 (`every_shape_seed_is_the_shape_it_is_named_for`). The plane–cone and
 plane–torus circles are still refused (Q662, Q407).*
+
+*Since Q662 (2026-10-03, landed by Q821) the plane–cone circle is named too:
+a flat cap square to a cone's axis is written as the circle worked out in the
+frame the two faces are stored in (§366). The seeds
+`a_frustum_of_a_half_slope_cone` and `a_pointed_cone` are written and come
+back the same (`every_shape_seed_is_the_shape_it_is_named_for`), so of the
+three shapes the item above names only the bend is still refused, at the
+plane–torus circle (Q407).*

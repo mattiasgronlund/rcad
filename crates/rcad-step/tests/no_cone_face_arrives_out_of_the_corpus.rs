@@ -44,28 +44,24 @@
 //! could never yield a cone face at all, in which case the day above can never
 //! come and this watches for nothing forever.
 //!
-//! So two controls run in the same test, before the claim.
+//! So three controls run in the same test, before the claim.
 //!
 //! 1. **The census sees a cone.** It is run over a cone-faced solid built here
 //!    through the public builder and required to find it. That is what says a
 //!    later count of zero is a fact about the corpus rather than about
 //!    `Surface::Cone` being read wrongly.
-//! 2. **The cone is not what refuses those files.** Every refused file that
+//! 2. **A cone face does arrive out of a file.** The same solid is written out
+//!    with `rcad_step::write`, read back through [`Import`], and the census is
+//!    required to find its cone face in what the reader hands back. That is what
+//!    says the reader can yield a cone face at all, so the zero over the corpus
+//!    is not a permanent property of the reader. Until Q662 the writer refused
+//!    the pointed cone, `ACurveTheFacesEitherSideOfItDoNotName { first: "plane",
+//!    second: "cone", closed: true }`, and this control could not be built
+//!    (`docs/decisions.md` §366).
+//! 3. **The cone is not what refuses those files.** Every refused file that
 //!    names `CONICAL_SURFACE` is required *not* to have been refused for a
 //!    surface this kernel does not hold. That is what says the zero is caused
-//!    upstream and will flip when upstream clears, rather than being a permanent
-//!    property of the reader.
-//!
-//! **The control this test would rather have run is not available**, and the
-//! reason is worth recording where the next person to try it will find it: this
-//! kernel cannot write a cone-faced solid out. `rcad_step::write` refuses a
-//! pointed cone with `ACurveTheFacesEitherSideOfItDoNotName { first: "plane",
-//! second: "cone", closed: true }`, so the write-it-out-and-read-it-back control
-//! that `how_often_a_real_file_imports` uses cannot be built for a cone today.
-//! That is a **writer** limitation and not a reader one — `brep.rs:506` hands
-//! back `EdgeRun::RightRoundWhereItsFacesCross` with no restriction on which
-//! surfaces meet — so it says nothing about whether an imported cone would
-//! arrive. When the writer learns that pair, the stronger control belongs here.
+//!    upstream and will flip when upstream clears.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -80,6 +76,7 @@ use rcad_topo::{DraftStep, Model, SolidBuilder};
 #[test]
 fn no_cone_face_arrives_out_of_the_corpus() {
     the_census_sees_a_cone_when_there_is_one();
+    a_cone_face_arrives_out_of_a_file_that_holds_one();
 
     let root = corpus();
     let (mut files, mut imported, mut faces) = (0usize, 0usize, 0usize);
@@ -182,6 +179,22 @@ fn the_census_sees_a_cone_when_there_is_one() {
         1,
         "the census read no cone face off a solid built with exactly one, so a count of zero over \
          the corpus would say nothing about the corpus"
+    );
+}
+
+/// The second control: the pointed cone of [`a_cone_faced_model`], written out
+/// and read back, arrives with its one cone face.
+fn a_cone_face_arrives_out_of_a_file_that_holds_one() {
+    let text = rcad_step::write(&a_cone_faced_model(), "a pointed cone")
+        .expect("the writer names the circle where a flat cap meets a cone");
+    let file = StepFile::read(text.as_bytes()).expect("the reader parses this writer's text");
+    let import = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a pointed cone this kernel wrote is read back");
+    assert_eq!(
+        cone_faces_in(import.model()),
+        1,
+        "a pointed cone written out and read back arrived with no cone face, so the reader \
+         cannot yield one and a count of zero over the corpus would say nothing about the corpus"
     );
 }
 
