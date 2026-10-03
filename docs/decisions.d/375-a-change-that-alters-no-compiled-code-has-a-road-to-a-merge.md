@@ -150,3 +150,79 @@ on this branch. With `.claude/workflows/lanes.js` and
 
 Like §287.5, a text arm cannot run the workflow. The first bundle that merges
 on an empty print is the end-to-end proof.
+
+**2026-10-03.** §375 named no lane that had actually used the path yet. The
+Q727 bundle (`lane-q727-five-small-rows-after-q684`, merged `206bae1d`) is
+one: its verifier ran `mise exec -- just lines-that-run ad8189a6
+lane-q727-five-small-rows-after-q684`, got `lines that run: 0`, skipped the
+revert, and gave `merge`. Q745 expected the Q655 bundle to be the shape's
+first use; Q731 and Q732 went into the Q727 bundle instead, and the Q655
+bundle had not run as of this entry.
+
+Walking first-parent from the merge that added the path, `311b06e2` (Q740), to
+`206bae1d` oldest first, with `mise exec -- just lines-that-run <base>
+<merge>^2` and `<base>` from `git merge-base <merge>^1 <merge>^2` (two plain
+`Merge origin/main` commits, `7bb16174` and `9c6197a8`, left out of the walk,
+since neither carries a lane's own commits):
+
+| merge | row(s) | base (`git merge-base <merge>^1 <merge>^2`) | lines that run |
+|---|---|---|---|
+| `311b06e2` | Q740 | `c94d6d22` | 23 (adds the path itself) |
+| `cea8fafb` | Q709 | `c94d6d22` | 0 |
+| `a189d01b` | Q708 | `cea8fafb` | 0 |
+| `85080cde` | Q754 | `a189d01b` | 0 |
+| `b744610e` | Q759 | `9c6197a8` | 116 |
+| `307756fb` | Q405 | `b744610e` | 3 |
+| `d149f053` | Q763, Q409 | `307756fb` | 55 |
+| `44a97343` | Q766 | `d149f053` | 185 |
+| `e1498251` | Q767, Q773 | `44a97343` | 199 |
+| `3d403339` | Q774 | `e73a38b8` | 35 |
+| `6ac09257` | Q378 (stays open) | `3d403339` | 0 |
+| `0c452a81` | Q780 | `6ac09257` | 89 |
+| `a6affd27` | Q781 | `348b9390` | 0 |
+| `1b4aee7b` | Q753 | `0c8a44fc` | 31 |
+| `ad8189a6` | Q440, Q619, Q720, Q624, Q684 | `c92a035b` | 0 |
+| `206bae1d` | Q727, Q739, Q731, Q732, Q744 | `ad8189a6` | 0 (reported by its own verifier, above) |
+
+A base equal to the merge right before it (`a189d01b`→`85080cde`,
+`6ac09257`→`0c452a81`, `ad8189a6`→`206bae1d`) means that lane was dispatched
+after the prior one had already landed, so its own lanes.js was whatever
+`lanes.js` held by then. A base further back (`3d403339`'s `e73a38b8`,
+`a6affd27`'s `348b9390`, `1b4aee7b`'s `0c8a44fc`) means that lane's branch had
+not caught up with everything already on `main` when it was dispatched, so it
+raced one or more other lanes rather than following them; which `lanes.js` it
+ran with is not settled by the merge-base alone, and was not chased further
+here.
+
+Six merges before `206bae1d` print 0 under today's recipe, not one. Two of
+them, `cea8fafb` (Q709) and `a189d01b` (Q708), share `311b06e2`'s own base,
+`c94d6d22`: all three were dispatched in the one `lanes` workflow call that
+wrote the path into `lanes.js`, off a tree that call's own `lanes.js` had not
+yet changed, so neither Q709's nor Q708's verifier could have taken this road
+no matter what their diffs print today.
+
+`85080cde` (Q754) is the one that counts. Its base, `a189d01b`, is the merge
+right before it, so its lane was dispatched after Q740 had already landed —
+about an hour after, by the merge timestamps (`311b06e2` 20:38:41,
+`85080cde` 21:46:37). §378's own preamble says the same thing a different
+way: *"This lane changed no source: it adds
+`crates/rcad-topo/tests/two_quarter_bends_on_one_torus.rs` and this
+section."* A lane that adds a test and a section and touches no `src/` is
+exactly the shape §375.3's first bullet describes, and Q754's row, filed from
+§357.4, is a trace row of that shape. `85080cde` is accordingly the earliest
+lane this walk finds that could have merged on an empty print for real,
+about eighteen hours before the Q727 bundle. `6ac09257` (Q378, which stays
+open; the lane records a measurement rather than closing its row),
+`a6affd27` (Q781) and `ad8189a6` (the Q440 bundle) are later matches of the
+same shape.
+
+This entry cannot quote any of these four lanes' own verifier report: that
+JSON lived in the run's transcript, not in a tracked file, and none of it
+was copied into a commit message or a decisions section. The table above is
+read off the diff each merge actually carries, with `git merge-base` giving
+the base each verifier would have run `lines-that-run` against; the
+§378 cross-check is the only place the lane's own words happen to confirm
+the diff's shape independently. Whether `6ac09257`, `a6affd27` and
+`ad8189a6` used this road too, or `unproven`'s older `pinsOnly`/mutation road
+instead, or something else again, was not traced here and is left for
+whoever next needs the answer.
