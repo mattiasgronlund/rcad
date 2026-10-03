@@ -12,8 +12,9 @@
 //!   keeps is under a third of a turn two quarters pick the same corner. The
 //!   patch between them was that corner and the apex twice, and the
 //!   triangulator refused it: `CornersCoincide { position: 2 }`. The cuts leave
-//!   from four different corners now (§354): twelve answer right, and the four
-//!   whose steep face misses the apex by a rounding answer and do not measure.
+//!   from four different corners now (§354): fourteen answer right, and the
+//!   last two, whose steep face misses the apex by a rounding, hold every
+//!   grid point and measure at `0.02` and no finer (Q846).
 //! - **Two folds on the frustum.** The block's steep face and the frustum's
 //!   face share the two arcs they cross in, each walked as two chords, and both
 //!   faces draw the side between the two arcs' middles:
@@ -104,19 +105,19 @@ fn two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_t
 
 /// The intersections whose steep face is meant to run through the apex,
 /// crossing zero, do not measure at `0.002` at turn one and at no other turn,
-/// and which side of that face the apex really is on does not say which.
+/// and which side of that face the apex really is on does not say whether
+/// one of them measures at all.
 ///
 /// The block's placement is rounded, so its steep face misses the apex by a
 /// rounding. The block itself puts the apex inside it at three of the six,
-/// outside at two, and on its boundary at one, and of the two that do not
-/// measure one has it outside and one inside.
-/// So the cap round the apex these two make is not the apex's own side of the
-/// face: it is where the fuse's crossing of the face and the cone came out, a
-/// few `1e-16` above the apex (§285.3). They refused in the mesher before the
-/// quarter cuts left from four different corners, and refuse measuring now
-/// (§354).
+/// outside at two, and on its boundary at one. Since Q846's four-corner cuts
+/// (§354), only `(0.25, 1.0)` still fails to measure at every deflection; the
+/// other outside one, `(0.375, 3.0)`, measures, and so does `(0.375, 1.0)`,
+/// which the apex is inside. So the apex's own side of the face still does
+/// not say which of these caps measure: `(0.25, 1.0)` and `(0.375, 3.0)` are
+/// both outside, and only one of them does.
 #[test]
-fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_do_not_measure() {
+fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures() {
     let policy = Policy::certified();
     let mut seen = Vec::new();
     for lean in [0.25, 0.375] {
@@ -141,7 +142,7 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_do_
             (0.25, 1.0, Containment::Outside, true),
             (0.25, 3.0, Containment::Inside, false),
             (0.375, 0.0, Containment::Inside, false),
-            (0.375, 1.0, Containment::Inside, true),
+            (0.375, 1.0, Containment::Inside, false),
             (0.375, 3.0, Containment::Outside, false),
         ]
     );
@@ -152,12 +153,13 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_which_do_
 ///
 /// All eighteen refused before there was an answer to check until the quarter
 /// cuts left from four different corners (§354) and the coarsest mesh retried
-/// a fold. Now fourteen answer right: the twelve caps and the frustum's two
-/// folds. The four whose steep face misses the apex by a rounding hold every
-/// grid point and measure at `0.02` and no finer (lean one quarter) or at no
-/// rung (lean three eighths). It is the harness for §285's and §354's
-/// experiments: with one applied, the same test prints how many answer right
-/// and how the rest refuse.
+/// a fold. Now sixteen answer right: the twelve caps that already did, the
+/// frustum's two folds, and the two at lean three eighths whose steep face
+/// misses the apex by a rounding, which now answer right too (Q846). The last
+/// two, at lean one quarter, still hold every grid point and measure at
+/// `0.02` and no finer. It is the harness for §285's and §354's experiments:
+/// with one applied, the same test prints how many answer right and how the
+/// rest refuse.
 #[test]
 fn the_eighteen_held_to_the_familys_four_checks() {
     let mut cases = Vec::new();
@@ -189,27 +191,15 @@ fn the_eighteen_held_to_the_familys_four_checks() {
         *tally.entry(said).or_default() += 1;
     }
     println!("{tally:#?}");
-    let cuts_off_a_corner = |points: usize| {
-        format!(
-            "right on the grid ({points} points), and every measure refused: {:?}",
-            [1541, 1014, 747, 535, 348].map(|corner| format!(
-                "CannotMeshAFace ASideCutsOffOneCornerOfACurvedPatch {{ corner: {corner} }}"
-            ))
-        )
-    };
-    let crosses_itself = format!(
+    let a_side_cuts_off_a_corner = format!(
         "right on the grid, measured right at 0.02, refused finer: {:?}",
-        [2011, 1273, 901].map(|at| format!("CannotMeshAFace BoundaryCrossesItself {{ at: {at} }}"))
+        [19, 68, 9].map(|corner| format!(
+            "CannotMeshAFace ASideCutsOffOneCornerOfACurvedPatch {{ corner: {corner} }}"
+        ))
     );
     assert_eq!(
         tally,
-        [
-            ("right".to_owned(), 14),
-            (cuts_off_a_corner(21_610), 1),
-            (cuts_off_a_corner(27_214), 1),
-            (crosses_itself, 2),
-        ]
-        .into()
+        [("right".to_owned(), 16), (a_side_cuts_off_a_corner, 2)].into()
     );
 }
 
