@@ -65,15 +65,6 @@ const MERGE_ATTEMPTS = 3
 const DOCS_CATCH_UPS = 5
 const RESULT_LINES = 20
 
-// Reads the whole-file diff of a lane's branch and prints every changed line
-// that could change what runs: everything but `.md` files, comment lines, and
-// test code -- files under `crates/*/tests/` and `fuzz/corpus/`, the items
-// after a column-0 `#[cfg(test)]` in a `.rs` file, and the bodies of the
-// justfile's `check-*` recipes. An empty print is the evidence that lets a
-// lane merge without a revert (§375). It is inline because the verifier's
-// Bash guard runs `git diff | awk '...'` and refuses `awk -f`.
-const LINES_THAT_RUN = String.raw`awk 'function test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^fuzz\/corpus\// } function rust_test(s, c) { if (in_test[s]) { if (c ~ /^}/) in_test[s] = 0; return 1 } if (c ~ /^([ \t]|$)/) return 0; if (c ~ /^#\[cfg\(test\)\][ \t]*$/) { pending[s] = 1; return 0 } if (c ~ /^(\/\/|#\[)/) return 0; if (pending[s]) { pending[s] = 0; in_test[s] = c ~ /\{[ \t]*$/; return 1 } return 0 } function recipe_test(s, c) { if (c ~ /^([ \t]|$)/) return in_check[s]; in_check[s] = c ~ /^@?check-[A-Za-z0-9_-]+[^:]*:([^=]|$)/; return 0 } /^diff --git / { seen = 1; hunk = 0; a = $3; b = $4; sub(/^a\//, "", a); sub(/^b\//, "", b); skip = (a ~ /\.md$/ && b ~ /\.md$/) || (test_path(a) && test_path(b)); rust = b ~ /\.rs$/; slash = b ~ /\.(rs|js)$/; just = b ~ /(^|\/)justfile$/; hash = just || b ~ /\.(toml|sh|py|ya?ml)$/; for (s = 0; s < 2; s++) { pending[s] = 0; in_test[s] = 0; in_check[s] = 0 } next } skip { next } /^@@/ { hunk = 1; next } !hunk { if ($0 ~ /^(rename (from|to)|old mode|new mode|Binary files)/) print b ": " $0; next } /^\\/ { next } { m = substr($0, 1, 1); c = substr($0, 2); for (s = 0; s < 2; s++) { if (m == (s ? "-" : "+")) continue; t[s] = rust ? rust_test(s, c) : (just ? recipe_test(s, c) : 0) } if (m == " ") next; if (t[m == "+"]) next; if (slash && c ~ /^[ \t]*(\/\/.*)?$/) next; if (hash && c ~ /^[ \t]*(#([^!].*)?)?$/) next; print b ": " m c } END { if (!seen) print "git diff printed nothing, so it shows nothing" }'`
-
 const writes = (lane) => Array.isArray(lane.writeSet) && lane.writeSet.length > 0
 const rowsOf = (lane) => {
   const ids = lane.queueId.split(',')
@@ -192,29 +183,39 @@ function namesTests(report) {
 //
 // A fourth changes nothing that runs: comments, doc comments and test code
 // (§375). There a revert takes out nothing the tests could see, so a lane
-// whose `LINES_THAT_RUN` printed nothing merges on its tests passing, and one
-// that names no test merges on that print alone. The print is the evidence,
-// never the verifier's reading of the diff: an empty string it did not get
-// from the command it was given is refused like a missing one.
+// whose lines-that-run print ends `lines that run: 0` merges on its tests
+// passing, and one that names no test merges on that print alone. The print is
+// the evidence, never the verifier's reading of the diff: a count it did not
+// get from the command it was given is refused like a missing one.
 function unproven(lane, kind, check) {
   const why = []
   if (check.files_outside_write_set && check.files_outside_write_set.length) why.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
-  const runs = typeof check.lines_that_run === 'string' ? check.lines_that_run.trim() : null
-  if (runs === null) why.push('the verifier did not report what the lines-that-run command printed')
+  const runs = linesThatRun(check.lines_that_run)
+  if (runs === null) why.push('the lines-that-run print the verifier reported does not end in its count, lines that run: N')
   if (squeezed(check.lines_that_run_command) !== squeezed(linesThatRunCommand(lane))) why.push('the verifier ran another command than the lines-that-run command it was given')
   if (kind === 'tests') {
     if (check.tests_pass_on_branch !== true) why.push('the tests do not pass on the branch')
     const sources = sourcePathsOf(lane)
     if (lane.pinsOnly === true && sources.length) why.push('the lane is marked pinsOnly, but it declares a source directory to revert -- there is something to revert, so pinsOnly does not apply')
     const pinsOnly = lane.pinsOnly === true && !sources.length
-    if (!pinsOnly && runs !== '') {
+    if (!pinsOnly && runs !== 0) {
       if (check.tests_fail_without_fix !== true && !mutationProven(check.reproduced_mutation)) why.push('the tests were never seen to fail with the source reverted, and no reproduced mutation stands in for it')
       if (!sources.length) why.push('the lane declared no source directory to revert')
     }
   } else if (runs) {
-    why.push(`the branch changes lines that run and names no test that fails without them, starting with: ${runs.split('\n')[0]}`)
+    why.push(`the branch changes ${runs} lines that run and names no test that fails without them, starting with: ${check.lines_that_run.trim().split('\n')[0]}`)
   }
   return why
+}
+
+// The count the `lines-that-run` recipe ends its print with, or null when the
+// reported print does not end in one -- the recipe failed, or the verifier
+// left the line out.
+function linesThatRun(print) {
+  if (typeof print !== 'string') return null
+  const last = print.trim().split('\n').pop().trim()
+  const count = /^lines that run: ([0-9]+)$/.exec(last)
+  return count ? Number(count[1]) : null
 }
 
 function squeezed(s) {
@@ -407,9 +408,9 @@ Branch: ${branchOf(lane)}
 Write set: ${lane.writeSet.join(', ')}
 The lane's worktree, to unlock once you are done with it -- this is not your own tree, and not what you report as worktree_path: ${r.worktree_path}
 Source paths to revert: ${revert}${pinsOnlyNote}
-Lines that run -- in step 1, run this once in your own tree, exactly as written; report it as lines_that_run_command and all it prints, verbatim, as lines_that_run (the empty string when it prints nothing):
+Lines that run -- in step 1, before you check the branch out, run this once in your own tree, exactly as written; report it as lines_that_run_command and all it prints, verbatim, as lines_that_run. It prints at most eleven lines, and the last is always lines that run: N:
   ${linesThatRunCommand(lane)}
-When it prints nothing, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones.
+When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones.
 Revert them and watch the tests fail, then restore them -- that is the default proof for the fail half, and report it as tests_fail_without_fix. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says.
 Only when the revert itself cannot fail -- a fix that just moves a floor or a bound, where a value on the wrong side of the old one can still pass a proptest run at most seeds -- report a reproduced_mutation instead: make a small, uncommitted change to the source that reintroduces the kind of bug the fix is meant to catch, run one command unchanged against the base commit and against this branch, and give the exact scratch change, the command, and both outcomes ('pass' or 'fail'). Say in notes why the revert could not fail here. Do not reach for a mutation when a revert would do.
 Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
@@ -417,11 +418,11 @@ Your own worktree is a different tree the harness made for this check. Run git r
 The lane claims (JSON): ${JSON.stringify(r)}`
 }
 
-// The whole file as context, so `LINES_THAT_RUN` sees each `#[cfg(test)]` and
-// each recipe header above a changed line. The prefixes and the flags are
-// spelled out so no one's git config can change what it reads.
+// A recipe, so the verifier types and reports one short line (§382). It runs
+// before the verifier checks the branch out, so the recipe that judges the
+// branch is never a copy the branch changed.
 function linesThatRunCommand(lane) {
-  return `git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 ${BASE} ${branchOf(lane)} | ${LINES_THAT_RUN}`
+  return `mise exec -- just lines-that-run ${BASE} ${branchOf(lane)}`
 }
 
 function MERGE(lane, prior) {
@@ -463,9 +464,9 @@ function verdictSchema(kind) {
     unbacked_claims: { type: 'array', items: { type: 'string' } },
     fixes: { type: 'array', items: { type: 'string' }, description: 'each fix fix_first asks for: the file, the change, and why' },
     lines_that_run_command: { type: 'string', description: 'the lines-that-run command from your brief, exactly as you ran it' },
-    lines_that_run: { type: 'string', description: 'everything that command printed, verbatim; the empty string when it printed nothing -- never your own reading of the diff' },
+    lines_that_run: { type: 'string', description: 'everything that command printed, verbatim, down to its last line, lines that run: N -- never your own reading of the diff' },
     verdict: { type: 'string', enum: ['merge', 'fix_first', 'reject'] },
-    notes: { type: 'string' },
+    notes: { type: 'string', description: 'at most five lines, for the merger: what it must act on and what no other field says -- never an account of the steps you ran, which the other fields already hold' },
   }
   const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']
   if (kind === 'tests') {

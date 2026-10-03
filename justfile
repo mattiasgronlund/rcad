@@ -2368,20 +2368,32 @@ check-skills-selftest:
 # (§375).** Q519, Q601 and the bundle Q440,Q619,Q720,Q624,Q684 waited on
 # Mattias's hand: a doc-comment edit in a `.rs` file always met the moved-text
 # step's "any file not ending in `.md`" bar, and a pinned test inside `src/`
-# met `unproven`'s demand for a revert. `LINES_THAT_RUN` in `lanes.js` now
-# prints every changed line that could change what runs -- none from `.md`
-# files, comments, or test code -- and an empty print is what waives the
-# revert. The arm runs that awk program, cut out of `lanes.js` itself, on a
+# met `unproven`'s demand for a revert. The `lines-that-run` recipe now prints
+# every changed line that could change what runs -- none from `.md` files,
+# comments, or test code -- and then how many there are, and a count of 0 is
+# what waives the revert (§382 moved it out of `lanes.js` and gave it the
+# count). The arm runs that awk program, cut out of the recipe itself, on a
 # small repo it builds, and wants back exactly the lines that run: a code line
 # in a plain `mod`, a function after a `#[cfg(test)]` module closes, a shebang
-# in a recipe that is not a `check-*`, and a source file renamed. It skips a
-# comment, a doc comment, a test inside `#[cfg(test)]`, a file under
-# `tests/`, a fuzz seed renamed, a `check-*` recipe's body and a `.md` file.
-# The arm also checks the lines that use the print: `unproven` waives the
-# revert only on an empty one and refuses a lane with no test whose print is
-# not empty, a print the verifier did not report or got from another command
-# is refused, the schema requires both, `VERIFY` hands the command over, and
-# `verifier.md` carries the new moved-text rule and not the old one.
+# in a recipe that is not a `check-*`, and a source file renamed, then `lines
+# that run: 7`. It skips a comment, a doc comment, a test inside
+# `#[cfg(test)]`, a file under `tests/`, a fuzz seed renamed, a `check-*`
+# recipe's body and a `.md` file. The arm also checks the lines that use the
+# print: the recipe reads the whole-file diff with its flags spelled out,
+# `unproven` reads the count off the print's last line, waives the revert only
+# on a count of 0 and refuses a lane with no test whose count is not 0, a print
+# with no count or from another command is refused, the schema requires both,
+# `VERIFY` hands the command over, and `verifier.md` carries the new moved-text
+# rule and not the old one.
+#
+# **A seventeenth arm holds the verifier's report short (§382).** Writing its
+# report took a verifier about 40 s, and two fields were three quarters of it:
+# the lines-that-run print, which ran to 199 lines, and `notes`, a step-by-step
+# account of what the other fields already held. The arm runs the recipe's awk
+# program on a second repo, whose one commit adds fifteen functions, and wants
+# back the first ten and then `lines that run: 15`. It also checks that the
+# verdict schema's `notes` says at most five lines, and that `verifier.md` says
+# so too.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2389,6 +2401,7 @@ check-lanes-workflow:
     file=.claude/workflows/lanes.js
     agents=.claude/agents
     claude=CLAUDE.md
+    recipes=justfile
     create='  git switch -c ${branchOf(lane)} ${BASE}'
     reset='  git checkout -B ${branchOf(lane)} ${BASE}'
     refusal='already exists, stop and report it as blocked'
@@ -2415,15 +2428,17 @@ check-lanes-workflow:
     docs_field="      docs_catch_ups: { type: 'integer', minimum: 0,"
     docs_required="'push_attempts', 'docs_catch_ups',"
     pass_rule='Step 3 already proved the tests pass; do not run them again to watch that (§370)'
-    runs_prefix='const LINES_THAT_RUN = String.raw`awk '"'"
-    runs_command='  return `git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 ${BASE} ${branchOf(lane)} | ${LINES_THAT_RUN}`'
+    runs_awk='^ +\| awk .function show\(line\)'
+    runs_diff='    git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 "$1" "$2" \'
+    runs_command='  return `mise exec -- just lines-that-run ${BASE} ${branchOf(lane)}`'
     runs_handed='  ${linesThatRunCommand(lane)}'
-    runs_waive="    if (!pinsOnly && runs !== '') {"
+    runs_count='  const count = /^lines that run: ([0-9]+)$/.exec(last)'
+    runs_waive="    if (!pinsOnly && runs !== 0) {"
     runs_refusal='names no test that fails without them'
-    runs_unreported='the verifier did not report what the lines-that-run command printed'
+    runs_unreported='the lines-that-run print the verifier reported does not end in its count'
     runs_other='the verifier ran another command than the lines-that-run command it was given'
     runs_required="'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']"
-    runs_rule='6. If step 1'"'"'s `lines_that_run` is not empty, the verdict cannot be `merge`: a'
+    runs_rule='6. If step 1'"'"'s print does not end `lines that run: 0`, the verdict cannot be'
     old_md_rule='6. If any changed file does not end in `.md`, the verdict cannot be `merge`: a'
     runs_want=$(printf '%s\n' \
         'crates/k/src/lib.rs: -        2' \
@@ -2432,8 +2447,12 @@ check-lanes-workflow:
         'crates/k/src/lib.rs: +    3' \
         'crates/k/src/moved.rs: rename from crates/k/src/old.rs' \
         'crates/k/src/moved.rs: rename to crates/k/src/moved.rs' \
-        'justfile: +    #!/usr/bin/env bash')
+        'justfile: +    #!/usr/bin/env bash' \
+        'lines that run: 7')
     runs_empty='git diff printed nothing, so it shows nothing'
+    many_want=$(seq -f 'crates/k/src/lib.rs: +pub fn f%g() {}' 1 10; echo 'lines that run: 15')
+    notes_bound="    notes: { type: 'string', description: 'at most five lines, for the merger:"
+    notes_rule='`notes` is at most five lines, for the merger: what it must act on and what no'
     settings=.claude/settings.json
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
@@ -2469,6 +2488,13 @@ check-lanes-workflow:
         '    #!/usr/bin/env bash' '    echo "all fine"' '    test -f justfile' \
         > "$fixture/justfile"
     commit "$fixture" branch
+    many="$dir/many"
+    mkdir -p "$many/crates/k/src"
+    git -C "$many" init -q
+    printf '%s\n' '//! A crate.' > "$many/crates/k/src/lib.rs"
+    commit "$many" base
+    seq -f 'pub fn f%g() {}' 1 15 >> "$many/crates/k/src/lib.rs"
+    commit "$many" branch
     scan() {
         local n t at prev line types prog got
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -2622,11 +2648,19 @@ check-lanes-workflow:
             return 15
         fi
         if ! grep -qxF -- "$runs_command" "$1" || ! grep -qxF -- "$runs_handed" "$1"; then
-            echo "$1 does not hand the verifier the lines-that-run command, the whole-file diff of the branch piped into LINES_THAT_RUN; without it there is no print for an empty one to be (§375)"
+            echo "$1 does not hand the verifier the lines-that-run command, the recipe run on the base and the branch; without it there is no count of 0 to waive the revert on (§375, §382)"
+            return 16
+        fi
+        if ! grep -qxF -- "$runs_diff" "$4"; then
+            echo "$4's lines-that-run recipe does not read the whole-file diff of the two commits it is given with every flag spelled out ('$runs_diff'); with less context it cannot see the #[cfg(test)] or recipe header above a changed line (§375)"
+            return 16
+        fi
+        if ! grep -qxF -- "$runs_count" "$1"; then
+            echo "$1 does not read the count off the last line of the lines-that-run print ('$runs_count'); a looser reading would take a count the recipe did not print (§382)"
             return 16
         fi
         if ! grep -qF -- "$runs_waive" "$1"; then
-            echo "$1 does not waive the revert on an empty lines-that-run print alone ('$runs_waive'); a lane that changes what runs would then merge on a test that never failed (§375)"
+            echo "$1 does not waive the revert on a lines-that-run count of 0 alone ('$runs_waive'); a lane that changes what runs would then merge on a test that never failed (§375)"
             return 16
         fi
         for t in "$runs_refusal" "$runs_unreported" "$runs_other"; do
@@ -2643,12 +2677,12 @@ check-lanes-workflow:
             echo "$2/verifier.md does not carry the moved-text rule on the lines-that-run print in place of the old 'any file not ending in .md' bar (§375)"
             return 16
         fi
-        line=$(grep -F -- "$runs_prefix" "$1" || true)
-        prog=${line#*"$runs_prefix"}
-        prog=${prog%"'\`"}
+        line=$(grep -E -- "$runs_awk" "$4" || true)
+        prog=${line#*"| awk '"}
+        prog=${prog%"'"}
         got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
         if [ "$got" != "$runs_want" ]; then
-            echo "LINES_THAT_RUN in $1 printed, on the fixture repo:"
+            echo "the lines-that-run recipe in $4 printed, on the fixture repo:"
             printf '%s\n' "$got"
             echo "and should have printed exactly:"
             printf '%s\n' "$runs_want"
@@ -2657,11 +2691,22 @@ check-lanes-workflow:
         fi
         got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD HEAD | awk "$prog" 2>&1 || true)
         if [ "$got" != "$runs_empty" ]; then
-            echo "LINES_THAT_RUN in $1 printed '$got' for an empty diff, not '$runs_empty'; a git diff that failed would read as nothing that runs changed (§375)"
+            echo "the lines-that-run recipe in $4 printed '$got' for an empty diff, not '$runs_empty'; a git diff that failed would read as nothing that runs changed (§375)"
             return 16
         fi
+        got=$(git -C "$many" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$got" != "$many_want" ]; then
+            echo "the lines-that-run recipe in $4 printed, on a commit that adds fifteen functions:"
+            printf '%s\n' "$got"
+            echo "and should have printed the first ten, then 'lines that run: 15'; a verifier copies the whole print into its report (§382)"
+            return 17
+        fi
+        if ! grep -qF -- "$notes_bound" "$1" || ! grep -qF -- "$notes_rule" "$2/verifier.md"; then
+            echo "$1's verdict schema or $2/verifier.md no longer holds a verifier's notes to five lines; unbounded, they were about a third of its report (§382)"
+            return 17
+        fi
     }
-    scan "$file" "$agents" "$claude" || exit 1
+    scan "$file" "$agents" "$claude" "$recipes" || exit 1
     swap() {
         S="$2" R="$3" awk '{ i = index($0, ENVIRON["S"]); if (i) $0 = substr($0, 1, i - 1) ENVIRON["R"] substr($0, i + length(ENVIRON["S"])); print }' "$1"
     }
@@ -2670,6 +2715,7 @@ check-lanes-workflow:
         cp "$file" "$dir/$1/lanes.js"
         cp -r "$agents" "$dir/$1/agents"
         cp "$claude" "$dir/$1/CLAUDE.md"
+        cp "$recipes" "$dir/$1/justfile"
     }
     fresh reset-instead
     awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead/lanes.js"
@@ -2756,30 +2802,71 @@ check-lanes-workflow:
     fresh runs-no-md-rule
     grep -vF -- "$runs_rule" "$agents/verifier.md" > "$dir/runs-no-md-rule/agents/verifier.md"
     fresh runs-src-is-test
-    swap "$file" '/^crates\/[^\/]+\/tests\//' '/^crates\/[^\/]+\/(tests|src)\//' > "$dir/runs-src-is-test/lanes.js"
+    swap "$recipes" '/^crates\/[^\/]+\/tests\//' '/^crates\/[^\/]+\/(tests|src)\//' > "$dir/runs-src-is-test/justfile"
     fresh runs-test-never-ends
-    swap "$file" 'if (c ~ /^}/) in_test[s] = 0; ' '' > "$dir/runs-test-never-ends/lanes.js"
+    swap "$recipes" 'if (c ~ /^}/) in_test[s] = 0; ' '' > "$dir/runs-test-never-ends/justfile"
     fresh runs-shebang-is-comment
-    swap "$file" '(#([^!].*)?)?' '(#.*)?' > "$dir/runs-shebang-is-comment/lanes.js"
+    swap "$recipes" '(#([^!].*)?)?' '(#.*)?' > "$dir/runs-shebang-is-comment/justfile"
     fresh runs-nothing-is-silent
-    swap "$file" 'END { if (!seen) print "git diff printed nothing, so it shows nothing" }' 'END { }' > "$dir/runs-nothing-is-silent/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16)
+    swap "$recipes" 'if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } ' '' > "$dir/runs-nothing-is-silent/justfile"
+    fresh runs-uncounted
+    swap "$recipes" ' print "lines that run: " (shown + 0)' '' > "$dir/runs-uncounted/justfile"
+    fresh runs-count-loose
+    swap "$file" "$runs_count" '  const count = /([0-9]+)$/.exec(last)' > "$dir/runs-count-loose/lanes.js"
+    fresh runs-diff-narrow
+    swap "$recipes" '-U1000000 "$1" "$2"' '"$1" "$2"' > "$dir/runs-diff-narrow/justfile"
+    fresh runs-uncapped
+    swap "$recipes" 'if (++shown <= 10) print line' '++shown; print line' > "$dir/runs-uncapped/justfile"
+    fresh notes-unbounded
+    swap "$file" 'at most five lines, ' '' > "$dir/notes-unbounded/lanes.js"
+    fresh notes-unsaid
+    grep -vF -- "$notes_rule" "$agents/verifier.md" > "$dir/notes-unsaid/agents/verifier.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
         if cmp -s "$file" "$dir/$name/lanes.js" && diff -rq "$agents" "$dir/$name/agents" > /dev/null \
-            && cmp -s "$claude" "$dir/$name/CLAUDE.md"; then
-            echo "the cut '$name' found nothing to cut in $file, $agents or $claude, so it proves nothing"
+            && cmp -s "$claude" "$dir/$name/CLAUDE.md" && cmp -s "$recipes" "$dir/$name/justfile"; then
+            echo "the cut '$name' found nothing to cut in $file, $agents, $claude or $recipes, so it proves nothing"
             exit 1
         fi
         got=0
-        scan "$dir/$name/lanes.js" "$dir/$name/agents" "$dir/$name/CLAUDE.md" > /dev/null || got=$?
+        scan "$dir/$name/lanes.js" "$dir/$name/agents" "$dir/$name/CLAUDE.md" "$dir/$name/justfile" > /dev/null || got=$?
         if [ "$got" != "$want" ]; then
             echo "the cut '$name' was caught by arm $got, expected arm $want"
             exit 1
         fi
     done
     echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+
+# Print the changed lines between two commits that could change what runs:
+# everything but `.md` files, comment lines, and test code -- files under
+# `crates/*/tests/` and `fuzz/corpus/`, the items after a column-0
+# `#[cfg(test)]` in a `.rs` file, and the bodies of the justfile's `check-*`
+# recipes. The `lanes` workflow's verifier runs it on a lane's branch, and a
+# print that ends `lines that run: 0` lets the lane merge without a revert
+# (§375).
+#
+# It reads the whole-file diff, so it sees each `#[cfg(test)]` and each recipe
+# header above a changed line. The prefixes and the flags are spelled out so no
+# one's git config can change what it reads.
+#
+# **It prints the first ten lines, then how many there are** (§382). A verifier
+# copies the print into its report, and before the cap one ran to 199 lines.
+# The count line is always printed, so there is no empty print for a verifier to
+# report: Q708's verifier wrote one as the two characters `""`, and `lanes.js`
+# read that as lines that run.
+#
+# It is a recipe so a verifier types and reports a short command, not 1.6 KB of
+# git and awk: Q753's verifier reported the awk as a paraphrase of it, and its
+# merge was refused for that. A verifier runs it before it checks the branch out, so the
+# copy of this recipe that judges a branch is never one the branch changed.
+[doc("Print the first ten changed lines between two commits that could change what runs, then how many there are.")]
+lines-that-run base branch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 "$1" "$2" \
+        | awk 'function show(line) { if (++shown <= 10) print line } function test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^fuzz\/corpus\// } function rust_test(s, c) { if (in_test[s]) { if (c ~ /^}/) in_test[s] = 0; return 1 } if (c ~ /^([ \t]|$)/) return 0; if (c ~ /^#\[cfg\(test\)\][ \t]*$/) { pending[s] = 1; return 0 } if (c ~ /^(\/\/|#\[)/) return 0; if (pending[s]) { pending[s] = 0; in_test[s] = c ~ /\{[ \t]*$/; return 1 } return 0 } function recipe_test(s, c) { if (c ~ /^([ \t]|$)/) return in_check[s]; in_check[s] = c ~ /^@?check-[A-Za-z0-9_-]+[^:]*:([^=]|$)/; return 0 } /^diff --git / { seen = 1; hunk = 0; a = $3; b = $4; sub(/^a\//, "", a); sub(/^b\//, "", b); skip = (a ~ /\.md$/ && b ~ /\.md$/) || (test_path(a) && test_path(b)); rust = b ~ /\.rs$/; slash = b ~ /\.(rs|js)$/; just = b ~ /(^|\/)justfile$/; hash = just || b ~ /\.(toml|sh|py|ya?ml)$/; for (s = 0; s < 2; s++) { pending[s] = 0; in_test[s] = 0; in_check[s] = 0 } next } skip { next } /^@@/ { hunk = 1; next } !hunk { if ($0 ~ /^(rename (from|to)|old mode|new mode|Binary files)/) show(b ": " $0); next } /^\\/ { next } { m = substr($0, 1, 1); c = substr($0, 2); for (s = 0; s < 2; s++) { if (m == (s ? "-" : "+")) continue; t[s] = rust ? rust_test(s, c) : (just ? recipe_test(s, c) : 0) } if (m == " ") next; if (t[m == "+"]) next; if (slash && c ~ /^[ \t]*(\/\/.*)?$/) next; if (hash && c ~ /^[ \t]*(#([^!].*)?)?$/) next; show(b ": " m c) } END { if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } print "lines that run: " (shown + 0) }'
 
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
