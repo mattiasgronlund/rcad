@@ -110,6 +110,11 @@ increases. The proposed test is `a_bar_capped_by_a_dome_of_its_own_radius_import
 in `crates/rcad-step/tests`. Whether some of §188.3's seven "50 shortenings"
 files are this same dome joint has not been measured.
 
+*§341.5 adds a reading after that fallback. A rim that names its own plane, as
+a hand-built half ball's does, hands the fallback the ball and the plane, so
+the pipe's longitude is never asked; where the corner is on the ball's pole
+the mesher now reads which way the two faces walk the edge instead.*
+
 ### 189.4 What is left
 
 - **The LED dome joint**, §189.3: `walk.rs` and `mesh.rs`, plus the test file.
