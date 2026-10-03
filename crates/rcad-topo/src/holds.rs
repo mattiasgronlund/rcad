@@ -1725,7 +1725,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// halves, and any number of halves meet in one piece, where planes that miss
 /// the centre can leave two caps with nothing between them.
 ///
-/// # On a cone it is planes the apex is on or in front of, any number of them
+/// # On a cone it is planes the apex is in front of, any number of them, and at most one it is on
 ///
 /// Every point of one nappe but the apex sits on exactly one ray from the apex —
 /// a ruling — and the whole straight segment from the apex out to that point is
@@ -1762,6 +1762,23 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// **held**. `a_cone_face_round_an_apex_holds_its_own_nappe_and_not_the_other`, in
 /// `tests/a_plane_cut_along_a_cones_other_nappe.rs`, is those two points through
 /// the public [`SolidView::face_holds_the_point`].
+///
+/// **The same pinch happens on one nappe, and it is why at most one cut may
+/// hold the apex.** A plane through the apex has the value zero there, so along
+/// each ruling it keeps all of it or only the apex, and which is the sign of how
+/// fast it grows along that ruling — affine in `cos φ` and `sin φ`, so one arc of
+/// the circle of rulings. One such arc is one piece. Two can meet in two: keep
+/// `|x| ≤ z/10` on the cone of slope a half and the rulings with
+/// `|cos φ| ≤ 1/5` are left, one run round `+y` and one round `−y`, two sheets
+/// that meet only at the apex. A face on one of them is cut by both planes, has
+/// every side in front of both, and the other sheet is in front of both too, so
+/// `held_in_front_of_all` would hold its points — a wrong answer.
+/// `two_planes_through_the_apex_leave_a_nappe_in_two_sheets` below walks those
+/// rulings. Before `docs/decisions.md` §334 a cut through the apex came only
+/// with a side stored as [`EdgeRun::Straight`] along a ruling, since a ruling
+/// stored as part of a crossing was refused as an arc; since it, every ruling
+/// side reaches this arm. Telling one arc from two wants where the two planes
+/// meet compared with the cone, a part with no named consumer (§13).
 ///
 /// # And one cut the apex is behind, when it closes, beside at most one other
 ///
@@ -1851,18 +1868,26 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         Surface::Cone(cone) => {
             let apex = PredicatePoint::from(cone.apex().coordinates());
             let mut behind = Vec::new();
+            let mut through_the_apex = 0;
             for cut in cuts {
                 let Some(flat) = cut.surface.as_plane() else {
                     return false;
                 };
                 let sits = flat.side_of_point(apex);
-                if sits == Decision::Zero || sits == cut.kept {
+                if sits == Decision::Zero {
+                    through_the_apex += 1;
+                    continue;
+                }
+                if sits == cut.kept {
                     continue;
                 }
                 if sits != Decision::Pos && sits != Decision::Neg {
                     return false;
                 }
                 behind.push(flat);
+            }
+            if through_the_apex > 1 {
+                return false;
             }
             match behind.as_slice() {
                 [] => true,
@@ -3362,6 +3387,95 @@ mod tests {
             "one cut behind the apex that closes, and one other, are followed"
         );
         assert_eq!(runs_of_rulings_that_carry_a_point(&two), 1);
+    }
+
+    /// Why a cone face is followed beside at most **one** cut through its apex.
+    ///
+    /// On the cone of slope a half about `+z`, keep `x ≤ z/10` and `−x ≤ z/10`,
+    /// both through the apex, and `z ≤ 8`, which the apex is in front of. Along
+    /// the ruling at `φ` a plane through the apex is zero at the apex and grows
+    /// at one rate, so it keeps the whole ruling or only the apex. Both keep more
+    /// than the apex exactly where `|cos φ| < 1/5`: **two** runs of rulings, round
+    /// `+y` and round `−y`, two sheets of one nappe meeting only at the apex. The
+    /// part in front of every cut is connected through the apex and is still not
+    /// one face, and before this refused it `[] => true` followed it.
+    ///
+    /// One plane through the apex keeps one run, and that is followed.
+    #[test]
+    fn two_planes_through_the_apex_leave_a_nappe_in_two_sheets() {
+        let cone = rcad_geom::Cone::new(Axis::z(), 0.5).expect("a positive slope");
+        let cut = |through: [f64; 3], facing: [f64; 3]| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(facing[0], facing[1], facing[2]),
+            )
+            .expect("a normal with a length");
+            Cut {
+                surface: Surface::Plane(plane),
+                placed: Surface::Plane(plane),
+                kept: Decision::Pos,
+                corners_on_it: Vec::new(),
+            }
+        };
+        let one_side = || cut([0.0; 3], [-1.0, 0.0, 0.1]);
+        let other_side = || cut([0.0; 3], [1.0, 0.0, 0.1]);
+        let roof = || cut([0.0, 0.0, 8.0], [0.0, 0.0, -1.0]);
+
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        assert_eq!(side_of_surface(&one_side().surface, apex), Decision::Zero);
+        assert_eq!(side_of_surface(&other_side().surface, apex), Decision::Zero);
+        assert_eq!(side_of_surface(&roof().surface, apex), Decision::Pos);
+
+        let strip = [one_side(), other_side(), roof()];
+        assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&strip), 2);
+        assert!(
+            !is_a_family_this_follows(&Surface::Cone(cone), &strip),
+            "two cuts through the apex are refused"
+        );
+
+        let half = [one_side(), roof()];
+        assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&half), 1);
+        assert!(
+            is_a_family_this_follows(&Surface::Cone(cone), &half),
+            "one cut through the apex, and any the apex is in front of, are followed"
+        );
+    }
+
+    /// How many runs of the rulings of the slope-one-half cone about `+z` carry a
+    /// point in front of every cut other than the apex, walked a tenth of a
+    /// degree at a time. A cut through the apex keeps a ruling where it grows
+    /// along it; [`runs_of_rulings_that_carry_a_point`] counts the apex alone as
+    /// a point, which every ruling carries.
+    fn runs_of_rulings_carrying_more_than_the_apex(cuts: &[Cut]) -> usize {
+        let carries_more = |angle: f64| {
+            let along = [0.5 * angle.cos(), 0.5 * angle.sin(), 1.0];
+            let (mut from, mut to) = (0.0, f64::INFINITY);
+            for cut in cuts {
+                let plane = cut.surface.as_plane().expect("every cut here is a plane");
+                let normal = plane.normal().components();
+                let rate: f64 = (0..3).map(|axis| normal[axis] * along[axis]).sum();
+                let at_the_apex = -plane.offset();
+                if rate > 0.0 {
+                    from = f64::max(from, -at_the_apex / rate);
+                } else if rate < 0.0 {
+                    to = f64::min(to, -at_the_apex / rate);
+                } else if at_the_apex < 0.0 {
+                    return false;
+                }
+            }
+            from < to
+        };
+        let how_many = 3600;
+        let round_the_rulings: Vec<bool> = (0..how_many)
+            .map(|step| {
+                carries_more(core::f64::consts::TAU * f64::from(step) / f64::from(how_many))
+            })
+            .collect();
+        round_the_rulings
+            .iter()
+            .zip(round_the_rulings.iter().cycle().skip(1))
+            .filter(|(now, next)| !**now && **next)
+            .count()
     }
 
     /// How many runs of the rulings of the slope-one-half cone about `+z` carry a
