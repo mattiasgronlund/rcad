@@ -1233,6 +1233,9 @@ fn do_they_face_the_same_way(
         (Some(_), None) | (None, Some(_)) => return Ok(None),
         (None, None) => (),
     }
+    if of_two_curved_kinds(&piece.surface, &face.surface) {
+        return Ok(None);
+    }
     if !matches!(
         intersect(&piece.surface, &face.surface, policy, log)?,
         SurfaceMeet::SameSurface
@@ -1240,6 +1243,34 @@ fn do_they_face_the_same_way(
         return Ok(None);
     }
     Ok(Some(piece.orientation == face.orientation))
+}
+
+/// Whether two curved surfaces are of two different kinds, which are never one
+/// surface, so `intersect` is not asked whether they are.
+///
+/// `intersect` refuses a ring against a ball, a pipe or a cone, and a cone
+/// against a ball, however far apart the two are, and a ball twenty units from
+/// a bend refused every fuse for it (`docs/decisions.md` §322.7, Q463).
+/// `tests/a_plane_is_never_one_surface_with_a_curved_face.rs` shows each pair
+/// of kinds apart: one plane, built from the two, that `intersect` cuts each
+/// of them in differently. `intersect` answers `SameSurface` only for a pair of
+/// one kind, so what skipping it drops is a refusal, or the records of a
+/// crossing nothing here used. Where two such faces really cross, the cutting
+/// has already asked for that crossing.
+fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
+    match (one, other) {
+        (Surface::Sphere(_), Surface::Sphere(_))
+        | (Surface::Cylinder(_), Surface::Cylinder(_))
+        | (Surface::Cone(_), Surface::Cone(_))
+        | (Surface::Torus(_), Surface::Torus(_)) => false,
+        (
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+        ) => true,
+        // A plane is answered by the caller before this. A kind rcad-geom grows
+        // later has not been shown apart from these, so it is still asked about.
+        _ => false,
+    }
 }
 
 /// Whether the material of one face of an input holds a point already known to
