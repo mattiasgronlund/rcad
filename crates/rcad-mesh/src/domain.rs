@@ -55,6 +55,7 @@ pub struct TrimmedDomain {
     holes: Vec<Loop>,
     deflection: Deflection,
     between_two_edges: Vec<bool>,
+    by_corner_order: bool,
 }
 
 impl TrimmedDomain {
@@ -68,7 +69,35 @@ impl TrimmedDomain {
             holes,
             deflection,
             between_two_edges: Vec::new(),
+            by_corner_order: false,
         }
+    }
+
+    /// Ask for the patch to be cut by the order of its corners, and not by the
+    /// Delaunay test, where that order alone makes a cut: a flat patch with no
+    /// holes whose outline turns the same way at every corner and goes round
+    /// once. Any other patch is cut as before.
+    ///
+    /// **Ask only where no face across the boundary can draw a side between two
+    /// of these corners.** The cut joins corners that are not next to each
+    /// other, and a face across the boundary that joins the same two draws the
+    /// same side: a pocket, refused as two patches drawing one side
+    /// (`docs/decisions.md` §187.4, §379.5). The triangulator sees one face and
+    /// cannot tell; the caller sees both.
+    ///
+    /// What it buys: points of one circle are a near-tie for the Delaunay test
+    /// in any four, so the same disc moved by a rounding is cut into other
+    /// triangles. Corner order does not move with the numbers.
+    #[must_use]
+    pub fn cut_by_corner_order(mut self) -> Self {
+        self.by_corner_order = true;
+        self
+    }
+
+    /// Whether [`TrimmedDomain::cut_by_corner_order`] was asked for.
+    #[must_use]
+    pub fn is_cut_by_corner_order(&self) -> bool {
+        self.by_corner_order
     }
 
     /// Say which corners are where the boundary passes from one edge of the

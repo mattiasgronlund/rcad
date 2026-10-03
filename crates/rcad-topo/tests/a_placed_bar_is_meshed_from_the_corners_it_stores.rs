@@ -1,5 +1,5 @@
 //! A placed bar's mesh points are the unplaced bar's mesh points moved out,
-//! bit for bit, and its wall is cut into the unplaced wall's triangles.
+//! bit for bit, and it is cut into the unplaced bar's triangles, wall and caps.
 //!
 //! A placed face is meshed in the frame it is stored in, and its points are
 //! then moved out by the placement. So the mesh of a bar placed by some
@@ -36,16 +36,18 @@
 //! `how_far_out_a_ball_can_sit_and_still_mesh.rs` is refused for it, as
 //! `PlacingItTookAwayTheSpaceItsMeshEncloses`.
 //!
-//! # What is not compared
+//! # The caps' triangles
 //!
-//! **The caps' triangles.** A flat face is cut into triangles on its plane
-//! where the solid sits, so that a placed cap is cut like the same cap read
-//! back from its STEP file, which has no placement (§362). The points round a
-//! circle are a tie for the triangulator's Delaunay test, and a tie goes
-//! whichever way the last bits push it, so the placed caps are not cut like
-//! the unplaced ones: 141 to 199 of the bar's 500 triangles join other points,
-//! every one of them on a cap. Cut where they are stored, the caps match the
-//! unplaced bar's in every row and the read-back's are lost (§379.5).
+//! A flat face is cut into triangles on its plane where the solid sits, so
+//! that a placed cap is cut like the same cap read back from its STEP file,
+//! which has no placement (§362). The points round a circle are a near-tie for
+//! the triangulator's Delaunay test, and a near-tie goes whichever way the last
+//! bits push it, so under the Delaunay test 141 to 199 of the bar's 500
+//! triangles joined other points, every one of them on a cap. A cap is now cut
+//! by the order of its corners, which is the same wherever the bar is put,
+//! because the wall reads the cap circle at one height and so cannot share a
+//! side with that cut (`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`,
+//! §379.5).
 
 use std::collections::HashSet;
 
@@ -108,12 +110,13 @@ fn a_placed_bar_meshes_to_the_unplaced_bars_mesh_moved_out_point_for_point() {
     );
 }
 
-/// The wall's triangles, corner for corner and in the same order. The caps'
-/// are printed and not compared, for the reason the module doc gives.
+/// The wall's triangles and the caps', each corner for corner and in the same
+/// order.
 #[test]
-fn a_placed_bars_wall_is_cut_into_the_unplaced_walls_triangles() {
+fn a_placed_bar_is_cut_into_the_unplaced_bars_triangles() {
     let (unplaced, unplaced_caps) = a_bar_meshed_with_its_caps(&Isometry::identity());
     let unplaced_wall = the_wall_of(&unplaced, &unplaced_caps);
+    let unplaced_caps_cut = the_caps_of(&unplaced, &unplaced_caps);
     let unplaced_as_sets: HashSet<[u32; 3]> = unplaced
         .triangles()
         .iter()
@@ -147,15 +150,15 @@ fn a_placed_bars_wall_is_cut_into_the_unplaced_walls_triangles() {
              the wall join other points",
             placed.triangles().len()
         );
-        if wall != unplaced_wall {
-            differing.push((name.clone(), off_on_the_wall));
+        if wall != unplaced_wall || the_caps_of(&placed, &caps) != unplaced_caps_cut {
+            differing.push((name.clone(), off_on_the_caps, off_on_the_wall));
         }
     }
 
     assert!(
         differing.is_empty(),
-        "a placed bar's wall is not cut into the unplaced wall's triangles; (placement, wall \
-         triangles joining other points): {differing:?}"
+        "a placed bar is not cut into the unplaced bar's triangles; (placement, cap triangles \
+         and wall triangles joining other points): {differing:?}"
     );
 }
 
@@ -165,6 +168,15 @@ fn the_wall_of(mesh: &Mesh, caps: &HashSet<FaceKey>) -> Vec<[u32; 3]> {
     mesh.triangles()
         .iter()
         .filter(|triangle| !caps.contains(&triangle.face()))
+        .map(|triangle| triangle.corners())
+        .collect()
+}
+
+/// Each triangle on a cap, the same way.
+fn the_caps_of(mesh: &Mesh, caps: &HashSet<FaceKey>) -> Vec<[u32; 3]> {
+    mesh.triangles()
+        .iter()
+        .filter(|triangle| caps.contains(&triangle.face()))
         .map(|triangle| triangle.corners())
         .collect()
 }

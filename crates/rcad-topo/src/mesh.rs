@@ -323,6 +323,9 @@ impl SolidView<'_> {
     /// frame every copy of a flat face shares, so moving a flat face can change
     /// which of two tied triangles it gets, and a placed flat face is cut the
     /// same way as its read-back — see [`the_surface_this_face_is_cut_up_on`].
+    /// A disc whose rim the face across reads at one height is cut by the order
+    /// of its corners instead, which no movement changes
+    /// ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]).
     ///
     /// [`Sphere::transformed`]: rcad_geom::Sphere::transformed
     ///
@@ -399,7 +402,7 @@ impl SolidView<'_> {
             building.walk_the_edges_this_face_can_place(face, policy, log)?;
         }
         for face in self.faces() {
-            building.cut_up(face, log)?;
+            building.cut_up(face, self, log)?;
         }
         let made = core::mem::take(&mut building.made);
         let mesh = building.finish()?;
@@ -738,13 +741,14 @@ impl BuildingAMesh {
     /// **What it does not reach.** [`BuildingAMesh::walk_a_wire_round`] now
     /// reads a placed curved face's points where they were made too (§379), so
     /// a placed bar's wall is cut into the unplaced wall's triangles, corner for
-    /// corner, under the same twelve placements. Its caps are not: a flat face
-    /// is cut where the solid sits, like its read-back
-    /// ([`the_surface_this_face_is_cut_up_on`]), and between 141 and 199 of the
-    /// bar's 500 triangles, all on the caps, join other points than the
-    /// unplaced bar's (§379.5). And a solid read back from a file is meshed in
-    /// the world, not in its stored frame, so this does not make a STEP round
-    /// trip measure the same (§249.5).
+    /// corner, under the same twelve placements. Its caps are cut where the
+    /// solid sits, like their read-back
+    /// ([`the_surface_this_face_is_cut_up_on`]), and by the order of their
+    /// corners, so they match too
+    /// ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`],
+    /// §379.5). A solid read back from a file is meshed in the world, not in
+    /// its stored frame, so this does not make a STEP round trip measure the
+    /// same (§249.5).
     ///
     /// # What a refusal from here is in, and why it is not what was walked
     ///
@@ -903,9 +907,17 @@ impl BuildingAMesh {
             .collect())
     }
 
-    /// Cut one face into triangles and put them in the solid's own table.
-    fn cut_up(&mut self, face: FaceView<'_>, log: &mut ProvenanceLog) -> Result<()> {
+    /// Cut one face of `solid` into triangles and put them in the solid's own
+    /// table.
+    fn cut_up(
+        &mut self,
+        face: FaceView<'_>,
+        solid: SolidView<'_>,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
         let surface = the_surface_this_face_is_cut_up_on(face);
+        let by_corner_order = surface.as_plane().is_some()
+            && self.nothing_across_its_rim_joins_two_of_its_points(face, solid);
         let room =
             self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
 
@@ -937,9 +949,81 @@ impl BuildingAMesh {
             return Err(Error::AWireWillNotLieFlatOnItsFace { face: face.key() });
         }
         for patch in self.cut_off_what_goes_too_far_round(face, &surface, walked, room)? {
-            self.hand_over(face, &surface, patch, room, log)?;
+            self.hand_over(face, &surface, patch, room, by_corner_order, log)?;
         }
         Ok(())
+    }
+
+    /// Whether `face` is bounded by one closed edge and every face across it
+    /// reads every point of it at one height of its own chart, so that none of
+    /// them can draw a side between two of those points. A flat `face` that
+    /// passes is cut by the order of its corners
+    /// ([`TrimmedDomain::cut_by_corner_order`]), the same way however the
+    /// solid is placed.
+    ///
+    /// **Why one height is enough, and exact.** The face across hands its
+    /// triangulator these points on one straight line, at the second
+    /// coordinate's very bits, and a side between two of them that are not next
+    /// to each other along the edge would run through the points between: no
+    /// triangulation draws one. A bar's wall reads its cap circle at the cap's
+    /// height. The read is the one [`BuildingAMesh::walk_a_wire_round`] makes,
+    /// and only where the second coordinate does not wrap, since there the walk
+    /// hands it over as it came ([`WalkingAWire::arrive`]).
+    ///
+    /// **Why it is needed.** The cut joins corners that are not next to each
+    /// other, and a ball's patch along a lid's rim joins some of the same two
+    /// points: the lid of `a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures`
+    /// was refused as two patches drawing one side, and 68 of the 1440 meshes
+    /// of `no_sliver_cut_through_a_balls_pole_folds_at_any_deflection` folded
+    /// where 38 do (`docs/decisions.md` §379.5). A ball reads a tilted rim at
+    /// many latitudes, so its lids stay with the Delaunay cut.
+    ///
+    /// The points strictly along the edge are on no other face, so only the
+    /// faces across it could join two of them.
+    fn nothing_across_its_rim_joins_two_of_its_points(
+        &self,
+        face: FaceView<'_>,
+        solid: SolidView<'_>,
+    ) -> bool {
+        let mut wires = face.wires();
+        let (Some(wire), None) = (wires.next(), wires.next()) else {
+            return false;
+        };
+        if !wire.closes_on_one_edge() {
+            return false;
+        }
+        let Some(rim) = wire.coedges().next().map(|coedge| coedge.edge().key()) else {
+            return false;
+        };
+        let Some(walked) = self.along_edge.get(&rim) else {
+            return false;
+        };
+        let mut faces_across = 0;
+        for other in solid.faces().filter(|other| other.key() != face.key()) {
+            for coedge in other
+                .wires()
+                .flat_map(WireView::coedges)
+                .filter(|coedge| coedge.edge().key() == rim)
+            {
+                faces_across += 1;
+                let chart = the_surface_this_face_is_cut_up_on(other);
+                if chart.as_plane().is_some()
+                    || how_far_the_second_coordinate_wraps(&chart).is_some()
+                {
+                    return false;
+                }
+                let reads = HowAFaceReadsThePointsRoundIt::of(other);
+                let height = |at: Point| chart.coordinates_of(at).1.to_bits();
+                let corner = height(reads.a_corner(coedge.start(), other));
+                if walked
+                    .iter()
+                    .any(|&at| height(reads.a_point(at, self)) != corner)
+                {
+                    return false;
+                }
+            }
+        }
+        faces_across > 0
     }
 
     /// The patches to hand over for one face: usually the one, but a face that
@@ -1750,13 +1834,16 @@ impl BuildingAMesh {
     }
 
     /// Hand one patch to the triangulator and take what comes back into the
-    /// solid's own table.
+    /// solid's own table, asking for it to be cut by the order of its corners
+    /// when `by_corner_order` says nothing across can share a side with that
+    /// cut ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]).
     fn hand_over(
         &mut self,
         face: FaceView<'_>,
         surface: &Surface,
         patch: Vec<WalkedLoop>,
         room: f64,
+        by_corner_order: bool,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         let mut corner_is = Vec::new();
@@ -1788,13 +1875,16 @@ impl BuildingAMesh {
         }
         let (outer, holes) = loops.split_first().ok_or(Invalid::FaceHasNoWires)?;
 
-        let domain = TrimmedDomain::new(
+        let mut domain = TrimmedDomain::new(
             *surface,
             outer.clone(),
             holes.to_vec(),
             Deflection::of(room)?,
         )
         .with_corners_between_two_edges(between_two_edges);
+        if by_corner_order {
+            domain = domain.cut_by_corner_order();
+        }
         let cut = match triangulate(&domain) {
             Ok(cut) => cut,
             Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
@@ -1907,15 +1997,8 @@ impl BuildingAMesh {
         face: FaceView<'_>,
         surface: &Surface,
     ) -> Option<WalkedLoop> {
-        let back = the_frame_this_face_is_cut_up_in(face);
-        let read_as_made = face.location() != Isometry::identity() && back != Isometry::identity();
-        let corner_in = |vertex: VertexView<'_>| {
-            if read_as_made {
-                where_this_corner_is_in_the_frame_it_is_meshed_in(vertex, face)
-            } else {
-                back.apply_to_point(vertex.point())
-            }
-        };
+        let reads = HowAFaceReadsThePointsRoundIt::of(face);
+        let corner_in = |vertex: VertexView<'_>| reads.a_corner(vertex, face);
         let poles = poles_of(wire);
         let sits_at_a_pole = |at: Point| {
             the_surface_pinches_at(surface, surface.coordinates_of(at).1)
@@ -1974,11 +2057,7 @@ impl BuildingAMesh {
                         } else {
                             walked[step]
                         };
-                        let where_it_is = if read_as_made {
-                            self.made[at as usize]
-                        } else {
-                            back.apply_to_point(self.points[at as usize])
-                        };
+                        let where_it_is = reads.a_point(at, self);
                         let sits_at = surface.coordinates_of(where_it_is);
                         let passes_a_pole = sits_at_a_pole(where_it_is);
                         walk.arrive(at, sits_at, passes_a_pole);
@@ -2075,6 +2154,48 @@ impl BuildingAMesh {
             along_edge: self.along_edge,
             deviation: Approximation::new(self.worst, Cause::FlatStandIn),
         })
+    }
+}
+
+/// Where a face reads the points round it, in the frame it is cut up in: a
+/// placed curved face reads each where it was made, and any other face reads
+/// the point table moved into that frame — see
+/// [`BuildingAMesh::walk_a_wire_round`] for why.
+///
+/// One reader for the face's own walk and for
+/// [`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`], which has
+/// to read the points the face across will read, bit for bit.
+#[derive(Clone, Copy)]
+struct HowAFaceReadsThePointsRoundIt {
+    back: Isometry,
+    as_made: bool,
+}
+
+impl HowAFaceReadsThePointsRoundIt {
+    fn of(face: FaceView<'_>) -> Self {
+        let back = the_frame_this_face_is_cut_up_in(face);
+        Self {
+            back,
+            as_made: face.location() != Isometry::identity() && back != Isometry::identity(),
+        }
+    }
+
+    /// A corner of the model, looked at through `face`'s own wires.
+    fn a_corner(self, vertex: VertexView<'_>, face: FaceView<'_>) -> Point {
+        if self.as_made {
+            where_this_corner_is_in_the_frame_it_is_meshed_in(vertex, face)
+        } else {
+            self.back.apply_to_point(vertex.point())
+        }
+    }
+
+    /// The point at `at` in the table `building` holds.
+    fn a_point(self, at: u32, building: &BuildingAMesh) -> Point {
+        if self.as_made {
+            building.made[at as usize]
+        } else {
+            self.back.apply_to_point(building.points[at as usize])
+        }
     }
 }
 
@@ -4253,6 +4374,13 @@ fn how_far_moving_this_face_rounds(
 /// sits, the test is decided on the mesh points themselves, and a cap is cut
 /// the same way whichever frame it was stored in.
 ///
+/// **A cap of a bar is no longer cut by that test at all**, but by the order
+/// of its corners, because the same cap placed and unplaced still came out in
+/// other triangles: 141 to 199 of a bar's 500 under twelve placements (§379.5).
+/// Only a disc whose rim the face across cannot join two points of is cut that
+/// way ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]);
+/// every other flat face is still decided here, on these numbers.
+///
 /// A flat face at no placement was cut up there already. A plane is never
 /// shifted ([`a_shift_that_loses_nothing`]), and moving one by nothing changes
 /// no bit ([`Plane::transformed`](rcad_geom::Plane::transformed)).
@@ -5844,7 +5972,7 @@ mod tests {
             .find(|face| face.surface().as_plane().is_none())
             .expect("a bar has one curved face");
         let refusal = building
-            .cut_up(wall, &mut log)
+            .cut_up(wall, solid, &mut log)
             .expect_err("a wall whose top side collapsed to one point is not a patch");
         assert!(
             matches!(refusal, Error::AWireWillNotLieFlatOnItsFace { .. }),

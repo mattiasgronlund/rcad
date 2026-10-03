@@ -507,6 +507,137 @@ fn a_plane_is_never_refined_and_never_strays() {
     }
 }
 
+/// A disc of 40 corners round a circle, turned by `turn` and moved by `(3, −5)`.
+fn a_disc_turned_and_moved(turn: f64) -> Vec<[f64; 2]> {
+    (0..40)
+        .map(|step| {
+            let angle = TAU * f64::from(step) / 40.0 + turn;
+            [3.0 + 2.0 * angle.cos(), -5.0 + 2.0 * angle.sin()]
+        })
+        .collect()
+}
+
+fn every_triangle_turns_anticlockwise(name: &str, patch: &Patch) {
+    for &triangle in patch.triangles() {
+        let [a, b, c] = triangle.map(|corner| patch.corners()[corner as usize]);
+        assert_eq!(
+            orient2d(a, b, c),
+            Decision::Pos,
+            "{name}: the triangle {triangle:?} does not turn anticlockwise"
+        );
+    }
+}
+
+/// The points round a circle are a near-tie for the Delaunay test in any four,
+/// so the same disc turned and moved is cut into other triangles. Asked to be
+/// cut by the order of its corners, it is cut the same every time
+/// (`docs/decisions.md` §379.5).
+#[test]
+fn a_disc_cut_by_corner_order_is_cut_the_same_however_it_is_turned_and_moved() {
+    let turns = (0..12).map(|step| 0.3 * f64::from(step) + 0.01);
+    let by_delaunay: Vec<Vec<[u32; 3]>> = turns
+        .clone()
+        .map(|turn| {
+            let domain = domain_of(flat(), a_disc_turned_and_moved(turn), Vec::new());
+            let mut triangles = triangulate(&domain).expect("a disc").triangles().to_vec();
+            for triangle in &mut triangles {
+                triangle.sort_unstable();
+            }
+            triangles.sort_unstable();
+            triangles
+        })
+        .collect();
+    let cut_differently = by_delaunay
+        .iter()
+        .filter(|triangles| **triangles != by_delaunay[0])
+        .count();
+    println!(
+        "the Delaunay test cut {cut_differently} of 11 turned discs differently from the first"
+    );
+    assert!(
+        cut_differently > 0,
+        "the Delaunay test cut every turned disc the same, so this tells corner order from it \
+         by nothing"
+    );
+
+    let mut by_corner_order = Vec::new();
+    for turn in turns {
+        let name = format!("a disc turned by {turn}, cut by corner order");
+        let domain =
+            domain_of(flat(), a_disc_turned_and_moved(turn), Vec::new()).cut_by_corner_order();
+        check_everything(&name, &domain);
+        let patch = triangulate(&domain).expect("checked just above");
+        every_triangle_turns_anticlockwise(&name, &patch);
+        by_corner_order.push(patch.triangles().to_vec());
+    }
+    assert!(
+        by_corner_order
+            .iter()
+            .all(|triangles| *triangles == by_corner_order[0]),
+        "cut by corner order, the turned discs still came out in different triangles"
+    );
+}
+
+/// An outline running clockwise is cut into triangles that turn anticlockwise,
+/// like every other patch's.
+#[test]
+fn a_clockwise_disc_cut_by_corner_order_turns_every_triangle_anticlockwise() {
+    let mut disc = a_disc_turned_and_moved(0.0);
+    disc.reverse();
+    let domain = domain_of(flat(), disc, Vec::new()).cut_by_corner_order();
+    check_everything("a clockwise disc", &domain);
+    every_triangle_turns_anticlockwise(
+        "a clockwise disc",
+        &triangulate(&domain).expect("checked just above"),
+    );
+}
+
+/// Corner order cuts only a flat patch with no hole and an outline that turns
+/// one way at every corner. Every other patch asked for it is cut as though it
+/// had not been asked.
+#[test]
+fn a_patch_corner_order_cannot_cut_is_cut_as_though_it_had_not_been_asked() {
+    let disc = a_disc_turned_and_moved(0.0);
+    let hole: Vec<[f64; 2]> = a_disc_turned_and_moved(0.0)
+        .into_iter()
+        .rev()
+        .map(|[u, v]| [3.0 + (u - 3.0) / 4.0, -5.0 + (v + 5.0) / 4.0])
+        .collect();
+    let five_petals: Vec<[f64; 2]> = (0..60)
+        .map(|step| {
+            let angle = TAU * f64::from(step) / 60.0;
+            let reach = 2.0 + 0.6 * (5.0 * angle).cos();
+            [reach * angle.cos(), reach * angle.sin()]
+        })
+        .collect();
+    let with_a_straight_corner = vec![[0.0, 0.0], [2.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+    let on_a_pipe = Surface::from(Cylinder::new(Axis::z(), 2.0).expect("a pipe"));
+    for (name, surface, outer, holes) in [
+        ("a disc with a hole", flat(), disc.clone(), vec![hole]),
+        ("five petals", flat(), five_petals, Vec::new()),
+        (
+            "a corner that does not turn",
+            flat(),
+            with_a_straight_corner,
+            Vec::new(),
+        ),
+        (
+            "a patch of a pipe",
+            on_a_pipe,
+            a_walked_rectangle([0.0, 1.0], [0.0, 1.0], 8),
+            Vec::new(),
+        ),
+    ] {
+        let asked = domain_of(surface, outer.clone(), holes.clone()).cut_by_corner_order();
+        check_everything(name, &asked);
+        assert_eq!(
+            triangulate(&asked),
+            triangulate(&domain_of(surface, outer, holes)),
+            "{name}: asked to be cut by corner order, it was cut otherwise than unasked"
+        );
+    }
+}
+
 /// The scaling is not decoration: an unscaled pipe of large radius is a strip
 /// `2π` wide, and every triangle in it is a sliver.
 ///

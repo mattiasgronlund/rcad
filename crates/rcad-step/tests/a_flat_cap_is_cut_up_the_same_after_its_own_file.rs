@@ -5,11 +5,15 @@
 //! else, comes back from its file with every mesh point the same bits (§249.4
 //! item 2). Its two caps used to come back cut differently all the same: 20 of
 //! each cap's triangles joined other points. The points round a cap circle are
-//! points of one circle, so four in a row are a true tie for the Delaunay
+//! points of one circle, so four in a row are a near-tie for the Delaunay
 //! triangulator, and the tie was decided on different numbers on the two sides.
 //! The bar going in was cut up in the frame it is stored in, from its mesh
 //! points moved back there by a rounded subtraction; the bar coming back has no
 //! placement and was cut up where it sits, from the mesh points themselves.
+//!
+//! A bar's cap is now cut by the order of its corners and not by the Delaunay
+//! test (§379.5), and both caps reach the triangulator with the same corners in
+//! the same order, so the cap test below holds on that rule too.
 
 use std::collections::BTreeMap;
 use std::f64::consts::FRAC_PI_4;
