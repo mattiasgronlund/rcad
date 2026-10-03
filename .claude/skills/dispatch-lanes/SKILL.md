@@ -199,6 +199,12 @@ Several rows off one base can share a run, and their merges then wait for one
 another. But a slot refills when its run returns (§230.4), so a shared run
 holds every slot in it until the slowest row is merged.
 
+**Never `SendMessage` an agent a run is running.** It does not reach the live
+agent: it starts a second copy from the transcript, in the same tree and on the
+same branch, and the two write over each other (§398). A brief found wrong
+mid-run is corrected when the run returns, or the run is stopped with
+`TaskStop` and the row sent again.
+
 ## 6. When a row's run returns
 
 A merged row comes back as the sha the merger pushed, the gate's PASS line,
