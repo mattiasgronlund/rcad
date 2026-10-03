@@ -24,7 +24,8 @@ it with one of three moves, then reads the bytes back:
 
 - **off the wall**, `(4, 0, 10)` — a millimetre out, still on the cap's plane.
 - **off the cap**, `(3, 0, 11)` — a millimetre up, still on the wall's cylinder.
-- **a quarter turn round and off the wall**, `(0, 4, 10)` — off both.
+- **a quarter turn round and off the wall**, `(0, 4, 10)` — off the wall only;
+  it still sits on the cap's own plane, `z = 10`.
 
 `Deserialize` does not call `validate`, so all three read back. `Model::validate`
 under `Policy::certified` refuses each: off the wall and the quarter turn as
@@ -180,14 +181,60 @@ the fold's cost against a fuse's other work.
 
 ### 294.7 Not tried
 
-- **A non-identity placement.** `add_round_bar` here is built at
-  `Isometry::identity()`; the corner's stored point and the placement that
-  locates it are not exercised apart.
-- **Balls and cones.** Only a plane-and-cylinder corner was moved; a
-  plane-and-cone or a ball's own two-surface corners were not.
-- **A tolerant policy.** Every fuse and `validate` call here used
-  `Policy::certified()`.
 - **A three-or-more-surface corner moved the same way**, which §286.4 already
   named as a separate, unmeasured gap (`Undecidable` from
   `the_place_the_model_points_at`'s narrower rounding, not this file's
   question).
+
+The three items this section used to list beside that one — a non-identity
+placement, balls and cones, and a tolerant policy — are now tried; §294.8
+records what Q224 found.
+
+### 294.8 Q224: a placement, a tolerant policy, a ball, a frustum
+
+Q224 tried three more families, and Q419 pinned what it found in the same
+file. Every case comes out one of 294.2's three ways, or as a refusal that
+names something other than the file — never a wrong `Ok`, never a panic.
+
+- **The bar at a placement** — shifted by `(7, -5, 2.5)`, turned 0.4 about
+  `x`, and turned then shifted, the block placed the same way. The corner is
+  moved in the stored frame, and `validate` refuses it just as it refuses the
+  bar at no placement. Every fuse gives what the bar at no placement gives,
+  with two differences. Turned and shifted, the fuse's refusal of the corner
+  moved off the cap carries `VertexOffItsFacePlane { distance:
+  0.999_999_999_999_998_2 }` where `validate`'s own refusal carries `1.0`
+  (`a_turned_and_shifted_bar_blames_itself_for_a_corner_off_the_cap_with_the_distance_rounded`).
+  And turned, the sound bar cut along its own seam is `Undecidable` on "side
+  of plane" — the box round where its bottom seam corner `(3, 0, 0)` lands is
+  `8.5e-14` either way turned, `2.8e-13` turned and shifted — so every corner
+  moved there is that refusal too, not an answer about the moved corner
+  (`a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
+  Only shifted, the sound bar answers, because a corner moved by a shift that
+  rounds nothing is handed on exact (Q509 fixed this; before it, it refused
+  "side of plane" there as well).
+- **A tolerant policy**, `Policy::tolerant(100.0)`, on the bar at no
+  placement, matches `certified` in every fuse except the corner moved off the
+  cap in a cut along the seam, which refuses with
+  `TwoCurvesTouchWithoutCrossing` where `certified` finds the order along a
+  crossing `Undecidable`
+  (`under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_touches_without_crossing`).
+- **A ball's south pole** `(0, 0, -3)`, moved to five places. `validate`
+  refuses four with `VertexOffItsFaceSurface`, and the one moved onto the
+  equator at `(3, 0, 0)` with `APoleStandsWhereTheSurfaceDoesNotPinch`
+  (`a_ball_whose_south_pole_is_moved_in_its_file_reads_back_and_does_not_validate`).
+  No fuse blames itself. In six pairs, a block far away among them, the answer
+  is the sound ball's corner for corner to the last bit, so the moved pole
+  never reaches it; the seventh pair, a small block round the pole, refuses
+  with `ACurvedFaceGoesRightRoundWithNoSeam` for the sound ball too, under
+  both policies
+  (`a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer`).
+- **A frustum's top corner** `(3, 0, 6)`, from `cones::a_frustum(model, 0.5,
+  2, 6)`, moved off the wall, off the cap and a quarter turn round: the bar's
+  outcomes, and one refusal more. Moved off the cap to `(3.5, 0, 7)`, the
+  corner sits inside a block over the top (`z` from 5 to 8), and both rules
+  tried with that block are `Undecidable` on "a point inside a piece of a
+  face". The sound frustum is `Undecidable` on that same predicate against a
+  block over the rim by its seam, and so is every moved corner there, under
+  both policies
+  (`a_frustum_whose_top_corner_is_moved_in_its_file_reads_back_and_does_not_validate`,
+  `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more`).

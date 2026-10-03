@@ -99,15 +99,21 @@ The leaning bar refuses 69.5%, so its laws compare little — 28 of 126
 commutativity comparisons reached — and the doc comments say so rather than
 count it as coverage (§14.7).
 
-**Two wrong answers, parked:**
+**One wrong answer fixed, one parked:**
 
-- `a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model`.
-  A ball-and-block union that validates upright fails `Model::validate`
-  (`AClosedEdgeIsWalkedAgainstItsSurface`) after `place_solid` by a half turn
-  about `(-2,0,-2)`, or three quarters about `-y`. A rigid motion cannot make a
-  sound solid unsound, so either `place_solid` or validate's winding check is
-  wrong about a moved closed edge. `AClosedEdgeIsWalkedAgainstItsSurface` is
-  §124's refusal too.
+- `a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model` —
+  **fixed by Q648 (c1517c49).** A ball-and-block union that validates upright
+  failed `Model::validate` (`AClosedEdgeIsWalkedAgainstItsSurface`) after
+  `place_solid` by a half turn about `(-2,0,-2)`, or three quarters about
+  `-y`. `Model::validate` read a closed edge's winding rule where the solid
+  sits, where a ball is wound about the world's `z`, rather than where its
+  faces are stored; it now reads it in the stored frame, as the mesher
+  already did. The same union turned about every axis `{-1, 0, 1}³` names, by
+  every sixty-fourth of a turn short of a whole one — 26 axes and 63 steps,
+  1638 turns — is still sound
+  (`a_ball_and_block_union_turned_about_any_of_26_axes_is_still_a_sound_model`,
+  whose doc comment records that 430 of the 1638 were this refusal while
+  `validate` still read the winding where the solid sits, before the fix).
 - `a_bar_leaning_through_a_block_unites_with_it_into_a_solid`. `LeaningBar{side:
   15, radius: 1, at: [6,6], lean: [1,1], up: 2}`, `Union`, returns
   `ResultIsNotManifold` ("an edge would have 8 faces along it"). Every crossing
