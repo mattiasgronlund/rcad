@@ -1190,6 +1190,7 @@ check-pre-gate-selftest:
     grep -qx 'line 61' <<<"$got" && fail "a long failure was printed past its sixtieth line"
     kept=$(sed -nE 's/^\.\.\. [0-9]+ more lines in //p' <<<"$got")
     [ -n "$kept" ] || fail "a long failure did not say how much was cut and where the rest is"
+    [ -f "$kept" ] || fail "a long failure named a log, $kept, that it then deleted"
     grep -qx 'line 100' "$kept" || fail "the log a cut failure names does not hold the rest"
     rm -rf "$(dirname "$kept")"
 
@@ -1823,7 +1824,8 @@ check-wildcards:
     # of flags took turns in cargo's cache, and each turn re-checked all 8
     # crates of the workspace whether the edit reached them or not; run at
     # once, one of the two waited on the other's lock. Here each re-checks only
-    # what the edit reached. The directory costs 276 MB on its first run.
+    # what the edit reached. The directory costs 276 MB on its first run, and
+    # about 1.1 GB once an edit has gone through it (§381.4).
     if ! CARGO_TARGET_DIR=target/wildcards CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
             -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
         grep '^error' "$log" | head -5

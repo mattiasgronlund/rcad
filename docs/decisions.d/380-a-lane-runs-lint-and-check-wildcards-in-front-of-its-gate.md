@@ -111,6 +111,9 @@ C1 is the other order. There the lane's `lint` re-checked all 8 crates instead
 of the 4 the edit reaches (A3), and so did the gate's `check-wildcards`
 (12.4 s). That order costs about 16 s a passing gate, not 9.
 
+§381 replaces this rule: `just pre-gate` runs the checks at once, each clippy
+in a target directory of its own, so the order no longer matters.
+
 ### 380.5 What this leaves
 
 - **When `lint` fails, `check-wildcards` does not run in that call.** A lane that
