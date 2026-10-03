@@ -79,7 +79,9 @@ below, and settle what the stop line names.
    ours|theirs` for each row the driver names. Any other conflict you settle
    only by keeping one side's lines whole, inside the write set; otherwise
    `git merge --abort`, and do not merge.
-2. Make the fixes from step 2.
+2. Make the fixes from step 2. Run `mise exec -- just fmt` before you commit
+   any of them to a `.rs` file: a fix committed unformatted fails the merge
+   gate at lint over formatting alone, as Q574's first gate did.
 3. One `mise exec -- just queue apply done <row> <lane tip sha> + add <tier>
    <model> <write set> <what, ending in §N> + ...` (§309): the row's `done`
    step and every `add` step below, in one call. The lane's tip, not the merge
