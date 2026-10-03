@@ -352,8 +352,11 @@ fn what_a_round_wire_encloses(
                 Decision::Pos
             })
         }
-        Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => {
-            what_a_circle_round_the_axis_encloses(&this_circle, side, point)
+        Picker::OutsideAPipe(_) => {
+            what_a_circle_round_the_axis_encloses(&this_circle, true, side, point)
+        }
+        Picker::InsideAPipe(_) => {
+            what_a_circle_round_the_axis_encloses(&this_circle, false, side, point)
         }
         Picker::OutsideABall(_) | _ => Err(cannot()),
     }
@@ -383,19 +386,18 @@ fn what_a_round_wire_encloses(
 /// plane the answer is whatever the two signs give, as everywhere in this file:
 /// [`SolidView::face_holds_the_point`] takes its point as on the face.
 ///
+/// `outer` says which of the two circles `this_circle`, the side of the pipe
+/// naming it, picks.
+///
 /// # Errors
 ///
 /// [`Error::Undecidable`], naming the pipe, when it cannot say.
 fn what_a_circle_round_the_axis_encloses(
     this_circle: &Picker,
+    outer: bool,
     side: Decision,
     point: PredicatePoint,
 ) -> Result<Decision> {
-    let outer = match this_circle {
-        Picker::OutsideAPipe(_) => true,
-        Picker::InsideAPipe(_) => false,
-        other => panic!("only a pipe names a circle round a ring's axis, and this is {other:?}"),
-    };
     if side == Decision::Neg {
         return Ok(if outer { Decision::Neg } else { Decision::Pos });
     }
