@@ -43,9 +43,12 @@
 //! solid's located numbers are checked bit for bit: each face's surface, and
 //! for every coedge its two corners and its edge's run, in walk order. These
 //! are the numbers the writer writes and the reader reads, and §249.2 found
-//! every one of them come back the same bits for a turned round bar. Volume,
-//! surface area and centroid are then also checked bit for bit, but only for a
-//! solid that sits wholly on planes or that carries no placement at all. A
+//! every one of them come back the same bits for a turned round bar. A cone's
+//! slope is the one exception: the file carries its half-angle, no angle reads
+//! back as most slopes, and the slope is compared as a measurement (§366).
+//! Volume, surface area and centroid are then also checked bit for bit, but
+//! only for a solid whose every number came back the same bits and that sits
+//! wholly on planes or carries no placement at all. A
 //! curved solid placed with a turn is meshed in the frame it is stored in on
 //! the way out and in the frame the reader baked it into on the way back — two
 //! different roundings of the same true surface — so its measurement can come
@@ -241,7 +244,7 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
     for (&here_key, &back_key) in source_solids.iter().zip(&there_solids) {
         let here_solid = source.solid(here_key).expect("this model made the key");
         let back_solid = there.solid(back_key).expect("this model made the key");
-        assert_located_numbers_the_same(here_solid, back_solid);
+        let every_number_the_same_bits = assert_located_numbers_the_same(here_solid, back_solid);
 
         let Ok(here) = here_solid.measure(deflection, &policy, &mut log) else {
             reached.did_not_measure = 1;
@@ -252,7 +255,9 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
             .unwrap_or_else(|why| {
                 panic!("a solid that measured does not measure after its own file: {why}")
             });
-        if here_solid.is_wholly_flat() || solid_has_no_placement(here_solid) {
+        if every_number_the_same_bits
+            && (here_solid.is_wholly_flat() || solid_has_no_placement(here_solid))
+        {
             assert!(
                 here.volume() == back.volume() && here.surface_area() == back.surface_area(),
                 "a sound solid came back from its own file with a different volume or area: \
@@ -276,10 +281,18 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 ///
 /// Compared as `{:?}` text rather than with `==`, because derived float
 /// equality treats `0.0` and `-0.0` as one number and this has to mean the
-/// same bits (§249.1). A mismatch here is never a limit: the writer writes
-/// every one of these numbers unchanged and the reader parses them back
+/// same bits (§249.1). A mismatch here is never a limit but in one number:
+/// the writer writes every other one unchanged and the reader parses it back
 /// exactly (§249.2), so a difference is a defect in one of the two, not a
 /// frame the file cannot name.
+///
+/// **That one number is a cone's slope.** STEP writes a cone's half-angle and
+/// the reader takes its tangent, and for most slopes over one no angle's
+/// tangent is the slope (`docs/decisions.md` §366). So a cone's apex and axis
+/// are compared bit for bit and its slope as a measurement — see
+/// [`a_slope_comes_back_as_near_as_a_half_angle_carries_it`] — and this
+/// answers whether every number came back the same bits, which is what lets
+/// [`read_back_and_compared`] compare the solid's measurement bit for bit too.
 ///
 /// A plane is the one surface whose numbers are not written as they are
 /// stored. The writer picks the point it writes so that the reader's offset
@@ -293,7 +306,8 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// # Panics
 ///
 /// If a face, a coedge, a corner or a run differs between `here` and `back`.
-fn assert_located_numbers_the_same(here: SolidView, back: SolidView) {
+fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
+    let mut every_number_the_same_bits = true;
     let here_faces: Vec<_> = here.faces().collect();
     let back_faces: Vec<_> = back.faces().collect();
     assert_eq!(
@@ -302,11 +316,32 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) {
         "a sound solid came back from its own file with a different number of faces"
     );
     for (here_face, back_face) in here_faces.iter().zip(&back_faces) {
-        assert_eq!(
-            format!("{:?}", here_face.surface()),
-            format!("{:?}", back_face.surface()),
-            "a sound solid's face came back from its own file with a different surface"
-        );
+        let (here_surface, back_surface) = (here_face.surface(), back_face.surface());
+        if let (Surface::Cone(here_cone), Surface::Cone(back_cone)) = (here_surface, back_surface) {
+            assert_eq!(
+                format!("{:?}", here_cone.axis()),
+                format!("{:?}", back_cone.axis()),
+                "a sound solid's face came back from its own file with a different surface"
+            );
+            assert!(
+                a_slope_comes_back_as_near_as_a_half_angle_carries_it(
+                    here_cone.slope(),
+                    back_cone.slope()
+                ),
+                "a sound solid's cone came back from its own file with a slope further off \
+                 than a half-angle carries: {} went in, {} came back",
+                here_cone.slope(),
+                back_cone.slope()
+            );
+            every_number_the_same_bits &=
+                here_cone.slope().to_bits() == back_cone.slope().to_bits();
+        } else {
+            assert_eq!(
+                format!("{here_surface:?}"),
+                format!("{back_surface:?}"),
+                "a sound solid's face came back from its own file with a different surface"
+            );
+        }
         let here_coedges: Vec<_> = here_face.wires().flat_map(WireView::coedges).collect();
         let back_coedges: Vec<_> = back_face.wires().flat_map(WireView::coedges).collect();
         assert_eq!(
@@ -333,6 +368,26 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) {
             );
         }
     }
+    every_number_the_same_bits
+}
+
+/// Whether a cone's slope came back as near as a written half-angle can carry
+/// it: within what the tangents of the two `f64` angles either side of
+/// `atan(here)` differ by.
+///
+/// STEP writes a cone's half-angle and the reader takes its tangent, so a
+/// slope comes back exactly only where some angle's tangent is that slope. For
+/// most slopes over one none is, and slopes one and two of the four
+/// [`a_slope`] draws are among them (`docs/decisions.md` §366). So the slope
+/// is compared as a measurement, the way §249.6 compares one. The writer
+/// writes the angle whose tangent comes nearest, and
+/// `most_slopes_over_one_come_back_from_no_half_angle` in
+/// `crates/rcad-step/src/write.rs` finds it within a third of this reach at
+/// worst over a hundred thousand slopes from `1e-3` to `1e3`.
+fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -> bool {
+    let angle = here.atan();
+    let reach = (angle.next_up().tan() - angle.next_down().tan()).abs();
+    (back - here).abs() <= reach
 }
 
 /// Whether two runs are the same, which is the same bits except for a flat
@@ -512,7 +567,7 @@ fn how_often_a_model_the_mutator_draws_is_refused() {
         .collect();
     pool.sort();
     let mut refusals: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    let mut comparisons_that_panicked: std::collections::BTreeMap<String, usize> =
+    let mut comparisons_that_panicked: std::collections::BTreeMap<String, (usize, String)> =
         std::collections::BTreeMap::new();
     std::panic::set_hook(Box::new(|_| {}));
     let (draws, mut refused, mut a_sound_cone_cap_refused) = (400_u32, 0, 0);
@@ -538,10 +593,12 @@ fn how_often_a_model_the_mutator_draws_is_refused() {
                         .cloned()
                         .or_else(|| why.downcast_ref::<&str>().map(|said| (*said).to_owned()))
                         .unwrap_or_default();
+                    let whole: String = said.chars().take(400).collect();
                     let said = said.lines().next().unwrap_or_default();
                     let said = said.trim_start_matches("assertion `left == right` failed: ");
                     let said = said.split(':').next().unwrap_or_default().to_owned();
-                    *comparisons_that_panicked.entry(said).or_default() += 1;
+                    let seen = comparisons_that_panicked.entry(said).or_insert((0, whole));
+                    seen.0 += 1;
                 }
             }
             Err(why) => {
@@ -564,10 +621,50 @@ fn how_often_a_model_the_mutator_draws_is_refused() {
     for (named, count) in &refusals {
         println!("{count:6}  {named}");
     }
-    for (said, count) in &comparisons_that_panicked {
+    for (said, (count, first)) in &comparisons_that_panicked {
         println!("{count:6}  written, and the comparison panicked: {said}");
+        println!("        the first: {first}");
     }
     println!("{a_sound_cone_cap_refused} sound models refused where a flat face meets a cone");
+    assert_eq!(
+        a_sound_cone_cap_refused, 0,
+        "a sound model was refused where its flat cap meets its cone"
+    );
+}
+
+/// The frustum and the pointed cone this target draws, at each of its four
+/// slopes, where they are built and turned a quarter about `x`: each is
+/// written and comes back the same. Slopes one and two come back an ulp or two
+/// off whatever half-angle is written (§366), so for those the slope is held
+/// to what a half-angle carries and the measurement is not compared.
+#[test]
+fn every_cone_this_target_draws_comes_back_from_its_own_file() {
+    let quarter_turn = Isometry::rotation(&Axis::x(), core::f64::consts::FRAC_PI_2)
+        .expect("a finite angle about a unit axis");
+    for slope in [0.25, 0.5, 1.0, 2.0] {
+        for placement in [Isometry::identity(), quarter_turn] {
+            for pointed in [false, true] {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let solid = if pointed {
+                    a_pointed_cone(&mut model, slope, 6.0)
+                } else {
+                    a_frustum(&mut model, slope, 2.0, 6.0)
+                }
+                .expect("each cone fits in a model this size");
+                model
+                    .place_solid(solid, &placement)
+                    .expect("the key came from this model");
+                let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+                let reached = one_model_decoded_and_written(&bytes);
+                assert_eq!(
+                    (reached.came_back_the_same, reached.solids_the_same),
+                    (1, 1),
+                    "slope {slope}, pointed {pointed}, {placement:?}: {reached:?}"
+                );
+            }
+        }
+    }
 }
 
 fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
