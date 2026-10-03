@@ -89,9 +89,9 @@
 //!
 //! Three of the four controls answer, so the rate above is the torus's and not
 //! the tools'. The fourth does not, and that is a result rather than a hole: a
-//! ball resting on a bar is a hard pair for this kernel already — `where three
-//! surfaces meet is only worked out when two of them are flat` — so that row
-//! measures the tool. The fifth takes no control at all, because a bar in place
+//! ball resting on a bar is a hard pair for this kernel already — all 96
+//! refuse `Undecidable`, the last record `a point in a piece that every solid
+//! could place` — so that row measures the tool. The fifth takes no control at all, because a bar in place
 //! of a second bend still leaves a torus in the pair.
 
 use std::collections::BTreeMap;
