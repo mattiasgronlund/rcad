@@ -26,9 +26,17 @@ by `true`, all six fuses of the half frustum and a block across its top come
 back `Invalid(EdgeHasNoLength)`, and
 `a_half_frustums_corners_on_two_rulings_stay_two_corners` fails. On the base
 all six get through the arrangement and stop in `select.rs`, for want of a
-point in a piece that both solids can place. That is the half frustum's flat
-face, bounded by rulings, which `holds.rs` cannot follow yet —
-`a_flat_cap_cut_by_a_cones_rim.rs`'s `the_face_down_the_axis_is_still_refused`.
+point in a piece that both solids can place.
+
+**Corrected by §389: that was not the flat face.** Traced on `b1136e72` in the
+union with the half frustum first, each ray `select.rs` fired asked the top cap,
+which answered, and then the cone skin, which refused; the flat face was never
+reached. Asked on their own, the skin and the flat face both refused, and both
+are bounded by pieces of the two rulings. Since §389 both answer, and so do all
+six fuses, each one solid of the closed-form volume. The picker question above
+still holds them apart: replaced by `true` on §389's branch, all six come back
+`Invalid(EdgeHasNoLength)` again. `the_face_down_the_axis_is_still_refused` is
+now `the_face_down_the_axis_holds_its_four_corners_and_not_the_other_nappe`.
 
 ### 334.2 Where the block's floor is decides the answer
 
