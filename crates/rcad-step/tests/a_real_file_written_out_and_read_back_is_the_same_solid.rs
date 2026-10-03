@@ -127,21 +127,25 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     assert_pinned_round_trips(&round_tripped);
 }
 
-/// The 161 imported KiCad files this kernel can write back out and read back as
-/// the same solid, out of the 164 that import.
+/// All 164 imported KiCad files, each written back out and read back as the
+/// same solid.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
 /// (§44.10): a rate cannot say which file moved. Regenerate it from the failing
-/// assertion, which prints what appeared and what disappeared.
+/// assertion, which prints what appeared and what disappeared. A file only
+/// reaches here **after** importing and passing the full sweep, so a file that
+/// leaves this list stops at the writer or on the way back in, and the run
+/// prints every reason with the files under it.
 ///
-/// # The 3 that are missing are the writer's gap and not the reader's
-///
-/// Each of them fails as *writer refuses: an edge between a plane and a ring
-/// names no curve*, and the run prints every reason with the files under it:
-/// the two `Relay_1-Form-*_Schrack-RYII` relays and
-/// `Relay_SPDT_Finder_34.51_Vertical`. A file only reaches here **after**
-/// importing and passing the full sweep, so the solid is sound and the writer
-/// simply has no curve to write for an edge between those faces.
+/// **The last three came in with Q774**: the two `Relay_1-Form-*_Schrack-RYII`
+/// relays and `Relay_SPDT_Finder_34.51_Vertical`. Each rounds the corners of
+/// a flat pin with a ring, and the pin's flat face rests on the ring's tube
+/// along a quarter of the circle of the ring's own radius; the writer refused
+/// any open edge between a flat face and a ring. It now writes that circle,
+/// turned so that the arc the reader picks is the one the model holds
+/// (`where_a_plane_crosses_a_ring` in `write.rs`), and
+/// [`the_edges_where_a_relay_pin_rests_on_a_ring_are_quarters_of_its_own_circle`]
+/// pins what the eight such edges are.
 ///
 /// **Fifty-two came in with Q767 and Q773**: the twenty horizontal `LED_D3.0mm`
 /// and `LED_D5.0mm` and `LED_D5.0mm-3`, `LED_SideEmitter`, the fuseholder and
@@ -181,7 +185,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// thirteen (§115), the equal-pipes lane's two and the homogeneous-cylinder
 /// lane's two (§118.10) — runs into the same writer.
 /// Closing that is a writer lane and not this list's business. What this list is
-/// for is that the 161 which do round trip cannot quietly become 160.
+/// for is that the 164 which do round trip cannot quietly become 163.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -275,6 +279,8 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "PinHeader_2x34_P2.54mm_Vertical_SMD.step",
     "PinHeader_2x36_P2.54mm_Vertical.step",
     "PinHeader_2x39_P2.54mm_Horizontal.step",
+    "Relay_1-Form-A_Schrack-RYII_RM5mm.step",
+    "Relay_1-Form-B_Schrack-RYII_RM5mm.step",
     "Relay_3PST_COTO_3650.step",
     "Relay_3PST_COTO_3660.step",
     "Relay_DPDT_FCL_FTR-B4C.step",
@@ -299,6 +305,7 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "Relay_DPST_Schrack-RT2-FormA_RM5mm.step",
     "Relay_SPDT_CUI_SR5.step",
     "Relay_SPDT_Finder_32.21-x000.step",
+    "Relay_SPDT_Finder_34.51_Vertical.step",
     "Relay_SPDT_Finder_36.11.step",
     "Relay_SPDT_Finder_40.31.step",
     "Relay_SPDT_Finder_40.51.step",
@@ -732,4 +739,129 @@ fn name_of(path: &Path) -> String {
         .unwrap_or(path.as_os_str())
         .to_string_lossy()
         .into_owned()
+}
+
+/// The eight open edges between a flat face and a ring in the three relays
+/// Q774 brought in are each a quarter of the circle of the ring's own radius,
+/// where a flat face square to the ring's axis rests on top of its tube, and
+/// each names as its run's plane that face's own plane or that plane turned
+/// round, bit for bit — never a plane a few bits off it, and never a plane a
+/// circle could not lie in.
+///
+/// The reader names an open arc between a flat face and a curved one by the
+/// plane its `CIRCLE` lies in (`Walk::the_surface_that_names_the_curve` in
+/// `brep.rs`), so the relay that wrote its circle about the face's normal
+/// turned round names the face turned round. Both kinds walk between the same
+/// two surfaces, the face and the ring, which is what
+/// `rcad_geom::which_two_surfaces_a_run_is_between` is asked here. So the
+/// writer has one curve to write for all eight, and writes it in
+/// `where_a_plane_crosses_a_ring` in `write.rs`.
+#[test]
+fn the_edges_where_a_relay_pin_rests_on_a_ring_are_quarters_of_its_own_circle() {
+    use rcad_geom::{EdgeRun, Surface, which_two_surfaces_a_run_is_between};
+
+    let mut counted: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    for name in [
+        "Relay_1-Form-A_Schrack-RYII_RM5mm.step",
+        "Relay_1-Form-B_Schrack-RYII_RM5mm.step",
+        "Relay_SPDT_Finder_34.51_Vertical.step",
+    ] {
+        let bytes = fs::read(corpus().join("kicad").join(name)).expect("a corpus file");
+        let file = StepFile::read(&bytes).expect("every file in the corpus parses");
+        let import = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{name} imports: {why}"));
+        let model = import.model();
+        let mut either_side: Vec<(rcad_topo::EdgeKey, Vec<Surface>)> = Vec::new();
+        for solid in model.solids() {
+            for face in solid.faces() {
+                for wire in face.wires() {
+                    for coedge in wire.coedges() {
+                        let key = coedge.edge().key();
+                        match either_side.iter_mut().find(|(seen, _)| *seen == key) {
+                            Some((_, faces)) => faces.push(face.surface()),
+                            None => either_side.push((key, vec![face.surface()])),
+                        }
+                    }
+                }
+            }
+        }
+        for (key, faces) in either_side {
+            let ([Surface::Plane(flat), Surface::Torus(ring)]
+            | [Surface::Torus(ring), Surface::Plane(flat)]) = faces[..]
+            else {
+                continue;
+            };
+            let edge = model.edge(key).expect("a key off this model");
+            assert_eq!(edge.is_closed().ok(), Some(false), "{name}: an open edge");
+            let w = ring.axis().direction();
+            assert_eq!(flat.normal().cross(w), Vector::zero(), "{name}: square");
+            assert_eq!(
+                flat.signed_distance_to(ring.centre()).abs(),
+                ring.tube_radius(),
+                "{name}: the face rests on the tube"
+            );
+            for corner in [edge.start().point(), edge.end().point()] {
+                assert_eq!(flat.signed_distance_to(corner), 0.0, "{name}: on the face");
+                let out = corner - ring.centre();
+                let from_the_axis = (out - w * out.dot(w)).length();
+                assert!(
+                    (from_the_axis - ring.ring_radius()).abs() <= 1e-15 * 32.0,
+                    "{name}: a corner {from_the_axis} from the axis, not on the ring's own circle"
+                );
+            }
+            let EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(named),
+                ..
+            } = edge.run()
+            else {
+                panic!("{name}: the run names a plane, as the reader writes it");
+            };
+            let which = if named == flat {
+                "the face's own plane"
+            } else if named == flat.reversed() {
+                "the face's plane turned round"
+            } else {
+                panic!("{name}: the run names {named:?}, which is neither");
+            };
+            assert_eq!(
+                which_two_surfaces_a_run_is_between(&edge.run(), [&faces[0], &faces[1]]),
+                [faces[0], faces[1]],
+                "{name}: walked between the face and the ring"
+            );
+            *counted.entry((name, which)).or_default() += 1;
+        }
+    }
+    assert_eq!(
+        counted.into_iter().collect::<Vec<_>>(),
+        [
+            (
+                (
+                    "Relay_1-Form-A_Schrack-RYII_RM5mm.step",
+                    "the face's plane turned round"
+                ),
+                2
+            ),
+            (
+                (
+                    "Relay_1-Form-B_Schrack-RYII_RM5mm.step",
+                    "the face's plane turned round"
+                ),
+                2
+            ),
+            (
+                (
+                    "Relay_SPDT_Finder_34.51_Vertical.step",
+                    "the face's own plane"
+                ),
+                3
+            ),
+            (
+                (
+                    "Relay_SPDT_Finder_34.51_Vertical.step",
+                    "the face's plane turned round"
+                ),
+                1
+            ),
+        ]
+    );
 }
