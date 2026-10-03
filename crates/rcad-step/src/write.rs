@@ -123,7 +123,7 @@ pub enum CannotWrite {
     /// pinches. The reader would put that pole back where the surface does not
     /// pinch, which `Model::validate` refuses, and writing a file this kernel
     /// will not read back is not a round trip. The first is a `VERTEX_LOOP`
-    /// away, which the reader does not walk yet
+    /// away, which the reader does not walk yet anywhere but a cone apex
     /// ([`Refusal::ALoopThisReaderDoesNotWalk`](crate::Refusal::ALoopThisReaderDoesNotWalk));
     /// the second wants a placed solid on the way back in, which the reader
     /// never builds.
