@@ -128,6 +128,14 @@ missing `lander` type does not throw the run, it sends the lane to the Opus
 merger instead, on its own branch, `merge-<label>-after-land` (§384.3). Start a
 new session rather than run it (§266.6).
 
+A run takes the types the session has **when the run is launched**, and the
+session can gain one later. On 2026-10-03 the harness told a session begun
+without `lander.md` that `lander` was now available. Its run launched before
+that note still sent Q796's merge to the Opus merger (`lander` not found,
+`c5db0045`), though the merge stage ran after the note; its next run, launched
+after it, merged Q801 through the lander (`67109a2e`). So once the note comes,
+the next run you launch has the type, and a run already going does not.
+
 For every row the fill took:
 
 1. One `mise exec -- just queue apply take <id1> <branch1> + take <id2>
