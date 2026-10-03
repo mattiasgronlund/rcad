@@ -2305,7 +2305,7 @@ impl<'f> Arrangement<'f> {
                 closes,
                 "an edge that starts and ends at one corner runs right round a closed curve"
             );
-            let runs_forward = self.material_is_left_of_forward(crossing);
+            let runs_forward = self.material_is_left_of_forward(crossing, [wire, position]);
             return Ok((0..order.len()).map(|step| (step, runs_forward)).collect());
         }
         let runs_forward =
@@ -2414,13 +2414,27 @@ impl<'f> Arrangement<'f> {
     /// inside the partner, and that is read off a corner of the face that is off
     /// it.
     ///
-    /// Where every corner sits on the partner there is nothing to read and the
-    /// answer is the crossing's forward direction — a face whose whole boundary
-    /// is one closed curve is the piece of its surface the curve leaves, and
-    /// both pieces have the same wire. That is
+    /// **Where every corner sits on the partner, the edge itself says**, from
+    /// the way the face's wire walks it in the model
+    /// ([`BakedEdge::inside_across`](super::bake::BakedEdge)). Both halves of
+    /// a ball have one wire, its circle, and a half ball hanging under a block's
+    /// floor has its one corner on the floor; it was built as the upper half
+    /// when nothing else was read here (`docs/decisions.md` §340.5). That side
+    /// is of the face across the edge, so it is read only where the crossing's
+    /// partner is that face's surface itself and not another spelling of it.
+    ///
+    /// A round bar's cap is read that way too, and says what the guess below
+    /// always said of it: a flat disc lies inside the round surface that cuts
+    /// it.
+    ///
+    /// Where neither says, the answer is the crossing's forward direction — a
+    /// face whose whole boundary is one closed curve is the piece of its
+    /// surface the curve leaves, and both pieces have the same wire. That is
     /// [`NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`](crate::Error) one layer
-    /// down, and it is the case §35.10 hands on.
-    fn material_is_left_of_forward(&self, crossing: usize) -> bool {
+    /// down, and it is the case §35.10 hands on. It is left a guess rather
+    /// than made a refusal because the caps it used to answer were right
+    /// (§340.5).
+    fn material_is_left_of_forward(&self, crossing: usize, [wire, position]: [usize; 2]) -> bool {
         let partner = self.crossings[crossing].partner;
         for side in self.face.wires.iter().flatten() {
             if side.start.around.contains(&partner) {
@@ -2432,7 +2446,11 @@ impl<'f> Arrangement<'f> {
                 Decision::Zero | Decision::Undecidable { .. } | _ => (),
             }
         }
-        true
+        let edge = &self.face.wires[wire][position];
+        match edge.inside_across {
+            Some(inside) if edge.across == partner => inside,
+            Some(_) | None => true,
+        }
     }
 
     /// Join two arcs that meet at a node nothing else touches.

@@ -155,6 +155,7 @@ still calls it a bug. The one property that meets this configuration,
 lets that one `Invalid` through for that one fuse and names it
 `A_HALF_BALL_TURNED_INSIDE_OUT`. Its quarter of fuses that do not answer is
 unchanged. Q316's block and ball, clear of each other, were not looked at.
+§340.7 is the fix.
 
 ### 340.6 The two counts, measured on this branch
 
@@ -166,3 +167,64 @@ by `mise exec -- just t -p rcad-topo --no-fail-fast`: 1117 run, 1117 passed.
 | `how_often_a_fuse_with_a_cone_refuses.rs`, a frustum against a block | 66 of 96, 30 no point | 96 of 96, nothing refused; its floor is 96 |
 | `what_the_answered_block_fuses_actually_say.rs`, rows that miss | 24, four rows | 30, all five |
 | the same, rows that meet | 7 checked | 11 checked, 66 answers; its floor is 11 |
+
+### 340.7 The edge says which half, where no corner can
+
+*Queue row Q421. Lane `lane-q421-a-half-ball-under-the-floor-faces-the-right-way`,
+off `ec4cbc69`.*
+
+**The flip was reproduced first.** With the guess at the end of
+`Arrangement::material_is_left_of_forward` turned round for a face on a sphere
+and for nothing else, the ball-then-bar union answers, validates, has 11
+faces, and measures `357.59371084320134` at deflection `0.02` against
+`343 + 2π/3 + 4π = 357.6607657167524` by hand. The guess was reached three
+times in the second fuse: the half ball, and the bar's two caps.
+
+**The fix is §340.5's.** `BakedEdge::inside_across` carries, for an edge that
+runs right round a closed curve, whether the face lies on the negative side of
+the face across it. `bake.rs` reads it off the coedge's direction on its edge
+through `a_closed_crossing_is_walked_the_way_it_is_stored`, backwards, the way
+`holds.rs` reads a ring's face: in the stored frame, with both gradients as
+the solid uses its faces, and turned round where the face across is used
+turned round. `material_is_left_of_forward` reads it after the corners and
+before the guess, and only where the crossing's partner is the edge's own face
+across bit for bit, since a folded crossing's partner can be another spelling
+of it whose sides are the other way round. Printed on the way: the half ball's
+edge says it lies outside the floor, and both caps' edges say they lie inside
+the bar's wall, which is what the guess said of them. The union then answers
+with the same 11 faces and the same `357.59371084320134`.
+
+**Bake reads it for every closed edge and refuses what the rule refuses** — a
+direction it cannot tell, a closed edge between two planes, a kind of run it
+has never seen — rather than only where the arrangement would need it. The one
+test outside these files that moved, §340.8's, moved from a refusal to an
+answer.
+
+**What moved, all in this lane's files.**
+`the_same_three_one_pair_at_a_time_stop_somewhere_else` is
+`the_same_three_one_pair_at_a_time_make_the_same_block`, and makes every check
+the all-at-once union makes, through one helper. `A_HALF_BALL_TURNED_INSIDE_OUT`
+and `the_ball_comes_back_inside_out` are gone from `fuses_that_must_agree.rs`,
+and `uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`
+compares: 172 fuses, none refused, 43 of 43 comparisons reached. **It failed
+the first time it compared**, and not on the shape: the two groupings hand back
+the same 11 faces on the same surfaces in a different order, and a whole
+solid's measure sums them in that order, so volume, area and centroid differ
+in the last place. It compares each face measured on its own now, sorted, bit
+for bit, which is the same triangles in either list.
+
+### 340.8 What this leaves
+
+- **`fuse_laws_over_a_cone.rs`'s
+  `three_trios_that_refused_both_ways_now_answer_one_way_round` fails**, and the
+  file is not this lane's. Its third trio, a pointed cone with its apex a unit
+  under a six-block's floor and a cube far away, refused `(block ∪ cone) ∪ cube`
+  at the second union with `ACurvedFaceGoesRightRoundWithNoSeam`; it answers
+  now. Put among that file's `TRIOS_THAT_AGREE_ABOUT_ANSWERING` for a probe and
+  then put back, the associativity there compared 4 trios where it compared 3,
+  and held. So the new answer is right, and the trio moves to that list. Why
+  this fix reached it was not traced.
+- **The guess is still there** for a closed edge the rule says nothing about:
+  one whose run names a third surface, one along which the two surfaces touch,
+  and one on a crossing folded into another spelling of its partner. None was
+  met here.
