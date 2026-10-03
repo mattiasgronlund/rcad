@@ -51,7 +51,7 @@
 //! the apex, two of them could not be ordered along a crossing, or the cells
 //! they cut off round it wound outside 0 and 1. The 5 left — 1 at a 256th and
 //! 4 at a 4096th — are apex meets of three of the apex's own planes whose boxes
-//! miss even the apex's box grown by the room, by 1.3 to 60 rooms. §356's
+//! miss the apex's own box by 1.3 to 60 rooms, so its grown box too. §356's
 //! argument would fold those too, and does answer all 648 when it is followed
 //! (§395.4).
 //!
@@ -142,9 +142,9 @@ fn a_pyramid_whose_apex_meets_lie_inside_its_room_but_miss_its_box_is_united_at_
 }
 
 /// Five pyramids bent by a 256th or a 4096th are still refused. Their apex
-/// meets of three of the apex's own planes have boxes that miss even the
-/// apex's box grown by the room, by 1.3 to 60 rooms, and are left nodes
-/// beside it (§395.4).
+/// meets of three of the apex's own planes have boxes that miss the apex's
+/// own box by 1.3 to 60 rooms, so its box grown by the room too, and are left
+/// nodes beside it (§395.4).
 ///
 /// **The answer exists, so this is a gap.** §356's argument, that three planes
 /// meet once, folds these meets as well, and folding them answers every one

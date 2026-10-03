@@ -1474,8 +1474,8 @@ impl<'f> Arrangement<'f> {
     /// three stored planes itself, worked out exactly, still 1.6 rooms past it.
     /// Its 36 turned unions at height one were all refused before this rule and
     /// are all answered with it (§356). Bent by a 256th or less, a few such
-    /// meets miss the grown box altogether, by 1.3 to 60 rooms, and stay nodes
-    /// (§395.4).
+    /// meets miss the corner's own box by 1.3 to 60 rooms, and so the grown
+    /// box too, and stay nodes (§395.4).
     ///
     /// **Whether the meet's box touches the corner's own box is not asked.**
     /// That was the whole fold before §253, and the two rules above were laid
