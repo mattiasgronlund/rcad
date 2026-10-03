@@ -34,12 +34,12 @@
 //! | cell | touching | clear by one | what the touch alone refuses |
 //! |---|---|---|---|
 //! | two blocks, one flush on the other | 66 of 66 | 84 of 84 | — |
-//! | a bar beside a block's wall | 52 of 78 | 78 of 78 | `ResultIsNotManifold` 26, every union |
-//! | a bar in an inside corner (a fillet) | 56 of 84 | 72 of 72 | `ResultIsNotManifold` 28, every union |
+//! | a bar beside a block's wall | 78 of 78 | 78 of 78 | — |
+//! | a bar in an inside corner (a fillet) | 84 of 84 | 72 of 72 | — |
 //! | a bar's cap flush on a block | 0 of 66 | 84 of 84 | *a point inside a piece of a face* 66 |
 //! | a ball resting on a block | 54 of 72 | 78 of 78 | `NotFinite` 9, `ResultIsNotManifold` 9 |
 //! | a ball against a block's wall | 57 of 78 | 72 of 72 | `ResultIsNotManifold` 21 |
-//! | two bars touching along a line | 40 of 60 | 96 of 96 | `ResultIsNotManifold` 20, every union |
+//! | two bars touching along a line | 60 of 60 | 96 of 96 | — |
 //! | a bar inside a bar, touching | panics on its control | — | see below |
 //! | two balls touching at a point | 54 of 54 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 54 of 54 | 96 of 96 | — |
@@ -71,11 +71,14 @@
 //! against a bar, a ball of radius one on a block, and every control. So every
 //! refusal in the "touch alone" column of an apart cell is a **gap**:
 //!
-//! - `ResultIsNotManifold`, every union of a wall or a second pipe lying along a
-//!   pipe's ruling. The likely cause is that both solids keep every face along
-//!   the touching line, so it comes out one edge with four faces round it, but
-//!   nobody has traced that. Queue row Q371 traces and fixes it, in
-//!   `fuse/assemble.rs`; `a_bar_lying_along_a_plane_or_a_bar.rs` pins it. Until
+//! - A wall or a second pipe lying along a pipe's ruling: **closed**, every
+//!   fuse of those three cells answered, 2026-10-03. Every union used to refuse
+//!   `ResultIsNotManifold`, because both solids keep both sides of the touching
+//!   line and it came out one edge with four faces round it, two pieces of the
+//!   wall and the skin walking it both ways (queue row Q760 printed them).
+//!   `fuse/assemble.rs` now parts such an edge into one per input face, and the
+//!   union is the two solids as they stand, two lumps;
+//!   `a_bar_lying_along_a_plane_or_a_bar.rs` pins it against the volumes. Until
 //!   queue row Q649 every fuse of these three cells refused before that, on
 //!   *which way a crossing runs*: the two surfaces' normals are parallel along
 //!   the line, so their cross product is exactly nothing. The line runs along

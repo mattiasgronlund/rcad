@@ -9,20 +9,24 @@
 //! `AlongATouch` carries it, turns ways out round it, and gives both sides of the
 //! line the one side of the partner the face lies on.
 //!
-//! **The intersection and both differences are answered**, and they are the
-//! answers that exist: the insides are apart, so the intersection is no solid at
-//! all and each difference is the first solid as it stood. **The union is
-//! refused** `ResultIsNotManifold { count: 4 }`. The likely cause is that both
-//! solids keep every face along the touch, so the line comes out one edge with
-//! four faces round it, but nobody has traced that. Its answer is the two solids
-//! as they stand, so that refusal is a gap, and queue row Q371
-//! (`fuse/assemble.rs`) traces and fixes it. It is pinned here as it refuses.
+//! **Every rule is answered**, with the answers that exist: the insides are
+//! apart, so the union is the two solids as they stood, two lumps whose volumes
+//! are the two inputs', the intersection is no solid at all, and each difference
+//! is the first solid as it stood.
+//!
+//! The union used to be refused `ResultIsNotManifold { count: 4 }`. A union
+//! keeps both sides of the touching line, of the wall and of the bar's skin
+//! alike, so the line came out one edge with four darts along it: two pieces of
+//! the wall, and the skin's one piece cut open along the line and walking it
+//! both ways (queue row Q760 printed them). `fuse/assemble.rs` now parts such an
+//! edge into one per input face, and the wall's is dissolved as any edge between
+//! two pieces of one plane is.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 /// How far under the closed form a bar's meshed volume may be.
 ///
@@ -38,7 +42,7 @@ const A_DEFLECTION: f64 = 0.02;
 /// touching it along `(4, 2, z)`. The bar's seam is at `(6, 2, z)`, across the
 /// bar from the touch.
 #[test]
-fn a_bar_standing_against_a_blocks_wall_answers_every_rule_but_the_union() {
+fn a_bar_standing_against_a_blocks_wall_answers_every_rule() {
     every_rule_of(
         |model| {
             let cube = a_block(model, [4.0, 4.0, 4.0]);
@@ -52,7 +56,7 @@ fn a_bar_standing_against_a_blocks_wall_answers_every_rule_but_the_union() {
 /// The same with the bar on the other side of the cube, so its seam `(0, 2, z)`
 /// is the touching line itself.
 #[test]
-fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_answers_every_rule_but_the_union() {
+fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_answers_every_rule() {
     every_rule_of(
         |model| {
             let cube = a_block(model, [4.0, 4.0, 4.0]);
@@ -67,7 +71,7 @@ fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_answers_every_rule_but_t
 /// in its inside corner, touching both walls: `x = 2` along `(2, 3, z)` and
 /// `y = 2` along `(3, 2, z)`. The fillet a part's inside corner is.
 #[test]
-fn a_bar_in_an_inside_corner_answers_every_rule_but_the_union() {
+fn a_bar_in_an_inside_corner_answers_every_rule() {
     every_rule_of(
         |model| {
             let corner = an_l(model);
@@ -82,7 +86,7 @@ fn a_bar_in_an_inside_corner_answers_every_rule_but_the_union() {
 /// along `(0, 2, z)`. Both seams are off the touch, at `(2, 0, z)` and
 /// `(1, 3, z)`.
 #[test]
-fn two_bars_side_by_side_answer_every_rule_but_the_union() {
+fn two_bars_side_by_side_answer_every_rule() {
     every_rule_of(
         |model| {
             let thick = a_bar(model, 2.0, 4.0, [0.0, 0.0, 0.0]);
@@ -93,27 +97,22 @@ fn two_bars_side_by_side_answer_every_rule_but_the_union() {
     );
 }
 
-/// Every rule, both ways round, of a pair whose insides are apart: no solid for
-/// the intersection, the first solid for each difference, and the union refused.
+/// Every rule, both ways round, of a pair whose insides are apart: both solids
+/// as they stand for the union, no solid for the intersection, and the first
+/// solid for each difference.
 fn every_rule_of(build: fn(&mut Model) -> [(SolidKey, f64); 2], pair: &str) {
     for swapped in [false, true] {
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
             let [one, other] = build(&mut model);
-            let [(first, first_volume), (second, _)] =
+            let [(first, first_volume), (second, second_volume)] =
                 if swapped { [other, one] } else { [one, other] };
             let what = format!("{pair}, {rule:?}, swapped {swapped}");
             let mut log = ProvenanceLog::new();
-            let answer = model.fuse(&[first], &[second], rule, &Policy::certified(), &mut log);
-            if rule == Rule::Union {
-                assert!(
-                    matches!(answer, Err(Error::ResultIsNotManifold { count: 4, .. })),
-                    "{what}: an edge with four faces round it, got {answer:?}"
-                );
-                continue;
-            }
-            let answer = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
+            let answer = model
+                .fuse(&[first], &[second], rule, &Policy::certified(), &mut log)
+                .unwrap_or_else(|why| panic!("{what} refused: {why}"));
             assert!(
                 log.records().is_empty(),
                 "{what}: every decision is proved, got {:?}",
@@ -122,6 +121,28 @@ fn every_rule_of(build: fn(&mut Model) -> [(SolidKey, f64); 2], pair: &str) {
             model
                 .validate(&Policy::certified(), &mut ProvenanceLog::new())
                 .unwrap_or_else(|why| panic!("{what} wrote a model that does not validate: {why}"));
+            if rule == Rule::Union {
+                let mut found: Vec<f64> = answer
+                    .solids()
+                    .iter()
+                    .map(|&solid| volume_of(&model, solid))
+                    .collect();
+                found.sort_by(f64::total_cmp);
+                let mut expected = [first_volume, second_volume];
+                expected.sort_by(f64::total_cmp);
+                assert_eq!(
+                    found.len(),
+                    2,
+                    "{what}: two solids touching along a line are two lumps, got {found:?}"
+                );
+                for (found, expected) in found.iter().zip(expected) {
+                    assert!(
+                        *found <= expected && (expected - found) / expected < HOW_FAR_A_MESH_MAY_BE,
+                        "{what}: measured {found}, and the solid is {expected}"
+                    );
+                }
+                continue;
+            }
             if rule == Rule::Intersection {
                 assert!(
                     answer.solids().is_empty(),

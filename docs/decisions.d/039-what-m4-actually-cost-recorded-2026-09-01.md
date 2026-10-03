@@ -340,11 +340,35 @@ moved them.
 > every face along the line, so it comes out one edge with four faces round it,
 > but nobody has traced that. That union's answer is the two solids as they
 > stand, so it is a gap too, and queue row Q371 traces and fixes it
-> (`a_bar_lying_along_a_plane_or_a_bar.rs`). The block on a bar's cap refuses
+> (`a_bar_lying_along_a_plane_or_a_bar.rs`; traced and fixed by Q760, in the
+> note below). The block on a bar's cap refuses
 > `TwoCurvesTouchWithoutCrossing` again, under every rule, and why is not traced
 > (`a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch`). A plane
 > lying along a cone's ruling still refuses on *which way a crossing runs*,
 > unchanged: a ruling has no stored direction, and it is queue row Q473's.
+
+> **2026-10-03 note (Q760): the union of a bar lying along a plane or a bar is
+> answered.** Traced on the bar beside a cube's wall, with a print of the
+> claimants where `darts_along_each_edge` counts them: the touching line
+> `(4, 2, 1)–(4, 2, 3)` is one edge with four darts, two from the two pieces of
+> the cube's wall either side of it and two from the bar's skin, which is one
+> piece cut open along the line and walking it both ways. The guess held, with
+> that one difference: the skin is one piece, not two. A union keeps both
+> sides of the line in both solids, because the insides are apart, so the line
+> is no edge of either input. `fuse/assemble.rs` now parts an edge with four
+> darts into two where they are two pairs, each pair from pieces of **one input
+> face** walking it opposite ways; the wall's half is dissolved as any edge
+> between two pieces of one plane is, and the skin's stays as its seam. The
+> union is the two solids as they stood, two lumps with the inputs' volumes, in
+> all four cells of `a_bar_lying_along_a_plane_or_a_bar.rs` both ways round,
+> the bar with its seam on a cube's wall, and the bar touching a tube's inner
+> wall; `fuses_that_touch.rs` answers all 78, 84 and 60 fuses of its three
+> line-touch cells. The parting fired in those nine tests and in no other test
+> of `rcad-topo`. **Four darts from four input faces stay refused**: the frame
+> and the comb, two cubes along part of an edge, the frame less the block over
+> its corner, and two quarter bends end to end still refuse
+> `ResultIsNotManifold { count: 4 }`, and §80.9's decision that two solids
+> touching along an edge of both are not built is untouched.
 
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot

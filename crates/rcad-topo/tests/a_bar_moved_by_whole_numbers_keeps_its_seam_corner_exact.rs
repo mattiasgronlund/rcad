@@ -19,7 +19,7 @@ use rcad_geom::{
     where_a_corner_lands_after_moving,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 /// How far under the closed form a bar's meshed volume may be.
 ///
@@ -71,10 +71,9 @@ fn a_bar_moved_by_whole_numbers_lands_its_seam_corner_on_an_exact_point() {
 ///
 /// `ABarBesideAWall { side: 4, radius: 1, along: 2, on_its_seam: true }` in
 /// `fuses_that_touch.rs`. The bar fills `x` from −2 to 0 and the cube `x` from 0
-/// to 4, so they meet only along the seam `(0, 2, z)`: the intersection is no
-/// solid, and the difference is the bar whole, `π · 1² · 2`. The union's answer
-/// is the two solids as they stand, and it is refused
-/// `ResultIsNotManifold { count: 4 }` instead, a gap queue row Q371 owns.
+/// to 4, so they meet only along the seam `(0, 2, z)`: the union is the two
+/// solids as they stand, two lumps of `π · 1² · 2` and 64, the intersection is
+/// no solid, and the difference is the bar whole.
 #[test]
 fn a_bar_with_its_seam_on_a_blocks_wall_is_not_refused_on_which_side_of_the_wall_its_corner_is() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -86,17 +85,20 @@ fn a_bar_with_its_seam_on_a_blocks_wall_is_not_refused_on_which_side_of_the_wall
             &Isometry::translation(Vector::new(-1.0, 2.0, 1.0)).expect("a whole-number shift"),
         )
         .expect("a whole-number bar");
+    let the_bar = PI * 1.0 * 1.0 * 2.0;
 
-    let union = model.clone().fuse(
-        &[bar],
-        &[cube],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
+    let mut joined = model.clone();
+    let both = answered(&mut joined, bar, cube, Rule::Union);
+    let mut found: Vec<f64> = both
+        .iter()
+        .map(|&solid| volume_of(&joined, solid))
+        .collect();
+    found.sort_by(f64::total_cmp);
     assert!(
-        matches!(union, Err(Error::ResultIsNotManifold { count: 4 })),
-        "the union of the bar and the cube, got {union:?}"
+        matches!(found[..], [bar, cube]
+            if bar <= the_bar && (the_bar - bar) / the_bar < HOW_FAR_A_MESH_MAY_BE
+                && cube == 64.0),
+        "the union is the bar and the cube as they stand, measured {found:?}"
     );
 
     let mut shared = model.clone();
@@ -108,7 +110,6 @@ fn a_bar_with_its_seam_on_a_blocks_wall_is_not_refused_on_which_side_of_the_wall
     let mut cut = model.clone();
     let what_is_left = answered(&mut cut, bar, cube, Rule::Difference);
     assert_eq!(what_is_left.len(), 1, "the cube takes nothing off the bar");
-    let the_bar = PI * 1.0 * 1.0 * 2.0;
     let found = volume_of(&cut, what_is_left[0]);
     assert!(
         found <= the_bar && (the_bar - found) / the_bar < HOW_FAR_A_MESH_MAY_BE,
