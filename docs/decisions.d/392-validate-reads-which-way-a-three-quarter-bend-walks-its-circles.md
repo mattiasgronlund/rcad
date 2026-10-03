@@ -122,6 +122,3 @@ tests passed.
   band running from one round the tube past the other would come back to the
   plane's other side, as a three-quarter bend does. Reasoned and not run, so
   not classed.
-- The ring's face at a circle round its tube is held to its other circles
-  only. One such circle and a seam leaves the ring's face unchecked by the rule
-  there; its cap still is.
