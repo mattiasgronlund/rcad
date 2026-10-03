@@ -935,6 +935,12 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
 /// each with torus faces used forwards, which the mesher faced into the tube
 /// and refused `FacesDoNotAgreeWhichWayTheyFace` (`docs/decisions.md` §329.4,
 /// §361).
+///
+/// **Charging a circle's lean off a torus's tube once moved it from 164 to
+/// 165**, with nothing dropping out: `Relay_1-Form-C_Schrack-RYII_RM3.2mm`,
+/// whose two pin-bend circles read `19.43` roundings off their tube circles
+/// against the sixteen allowed until the torus arm's `2` became `√2`
+/// (`docs/decisions.md` §387).
 const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -1030,6 +1036,7 @@ const KICAD_FILES_THAT_IMPORT: &[&str] = &[
     "PinHeader_2x39_P2.54mm_Horizontal.step",
     "Relay_1-Form-A_Schrack-RYII_RM5mm.step",
     "Relay_1-Form-B_Schrack-RYII_RM5mm.step",
+    "Relay_1-Form-C_Schrack-RYII_RM3.2mm.step",
     "Relay_3PST_COTO_3650.step",
     "Relay_3PST_COTO_3660.step",
     "Relay_DPDT_FCL_FTR-B4C.step",

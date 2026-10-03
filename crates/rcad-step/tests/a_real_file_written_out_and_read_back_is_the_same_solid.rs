@@ -116,7 +116,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     }
 
     assert_eq!(
-        denominator, 164,
+        denominator, 165,
         "the count of KiCad files that import must not shift without somebody saying so"
     );
     assert_eq!(
@@ -127,7 +127,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
     assert_pinned_round_trips(&round_tripped);
 }
 
-/// All 164 imported KiCad files, each written back out and read back as the
+/// All 165 imported KiCad files, each written back out and read back as the
 /// same solid.
 ///
 /// **Pinned by name, not by rate**, for the reason `KICAD_FILES_THAT_IMPORT` is
@@ -137,7 +137,10 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// leaves this list stops at the writer or on the way back in, and the run
 /// prints every reason with the files under it.
 ///
-/// **The last three came in with Q774**: the two `Relay_1-Form-*_Schrack-RYII`
+/// **The last one came in with Q563**: `Relay_1-Form-C_Schrack-RYII_RM3.2mm`,
+/// which round-tripped as soon as it imported (`docs/decisions.md` §387).
+///
+/// **The three before it came in with Q774**: the two `Relay_1-Form-*_Schrack-RYII`
 /// relays and `Relay_SPDT_Finder_34.51_Vertical`. Each rounds the corners of
 /// a flat pin with a ring, and the pin's flat face rests on the ring's tube
 /// along a quarter of the circle of the ring's own radius; the writer refused
@@ -185,7 +188,7 @@ fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
 /// thirteen (§115), the equal-pipes lane's two and the homogeneous-cylinder
 /// lane's two (§118.10) — runs into the same writer.
 /// Closing that is a writer lane and not this list's business. What this list is
-/// for is that the 164 which do round trip cannot quietly become 163.
+/// for is that the 165 which do round trip cannot quietly become 164.
 const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "Fuse_0402_1005Metric.step",
     "Fuse_0603_1608Metric.step",
@@ -281,6 +284,7 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "PinHeader_2x39_P2.54mm_Horizontal.step",
     "Relay_1-Form-A_Schrack-RYII_RM5mm.step",
     "Relay_1-Form-B_Schrack-RYII_RM5mm.step",
+    "Relay_1-Form-C_Schrack-RYII_RM3.2mm.step",
     "Relay_3PST_COTO_3650.step",
     "Relay_3PST_COTO_3660.step",
     "Relay_DPDT_FCL_FTR-B4C.step",

@@ -23,8 +23,8 @@ copy on the joiner — absorption's corner and two spellings of one pipe; §232
 partner; §242 `rcad_testing`'s first asks — one solid validated, a solid copied,
 an edge's length, a face measured; §242.8 two wrong fuse answers, and §48's
 trio with them. Since, as queue rows with no section of their own: the writer
-round trips all 164 KiCad files that import, up from 45 (Q405, Q763, Q766,
-Q767, Q773, Q774, 2026-10-02..03); the doc of `KICAD_FILES_THAT_ROUND_TRIP` in
+round trips all 165 KiCad files that import, up from 45 (Q405, Q763, Q766,
+Q767, Q773, Q774, 2026-10-02..03; the 165th imports since §387); the doc of `KICAD_FILES_THAT_ROUND_TRIP` in
 `a_real_file_written_out_and_read_back_is_the_same_solid.rs` says which file
 came in with which.
 
