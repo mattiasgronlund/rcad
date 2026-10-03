@@ -20,7 +20,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
-    Axis, Deflection, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
+    Axis, Deflection, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
     which_two_surfaces_a_run_is_between,
 };
@@ -33,6 +33,7 @@ use smallvec::SmallVec;
 
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
+use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on};
 use crate::validate::{
     nothing_curved_says_where_it_bends, side_of_surface, the_way_it_is_parametrised_about,
 };
@@ -93,7 +94,9 @@ impl Mesh {
     /// An edge with two different ends runs from the end it is stored starting
     /// at. A **closed** edge is pinned by neither end, and is stored running the
     /// way the longitude of the curved surface along it increases — see
-    /// `BuildingAMesh::walk` for why the model needs that rule at all.
+    /// `BuildingAMesh::walk` for why the model needs that rule at all. Where that
+    /// rule reads nothing at the corner, as on a ball's pole, it runs the way
+    /// its forward use walks it.
     ///
     /// # Empty, and the three ways to be empty
     ///
@@ -399,7 +402,7 @@ impl SolidView<'_> {
         let deflection = self.room_a_mesh_has_to_work_in(deflection, policy, &along_each_edge)?;
         let mut building = BuildingAMesh::new(deflection, along_each_edge);
         for face in self.faces() {
-            building.walk_the_edges_this_face_can_place(face, policy, log)?;
+            building.walk_the_edges_this_face_can_place(self, face, policy, log)?;
         }
         for face in self.faces() {
             building.cut_up(face, self, log)?;
@@ -657,6 +660,7 @@ impl BuildingAMesh {
     /// [`Self::walk`].
     fn walk_the_edges_this_face_can_place(
         &mut self,
+        solid: SolidView<'_>,
         face: FaceView<'_>,
         policy: &Policy,
         log: &mut ProvenanceLog,
@@ -675,7 +679,7 @@ impl BuildingAMesh {
                 if flat && !only_a_flat_face_can_place(edge, &self.along_each_edge) {
                     continue;
                 }
-                let walked = self.walk(edge, face, room, policy, log)?;
+                let walked = self.walk(solid, edge, face, room, policy, log)?;
                 self.along_edge.insert(edge.key(), walked);
             }
         }
@@ -805,6 +809,7 @@ impl BuildingAMesh {
     /// §229.4). Meshed without that sweep, its pipe's wire will not lie flat.
     fn walk(
         &mut self,
+        solid: SolidView<'_>,
         edge: EdgeView<'_>,
         face: FaceView<'_>,
         room: f64,
@@ -862,11 +867,22 @@ impl BuildingAMesh {
         // in whichever order the walker produced them, and half the caps of a
         // ball come out walked backwards — a mesh that is wrong rather than one
         // that was refused.
+        //
+        // Where nothing at the corner names a way, as at a ball's pole, the way
+        // the faces walk the edge does, read only then because it reads every
+        // corner of a face: [`the_way_the_faces_along_a_closed_edge_walk_it`].
         if edge.is_closed()? {
             let corner = ends[0];
+            let read_at_the_corner = the_way_a_closed_edge_is_stored_running(&along, corner)
+                .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner));
+            let stored_way = match read_at_the_corner {
+                Some(way) => Some(way),
+                None => {
+                    the_way_the_faces_along_a_closed_edge_walk_it(solid, face, edge, &back, corner)?
+                }
+            };
             if let Some(first) = points.first()
-                && let Some(stored_way) = the_way_a_closed_edge_is_stored_running(&along, corner)
-                    .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner))
+                && let Some(stored_way) = stored_way
                 && (*first - corner).dot(stored_way) < 0.0
             {
                 points.reverse();
@@ -4129,6 +4145,155 @@ fn the_way_a_closed_edge_where_its_faces_touch_runs(
     })
 }
 
+/// Which way a closed edge runs as the faces along it walk it, for an edge
+/// that nothing read at its corner names a way for.
+///
+/// **There the way an edge is stored running is not a fact, and the way each
+/// face walks it is.** A rim through a ball's pole meets the ball's longitude
+/// and its latitude where both are exactly zero, so
+/// [`the_way_a_closed_edge_is_stored_running`] has nothing to read and
+/// `Model::validate` skips the edge: written either way round, the solid is
+/// sound (`docs/decisions.md` §341.4). Which way each use runs in space does
+/// not need the longitude. A face's material lies on its left, and left of
+/// `outward × ∇P` is `P`'s negative side, with `P` the second surface the run
+/// is between — the rule `Model::validate` reads a closed edge by
+/// ([`crate::validate::a_closed_crossing_is_walked_the_way_it_is_stored`]),
+/// read without the reference that vanishes at the pole. So a use walks along
+/// `outward × ∇P` where its face lies inside `P` and against it where it lies
+/// outside, and the edge runs the way its forward use walks.
+///
+/// **What it replaced was the walker's own order**, `∇S × ∇T`, which turns
+/// round with whichever way the rim's plane faces. A half ball on a pipe of its
+/// own radius with its rim cornered on the pole built in two of the four ways
+/// it can be written, and which two depended on that plane
+/// (`a_half_ball_on_a_pipe_of_its_own_radius.rs`, §341.5).
+///
+/// Asked of the face walking the edge first and then of the face across. The
+/// ball's half of that rim has every corner on the rim's plane, so it has no
+/// side to read and the pipe's corner on the lid answers. Two faces of a sound
+/// solid give one answer, since their uses run opposite ways.
+///
+/// `None` for a seam, and where neither face has a corner off `P` or its
+/// gradient crosses `P`'s to nothing — two faces that touch rather than cross,
+/// which [`the_way_a_closed_edge_where_its_faces_touch_runs`] is asked first.
+///
+/// # Errors
+///
+/// Whatever reading a corner's side refuses with, the same refusals
+/// `Model::validate` gives on the same corners.
+fn the_way_the_faces_along_a_closed_edge_walk_it(
+    solid: SolidView<'_>,
+    walking: FaceView<'_>,
+    edge: EdgeView<'_>,
+    back: &Isometry,
+    at: Point,
+) -> Result<Option<Vector>> {
+    let Some(across) = the_face_across(solid, walking, edge)? else {
+        return Ok(None);
+    };
+    for (face, other) in [(walking, across), (across, walking)] {
+        if let Some(way) =
+            the_way_this_face_walks_a_closed_edge(solid, [face, other], edge, back, at)?
+        {
+            return Ok(Some(way));
+        }
+    }
+    Ok(None)
+}
+
+/// Which way the edge runs if `face`'s use of it is right, read off which side
+/// of the run's second surface `face` lies on.
+///
+/// `back` is the frame the edge is walked in and `at` its corner there. The
+/// gradients are read in that frame, and the side where the solid sits, as
+/// `Model::validate` reads it: a movement keeps which side a corner is on.
+///
+/// # Panics
+///
+/// If `face` has no use of `edge`, which a face found along the edge always
+/// has.
+fn the_way_this_face_walks_a_closed_edge(
+    solid: SolidView<'_>,
+    [face, other]: [FaceView<'_>; 2],
+    edge: EdgeView<'_>,
+    back: &Isometry,
+    at: Point,
+) -> Result<Option<Vector>> {
+    let in_the_frame = |surface: Surface| {
+        SurfaceAlongAnEdge {
+            stored: surface,
+            placed_at: face.location(),
+        }
+        .in_the_frame(back)
+    };
+    let partner = which_two_surfaces_a_run_is_between(
+        edge.stored_run(),
+        [&face.stored_surface(), &other.stored_surface()],
+    )[1];
+    let outward = gradient_of(&in_the_frame(face.stored_surface()), at) * face.orientation().sign();
+    let forward = outward.cross(gradient_of(&in_the_frame(partner), at));
+    if forward == Vector::zero() {
+        return Ok(None);
+    }
+    let Some(material) =
+        which_side_of_a_surface_a_run_names_this_face_lies_on(solid, face, partner)?
+    else {
+        return Ok(None);
+    };
+    let walked = match material {
+        Decision::Neg => forward,
+        Decision::Pos => -forward,
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
+            panic!("a face with no side to its material: {material:?}")
+        }
+    };
+    let used = face
+        .wires()
+        .flat_map(WireView::coedges)
+        .find(|coedge| coedge.edge().key() == edge.key())
+        .expect("a face found along an edge uses it");
+    Ok(Some(match used.orientation_on_its_edge() {
+        Orientation::Forward => walked,
+        Orientation::Reversed => -walked,
+    }))
+}
+
+/// Which side of `named`, a surface a run of this face's names, the face lies
+/// on, as its corners off `named` say.
+///
+/// **`Model::validate` asks this same question of the same corners**, in its
+/// own private copy, and the two must stay one reading: the corners on `named`
+/// are the ends of every edge of this face whose run is between something and
+/// `named`, which no rounding can take off it ([`Trimming`]), and every other
+/// corner is read. `None` when every corner of the face is on it.
+fn which_side_of_a_surface_a_run_names_this_face_lies_on(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    named: Surface,
+) -> Result<Option<Decision>> {
+    let mut corners_on_it = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let beyond = the_face_across(solid, face, edge)?.unwrap_or(face);
+        if which_two_surfaces_a_run_is_between(
+            edge.stored_run(),
+            [&face.stored_surface(), &beyond.stored_surface()],
+        )
+        .contains(&named)
+        {
+            corners_on_it.push(edge.start().key());
+            corners_on_it.push(edge.end().key());
+        }
+    }
+    the_side_this_face_lies_on(
+        face,
+        &Trimming {
+            surface: named.transformed(&face.location()),
+            corners_on_it,
+        },
+    )
+}
+
 /// Make every pole of a ball that a closed crossing runs through one of the
 /// points walked along it, and say how far a walked point was moved to do it.
 ///
@@ -6319,7 +6484,7 @@ mod tests {
         let mut building = BuildingAMesh::new(deflection, solid.surfaces_along_each_edge());
         for face in solid.faces() {
             building
-                .walk_the_edges_this_face_can_place(face, &policy, &mut log)
+                .walk_the_edges_this_face_can_place(solid, face, &policy, &mut log)
                 .expect("a tolerant caller is handed an empty list rather than refused");
         }
 
