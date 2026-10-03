@@ -21,7 +21,11 @@
 //! edges, and an edge claimed by anything other than exactly two faces is
 //! [`Error::ResultIsNotManifold`]. That is the whole manifold check, and it
 //! lands here because this is where an edge with three claimants is *discovered*
-//! rather than searched for.
+//! rather than searched for. The one edge with four claimants that is not
+//! refused is a line two input faces rest against each other along, with both
+//! sides of each kept: it is no edge of either input, and
+//! [`Assembly::part_each_line_two_faces_rest_against_each_other_along`] gives
+//! each face its own before anything is counted.
 //!
 //! # Two pieces on one plane are one face
 //!
@@ -432,15 +436,21 @@ impl Assembly {
                 is_a_whole_closed_surface: piece.is_the_whole_surface,
             });
         }
-        every_closed_edge_read_off_one_spelling(&edges.made, &corners.made, &mut faces);
-        Ok(Self {
+        let mut assembly = Self {
             corners: corners.made,
             edges: edges.made,
             runs: Vec::new(),
             faces,
             shells: Vec::new(),
             solids: Vec::new(),
-        })
+        };
+        assembly.part_each_line_two_faces_rest_against_each_other_along();
+        every_closed_edge_read_off_one_spelling(
+            &assembly.edges,
+            &assembly.corners,
+            &mut assembly.faces,
+        );
+        Ok(assembly)
     }
 
     /// One face per face of an input solid, ready to be joined.
@@ -560,6 +570,74 @@ impl Assembly {
         Ok(faces)
     }
 
+    /// Part each line two faces rest against each other along into one edge
+    /// per face, where the pieces made it one edge with four faces round it.
+    ///
+    /// **A bar lying along a wall or along another bar is cut along the line it
+    /// touches on**, and a union keeps both sides of that line, of the wall and
+    /// of the bar's skin alike: the insides are apart, so no piece of either is
+    /// inside the other. The line then has four darts along it, two from pieces
+    /// of the wall and two from the skin — two pieces, or one piece cut open
+    /// along the line and walking it both ways — and it is not an edge of
+    /// either input. Parted, the wall's edge has two pieces of one plane either
+    /// side and [`Assembly::join_up_what_is_one_face`] dissolves it like any
+    /// other, and the skin's is left to the same joining as any edge between
+    /// pieces of one pipe; where one piece walks it both ways it stays, as the
+    /// seam that piece is cut open along. The answer is the two solids as they
+    /// stood, two lumps.
+    ///
+    /// **Only where each pair is pieces of one input face, walking the line
+    /// opposite ways.** Four darts from four input faces is a line both solids
+    /// have an edge along — two cubes touching along part of an edge, or the
+    /// frame and the comb of `degenerate_fuses.rs` — and those stay one edge and
+    /// are refused: no `Model` holds four faces along one edge, and §80.9 leaves
+    /// two touching solids as an answer for that relation unbuilt.
+    ///
+    /// Which pair keeps the edge is the one whose first dart comes first; the
+    /// other is moved onto a copy. The copy carries the original's input edges,
+    /// and in every case measured that is none: the arrangement gives a
+    /// touching line no input edge to run along, even where it lies over a
+    /// bar's seam.
+    fn part_each_line_two_faces_rest_against_each_other_along(&mut self) {
+        for by in self.claimants_of_each_edge() {
+            let Some(moving) = self.the_second_of_two_input_faces_along(&by) else {
+                continue;
+            };
+            let original = &self.edges[self.edge_of(by[0])];
+            let copy = Edge {
+                ends: original.ends,
+                carried_by: original.carried_by,
+                arc: original.arc,
+                from: original.from.clone(),
+            };
+            self.edges.push(copy);
+            let parted = self.edges.len() - 1;
+            for dart in moving {
+                self.faces[dart.face].wires[dart.wire][dart.position].edge = parted;
+            }
+        }
+    }
+
+    /// The two darts to move onto an edge of their own, where four darts along
+    /// one edge are two pairs, each pair from pieces of one input face and
+    /// walking the edge opposite ways; `None` for anything else.
+    fn the_second_of_two_input_faces_along(&self, by: &[Dart]) -> Option<[Dart; 2]> {
+        let &[first, _, _, _] = by else {
+            return None;
+        };
+        let ancestors = |dart: Dart| &self.faces[dart.face].ancestors;
+        let (keeping, moving): (Vec<Dart>, Vec<Dart>) = by
+            .iter()
+            .partition(|&&dart| ancestors(dart) == ancestors(first));
+        let keeping = <[Dart; 2]>::try_from(keeping).ok()?;
+        let moving = <[Dart; 2]>::try_from(moving).ok()?;
+        let one_face_both_ways = |[one, other]: [Dart; 2]| {
+            ancestors(one) == ancestors(other)
+                && self.side_of(one).forward != self.side_of(other).forward
+        };
+        (one_face_both_ways(keeping) && one_face_both_ways(moving)).then_some(moving)
+    }
+
     /// Fold every run of faces that is really one flat region into one face.
     ///
     /// Two faces of the result with an edge between them, lying on the same
@@ -631,6 +709,17 @@ impl Assembly {
     /// and relaxing that changes what a model *is* rather than what one boolean
     /// does (§17.4).
     fn darts_along_each_edge(&self) -> Result<Vec<[Dart; 2]>> {
+        self.claimants_of_each_edge()
+            .into_iter()
+            .map(|by| {
+                <[Dart; 2]>::try_from(by.as_slice())
+                    .map_err(|_| Error::ResultIsNotManifold { count: by.len() })
+            })
+            .collect()
+    }
+
+    /// Every dart along each edge, however many there are.
+    fn claimants_of_each_edge(&self) -> Vec<Vec<Dart>> {
         let mut claimants: Vec<Vec<Dart>> = vec![Vec::new(); self.edges.len()];
         for (face, walked) in self.faces.iter().enumerate() {
             for (wire, ring) in walked.wires.iter().enumerate() {
@@ -644,12 +733,6 @@ impl Assembly {
             }
         }
         claimants
-            .into_iter()
-            .map(|by| {
-                <[Dart; 2]>::try_from(by.as_slice())
-                    .map_err(|_| Error::ResultIsNotManifold { count: by.len() })
-            })
-            .collect()
     }
 
     /// Which edges have the same flat region on both sides of them.

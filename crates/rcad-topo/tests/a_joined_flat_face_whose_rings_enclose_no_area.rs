@@ -606,12 +606,16 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells() 
 /// rule (Q616), the gap §191.5 measures for bars touching along a line.
 ///
 /// So the intersection is no solid, the tube less the bar is the tube, and the
-/// bar less the tube is the bar. **The union is refused before the ring above
-/// is reached**: `ResultIsNotManifold { count: 4 }`, an edge with four faces
-/// round it. Which edge, and why, nobody has traced; queue row Q371 traces and
-/// fixes it. That ring is still unreached.
+/// bar less the tube is the bar. **The union is the tube and the bar as they
+/// stand**, two lumps. It used to be refused `ResultIsNotManifold { count: 4 }`
+/// on the touching line, kept on both sides in both solids, until queue row
+/// Q760 parted that edge into one per input face in `fuse/assemble.rs`.
+///
+/// **The ring above is still unreached.** The two caps on each end plane meet
+/// only at the touching line's corner and share no edge, so nothing joins them
+/// into one face, and each lump keeps its own cap.
 #[test]
-fn a_bar_touching_a_tubes_inner_wall_is_answered_but_for_the_union() {
+fn a_bar_touching_a_tubes_inner_wall_is_answered_under_every_rule() {
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let outer = model
@@ -627,10 +631,11 @@ fn a_bar_touching_a_tubes_inner_wall_is_answered_but_for_the_union() {
         let what = format!("{rule:?}, swapped {swapped}");
         let answer = fused_in_order(&mut model, [tube, inside], rule, swapped);
         match (rule, swapped) {
-            (Rule::Union, _) => assert!(
-                matches!(answer, Err(Error::ResultIsNotManifold { count: 4, .. })),
-                "{what}: {answer:?}"
-            ),
+            (Rule::Union, _) => {
+                let [bar, tube] = the_two_smaller_first(&model, answer, &what);
+                assert_holds(&model, tube, 4.0 * 40.0 * PI, "the tube in the union");
+                assert_holds(&model, bar, 4.0 * PI, "the bar in the union");
+            }
             (Rule::Intersection, _) => assert_eq!(
                 answer.unwrap_or_else(|why| panic!("{what} refused: {why}")),
                 Vec::new(),
@@ -657,6 +662,32 @@ fn the_only(answer: rcad_topo::Result<Vec<SolidKey>>, what: &str) -> SolidKey {
     let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
     assert_eq!(solids.len(), 1, "{what}: {solids:?}");
     solids[0]
+}
+
+/// The two solids of an answer, the one with less inside it first.
+fn the_two_smaller_first(
+    model: &Model,
+    answer: rcad_topo::Result<Vec<SolidKey>>,
+    what: &str,
+) -> [SolidKey; 2] {
+    let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
+    let mut two: [SolidKey; 2] = solids
+        .try_into()
+        .unwrap_or_else(|solids| panic!("{what}: two lumps, got {solids:?}"));
+    let volume = |solid: &SolidKey| {
+        model
+            .solid(*solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a fine mesh"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} does not measure: {why}"))
+            .volume()
+    };
+    two.sort_by(|one, other| volume(one).total_cmp(&volume(other)));
+    two
 }
 
 /// The corners of the bow tie cap, in the order its ring runs: two on the
