@@ -144,7 +144,7 @@ use rcad_geom::{
     Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
 
 use comparison::{
     Answer, Face, Picking, Run, Step, WhatItSitsOn, answer_of, bits, turned_to_its_smallest,
@@ -2464,28 +2464,28 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
 /// face. [`a_ball_a_bar_and_a_block`] is the trio, and its own doc says why the
 /// ball and the bar are kept out of each other's way.
 ///
-/// **Compared with [`invariants_of`] and not with [`answer_of`]**, because the
-/// two groupings may legitimately cut the answer into different faces —
-/// roadmap §11.2's point, and the reason this file picks between the two
-/// comparisons per property rather than once.
+/// **Compared face by face with [`the_faces_of`], and not with [`answer_of`]**,
+/// because the two groupings may legitimately cut the answer into different
+/// faces — roadmap §11.2's point, and the reason this file picks between the
+/// comparisons per property rather than once. Not with [`invariants_of`]
+/// either: the two groupings hand the same faces back in a different order,
+/// and a whole solid's measure sums them in that order, so it differs in the
+/// last place where nothing about the solid does. That was the first thing
+/// this property found once it ran.
 ///
-/// # It does not run today, and what stops it is not the trio
+/// # It runs, and what stopped it was not the trio
 ///
-/// **One of the four fuses this property runs per case does not answer**, and
-/// that is enough to leave it comparing nothing, so this pins it rather than
-/// reporting a green run over a property that compared nothing (§14.7). That
-/// quartering is asserted below and not merely printed.
+/// Until §340.5's fix, **one of the four fuses this property runs per case did
+/// not answer**, and that left it comparing nothing, so it was pinned at that.
+/// The one that stopped was the **second** fuse of the grouping that sinks the
+/// ball into the block first: the half ball hanging under the floor has its one
+/// corner on the floor, so no corner said which half of the ball it was, the
+/// arrangement built the upper half, and the fuse caught its own broken answer
+/// as `Invalid(FacesDoNotAgreeWhichWayTheyFace)`. Which way the half ball's
+/// wire walks its circle says which half, and `bake.rs` hands that on now.
+/// `a_ball_and_a_bar_in_one_block.rs` has the measurement.
 ///
-/// The one that stops is the **second** fuse of the grouping that sinks the ball
-/// into the block first. Since §340 its floor's cells are told apart, and what
-/// stops it is no longer a refusal: the half ball hanging under the floor comes
-/// out of the arrangement inside out, and the fuse catches its own broken
-/// answer as `Invalid(FacesDoNotAgreeWhichWayTheyFace)`.
-/// [`the_ball_comes_back_inside_out`] lets exactly that through, for this
-/// property alone, and names the site; [`a_curved_refusal`] still calls it a
-/// bug everywhere else. `a_ball_and_a_bar_in_one_block.rs` has the measurement.
-///
-/// # What this pin used to say, and why it changed
+/// # What this pin said before that, and why it changed
 ///
 /// Until §340 the same fuse refused [`CANNOT_TELL_THE_CELLS_OF_A_FACE_APART`]:
 /// the bar's circle in a floor with a round hole agreed with the
@@ -2517,16 +2517,7 @@ fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first()
         let (block, ball, bar) = (keys[0], keys[1], keys[2]);
         tally.meaning_to_compare();
 
-        // Both groupings are asked for, every case, and neither short-circuits
-        // the other. What this pins is that *each* of them stops, so a run that
-        // only ever tried the first would be pinning half the claim.
-        let left = match fused(tally, coordinates, &model, &[block], &[ball], Rule::Union)?.answer()
-        {
-            Some((sunk, first)) if !the_ball_comes_back_inside_out(tally, &sunk, &first, bar) => {
-                fused(tally, coordinates, &sunk, &first, &[bar], Rule::Union)?.answer()
-            }
-            Some(_) | None => None,
-        };
+        let left = united_in_turn(tally, coordinates, &model, &[block], &[ball], &[bar])?;
         let right = united_in_turn(tally, coordinates, &model, &[ball], &[bar], &[block])?;
         let (Some(left), Some(right)) = (left, right) else {
             return Ok(());
@@ -2534,69 +2525,55 @@ fn uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first()
 
         tally.comparing();
         prop_assert_eq!(
-            invariants_of(&left.0, &left.1),
-            invariants_of(&right.0, &right.1),
+            the_faces_of(&left.0, &left.1),
+            the_faces_of(&right.0, &right.1),
             "uniting a block, a ball and a bar does not depend on which two go first"
         );
         Ok(())
     });
-    tally.nothing_was_compared_because_it_all_refused(
-        "associativity of union over a ball and a bar in a block, which does not answer",
-        A_HALF_BALL_TURNED_INSIDE_OUT,
-    );
-    assert_eq!(
-        4 * tally.refused.get(),
-        tally.fuses.get(),
-        "the pin is that exactly one of the four fuses this property runs per case does not \
-         answer — the second of the grouping that sinks the ball into the block first, whose \
-         half ball comes out inside out: {} of {} did not",
-        tally.refused.get(),
-        tally.fuses.get()
+    tally.report_what_it_compared(
+        "associativity of union over a ball and a bar in a block, the ball sunk in first",
     );
 }
 
-/// What stops [`uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`].
-const A_HALF_BALL_TURNED_INSIDE_OUT: &str =
-    "a half ball whose one corner is on the floor, turned inside out";
-
-/// Whether uniting `bar` with the block the ball was just sunk into builds the
-/// half ball inside out, counted as a fuse that did not answer when it does.
+/// Every face of an answer measured on its own, its area and where it balances
+/// as bits, sorted, with the solid's shell count; one entry per solid, sorted.
 ///
-/// **An exemption for this configuration alone, and the site is known**
-/// (`docs/decisions.md` §340.5). The half ball's one wire is the circle where it
-/// meets the floor, whose one corner is on the floor, so
-/// `Arrangement::material_is_left_of_forward` in `arrange.rs` has no corner to
-/// read its side of the floor from and takes the circle's forward direction,
-/// which here is the upper half. The fuse catches it in `assemble.rs`'s
-/// `how_much_space_it_encloses`. Which way the wire walks that circle is in the
-/// model, and `bake.rs` does not hand it to the arrangement. Nothing but that
-/// exact `Invalid` is let through: any other outcome goes to [`fused`] and is
-/// judged there.
-fn the_ball_comes_back_inside_out(
-    tally: &Tally,
-    model: &Model,
-    block_and_ball: &[SolidKey],
-    bar: SolidKey,
-) -> bool {
-    let mut model = model.clone();
-    let answer = model.fuse(
-        block_and_ball,
-        &[bar],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    let Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace)) = answer else {
-        return false;
-    };
-    tally.fuses.set(tally.fuses.get() + 1);
-    tally.refused.set(tally.refused.get() + 1);
-    *tally
-        .gave_up
-        .borrow_mut()
-        .entry(A_HALF_BALL_TURNED_INSIDE_OUT)
-        .or_default() += 1;
-    true
+/// **What [`invariants_of`] compares, without the order the faces are added
+/// in.** The two groupings of a block, a ball and a bar hand back the same
+/// eleven faces on the same surfaces, the floor first in one and the ball first
+/// in the other, and a sum taken in another order rounds differently: on
+/// `a_ball_and_a_bar_in_one_block.rs`'s block, at its deflection of `0.02`, the
+/// ball-first grouping measures `357.5937108432019` and the other
+/// `357.59371084320134`. A face measured on
+/// its own is the same triangles and the same arithmetic in either list, so
+/// this still compares bit for bit.
+fn the_faces_of(model: &Model, solids: &[SolidKey]) -> Vec<(usize, Vec<[u64; 4]>)> {
+    let mut each: Vec<(usize, Vec<[u64; 4]>)> = solids
+        .iter()
+        .map(|&key| {
+            let solid = model.solid(key).expect("this model made the key");
+            let mut faces: Vec<[u64; 4]> = solid
+                .faces()
+                .map(|face| {
+                    let measured = solid
+                        .measure_one_face(
+                            face.key(),
+                            a_deflection(),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        )
+                        .expect("a face of a solid this size measures");
+                    let [x, y, z] = measured.centroid().coordinates();
+                    [bits(measured.area()), bits(x), bits(y), bits(z)]
+                })
+                .collect();
+            faces.sort_unstable();
+            (solid.shells().count(), faces)
+        })
+        .collect();
+    each.sort_unstable();
+    each
 }
 
 /// Every frustum the family draws really does have skin inside the block and
@@ -3912,7 +3889,8 @@ const WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON: &str = "which side of its trimm
 /// worked out when two of the three are flat. A block's floor crossed by a ball
 /// and by a bar is a plane, a sphere and a pipe — one plane short — and that is
 /// what [`uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`]
-/// stops at.
+/// stopped at, until a triple whose two round surfaces share nothing was
+/// skipped rather than asked.
 const WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT: &str =
     "where three surfaces meet, with fewer than two of them flat";
 

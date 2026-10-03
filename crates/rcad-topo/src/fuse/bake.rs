@@ -56,6 +56,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rcad_geom::{
     EdgeRun, Isometry, MeetOfThree, Orientation, Picker, Plane, Point, Surface,
     WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces, where_a_corner_lands_after_moving,
+    which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -63,7 +64,11 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::key::{FaceSlot, VertexSlot};
-use crate::validate::{CornerRoom, MEASURING_SLACK, side_of_surface};
+use crate::validate::{
+    CornerRoom, MEASURING_SLACK, a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
+    side_of_surface,
+};
+use crate::view::CoedgeView;
 use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
 use super::assemble::{InputFace, joined_faces_of_an_input};
@@ -79,7 +84,13 @@ use super::{as_exact_as_it_is, gave_up, middle_of};
 /// [`Error::Invalid`](crate::Error::Invalid) when a corner's own faces disagree
 /// about where it is by more than its box, and
 /// [`Error::Undecidable`](crate::Error::Undecidable) when no three surfaces
-/// around a corner could be shown to meet at a point.
+/// around a corner could be shown to meet at a point. And what reading which
+/// way a closed edge is walked refuses
+/// ([`the_side_a_closed_edge_is_walked_for`]):
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`](crate::Error::CannotTellWhichWayAClosedEdgeRuns),
+/// [`Invalid::ClosedEdgeBetweenTwoFlatFaces`], and
+/// [`Error::ACrossingThisCannotBeOrderedAlong`](crate::Error::ACrossingThisCannotBeOrderedAlong)
+/// for a kind of run this crate has never seen.
 ///
 /// # Panics
 ///
@@ -163,6 +174,24 @@ pub(crate) struct BakedEdge {
     /// edge goes: a half ball's skin is bound by two edges between the same two
     /// poles on one great circle, and only these say which half is which.
     pub(crate) picked_by: SmallVec<[Picker; 1]>,
+    /// For an edge that runs right round a closed curve, whether the face lies
+    /// on the negative side of `across`, as the way its wire walks the edge
+    /// says.
+    ///
+    /// **The model records this where the corners may not.** A face whose every
+    /// corner is on `across` has no corner to read its side off: a half ball
+    /// hanging under a block's floor has one corner, on the floor, and both
+    /// halves of the ball have that same wire. Which way the wire walks its
+    /// circle is what tells them apart, and the rule that turns that into a side
+    /// is the one `Model::validate` checks every closed edge against,
+    /// [`a_closed_crossing_is_walked_the_way_it_is_stored`], read backwards as
+    /// `holds.rs` reads it for a ring's face (`docs/decisions.md` §340.5).
+    ///
+    /// `None` for an edge with two corners, and for a closed edge the rule says
+    /// nothing about: one whose run names some third surface rather than the
+    /// face across, and one along which the two surfaces touch rather than
+    /// cross.
+    pub(crate) inside_across: Option<bool>,
 }
 
 /// A corner of an input face, in world coordinates.
@@ -300,7 +329,7 @@ fn bake_one_solid(
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
     for face in solid.faces() {
-        let baked = bake_one_face(model, solid, face, &surfaces, &corners);
+        let baked = bake_one_face(model, solid, face, &surfaces, &corners)?;
         bounds.take_in(baked.bounds);
         faces.push(baked);
     }
@@ -341,6 +370,7 @@ fn bake_the_joined_faces(
                     end: corners[&next.slot_in(model.id())].clone(),
                     across: Surface::Plane(side.across),
                     picked_by: SmallVec::new(),
+                    inside_across: None,
                 });
             }
             wires.push(walked);
@@ -429,6 +459,7 @@ fn surface_of_every_face(model: &Model, solid: SolidView<'_>) -> BTreeMap<FaceSl
                 stored: model.data().faces[slot].surface,
                 placed: face.surface(),
                 movement: face.location(),
+                used: face.orientation(),
             },
         );
         assert!(
@@ -439,17 +470,20 @@ fn surface_of_every_face(model: &Model, solid: SolidView<'_>) -> BTreeMap<FaceSl
     surfaces
 }
 
-/// One face's surface, moved into place, and the movement that put it there.
+/// One face's surface, moved into place, the movement that put it there, and
+/// which way round the solid uses the face.
 ///
 /// The movement is what a corner read out of the model needs: the box round
 /// where it lands is worked out from the *stored* corner and the *stored*
 /// surfaces, and applying the movement to each of them separately is what
-/// [`where_a_corner_lands_after_moving`] does.
+/// [`where_a_corner_lands_after_moving`] does. The use is what the closed-edge
+/// rule needs of the face across a closed edge ([`BakedEdge::inside_across`]).
 #[derive(Clone, Copy, Debug)]
 struct PlacedSurface {
     stored: Surface,
     placed: Surface,
     movement: Isometry,
+    used: Orientation,
 }
 
 fn corner_of_every_vertex(
@@ -880,47 +914,104 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
 }
 
 /// One face of a solid in world coordinates, with its seams left out.
+///
+/// # Errors
+///
+/// Whatever [`the_side_a_closed_edge_is_walked_for`] refuses.
 fn bake_one_face(
     model: &Model,
     solid: SolidView<'_>,
     face: FaceView<'_>,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
     corners: &BTreeMap<VertexSlot, BakedCorner>,
-) -> BakedFace {
+) -> Result<BakedFace> {
     let key = face.key();
     let bounds = Bounds::round_a_face(solid, face);
     let mine = key.slot_in(model.id());
 
-    let wires = model
-        .face_at(mine)
-        .wires()
-        .map(|wire| {
-            wire.coedges()
-                .filter_map(|coedge| {
-                    let across = face_across(model, mine, coedge.edge().key())?;
-                    Some(BakedEdge {
-                        keys: core::iter::once(coedge.edge().key()).collect(),
-                        start: corners[&coedge.start().key().slot_in(model.id())].clone(),
-                        end: corners[&coedge.end().key().slot_in(model.id())].clone(),
-                        across: surfaces[&across].placed,
-                        picked_by: pickers_moved_into_place(
-                            coedge.edge().stored_run(),
-                            &face.location(),
-                        ),
-                    })
-                })
-                .collect()
-        })
-        .collect();
+    let mut wires = Vec::new();
+    for wire in model.face_at(mine).wires() {
+        let mut walked = Vec::new();
+        for coedge in wire.coedges() {
+            let Some(across) = face_across(model, mine, coedge.edge().key()) else {
+                continue;
+            };
+            walked.push(BakedEdge {
+                keys: core::iter::once(coedge.edge().key()).collect(),
+                start: corners[&coedge.start().key().slot_in(model.id())].clone(),
+                end: corners[&coedge.end().key().slot_in(model.id())].clone(),
+                across: surfaces[&across].placed,
+                picked_by: pickers_moved_into_place(coedge.edge().stored_run(), &face.location()),
+                inside_across: the_side_a_closed_edge_is_walked_for(
+                    coedge,
+                    [surfaces[&mine], surfaces[&across]],
+                )?,
+            });
+        }
+        wires.push(walked);
+    }
 
-    BakedFace {
+    Ok(BakedFace {
         keys: vec![key],
         surface: face.surface(),
         orientation: face.orientation(),
         wires,
         cuts: Vec::new(),
         bounds,
+    })
+}
+
+/// Whether a face lies on the negative side of the face across a closed edge
+/// of it, as the way its wire walks that edge says; `None` for an edge that
+/// does not close, and see [`BakedEdge::inside_across`] for when else.
+///
+/// Read where both faces are stored, for the reason
+/// `Model::validate`'s own reading of this rule gives: a ball stores no axis
+/// and is wound about the `z` of the frame it is read in, so read where a
+/// turned solid sits it would be wound about a different line from the one
+/// its edges were walked by. A movement keeps which side of a surface a face
+/// is on, so the side read here is the side of `across` moved into place.
+///
+/// `faces` is this face and the face across, in that order.
+///
+/// # Errors
+///
+/// [`Error::ACrossingThisCannotBeOrderedAlong`](crate::Error::ACrossingThisCannotBeOrderedAlong)
+/// for a kind of run this crate has never seen, and whatever
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`] refuses: a closed edge
+/// between two planes, and one whose direction its rule cannot tell.
+fn the_side_a_closed_edge_is_walked_for(
+    coedge: CoedgeView<'_>,
+    [mine, across]: [PlacedSurface; 2],
+) -> Result<Option<bool>> {
+    let edge = coedge.edge();
+    if !edge.is_closed()? {
+        return Ok(None);
     }
+    let names_it =
+        which_two_surfaces_a_run_is_between(edge.stored_run(), [&mine.stored, &across.stored]);
+    if names_it[1] != across.stored {
+        return Ok(None);
+    }
+    let at = edge.stored_ends()[0];
+    let outward = [
+        gradient_of(&mine.stored, at) * mine.used.sign(),
+        gradient_of(&across.stored, at) * across.used.sign(),
+    ];
+    let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
+        [&names_it[0], &names_it[1]],
+        outward,
+        at,
+        Decision::Neg,
+    )?
+    else {
+        return Ok(None);
+    };
+    let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
+    let keeps_the_back = walked_forward == forward_if_it_keeps_the_back;
+    // The back is the side of `across` as the solid uses it; a face used
+    // turned round has its stored surface's negative side in front.
+    Ok(Some(keeps_the_back != across.used.is_reversed()))
 }
 
 /// An edge's pickers, moved by the placement its face stands at.

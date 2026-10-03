@@ -19,14 +19,16 @@
 //! common, no more — the refusal comes back by name. Nothing here is compared
 //! against a size.
 //!
-//! # What is still refused, and it is no longer the triple
+//! # One pair at a time, the same block
 //!
-//! The three fuse when they are handed over **together**. Fused a pair at a
-//! time, the ball goes in first and leaves the block's floor with a round hole
-//! and half a ball hanging under it. Uniting the bar with that then builds the
-//! half ball inside out and catches it: `Invalid(FacesDoNotAgreeWhichWayTheyFace)`.
-//! [`the_same_three_one_pair_at_a_time_stop_somewhere_else`] pins it and names
-//! where it goes wrong (`docs/decisions.md` §340.5).
+//! The three fuse when they are handed over **together**, and they fuse into
+//! the same block a pair at a time. The ball goes in first and leaves the
+//! block's floor with a round hole and half a ball hanging under it. That half
+//! ball's one corner is on the floor, so no corner says which half of the ball
+//! it is, and uniting the bar with it used to build the upper half and catch
+//! it as `Invalid(FacesDoNotAgreeWhichWayTheyFace)`. Which way its wire walks
+//! the circle says, and [`the_same_three_one_pair_at_a_time_make_the_same_block`]
+//! is the answer that came of reading it (`docs/decisions.md` §340.5).
 //!
 //! # And what a point inside the block still cannot be asked
 //!
@@ -41,7 +43,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Invalid, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
 
 /// How fine the meshes every volume here is read off are.
 const A_DEFLECTION: f64 = 0.02;
@@ -122,65 +124,12 @@ fn united_one_at_a_time(ball_at: f64) -> (Model, Result<Vec<SolidKey>, Error>) {
 ///
 /// The ball stands three units from the bar's axis, radii one and one, so the
 /// sphere and the pipe are two units apart at their nearest and no point lies on
-/// both. The volume is the block, plus the half of the ball hanging below the
-/// floor, plus the two two-unit stubs of bar sticking out of either end.
+/// both.
 #[test]
 fn a_ball_and_a_bar_that_miss_each_other_fuse_into_one_block() {
     let (model, answer) = united_all_at_once(2.0);
     let solids = answer.expect("a ball and a bar that miss each other unite with a block");
-    assert_eq!(solids.len(), 1, "one block with two lumps on it");
-
-    model
-        .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("the answer is a valid solid");
-
-    let solid = model.solid(solids[0]).expect("this model made the key");
-    assert_eq!(
-        solid.faces().count(),
-        11,
-        "six of the block, the ball's lower half, and the bar's wall and cap \
-         at each end"
-    );
-
-    let closed_form =
-        SIDE * SIDE * SIDE + 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS + 4.0 * PI * RADIUS * RADIUS;
-    let measured = volume_of(&model, &solids);
-    assert!(
-        (0.0..HOW_FAR_A_MESH_MAY_BE).contains(&((closed_form - measured) / closed_form)),
-        "the answer is a block with half a ball and two bar stubs on it, and a \
-         mesh inside a round skin under-measures it: {measured} against {closed_form}"
-    );
-    // Leaving the ball's own half out would come to 355.57, which is 0.59% below
-    // the closed form and five times the width of the band above. The measured
-    // 357.59 is 0.019% below it. A count of faces and a volume within half a per
-    // cent are two different claims and this file makes both (§47.2).
-    assert!(
-        measured > SIDE * SIDE * SIDE + 4.0 * PI * RADIUS * RADIUS + 2.0,
-        "the ball's own half is in the answer and not merely a hole in the floor: \
-         {measured}"
-    );
-
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
-    assert_eq!(
-        solid.classify_point(Point::new(5.0, 3.25, -1.5), &policy, &mut log),
-        Containment::Inside,
-        "a unit and a half under the floor, inside the bar stub"
-    );
-    assert_eq!(
-        solid.classify_point(Point::new(5.0, 3.25, SIDE + 1.5), &policy, &mut log),
-        Containment::Inside,
-        "the stub out of the top of the block"
-    );
-    for (x, y) in [(3.25, 1.75), (2.0, 3.25), (3.5, 3.25), (6.3, 5.7)] {
-        for z in [-1.5, SIDE + 1.5] {
-            assert_eq!(
-                solid.classify_point(Point::new(x, y, z), &policy, &mut log),
-                Containment::Outside,
-                "nothing but the bar reaches past the block at ({x}, {y}, {z})"
-            );
-        }
-    }
+    it_is_the_block_with_half_a_ball_and_two_stubs(&model, &solids);
 }
 
 /// The gap the skip needs is not a size.
@@ -229,39 +178,90 @@ fn a_ball_driven_into_the_bar_is_refused_by_name() {
     );
 }
 
-/// What stops the same three solids fused **one pair at a time**, now that the
-/// triple no longer does: the second fuse builds the half ball inside out and
-/// catches it before writing anything.
+/// The same three solids fused **one pair at a time** make the same block.
 ///
-/// **This is a broken answer caught late, and not a refusal.** Fusing the ball
-/// in first leaves the block's floor with a round hole and the lower half of the
-/// ball hanging under it. Uniting the bar with that, every face's cells are
-/// told apart right since §340 — the floor with two round holes, the bar's disc,
-/// three tubes — but the half ball, which nothing cuts, comes out of
-/// `arrange.rs` as the *upper* half. Its one wire is the circle where it meets
-/// the floor, and that circle's one corner is on the floor, so
-/// `Arrangement::material_is_left_of_forward` finds no corner off the floor to
-/// read its side from and takes the circle's forward direction. For this half
-/// ball that is the wrong way round: it hangs on the floor plane's outer side.
-/// The floor and the half ball then walk their shared circle the same way, and
-/// `how_much_space_it_encloses` in `assemble.rs` refuses the answer.
+/// Fusing the ball in first leaves the block's floor with a round hole and the
+/// lower half of the ball hanging under it. Uniting the bar with that, the half
+/// ball is the face nothing cuts. Its one wire is the circle where it meets the
+/// floor and that circle's one corner is on the floor, so no corner says which
+/// side of the floor it hangs on — both halves of the ball have that wire.
+/// `Arrangement::material_is_left_of_forward` took the circle's forward
+/// direction there, which is the upper half; the floor and the half ball then
+/// walked their shared circle the same way, and `how_much_space_it_encloses`
+/// in `assemble.rs` refused the answer
+/// `Invalid(FacesDoNotAgreeWhichWayTheyFace)`.
 ///
-/// Measured: with that one guess turned the other way for this face and nothing
-/// else changed, the same union answers, validates, has the eleven faces of
-/// [`a_ball_and_a_bar_that_miss_each_other_fuse_into_one_block`], and measures
-/// 357.594 against 357.661 worked out by hand. **The fix is not in `arrange.rs`
-/// alone**: which way a wire walks a closed edge is in the model, but `bake.rs`
-/// does not hand it to the arrangement (§340.5).
+/// Which way the half ball's wire walks its circle is in the model, read with
+/// the closed-edge rule `Model::validate` checks every closed edge against, and
+/// `bake.rs` hands it to the arrangement now (`docs/decisions.md` §340.5).
 #[test]
-fn the_same_three_one_pair_at_a_time_stop_somewhere_else() {
-    let (_, answer) = united_one_at_a_time(2.0);
-    assert!(
-        matches!(
-            answer,
-            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
-        ),
-        "the half ball comes out of the arrangement inside out, §340.5: {answer:?}"
+fn the_same_three_one_pair_at_a_time_make_the_same_block() {
+    let (model, answer) = united_one_at_a_time(2.0);
+    let solids = answer.expect("the ball, then the bar, unite with the block");
+    it_is_the_block_with_half_a_ball_and_two_stubs(&model, &solids);
+}
+
+/// The answer is one valid solid, the block with the lower half of the ball and
+/// two stubs of the bar on it, and it measures as that.
+///
+/// The closed form, for a block of side 7 and two round solids of radius 1:
+/// the block is `7³ = 343`, the half ball below the floor is `½ · 4/3 · π · 1³
+/// = 2π/3`, and each stub is a bar of radius 1 two units long, `π · 1² · 2 =
+/// 2π`, so two of them are `4π`. That is `343 + 2π/3 + 4π = 357.661`.
+fn it_is_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids: &[SolidKey]) {
+    assert_eq!(solids.len(), 1, "one block with two lumps on it");
+
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the answer is a valid solid");
+
+    let solid = model.solid(solids[0]).expect("this model made the key");
+    assert_eq!(
+        solid.faces().count(),
+        11,
+        "six of the block, the ball's lower half, and the bar's wall and cap \
+         at each end"
     );
+
+    let closed_form =
+        SIDE * SIDE * SIDE + 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS + 4.0 * PI * RADIUS * RADIUS;
+    let measured = volume_of(model, solids);
+    assert!(
+        (0.0..HOW_FAR_A_MESH_MAY_BE).contains(&((closed_form - measured) / closed_form)),
+        "the answer is a block with half a ball and two bar stubs on it, and a \
+         mesh inside a round skin under-measures it: {measured} against {closed_form}"
+    );
+    // Leaving the ball's own half out would come to 355.57, which is 0.59% below
+    // the closed form and five times the width of the band above. The measured
+    // 357.59 is 0.019% below it. A count of faces and a volume within half a per
+    // cent are two different claims and this file makes both (§47.2).
+    assert!(
+        measured > SIDE * SIDE * SIDE + 4.0 * PI * RADIUS * RADIUS + 2.0,
+        "the ball's own half is in the answer and not merely a hole in the floor: \
+         {measured}"
+    );
+
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    assert_eq!(
+        solid.classify_point(Point::new(5.0, 3.25, -1.5), &policy, &mut log),
+        Containment::Inside,
+        "a unit and a half under the floor, inside the bar stub"
+    );
+    assert_eq!(
+        solid.classify_point(Point::new(5.0, 3.25, SIDE + 1.5), &policy, &mut log),
+        Containment::Inside,
+        "the stub out of the top of the block"
+    );
+    for (x, y) in [(3.25, 1.75), (2.0, 3.25), (3.5, 3.25), (6.3, 5.7)] {
+        for z in [-1.5, SIDE + 1.5] {
+            assert_eq!(
+                solid.classify_point(Point::new(x, y, z), &policy, &mut log),
+                Containment::Outside,
+                "nothing but the bar reaches past the block at ({x}, {y}, {z})"
+            );
+        }
+    }
 }
 
 /// How much space the answer takes up, all of its solids together.
