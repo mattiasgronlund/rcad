@@ -122,9 +122,11 @@ then a merger that lands it on `main` and hands back about twenty lines. You no
 longer merge in your own context, which is where most of it went (§266).
 
 A session reads its agent types once, when it starts. A session begun before its
-tree held `.claude/agents/lane.md`, `verifier.md` and `merger.md` cannot resolve
-them, and every stage of the run throws. Start a new session rather than run it
-(§266.6).
+tree held `.claude/agents/lane.md`, `verifier.md`, `merger.md` and `lander.md`
+cannot resolve them, and every stage of the run throws — except the lander's: a
+missing `lander` type does not throw the run, it sends the lane to the Opus
+merger instead, on its own branch, `merge-<label>-after-land` (§384.3). Start a
+new session rather than run it (§266.6).
 
 For every row the fill took:
 
@@ -196,6 +198,12 @@ the rows it closed and added, and anything it left for you. A row that did not
 merge comes back as why, the lane's summary and the verifier's findings, and
 the trees to unlock. What the verifier checks is `verifier.md`'s to say, and how
 the merger merges is `merger.md`'s; neither is repeated here.
+
+A row whose lane wrote rows is merged by the lander, through `just land`, not
+by the Opus merger — its result line reads `merged by just land, which the
+lander ran`. A stop sends it to the Opus merger instead. After a stop, the
+lander's own tree is unlocked but not marked finished, so it stays on disk
+until the merger that follows marks it (§384.3).
 
 - **Merged**: `git fetch origin` and `git rev-parse origin/main` — a reported
   sha can be invented — then merge `origin/main` into your branch, so the copy
