@@ -91,14 +91,16 @@ a loop, write a script to `target/` (gitignored) and run it as
 recipe in the file, and that is `list`. Every listed recipe carries a real
 sentence, so start there rather than reading the `justfile`.
 
-**`just gate` is the whole gate**, and what CI runs. `just check-plugins`
-fails, first thing in `just gate`, when a plugin is missing, and names the
-command that installs it.
+**`just gate` is the whole gate**, and what CI runs. Every step starts at
+once, so a failure stops none of them. `just check-plugins` is kept first in
+`gate_steps`, so when a plugin is missing it is the first failure the summary
+block names, with its install command in its tail.
 
 **Run it as `just gate quiet`, in one plain Bash call, with `timeout` set to
-600000 and no redirect.** `quiet` prints one line per step, the failing step's
-own last sixty lines, and the summary block — about fifty lines in all — and
-sends the rest to `target/last-gate.log`. That is the whole answer, in the tool
+600000 and no redirect.** `quiet` prints one line per step, the first failing
+step's own last sixty lines, and the summary block, which names any other
+failed steps on an `also failed:` line — about fifty lines in all — and sends
+the rest to `target/last-gate.log`. That is the whole answer, in the tool
 result, for one call. Bare `just gate` stays the terminal mode and CI's: it
 streams every line, which is 300 KB, and 300 KB is 75 000 tokens you cannot put
 in a result. **Do not redirect `quiet` to a file**; redirecting is what made the

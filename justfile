@@ -2933,9 +2933,10 @@ check-kache-off-on-ci:
 #
 # The last arm pins `check-plugins` **first**, which the three above could not:
 # both sides of every comparison here are `sort -u`, so this recipe was blind to
-# order by construction. CLAUDE.md publishes "first thing in `just gate`" and
-# `ci.yml` leans on it, and a published claim wants a test (§15.6) — it had none,
-# and `check-plugins` ran first only because of where it happened to sit.
+# order by construction. CLAUDE.md says check-plugins is the first failure the
+# summary block names when a plugin is missing, and `ci.yml` leans on it, and a
+# published claim wants a test (§15.6) — it had none, and `check-plugins` ran
+# first only because of where it happened to sit.
 #
 # What the order buys is the error message. Without plugins `check-plugins` exits
 # 1 and names the install command, while `check-hooks` and
@@ -2992,8 +2993,8 @@ check-gate-runs-every-check:
     first=$(printf '%s\n' "$steps" | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
         echo "gate names '$first' first, expected 'check-plugins'"; \
-        echo "CLAUDE.md says check-plugins fails first thing in just gate, and"; \
-        echo "ci.yml leans on it: with no plugins, check-hooks and"; \
+        echo "CLAUDE.md says check-plugins is the first failure the summary"; \
+        echo "block names, and ci.yml leans on it: with no plugins, check-hooks and"; \
         echo "check-questions-selftest exit 127 on a missing selftest.sh, which is"; \
         echo "the failure a runner explains worst, while check-plugins exits 1 and"; \
         echo "names the command that installs them"; \
