@@ -2034,6 +2034,14 @@ mod cone_round_trip_tests {
     /// no angle in the window reads back as it, and every angle outside the
     /// window is further still: below it the tangent is below the window's
     /// least, above it above its most (`docs/decisions.md` §366).
+    ///
+    /// **It shows the limit and does not pin the search.** None of these slopes
+    /// comes back from an angle the search finds and `atan` misses, so with the
+    /// search taken out every count here is the same. Half is such a slope, and
+    /// [`each_slope_the_writer_target_draws_reads_back_from_the_angle_written`]
+    /// pins the search on it here, as does
+    /// `a_cone_of_a_slope_some_half_angle_carries_comes_back_with_that_slope_to_the_bit`
+    /// in `crates/rcad-step/tests/fuzzing/writer.rs` through the whole writer.
     #[test]
     fn most_slopes_over_one_come_back_from_no_half_angle() {
         let mut state: u64 = 0x9E37_79B9_7F4A_7C15;

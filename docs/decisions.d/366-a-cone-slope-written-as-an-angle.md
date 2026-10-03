@@ -8,11 +8,16 @@ refusals into comparison panics on the cone's slope, so the half-angle is
 searched and the writer target compares the slope as a measurement. Both land
 together. Everything below was run, and each number names its test.*
 
+*Landed by Q821, lane `lane-q821-a-cone-cap-written-in-its-stored-frame`, off
+`c564dec5`, which merged Q662's branch and moved the pins and notes outside
+its write set (366.5). 366.2's last paragraph and 366.6 are Q821's.*
+
   366.1   The cap circle, in the stored frame
   366.2   The half-angle written, and the slopes no half-angle carries
   366.3   The slope compared as a measurement
   366.4   What it changed in the writer target
   366.5   What this leaves
+  366.6   A frustum and a block read back from rounded text
 
 ### 366.1 The cap circle, in the stored frame
 
@@ -84,6 +89,25 @@ It is not a channel. **A reader that recovers the slope some other way**, from
 the corners for instance, was not examined. That is a change to the reader,
 and this lane's write set did not hold it.
 
+**`most_slopes_over_one_come_back_from_no_half_angle` shows the limit and
+cannot pin the search.** Not one of its 100 000 slopes comes back from an angle
+the search finds and `atan` misses ("0 from an angle the search finds"), so
+every count it prints is the same with the search taken out. Q662's verifier
+found that, and Q821 ran both ways of taking it out:
+
+- **The writer's call site written back to `real(cone.slope().atan())`**: the
+  one test that fails is
+  `a_cone_of_a_slope_some_half_angle_carries_comes_back_with_that_slope_to_the_bit`,
+  in `crates/rcad-step/tests/fuzzing/writer.rs`, at slope ½, `left:
+  [4602678819172646911]` (`0.49999999999999994`) against `right:
+  [4602678819172646912]` (`0.5`). It writes the frustum and the pointed cone at
+  slopes ¼ and ½, reads each back, and asks for the slope bit for bit. Every
+  other cone test passes, because the target compares the slope as a
+  measurement (366.3) and lets that ulp through.
+- **The search's body returning `slope.atan()`**: that test fails the same way,
+  and so does `each_slope_the_writer_target_draws_reads_back_from_the_angle_written`,
+  which asks the function itself.
+
 ### 366.3 The slope compared as a measurement
 
 `assert_located_numbers_the_same`, in
@@ -149,19 +173,49 @@ failed:
 
 - `every_shape_seed_is_the_shape_it_is_named_for`, in
   `crates/rcad-step/tests/every_model_the_writer_fuzzer_kept_is_written_again.rs`,
-  pins the frustum and pointed-cone seeds as refused. They now come back the
-  same, so `comes_back` is `true` for both, and that file's module doc ("four
-  are refused") wants the same change. And
-  `a_frustum_up_through_a_block_never_reaches_the_reader_because_the_writer_refuses_it`,
-  in `crates/rcad-step/tests/a_fuse_read_back_from_rounded_text.rs`, pins all 48
-  frustum-and-block cases as refused. It now fails as its own doc says it
-  should on this day: all 48 are written, and its `all_answers_right` passes.
-  It becomes a row like the others, asserting nothing is left unwritten. This
-  lane's write set held neither file.
-- `crates/rcad-step/tests/no_cone_face_arrives_out_of_the_corpus.rs` says the
-  writer refuses a pointed cone, so the stronger control it wanted can now be
-  built. §241.6's closing note still names Q662 as refused. Neither file was in
-  this lane's write set.
-- The ball seam in 366.4 is a defect with no row until this one; it is filed.
+  pinned the frustum and pointed-cone seeds as refused. They now come back the
+  same, so `comes_back` is `true` for both, and that file's module doc says only
+  the quarter bend is refused. Done by Q821.
+- `a_frustum_up_through_a_block_never_reaches_the_reader_because_the_writer_refuses_it`,
+  in `crates/rcad-step/tests/a_fuse_read_back_from_rounded_text.rs`, pinned all
+  48 frustum-and-block cases as refused, and failed as its own doc said it
+  would. Q821 made it a row like the ball's,
+  `a_frustum_up_through_a_block_read_back_from_rounded_text`, asserting nothing
+  is left unwritten. 366.6 has what it prints.
+- `crates/rcad-step/tests/no_cone_face_arrives_out_of_the_corpus.rs` said the
+  writer refuses a pointed cone. Q821 built the control it wanted: its pointed
+  cone is written, read back through `Import`, and must arrive with its one cone
+  face. §241.6 has a dated note.
+- The ball seam in 366.4 is a defect, filed as Q822.
 - Q497 now covers turned cones as well as turned pipes, through `cone_from`.
 - Q407, the torus cap, is still refused: 85 of the 400 draws.
+- §191.3 still says the frustum is refused by the writer. Its file was in
+  neither lane's write set; a row adds the dated note.
+
+### 366.6 A frustum and a block read back from rounded text
+
+`a_frustum_up_through_a_block_read_back_from_rounded_text` now writes all 48
+configurations and prints, run by
+
+    mise exec -- just t -p rcad-step --test a_fuse_read_back_from_rounded_text \
+        a_frustum_up_through_a_block --no-capture
+
+    as built:            144 decided, refused {}
+    read back exactly:   144 decided, refused {}
+    11 digits (48 of 48 files had a real moved): 0 decided, refused {}; ...
+        reader refused {"ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn": 48}
+    12 digits (48 of 48 files had a real moved): 0 decided, refused {}; ...
+        reader refused {"ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn": 48}
+    13 digits (48 of 48 files had a real moved): 21 decided,
+        refused {"Undecidable": 3}; 3 refusals the rounding introduced ...
+        reader refused {"ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn": 40}
+
+It is the first family in that file whose curved faces carry a real that
+rounding moves: the bar through a block and the ball and block are built in
+whole numbers. **The reader refuses the frustum file at every digit count an
+exporter writes**, all 48 at 11 and 12 digits and 40 of 48 at 13, where the
+turned pair, whose faces are all flat, is read back at all three. Whether that
+is §42.9's refusal of a corner provably off its face, which the house keeps
+until healing has a consumer (Q25), or a gap in the room a corner on a cone is
+given, was not traced. Neither were the three fuses the 13-digit rounding
+turned from decided to `Undecidable`. Each has a row.

@@ -667,6 +667,50 @@ fn every_cone_this_target_draws_comes_back_from_its_own_file() {
     }
 }
 
+/// A frustum and a pointed cone of slope a quarter and a half, the two of this
+/// target's four slopes some half-angle carries exactly, come back from their
+/// own file with the slope they went in with, bit for bit, so their volume,
+/// area and centroid are compared bit for bit too.
+///
+/// **This is what pins the writer's half-angle search end to end.** Written as
+/// `atan(0.5)` alone, a half comes back `0.49999999999999994`, which
+/// [`a_slope_comes_back_as_near_as_a_half_angle_carries_it`] lets through, and
+/// the measurement is then not compared (§366.2).
+#[test]
+fn a_cone_of_a_slope_some_half_angle_carries_comes_back_with_that_slope_to_the_bit() {
+    for slope in [0.25, 0.5] {
+        for pointed in [false, true] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            if pointed {
+                a_pointed_cone(&mut model, slope, 6.0)
+            } else {
+                a_frustum(&mut model, slope, 2.0, 6.0)
+            }
+            .expect("each cone fits in a model this size");
+            let text = rcad_step::write(&model, "a cone").expect("a cone is written");
+            let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+            let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a cone this writer wrote is read back");
+            let slopes: Vec<f64> = back
+                .model()
+                .faces()
+                .filter_map(|face| {
+                    let Surface::Cone(cone) = face.surface() else {
+                        return None;
+                    };
+                    Some(cone.slope())
+                })
+                .collect();
+            assert_eq!(
+                slopes.iter().map(|back| back.to_bits()).collect::<Vec<_>>(),
+                [slope.to_bits()],
+                "slope {slope}, pointed {pointed}: came back {slopes:?}"
+            );
+        }
+    }
+}
+
 fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
     model.add_round_bar(3.0, 5.0, &Isometry::identity())
 }
