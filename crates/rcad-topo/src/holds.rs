@@ -57,7 +57,7 @@ use rcad_geom::{
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Decision, Filtered, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy,
-    Predicate, ProvenanceLog, Record,
+    Predicate, ProvenanceLog, Record, orient2d,
 };
 
 use crate::classify::decide;
@@ -244,7 +244,7 @@ fn what_a_flat_face_holds(
             // an aim is missing only for a wire with no corners at all.
             continue;
         };
-        match walk_one_outline(face, wire, point, aim, target, policy, log)? {
+        match walk_one_outline(solid, face, wire, point, aim, target, policy, log)? {
             Some(count) => winding += count,
             None => return Ok(OnAFace::OnItsBoundary),
         }
@@ -430,7 +430,18 @@ pub(crate) fn the_meridian_half_space_keeps(
 
 /// One polygonal wire's contribution to the crossing count, or `None` when
 /// `point` sits on one of its sides.
+///
+/// Every side must be straight between its two corners: stored as
+/// [`EdgeRun::Straight`], or a piece of a cone's ruling
+/// ([`is_a_piece_of_a_ruling`]), which is the same segment stored as part of a
+/// crossing.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the solid is what a ruling side's face across is found in, and every other one \
+              was here before it"
+)]
 fn walk_one_outline(
+    solid: SolidView<'_>,
     face: FaceView<'_>,
     wire: WireView<'_>,
     point: PredicatePoint,
@@ -444,7 +455,8 @@ fn walk_one_outline(
         return Ok(Some(0));
     }
     for coedge in wire.coedges() {
-        if coedge.edge().stored_run() != &EdgeRun::Straight {
+        let edge = coedge.edge();
+        if edge.stored_run() != &EdgeRun::Straight && !is_a_piece_of_a_ruling(solid, face, edge)? {
             return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
         }
     }
@@ -957,7 +969,15 @@ fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Opt
 /// ([`is_one_circle_cut_in_two`]): each arc is part of the crossing, but the
 /// two together are all of it, and the round-wire count answers such a wire
 /// where §167's family refuses a hole in a flat face.
+///
+/// So is a piece of a cone's ruling on a **flat** face
+/// ([`is_a_piece_of_a_ruling`]). It is straight, so a flat face whose other
+/// sides are straight too is a polygon and is walked as one: the face of a
+/// half frustum down its axis (`docs/decisions.md` §334). On a curved face a
+/// ruling is still part of a crossing, read as a straight side by
+/// [`the_sides_of`].
 fn a_side_of_it_is_part_of_a_crossing(solid: SolidView<'_>, face: FaceView<'_>) -> Result<bool> {
+    let flat = face.stored_surface().as_plane().is_some();
     for wire in face.wires() {
         if is_one_circle_cut_in_two(solid, face, wire)? {
             continue;
@@ -966,7 +986,10 @@ fn a_side_of_it_is_part_of_a_crossing(solid: SolidView<'_>, face: FaceView<'_>) 
             let edge = coedge.edge();
             let is_a_piece = matches!(edge.stored_run(), EdgeRun::PartOfWhereItCrosses { .. })
                 && edge.start().key() != edge.end().key();
-            if is_a_piece && the_face_across(solid, face, edge)?.is_some() {
+            if !is_a_piece || the_face_across(solid, face, edge)?.is_none() {
+                continue;
+            }
+            if !(flat && is_a_piece_of_a_ruling(solid, face, edge)?) {
                 return Ok(true);
             }
         }
@@ -1274,6 +1297,9 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
         let across_surface = across.stored_surface();
         let run = match edge.stored_run() {
             EdgeRun::Straight => SideRun::Straight,
+            EdgeRun::PartOfWhereItCrosses { .. } if is_a_piece_of_a_ruling(solid, face, edge)? => {
+                SideRun::Straight
+            }
             EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key != end.key => {
                 SideRun::Arc {
                     into_the_arc: the_way_into_an_arc(
@@ -1303,6 +1329,60 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
         });
     }
     Ok(sides)
+}
+
+/// Whether `edge`, a side of `face`, is a piece of a straight ruling of a cone:
+/// part of where a plane holding the cone's apex crosses that cone, with its two
+/// ends on one line through the apex. Such a side is the straight segment
+/// between its two corners.
+///
+/// **A plane through the apex cuts a cone in straight lines through the apex**
+/// — two, or one where it touches, or none — so a piece of that crossing is
+/// straight unless it turns at the apex from one line onto the other. Its two
+/// ends on one line with the apex rule the turn out: a piece that left that line
+/// at the apex could only come back to it at the apex, and an edge does not run
+/// through one point twice.
+///
+/// Every number asked is stored, in the frame the face is stored in: the
+/// plane's own sign at the apex, and three [`orient2d`]s, which are the three
+/// components of `(start − apex) × (end − apex)`. A corner rounded off its line
+/// fails the second and the side is refused as it was; the corners of a half
+/// frustum built by hand down its axis pass (`docs/decisions.md` §334).
+///
+/// # Errors
+///
+/// Whatever [`the_face_across`] gives for the edge.
+fn is_a_piece_of_a_ruling(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    edge: EdgeView<'_>,
+) -> Result<bool> {
+    if !matches!(edge.stored_run(), EdgeRun::PartOfWhereItCrosses { .. })
+        || edge.start().key() == edge.end().key()
+    {
+        return Ok(false);
+    }
+    let Some(across) = the_face_across(solid, face, edge)? else {
+        return Ok(false);
+    };
+    if across.location() != face.location() {
+        return Ok(false);
+    }
+    let ((Surface::Plane(flat), Surface::Cone(cone)) | (Surface::Cone(cone), Surface::Plane(flat))) =
+        (face.stored_surface(), across.stored_surface())
+    else {
+        return Ok(false);
+    };
+    let apex = cone.apex().coordinates();
+    if flat.side_of_point(PredicatePoint::from(apex)) != Decision::Zero {
+        return Ok(false);
+    }
+    let ends = [edge.start().key(), edge.end().key()]
+        .map(|corner| where_it_is_stored(solid, corner).coordinates());
+    Ok([(0, 1), (1, 2), (2, 0)].into_iter().all(|(i, j)| {
+        let [from, start, end] = [apex, ends[0], ends[1]].map(|at| [at[i], at[j]]);
+        orient2d(from, start, end) == Decision::Zero
+    }))
 }
 
 /// Where a corner of `solid` is in the frame its faces are stored in.
@@ -1705,8 +1785,20 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// points `α(φ)` run along one unbroken curve, and each ruling's piece hangs off
 /// that curve. One piece.
 ///
-/// **Two or more others is where it stops, and that is a limit even when every
-/// cut closes.** Each other cut gives its own arc and two arcs can meet in two:
+/// **A cut side by side with the one the apex is behind costs nothing**, however
+/// many there are: its normal lies along that cut's
+/// ([`the_normals_lie_along_one_line`]), so as functions of space it is `μ` times
+/// that cut plus a constant, and `b(φ) = μ·a(φ)`. Then `h·a(φ) − g·b(φ)` is
+/// `a(φ)·(h − g·μ)`, whose sign does not depend on `φ` at all: every ruling
+/// carries a point or none does. What is left is the arc of the one other cut,
+/// and each ruling's piece runs from `α(φ)` to the nearest of the others, so it
+/// still hangs off the one curve. A half frustum's skin is that: the floor the
+/// apex is behind, the roof square to the axis above it, and the plane down the
+/// axis that cut it in half (`docs/decisions.md` §334).
+///
+/// **Two or more others not side by side with it is where it stops, and that is
+/// a limit even when every cut closes.** Each such cut gives its own arc and two
+/// arcs can meet in two:
 /// `one_plane_behind_the_apex_and_two_in_front_leave_a_nappe_in_two_pieces`
 /// below is a floor that cuts a circle and two roofs that each cut an ellipse,
 /// whose region is two pieces round `±90°` with nothing along `±x`. Telling that
@@ -1774,7 +1866,14 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
             }
             match behind.as_slice() {
                 [] => true,
-                [flat] => cuts.len() <= 2 && cone.is_cut_in_a_closed_curve_by(flat) == Some(true),
+                [flat] => {
+                    let not_side_by_side = cuts
+                        .iter()
+                        .filter_map(|cut| cut.surface.as_plane())
+                        .filter(|other| !the_normals_lie_along_one_line(flat, other))
+                        .count();
+                    not_side_by_side <= 1 && cone.is_cut_in_a_closed_curve_by(flat) == Some(true)
+                }
                 [_, _, ..] => false,
             }
         }
