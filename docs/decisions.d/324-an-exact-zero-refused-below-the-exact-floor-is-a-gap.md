@@ -106,6 +106,12 @@ open, not ruled out.
   still refuses. Both exponents scale its `2^1000` coordinate down, and both
   push `2^-538` out of the normal range. Its doc now names both exponents.
 
+  **Q336, `f3e84cf9`, 2026-10-03.** A third exponent, which lifts rather than
+  scales down, now decides this one: the test is renamed
+  `..._is_lifted_to_its_true_sign` and `orient3d` returns `Decision::Neg` at
+  the third exponent, `2^23`. §393 has the ceilings this third exponent reads
+  and the `2^-995` gap it closes for one shape.
+
 ### 324.6 Eight pins outside `rcad-predicates` that this falsifies
 
 `just t --workspace --no-fail-fast` on this lane's tip: 2590 tests run, 2582
