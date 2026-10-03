@@ -26,14 +26,9 @@ use crate::graph::EntityId;
 use crate::names::{
     ADVANCED_FACE, CIRCLE, CLOSED_SHELL, CONICAL_SURFACE, EDGE_CURVE, EDGE_LOOP, ELLIPSE,
     FACE_BOUND, FACE_OUTER_BOUND, FACE_SURFACE, Keyword, LINE, MANIFOLD_SOLID_BREP, ORIENTED_EDGE,
-    VERTEX_POINT,
+    VERTEX_LOOP, VERTEX_POINT,
 };
 use crate::refusal::Refusal;
-
-/// The one loop keyword the walk reads by spelling rather than from
-/// `names.rs`, which with `fuzz/step.dict` lay outside Q746's write set; it
-/// belongs in that list like every other name the reader reads.
-const A_LOOP_OF_ONE_CORNER: &str = "VERTEX_LOOP";
 
 /// Turn one `MANIFOLD_SOLID_BREP` into one solid in `model`.
 pub(crate) fn solid_from(
@@ -394,7 +389,7 @@ impl Walk {
         let Some(corner) = reading
             .file()
             .instance(loop_id)
-            .and_then(|held| held.part(A_LOOP_OF_ONE_CORNER))
+            .and_then(|held| held.part(VERTEX_LOOP.name()))
             .and_then(|record| record.attribute(1))
             .and_then(Value::as_reference)
         else {
@@ -2464,8 +2459,8 @@ mod tests {
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, Ellipse, a_half_space_holding_both,
-        a_surface_holds_the_circle, a_surface_holds_the_ellipse, how_far_off_the_circle_can_be,
-        how_far_off_the_ellipse_can_be,
+        a_surface_holds_the_circle, a_surface_holds_the_ellipse, how_far_off,
+        how_far_off_the_circle_can_be, how_far_off_the_ellipse_can_be,
     };
 
     /// The LED body's circle, written as the file writes it: on its dome
@@ -2540,6 +2535,37 @@ mod tests {
             lid.normal(),
             1.0
         ));
+    }
+
+    /// Before Q560 (`docs/decisions.md` §357.6), [`Cone::point_at`] stepped
+    /// across the axis by `self.slope * along`, which goes negative on the
+    /// nappe behind the apex, so a point there came back at half a turn
+    /// round from where it really is. This cone has its apex at the origin,
+    /// slope `0.5`, and points about `-z`, so `(1, 0, 2)` sits at `along =
+    /// -2`, where `radius_at(-2) = 1`: that stepping-across bug would have
+    /// turned it into `(-1, 0, 2)` and `how_far_off` would have read about
+    /// `2.0`, the diameter, instead of near zero. Q560 already fixed
+    /// `point_at`; this pins that it stays fixed.
+    ///
+    /// The bound is four roundings of the point's largest coordinate, `2.0`
+    /// (`NEAREST_F64_POINT_ROUNDOFF`'s own unit): generous enough that a true
+    /// hit on the cone never trips it, and still two orders of magnitude under
+    /// the `2.0` a regression to the old `point_at` would read.
+    #[test]
+    fn how_far_off_reads_near_zero_on_the_cones_far_nappe() {
+        let cone = Cone::new(
+            Axis::new(Point::origin(), Vector::new(0.0, 0.0, -1.0)).expect("an axis"),
+            0.5,
+        )
+        .expect("a slope");
+        let point = Point::new(1.0, 0.0, 2.0);
+
+        let off = how_far_off(&Surface::Cone(cone), point);
+        assert!(
+            off < 4.0 * NEAREST_F64_POINT_ROUNDOFF * 2.0,
+            "(1, 0, 2) is on the cone's far nappe, where point_at(0, -2) should \
+             land on it exactly; how_far_off read {off}, not near zero"
+        );
     }
 
     /// The worst case [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] publishes, held against

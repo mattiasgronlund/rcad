@@ -142,6 +142,11 @@ poles unwritten and the reader puts them back where the seam turns, so
 `a_ball_of_radius_three` and `a_ball_whose_pole_the_writer_refuses` are both
 written and come back the same. The replay counts above are from before it.*
 
+*Q738 renamed that seed to `a_ball_of_radius_two` on 2026-10-03, for the same
+reason the paragraph above gives: since Q730 it is written and comes back the
+same, so a name that said the writer refuses it was no longer true. §95.3 is a
+record of its day and keeps the seed's old name.*
+
 ### 241.5 What the first minutes found
 
 All three are reproduced outside libFuzzer by the same scratch program, calling

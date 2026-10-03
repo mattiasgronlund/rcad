@@ -24,8 +24,8 @@
 //! was empty — at most one solid, no faces, no vertices — so the door check
 //! walked three empty iterators 1180 times and the writer never got past
 //! `TheModelHasNoSolid` or `ASolidWithNoShell`. `two_cubes_that_write` and
-//! `a_ball_whose_pole_the_writer_refuses` are the two seeds that fix that. They
-//! were one either side; since Q730 the ball is written too.
+//! `a_ball_of_radius_two` are the two seeds that fix that. They were one
+//! either side; since Q730 the ball is written too.
 //!
 //! **A file that was written is read back and compared with the model that went
 //! in** (`docs/decisions.md` §129.5 item 3). Not panicking was all this target

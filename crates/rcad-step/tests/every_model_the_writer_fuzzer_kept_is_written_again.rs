@@ -25,13 +25,13 @@
 //!
 //! `two_cubes_that_write` is two cubes of side 2, one at the origin and one at
 //! `(1, 1, 1)` — 12 faces, 16 corners — which writes 10 435 bytes of Part 21.
-//! `a_ball_whose_pole_the_writer_refuses` is one ball of radius 2, which was
-//! refused `AWireThatStandsStillAtAPole`: a named gap deep inside
-//! `solid_from_shell`, not one of the two doorstep refusals. One either side,
-//! and the second one reached past where the corpus had ever been. **Its name
-//! is out of date**: since Q730 the writer leaves a ball's poles unwritten, the
-//! reader puts them back where the seam turns, and the ball comes back the
-//! same, so both control seeds now land on the written side.
+//! `a_ball_of_radius_two` is one ball of radius 2. Before Q730 it was refused
+//! `AWireThatStandsStillAtAPole`: a named gap deep inside `solid_from_shell`,
+//! not one of the two doorstep refusals, one either side of
+//! `two_cubes_that_write`, and the one that reached furthest past where the
+//! corpus had ever been. Since Q730 the writer leaves a ball's poles
+//! unwritten, the reader puts them back where the seam turns, and the ball
+//! comes back the same, so both control seeds now land on the written side.
 //!
 //! **These two seeds are `postcard` bytes, so they stop decoding if `Model`'s
 //! serialized shape changes.** That is the alarm working, not a fragility: a
@@ -45,8 +45,8 @@
 //! `a_solid_written_out_and_read_back_is_the_same_solid.rs`. Before it, no
 //! seed here had ever decoded into a model with a curved face — the sixteen
 //! empty decodes above have no faces at all, and of the two control seeds,
-//! `two_cubes_that_write` is planar and `a_ball_whose_pole_the_writer_refuses`
-//! was refused before it was ever measured. Mutating `postcard` bytes almost
+//! `two_cubes_that_write` is planar and `a_ball_of_radius_two` was refused
+//! before it was ever measured. Mutating `postcard` bytes almost
 //! never lands on a shape whose internal keys are even self-consistent (16 of
 //! 1180), let alone one whose curved corners also certify onto their surface
 //! the way `Model::validate` asks — every curved shape in this corpus, cube or
@@ -304,9 +304,10 @@ fn every_seed_in_the_checked_in_corpus_is_written_without_panicking() {
     );
 }
 
-/// The two named seeds, each asserted to be the thing it was checked in as —
-/// and the second is no longer what its name says: the writer leaves a ball's
-/// poles unwritten now, and the ball comes back the same.
+/// The two named control seeds, each asserted to be the thing it was checked
+/// in as: `two_cubes_that_write` writes two cubes, and `a_ball_of_radius_two`
+/// writes a ball whose poles the writer leaves unwritten and the reader puts
+/// back, so both come back the same.
 #[test]
 fn the_two_named_control_seeds_are_written_and_come_back() {
     let writes = std::fs::read(corpus().join("two_cubes_that_write"))
@@ -323,7 +324,7 @@ fn the_two_named_control_seeds_are_written_and_come_back() {
         "two cubes written out come back as the same two cubes: {reached:?}"
     );
 
-    let pole = std::fs::read(corpus().join("a_ball_whose_pole_the_writer_refuses"))
+    let pole = std::fs::read(corpus().join("a_ball_of_radius_two"))
         .expect("the control seed is checked in");
     let reached = one_model_decoded_and_written(&pole);
     assert_eq!(reached.decoded, 1, "{reached:?}");
