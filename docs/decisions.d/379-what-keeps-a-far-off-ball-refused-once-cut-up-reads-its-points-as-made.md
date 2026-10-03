@@ -189,3 +189,17 @@ The second and third items above are done; the first stays open (Q781).
   digits, so the closest is now `0.0018130049876618794` and under the floor.
   Every face is still inside its wobble. The floor and the doc's `0.0022` need
   moving to the unplaced bend's `0.0018`; that file was not this lane's.
+
+**2026-10-03, Q780's second run: the wobble floor moved.** Lane
+`lane-q780-a-placed-solid-that-loses-its-space-is-refused-2` took the first
+run's branch whole and moved `the_middle_of_each_face_is_within_its_wobble`'s
+floor from `0.002` to `0.0016`. That keeps it about as far under the new
+closest, `0.0018`, as the old floor sat under `0.0022`. On this branch the
+closest of the 96 faces is the bend's tube at `0.03` where it was built,
+`0.0018130049876618794`. The same tube turned and a million units out comes to
+`0.0018130046725639277`. The test now names the closest face, so a run with
+`--no-capture` prints it. This run did not measure the base again. A face at
+no placement is meshed from the same points as before: `read_as_made` is false
+there, and `remember_made_on` keeps the point as it lands. So the base's
+`0.0022` above `0.002` can only have come from a placed face. Which placed face
+it was rests on the first run's figure.
