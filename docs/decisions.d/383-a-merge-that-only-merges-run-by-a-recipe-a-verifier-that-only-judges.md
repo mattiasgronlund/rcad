@@ -175,7 +175,8 @@ These are estimates, to be measured once both rows land.
 - **Q792, the merge.** The lane writes its rows; add `just land` and
   `lander`; `lanes.js` picks the merger. Tier 2.2, Opus.
 - **Q793, the verifier.** `just verify-lane`, `verifier.md` and
-  `numberSchema`. It waits on Q792, since both change `lanes.js`.
+  `numberSchema`. It waits on Q792, since both change `lanes.js`. Done
+  2026-10-03 (§385).
 - **A `.claude/settings.json` line allowing `mise exec -- just land *`.** That
   line is Mattias's to commit. Without it the lander's push may stop on a
   permission prompt. The pruner has the same kind of line for

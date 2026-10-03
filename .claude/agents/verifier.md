@@ -23,18 +23,47 @@ in chunks of under ten, never in the background.
 You are checking another lane's claims; do not trust its report. Write no
 tracked file and make no commit.
 
-## First
+## First: `just verify-lane`
 
-`git worktree unlock <the lane's worktree>`. The lane is finished, and a locked
-tree holds a slot that `just queue next` counts (§263.4). "is not locked" means
-someone did it already, and is fine.
+Your brief carries the input for `just verify-lane` between two dashed lines
+(§385). Run `git rev-parse --show-toplevel` in your own tree, write those lines
+with the Write tool to `target/verify-lane.txt` under the path it printed, and
+run `mise exec -- just verify-lane target/verify-lane.txt` as one plain Bash
+call in the foreground, `timeout` 600000. While its last line says the run is
+still going, run `mise exec -- just verify-lane wait` the same way, as often as
+it takes. The run goes on between calls, and each call ends before the
+harness's ten minutes do (§385.2).
 
-Your own tree is a different one, made for this check. Run
-`git rev-parse --show-toplevel` in it and report exactly that as
-`worktree_path` in your verdict -- never the lane's worktree above, which you
-unlock but do not report as your own. A verifier that skips this and copies
-the lane's path back leaves its own tree locked, holding a slot, until someone
-finds it by hand (§263.4).
+It does the fixed steps below, in order: it unlocks the lane's tree, then runs
+step 1's log, its files outside the write set and its lines-that-run before the
+checkout, step 2's checkout, step 3's gate, step 6's one run of a named recipe
+the gate does not run, step 7's revert, test run and restore, and step 4's
+numbers. Its last line is one line of JSON holding every verdict field it could
+fill. Take those as they stand and do not run its steps again. `skipped` says
+what it skipped and why, for `notes`. `left_to_you` is what it could not
+decide, and each item of it is yours.
+
+The reading is yours whatever it printed:
+
+- what the branch takes out of a test (step 1);
+- the section's claims, under §16.10 (step 5);
+- each number in `number_mismatches`, and each it did not run: read the print
+  and the lane's claim, then keep it as a mismatch or drop it;
+- a revert by hand, when it says a source path holds test code the branch
+  changed (step 7);
+- the rows.
+
+If `just` has no `verify-lane` recipe in your tree, do every step by hand,
+starting with `git worktree unlock <the lane's worktree>`. The lane is
+finished, and a locked tree holds a slot that `just queue next` counts
+(§263.4). "is not locked" means someone did it already, and is fine.
+
+Your own tree is a different one, made for this check. The recipe reports its
+`git rev-parse --show-toplevel` as `worktree_path`; by hand, run that in it
+and report exactly what it prints -- never the lane's worktree, which you
+unlock but do not report as your own. A verifier that copies the lane's path
+back leaves its own tree locked, holding a slot, until someone finds it by hand
+(§263.4).
 
 ## Every lane
 
@@ -58,6 +87,9 @@ finds it by hand (§263.4).
    one plain Bash call, `timeout` 600000, no redirect and no pipe through `tail`.
    Record the summary block verbatim.
 4. Re-run every command in the lane's `numbers` and compare the values you get.
+   The recipe runs each on the branch tip and says whether its `value` is in
+   what it printed, since a lane's value must be text its command prints. It
+   does not run a command that writes, such as a commit or a `queue` verb.
 5. Read the lane's new decisions section if it claimed one. Per §16.10 every
    "cannot", "unreachable" or "limit" claim owes a demonstration and not a
    paragraph — say which ones have one. If the lane demonstrated a limit rather
@@ -105,6 +137,11 @@ finds it by hand (§263.4).
    out too. Then put the branch's source back the same way, `git checkout
    <branch> -- <path>`. Its tests passing again is what step 6 already
    established; this restore does not rerun them.
+   The recipe does all of this but the revert by hand, which it leaves to you
+   and says so. It reports `tests_fail_without_fix: true` only when every named
+   test ran and failed, and `false` when every one passed. A test the revert
+   took out, one that did not build, or a name it could not run leaves the field
+   to you, in `left_to_you`.
 
 ## Moved text
 

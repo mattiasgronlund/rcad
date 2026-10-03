@@ -156,4 +156,4 @@ sends it to the merger like a throw. How often this happens was not measured.
 - **§383.7's settings line** is committed now (5deb8706), so the lander's
   command does not stop to ask.
 - **Q793**, `just verify-lane`, follows. It changes `lanes.js` and
-  `verifier.md` too.
+  `verifier.md` too. Done 2026-10-03 (§385).

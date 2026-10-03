@@ -115,7 +115,11 @@ Budget about 45 minutes. If the work is bigger, commit what is done, report
 what is left, and stop.
 
 Never restate a number you did not run yourself; every number you report
-carries the command that produced it.
+carries the command that produced it. Its `value` is text that command prints,
+exactly as it prints it, since your verifier's `just verify-lane` runs the
+command and looks for the value in its print (§385). Write "164 of 164" only
+when the command prints that; a value you worked out from its print goes in
+`what` or `summary`, with the printed text as the value.
 
 **Do not merge anything into `main` and do not push.** A merger does that after
 your verifier has checked the branch (§266).
