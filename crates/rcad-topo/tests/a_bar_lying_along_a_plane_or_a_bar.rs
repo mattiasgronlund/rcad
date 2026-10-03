@@ -21,12 +21,19 @@
 //! both ways (queue row Q760 printed them). `fuse/assemble.rs` now parts such an
 //! edge into one per input face, and the wall's is dissolved as any edge between
 //! two pieces of one plane is.
+//!
+//! **A bar whose seam is the touching line keeps its seam's history** (queue row
+//! Q801). The seam is left out of the arrangement, so the side the touch cuts
+//! along it named no input edge and the seam read as deleted where the answer
+//! has an edge on it. `fuse/assemble.rs` names the seam for a straight side
+//! between the seam's own two corners, gathers every side's input edges onto
+//! the edge they share, and hands each half of a parted line its own face's.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{EdgeKey, Model, ProfileBuilder, Rule, SolidKey};
 
 /// How far under the closed form a bar's meshed volume may be.
 ///
@@ -65,6 +72,113 @@ fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_answers_every_rule() {
         },
         "a bar touching a wall along its seam",
     );
+}
+
+/// What became of that bar's seam, under every rule both ways round: the edges
+/// of the answer along the touching line, and nothing else.
+///
+/// The union and the bar less the cube keep the bar whole, seam and all, so the
+/// seam has an image there. The intersection and the cube less the bar keep none
+/// of the bar's skin, and the cube's wall is one face again, so it has none.
+#[test]
+fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_keeps_its_seam_in_history() {
+    let mut wrong: Vec<String> = Vec::new();
+    for swapped in [false, true] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let cube = a_block(&mut model, [4.0, 4.0, 4.0]);
+            let bar = a_bar(&mut model, 1.0, 2.0, [-1.0, 2.0, 1.0]);
+            let seam = the_one_straight_edge_of(&model, bar);
+            let [first, second] = if swapped { [bar, cube] } else { [cube, bar] };
+            let what = format!("{rule:?}, bar first {swapped}");
+            let answer = model
+                .fuse(
+                    &[first],
+                    &[second],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} refused: {why}"));
+            let images = answer
+                .images_of_edge(seam)
+                .expect("this model made the key");
+            let along_the_touch: Vec<EdgeKey> = answer
+                .solids()
+                .iter()
+                .flat_map(|&solid| edges_of(&model, solid))
+                .filter(|&edge| runs_up_the_line(&model, edge, [0.0, 2.0]))
+                .collect();
+            let keeps_the_bar = rule == Rule::Union || (rule == Rule::Difference && swapped);
+            if along_the_touch.len() != usize::from(keeps_the_bar) || images != along_the_touch {
+                wrong.push(format!(
+                    "{what}: the answer's edges along the touch are {along_the_touch:?} and the \
+                     seam's images {images:?}"
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the seam's images are the one edge of the answer along it where the answer keeps the \
+         bar, and nothing where it does not:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// A bar of radius one in the hole of a tube, radius seven less radius three,
+/// touching the inner wall along `(3, 0, z)`, which is the bar's seam. United,
+/// both skins keep the line, so the edge along it is parted into one per skin
+/// and both stay: the bar's seam is the bar's edge, and not the tube's too.
+#[test]
+fn a_bar_whose_seam_touches_a_tubes_inner_wall_keeps_its_seam_in_its_own_lump() {
+    for swapped in [false, true] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let outer = a_bar(&mut model, 7.0, 4.0, [0.0, 0.0, 0.0]);
+        let through = a_bar(&mut model, 3.0, 6.0, [0.0, 0.0, -1.0]);
+        let tube = model
+            .fuse(
+                &[outer],
+                &[through],
+                Rule::Difference,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar less a thinner bar through it is a tube")
+            .solids()[0];
+        let bar = a_bar(&mut model, 1.0, 4.0, [2.0, 0.0, 0.0]);
+        let seam = the_one_straight_edge_of(&model, bar);
+        let [first, second] = if swapped { [bar, tube] } else { [tube, bar] };
+        let what = format!("bar first {swapped}");
+        let answer = model
+            .fuse(
+                &[first],
+                &[second],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} refused: {why}"));
+        let lumps = answer.solids();
+        assert_eq!(lumps.len(), 2, "{what}: the tube and the bar, apart");
+        let the_bar = if volume_of(&model, lumps[0]) < volume_of(&model, lumps[1]) {
+            lumps[0]
+        } else {
+            lumps[1]
+        };
+        let images = answer
+            .images_of_edge(seam)
+            .expect("this model made the key");
+        let the_bars_edge_along_the_touch: Vec<EdgeKey> = edges_of(&model, the_bar)
+            .into_iter()
+            .filter(|&edge| runs_up_the_line(&model, edge, [3.0, 0.0]))
+            .collect();
+        assert_eq!(
+            images, the_bars_edge_along_the_touch,
+            "{what}: the seam's one image is the bar's own edge along the touch"
+        );
+    }
 }
 
 /// An L of two arms six long and two thick, four high, with a bar of radius one
@@ -172,6 +286,53 @@ fn volume_of(model: &Model, solid: SolidKey) -> f64 {
         )
         .expect("a solid this size measures")
         .volume()
+}
+
+/// A bar's seam: of its three edges, the two caps' rims close and the seam is
+/// straight.
+fn the_one_straight_edge_of(model: &Model, bar: SolidKey) -> EdgeKey {
+    let straight: Vec<EdgeKey> = edges_of(model, bar)
+        .into_iter()
+        .filter(|&edge| {
+            !model
+                .edge(edge)
+                .expect("this model made the key")
+                .is_closed()
+                .expect("a bar's edges are straight or round a circle")
+        })
+        .collect();
+    assert_eq!(straight.len(), 1, "a bar has one seam, got {straight:?}");
+    straight[0]
+}
+
+/// Every edge of a solid, once each.
+fn edges_of(model: &Model, solid: SolidKey) -> Vec<EdgeKey> {
+    let mut edges: Vec<EdgeKey> = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let edge = coedge.edge().key();
+                if !edges.contains(&edge) {
+                    edges.push(edge);
+                }
+            }
+        }
+    }
+    edges
+}
+
+/// Whether an edge runs along the upright line through `(x, y)`: not round a
+/// cap's rim, which starts and ends on the line, and with both ends on it. The
+/// ends are sums of whole numbers, so they come out exactly.
+fn runs_up_the_line(model: &Model, edge: EdgeKey, [x, y]: [f64; 2]) -> bool {
+    let edge = model.edge(edge).expect("this model made the key");
+    let closes = edge
+        .is_closed()
+        .expect("the edges here are straight or round a circle");
+    !closes
+        && [edge.start().point(), edge.end().point()]
+            .iter()
+            .all(|end| end.x() == x && end.y() == y)
 }
 
 /// A box with its low corner at the origin.
