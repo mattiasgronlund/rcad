@@ -257,3 +257,74 @@ Lane `lane-q781-a-placed-wall-cut-like-the-unplaced-wall`, off `348b9390`.
   the rcad-step side is
   `mise exec -- just t -p rcad-step --test a_flat_cap_is_cut_up_the_same_after_its_own_file --no-capture`.
 - No pin moved, since no code did.
+
+**2026-10-03, Q784: a rule on corner order cuts the caps alike and breaks two
+ball lids, so nothing landed.** Lane
+`lane-q784-a-placed-bars-caps-cut-like-the-unplaced-caps`, off `ad8189a6`.
+Only this entry changed.
+
+- **Q781's two numbers, measured again.** With
+  `the_surface_this_face_is_cut_up_on`, `the_frame_this_face_is_cut_up_in`
+  and `back_out_of_the_frame_this_face_is_cut_up_in` sent to the meshed-in
+  frame for a plane too, all twelve rows print 0 off, caps and wall, and
+  `a_bar_moved_a_tenth_has_its_caps_cut_up_the_same_after_its_own_file` fails:
+  21 of 121 triangles of the cap on `z = 5.3` join other points. Both are
+  Q781's. On the base the rows print 142, 155, 141, 143, 165, 187, 197, 199,
+  177, 189, 163 and 183.
+- **spade's in-circle test is exact, and the caps' ties are near-ties, so
+  breaking ties by index cannot work.** spade 2.15.1 decides a flip with
+  `robust::incircle(...) < 0.0` (`contained_in_circumference` in
+  `delaunay_core/math.rs`), which is Shewchuk's adaptive exact test, so a tie
+  there is an exact zero. Each flat patch was dumped from `triangulate` and
+  its sides tested again with `robust` 1.2.0 in a scratch probe. Of the 123
+  sides spade drew inside the unplaced bar's cap, 2 test exactly zero and the
+  other 121 come under `3.6e-15` of the fourth power of their size. Per
+  placed cap, 56 to 98 sides of the unplaced cut are missing. On those, the
+  unplaced cap has 1 or 2 exact zeros and the placed cap none, and the sign
+  differs on 34 to 59, all under `1.5e-14` of size⁴. A rule on exact zeros
+  would touch at most two sides of a cap, and none on the placed side.
+- **The read-back hands over the same corners in the same order.** For the bar
+  moved a tenth, the placed caps and the read-back caps reach `triangulate`
+  with the same corner bits in the same order, so a rule on corner order
+  keeps that test.
+- **The rule tried reads only corner order and which way each corner turns.**
+  It applied to a flat patch with one loop, every corner inside one edge,
+  every corner turning the same way by `orient2d`, and `v` climbing then
+  falling once round the loop, which makes the loop convex and once round.
+  That patch was cut by corner order instead of by spade. A hole, a corner
+  between two edges, or a corner turning the other way left the patch to
+  spade. On the bar's caps the tightest turn is `5e-2` of its size squared,
+  far from a tie. Two shapes of the rule were tried: a fan from corner 0; and
+  every other corner cut off, round after round, so that the first round
+  draws only sides that skip one corner, which no curved neighbour draws
+  (§187.4). **Both meet both pins**: 0 off on caps and wall in all twelve
+  rows, with the caps compared corner for corner and in order, and the
+  read-back test passes. A disc of 40 corners turned by twelve angles and
+  moved is cut the same in all twelve, where spade cut all twelve
+  differently. A five-petalled curve and a disc with a round hole stay with
+  spade and pass the patch file's `check_everything`.
+- **Both break two ball lids.** The whole suite under the fan, `mise exec --
+  just t --no-fail-fast`: 2867 of 2869 pass. The two that fail:
+  - `a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures`
+    (`a_closed_edge_neither_direction_rule_answers.rs`) is refused
+    `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` for `TheCap`,
+    rim named `ItsTwoFaces`, lid listed first `false`, deflection `0.5`. The
+    lid draws a side between two rim points that the ball's patch also draws.
+    Every-other-corner is refused the same way.
+  - `no_sliver_cut_through_a_balls_pole_folds_at_any_deflection`
+    (`a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`) pins 38 folds
+    in 1440 meshes, every one cured at a later rung. The fan gives 96 and
+    every-other-corner 68, all cured at a later rung.
+  Every-other-corner was run on those two tests and the four new and pinned
+  ones only, not the whole suite. Landing either rule would trade the caps'
+  ties for a new refusal and more folds, so the lane kept the base.
+- **What a next lane needs.** The triangulator sees one face at a time, so it
+  cannot tell a bar's cap from a ball's lid. A bar's wall never draws a side
+  between two rim points, because the rim is a straight line in the wall's
+  chart. A ball's patch does draw one. `mesh.rs` knows the face across the
+  rim. So a rule on corner order, offered only where no face across the rim
+  can draw such a side, should meet both pins and leave the lids to spade.
+  That has not been run. It needs `crates/rcad-mesh/src/domain.rs` (a way to
+  ask for the rule) and `crates/rcad-topo/src/mesh.rs` (asking for it) in the
+  write set, beside this lane's three files. Not measured: whether a tube's
+  flat end, a ring between two circles, has the same near-ties.
