@@ -1464,16 +1464,29 @@ impl<'f> Arrangement<'f> {
     /// under one percent of it (§253.2).
     ///
     /// **Or when the three are planes `bake` solved the corner among**, however
-    /// far the meet's box reaches. Those three were each asked about the corner
-    /// grown by `bake.rs`'s whole room, and none proved it off;
-    /// a meet of three of them can then sit many rooms away in space only
-    /// because two of them are nearly one plane
-    /// ([`Arrangement::bake_placed_the_corner_on_the_three_planes`]). A turned
-    /// pyramid whose base is bent by a sixty-fourth has its apex's two folding
-    /// faces' meets 4.7 rooms past the apex's box, and the meet of the three
-    /// stored planes itself, worked out exactly, still 1.6 rooms past it. Its 36
-    /// turned unions at height one were all refused before this rule and are
-    /// all answered with it (§356).
+    /// far past the corner's grown box the meet's box reaches, as long as it
+    /// reaches into it. Those three were each asked about the corner grown by
+    /// `bake.rs`'s whole room, and none proved it off; a meet of three of them
+    /// can then sit many rooms away in space only because two of them are
+    /// nearly one plane ([`Arrangement::bake_placed_the_corner_on_the_three_planes`]).
+    /// A turned pyramid whose base is bent by a sixty-fourth has its apex's two
+    /// folding faces' meets 4.7 rooms past the apex's box, and the meet of the
+    /// three stored planes itself, worked out exactly, still 1.6 rooms past it.
+    /// Its 36 turned unions at height one were all refused before this rule and
+    /// are all answered with it (§356). Bent by a 256th or less, a few such
+    /// meets miss the grown box altogether, by 1.3 to 60 rooms, and stay nodes
+    /// (§395.4).
+    ///
+    /// **Whether the meet's box touches the corner's own box is not asked.**
+    /// That was the whole fold before §253, and the two rules above were laid
+    /// on top of it; neither one's argument uses it. Every point of a box inside
+    /// the grown box is within the room of the corner whether the two boxes
+    /// share a point or not. At a pyramid's apex, a side face has a meet there
+    /// for each pair of the other three side planes, `bake` solved the apex
+    /// from one triple of the four, and the other meets' boxes can lie inside
+    /// the apex's room yet miss its own box by up to four tenths of a room.
+    /// Left standing, they refused 5 of 108 certified unions at a fold of a
+    /// quarter, 5 at a sixteenth and 1 at a sixty-fourth (§344.2, §395.2).
     ///
     /// **Anything further stays a node of its own**, and whether two
     /// overlapping nodes are one point is left to
@@ -1492,7 +1505,9 @@ impl<'f> Arrangement<'f> {
     /// **A second place within the allowance** means nothing here says which
     /// of the two the corner is, and both stay nodes. The places of one meet
     /// are *different* points, and folding on a touch alone once merged them
-    /// (§244.3, §248).
+    /// (§244.3, §248). This, and not the touch, is what keeps them apart: of a
+    /// ball's two places grazing a block's corner, the one that misses the
+    /// corner's box lies inside its room too (§395.3).
     fn a_corner_is_this_place(
         &self,
         first: usize,
@@ -1503,8 +1518,7 @@ impl<'f> Arrangement<'f> {
         self.nodes.iter().any(|node| {
             if !(node.vertex.is_some()
                 && node.crossings.contains(&first)
-                && node.crossings.contains(&second)
-                && boxes_overlap(node.point, place))
+                && node.crossings.contains(&second))
             {
                 return false;
             }
@@ -1512,17 +1526,19 @@ impl<'f> Arrangement<'f> {
                 node.point,
                 super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
             );
+            let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
             let (meet, room) = (place.enclosure(), allowed.enclosure());
             let inside_the_room = (0..3).all(|axis| {
                 room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
             });
-            (inside_the_room
-                || self.bake_placed_the_corner_on_the_three_planes(node, first, second))
+            reaches_the_room(&place)
                 && places
                     .iter()
-                    .filter(|&&other| boxes_overlap(allowed, other))
+                    .filter(|other| reaches_the_room(other))
                     .count()
                     == 1
+                && (inside_the_room
+                    || self.bake_placed_the_corner_on_the_three_planes(node, first, second))
         })
     }
 
@@ -6665,6 +6681,74 @@ mod tests {
         );
     }
 
+    /// A place whose box lies inside the room round the unit cube's corner at
+    /// the origin, half a room to a whole room off it on every axis, is folded
+    /// into the corner, though the two boxes share no point. Every point of
+    /// that box is within the room of the corner, which is all §253's argument
+    /// for the fold reads. Asked on the cut `x = y`, so the room is the whole
+    /// of what the fold allows.
+    ///
+    /// Before §395 the fold asked first whether the two boxes touch, and left
+    /// this place a node beside the corner for the policy to refuse.
+    #[test]
+    fn a_place_inside_a_corners_room_is_folded_into_it_though_its_box_misses_the_corners() {
+        let (cube, cut) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let bottom = cut_by(&the_face_facing(&cube, [0.0, 0.0, -1.0]), &[cut]);
+        let arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let cut = the_crossing_of_the_cut(&arrangement, cut);
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], wall, cut),
+            "the fold is only asked about a corner on both crossings"
+        );
+
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        let place = from_to(room / 2.0, room);
+        assert!(
+            arrangement.a_corner_is_this_place(wall, cut, place, &[place]),
+            "a place inside the corner's room is the corner written down another way, \
+             whether or not its box touches the corner's"
+        );
+    }
+
+    /// A meet of the bottom and the two walls, three planes `bake` solved the
+    /// unit cube's corner among, is folded into it however far its box reaches
+    /// past the corner's room, but only while its box reaches into that room:
+    /// a box from the room's edge out to a thousand rooms is folded, and one
+    /// starting a step past the edge is not (§395.4).
+    ///
+    /// The second is a gap left on purpose. Three planes meet once, so §356's
+    /// argument folds it as well, and a pyramid bent by a 256th or less has
+    /// apex meets out there. Folding them changes a fold the KiCad round trip
+    /// makes, so it is a row of its own.
+    #[test]
+    fn a_meet_of_three_planes_bake_solved_the_corner_among_is_folded_only_while_its_box_reaches_the_corners_room()
+     {
+        let (cube, cut) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let bottom = cut_by(&the_face_facing(&cube, [0.0, 0.0, -1.0]), &[cut]);
+        let arrangement = drawn_up_to_its_corners(&bottom);
+        let one_wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let other_wall = the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], one_wall, other_wall),
+            "the fold is only asked about a corner on both crossings"
+        );
+
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        let folds = |place: PredicatePoint| {
+            arrangement.a_corner_is_this_place(one_wall, other_wall, place, &[place])
+        };
+        assert!(
+            folds(from_to(room, 1000.0 * room)),
+            "a meet of the corner's own three planes whose box reaches the corner's room is the \
+             corner"
+        );
+        assert!(
+            !folds(from_to(room.next_up(), 1000.0 * room)),
+            "a meet whose box misses the corner's room altogether is left a node"
+        );
+    }
+
     fn the_unit_cube_baked_and_the_plane_x_equals_y() -> (BakedSolid, [f64; 4]) {
         let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
         let cube = model
@@ -6687,6 +6771,13 @@ mod tests {
     fn reaching(far: f64) -> PredicatePoint {
         PredicatePoint::Constructed(
             [Interval::new(-far, far).expect("a finite reach either side of zero"); 3],
+        )
+    }
+
+    /// A box from `near` to `far` on every axis.
+    fn from_to(near: f64, far: f64) -> PredicatePoint {
+        PredicatePoint::Constructed(
+            [Interval::new(near, far).expect("a finite span, nearer end first"); 3],
         )
     }
 
