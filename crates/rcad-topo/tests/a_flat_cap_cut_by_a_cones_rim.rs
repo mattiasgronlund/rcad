@@ -28,7 +28,7 @@
 //!
 //! **The flat face down the axis and the skin are not answered by this
 //! family.** Both are bounded by pieces of the two rulings a plane through the
-//! apex cuts, and both were refused until `docs/decisions.md` §334 read a piece
+//! apex cuts, and both were refused until `docs/decisions.md` §389 read a piece
 //! of a ruling as the straight segment it is:
 //! [`the_face_down_the_axis_holds_its_four_corners_and_not_the_other_nappe`] and
 //! [`the_skin_of_a_half_frustum_holds_its_own_half_between_the_caps`]. Neither
@@ -171,7 +171,7 @@ fn a_placed_cap_answers_the_same_points_moved_with_it() {
 /// not read off the cone's inside any more. A piece of a ruling is the straight
 /// segment between its two corners, so the face is the polygon of its corners
 /// and is walked as any flat face with straight sides is (`docs/decisions.md`
-/// §334). `(0, 1, −6)` is inside the cone, on the other nappe's wedge, and
+/// §389). `(0, 1, −6)` is inside the cone, on the other nappe's wedge, and
 /// outside the polygon; a reading that took the cone's inside for the face
 /// would hold it.
 ///
@@ -213,7 +213,7 @@ fn the_face_down_the_axis_holds_its_four_corners_and_not_the_other_nappe() {
 /// apex is in front of, and `x = 0` through the apex. `holds.rs` took one cut
 /// beside the one the apex is behind and refused two; the big cap is side by
 /// side with the small one, and a cut side by side with that one keeps every
-/// ruling or none, so it costs nothing (`docs/decisions.md` §334). This skin
+/// ruling or none, so it costs nothing (`docs/decisions.md` §389). This skin
 /// was the first face a ray asked when the half frustum was fused with a block
 /// across its top, and every fuse stopped there.
 #[test]

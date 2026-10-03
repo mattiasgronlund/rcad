@@ -187,8 +187,8 @@ fn a_floor_through_the_apex_is_not_a_manifold_under_the_fuses_that_keep_the_floo
 /// piece inside the half frustum, whose every candidate the ray could not place
 /// because `holds.rs` followed neither the half frustum's skin nor its flat face.
 /// Each is bounded by pieces of the two rulings, and a ruling's piece is read
-/// now as the straight segment it is; `a_flat_cap_cut_by_a_cones_rim.rs` asks
-/// the two faces on their own.
+/// now as the straight segment it is (`docs/decisions.md` §389);
+/// `a_flat_cap_cut_by_a_cones_rim.rs` asks the two faces on their own.
 #[test]
 fn a_half_frustums_corners_on_two_rulings_stay_two_corners() {
     let pi = core::f64::consts::PI;

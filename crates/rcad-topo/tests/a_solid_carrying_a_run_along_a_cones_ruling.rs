@@ -27,13 +27,17 @@
 //! to nothing at either cap, and the two ruling directions `(0, ±1/2, 1)` are
 //! stored triples that satisfy the cone's own equation with nothing left over —
 //! which is what lets `intersect` name the pair at all.
+//!
+//! A quarter of a pointed cone is built the same way, with a ruling from each
+//! of two planes through the apex, to ask what two such cuts on one cone face
+//! cost (`docs/decisions.md` §389).
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, NamedRun, Orientation, Picker, Plane, Point, Scale,
     Surface, SurfaceMeet, Vector, intersect,
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, DraftStep, Error, Model, SolidBuilder, SolidKey};
+use rcad_topo::{Containment, DraftStep, Error, Model, OnAFace, SolidBuilder, SolidKey};
 
 mod cones;
 
@@ -49,11 +53,15 @@ fn the_cut_plane() -> Plane {
         .expect("the x axis is a unit normal")
 }
 
-/// The two runs `intersect` names for the cut plane against the cone, in the
-/// order it hands them back.
-fn the_two_rulings() -> Vec<NamedRun> {
+/// The one of the two runs `intersect` names for `plane` against the cone that
+/// holds `here` and not `not_here`.
+///
+/// Which run is which line is the pickers' to say, not the order's, and the run
+/// is taken from `intersect` rather than written out here — a test that spelled
+/// its own pickers would be checking itself.
+fn the_ruling_on(plane: Plane, here: [f64; 3], not_here: [f64; 3]) -> EdgeRun {
     let SurfaceMeet::Curves(runs) = intersect(
-        &Surface::Plane(the_cut_plane()),
+        &Surface::Plane(plane),
         &Surface::Cone(the_cone()),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
@@ -62,7 +70,11 @@ fn the_two_rulings() -> Vec<NamedRun> {
         panic!("two rulings are two curves");
     };
     assert_eq!(runs.len(), 2);
-    runs
+    runs.iter()
+        .find(|run| holds(run, here) && !holds(run, not_here))
+        .expect("one of the two runs holds the one point and not the other")
+        .run()
+        .clone()
 }
 
 /// Whether every picker on `run` holds `point`, which is how a run says a point
@@ -78,26 +90,11 @@ fn holds(run: &NamedRun, point: [f64; 3]) -> bool {
 
 /// Half a frustum, described face by face through the public builder.
 ///
-/// The two side edges are the runs `intersect` names, taken from it rather than
-/// written out here — a test that spelled its own pickers would be checking
-/// itself.
+/// The two side edges are the runs `intersect` names ([`the_ruling_on`]).
 fn a_half_frustum(model: &mut Model) -> SolidKey {
     let skin = the_cone();
-    let runs = the_two_rulings();
-    // Which run is the `y > 0` line and which the `y < 0` one is the pickers'
-    // to say, not the order's.
-    let up_the_positive_side = runs
-        .iter()
-        .find(|run| holds(run, [0.0, 2.0, 4.0]) && !holds(run, [0.0, -2.0, 4.0]))
-        .expect("one of the two runs holds the ruling at y > 0 and not the other")
-        .run()
-        .clone();
-    let up_the_negative_side = runs
-        .iter()
-        .find(|run| holds(run, [0.0, -2.0, 4.0]) && !holds(run, [0.0, 2.0, 4.0]))
-        .expect("and the other holds the ruling at y < 0")
-        .run()
-        .clone();
+    let up_the_positive_side = the_ruling_on(the_cut_plane(), [0.0, 2.0, 4.0], [0.0, -2.0, 4.0]);
+    let up_the_negative_side = the_ruling_on(the_cut_plane(), [0.0, -2.0, 4.0], [0.0, 2.0, 4.0]);
 
     let mut builder = SolidBuilder::new();
     let corner = |builder: &mut SolidBuilder, y: f64, z: f64| {
@@ -315,76 +312,92 @@ fn a_solid_carrying_apex_runs_meshes_to_half_a_frustums_volume() {
     let _ = &mut log;
 }
 
-/// **Point-in-solid refuses this solid, and the face it names is not one of the
-/// two the apex runs bound.** Measured, not read off the code.
+/// **Point-in-solid answers this solid, and every answer is the one the shape's
+/// own sizes give** — worked out in plain arithmetic by
+/// [`is_in_the_half_frustum`] before the kernel is asked, because a refusal that
+/// turns into an answer is only a fix if the answer is right.
 ///
-/// `holds.rs`'s `walk_one_outline` walks a face's outline as a polygon and
-/// refuses the moment a coedge's run is anything but [`EdgeRun::Straight`]. What
-/// it catches is an arc — a [`EdgeRun::PartOfWhereItCrosses`], with two
-/// different ends.
+/// `(1, 0, 6)` against each of the four faces:
 ///
-/// **The face it names is the cone face**, measured here by printing the named
-/// face's surface: `Cone { axis: z through the origin, slope: 0.5 }`. It used to
-/// name the **top cap**, a plain flat face trimmed by half the rim circle, and
-/// §208.1 is why it no longer does — a flat face cut by a cone standing square
-/// to it is a family `what_a_face_cut_by_part_of_a_crossing_holds` can follow,
-/// so the cap answers and the walk gets as far as the cone face, whose own
-/// outline carries that same arc. The flat face along the two rulings is still
-/// never reached.
+/// - the bottom cap is `z = 4`, facing down, and the point is `6 − 4 = 2` above
+///   it;
+/// - the top cap is `z = 8`, facing up, and the point is `8 − 6 = 2` below it;
+/// - the flat face is `x = 0`, facing `−x`, and the point is at `x = 1`;
+/// - the cone at height `6` has radius `0.5 · 6 = 3`, and the point is `1` from
+///   the axis, so `x² + y² − (z/2)² = 1 − 9 = −8`, on the nappe `z > 0`.
 ///
-/// The whole frustum, built from the same cone by the same builder, **answers
-/// `Inside`**, because its non-straight edges are all *closed* and a wire that
-/// is one closed edge takes a different route. So the gap is arcs, not cones and
-/// not apex runs: any solid with an arc-trimmed face has always refused here, and
-/// a half-frustum is the first one this repo builds.
+/// Each is strictly the solid's side. The half frustum is convex — the inside of
+/// one nappe is, and so is each half-space it is cut down by — so it is exactly
+/// the part of space on the solid's side of all four, and a point strictly on
+/// that side of every one is inside and on no face. The other points each break
+/// one of the four, and come back outside.
 ///
-/// The classifier says which face it could not follow and hands that back as an
-/// answer of its own rather than a panic, which is the rule this file exists to
-/// check.
+/// This used to refuse, `CannotFollowAFacesTrimming` naming the cone face:
+/// `holds.rs` read the two side edges, pieces of the rulings `x = 0` cuts the
+/// cone in, as arcs it could not follow, and so it followed neither the skin
+/// nor the flat face. A piece of a ruling is read as the straight segment it is
+/// since `docs/decisions.md` §389, so both answer. The caps, each trimmed by
+/// half a rim circle, had answered since §208.1. The whole frustum, whose
+/// curved edges are closed, answers as it always did. An arc no family here
+/// follows is still refused by name, but this solid no longer has one.
 #[test]
-fn an_arc_trimmed_face_refuses_point_in_solid_by_name_and_a_closed_one_does_not() {
+fn point_in_solid_answers_a_half_frustum_as_its_own_sizes_say() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let half = a_half_frustum(&mut model);
     let whole = cones::a_frustum(&mut model, 0.5, 4.0, 8.0);
-    let inside_both = Point::new(1.0, 0.0, 6.0);
 
-    let answer = model
-        .solid(half)
-        .expect("this model made the key")
-        .classify_point(inside_both, &policy, &mut log);
-    let Containment::CannotFollowAFacesTrimming { face } = answer else {
-        panic!("half a frustum: expected a named refusal, got {answer:?}");
-    };
-    let trimmed_by_an_arc = model
-        .face(face)
-        .expect("this model made the key")
-        .wires()
-        .flat_map(|wire| wire.coedges())
-        .any(|coedge| {
-            let edge = coedge.edge();
-            !edge
-                .is_closed()
-                .expect("a cone's edges are runs this kernel named")
-                && edge.run() != EdgeRun::Straight
-        });
-    assert!(
-        trimmed_by_an_arc,
-        "the refusal names the face whose outline it could not walk, and what it could not walk \
-         is an arc: {:?}",
-        model.face(face).expect("this model made the key").surface()
-    );
+    for point in [
+        [1.0, 0.0, 6.0],
+        [2.0, -1.5, 7.5],
+        [-1.0, 0.0, 6.0],
+        [1.0, 0.0, 3.0],
+        [1.0, 0.0, 9.0],
+        [3.5, 0.0, 6.0],
+        [1.0, 0.0, -6.0],
+    ] {
+        let want = if is_in_the_half_frustum(point) {
+            Containment::Inside
+        } else {
+            Containment::Outside
+        };
+        assert_eq!(
+            model
+                .solid(half)
+                .expect("this model made the key")
+                .classify_point(Point::new(point[0], point[1], point[2]), &policy, &mut log),
+            want,
+            "half a frustum, asked about {point:?}"
+        );
+    }
+    assert!(is_in_the_half_frustum([1.0, 0.0, 6.0]));
 
     assert_eq!(
         model
             .solid(whole)
             .expect("this model made the key")
-            .classify_point(inside_both, &policy, &mut log),
+            .classify_point(Point::new(1.0, 0.0, 6.0), &policy, &mut log),
         Containment::Inside,
-        "the whole frustum, same cone and same builder, is decided — so what stops the half is \
-         the arc and not the cone"
+        "the whole frustum, same cone and same builder"
     );
+}
+
+/// Whether `point` is strictly inside the half frustum, from its sizes alone:
+/// above the bottom cap at `z = 4`, below the top cap at `z = 8`, on the `x > 0`
+/// side of the flat face, and nearer the axis than the cone's radius `z/2` there.
+///
+/// # Panics
+///
+/// If `point` is on one of the four surfaces, where "strictly" says nothing.
+fn is_in_the_half_frustum(point: [f64; 3]) -> bool {
+    let [x, y, z] = point;
+    let sides = [z - 4.0, 8.0 - z, x, (z / 2.0).powi(2) - (x * x + y * y)];
+    assert!(
+        sides.iter().all(|side| *side != 0.0),
+        "{point:?} is on a face of the half frustum"
+    );
+    sides.iter().all(|side| *side > 0.0)
 }
 
 /// The fuse is put to a solid carrying two apex runs, and whatever it does it
@@ -435,4 +448,243 @@ fn a_fuse_with_an_apex_run_in_it_either_answers_soundly_or_refuses_by_name() {
         }
     }
     let _ = (half, other_half);
+}
+
+/// **A quarter of a pointed cone has its skin refused by name, and that is a
+/// gap: the skin is one piece.** Measured, and the same refusal on the base
+/// before `docs/decisions.md` §389.
+///
+/// The quarter is the `x ≥ 0`, `y ≥ 0` part of the cone of slope a half, eight
+/// tall ([`a_quarter_of_a_pointed_cone`]). Its skin is cut by `x = 0` and
+/// `y = 0`, **both through the apex**, and by the cap the apex is in front of.
+/// `holds.rs` follows a cone face beside at most one cut through its apex,
+/// because two can leave the rulings in two runs that meet only at the apex
+/// (`two_planes_through_the_apex_leave_a_nappe_in_two_sheets` there). These two
+/// do not: they meet along the axis, inside the cone, so each half-plane round
+/// the axis meets the nappe in one ruling and the wedge they keep is one run of
+/// rulings, `0 < φ < 90°`. The answer exists — `(1, 1, 6)` is inside, at `x = 1`,
+/// `y = 1`, below the cap at `8`, and `√2` from the axis where the radius is `3`
+/// — and the classifier names the skin instead.
+///
+/// On the base `b1136e72`, where a piece of a ruling was not read as straight,
+/// the skin was refused by the same name, and so were both flat triangles;
+/// `(1, 1, 6)` came back naming the skin, as here. So this change brought in no
+/// new refusal for the quarter, and it took two away: the triangles answer now,
+/// and are pinned here with them. Telling the quarter's two cuts from the two
+/// sheets — where the two planes meet, against the cone — is the fix, and it is
+/// filed rather than done (`docs/decisions.md` §389).
+///
+/// What is outside the cone or above the cap is still answered: the ray from it
+/// meets no face that refuses.
+#[test]
+fn a_quarter_of_a_pointed_cone_has_its_skin_refused_by_name_though_it_is_one_piece() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let quarter = a_quarter_of_a_pointed_cone(&mut model);
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("a quarter of a pointed cone is a sound solid");
+    let view = model.solid(quarter).expect("this model made the key");
+    let face_on = |which: &dyn Fn(&Surface) -> bool| {
+        let mut found = view.faces().filter(|face| which(&face.surface()));
+        let face = found.next().expect("a face on that surface");
+        assert!(found.next().is_none(), "one face on that surface");
+        face.key()
+    };
+    let skin = face_on(&|surface| matches!(surface, Surface::Cone(_)));
+    let flat_facing = |normal: [f64; 3]| {
+        face_on(&|surface: &Surface| {
+            surface
+                .as_plane()
+                .is_some_and(|plane| plane.normal().components() == normal)
+        })
+    };
+    let on_x_is_zero = flat_facing([-1.0, 0.0, 0.0]);
+    let on_y_is_zero = flat_facing([0.0, -1.0, 0.0]);
+    let asked = |face, point: [f64; 3]| {
+        view.face_holds_the_point(
+            face,
+            PredicatePoint::from(point),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+    };
+
+    for point in [[1.8, 2.4, 6.0], [-1.8, -2.4, 6.0], [1.8, 2.4, -6.0]] {
+        assert!(
+            matches!(
+                asked(skin, point),
+                Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == skin
+            ),
+            "the skin, asked about {point:?}"
+        );
+    }
+    for (face, point, want) in [
+        (on_x_is_zero, [0.0, 1.0, 6.0], OnAFace::Held),
+        (on_x_is_zero, [0.0, -1.0, 6.0], OnAFace::NotHeld),
+        (on_x_is_zero, [0.0, 3.5, 6.0], OnAFace::NotHeld),
+        (on_x_is_zero, [0.0, 1.0, -6.0], OnAFace::NotHeld),
+        (on_x_is_zero, [0.0, 0.0, 4.0], OnAFace::OnItsBoundary),
+        (on_y_is_zero, [1.0, 0.0, 6.0], OnAFace::Held),
+        (on_y_is_zero, [-1.0, 0.0, 6.0], OnAFace::NotHeld),
+        (on_y_is_zero, [3.0, 0.0, 6.0], OnAFace::OnItsBoundary),
+    ] {
+        assert_eq!(
+            asked(face, point).unwrap_or_else(|error| panic!("{point:?}: {error:?}")),
+            want,
+            "a flat triangle, asked about {point:?}"
+        );
+    }
+
+    let classified = |point: [f64; 3]| {
+        view.classify_point(
+            Point::new(point[0], point[1], point[2]),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+    };
+    assert_eq!(
+        classified([1.0, 1.0, 6.0]),
+        Containment::CannotFollowAFacesTrimming { face: skin }
+    );
+    for outside in [[3.0, 3.0, 6.0], [1.0, 1.0, 9.0], [1.0, 1.0, -6.0]] {
+        assert_eq!(classified(outside), Containment::Outside, "{outside:?}");
+    }
+}
+
+/// A quarter of a pointed cone: the cone of slope a half about `+z`, from its
+/// apex up to a cap at `z = 8`, cut down to `x ≥ 0` and `y ≥ 0`. Four faces —
+/// the quarter disc of the cap, a triangle on each of `x = 0` and `y = 0`, and a
+/// quarter of the skin — six edges and four corners, the apex one of them.
+///
+/// The skin's two sides up from the apex are rulings, one named by each plane
+/// ([`the_ruling_on`]); the two triangles meet along the axis.
+fn a_quarter_of_a_pointed_cone(model: &mut Model) -> SolidKey {
+    let x_is_zero = the_cut_plane();
+    let y_is_zero = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -1.0, 0.0))
+        .expect("the y axis is a unit normal");
+    let cap_plane =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 8.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal");
+
+    let mut builder = SolidBuilder::new();
+    let apex = builder.add_vertex(Point::origin()).expect("a finite point");
+    let on_x = builder
+        .add_vertex(Point::new(4.0, 0.0, 8.0))
+        .expect("a finite point");
+    let on_y = builder
+        .add_vertex(Point::new(0.0, 4.0, 8.0))
+        .expect("a finite point");
+    let on_the_axis = builder
+        .add_vertex(Point::new(0.0, 0.0, 8.0))
+        .expect("a finite point");
+
+    let up_y_is_zero = builder
+        .add_edge(
+            apex,
+            on_x,
+            the_ruling_on(y_is_zero, [2.0, 0.0, 4.0], [-2.0, 0.0, 4.0]),
+        )
+        .expect("a piece of the ruling over +x");
+    let up_x_is_zero = builder
+        .add_edge(
+            apex,
+            on_y,
+            the_ruling_on(x_is_zero, [0.0, 2.0, 4.0], [0.0, -2.0, 4.0]),
+        )
+        .expect("a piece of the ruling over +y");
+    let up_the_axis = builder
+        .add_edge(apex, on_the_axis, EdgeRun::Straight)
+        .expect("the axis");
+    let round_the_rim = builder
+        .add_edge(
+            on_x,
+            on_y,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(cap_plane),
+                picked_by: smallvec::smallvec![Picker::from(
+                    HalfSpace::through_a_point_facing(
+                        Point::new(4.0, 0.0, 8.0),
+                        Vector::new(1.0, 1.0, 0.0)
+                    )
+                    .expect("a direction with a length")
+                )],
+            },
+        )
+        .expect("a quarter of the rim");
+    let cap_along_x = builder
+        .add_edge(on_the_axis, on_x, EdgeRun::Straight)
+        .expect("the cap's side along y = 0");
+    let cap_along_y = builder
+        .add_edge(on_y, on_the_axis, EdgeRun::Straight)
+        .expect("the cap's side along x = 0");
+
+    let wire_of = |builder: &mut SolidBuilder, steps: &[(_, Orientation)]| {
+        let along: Vec<DraftStep> = steps
+            .iter()
+            .map(|(edge, turn)| {
+                DraftStep::Along(
+                    builder
+                        .add_coedge(*edge, *turn)
+                        .expect("an edge of this build"),
+                )
+            })
+            .collect();
+        builder.add_wire(&along).expect("a closed wire")
+    };
+    let cap_wire = wire_of(
+        &mut builder,
+        &[
+            (cap_along_x, Orientation::Forward),
+            (round_the_rim, Orientation::Forward),
+            (cap_along_y, Orientation::Forward),
+        ],
+    );
+    let on_x_is_zero_wire = wire_of(
+        &mut builder,
+        &[
+            (up_the_axis, Orientation::Forward),
+            (cap_along_y, Orientation::Reversed),
+            (up_x_is_zero, Orientation::Reversed),
+        ],
+    );
+    let on_y_is_zero_wire = wire_of(
+        &mut builder,
+        &[
+            (up_y_is_zero, Orientation::Forward),
+            (cap_along_x, Orientation::Reversed),
+            (up_the_axis, Orientation::Reversed),
+        ],
+    );
+    let skin_wire = wire_of(
+        &mut builder,
+        &[
+            (up_x_is_zero, Orientation::Forward),
+            (round_the_rim, Orientation::Reversed),
+            (up_y_is_zero, Orientation::Reversed),
+        ],
+    );
+    let cap = builder
+        .add_face(Surface::Plane(cap_plane), &[cap_wire])
+        .expect("a quarter disc");
+    let on_x_is_zero = builder
+        .add_face(Surface::Plane(x_is_zero), &[on_x_is_zero_wire])
+        .expect("a triangle on x = 0");
+    let on_y_is_zero = builder
+        .add_face(Surface::Plane(y_is_zero), &[on_y_is_zero_wire])
+        .expect("a triangle on y = 0");
+    let skin = builder
+        .add_face(Surface::Cone(the_cone()), &[skin_wire])
+        .expect("a quarter of the skin");
+    builder
+        .add_shell(&[
+            (cap, Orientation::Forward),
+            (on_x_is_zero, Orientation::Forward),
+            (on_y_is_zero, Orientation::Forward),
+            (skin, Orientation::Forward),
+        ])
+        .expect("four faces close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a quarter of a pointed cone described this way is a solid")
 }

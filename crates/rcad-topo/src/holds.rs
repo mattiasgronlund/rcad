@@ -973,7 +973,7 @@ fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Opt
 /// So is a piece of a cone's ruling on a **flat** face
 /// ([`is_a_piece_of_a_ruling`]). It is straight, so a flat face whose other
 /// sides are straight too is a polygon and is walked as one: the face of a
-/// half frustum down its axis (`docs/decisions.md` §334). On a curved face a
+/// half frustum down its axis (`docs/decisions.md` §389). On a curved face a
 /// ruling is still part of a crossing, read as a straight side by
 /// [`the_sides_of`].
 fn a_side_of_it_is_part_of_a_crossing(solid: SolidView<'_>, face: FaceView<'_>) -> Result<bool> {
@@ -1347,7 +1347,7 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
 /// plane's own sign at the apex, and three [`orient2d`]s, which are the three
 /// components of `(start − apex) × (end − apex)`. A corner rounded off its line
 /// fails the second and the side is refused as it was; the corners of a half
-/// frustum built by hand down its axis pass (`docs/decisions.md` §334).
+/// frustum built by hand down its axis pass (`docs/decisions.md` §389).
 ///
 /// # Errors
 ///
@@ -1774,11 +1774,22 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// every side in front of both, and the other sheet is in front of both too, so
 /// `held_in_front_of_all` would hold its points — a wrong answer.
 /// `two_planes_through_the_apex_leave_a_nappe_in_two_sheets` below walks those
-/// rulings. Before `docs/decisions.md` §334 a cut through the apex came only
+/// rulings. Before `docs/decisions.md` §389 a cut through the apex came only
 /// with a side stored as [`EdgeRun::Straight`] along a ruling, since a ruling
 /// stored as part of a crossing was refused as an arc; since it, every ruling
-/// side reaches this arm. Telling one arc from two wants where the two planes
-/// meet compared with the cone, a part with no named consumer (§13).
+/// side reaches this arm.
+///
+/// **That refuses some faces that are one piece, and it is a gap.** Two planes
+/// through the apex meeting along a line inside the cone keep one arc: every
+/// half-plane round that line meets the nappe in one ruling, so a wedge round it
+/// holds one run. A quarter of a pointed cone, cut by `x = 0` and `y = 0` along
+/// its axis, is that, and its skin is refused here
+/// (`a_quarter_of_a_pointed_cone_has_its_skin_refused_by_name_though_it_is_one_piece`
+/// in `tests/a_solid_carrying_a_run_along_a_cones_ruling.rs`, and the quarter's
+/// cuts in `two_planes_through_the_apex_leave_a_nappe_in_two_sheets` below).
+/// It was refused before §389 too, measured, so this took nothing away.
+/// Telling it from two sheets wants where the two planes meet compared with the
+/// cone (`docs/decisions.md` §389).
 ///
 /// # And one cut the apex is behind, when it closes, beside at most one other
 ///
@@ -1811,7 +1822,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// and each ruling's piece runs from `α(φ)` to the nearest of the others, so it
 /// still hangs off the one curve. A half frustum's skin is that: the floor the
 /// apex is behind, the roof square to the axis above it, and the plane down the
-/// axis that cut it in half (`docs/decisions.md` §334).
+/// axis that cut it in half (`docs/decisions.md` §389).
 ///
 /// **Two or more others not side by side with it is where it stops, and that is
 /// a limit even when every cut closes.** Each such cut gives its own arc and two
@@ -3401,6 +3412,10 @@ mod tests {
     /// one face, and before this refused it `[] => true` followed it.
     ///
     /// One plane through the apex keeps one run, and that is followed.
+    ///
+    /// **Two are refused even where they keep one run**, which is the gap
+    /// `docs/decisions.md` §389 files: `x ≥ 0` and `y ≥ 0`, a quarter of a pointed
+    /// cone, meet along the axis, inside the cone, and keep `0 < φ < 90°`.
     #[test]
     fn two_planes_through_the_apex_leave_a_nappe_in_two_sheets() {
         let cone = rcad_geom::Cone::new(Axis::z(), 0.5).expect("a positive slope");
@@ -3438,6 +3453,18 @@ mod tests {
         assert!(
             is_a_family_this_follows(&Surface::Cone(cone), &half),
             "one cut through the apex, and any the apex is in front of, are followed"
+        );
+
+        let quarter = [
+            cut([0.0; 3], [1.0, 0.0, 0.0]),
+            cut([0.0; 3], [0.0, 1.0, 0.0]),
+            roof(),
+        ];
+        assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&quarter), 1);
+        assert!(
+            !is_a_family_this_follows(&Surface::Cone(cone), &quarter),
+            "two cuts through the apex meeting inside the cone keep one run, and are refused \
+             all the same"
         );
     }
 
