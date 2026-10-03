@@ -22,19 +22,23 @@
 //!
 //! - `r / u > 0.5` — the poles land in different ulp buckets from `c`. Two
 //!   corners, and a mesh.
-//! - `r / u < 0.5` — both poles round back onto `c`. The corners coincide, and
-//!   the mesher refuses. **This does not depend on `c` at all.**
+//! - `r / u < 0.5` — both poles round back onto `c`. The mesh lands flat,
+//!   enclosing nothing, and the mesher refuses it. **This does not depend on
+//!   `c` at all.**
 //! - `r / u == 0.5` — the poles sit *exactly halfway* between two doubles.
 //!   Round-half-to-even breaks the tie, and which way it breaks is decided by
 //!   the last bit of `c`'s mantissa. Even, and both poles round *inward* onto
-//!   `c`: corners coincide, refusal. Odd, and they round *outward* to
-//!   `c - u` and `c + u`: a mesh.
+//!   `c`: a flat mesh, refused. Odd, and they round *outward* to `c - u` and
+//!   `c + u`: a mesh.
 //!
 //! That third case is the alternating band, and it is not a knife edge: `u` is
 //! constant across a binade, so `r / u == 0.5` holds for **every** placement in
 //! one factor-of-two stretch. For a unit ball that stretch is
 //! `[2^53, 2^54)` — nine quadrillion units wide — and the answer flips at each
-//! of its four and a half quadrillion representable points.
+//! of its four and a half quadrillion representable points **but the first**.
+//! At `2^53` itself the ulp below is half the one above, so the near pole is not
+//! a tie at all and lands where it was made, and the ball meshes half flattened
+//! ([`at_the_bottom_of_the_band_the_ball_meshes_half_flattened`]).
 //!
 //! # The ulp of 2 was half the story
 //!
@@ -99,10 +103,9 @@
 //!
 //! §16.10 scopes a verdict to the family swept. This is balls, placed along one
 //! axis, meshed under [`Policy::certified()`]. The parity law is checked on the
-//! `z` axis as well as `x` and holds on both — but the *refusal it produces* is
-//! not the same one on both axes, and
-//! [`the_law_travels_to_another_axis_but_the_refusal_it_produces_does_not`]
-//! says why: which coordinate collapses decides which step notices.
+//! `z` axis as well as `x` and holds on both, with the same refusal on both,
+//! although a different coordinate collapses on each
+//! ([`the_law_and_its_refusal_travel_to_another_axis`]).
 
 use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -235,22 +238,68 @@ fn a_coordinate_with_an_odd_mantissa_keeps_a_feature_a_binade_longer() {
     }
 }
 
-/// The refusal is [`rcad_mesh::CannotTriangulate::CornersCoincide`], which is
-/// the collapse above said in the triangulator's own words.
+/// The refusal is [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`], which
+/// is the collapse above said as what it costs the mesh.
 ///
 /// Named rather than counted, per §15.10: a different refusal appearing here
 /// would mean the placement stopped mattering for the reason this file says it
 /// does, and a test that only asked "did it refuse" would not notice.
+///
+/// **It was [`rcad_mesh::CannotTriangulate::CornersCoincide`] until
+/// `docs/decisions.md` §379.** The mesher read each point of a placed ball back
+/// from where it lands, and the middle of the seam came back on the axis between
+/// the poles. It now reads each point where it was made, so the ball is cut into
+/// a sound octahedron, and every point of it then lands on the plane
+/// `x = EVEN`: a mesh that encloses nothing, refused by name.
 #[test]
 fn what_the_refusal_out_there_is_called() {
     assert_eq!(
         what_happened(1.0, EVEN, COARSE),
-        "the triangulator found two corners in the same place",
-        "along x the poles come back untouched at (0, 0, ±1); it is the \
-         seam's middle that lands on the axis between them, a boundary with \
-         corners on top of each other, and that is what the triangulator \
-         says about it"
+        "placing it took away the space its mesh encloses",
+        "the octahedron the ball is meshed as encloses 4/3 where it was made \
+         and lands flat"
     );
+}
+
+/// [`Model::validate`] and [`rcad_topo::SolidView::measure`] mesh through the
+/// same call and give the same name, so none of the three calls a sound ball
+/// malformed.
+///
+/// Read without the refusal, the flat mesh reached the other two as
+/// `Invalid::VolumeIsNotPositive { volume: 0.0 }`, which says the solid's faces
+/// do not point outwards (`docs/decisions.md` §333.6). The ball is the kernel's
+/// own `add_ball` and they do. Both hand the mesher's refusal on unchanged:
+/// `validate` retries a finer mesh only for a refusal a finer mesh may clear,
+/// and this is not one.
+#[test]
+fn mesh_validate_and_measure_all_refuse_the_flat_ball_by_one_name() {
+    let (model, ball) = a_ball_out_there(1.0, EVEN);
+    let deflection = Deflection::of(COARSE).expect("a positive length");
+    let view = model.solid(ball).expect("this model made the key");
+
+    let meshed = view.mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+    let validated = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+    let measured = view.measure(deflection, &Policy::certified(), &mut ProvenanceLog::new());
+
+    for (call, answer) in [
+        ("mesh", meshed.map(|_| ())),
+        ("validate", validated),
+        ("measure", measured.map(|_| ())),
+    ] {
+        let Err(Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+            enclosed_where_made,
+            enclosed_where_placed,
+        }) = answer
+        else {
+            panic!("{call} of a unit ball at {EVEN:e} answered {answer:?}");
+        };
+        assert_eq!(
+            (enclosed_where_made, enclosed_where_placed),
+            (4.0 / 3.0, 0.0),
+            "{call}: the octahedron of a unit ball encloses 4/3 where it is made \
+             and nothing where it lands"
+        );
+    }
 }
 
 /// Sixty-four placements one ulp apart: thirty-two mesh and thirty-two refuse,
@@ -261,15 +310,25 @@ fn what_the_refusal_out_there_is_called() {
 /// asserted **rung by rung against the parity rule**, not summed into a count.
 /// A run of two meshes or two refusals anywhere in it fails, which is what
 /// stops "it alternates" degrading into "roughly half of them work".
+///
+/// **The walk starts one ulp above `2^53`**, because `2^53` itself has an even
+/// mantissa and meshes: the ulp below it is 1, so its near pole is no tie
+/// ([`at_the_bottom_of_the_band_the_ball_meshes_half_flattened`]). Before
+/// `docs/decisions.md` §379 the mesher read the ball's points back from where
+/// they landed and refused it, and the walk started there.
 #[test]
 fn the_answer_alternates_at_every_ulp_across_the_band() {
-    let start = 9_007_199_254_740_992.0f64;
-    assert_eq!(ulp_of(start), 2.0, "2^53 is where the ulp becomes 2");
+    let two_53 = 9_007_199_254_740_992.0f64;
+    assert_eq!(ulp_of(two_53), 2.0, "2^53 is where the ulp becomes 2");
+    assert!(
+        meshes(1.0, two_53, COARSE),
+        "the bottom of the band meshes, half flattened"
+    );
 
     let mut meshed = 0;
     let mut refused = 0;
-    for step in 0..64 {
-        let out = start + f64::from(step) * 2.0;
+    for step in 1..=64 {
+        let out = two_53 + f64::from(step) * 2.0;
         let by_parity = out.to_bits() % 2 == 1;
         assert_eq!(
             meshes(1.0, out, COARSE),
@@ -417,10 +476,16 @@ fn a_quarter_radius_needs_a_quarter_of_the_distance_to_split_the_same_way() {
 /// it moves the band down two binades, which is why the same behaviour turns up
 /// at a quarter of the distance and not at the same distance.
 ///
-/// Sixteen consecutive placements from the bottom of each band, four radii two
-/// binades apart, asserted against parity one placement at a time. The bands do
-/// not overlap: at `2^51` a unit ball meshes and a quarter ball alternates, and
-/// at `2^53` it is the other way round.
+/// Sixteen consecutive placements from one ulp above the bottom of each band,
+/// four radii two binades apart, asserted against parity one placement at a
+/// time. The bands do not overlap: at `2^51` a unit ball meshes and a quarter
+/// ball alternates, and at `2^53` it is the other way round.
+///
+/// **The bottom of every band meshes, whatever its last bit**, for the reason
+/// [`at_the_bottom_of_the_band_the_ball_meshes_half_flattened`] measures at two
+/// of them: the ulp below `2^e` is half the one above, so the near pole lands
+/// where it was made. Until `docs/decisions.md` §379 the bottom was refused with
+/// the rest of the even rungs, and the walk started there.
 #[test]
 fn each_radius_has_its_own_band_and_they_all_alternate() {
     for (radius, exponent) in [(0.25f64, 51u64), (0.5, 52), (1.0, 53), (2.0, 54)] {
@@ -430,8 +495,13 @@ fn each_radius_has_its_own_band_and_they_all_alternate() {
             2.0 * radius,
             "a ball of radius {radius} is exactly half an ulp from 2^{exponent}"
         );
+        assert!(
+            meshes(radius, bottom, COARSE),
+            "radius {radius} at the bottom of its band, 2^{exponent}: {}",
+            what_happened(radius, bottom, COARSE)
+        );
 
-        for step in 0..16 {
+        for step in 1..=16 {
             let out = bottom + f64::from(step) * ulp_of(bottom);
             let by_parity = out.to_bits() % 2 == 1;
             assert_eq!(
@@ -458,36 +528,29 @@ fn each_radius_has_its_own_band_and_they_all_alternate() {
     );
 }
 
-/// The parity law holds on the `z` axis too, and the refusal it produces there
-/// is a different one, because a different coordinate collapses.
+/// The parity law holds on the `z` axis too, and so does the refusal, although
+/// a different coordinate collapses.
 ///
-/// The mesher works a placed face out in the frame it is stored in, where the
-/// ball sits about the origin, and reads a point of the table back into that
-/// frame by the placement's inverse. A point of the unit ball moved out to
-/// [`EVEN`] and back has `0` in the coordinate the ball was moved along,
-/// whatever it had there before.
+/// A point of the unit ball moved out to [`EVEN`] and back has `0` in the
+/// coordinate the ball was moved along, whatever it had there before.
 ///
 /// - **Along `x`** the poles `(0, 0, ±1)` do not use that coordinate. They come
-///   back where they were and the seam between them is walked, but the point
-///   walked at its middle, `(1, 0, 0)` to within a rounding, comes back on the
-///   axis between the poles — and the triangulator finds two corners in one
-///   place.
+///   back where they were, but the middle of the seam between them, `(1, 0, 0)`
+///   to within a rounding, comes back on the axis between the poles.
 /// - **Along `z`** the poles do use it. Both come back as the centre, and the
-///   seam's middle comes back at height `0` as well, so every point of the wire
-///   reads as the same place in the ball's own two coordinates and the
-///   mesher's `cut_up` refuses the wire as one that will not lie flat.
+///   seam's middle comes back at height `0` with them.
 ///
-/// Until `docs/decisions.md` §333 the walk was handed the poles moved out and
-/// back too, both on the centre, and the geometry layer refused
-/// `CannotNameWhichPieceOfACrossingThisIs` before `cut_up` was reached. The walk
-/// now starts from the poles the arena stores; `cut_up` still moves every point
-/// out and back, and it is what refuses. §333 has the printout of what each step
-/// read, for both axes and both refusals.
+/// **Until `docs/decisions.md` §379 that difference decided the refusal.** The
+/// mesher read each point of a placed ball back by that round trip, so along
+/// `x` the triangulator found two corners in one place, and up `z` the wire read
+/// as one place in the ball's own two coordinates and would not lie flat. It now
+/// reads each point where it was made, cuts the ball into a sound octahedron
+/// either way, and asks the whole mesh whether it still encloses space where it
+/// lands — and on both axes it does not.
 ///
-/// The three points are checked here with the kernel's own [`Isometry`], which
-/// is how the mesher moves them.
+/// The three points are checked here with the kernel's own [`Isometry`].
 #[test]
-fn the_law_travels_to_another_axis_but_the_refusal_it_produces_does_not() {
+fn the_law_and_its_refusal_travel_to_another_axis() {
     let north = Point::new(0.0, 0.0, 1.0);
     let south = Point::new(0.0, 0.0, -1.0);
     let the_seams_middle = Point::new(1.0, 0.0, 0.0);
@@ -519,9 +582,14 @@ fn the_law_travels_to_another_axis_but_the_refusal_it_produces_does_not() {
     );
 
     assert_eq!(
+        what_happened(1.0, EVEN, COARSE),
+        "placing it took away the space its mesh encloses",
+        "along x the ball lands flat"
+    );
+    assert_eq!(
         along_z(EVEN),
-        "a wire will not lie flat on its face",
-        "up the z axis the same collapse is caught by cut_up"
+        "placing it took away the space its mesh encloses",
+        "and up z it lands flat too, refused by the same name"
     );
     assert_eq!(along_z(ODD), "meshed", "and the odd placement still meshes");
 }
@@ -592,8 +660,8 @@ fn monotone_in_the_deflection_even_where_it_is_not_monotone_in_the_placement() {
     for deflection in ladder {
         assert!(
             !meshes(1.0, EVEN, deflection),
-            "at {EVEN:e} no deflection helps, because the poles have already \
-             collapsed before one is read"
+            "at {EVEN:e} no deflection helps, because the placement flattens \
+             whatever mesh the ball is cut into"
         );
     }
 }
@@ -643,6 +711,193 @@ fn the_mesh_that_comes_back_out_there_is_twice_the_ball_across() {
     );
 }
 
+/// At the bottom of a band the ball meshes half flattened, and that mesh is an
+/// honest one: it encloses space, it is inside the deviation it claims, and no
+/// triangle of it lies on another.
+///
+/// At `2^53` the ulp below is 1 and the ulp above is 2, so a unit ball's near
+/// side, `c − 1`, is a double and lands where it was made, while its far side
+/// `c + 1` is a tie and rounds to even, onto `c`. The octahedron the ball is
+/// meshed as keeps its near half and has its far corner pressed into the
+/// square through its middle: a square pyramid, closed, with half the
+/// octahedron's volume. A ball of radius a quarter at `2^51` is the same
+/// pyramid at a quarter the size.
+///
+/// The three things checked are the three a mesh of a solid promises and the
+/// flat mesh at [`EVEN`] broke one of (`docs/decisions.md` §379.2). It is the
+/// same kind of answer as [`ODD`]'s, which is twice the ball across
+/// ([`the_mesh_that_comes_back_out_there_is_twice_the_ball_across`]): inside
+/// the deflection asked for, closed, and enclosing space. Distances and the
+/// volume are worked out about the centre, where every point here is exact.
+#[test]
+fn at_the_bottom_of_the_band_the_ball_meshes_half_flattened() {
+    for (radius, exponent) in [(1.0f64, 53u64), (0.25, 51)] {
+        let out = two_to_the(exponent);
+        let mesh = try_to_mesh(radius, out, COARSE).expect("the bottom of the band meshes");
+        let about_the_centre: Vec<[f64; 3]> = mesh
+            .points()
+            .iter()
+            .map(|point| {
+                let [x, y, z] = point.coordinates();
+                [x - out, y, z]
+            })
+            .collect();
+        let triangles: Vec<[[f64; 3]; 3]> = mesh
+            .triangles()
+            .iter()
+            .map(|triangle| {
+                triangle
+                    .corners()
+                    .map(|corner| about_the_centre[corner as usize])
+            })
+            .collect();
+
+        let reach_in_x = about_the_centre
+            .iter()
+            .map(|point| point[0])
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), x| {
+                (low.min(x), high.max(x))
+            });
+        assert_eq!(
+            reach_in_x,
+            (-radius, 0.0),
+            "radius {radius} at 2^{exponent}: the near side lands where it was made \
+             and the far side on the centre"
+        );
+
+        let volume: f64 = triangles
+            .iter()
+            .map(|[a, b, c]| dot(*a, cross(*b, *c)) / 6.0)
+            .sum();
+        let the_octahedrons = 4.0 / 3.0 * radius.powi(3);
+        assert_eq!(
+            volume,
+            the_octahedrons / 2.0,
+            "radius {radius} at 2^{exponent}: half the octahedron the same deflection \
+             gives where nothing rounds"
+        );
+
+        for (index, one) in triangles.iter().enumerate() {
+            let normal = cross(minus(one[1], one[0]), minus(one[2], one[0]));
+            assert_ne!(
+                dot(normal, normal),
+                0.0,
+                "radius {radius} at 2^{exponent}: triangle {index} has no area"
+            );
+            for other in &triangles[index + 1..] {
+                assert!(
+                    !on_the_same_three_places(*one, *other),
+                    "radius {radius} at 2^{exponent}: two triangles lie on top of each \
+                     other, {one:?} and {other:?}"
+                );
+            }
+        }
+
+        let furthest = furthest_a_sampled_point_of_the_ball_sits_from(&triangles, radius);
+        println!(
+            "radius {radius} at 2^{exponent}: volume {volume} against the ball's {}, \
+             furthest sampled point {furthest} against a deviation of {}",
+            4.0 / 3.0 * core::f64::consts::PI * radius.powi(3),
+            mesh.deviation().magnitude()
+        );
+        assert_eq!(
+            furthest, radius,
+            "radius {radius} at 2^{exponent}: the far pole sits one radius from the \
+             square it was pressed into"
+        );
+        assert!(
+            furthest <= mesh.deviation().magnitude(),
+            "radius {radius} at 2^{exponent}: {furthest} off is inside the {} the mesh \
+             claims",
+            mesh.deviation().magnitude()
+        );
+    }
+}
+
+/// The furthest any of a grid of points on the ball of `radius` about the
+/// origin sits from the nearest of `triangles`.
+fn furthest_a_sampled_point_of_the_ball_sits_from(triangles: &[[[f64; 3]; 3]], radius: f64) -> f64 {
+    let rows = 64;
+    let mut furthest = 0.0f64;
+    for row in 0..=rows {
+        let latitude = core::f64::consts::PI * (f64::from(row) / f64::from(rows) - 0.5);
+        for column in 0..2 * rows {
+            let longitude = core::f64::consts::PI * f64::from(column) / f64::from(rows);
+            let on_the_ball = [
+                radius * latitude.cos() * longitude.cos(),
+                radius * latitude.cos() * longitude.sin(),
+                radius * latitude.sin(),
+            ];
+            let nearest = triangles
+                .iter()
+                .map(|triangle| how_far_from_a_triangle(on_the_ball, *triangle))
+                .fold(f64::INFINITY, f64::min);
+            furthest = furthest.max(nearest);
+        }
+    }
+    furthest
+}
+
+fn how_far_from_a_triangle(point: [f64; 3], [a, b, c]: [[f64; 3]; 3]) -> f64 {
+    let nearest_side = how_far_from_a_side(point, a, b)
+        .min(how_far_from_a_side(point, b, c))
+        .min(how_far_from_a_side(point, c, a));
+    let normal = cross(minus(b, a), minus(c, a));
+    let square = dot(normal, normal);
+    let along_the_normal = dot(minus(point, a), normal) / square;
+    let dropped = minus(point, normal.map(|component| component * along_the_normal));
+    let inside = [(a, b), (b, c), (c, a)]
+        .into_iter()
+        .all(|(from, to)| dot(cross(minus(to, from), minus(dropped, from)), normal) >= 0.0);
+    if inside {
+        return length(minus(point, dropped));
+    }
+    nearest_side
+}
+
+fn how_far_from_a_side(point: [f64; 3], from: [f64; 3], to: [f64; 3]) -> f64 {
+    let along = minus(to, from);
+    let part = (dot(minus(point, from), along) / dot(along, along)).clamp(0.0, 1.0);
+    length(minus(
+        point,
+        [0, 1, 2].map(|axis| from[axis] + part * along[axis]),
+    ))
+}
+
+fn on_the_same_three_places(one: [[f64; 3]; 3], other: [[f64; 3]; 3]) -> bool {
+    let sorted = |mut corners: [[f64; 3]; 3]| {
+        corners.sort_by(|a, b| {
+            a.iter()
+                .zip(b)
+                .map(|(x, y)| x.total_cmp(y))
+                .find(|order| order.is_ne())
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
+        corners.map(|corner| corner.map(f64::to_bits))
+    };
+    sorted(one) == sorted(other)
+}
+
+fn minus(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [0, 1, 2].map(|axis| a[axis] - b[axis])
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn length(a: [f64; 3]) -> f64 {
+    dot(a, a).sqrt()
+}
+
 fn meshes(radius: f64, out: f64, deflection: f64) -> bool {
     try_to_mesh(radius, out, deflection).is_ok()
 }
@@ -673,7 +928,8 @@ fn along_z(out: f64) -> String {
 }
 
 /// `point` moved out by `placement` and back by its inverse, the way the mesher
-/// reads a point of its table back into the frame a placed face is worked in.
+/// read a point of its table back into the frame a placed face is worked in
+/// until `docs/decisions.md` §379.
 fn out_and_back(placement: &Isometry, point: Point) -> Point {
     placement
         .inverse()
@@ -721,6 +977,9 @@ fn what_it_refused(why: &Error) -> String {
     match why {
         Error::DeflectionBelowWhatAMeshCanReach { .. } => {
             "the deflection is under the floor".to_owned()
+        }
+        Error::PlacingItTookAwayTheSpaceItsMeshEncloses { .. } => {
+            "placing it took away the space its mesh encloses".to_owned()
         }
         Error::CannotMeshAFace {
             why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },

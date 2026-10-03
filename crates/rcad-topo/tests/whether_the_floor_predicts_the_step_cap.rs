@@ -185,6 +185,16 @@ fn a_tolerant_caller_is_refused_by_the_floor_and_not_by_the_walk() {
 /// 99.99992% of the whole deflection it was handed — the budget is spent, so
 /// where the budget goes the published number goes — while this bar spends
 /// 74.98% of its own and pays the rest to a movement no deflection reaches.
+///
+/// **And then the deviation moved once more, with no floor and no count
+/// moving**: from `5.994025313141081e-6` to `5.993841838603952e-6`, still 5134
+/// points. `BuildingAMesh::walk_a_wire_round` now hands the triangulator a
+/// placed wall's points where they were made instead of moved out a billion
+/// units and back (`docs/decisions.md` §379.5), so the wall is cut from corners
+/// a rounding apart from the ones it had, and what the triangulator says it
+/// strays moved with them. The demonstration is that putting that one read
+/// back — every other part of the change kept — gives `5.994025313141081e-6`
+/// again.
 #[test]
 fn the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing() {
     let (model, bar) = a_bar(1.0, 5.0, 1e9);
@@ -199,5 +209,5 @@ fn the_fallback_a_bar_a_billion_units_out_already_had_says_the_same_thing() {
         .expect("a tolerant caller gets as fine a mesh as the arithmetic reaches");
 
     assert_eq!(mesh.points().len(), 5134);
-    assert_eq!(mesh.deviation().magnitude(), 5.994025313141081e-6);
+    assert_eq!(mesh.deviation().magnitude(), 5.993841838603952e-6);
 }

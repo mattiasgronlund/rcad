@@ -447,6 +447,42 @@ pub enum Error {
         used: u32,
     },
 
+    /// Moving this solid's mesh into place took away the space it encloses.
+    ///
+    /// A placed curved face is meshed in the frame it is stored in, and its
+    /// points are then moved out to where the solid sits. Out where one ulp of
+    /// the placement is as wide as the solid, that movement rounds a whole side
+    /// of it onto one coordinate: a unit ball moved to
+    /// `x = 1.0808639105689192e16` is a sound octahedron where it is meshed, and
+    /// every one of its points lands on the plane `x = 1.0808639105689192e16`,
+    /// so each triangle lies on a twin and the mesh encloses nothing
+    /// (`docs/decisions.md` §333.6). Handed back, that mesh is a wrong answer
+    /// that no check of distance or topology catches.
+    ///
+    /// **Raised by [`SolidView::mesh`](crate::SolidView::mesh) for a placed
+    /// solid only**, when the mesh encloses space where it was made and none,
+    /// or less than none, where it lands — both signs settled exactly
+    /// (§379.2). A solid at no placement is moved by a shift that loses
+    /// nothing, so it cannot reach this.
+    ///
+    /// **The solid is sound.** It is the kernel's own `add_ball` in the case
+    /// above, checked when it was built; what is refused is the mesh of it at
+    /// that placement. A mesh that encloses nothing where it was made is not
+    /// this: that is about the solid, and
+    /// [`Model::validate`](crate::Model::validate) says so with
+    /// [`Invalid::VolumeIsNotPositive`].
+    #[error(
+        "moving this solid into place took away the space its mesh encloses: \
+         {enclosed_where_made} where it was made, {enclosed_where_placed} where it lands"
+    )]
+    PlacingItTookAwayTheSpaceItsMeshEncloses {
+        /// The mesh's volume in the frame each face is stored in, where its
+        /// points were worked out.
+        enclosed_where_made: f64,
+        /// The mesh's volume where the solid sits: zero or less.
+        enclosed_where_placed: f64,
+    },
+
     /// A closed edge of the answer would start at a **pole** of the surface it is
     /// drawn on, where nothing says which way it runs.
     ///
