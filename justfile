@@ -102,6 +102,7 @@ gate_steps := "check-plugins \
     check-release-lanes-selftest \
     check-ff-main-selftest \
     check-land-selftest \
+    check-verify-lane-selftest \
     check-status-selftest \
     check-plan \
     check-plan-selftest \
@@ -208,6 +209,7 @@ gate_reusable_steps := "check \
     check-release-lanes-selftest \
     check-ff-main-selftest \
     check-land-selftest \
+    check-verify-lane-selftest \
     check-status-selftest \
     check-plan-selftest \
     check-queue-selftest \
@@ -2407,6 +2409,14 @@ check-skills-selftest:
 # exist, the `origin/main` check that brief and `merger.md` both carry, and the
 # lander's command starting with the text `.claude/settings.json` allows. The
 # fifth arm now holds the whole of that, lander and merger, behind `lastMerge`.
+#
+# **A nineteenth arm holds the verifier to `just verify-lane` (§383.4 item 4,
+# §385).** `VERIFY`'s prompt hands over the recipe's start and its wait, each as
+# a line of its own, and `verifier.md` has the verifier run both first. The
+# recipe looks for each number's value in what its command prints, so
+# `numberSchema` and `lane.md` both say the value is that text. And each record
+# the prompt writes into the recipe's input is one the script reads, so a
+# rename on one side cannot leave the other refusing every input.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2475,7 +2485,15 @@ check-lanes-workflow:
     land_check_doc='git merge-base --is-ancestor <lane branch> origin/main'
     land_prefix='  return `mise exec -- just land '
     land_allowed='"Bash(mise exec -- just land:*)"'
+    verify_command='mise exec -- just verify-lane target/verify-lane.txt'
+    verify_wait_command='mise exec -- just verify-lane wait'
+    verify_start="  $verify_command"
+    verify_wait="  $verify_wait_command"
+    verify_value="      value: { type: 'string', description: 'text the command prints, exactly as it prints it"
+    lane_value='Its `value` is text that command prints,'
+    verify_records=(base branch lane-tree write-set source-paths pins-only tests number)
     settings=.claude/settings.json
+    script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
     commit() {
@@ -2752,8 +2770,26 @@ check-lanes-workflow:
             echo "$1 does not send the lander a command starting with the text $settings allows, so it would stop to ask with nobody there to answer (§383.7)"
             return 18
         fi
+        if ! grep -qxF -- "$verify_start" "$1" || ! grep -qxF -- "$verify_wait" "$1"; then
+            echo "$1 does not hand the verifier just verify-lane and its wait, each as a line of its own ('$verify_start', '$verify_wait'), so the verifier would run its fixed steps by hand again (§385)"
+            return 19
+        fi
+        if ! grep -qF -- "$verify_value" "$1" || ! grep -qF -- "$lane_value" "$2/lane.md"; then
+            echo "$1's numberSchema or $2/lane.md does not say a number's value is text its command prints, which is where just verify-lane looks for it (§383.4)"
+            return 19
+        fi
+        if ! grep -qF -- "$verify_command" "$2/verifier.md" || ! grep -qF -- "$verify_wait_command" "$2/verifier.md"; then
+            echo "$2/verifier.md does not have the verifier run just verify-lane first and wait on it (§385)"
+            return 19
+        fi
+        for t in "${verify_records[@]}"; do
+            if ! grep -qF -- "['$t'" "$1" || ! grep -qF -- "\"$t\": (" "$5"; then
+                echo "the record $t is not both written by $1 and read by $5, so the verifier's input would carry a record the recipe refuses or lack one it needs (§385)"
+                return 19
+            fi
+        done
     }
-    scan "$file" "$agents" "$claude" "$recipes" || exit 1
+    scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
         S="$2" R="$3" awk '{ i = index($0, ENVIRON["S"]); if (i) $0 = substr($0, 1, i - 1) ENVIRON["R"] substr($0, i + length(ENVIRON["S"])); print }' "$1"
     }
@@ -2763,6 +2799,7 @@ check-lanes-workflow:
         cp -r "$agents" "$dir/$1/agents"
         cp "$claude" "$dir/$1/CLAUDE.md"
         cp "$recipes" "$dir/$1/justfile"
+        cp "$script" "$dir/$1/verify_lane.py"
     }
     fresh reset-instead
     awk -v l="$create" -v r="$reset" '$0 == l { print r; next } { print }' "$file" > "$dir/reset-instead/lanes.js"
@@ -2892,23 +2929,36 @@ check-lanes-workflow:
     grep -vF -- "$land_check_doc" "$agents/merger.md" > "$dir/merges-twice-doc/agents/merger.md"
     fresh land-command-drifts
     swap "$file" 'mise exec -- just land ' 'mise exec -- just  land ' > "$dir/land-command-drifts/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18)
+    fresh verify-not-handed
+    grep -vxF -- "$verify_start" "$file" > "$dir/verify-not-handed/lanes.js"
+    fresh verify-no-wait
+    grep -vxF -- "$verify_wait" "$file" > "$dir/verify-no-wait/lanes.js"
+    fresh value-unsaid
+    swap "$file" 'text the command prints, exactly as it prints it' 'a number' > "$dir/value-unsaid/lanes.js"
+    fresh lane-value-unsaid
+    swap "$agents/lane.md" "$lane_value" 'Its `value` is a number,' > "$dir/lane-value-unsaid/agents/lane.md"
+    fresh verifier-by-hand
+    grep -vF -- "$verify_command" "$agents/verifier.md" > "$dir/verifier-by-hand/agents/verifier.md"
+    fresh record-renamed
+    swap "$script" '"lane-tree": (' '"lane_tree": (' > "$dir/record-renamed/verify_lane.py"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
         if cmp -s "$file" "$dir/$name/lanes.js" && diff -rq "$agents" "$dir/$name/agents" > /dev/null \
-            && cmp -s "$claude" "$dir/$name/CLAUDE.md" && cmp -s "$recipes" "$dir/$name/justfile"; then
-            echo "the cut '$name' found nothing to cut in $file, $agents, $claude or $recipes, so it proves nothing"
+            && cmp -s "$claude" "$dir/$name/CLAUDE.md" && cmp -s "$recipes" "$dir/$name/justfile" \
+            && cmp -s "$script" "$dir/$name/verify_lane.py"; then
+            echo "the cut '$name' found nothing to cut in $file, $agents, $claude, $recipes or $script, so it proves nothing"
             exit 1
         fi
         got=0
-        scan "$dir/$name/lanes.js" "$dir/$name/agents" "$dir/$name/CLAUDE.md" "$dir/$name/justfile" > /dev/null || got=$?
+        scan "$dir/$name/lanes.js" "$dir/$name/agents" "$dir/$name/CLAUDE.md" "$dir/$name/justfile" "$dir/$name/verify_lane.py" > /dev/null || got=$?
         if [ "$got" != "$want" ]; then
             echo "the cut '$name' was caught by arm $got, expected arm $want"
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, and prunes only what merged; ${#cuts[@]} cuts, each caught"
 
 # Print the changed lines between two commits that could change what runs:
 # everything but `.md` files, comment lines, and test code -- files under
@@ -3035,8 +3085,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "55" ]; then \
-        echo "found $n check-* recipes, expected 55"; \
+    if [ "$n" != "56" ]; then \
+        echo "found $n check-* recipes, expected 56"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -12376,6 +12426,308 @@ check-land-selftest:
     stopped steps
     ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it read the steps"
     echo "land merges a clean lane and prints its JSON, and stops by name on each of 9 stops"
+
+# A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
+# the lane's tree, `git log` from the base to the branch, the files outside the
+# write set, `lines-that-run` before the checkout, the checkout, `gate quiet`,
+# `verifier.md` step 7's revert, test run and restore, and the lane's numbers.
+# Its last line is one line of JSON holding every `verdictSchema` field it could
+# fill, with `skipped` and `left_to_you` for what it skipped and could not
+# decide. The verifier keeps the reading.
+#
+# **It runs detached, and the verifier waits on it** (§385.2). The harness ends
+# a Bash call at 600 s, and a cold gate alone can take nine minutes. So the
+# first call starts the run in a session of its own and follows its log for at
+# most 540 s, and while its last line says the run is still going, `just
+# verify-lane wait` follows it again. Each call prints what the run logged since
+# the call before. A run is one python process started before the checkout, so
+# the copy that judges a branch is never one the branch changed.
+#
+# The input is a file the verifier writes with the Write tool, one word to a
+# line and a `+` line between records, as the lander's steps are (§384.2). The
+# logic is `tooling/verify-lane/verify_lane.py`; `VERIFY_LANE_JUST` is the seam
+# `check-verify-lane-selftest` puts a stub in where `just` would run the gate and
+# the tests, and `VERIFY_LANE_WAIT` how long one call follows the run.
+[doc("A verifier's fixed steps for one lane, run detached so no call passes ten minutes: `just verify-lane <input file>`, then `just verify-lane wait` while it says it is still running. Ends with one line of JSON.")]
+[no-exit-message]
+verify-lane *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERIFY_LANE_JUST="${VERIFY_LANE_JUST:-{{ just_executable() }}}" exec python3 '{{ justfile_directory() }}/tooling/verify-lane/verify_lane.py' "$@"
+
+# Pins `verify-lane` against repositories it builds itself, one per arm, each
+# with a lane's worktree on its branch and a verifier's worktree at the base, as
+# the `lanes` workflow leaves them. A stub on `VERIFY_LANE_JUST` stands in for
+# `just`: its `gate` prints a summary block, its `t <name>` runs the fixture's
+# `tests/<name>.sh` and exits 100 when that fails and 4 when there is no such
+# file, as nextest does, and its recipes are the fixture's `recipes/`. Its
+# `lines-that-run` is the real recipe, run on the fixture. It logs `HEAD` for
+# `lines-that-run` and the gate, which is how the first arm sees the one ran on
+# the base and the other on the branch.
+#
+# The arms: a test that fails with the source reverted, beside a number whose
+# value is in its command's print, one whose value is not, and one whose command
+# writes; a revert that takes the new test out, which is no failure (Q231); tests
+# that pass with the source reverted; a `pinsOnly` lane; a lines-that-run count
+# of 0; a source path holding test code the branch changed; a lane that names no
+# test; a run longer than one call, which a second call follows to its end; and
+# an input file it cannot read.
+#
+# The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
+# file, so a field the schema renames fails here and not in a verifier's report.
+[private]
+check-verify-lane-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(realpath "$(mktemp -d)")
+    trap 'rm -rf "$dir"' EXIT
+    mkdir "$dir/bin"
+    cat >"$dir/bin/just" <<'STUB'
+    #!/usr/bin/env bash
+    set -uo pipefail
+    printf 'just %s\n' "$*" >>"$STUB_DIR/log"
+    case "${1:-}" in
+        lines-that-run)
+            echo "lines-that-run at $(git rev-parse HEAD)" >>"$STUB_DIR/heads"
+            exec "$REAL_JUST" --justfile "$REAL_JUSTFILE" --working-directory "$PWD" lines-that-run "$2" "$3" ;;
+        gate)
+            echo "gate at $(git rev-parse HEAD)" >>"$STUB_DIR/heads"
+            [ ! -e "$STUB_DIR/gate-sleeps" ] || sleep "$(cat "$STUB_DIR/gate-sleeps")"
+            echo "· check-fixed (0.1 s)"
+            echo
+            echo "=== gate summary ==="
+            echo "gate: PASS"
+            echo "tests: Summary [   0.1s] 2 tests run: 2 passed, 0 skipped"
+            echo "full log: target/last-gate.log" ;;
+        --show) [ -f "recipes/${2:-}.sh" ] ;;
+        --evaluate) echo "check-plugins check-fixed lint test" ;;
+        t)
+            if [ ! -f "tests/${2:-}.sh" ]; then
+                echo "error: no tests to run"
+                exit 4
+            fi
+            if bash "tests/$2.sh"; then
+                echo "PASS $2"
+                exit 0
+            fi
+            echo "FAIL $2"
+            exit 100 ;;
+        *)
+            [ -f "recipes/${1:-}.sh" ] || { echo "the stub has no recipe ${1:-}" >&2; exit 2; }
+            exec bash "recipes/$1.sh" ;;
+    esac
+    STUB
+    chmod +x "$dir/bin/just"
+    schema=$(awk '/^function verdictSchema/,/^}/' .claude/workflows/lanes.js \
+        | grep -oE '^    [a-z_]+: \{|properties\.[a-z_]+ = \{' | grep -oE '[a-z_]+' | grep -vx properties | tr '\n' ' ' || true)
+    for wanted in worktree_path lines_that_run tests_fail_without_fix; do
+        case " $schema " in
+            *" $wanted "*) ;;
+            *) echo "found no verdictSchema holding $wanted in .claude/workflows/lanes.js, so the JSON would be held to nothing"; exit 1 ;;
+        esac
+    done
+    arm=""
+    at=""
+    base=""
+    tip=""
+    got=""
+    json=""
+    rc=0
+    fail() {
+        echo "verify-lane drifted from its own fixtures, in the arm '$arm': $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    code() {
+        printf '%s\n' "$1" 'pub fn answer() -> u32 {' "    $2" '}' '' '#[cfg(test)]' 'mod tests {' '    #[test]' \
+            '    fn answer_is_right() {' "        assert_eq!(super::answer(), $3);" '    }' '}'
+    }
+    fixture() {
+        arm=$1
+        at="$dir/$1"
+        mkdir -p "$at/stub"
+        touch "$at/stub/log" "$at/stub/heads"
+        git init -q -b main "$at/hub"
+        git -C "$at/hub" config user.email t@t
+        git -C "$at/hub" config user.name t
+        git -C "$at/hub" config commit.gpgsign false
+        mkdir -p "$at/hub/src" "$at/hub/tests" "$at/hub/recipes" "$at/hub/docs"
+        printf '/target\n' >"$at/hub/.gitignore"
+        printf 'broken\n' >"$at/hub/src/lib.txt"
+        code '// The answer.' 41 41 >"$at/hub/src/code.rs"
+        printf 'grep -q fixed src/lib.txt\n' >"$at/hub/tests/is_fixed.sh"
+        printf 'true\n' >"$at/hub/tests/always_passes.sh"
+        printf 'grep -q fixed src/lib.txt\n' >"$at/hub/recipes/check-fixed.sh"
+        printf 'true\n' >"$at/hub/recipes/check-always.sh"
+        printf '# Notes\n' >"$at/hub/docs/notes.md"
+        git -C "$at/hub" add -A
+        git -C "$at/hub" commit -q -m base
+        base=$(git -C "$at/hub" rev-parse HEAD)
+        git -C "$at/hub" checkout -q --detach
+        git -C "$at/hub" worktree add -q -b lane-x "$at/lane" "$base"
+        git -C "$at/hub" worktree add -q --detach "$at/verify" "$base"
+        git -C "$at/hub" worktree lock --reason "an agent at work" "$at/lane"
+        mkdir -p "$at/verify/target"
+    }
+    lane_commit() {
+        git -C "$at/lane" add -A
+        git -C "$at/lane" commit -q -m "the lane's work"
+        tip=$(git -C "$at/lane" rev-parse HEAD)
+    }
+    input() {
+        printf '%s\n' "$@" >"$at/verify/target/verify-lane.txt"
+    }
+    call() {
+        got=$(STUB_DIR="$at/stub" REAL_JUST='{{ just_executable() }}' REAL_JUSTFILE='{{ justfile() }}' \
+            VERIFY_LANE_JUST="$dir/bin/just" VERIFY_LANE_WAIT="${budget:-60}" \
+            {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/verify" verify-lane "$@" 2>&1) \
+            && rc=0 || rc=$?
+        json=$(printf '%s\n' "$got" | tail -n 1)
+    }
+    held_to_the_schema() {
+        local stray
+        stray=$(python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(" ".join(k for k in d if k not in sys.argv[2].split() + ["skipped", "left_to_you"]))' "$json" "$schema" 2>&1) \
+            || fail "its last line is not JSON: $stray"
+        [ -z "$stray" ] || fail "its JSON has fields that verdictSchema in lanes.js does not: $stray"
+    }
+    run() {
+        call target/verify-lane.txt
+        [ "$rc" -eq 0 ] || fail "a run that ended exited $rc"
+        held_to_the_schema
+    }
+    field() {
+        python3 -c 'import json, sys; v = json.loads(sys.argv[1]).get(sys.argv[2], "(absent)"); print(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))' "$json" "$1"
+    }
+    says() {
+        grep -qF -- "$2" <<<"$(field "$1")" || fail "$1 does not say '$2': $(field "$1")"
+    }
+    locked() {
+        [ -e "$(git -C "$at/$1" rev-parse --absolute-git-dir)/locked" ]
+    }
+    back_at_the_tip() {
+        [ -z "$(git -C "$at/verify" status --porcelain)" ] || fail "the verifier's tree is left changed: $(git -C "$at/verify" status --porcelain)"
+        [ "$(git -C "$at/verify" rev-parse HEAD)" = "$tip" ] || fail "the verifier's tree is not at the lane's tip"
+    }
+    no_test_ran() {
+        ! grep -qE '^just (t |check-)' "$at/stub/log" || fail "it ran a test: $(grep -E '^just (t |check-)' "$at/stub/log")"
+    }
+
+    fixture fails-reverted
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    printf 'not the lane'"'"'s\n' >"$at/lane/outside.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ docs/ + source-paths src/ \
+        + tests is_fixed check-fixed \
+        + number 'lines that say fixed' 1 'grep -c fixed src/lib.txt' \
+        + number 'a count the lane misread' 7 'grep -c fixed src/lib.txt' \
+        + number 'a count whose command writes' 0 'git commit -q --allow-empty -m "a number"'
+    run
+    [ "$(field worktree_path) $(field branch_ok)" = "$at/verify true" ] || fail "worktree_path and branch_ok are $(field worktree_path) $(field branch_ok)"
+    [ "$(field files_outside_write_set)" = '["outside.txt"]' ] || fail "files_outside_write_set is $(field files_outside_write_set)"
+    [ "$(field lines_that_run_command)" = "mise exec -- just lines-that-run $base lane-x" ] \
+        || fail "lines_that_run_command is not the command lanes.js hands a verifier: $(field lines_that_run_command)"
+    [ "$(field lines_that_run | tail -n 1)" = "lines that run: 3" ] || fail "the lines-that-run print does not end in its count of 3"
+    [ "$(printf '%s\n' "$(cat "$at/stub/heads")")" = "lines-that-run at $base"$'\n'"gate at $tip" ] \
+        || fail "lines-that-run must run before the checkout and the gate after it, and they ran at: $(cat "$at/stub/heads")"
+    [ "$(field gate_summary | head -n 2)" = $'=== gate summary ===\ngate: PASS' ] || fail "gate_summary is not the block: $(field gate_summary)"
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "true true" ] \
+        || fail "tests that fail with the source reverted gave tests_pass_on_branch $(field tests_pass_on_branch) and tests_fail_without_fix $(field tests_fail_without_fix)"
+    grep -qxF 'just t is_fixed' "$at/stub/log" && grep -qxF 'just check-fixed' "$at/stub/log" || fail "it did not run both tests against the revert"
+    [ "$(python3 -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$(field number_mismatches)")" = 1 ] \
+        || fail "of three numbers, one has a value its command prints and one has a value it does not, but number_mismatches is $(field number_mismatches)"
+    says number_mismatches "a count the lane misread: '7' is not in what"
+    says left_to_you 'a count whose command writes: not run'
+    back_at_the_tip
+    ! locked lane || fail "the lane's tree is still locked"
+
+    fixture taken-out
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    printf 'grep -q fixed src/lib.txt\n' >"$at/lane/tests/new_test.sh"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ tests/ + source-paths src/ tests/ + tests new_test
+    run
+    [ "$(field tests_fail_without_fix)" = "(absent)" ] \
+        || fail "a revert that took the test out gave tests_fail_without_fix $(field tests_fail_without_fix); no test ran, and that is no failure (Q231)"
+    says left_to_you 'new_test ran no test'
+    back_at_the_tip
+
+    fixture passes-reverted
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + tests always_passes check-always
+    run
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "true false" ] \
+        || fail "tests that pass with the source reverted gave $(field tests_pass_on_branch) and $(field tests_fail_without_fix)"
+    [ "$(grep -cxF 'just check-always' "$at/stub/log")" = 2 ] \
+        || fail "a named recipe the gate does not run should run once on the branch and once reverted"
+    back_at_the_tip
+
+    fixture pins-only
+    printf 'true\n' >"$at/lane/tests/is_pinned.sh"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set tests/ + pins-only + tests is_pinned
+    run
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "true false" ] \
+        || fail "a pinsOnly lane gave $(field tests_pass_on_branch) and $(field tests_fail_without_fix)"
+    says skipped 'pinsOnly'
+    no_test_ran
+
+    fixture zero
+    code '// The answer, which is right.' 41 41 >"$at/lane/src/code.rs"
+    printf '# Notes, and more\n' >"$at/lane/docs/notes.md"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ docs/ + source-paths src/ + tests answer_is_right
+    run
+    [ "$(field lines_that_run | tail -n 1)" = "lines that run: 0" ] || fail "a comment and a note counted as lines that run"
+    [ "$(field tests_fail_without_fix)" = false ] || fail "a count of 0 gave tests_fail_without_fix $(field tests_fail_without_fix)"
+    says skipped 'lines that run: 0'
+    no_test_ran
+
+    fixture test-in-source
+    code '// The answer.' 42 42 >"$at/lane/src/code.rs"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + tests answer_is_right
+    run
+    says left_to_you 'revert by hand'
+    says left_to_you 'src/code.rs: +assert_eq!(super::answer(), 42);'
+    [ "$(field tests_fail_without_fix)" = "(absent)" ] || fail "a source path holding the new test gave tests_fail_without_fix $(field tests_fail_without_fix)"
+    no_test_ran
+
+    fixture moved-text
+    printf '# Notes, moved\n' >"$at/lane/docs/notes.md"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set docs/
+    run
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "(absent) (absent)" ] || fail "a lane naming no test got a test field"
+    [ "$(field lines_that_run | tail -n 1)" = "lines that run: 0" ] || fail "a note counted as lines that run"
+    no_test_ran
+
+    fixture resume
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    echo 2 >"$at/stub/gate-sleeps"
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + tests is_fixed
+    budget=1 call target/verify-lane.txt
+    [ "$rc" -eq 3 ] || fail "a run longer than one call exited $rc, not 3"
+    grep -qF 'still running' <<<"$json" || fail "a call that ran out of time does not say on its last line that the run goes on"
+    call target/verify-lane.txt
+    [ "$rc" -eq 2 ] && grep -qF 'has started a run' <<<"$got" || fail "a second start in the same tree did not refuse"
+    call wait
+    [ "$rc" -eq 0 ] || fail "the wait that saw the run end exited $rc"
+    held_to_the_schema
+    grep -qxF 'gate: PASS' <<<"$got" || fail "the wait did not print what the run logged after the first call"
+    [ "$(field tests_fail_without_fix)" = true ] || fail "the run followed to its end gave tests_fail_without_fix $(field tests_fail_without_fix)"
+    first=$json
+    call wait
+    [ "$rc" -eq 0 ] && [ "$json" = "$first" ] || fail "a wait after the run ended does not print its JSON again"
+    back_at_the_tip
+
+    fixture bad-input
+    input base "$base" + colour blue
+    call target/verify-lane.txt
+    [ "$rc" -eq 2 ] && grep -qF "is 'colour'" <<<"$got" || fail "an input with an unknown record did not refuse by name"
+    [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input it could not read"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 10 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #

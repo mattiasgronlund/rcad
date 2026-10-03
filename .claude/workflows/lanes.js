@@ -18,7 +18,9 @@
 // Since §383 and §384 the lane writes the rows it leaves, as `add` steps, and a
 // `merge` on such a lane goes to a Haiku lander that runs `just land` once. The
 // Opus merger takes a `fix_first`, a lane with no usable rows, and every merge
-// the recipe stopped on.
+// the recipe stopped on. Since §385 the verifier's fixed steps, and its re-runs
+// of the lane's numbers, are `just verify-lane`'s, and the verifier keeps the
+// reading.
 //
 // Invoke it as the `lanes` workflow, which is `meta.name` below and not this
 // file's name: Claude Code loads `.claude/workflows/*.js`, parses `meta`, and
@@ -284,7 +286,7 @@ function landable(prior) {
 function stepsProblem(rows) {
   if (!Array.isArray(rows)) return 'the lane reported no rows'
   for (const step of rows) {
-    if (!Array.isArray(step) || !step.every((w) => typeof w === 'string' && w.trim() !== '' && w !== '+' && !w.includes('\n'))) {
+    if (!Array.isArray(step) || !step.every(oneLine)) {
       return `the step ${JSON.stringify(step)} is not a list of words`
     }
     if (STEP_WORDS[step[0]] !== step.length) return `the step ${JSON.stringify(step)} is not add <tier> <model> <write set> <what>, after @N <ids>, or tag @N <tag>`
@@ -474,10 +476,20 @@ function reportSchema(lane) {
 // "your own worktree", is what made a verifier echo the lane's path back
 // (§263.4): it was never told its own tree has a path at all, let alone how
 // to find it.
+//
+// Since §385 the verifier's fixed steps are `just verify-lane`'s, and the rest
+// of this prompt is for what it leaves. Its input travels as the lander's steps
+// do (§384.2), as a file the verifier writes with the Write tool, one word to a
+// line: the Bash guard refuses `$( )`, variables and loops, and a number's
+// command holds quotes and `$`.
 function VERIFY(lane, r, kind) {
   const revert = sourcePathsOf(lane).join(', ') || '(none declared; say so and skip the revert)'
   const pinsOnlyNote = lane.pinsOnly === true
     ? '\nThis lane is marked pinsOnly: a verdict, a pinned test and a decisions section, nothing in src/ to revert. Skip the revert step. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says, then report tests_fail_without_fix: false with no reproduced_mutation and say in notes that pinsOnly is why -- that is the expected shape here, not a defect.'
+    : ''
+  const input = verifyInput(lane, r, kind)
+  const unsent = input.unsent.length
+    ? `\nThese could not go in the file, since a word of each is empty, a lone +, or more than one line, so check them by hand: ${JSON.stringify(input.unsent)}`
     : ''
   return `Check lane ${lane.label}, queue ${rowsOf(lane)}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
 Base: ${BASE}
@@ -485,7 +497,19 @@ Branch: ${branchOf(lane)}
 Write set: ${lane.writeSet.join(', ')}
 The lane's worktree, to unlock once you are done with it -- this is not your own tree, and not what you report as worktree_path: ${r.worktree_path}
 Source paths to revert: ${revert}${pinsOnlyNote}
-Lines that run -- in step 1, before you check the branch out, run this once in your own tree, exactly as written; report it as lines_that_run_command and all it prints, verbatim, as lines_that_run. It prints at most eleven lines, and the last is always lines that run: N:
+
+Run just verify-lane first: it does verifier.md's fixed steps for you (§385). First run git rev-parse --show-toplevel. Then, with the Write tool, write the lines between the two dashed lines below to target/verify-lane.txt under the path it printed, exactly as they stand: one word to a line, a + line between records, nothing added and nothing left out.
+----------
+${input.text}
+----------
+Then run this, as one plain Bash call in the foreground with timeout 600000:
+  mise exec -- just verify-lane target/verify-lane.txt
+While its last line says the run is still going, run this the same way, as often as it takes:
+  mise exec -- just verify-lane wait
+Its last line is then one line of JSON. Take every field it holds as it stands and do not run its steps again: skipped says what it skipped and why, for your notes, and left_to_you is what it could not decide, which is yours, beside the reading verifier.md names.${unsent}
+If your tree's just has no verify-lane recipe, do verifier.md's steps by hand.
+
+Lines that run -- just verify-lane runs this once, before it checks the branch out, and its JSON holds the command as lines_that_run_command and all it prints as lines_that_run. By hand, in step 1, before you check the branch out, run it once in your own tree, exactly as written, and report it the same way. It prints at most eleven lines, and the last is always lines that run: N:
   ${linesThatRunCommand(lane)}
 When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones.
 Revert them and watch the tests fail, then restore them -- that is the default proof for the fail half, and report it as tests_fail_without_fix. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says.
@@ -493,6 +517,38 @@ Only when the revert itself cannot fail -- a fix that just moves a floor or a bo
 Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
 
 The lane claims (JSON): ${JSON.stringify(r)}`
+}
+
+// The records `tooling/verify-lane/verify_lane.py` reads, each its name and
+// then its words, joined one to a line with a `+` line between records. A
+// number with a word no line can carry is left out and named in the prompt.
+function verifyInput(lane, r, kind) {
+  const records = [
+    ['base', BASE],
+    ['branch', branchOf(lane)],
+    ['lane-tree', r.worktree_path],
+    ['write-set'].concat(lane.writeSet),
+    ['source-paths'].concat(sourcePathsOf(lane)),
+  ]
+  if (lane.pinsOnly === true) records.push(['pins-only'])
+  const unsent = []
+  if (kind === 'tests') {
+    const tests = r.tests_that_fail_without_the_change
+    if (tests.some(oneLine)) records.push(['tests'].concat(tests.filter(oneLine)))
+    unsent.push(...tests.filter((t) => !oneLine(t)).map((t) => ({ test: t })))
+  }
+  for (const n of r.numbers || []) {
+    const words = [n.what, n.value, n.command]
+    if (words.every(oneLine)) records.push(['number'].concat(words))
+    else unsent.push(n)
+  }
+  return { text: records.map((record) => record.join('\n')).join('\n+\n'), unsent }
+}
+
+// A word one line of a file can carry, in the lander's steps and the
+// verifier's input alike: not empty, not the `+` that separates, one line.
+function oneLine(w) {
+  return typeof w === 'string' && w.trim() !== '' && w !== '+' && !w.includes('\n')
 }
 
 // A recipe, so the verifier types and reports one short line (§382). It runs
@@ -610,7 +666,7 @@ function numberSchema() {
     required: ['what', 'value', 'command'],
     properties: {
       what: { type: 'string' },
-      value: { type: 'string' },
+      value: { type: 'string', description: 'text the command prints, exactly as it prints it: the verifier\'s just verify-lane looks for it in that print (§383.4, §385)' },
       command: { type: 'string', description: 'the exact command you ran to get this value' },
     },
   }
