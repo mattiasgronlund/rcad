@@ -178,3 +178,14 @@ The second and third items above are done; the first stays open (Q781).
   `5.993841838603952e-6`, still 5134 points. With the one read in
   `walk_a_wire_round` put back to the round trip and everything else kept, the
   old value comes back, so that read is the cause.
+- **One floor outside this lane's files fails, because a placed mesh got
+  better.** `measuring_one_face.rs`'s
+  `the_middle_of_each_face_is_within_its_wobble` floors the closest any
+  centroid comes to its wobble at `0.002`, and its doc says `0.0022`. That
+  `0.0022` was the bend turned and a million units out, at `0.03`:
+  `0.0021706256371892296` with the round trip, against `0.0018130049876618794`
+  for the same bend at no placement. With the read as made the placed bend
+  comes to `0.0018130046725639277`, the unplaced bend's own figure to seven
+  digits, so the closest is now `0.0018130049876618794` and under the floor.
+  Every face is still inside its wobble. The floor and the doc's `0.0022` need
+  moving to the unplaced bend's `0.0018`; that file was not this lane's.
