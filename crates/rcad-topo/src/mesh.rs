@@ -942,13 +942,26 @@ impl BuildingAMesh {
         // [`BuildingAMesh::cut_a_ring_across`] cuts it; one that goes right
         // round beside one that does not says nothing about which side of the
         // winding one the other sits, so the face is refused the way a wire
-        // that will not lie flat has always been refused.
-        if walked.iter().any(|around| around.goes_right_round)
-            && !walked.iter().all(|around| around.goes_right_round)
+        // that will not lie flat has always been refused. On a torus that is
+        // asked of each way round, the tube and the ring, and a wire that went
+        // right round both was refused in [`WalkingAWire::finish`].
+        let winding_round =
+            |way: fn(&WalkedLoop) -> bool| walked.iter().filter(|&around| way(around)).count();
+        let round_the_first_way = winding_round(|around| around.goes_right_round);
+        let round_the_second_way = winding_round(|around| around.goes_right_round_the_second_way);
+        if [round_the_first_way, round_the_second_way]
+            .iter()
+            .any(|&winding| winding > 0 && winding < walked.len())
         {
             return Err(Error::AWireWillNotLieFlatOnItsFace { face: face.key() });
         }
-        for patch in self.cut_off_what_goes_too_far_round(face, &surface, walked, room)? {
+        let patches = if round_the_second_way > 0 {
+            self.cut_a_band_right_round_the_ring(face, &surface, &walked, room)?
+        } else {
+            let patches = self.cut_off_what_goes_too_far_round(face, &surface, walked, room)?;
+            self.cut_what_reaches_right_round_the_ring(face, &surface, patches, room)?
+        };
+        for patch in patches {
             self.hand_over(face, &surface, patch, room, by_corner_order, log)?;
         }
         Ok(())
@@ -1094,12 +1107,26 @@ impl BuildingAMesh {
             else {
                 return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
             };
-            return self.cut_each_narrow_enough(face, stored, vec![one, other], widest, room);
+            return self.cut_each_narrow_enough(
+                face,
+                stored,
+                Chart::Upright,
+                vec![one, other],
+                widest,
+                room,
+            );
         }
         if walked.len() == 1
             && let Some((one, other)) = self.open_a_slit(face, stored, &walked[0], room)?
         {
-            return self.cut_each_narrow_enough(face, stored, vec![one, other], widest, room);
+            return self.cut_each_narrow_enough(
+                face,
+                stored,
+                Chart::Upright,
+                vec![one, other],
+                widest,
+                room,
+            );
         }
         if how_far_round(&walked[0]) <= widest {
             return Ok(vec![walked]);
@@ -1139,7 +1166,7 @@ impl BuildingAMesh {
         // taught the walk to come back a whole turn on.
         if walked.len() != 1 {
             if let Some(patches) =
-                self.cut_a_ring_across(face, stored, &walked, whole_turn, room)?
+                self.cut_a_ring_across(face, stored, Chart::Upright, &walked, whole_turn, room)?
             {
                 return Ok(patches);
             }
@@ -1148,10 +1175,150 @@ impl BuildingAMesh {
             else {
                 return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
             };
-            return self.cut_each_narrow_enough(face, stored, vec![one, other], widest, room);
+            return self.cut_each_narrow_enough(
+                face,
+                stored,
+                Chart::Upright,
+                vec![one, other],
+                widest,
+                room,
+            );
         }
         let only = walked.into_iter().next().expect("just checked");
-        self.cut_each_narrow_enough(face, stored, vec![only], widest, room)
+        self.cut_each_narrow_enough(face, stored, Chart::Upright, vec![only], widest, room)
+    }
+
+    /// Cut a torus face whose two wires each go right round the **ring** —
+    /// the band between two circles round the tube's own middle, with no seam
+    /// across the tube — into patches no wider than a quarter turn either way.
+    ///
+    /// It is [`BuildingAMesh::cut_a_ring_across`] on the loops turned on their
+    /// side ([`Chart::OnItsSide`]), so that the angle round the ring is
+    /// the one it cuts across at four quarters, and then each quarter is cut
+    /// round the tube as any piece is. The top half of a ring written with one
+    /// wire per equator is this shape, and so is the band between the inner
+    /// and outer equator that §250.7's half ring needs.
+    ///
+    /// **The second loop is put on the side of the first the face lies on
+    /// before anything is cut**, in the angle round the tube, because a straight
+    /// cut from one loop to the other goes over the top of the tube or under
+    /// it according to which turn of that angle the second loop is in
+    /// ([`with_its_tube_angle_on_the_faces_side_of`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`] for a face that has a
+    /// number of such wires other than two: one alone bounds the whole torus
+    /// slit along it, which is not a face, and three or more bound no band
+    /// between them.
+    fn cut_a_band_right_round_the_ring(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        walked: &[WalkedLoop],
+        room: f64,
+    ) -> Result<Vec<Vec<WalkedLoop>>> {
+        let (Some(round_the_tube), Some(round_the_ring)) = (
+            how_far_the_longitude_wraps(stored),
+            how_far_the_second_coordinate_wraps(stored),
+        ) else {
+            panic!("only a torus has a wire that goes right round its second coordinate");
+        };
+        let [first, second] = walked else {
+            return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+        };
+        let second = with_its_tube_angle_on_the_faces_side_of(second, first, round_the_tube);
+        let on_their_side = [first.turned_on_its_side(), second.turned_on_its_side()];
+        let Some(quarters) = self.cut_a_ring_across(
+            face,
+            stored,
+            Chart::OnItsSide,
+            &on_their_side,
+            round_the_ring,
+            room,
+        )?
+        else {
+            return Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { face: face.key() });
+        };
+        let mut patches = Vec::with_capacity(quarters.len());
+        for quarter in quarters {
+            let upright = quarter.iter().map(WalkedLoop::turned_on_its_side).collect();
+            patches.extend(self.cut_each_narrow_enough(
+                face,
+                stored,
+                Chart::Upright,
+                upright,
+                round_the_tube / 4.0,
+                room,
+            )?);
+        }
+        Ok(patches)
+    }
+
+    /// Cut each patch of a torus face that reaches a whole turn round the
+    /// **ring** into pieces no wider than a quarter turn that way, and hand
+    /// every other patch back as it came.
+    ///
+    /// **A face reaches a whole turn round the ring by a seam across the tube**:
+    /// one wire passes the seam's points twice, a whole turn apart in the angle
+    /// round the ring, which is how a file writes a fillet round a disc and how
+    /// the crown of a ring is written. In the chart that patch closes, so
+    /// nothing before this saw anything wrong with it, but it is a whole turn
+    /// wide, and a triangle's chord across a whole turn is nothing at all: the
+    /// crown folded (`TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`,
+    /// `docs/decisions.md` §280.8). So it is cut the way
+    /// [`BuildingAMesh::cut_off_what_goes_too_far_round`] cuts a piece round the
+    /// tube, with its corners turned on their side ([`Chart::OnItsSide`]).
+    ///
+    /// **A patch that does not reach a whole turn round the ring is left as it
+    /// was**, bit for bit, though it may be wider than a quarter: a band three
+    /// quarters of the way round measured `6π²` within its stated error in one
+    /// patch per quarter of the tube (`docs/decisions.md` §343.3). A chord stops
+    /// growing past half a turn, and it comes to nothing only at a whole one.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`] for a patch of more than one
+    /// loop that reaches a whole turn round the ring: nothing here cuts a piece
+    /// with a hole in it.
+    fn cut_what_reaches_right_round_the_ring(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        patches: Vec<Vec<WalkedLoop>>,
+        room: f64,
+    ) -> Result<Vec<Vec<WalkedLoop>>> {
+        let Some(round_the_ring) = how_far_the_second_coordinate_wraps(stored) else {
+            return Ok(patches);
+        };
+        let mut cut = Vec::with_capacity(patches.len());
+        for patch in patches {
+            if !patch
+                .iter()
+                .any(|around| reaches_a_whole_turn_round_the_second_way(around, round_the_ring))
+            {
+                cut.push(patch);
+                continue;
+            }
+            let [only] = patch.as_slice() else {
+                return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+            };
+            let pieces = self.cut_each_narrow_enough(
+                face,
+                stored,
+                Chart::OnItsSide,
+                vec![only.turned_on_its_side()],
+                round_the_ring / 4.0,
+                room,
+            )?;
+            cut.extend(pieces.into_iter().map(|piece| {
+                piece
+                    .iter()
+                    .map(WalkedLoop::turned_on_its_side)
+                    .collect::<Vec<_>>()
+            }));
+        }
+        Ok(cut)
     }
 
     /// The outer loop of a ball less a disc, for a face whose one wire is the
@@ -1191,14 +1358,19 @@ impl BuildingAMesh {
             self.on_a_cut.insert(at);
             at
         });
-        let up = self.points_along_a_cut(face, stored, [seam, -pole], [seam, pole], room)?;
+        let up = self.points_along_a_cut(
+            face,
+            stored,
+            Chart::Upright,
+            [seam, -pole],
+            [seam, pole],
+            room,
+        )?;
 
         let mut outer = WalkedLoop {
             corners: vec![[seam, -pole], [seam + whole, -pole]],
             points: vec![south, south],
-            closes_on_one_curve: false,
-            goes_right_round: false,
-            climbed: 0.0,
+            ..WalkedLoop::a_stretch(0)
         };
         for (corner, &point) in up.corners.iter().zip(&up.points) {
             outer.corners.push([corner[0] + whole, corner[1]]);
@@ -1211,11 +1383,14 @@ impl BuildingAMesh {
     }
 
     /// Cut each piece in two until none of them goes further round than
-    /// `widest`, or until no cut makes one any narrower.
+    /// `widest` in the first coordinate of its corners, or until no cut makes
+    /// one any narrower. `chart` says which of the surface's own two that first
+    /// one is.
     fn cut_each_narrow_enough(
         &mut self,
         face: FaceView<'_>,
         stored: &Surface,
+        chart: Chart,
         mut pieces: Vec<WalkedLoop>,
         widest: f64,
         room: f64,
@@ -1225,7 +1400,7 @@ impl BuildingAMesh {
             if pieces.len() + done.len() >= MOST_PIECES_A_FACE_IS_CUT_INTO {
                 return Err(Error::ACurvedFaceCannotBeCutSmallEnoughToMesh { face: face.key() });
             }
-            match self.cut_in_two(face, stored, &piece, widest, room)? {
+            match self.cut_in_two(face, stored, chart, &piece, widest, room)? {
                 Some((one, other)) => {
                     pieces.push(one);
                     pieces.push(other);
@@ -1273,8 +1448,14 @@ impl BuildingAMesh {
         };
         self.on_a_cut.insert(opened.points[tip]);
         self.on_a_cut.insert(opened.points[far]);
-        let cut =
-            self.points_along_a_cut(face, stored, opened.corners[far], opened.corners[tip], room)?;
+        let cut = self.points_along_a_cut(
+            face,
+            stored,
+            Chart::Upright,
+            opened.corners[far],
+            opened.corners[tip],
+            room,
+        )?;
         let mut one = opened.between(tip, far);
         one.take_in(&cut);
         let mut other = opened.between(far, tip);
@@ -1350,7 +1531,14 @@ impl BuildingAMesh {
             self.on_a_cut.insert(cap.points[corner]);
             let leaving = cap.corners[corner];
             let arriving = [leaving[0], towards];
-            cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
+            cuts.push(self.points_along_a_cut(
+                face,
+                stored,
+                Chart::Upright,
+                leaving,
+                arriving,
+                room,
+            )?);
         }
 
         let mut patches = Vec::with_capacity(4);
@@ -1478,12 +1666,20 @@ impl BuildingAMesh {
     /// already has and a corner the other already has, and the points strictly
     /// along it are made once and handed to the two patches either side.
     ///
+    /// **Round the first coordinate of the corners it is handed**, which `chart`
+    /// says is the surface's own first or its second. A torus band between two
+    /// circles round the tube's middle goes right round the ring instead, and
+    /// [`BuildingAMesh::cut_a_band_right_round_the_ring`] hands it here on its
+    /// side, so that the four cuts run across the band from one circle to the
+    /// other.
+    ///
     /// `None` when the face is not a ring: two loops is not enough, they both
     /// have to go right round, or there is nothing across to cut to.
     fn cut_a_ring_across(
         &mut self,
         face: FaceView<'_>,
         stored: &Surface,
+        chart: Chart,
         walked: &[WalkedLoop],
         whole_turn: f64,
         room: f64,
@@ -1554,7 +1750,7 @@ impl BuildingAMesh {
             ];
             self.on_a_cut.insert(up.points[along_the_top[step]]);
             self.on_a_cut.insert(down.points[along_the_bottom[step]]);
-            cuts.push(self.points_along_a_cut(face, stored, leaving, arriving, room)?);
+            cuts.push(self.points_along_a_cut(face, stored, chart, leaving, arriving, room)?);
         }
 
         // Every stretch is put on the end **unwrapped against what is already
@@ -1666,10 +1862,22 @@ impl BuildingAMesh {
 
         let mut one = opened.between(top, bottom);
         let mut other = opened.between(bottom, top);
-        let to_the_top =
-            self.points_along_a_cut(face, stored, hole.corners[highest], top_corner, room)?;
-        let from_the_bottom =
-            self.points_along_a_cut(face, stored, bottom_corner, hole.corners[lowest], room)?;
+        let to_the_top = self.points_along_a_cut(
+            face,
+            stored,
+            Chart::Upright,
+            hole.corners[highest],
+            top_corner,
+            room,
+        )?;
+        let from_the_bottom = self.points_along_a_cut(
+            face,
+            stored,
+            Chart::Upright,
+            bottom_corner,
+            hole.corners[lowest],
+            room,
+        )?;
 
         one.take_in(&from_the_bottom);
         one.take_in(&hole.between(lowest, highest));
@@ -1696,34 +1904,53 @@ impl BuildingAMesh {
     }
 
     /// The points strictly between two corners of one face, walked along the
-    /// straight line between them in the surface's own two coordinates.
+    /// straight line between them in the surface's own two coordinates, and
+    /// as many of them as [`how_many_steps`] says the line needs.
+    ///
+    /// The two corners and the points that come back are in the order `chart`
+    /// says; only where a point is put on the surface are its two numbers given
+    /// back in the surface's own order.
     fn points_along_a_cut(
         &mut self,
         face: FaceView<'_>,
         stored: &Surface,
+        chart: Chart,
         leaving: [f64; 2],
         arriving: [f64; 2],
         room: f64,
     ) -> Result<WalkedLoop> {
-        let steps = how_many_steps(stored, leaving, arriving, room);
+        let steps = how_many_steps(
+            stored,
+            chart.as_the_surface_takes_them(leaving),
+            chart.as_the_surface_takes_them(arriving),
+            room,
+        );
+        self.points_along_a_cut_in(face, stored, chart, [leaving, arriving], steps)
+    }
+
+    /// The points strictly between two corners of one face, `steps` steps
+    /// apart along the straight line between them.
+    fn points_along_a_cut_in(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        chart: Chart,
+        [leaving, arriving]: [[f64; 2]; 2],
+        steps: usize,
+    ) -> Result<WalkedLoop> {
         if self.points.len() + steps > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
                 most: MOST_POINTS_A_MESH_WILL_HOLD,
             });
         }
         let there = back_out_of_the_frame_this_face_is_meshed_in(face);
-        let mut along = WalkedLoop {
-            corners: Vec::with_capacity(steps - 1),
-            points: Vec::with_capacity(steps - 1),
-            closes_on_one_curve: false,
-            goes_right_round: false,
-            climbed: 0.0,
-        };
+        let mut along = WalkedLoop::a_stretch(steps - 1);
         for step in 1..steps {
             let part = step as f64 / steps as f64;
             let sits_at =
                 [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
-            let on_it = stored.point_at(sits_at[0], sits_at[1]);
+            let [first, second] = chart.as_the_surface_takes_them(sits_at);
+            let on_it = stored.point_at(first, second);
             along.corners.push(sits_at);
             let at = self.remember_made_on(face, &there, on_it);
             self.on_a_cut.insert(at);
@@ -1775,10 +2002,22 @@ impl BuildingAMesh {
     /// neighbour's diagonal — only that no solid the gate builds has shown one,
     /// and that the ones that do reach this go on paying nothing for the
     /// possibility.
+    ///
+    /// **A cut round a torus's ring is one that has**, and every one of those
+    /// carries a point. The crown of a ring is a piece of torus between two
+    /// circles that one flat face also bounds, written with a seam across the
+    /// tube: each cut round the ring runs from a point of one circle to a point
+    /// of the other, a pair the flat face across both is free to draw. With
+    /// bare cuts its build was refused `TwoPatchesOfTheMeshDrewTheSameSide {
+    /// drawn: 4, used: 4 }`, and with a point on each it builds and holds what
+    /// Pappus gives (`docs/decisions.md` §390). Every face cut that way was
+    /// refused before such a cut existed, so the point moves no answer the
+    /// kernel gave.
     fn cut_in_two(
         &mut self,
         face: FaceView<'_>,
         stored: &Surface,
+        chart: Chart,
         piece: &WalkedLoop,
         widest: f64,
         room: f64,
@@ -1799,34 +2038,22 @@ impl BuildingAMesh {
 
         let leaving = opened.corners[at[1]];
         let arriving = opened.corners[at[0]];
-        let least_steps = if piece.closes_on_one_curve { 2 } else { 1 };
-        let steps = how_many_steps(stored, leaving, arriving, room).max(least_steps);
-        if self.points.len() + steps > MOST_POINTS_A_MESH_WILL_HOLD {
-            return Err(Error::MoreMeshPointsThanASolidWillHold {
-                most: MOST_POINTS_A_MESH_WILL_HOLD,
-            });
-        }
-
-        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
-        let mut along_the_cut = WalkedLoop {
-            corners: Vec::with_capacity(steps - 1),
-            points: Vec::with_capacity(steps - 1),
-            closes_on_one_curve: false,
-            goes_right_round: false,
-            climbed: 0.0,
+        let least_steps = match chart {
+            Chart::OnItsSide => 2,
+            Chart::Upright if piece.closes_on_one_curve => 2,
+            Chart::Upright => 1,
         };
+        let steps = how_many_steps(
+            stored,
+            chart.as_the_surface_takes_them(leaving),
+            chart.as_the_surface_takes_them(arriving),
+            room,
+        )
+        .max(least_steps);
         self.on_a_cut.insert(opened.points[at[0]]);
         self.on_a_cut.insert(opened.points[at[1]]);
-        for step in 1..steps {
-            let part = step as f64 / steps as f64;
-            let sits_at =
-                [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
-            let on_it = stored.point_at(sits_at[0], sits_at[1]);
-            along_the_cut.corners.push(sits_at);
-            let at = self.remember_made_on(face, &there, on_it);
-            self.on_a_cut.insert(at);
-            along_the_cut.points.push(at);
-        }
+        let along_the_cut =
+            self.points_along_a_cut_in(face, stored, chart, [leaving, arriving], steps)?;
 
         one.take_in(&along_the_cut);
         other.take_in(&along_the_cut.the_other_way());
@@ -2224,18 +2451,50 @@ struct WalkedLoop {
     /// they run, not the short way round. Only a whole walked loop has one; a
     /// stretch or a cut says `0`.
     climbed: f64,
+    /// The same two for the second coordinate, which only wraps on a torus,
+    /// where it is the angle round the ring: whether the walk went right round
+    /// the ring, and how far round it the walk climbed.
+    goes_right_round_the_second_way: bool,
+    climbed_the_second_way: f64,
 }
 
 impl WalkedLoop {
-    /// The stretch from corner `from` round to corner `to`, both ends kept.
-    fn between(&self, from: usize, to: usize) -> WalkedLoop {
-        let mut taken = WalkedLoop {
-            corners: Vec::new(),
-            points: Vec::new(),
+    /// A stretch or a cut, with room for `corners` corners and none yet: it
+    /// is no whole loop, so it goes right round nothing.
+    fn a_stretch(corners: usize) -> WalkedLoop {
+        WalkedLoop {
+            corners: Vec::with_capacity(corners),
+            points: Vec::with_capacity(corners),
             closes_on_one_curve: false,
             goes_right_round: false,
             climbed: 0.0,
-        };
+            goes_right_round_the_second_way: false,
+            climbed_the_second_way: 0.0,
+        }
+    }
+
+    /// The same loop with the two numbers of every corner swapped, and with
+    /// them which way round it goes each way: the corners in
+    /// [`Chart::OnItsSide`] read from [`Chart::Upright`], and back again.
+    fn turned_on_its_side(&self) -> WalkedLoop {
+        WalkedLoop {
+            corners: self
+                .corners
+                .iter()
+                .map(|&[first, second]| [second, first])
+                .collect(),
+            points: self.points.clone(),
+            closes_on_one_curve: self.closes_on_one_curve,
+            goes_right_round: self.goes_right_round_the_second_way,
+            climbed: self.climbed_the_second_way,
+            goes_right_round_the_second_way: self.goes_right_round,
+            climbed_the_second_way: self.climbed,
+        }
+    }
+
+    /// The stretch from corner `from` round to corner `to`, both ends kept.
+    fn between(&self, from: usize, to: usize) -> WalkedLoop {
+        let mut taken = WalkedLoop::a_stretch(0);
         let mut at = from;
         loop {
             taken.corners.push(self.corners[at]);
@@ -2272,6 +2531,40 @@ impl WalkedLoop {
             closes_on_one_curve: self.closes_on_one_curve,
             goes_right_round: self.goes_right_round,
             climbed: -self.climbed,
+            goes_right_round_the_second_way: self.goes_right_round_the_second_way,
+            climbed_the_second_way: -self.climbed_the_second_way,
+        }
+    }
+}
+
+/// Which order a patch's corners give a surface's two coordinates in.
+///
+/// Everything that cuts a face into pieces cuts across the **first** number of
+/// the corners it is handed: [`BuildingAMesh::cut_in_two`] at the middle of
+/// how far round a piece goes, [`BuildingAMesh::cut_a_ring_across`] at four
+/// quarters of a turn. On every surface but a torus only the first of the
+/// surface's own two coordinates wraps, so that is the only way there is to
+/// cut. A torus wraps both ways, round the tube and round the ring, and a face
+/// can go right round either. Turning its corners on their side lets the same
+/// cuts run round the ring, and the two numbers are given back in the
+/// surface's own order only where a point is put on the surface.
+#[derive(Clone, Copy, Debug)]
+enum Chart {
+    /// The surface's first coordinate first: on a torus, the angle round the
+    /// tube.
+    Upright,
+    /// The surface's second coordinate first: on a torus, the angle round the
+    /// ring.
+    OnItsSide,
+}
+
+impl Chart {
+    /// A corner's two numbers in the order the surface's own
+    /// [`Surface::point_at`] and [`how_many_steps`] take them.
+    fn as_the_surface_takes_them(self, [one, other]: [f64; 2]) -> [f64; 2] {
+        match self {
+            Chart::Upright => [one, other],
+            Chart::OnItsSide => [other, one],
         }
     }
 }
@@ -2557,10 +2850,7 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
             .iter()
             .map(|corner| [corner[0] + by, corner[1]])
             .collect(),
-        points: chain.points.clone(),
-        closes_on_one_curve: chain.closes_on_one_curve,
-        goes_right_round: chain.goes_right_round,
-        climbed: chain.climbed,
+        ..chain.clone()
     }
 }
 
@@ -2574,10 +2864,11 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
 /// outer loop's span from the outer loop's middle. For an outer loop spanning
 /// less than a whole turn round the ring that is less than half a turn in
 /// exactly one turn, and this finds it whichever of the two is the face's
-/// first wire. The loops that go right round the ring, which are the ones a
-/// face is most likely to span a whole turn with, were refused by
-/// [`WalkingAWire::goes_right_round_the_second_way`]. A loop already in that
-/// turn keeps its numbers bit for bit.
+/// first wire. A loop already in that turn keeps its numbers bit for bit.
+/// Two loops that each go right round the ring span a whole turn each, so any
+/// turn is theirs; [`BuildingAMesh::cut_a_ring_across`] brings them into one,
+/// and what places them is the angle round the tube
+/// ([`with_its_tube_angle_on_the_faces_side_of`]).
 ///
 /// **Two loops side by side are placed by which way `frame` runs, and never by
 /// which way round is nearer.** Two loops that each go right round the tube,
@@ -2628,6 +2919,65 @@ fn with_its_second_coordinate_in_the_turn_of(
     }
 }
 
+/// One loop that goes right round a torus's ring moved by whole turns of the
+/// angle round the tube onto the side of `frame` the face lies on.
+///
+/// Two such loops bound two bands, one over the top of the tube between them
+/// and one under it, and only which way `frame` runs says which the face is —
+/// the same question [`with_its_second_coordinate_in_the_turn_of`] answers for
+/// two loops round the tube, asked the other way round. A torus face keeps its
+/// material on its left, and the chart's turn `∂u × ∂v` points into the tube
+/// while the face points out of it (§329.1), so the loop runs clockwise in
+/// `(u, v)`: up the angle round the ring along the low side of the band in
+/// `u`, and down it along the high side. So the face lies above a loop running
+/// up the ring and below one running down it, and the other loop goes in the
+/// nearest turn on that side. The top half of a ring is the case that checks
+/// it: its outer equator at `u = 0` runs up the ring, its inner one at `u = π`
+/// runs down, and the face is the `u` between them over the top of the tube.
+///
+/// **Middles are enough**, by 343.2's argument with the two coordinates
+/// swapped: two disjoint loops that each go once round the ring are one beside
+/// the other in `u`.
+fn with_its_tube_angle_on_the_faces_side_of(
+    chain: &WalkedLoop,
+    frame: &WalkedLoop,
+    whole: f64,
+) -> WalkedLoop {
+    let middle = |around: &WalkedLoop| {
+        let (least, most) = longitudes_of(around);
+        (least + most) / 2.0
+    };
+    let turns = (middle(chain) - middle(frame)) / whole;
+    let by = if frame.climbed_the_second_way > 0.0 {
+        turns.floor() * whole
+    } else {
+        turns.ceil() * whole
+    };
+    WalkedLoop {
+        corners: chain
+            .corners
+            .iter()
+            .map(|corner| [corner[0] - by, corner[1]])
+            .collect(),
+        ..chain.clone()
+    }
+}
+
+/// Whether a loop on a surface whose second coordinate wraps passes one point
+/// at two corners a whole turn apart that way — on a torus, a seam across the
+/// tube, so that its patch reaches a whole turn round the ring and closes.
+fn reaches_a_whole_turn_round_the_second_way(around: &WalkedLoop, whole: f64) -> bool {
+    let mut first_seen_at: HashMap<u32, f64> = HashMap::new();
+    around
+        .points
+        .iter()
+        .zip(&around.corners)
+        .any(|(&at, corner)| {
+            let first_seen = *first_seen_at.entry(at).or_insert(corner[1]);
+            (corner[1] - first_seen).abs() >= whole / 2.0
+        })
+}
+
 /// The lowest longitude any corner of a loop sits at.
 fn least_longitude(around: &WalkedLoop) -> f64 {
     around
@@ -2654,10 +3004,7 @@ fn unwrapped(chain: &WalkedLoop, whole: f64) -> WalkedLoop {
     }
     WalkedLoop {
         corners,
-        points: chain.points.clone(),
-        closes_on_one_curve: chain.closes_on_one_curve,
-        goes_right_round: chain.goes_right_round,
-        climbed: chain.climbed,
+        ..chain.clone()
     }
 }
 
@@ -2723,13 +3070,7 @@ fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
 /// corner: there is nothing to cut off there.
 fn where_to_cut(around: &WalkedLoop, middle: f64) -> Option<(WalkedLoop, [usize; 2])> {
     let count = around.corners.len();
-    let mut opened = WalkedLoop {
-        corners: Vec::with_capacity(count + 2),
-        points: Vec::with_capacity(count + 2),
-        closes_on_one_curve: false,
-        goes_right_round: false,
-        climbed: 0.0,
-    };
+    let mut opened = WalkedLoop::a_stretch(count + 2);
     let mut moved_to = Vec::with_capacity(count);
     let mut places = Vec::new();
 
@@ -3285,55 +3626,43 @@ impl WalkingAWire {
             }
             _ => (0.0, false),
         };
-        if let Some(whole) = self.second_wraps
-            && self.goes_right_round_the_second_way(whole)
-        {
-            return None;
-        }
+        // **Round the ring the same rule holds**, read the same way, on a
+        // torus, whose second coordinate is the angle round the ring. A wire
+        // that comes back a whole turn on round the ring is one of the two
+        // circles of a band round it, which
+        // [`BuildingAMesh::cut_a_band_right_round_the_ring`] cuts; it may come
+        // back a whole turn on only where it may round the tube. One that came
+        // back a whole turn on both ways round is no loop a face has.
+        //
+        // **A seam across the tube is not refused here any more.** Its wire
+        // passes the seam's points at two corners a whole turn apart round the
+        // ring and closes in the chart, so it is an ordinary loop a whole turn
+        // wide, and [`BuildingAMesh::cut_what_reaches_right_round_the_ring`]
+        // cuts it narrower (`docs/decisions.md` §390).
+        let (climbed_the_second_way, goes_right_round_the_second_way) =
+            match (self.second_wraps, self.corners.first(), self.corners.last()) {
+                (Some(whole), Some(first), Some(last)) => {
+                    let climbed =
+                        last[1] - first[1] + the_short_way_round(first[1] - last[1], whole);
+                    let went_round = climbed.abs() >= whole / 2.0;
+                    if went_round
+                        && (goes_right_round
+                            || !self.closes_on_one_curve && !self.may_come_back_a_whole_turn_on())
+                    {
+                        return None;
+                    }
+                    (climbed, went_round)
+                }
+                _ => (0.0, false),
+            };
         Some(WalkedLoop {
             corners: self.corners,
             points: self.points,
             closes_on_one_curve: self.closes_on_one_curve,
             goes_right_round,
             climbed,
-        })
-    }
-
-    /// Whether the loop goes right round the way its second coordinate wraps,
-    /// which on a torus is right round the ring: it comes back a whole turn on,
-    /// or it passes one point at two corners a whole turn apart, which is a
-    /// seam across the tube.
-    ///
-    /// **Either is a face this mesher has no cut for, so it is refused by name
-    /// — a gap, not a limit.** A wire that comes back a whole turn on does not
-    /// close in the chart, and only round the tube is there anything
-    /// ([`WalkingAWire::may_come_back_a_whole_turn_on`]) that lets one. A face
-    /// with a seam across the tube closes, but its patch is a whole turn wide
-    /// round the ring, and nothing cuts a patch narrower that way:
-    /// [`BuildingAMesh::cut_off_what_goes_too_far_round`] cuts in the first
-    /// coordinate only, and the triangulator's chord round the ring,
-    /// `2S·|sin(Δ/2)|`, is nothing across a whole turn. Meshed anyway, with
-    /// the seam half of this switched off, the crown of a ring in
-    /// `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs` folded
-    /// (`TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`), and the
-    /// top half of a ring with a seam built and measured `38.396` where Pappus
-    /// gives `39.478`, inside its stated `8.742`. One fold and one right answer
-    /// is not a path that can be trusted with the shape.
-    ///
-    /// The climb is measured the way [`WalkingAWire::finish`] measures the
-    /// longitude's, with the closing step taken the short way round.
-    fn goes_right_round_the_second_way(&self, whole: f64) -> bool {
-        let (Some(first), Some(last)) = (self.corners.first(), self.corners.last()) else {
-            return false;
-        };
-        let climbed = last[1] - first[1] + the_short_way_round(first[1] - last[1], whole);
-        if climbed.abs() >= whole / 2.0 {
-            return true;
-        }
-        let mut first_seen_at: HashMap<u32, f64> = HashMap::new();
-        self.points.iter().zip(&self.corners).any(|(&at, corner)| {
-            let first_seen = *first_seen_at.entry(at).or_insert(corner[1]);
-            (corner[1] - first_seen).abs() >= whole / 2.0
+            goes_right_round_the_second_way,
+            climbed_the_second_way,
         })
     }
 
