@@ -142,3 +142,39 @@ unchanged here because nothing landed.
   file's pins: the refusal's name along `x` and `z`, and the bottom of each
   band (379.3). Needs `crates/rcad-topo/src/error.rs` in the write set.
 - Then correct the floor file's pinned deviation with its cause.
+
+**2026-10-03, Q780: the refusal and the hunks landed.** Lane
+`lane-q780-a-placed-solid-that-loses-its-space-is-refused`, off `6ac09257`.
+The second and third items above are done; the first stays open (Q781).
+
+- `Error::PlacingItTookAwayTheSpaceItsMeshEncloses { enclosed_where_made,
+  enclosed_where_placed }` is the refusal, raised at the end of
+  `SolidView::mesh` for a placed solid only, when 379.2's question is asked
+  and answered no. It is asked only when the volume where the mesh lands is
+  not positive, so a sound placed solid pays for one sum. The probe's hunks
+  landed with it, with one change: a face at no placement records its points
+  as they land, not in the frame it was shifted to, so that the table of
+  points as made is in one frame per shell. A flat face is asserted to get no
+  point inside it, which the triangulator's own rule guarantees and which
+  keeps that table honest.
+- The unit ball at `EVEN` is refused by that name through `mesh`, `validate`
+  and `measure` alike, `4/3` where made and `0` where it lands, along `x` and
+  up `z`:
+  `mise exec -- just t -p rcad-topo --test how_far_out_a_ball_can_sit_and_still_mesh`.
+- **Both band edges are honest meshes, and their pins moved to the answer.**
+  The unit ball at `2^53` and the ball of radius `0.25` at `2^51` mesh as a
+  closed square pyramid: the octahedron with its far corner pressed onto the
+  centre. Volume `0.6666666666666666` and `0.010416666666666666`, half the
+  octahedron's in each case (the balls' own are `4.19` and `0.0654`); the
+  furthest of 8 320 sampled points of the ball sits `1` and `0.25` from the
+  mesh, against claimed deviations of `36.67` and `9.17`; no triangle has no
+  area and no two lie on the same three places.
+  `at_the_bottom_of_the_band_the_ball_meshes_half_flattened` checks all three
+  and prints the numbers. The alternation tests now start one ulp above the
+  bottom of each band, and pin the bottom as meshing.
+- The bar's wall still differs: 141 to 199 of 500 triangles across the twelve
+  rows, none on the caps — the same as 379.4 item 2.
+- The floor file's deviation moved from `5.994025313141081e-6` to
+  `5.993841838603952e-6`, still 5134 points. With the one read in
+  `walk_a_wire_round` put back to the round trip and everything else kept, the
+  old value comes back, so that read is the cause.
