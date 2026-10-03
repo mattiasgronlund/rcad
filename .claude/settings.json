@@ -29,7 +29,8 @@
       "Bash(git worktree unlock:*)",
       "Bash(mise exec -- just prune-worktrees)",
       "Bash(mise exec -- just clean-targets)",
-      "Bash(mise exec -- just release-lanes:*)"
+      "Bash(mise exec -- just release-lanes:*)",
+      "Bash(mise exec -- just land:*)"
     ]
   },
   "worktree": {
