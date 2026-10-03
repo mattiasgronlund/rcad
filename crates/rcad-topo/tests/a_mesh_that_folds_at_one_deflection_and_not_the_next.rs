@@ -45,22 +45,22 @@
 //! family that folds is narrowed, not emptied, and 38 of these 1 680 meshes are
 //! what that looks like from outside.
 //!
-//! **The two-closed-curve family is forced to one shape, and that shape is a
-//! *gap*.** A solid encloses nothing when meshed coarsely only if every point
-//! that mesh holds sits on one plane, so both of the closed curves bounding such
-//! a patch have to lie in that plane too. Of the five surfaces this kernel has,
-//! a plane cuts each of the four quadrics in one conic, and only a torus square
-//! to its axis is cut in two closed curves — which is what
-//! [`Picker::InsideAPipe`](rcad_geom::Picker::InsideAPipe) was added for. So the
-//! shape is the crown of a ring and nothing else, and
-//! `the_crown_of_a_ring_is_a_gap_in_the_mesher_and_not_a_limit_of_the_shape`
-//! builds one and watches the mesher refuse its curved face: that face goes
-//! right round the **ring**, and a walked loop carries one wrapping coordinate,
-//! which `Torus::point_at` spends on the tube. **That refusal is the mesher's
-//! and not the shape's** — the crown is an ordinary solid with an ordinary
-//! volume — so it is pinned as a gap. Calling the family a limit for it would be
-//! resting a verdict on someone else's defect, and §208.4 is what that costs: a
-//! ring of arcs with no seam was unwalkable until it was walked.
+//! **The two-closed-curve family is forced to one shape, and that shape now
+//! meshes without coming back flat.** A solid encloses nothing when meshed
+//! coarsely only if every point that mesh holds sits on one plane, so both of
+//! the closed curves bounding such a patch have to lie in that plane too. Of the
+//! five surfaces this kernel has, a plane cuts each of the four quadrics in one
+//! conic, and only a torus square to its axis is cut in two closed curves —
+//! which is what [`Picker::InsideAPipe`](rcad_geom::Picker::InsideAPipe) was
+//! added for. So the shape is the crown of a ring and nothing else. Its curved
+//! face goes right round the **ring**, and the mesher refused it until it cut a
+//! patch round the ring as well as round the tube (§390). Every one of those
+//! cuts carries a point of its own over the top of the tube, so no mesh of the
+//! crown is flat: `the_crown_of_a_ring_holds_what_pappus_gives_and_no_rung_of_its_ladder_folds`
+//! holds it to Pappus and walks its ladder, and its one fold, at the coarsest
+//! rung, is cured at the next. With §208.3's arm taken out, that test still
+//! passes, because the crown's coarsest mesh already encloses something and
+//! never reaches the arm.
 //!
 //! **The other family the code admits is swept and is quiet.** `cut_in_two` asks
 //! `piece.closes_on_one_curve`, which a loop of several arcs fails without any
@@ -274,8 +274,8 @@ fn chopped_sliver(
 }
 
 /// The crown of a ring is the only shape that could pair a zero with a bare cut
-/// across two closed curves, and the mesher will not walk it. **That is a gap in
-/// the mesher and not a limit of the shape.**
+/// across two closed curves, and it builds, holds what Pappus gives, and folds
+/// at one rung of its ladder only, which the next rung cures.
 ///
 /// A bare cut is charged to a piece whose loop is not one whole closed curve,
 /// and the family `cut_in_two` says nothing about is a curved patch bounded by
@@ -288,31 +288,55 @@ fn chopped_sliver(
 ///
 /// So the shape is forced, and this is it: everything of a torus above a plane
 /// square to its axis, cut high enough up the tube that the patch spans under a
-/// quarter turn. It describes as a solid — the shell closes, both corners are
-/// exact on the quartic — and then the mesher refuses its curved face by name.
-/// The face is one wire: the outer circle, a seam across the tube, the inner
-/// circle, and the seam back. Since Q190 the walk unwraps the ring angle as it
-/// does the tube angle, so it sees the seam's two ends a whole turn apart round
-/// the **ring**, and refuses the wire as `AWireWillNotLieFlatOnItsFace`. Without
-/// that refusal the crown folds, `TwoPatchesOfTheMeshDrewTheSameSide`, because
-/// nothing yet cuts a patch round the ring as well as round the tube (§280.7).
+/// quarter turn. The face is one wire: the outer circle, a seam across the
+/// tube, the inner circle, and the seam back. The walk sees the seam's two ends
+/// a whole turn apart round the **ring**, and until the mesher cut a patch
+/// round the ring it refused the wire as `AWireWillNotLieFlatOnItsFace`, a gap
+/// and not a limit (§280.8). It is cut round the ring now, and each cut that
+/// way carries a point of its own: a bare one runs from a point of the outer
+/// circle to a point of the inner one, a pair the flat face across both circles
+/// may draw too, and the crown folded `TwoPatchesOfTheMeshDrewTheSameSide
+/// { drawn: 4, used: 4 }` at every rung with bare cuts (§390).
 ///
-/// **§16.10's line is whether the answer exists, and here it does.** The crown
-/// of a ring is an ordinary solid with an ordinary volume; what stops it is a
-/// mesher that can only cut a patch round one way, which is arithmetic that
-/// could be reached and has not been. §208.4 is the warning read the other way: a ring of
-/// arcs with no seam was unwalkable until it was walked, and nothing in the
-/// argument for refusing it had been about cones. So this pins the refusal the
-/// mesher gives today, with the mesher's own reason, and it is a *gap* — a
-/// verdict of *limit* for the family would rest on this defect and evaporate the
-/// day it is fixed.
+/// **Pappus.** The tube's disc of radius five above the line four from its
+/// centre is a segment of area `25·acos(4/5) − 4·3`, with its centroid on the
+/// ring's own circle, twenty from the axis, so the crown holds
+/// `2π · 20 · (25·acos(4/5) − 12) = 513.66`.
+///
+/// **The one fold is at the coarsest rung**, room five, the tube's own radius
+/// and five times the crown's height, where the curved face and the flat one
+/// each join a point of the outer circle to one of the inner. Room two and a
+/// half meshes, and so does every rung after it.
 #[test]
-fn the_crown_of_a_ring_is_a_gap_in_the_mesher_and_not_a_limit_of_the_shape() {
+fn the_crown_of_a_ring_holds_what_pappus_gives_and_no_rung_of_its_ladder_folds() {
     let mut model = Model::new(Scale::millimetres(500.0).expect("a positive size"));
-    let refusal = a_crown_of_a_ring(&mut model);
-    assert!(
-        matches!(refusal, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
-        "the crown's curved face goes right round the ring, and was {refusal:?}"
+    let crown = a_crown_of_a_ring(&mut model)
+        .unwrap_or_else(|why| panic!("the crown of a ring was refused {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the model holding the crown is sound");
+    let segment = 25.0 * 0.8_f64.acos() - 4.0 * 3.0;
+    let pappus = 2.0 * PI * 20.0 * segment;
+    for deflection in [0.5, 0.1, 0.05] {
+        measures_within_what_it_declares(
+            &model,
+            &[crown],
+            deflection,
+            pappus,
+            &format!("the crown of a ring at {deflection}"),
+        );
+    }
+    let mut tally = BTreeMap::new();
+    count_the_ladder(&model, &[crown], 5.0, &mut tally, "the crown of a ring");
+    assert_eq!(
+        tally,
+        BTreeMap::from([
+            ("meshed", RUNGS - 1),
+            ("folded", 1),
+            ("folds a later rung cured", 1),
+            ("folds no later rung cured", 0),
+        ]),
+        "every rung of the crown's ladder"
     );
 }
 
@@ -349,9 +373,13 @@ fn the_crown_of_a_ring_is_a_gap_in_the_mesher_and_not_a_limit_of_the_shape() {
 ///
 /// **So this file does not close §208.3's hole, and says so rather than
 /// implying it.** Neither family it adds reaches the rescue's ladder at all:
-/// the crown of a ring is refused before it can be meshed, and the chopped
+/// the crown of a ring meshes with a point over the top of the tube on every
+/// cut round the ring, so its coarsest mesh encloses something, and the chopped
 /// sliver takes the bare cut but never comes back flat. The arm is still a
-/// guard with nothing behind it.
+/// guard with nothing behind it. The crown was run against it once it meshed:
+/// with the arm put back to `Err(_) => break` as an uncommitted edit, this file
+/// and `building_a_solid_out_of_faces.rs` ran `17 tests run: 16 passed, 1
+/// failed`, and the one failure was this test (§390).
 ///
 /// What this test can check is that the experiment above is still an experiment
 /// about this tree. If the arm moves or goes, the record stops describing what

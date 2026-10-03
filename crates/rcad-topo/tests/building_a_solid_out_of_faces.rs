@@ -26,11 +26,12 @@
 //! CLAUDE.md forbids. So a caller rebuilding a ball does what a reader does —
 //! it names the meridian from the geometry it holds, not from the model.
 
+use core::f64::consts::PI;
 use std::collections::HashMap;
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
-    Scale, Surface, Vector,
+    Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
@@ -399,47 +400,274 @@ fn a_bend_turned_past_where_the_ring_angle_is_cut_is_the_bend_that_was_not_turne
     }
 }
 
-/// The top half of a ring described with one wire per equator is refused by
-/// name, because each of those wires climbs a whole turn round the ring and a
-/// loop in the chart has to close.
+/// The top half of a ring described with one wire per equator builds and holds
+/// what Pappus gives: its curved face is a band between two circles that each
+/// go right round the ring, and the mesher cuts it across at four quarters of
+/// the ring and then round the tube (§390).
 ///
-/// That is a wire that will not lie flat on its face, the name a wire that
-/// winds round the tube where it may not has always had (§280.6). Before the
-/// ring angle was unwrapped, each equator came back to the corner it left
-/// with no turn counted, and the builder refused the half ring
-/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 3, used: 3 }`.
+/// Each wire climbs a whole turn round the ring, so a loop in the chart does
+/// not close, and until the band was cut round the ring the builder refused it
+/// as a wire that will not lie flat on its face (§280.6). Before the ring angle
+/// was unwrapped, each equator came back to the corner it left with no turn
+/// counted, and it was refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 3,
+/// used: 3 }`.
 #[test]
-fn the_top_half_of_a_ring_with_no_seam_climbs_a_whole_turn_round_it_and_is_refused() {
+fn the_top_half_of_a_ring_with_no_seam_is_a_band_round_the_ring_and_holds_what_pappus_gives() {
     let mut model = Model::new(a_working_size());
-    let refused = the_top_half_of_a_ring(&mut model, 4.0, 1.0, false);
-    assert!(
-        matches!(refused, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
-        "the top half of a ring with no seam came back {refused:?}"
-    );
-    assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
+    let half = the_top_half_of_a_ring(&mut model, 4.0, 1.0, false)
+        .unwrap_or_else(|why| panic!("the top half of a ring with no seam was refused {why:?}"));
+    holds_what_pappus_gives_the_top_half_of_a_ring(&model, half, 4.0, 1.0);
 }
 
 /// The same half ring with a seam across the tube, which is how a file writes a
-/// face right round the ring, is refused by the same name: its one wire passes
-/// the seam's points a whole turn apart round the ring.
+/// face right round the ring, builds and holds what Pappus gives too: its one
+/// wire passes the seam's points a whole turn apart round the ring, and the
+/// mesher cuts its patch narrower that way as it does round the tube (§390).
 ///
-/// **This refuses a solid that exists, and on purpose.** With that half of the
-/// refusal switched off this very shape built and measured `38.396` where
-/// Pappus, `π²·r²·R`, gives `39.478`, inside its stated `8.742`; the crown of
-/// a ring in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs` folded
-/// instead. Nothing cuts a patch narrower round the ring, so the mesher is
-/// not trusted with a patch a whole turn wide that way (§280.6, and
-/// `WalkingAWire::goes_right_round_the_second_way` in `mesh.rs`). A gap, and
-/// this test is what moves when it is closed.
+/// Until it did, this was refused by the same name as the one with no seam,
+/// on purpose: with the refusal switched off it measured `38.396` where Pappus
+/// gives `39.478`, and the crown of a ring folded (§280.8).
 #[test]
-fn the_top_half_of_a_ring_with_a_seam_across_the_tube_is_refused_by_the_same_name() {
+fn the_top_half_of_a_ring_with_a_seam_across_the_tube_holds_what_pappus_gives() {
     let mut model = Model::new(a_working_size());
-    let refused = the_top_half_of_a_ring(&mut model, 4.0, 1.0, true);
-    assert!(
-        matches!(refused, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
-        "the top half of a ring with a seam came back {refused:?}"
-    );
-    assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
+    let half = the_top_half_of_a_ring(&mut model, 4.0, 1.0, true)
+        .unwrap_or_else(|why| panic!("the top half of a ring with a seam was refused {why:?}"));
+    holds_what_pappus_gives_the_top_half_of_a_ring(&model, half, 4.0, 1.0);
+}
+
+/// §229.4's disc with a round rim, written face by face: a disc of radius
+/// three and thickness two whose rim is the outer half of the torus of ring
+/// three and tube one, cut at its outer equator into two bands that each go
+/// right round the ring with a seam across the tube. It builds and holds what
+/// Pappus gives, whichever band the shell lists first.
+///
+/// The rim is the shape a file writes a fillet round a disc as, and §229.4's
+/// STEP file of it (`a_closed_circle_between_one_torus_written_twice.rs` in
+/// `rcad-step`) is this solid. Each band's one wire passes its seam's points a
+/// whole turn apart round the ring, and was refused `AWireWillNotLieFlatOnItsFace`
+/// in all four builds until the mesher cut a patch round the ring (§390).
+///
+/// **Pappus, on the disc's cross-section.** The rectangle `0 ≤ ρ ≤ 3`,
+/// `|z| ≤ 1` has area `6` and centroid `ρ = 3/2`, so it sweeps `18π`. The half
+/// of the tube's disc outside `ρ = 3` has area `π/2` and its centroid
+/// `4/(3π)` past that line, so it sweeps `2π · (3 + 4/(3π)) · π/2 = 3π² + 4π/3`.
+#[test]
+fn a_disc_with_a_round_rim_in_two_bands_holds_what_pappus_gives() {
+    let policy = Policy::certified();
+    let pappus = 18.0 * PI + 3.0 * PI * PI + 4.0 * PI / 3.0;
+    for lower_first in [true, false] {
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(a_working_size());
+        let disc =
+            a_disc_with_a_round_rim_in_two_bands(&mut model, lower_first, Orientation::Forward)
+                .unwrap_or_else(|why| {
+                    panic!("the disc with the lower band first {lower_first} was refused {why:?}")
+                });
+        model
+            .validate(&policy, &mut log)
+            .expect("the model holding the disc is sound");
+        for deflection in [0.1, 0.03, 0.01] {
+            let measured = model
+                .solid(disc)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(deflection).expect("a positive length"),
+                    &policy,
+                    &mut log,
+                )
+                .unwrap_or_else(|why| panic!("the disc at {deflection} was refused {why:?}"));
+            assert!(
+                (measured.volume() - pappus).abs() <= measured.volume_error(),
+                "lower band first {lower_first}, at {deflection}: the disc measured {} where \
+                 Pappus gives {pappus}, allowed {}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
+/// The same disc with its rim used turned round — the two bands used reversed
+/// and each band's loop walked the other way — is refused at the door,
+/// whichever band the shell lists first, before anything is meshed. That rim
+/// keeps its material outside the tube, so it walks the top and bottom circles
+/// the way the flat faces do, and the builder names the first circle walked
+/// the same way twice.
+#[test]
+fn a_disc_whose_rim_is_used_turned_round_is_refused() {
+    for lower_first in [true, false] {
+        let mut model = Model::new(a_working_size());
+        let refused =
+            a_disc_with_a_round_rim_in_two_bands(&mut model, lower_first, Orientation::Reversed);
+        assert!(
+            matches!(
+                refused,
+                Err(Error::ADraftEdgeIsWalkedTheSameWayTwice { .. })
+            ),
+            "the disc whose rim is used turned round, lower band first {lower_first}, came \
+             back {refused:?}"
+        );
+        assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
+    }
+}
+
+/// The disc of [`a_disc_with_a_round_rim_in_two_bands_holds_what_pappus_gives`],
+/// both bands on one torus, with the lower band listed first in the shell or
+/// last.
+///
+/// With `walls` forwards every face is used the way the standard writes it. With
+/// `walls` reversed the two bands are used turned round and every coedge of
+/// theirs is turned over, which is how the kernel wrote a torus wall before
+/// §361 and is a rim with its material outside the tube.
+///
+/// The flat faces touch the torus round its top and bottom circles, which
+/// their own faces name; the equator between the two bands is named by its
+/// own plane, as `rcad-step` names it. Each seam is the quarter of the tube
+/// circle in the plane `y = 0` with `x ≥ 3`, below the equator for the lower
+/// band and above it for the upper one. The equator is walked the way
+/// `Model::validate` reads it stored: down the ring angle by the lower band.
+fn a_disc_with_a_round_rim_in_two_bands(
+    model: &mut Model,
+    lower_first: bool,
+    walls: Orientation,
+) -> Result<SolidKey> {
+    let (ring, tube) = (3.0, 1.0);
+    let skin =
+        Surface::Torus(Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring"));
+    let mut builder = SolidBuilder::new();
+
+    let bottom = builder.add_vertex(Point::new(ring, 0.0, -tube))?;
+    let equator = builder.add_vertex(Point::new(ring + tube, 0.0, 0.0))?;
+    let top = builder.add_vertex(Point::new(ring, 0.0, tube))?;
+    let a_plane = |at: f64, facing: f64| {
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, at), Vector::new(0.0, 0.0, facing))
+            .expect("the z axis is a unit normal")
+    };
+    let bottom_circle = builder.add_edge(bottom, bottom, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let top_circle = builder.add_edge(top, top, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let equator_circle = builder.add_edge(
+        equator,
+        equator,
+        EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(a_plane(0.0, 1.0)),
+        },
+    )?;
+    let across_the_tube = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("the y axis is a unit normal");
+    let a_seam = |builder: &mut SolidBuilder, from, to, up: f64| {
+        builder.add_edge(
+            from,
+            to,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(across_the_tube),
+                picked_by: smallvec::smallvec![
+                    Picker::from(
+                        HalfSpace::new(Vector::new(1.0, 0.0, 0.0), ring)
+                            .expect("a normal with a length")
+                    ),
+                    Picker::from(
+                        HalfSpace::new(Vector::new(0.0, 0.0, up), 0.0)
+                            .expect("a normal with a length")
+                    ),
+                ],
+            },
+        )
+    };
+    let lower_seam = a_seam(&mut builder, bottom, equator, -1.0)?;
+    let upper_seam = a_seam(&mut builder, equator, top, 1.0)?;
+
+    let a_wire = |builder: &mut SolidBuilder, turned: bool, steps: &[(DraftEdge, Orientation)]| {
+        let mut along = Vec::with_capacity(steps.len());
+        for &(edge, turn) in steps {
+            let turn = if turned { turn.reversed() } else { turn };
+            along.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
+        }
+        if turned {
+            along.reverse();
+        }
+        builder.add_wire(&along)
+    };
+    let turned = walls.is_reversed();
+    let lower_wire = a_wire(
+        &mut builder,
+        turned,
+        &[
+            (bottom_circle, Orientation::Reversed),
+            (lower_seam, Orientation::Forward),
+            (equator_circle, Orientation::Forward),
+            (lower_seam, Orientation::Reversed),
+        ],
+    )?;
+    let upper_wire = a_wire(
+        &mut builder,
+        turned,
+        &[
+            (equator_circle, Orientation::Reversed),
+            (upper_seam, Orientation::Forward),
+            (top_circle, Orientation::Reversed),
+            (upper_seam, Orientation::Reversed),
+        ],
+    )?;
+    let floor_wire = a_wire(
+        &mut builder,
+        false,
+        &[(bottom_circle, Orientation::Forward)],
+    )?;
+    let lid_wire = a_wire(&mut builder, false, &[(top_circle, Orientation::Forward)])?;
+
+    let lower = builder.add_face(skin, &[lower_wire])?;
+    let upper = builder.add_face(skin, &[upper_wire])?;
+    let floor = builder.add_face(Surface::Plane(a_plane(-tube, -1.0)), &[floor_wire])?;
+    let lid = builder.add_face(Surface::Plane(a_plane(tube, 1.0)), &[lid_wire])?;
+    let bands = if lower_first {
+        [lower, upper]
+    } else {
+        [upper, lower]
+    };
+    builder.add_shell(&[
+        (bands[0], walls),
+        (bands[1], walls),
+        (floor, Orientation::Forward),
+        (lid, Orientation::Forward),
+    ])?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// The half disc the tube leaves above `z = 0` has area `π r² / 2`, and its
+/// centroid is on the ring's own circle, `R` from the axis, because the half
+/// disc is cut through its centre along a line square to the axis. So by
+/// Pappus it sweeps `2π · R · π r² / 2 = π² r² R`, which is `4π² = 39.478`
+/// for a ring of four round a tube of one. Held at three deflections, each
+/// within the error its own measurement states.
+fn holds_what_pappus_gives_the_top_half_of_a_ring(
+    model: &Model,
+    half: SolidKey,
+    ring: f64,
+    tube: f64,
+) {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    model
+        .validate(&policy, &mut log)
+        .expect("the model holding the half ring is sound");
+    let pappus = 2.0 * PI * ring * (PI * tube * tube / 2.0);
+    for deflection in [0.1, 0.03, 0.01] {
+        let measured = model
+            .solid(half)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(deflection).expect("a positive length"),
+                &policy,
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("the half ring at {deflection} was refused {why:?}"));
+        assert!(
+            (measured.volume() - pappus).abs() <= measured.volume_error(),
+            "at {deflection} the half ring measured {} where Pappus gives {pappus}, allowed {}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
 }
 
 /// The seam of a bend, named from geometry a file carries rather than from
