@@ -1136,7 +1136,14 @@ impl Walk {
             self.point_of_vertex(reading, ends[0])?,
             self.point_of_vertex(reading, ends[1])?,
         ];
-        self.the_arc_between(edge_curve, &place, and, corners, along_the_curve)
+        let mut arc = self.the_arc_between(edge_curve, &place, and, corners, along_the_curve)?;
+        if let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = &mut arc
+            && let Some(circle) =
+                faces_along_it.and_then(|faces| which_of_a_rings_two_circles(faces, &and, corners))
+        {
+            picked_by.insert(0, circle);
+        }
+        Ok(arc)
     }
 
     /// The surface a run names beside the faces along it: the curve's own
@@ -1170,7 +1177,9 @@ impl Walk {
     /// consumer to make it for (§13).
     ///
     /// Where a flat face and a curved one are along the edge the plane stays
-    /// too: the walk reads the faces there. Where every face is the one surface
+    /// too: the walk reads the faces there. An arc whose plane is square to a
+    /// ring's axis also says which of the ring's two circles it is on — see
+    /// [`which_of_a_rings_two_circles`]. Where every face is the one surface
     /// bit for bit — a seam — the plane stays as well, and is the second surface
     /// the walk reads; a cylinder would change what a sphere's seam names from
     /// a great circle to a tangency.
@@ -2111,6 +2120,80 @@ fn the_faces_along_it_name_no_crossing(faces: &[Surface]) -> bool {
     faces.len() >= 2
         && (faces.iter().all(|face| face.as_plane().is_some())
             || faces.windows(2).all(|pair| pair[0] == pair[1]))
+}
+
+/// The picker that says which of a ring's two circles round its axis an arc
+/// is on, where the plane the arc is named by is square to that axis and cuts
+/// the tube in two; `None` everywhere else.
+///
+/// **A half-space on the chord does not tell the two apart.** A plane square to
+/// a ring's axis, nearer its centre than the tube's radius, crosses it in two
+/// circles about the axis, one inside the other, and a half-space that holds
+/// an arc of the one holds part of the other too. `rcad_geom`'s own crossing of
+/// a plane and a ring tells them apart by the pipe of the ring's own radius
+/// about its axis, outside it for the outer circle and inside it for the inner
+/// one (`two_circles_round_the_axis` in `crates/rcad-geom/src/intersect.rs`),
+/// and a bend built in the kernel names its seam along the inner equator that
+/// way. Read without it, that seam came back picked by the half-space alone,
+/// a run the kernel's own rule calls unnamed (Q407).
+///
+/// **Square is asked the way the walk asks it**, as the cross product of the
+/// plane's normal and the axis coming out exactly nothing, which is also how
+/// [`how_far_off_the_circle_can_be`] tells a circle round the axis from one
+/// round the tube. **Which circle is read off the corners**, as the side of
+/// the ring's radius both are on: the two circles are `√(r² − h²)` either side
+/// of it, so a corner on one is that far from the pipe. A plane resting on the
+/// tube touches it in the one circle of the ring's own radius, and a corner
+/// that is not further off that circle than the reader lets a circle miss its
+/// face ([`A_CIRCLE_MAY_MISS_ITS_FACE_BY`]) is read as on it, with no picker
+/// added. Without that room, `Relay_DPST_Fujitsu_FTR-F1A`,
+/// `Relay_DPDT_Fujitsu_FTR-F1C` and `nist_ftc_08_asme1_ap242-e2` logged 18, 18
+/// and 56 sides of a pipe the certified policy gave up on and the tolerant one
+/// answered (`no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses`).
+/// All three files are refused either way, and which arcs those were was not
+/// traced.
+fn which_of_a_rings_two_circles(
+    faces: &[Surface],
+    and: &Surface,
+    corners: [Point; 2],
+) -> Option<Picker> {
+    let Surface::Plane(cut) = and else {
+        return None;
+    };
+    let mut rings = faces.iter().filter_map(|face| {
+        if let Surface::Torus(ring) = face {
+            Some(*ring)
+        } else {
+            None
+        }
+    });
+    let ring = rings.next()?;
+    if rings.any(|other| other != ring) {
+        return None;
+    }
+    let along = ring.axis().direction();
+    if cut.normal().cross(along) != Vector::zero() {
+        return None;
+    }
+    let from_the_axis = |corner: Point| {
+        let out = corner - ring.centre();
+        (out - along * out.dot(along)).length()
+    };
+    let between = Cylinder::new(ring.axis(), ring.ring_radius()).ok()?;
+    let resting = A_CIRCLE_MAY_MISS_ITS_FACE_BY
+        * NEAREST_F64_POINT_ROUNDOFF
+        * largest_of(
+            &[corners[0], corners[1], ring.centre()],
+            &[ring.ring_radius(), ring.tube_radius()],
+        );
+    let [first, second] = corners.map(|corner| from_the_axis(corner) - ring.ring_radius());
+    if first < -resting && second < -resting {
+        Some(Picker::InsideAPipe(between))
+    } else if first > resting && second > resting {
+        Some(Picker::OutsideAPipe(between))
+    } else {
+        None
+    }
 }
 
 /// Whether every point of the circle with centre `centre`, unit axis `axis`

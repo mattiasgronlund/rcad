@@ -696,7 +696,8 @@ fn the_plane_its_seam_is_cut_from(model: &Model) -> Plane {
 /// panics are counted, except one on an edge's run, which fails: seven turned
 /// balls whose seam came back a different run were Q822, and none is left.
 /// Nor may a ball's seam be refused, which is what two of the seven became
-/// before the writer stepped two coordinates of the seam's centre together.
+/// before the writer stepped two coordinates of the seam's centre together,
+/// nor a sound model's flat cap on a cone (Q662) or on a bend (Q407).
 #[test]
 fn how_often_a_model_the_mutator_draws_is_refused() {
     fn one_byte_bumped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
@@ -762,6 +763,8 @@ fn how_often_a_model_the_mutator_draws_is_refused() {
                 let named = format!("{why:?}");
                 if named.contains("\"plane\", second: \"cone\"")
                     || named.contains("\"cone\", second: \"plane\"")
+                    || named.contains("\"plane\", second: \"ring\"")
+                    || named.contains("\"ring\", second: \"plane\"")
                 {
                     let sound = model
                         .validate(&Policy::certified(), &mut ProvenanceLog::new())
@@ -781,10 +784,12 @@ fn how_often_a_model_the_mutator_draws_is_refused() {
         println!("{count:6}  written, and the comparison panicked: {said}");
         println!("        the first: {first}");
     }
-    println!("{a_sound_cone_cap_refused} sound models refused where a flat face meets a cone");
+    println!(
+        "{a_sound_cone_cap_refused} sound models refused where a flat face meets a cone or a ring"
+    );
     assert_eq!(
         a_sound_cone_cap_refused, 0,
-        "a sound model was refused where its flat cap meets its cone"
+        "a sound model was refused where its flat cap meets its cone or its ring"
     );
     let runs_that_came_back_different: usize = comparisons_that_panicked
         .iter()
@@ -880,6 +885,90 @@ fn a_cone_of_a_slope_some_half_angle_carries_comes_back_with_that_slope_to_the_b
             );
         }
     }
+}
+
+/// The quarter bend this target draws, at the ring and tube of the checked-in
+/// seed and at the smallest and largest it draws, where it is built and turned
+/// a quarter about `x`: each is written, with its two cap circles round the
+/// tube (Q407), and comes back the same.
+#[test]
+fn every_bend_this_target_draws_comes_back_from_its_own_file() {
+    let quarter_turn = Isometry::rotation(&Axis::x(), core::f64::consts::FRAC_PI_2)
+        .expect("a finite angle about a unit axis");
+    for (ring, tube) in [(6.0, 2.0), (2.0, 1.0), (12.0, 4.0)] {
+        for placement in [Isometry::identity(), quarter_turn] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let solid = a_quarter_bend(&mut model, ring, tube).expect("each bend fits this model");
+            model
+                .place_solid(solid, &placement)
+                .expect("the key came from this model");
+            let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+            let reached = one_model_decoded_and_written(&bytes);
+            assert_eq!(
+                (reached.came_back_the_same, reached.solids_the_same),
+                (1, 1),
+                "ring {ring}, tube {tube}, {placement:?}: {reached:?}, {:?}",
+                rcad_step::write(&model, "a bend").err()
+            );
+        }
+    }
+}
+
+/// A bend of ring seven and tube one, turned about `x`, `y` and `z` by every
+/// tenth of a radian up to a whole turn, in place and moved by whole units:
+/// how many the writer writes and the reader reads back.
+///
+/// **This counts what is left after Q407, and fails when a fix moves it.**
+/// Turned about `z` all 124 are written and read back. Turned about `x` or `y`
+/// by 2.5, 2.8, 3.2, 3.3, 3.7, 4.1 or 4.6 radians, in place or moved, the
+/// reader refuses the file with `CannotNameWhichPieceOfACrossingThisIs` —
+/// 28 bends, the same angles about either axis — and turned about `y` by 5.0
+/// and moved, the writer refuses the seam, the quarter of the inner equator.
+/// Neither was traced (`docs/decisions.md` §241.6).
+#[test]
+fn how_often_a_turned_bend_comes_back_from_its_own_file() {
+    let (mut bends, mut writer_refused, mut reader_refused) = (0, 0, Vec::new());
+    for axis in [Axis::x(), Axis::y(), Axis::z()] {
+        for tenths in 1..63 {
+            for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
+                let turned = Isometry::translation(moved)
+                    .expect("a finite offset")
+                    .compose(
+                        &Isometry::rotation(&axis, f64::from(tenths) * 0.1)
+                            .expect("a finite angle about a unit axis"),
+                    );
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let solid = a_quarter_bend(&mut model, 7.0, 1.0).expect("a bend fits this model");
+                model
+                    .place_solid(solid, &turned)
+                    .expect("the key came from this model");
+                bends += 1;
+                let Ok(text) = rcad_step::write(&model, "a turned bend") else {
+                    writer_refused += 1;
+                    continue;
+                };
+                let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+                if let Err(why) =
+                    Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+                {
+                    reader_refused.push(format!("{why:?}"));
+                }
+            }
+        }
+    }
+    println!(
+        "{bends} turned bends: {writer_refused} refused by the writer, {} by the reader",
+        reader_refused.len()
+    );
+    assert_eq!((bends, writer_refused, reader_refused.len()), (372, 1, 28));
+    assert!(
+        reader_refused
+            .iter()
+            .all(|why| why.contains("CannotNameWhichPieceOfACrossingThisIs")),
+        "{reader_refused:?}"
+    );
 }
 
 fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {

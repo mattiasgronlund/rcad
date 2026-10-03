@@ -516,7 +516,10 @@ impl Writing {
     ///   corpus carries (Q774); the others refuse;
     /// - **a closed edge where a flat cap crosses a cone** square to its axis
     ///   is the circle [`where_a_cap_square_to_a_cone_crosses_it`] works out in
-    ///   the frame the two faces are stored in, and then places.
+    ///   the frame the two faces are stored in, and then places;
+    /// - **a closed edge where a flat cap holding a ring's axis crosses it** —
+    ///   the end of a bend of pipe — is the circle round the tube that
+    ///   [`where_a_cap_holding_a_rings_axis_crosses_it`] works out the same way.
     ///
     /// And two the surfaces do not name, which are read off the run instead:
     /// **a seam of one ball from pole to pole** — see
@@ -594,6 +597,13 @@ impl Writing {
                 let crossing = where_a_cap_square_to_a_cone_crosses_it(sides).ok_or_else(refuse)?;
                 Ok(Curve::along(self.round(&crossing, crossing.turning)))
             }
+            (Surface::Plane(_), Surface::Torus(_)) | (Surface::Torus(_), Surface::Plane(_))
+                if closed =>
+            {
+                let crossing =
+                    where_a_cap_holding_a_rings_axis_crosses_it(sides, start).ok_or_else(refuse)?;
+                Ok(Curve::along(self.round(&crossing, crossing.turning)))
+            }
             (Surface::Cylinder(pipe), Surface::Cylinder(other)) if !closed && pipe == other => {
                 let along = pipe.axis().direction();
                 let across = |corner: Point| {
@@ -609,6 +619,9 @@ impl Writing {
                 .a_seam_of_one_ball(ball, run, start, end)
                 .map(Curve::along)
                 .or_else(|| self.an_arc_its_own_plane_names(first, second, run, start, end))
+                .ok_or_else(refuse),
+            (Surface::Torus(ring), Surface::Torus(other)) if !closed && ring == other => self
+                .an_arc_its_own_plane_names(first, second, run, start, end)
                 .ok_or_else(refuse),
             (Surface::Cylinder(_), Surface::Sphere(_))
             | (Surface::Sphere(_), Surface::Cylinder(_))
@@ -780,11 +793,20 @@ impl Writing {
                 None
             }
         };
+        let a_ring = |face: &Surface| {
+            if let Surface::Torus(ring) = face {
+                Some(*ring)
+            } else {
+                None
+            }
+        };
         let crossing = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
             where_a_plane_crosses_a_pipe(cut, &pipe)?
-        } else {
-            let ball = a_ball(first).or_else(|| a_ball(second))?;
+        } else if let Some(ball) = a_ball(first).or_else(|| a_ball(second)) {
             where_a_plane_crosses_a_ball(cut, &ball)?
+        } else {
+            let ring = a_ring(first).or_else(|| a_ring(second))?;
+            where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?
         };
         let crossing = Crossing {
             centre: a_centre_its_plane_reads_back_from(cut, crossing.centre)?,
@@ -1031,7 +1053,7 @@ impl Curve {
 /// rounds the cap's normal and the cone's axis apart by an ulp. A curve worked
 /// out there and then placed is the curve the builder meant, moved; one worked
 /// out from the placed surfaces asks a question the rounding has already
-/// answered wrong. Q407 wants the same for a cap on a ring.
+/// answered wrong. A cap on a ring is asked there too (Q407).
 #[derive(Clone, Copy)]
 struct Side {
     located: Surface,
@@ -1192,9 +1214,10 @@ fn where_a_plane_crosses_a_ball(flat: &Plane, ball: &Sphere) -> Option<Crossing>
 /// **The rest are not built** (`docs/decisions.md` §13). A plane square to
 /// the axis nearer the centre than `r` crosses the ring in two circles, of
 /// radii `R ± √(r² − h²)`, and nothing in the corpus carries one; a plane
-/// holding the axis crosses it in the tube's own two circles, which Q407
-/// wants for a flat cap on a bend and extends this for; and any other plane
-/// crosses a ring in a curve with no name in this kernel.
+/// holding the axis crosses it in the tube's own two circles, which a closed
+/// edge at the end of a bend is written as, by
+/// [`where_a_cap_holding_a_rings_axis_crosses_it`]; and any other plane crosses
+/// a ring in a curve with no name in this kernel.
 fn where_a_plane_crosses_a_ring(flat: &Plane, ring: &Torus) -> Option<Crossing> {
     let along = ring.axis().direction();
     if flat.normal().cross(along) != Vector::zero() {
@@ -1214,6 +1237,48 @@ fn where_a_plane_crosses_a_ring(flat: &Plane, ring: &Torus) -> Option<Crossing> 
         shape: Shape::Circle {
             radius: ring.ring_radius(),
         },
+    })
+}
+
+/// Of the two circles a plane square to a ring's axis crosses it in, the one
+/// nearer `near`, about the plane's normal; `None` where the plane is not
+/// square to the axis or misses the tube.
+///
+/// A plane square to the axis `h` along it from the centre crosses the tube in
+/// two circles about the axis, of radii `R ± √(r² − h²)`. Where it holds the
+/// centre those are the inner and the outer equator, and the writer target's
+/// bend has its seam along a quarter of the inner one. Which of the two an
+/// edge is on is read off the edge's own corner, whose distance from the axis
+/// is nearer one radius than the other by `√(r² − h²)`.
+fn where_a_plane_square_to_a_ring_crosses_it_nearest(
+    flat: &Plane,
+    ring: &Torus,
+    near: Point,
+) -> Option<Crossing> {
+    let along = ring.axis().direction();
+    if flat.normal().cross(along) != Vector::zero() {
+        return None;
+    }
+    let up = (flat.offset() - flat.normal().dot(ring.centre() - Point::origin()))
+        / flat.normal().dot(along);
+    let tube = ring.tube_radius();
+    let spread = ((tube - up.abs()) * (tube + up.abs())).sqrt();
+    if !spread.is_finite() {
+        return None;
+    }
+    let centre = ring.centre() + along * up;
+    let out = near - centre;
+    let from_the_axis = (out - along * out.dot(along)).length();
+    let [outer, inner] = [ring.ring_radius() + spread, ring.ring_radius() - spread];
+    let radius = if (from_the_axis - outer).abs() <= (from_the_axis - inner).abs() {
+        outer
+    } else {
+        inner
+    };
+    Some(Crossing {
+        centre,
+        turning: flat.normal(),
+        shape: Shape::Circle { radius },
     })
 }
 
@@ -1239,10 +1304,7 @@ fn where_a_plane_crosses_a_ring(flat: &Plane, ring: &Torus) -> Option<Crossing> 
 /// [`Surface::the_way_its_first_coordinate_runs_at`] on a cone is
 /// `a × (p − apex)`, a right hand's turn about `a` on either nappe, and the
 /// reader reads each use of the edge against it
-/// (`Walk::which_way_round_a_closed_edge_is_stored`). The kernel's own
-/// closed-crossing rule, `rcad_geom::which_way_a_closed_crossing_turns`, is not
-/// needed here: it is for a ring, whose coordinate runs round its tube and not
-/// round the circle a cap cuts it in (Q407).
+/// (`Walk::which_way_round_a_closed_edge_is_stored`).
 fn where_a_cap_square_to_a_cone_crosses_it(sides: [&Side; 2]) -> Option<Crossing> {
     let [first, second] = sides;
     if first.placed_by != second.placed_by {
@@ -1268,6 +1330,74 @@ fn where_a_cap_square_to_a_cone_crosses_it(sides: [&Side; 2]) -> Option<Crossing
         turning: placed_by.apply_to_vector(along),
         shape: Shape::Circle {
             radius: cone.radius_at(reached * along.length()),
+        },
+    })
+}
+
+/// The circle a flat cap holding a ring's axis crosses it in, on the side of
+/// the axis `corner` is on, worked out in the frame the two faces are stored in
+/// and then placed; `None` where they are not stored in one frame or the cap
+/// does not hold the axis there.
+///
+/// **A plane holding the ring's axis crosses it in two circles round the
+/// tube**, each of the tube's radius and centred the ring's radius out from the
+/// centre, one either side of the axis. That is the end of a bend of pipe. A
+/// plane along the axis but off it crosses a ring in a curve with no name in
+/// this kernel, and so does any other plane but one square to the axis, so this
+/// asks for exactly zero both ways: the normal square to the axis, and the
+/// centre on the plane. Asked in the stored frame, for [`Side`]'s reason: the
+/// writer target's bend is built about `z` with its caps in `y = 0` and
+/// `x = 0`, and a turn would leave the cap's normal an ulp off square.
+///
+/// **Which of the two circles is the side of the axis the edge's one corner is
+/// on**, read as a sign that is a ring's radius from zero.
+///
+/// **It turns the way the ring winds round its tube at the corner**, which is
+/// how `rcad-topo` stores a closed edge on a ring and how the reader reads each
+/// use of it back (`Walk::which_way_round_a_closed_edge_is_stored`).
+/// [`Surface::the_way_its_first_coordinate_runs_at`] on a ring is the tangent
+/// to its middle circle, `(p − c) × a`, crossed into the way the surface faces.
+/// With `s = a × n` along the plane and square to the axis, a corner
+/// `p − c = σ·|p − c|·s + h·a`, with `σ` the side, gives `(p − c) × a` along
+/// `σ·n`, since `s × a = n`. So the circle on the side along `s` turns about the
+/// cap's normal `n`, and the one on the other side about `−n`. That is the same
+/// sign that picks the circle, and it needs no
+/// `rcad_geom::which_way_a_closed_crossing_turns`.
+fn where_a_cap_holding_a_rings_axis_crosses_it(
+    sides: [&Side; 2],
+    corner: Point,
+) -> Option<Crossing> {
+    let [first, second] = sides;
+    if first.placed_by != second.placed_by {
+        return None;
+    }
+    let ((Surface::Plane(flat), Surface::Torus(ring))
+    | (Surface::Torus(ring), Surface::Plane(flat))) = (first.stored, second.stored)
+    else {
+        return None;
+    };
+    let along = ring.axis().direction();
+    if flat.normal().dot(along) != 0.0 || flat.signed_distance_to(ring.centre()) != 0.0 {
+        return None;
+    }
+    let out_from_the_axis = along.cross(flat.normal());
+    let placed_by = first.placed_by;
+    let side = (corner - placed_by.apply_to_point(ring.centre()))
+        .dot(placed_by.apply_to_vector(out_from_the_axis));
+    let (out_from_the_axis, turning) = if side > 0.0 {
+        (out_from_the_axis, flat.normal())
+    } else if side < 0.0 {
+        (-out_from_the_axis, -flat.normal())
+    } else {
+        return None;
+    };
+    let middle =
+        ring.centre() + out_from_the_axis * (ring.ring_radius() / out_from_the_axis.length());
+    Some(Crossing {
+        centre: placed_by.apply_to_point(middle),
+        turning: placed_by.apply_to_vector(turning),
+        shape: Shape::Circle {
+            radius: ring.tube_radius(),
         },
     })
 }
