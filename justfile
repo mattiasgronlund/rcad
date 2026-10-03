@@ -101,6 +101,7 @@ gate_steps := "check-plugins \
     check-lanes-selftest \
     check-release-lanes-selftest \
     check-ff-main-selftest \
+    check-land-selftest \
     check-status-selftest \
     check-plan \
     check-plan-selftest \
@@ -206,6 +207,7 @@ gate_reusable_steps := "check \
     check-lanes-selftest \
     check-release-lanes-selftest \
     check-ff-main-selftest \
+    check-land-selftest \
     check-status-selftest \
     check-plan-selftest \
     check-queue-selftest \
@@ -2964,8 +2966,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "54" ]; then \
-        echo "found $n check-* recipes, expected 54"; \
+    if [ "$n" != "55" ]; then \
+        echo "found $n check-* recipes, expected 55"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -12011,6 +12013,300 @@ check-ff-main-selftest:
     run
     [ "$rc" -ne 0 ] || fail "a repository with main checked out nowhere passed"
     grep -qF "git worktree add" <<<"$got" || fail "the empty case did not name the way back"
+
+# One clean merge of a verified lane onto main, or a named stop (§383.4 item 2,
+# §384). The `lander` agent runs it once, and `lanes.js` hands any stop to the
+# Opus merger with the stop line in its brief (§383.5).
+#
+# It runs `merger.md`'s steps 1, 3, 4 and 5 as they stand, from a tree of its
+# own: fetch, branch from `origin/main`, unlock, check the sha, merge, close the
+# row and add the lane's rows in one `queue apply`, `check-queue`, commit, gate,
+# the push loop with §367's free catch-ups over docs and the same bounds as
+# `lanes.js`, then `ff-main`, unlock and `mark-finished`. It stops and names the
+# stop when the sha differs from the lane's report, a merge conflicts, §0 names
+# the row, `queue apply` or `check-queue` refuses, the gate fails, or the
+# attempts run out. Its last line is one line of JSON holding `mergedSchema`'s
+# fields and `stop`.
+#
+# `--steps` names a file holding the lane's `add`, `after` and `tag` steps, one
+# word to a line and a `+` line between steps, so that no row's text ever passes
+# through a shell (§384.2). The logic is `tooling/land/land.py`; this hands it
+# the arguments, and `LAND_JUST` is the one seam `check-land-selftest` uses to
+# put a stub where `just` would run the gate, `ff-main` and `mark-finished`. A
+# stop exits 1, and `[no-exit-message]` keeps `just`'s own error line from
+# landing after the JSON, so that line is the last on a stop too.
+[doc("Merge one verified lane onto main as merger.md's steps 1, 3, 4 and 5 do, or stop and say which stop; ends with one line of JSON.")]
+[no-exit-message]
+land *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LAND_JUST="${LAND_JUST:-{{ just_executable() }}}" exec python3 '{{ justfile_directory() }}/tooling/land/land.py' "$@"
+
+# Pins `land` against repositories it builds itself, each with a bare `origin`
+# on disk, one per arm: a clean merge lands and prints its JSON, and each stop
+# of §383.4 item 2 stops by name and pushes nothing.
+#
+# **A stub stands where `just` would run a recipe**, on `LAND_JUST`, the way the
+# fuzz selftests put a stub `cargo` on `PATH`. The real `gate` would gate this
+# repository, `ff-main` and `mark-finished` act on real trees, and `queue apply`
+# reads the real queue's claims. The stub logs every call, writes the `queue
+# apply` line into the fixture's `docs/queue.md` so that the merge commit
+# carries it, and fails or races on a flag file. A race is another merge landing
+# on `origin` while the gate runs: code three times over spends the push
+# attempts, docs six times over spends the catch-ups, and docs once costs no
+# attempt at all (§367).
+#
+# The JSON is held to the fields `mergedSchema` in `lanes.js` requires, read out
+# of that file, so a field the schema gains and the script lacks fails here and
+# not in the lander's report.
+[private]
+check-land-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(realpath "$(mktemp -d)")
+    trap 'rm -rf "$dir"' EXIT
+    mkdir "$dir/bin"
+    cat >"$dir/bin/just" <<'STUB'
+    #!/usr/bin/env bash
+    set -uo pipefail
+    printf 'just %s\n' "$*" >>"$STUB_DIR/log"
+    race() {
+        local n
+        n=$(( $(cat "$STUB_DIR/raced" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" >"$STUB_DIR/raced"
+        git -C "$STUB_DIR/other" pull -q --ff-only origin main
+        if [ "$1" = code ]; then
+            echo "fn raced$n() {}" >"$STUB_DIR/other/raced$n.rs"
+        else
+            echo "raced $n" >"$STUB_DIR/other/docs/raced$n.md"
+        fi
+        git -C "$STUB_DIR/other" add -A
+        git -C "$STUB_DIR/other" commit -q -m "another merge, $n"
+        git -C "$STUB_DIR/other" push -q origin HEAD:main
+    }
+    case "${1:-}" in
+        queue)
+            [ "${2:-}" = apply ] || { echo "the stub has no queue ${2:-}" >&2; exit 2; }
+            shift 2
+            if [ -e "$STUB_DIR/refuse-apply" ]; then
+                echo "queue apply: step 1 (done Q1) is refused: Q1 is closed already" >&2
+                exit 1
+            fi
+            printf 'apply %s\n' "$*" >>docs/queue.md
+            n=900
+            verb=1
+            for word in "$@"; do
+                if [ "$verb" = 1 ] && [ "$word" = add ]; then
+                    echo "Q$n"
+                    n=$((n + 1))
+                elif [ "$verb" = 1 ]; then
+                    echo "$word: applied"
+                fi
+                verb=0
+                [ "$word" != + ] || verb=1
+            done ;;
+        check-queue)
+            if [ -e "$STUB_DIR/check-queue-fails" ]; then
+                echo "check-queue: Q900 cites §999, and there is no such section"
+                exit 1
+            fi
+            echo "docs/queue.md: fine" ;;
+        gate)
+            n=$(( $(cat "$STUB_DIR/gates" 2>/dev/null || echo 0) + 1 ))
+            echo "$n" >"$STUB_DIR/gates"
+            case "$(cat "$STUB_DIR/race" 2>/dev/null)" in
+                code) race code ;;
+                docs) race docs ;;
+                docs-once) [ "$n" != 1 ] || race docs ;;
+            esac
+            echo "=== gate summary ==="
+            if [ -e "$STUB_DIR/gate-fails" ]; then
+                echo "gate: FAIL  first failure: test (exit 100)"
+                exit 1
+            fi
+            echo "gate: PASS" ;;
+        ff-main) echo "main fast-forwarded 1 commit(s)" ;;
+        mark-finished) shift; for tree in "$@"; do echo "marked: $tree"; done ;;
+        *) echo "the stub has no recipe ${1:-}" >&2; exit 2 ;;
+    esac
+    STUB
+    chmod +x "$dir/bin/just"
+    required=$(grep -F "required: ['start_sha', 'worktree_path', 'merge_branch'" .claude/workflows/lanes.js \
+        | grep -oE "'[a-z_]+'" | tr -d "'" | tr '\n' ' ' || true)
+    [ -n "$required" ] || { echo "found no mergedSchema required list in .claude/workflows/lanes.js, so the JSON would be held to nothing"; exit 1; }
+    steps_line='add 2.2 sonnet justfile small a row the lane left, ending in §384 + tag @1 small'
+    arm=""
+    at=""
+    got=""
+    json=""
+    rc=0
+    fail() {
+        echo "land drifted from its own fixtures, in the arm '$arm': $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    fixture() {
+        arm=$1
+        at="$dir/$1"
+        mkdir -p "$at/stub"
+        touch "$at/stub/log"
+        git init -q --bare -b main "$at/origin.git"
+        git init -q -b main "$at/hub"
+        git -C "$at/hub" config user.email t@t
+        git -C "$at/hub" config user.name t
+        git -C "$at/hub" config commit.gpgsign false
+        mkdir -p "$at/hub/docs/decisions.d"
+        printf '/target\n' >"$at/hub/.gitignore"
+        printf '# The queue\n' >"$at/hub/docs/queue.md"
+        printf '%s\n' '## 0. Where the work is' '' 'Q10 and Q12 closed what Q11 left.' >"$at/hub/docs/decisions.d/000-where-the-work-is.md"
+        printf 'fn main() {}\n' >"$at/hub/main.rs"
+        git -C "$at/hub" add -A
+        git -C "$at/hub" commit -q -m root
+        git -C "$at/hub" remote add origin "$at/origin.git"
+        git -C "$at/hub" push -q origin main
+        git -C "$at/hub" checkout -q --detach
+        git -C "$at/hub" worktree add -q -b lane-x "$at/lane" origin/main
+        printf 'fn lane() {}\n' >"$at/lane/lane.rs"
+        git -C "$at/lane" add lane.rs
+        git -C "$at/lane" commit -q -m "the lane's work"
+        git -C "$at/hub" worktree add -q --detach "$at/verify" origin/main
+        git -C "$at/hub" worktree add -q --detach "$at/lander" origin/main
+        for tree in lane verify lander; do
+            git -C "$at/hub" worktree lock --reason "an agent at work" "$at/$tree"
+        done
+        git clone -q "$at/origin.git" "$at/stub/other"
+        git -C "$at/stub/other" config user.email t@t
+        git -C "$at/stub/other" config user.name t
+        git -C "$at/stub/other" config commit.gpgsign false
+        mkdir -p "$at/lander/target"
+        printf '%s\n' add 2.2 sonnet justfile 'small a row the lane left, ending in §384' + tag @1 small \
+            >"$at/lander/target/land-steps.txt"
+        lane_sha=$(git -C "$at/lane" rev-parse HEAD)
+    }
+    another_merge() {
+        git -C "$at/stub/other" pull -q --ff-only origin main
+        printf '%s\n' "$2" >>"$at/stub/other/$1"
+        git -C "$at/stub/other" add -A
+        git -C "$at/stub/other" commit -q -m "another merge"
+        git -C "$at/stub/other" push -q origin HEAD:main
+    }
+    run() {
+        got=$(STUB_DIR="$at/stub" LAND_JUST="$dir/bin/just" \
+            {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/lander" land "$@" 2>&1) && rc=0 || rc=$?
+        json=$(printf '%s\n' "$got" | tail -n 1)
+        local missing
+        missing=$(python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(" ".join(k for k in (sys.argv[2].split() + ["stop"]) if k not in d))' "$json" "$required" 2>&1) \
+            || fail "its last line is not JSON: $missing"
+        [ -z "$missing" ] || fail "its JSON lacks $missing"
+    }
+    field() {
+        python3 -c 'import json, sys; v = json.loads(sys.argv[1])[sys.argv[2]]; print(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))' "$json" "$1"
+    }
+    locked() {
+        [ -e "$(git -C "$at/$1" rev-parse --absolute-git-dir)/locked" ]
+    }
+    gates() {
+        cat "$at/stub/gates" 2>/dev/null || echo 0
+    }
+    stopped() {
+        [ "$rc" -ne 0 ] || fail "it exited 0 on a stop"
+        [ "$(field stop)" = "$1" ] || fail "it stopped at '$(field stop)', not at '$1'"
+        [ "$(field merged)" = false ] || fail "a stop said it merged"
+        [ -n "$(field not_merged_because)" ] || fail "a stop gave no reason"
+        grep -qF "land: stopped at $1: " <<<"$got" || fail "no line names the stop"
+        [ -z "$(git -C "$at/origin.git" log --merges --grep 'by just land' --format=%H main)" ] || fail "a stop pushed its merge"
+        ! grep -qE '^just (ff-main|mark-finished)' "$at/stub/log" || fail "ff-main or mark-finished ran on a stop"
+        ! locked lander || fail "a stop left its own tree locked, holding a slot (§263.4)"
+    }
+
+    fixture clean
+    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] || fail "a clean merge exited $rc"
+    [ "$(field merged)" = true ] || fail "a clean merge did not say it merged"
+    [ "$(field stop)" = "" ] || fail "a clean merge named a stop"
+    [ "$(field merged_sha)" = "$(git -C "$at/origin.git" rev-parse main)" ] || fail "merged_sha is not what origin/main holds"
+    [ "$(git -C "$at/origin.git" rev-parse main^2)" = "$lane_sha" ] || fail "origin/main's merge commit does not have the lane's tip as its second parent"
+    git -C "$at/origin.git" show main:docs/queue.md | grep -qxF "apply done Q1 ${lane_sha:0:8} + $steps_line" \
+        || fail "the merge commit does not carry one queue apply: the done step, then the lane's own steps"
+    [ "$(field rows_closed)" = "[\"Q1 done:${lane_sha:0:8}\"]" ] || fail "rows_closed is $(field rows_closed)"
+    [ "$(field rows_added)" = '["Q900 tier 2.2 sonnet: small a row the lane left, ending in §384"]' ] || fail "rows_added is $(field rows_added)"
+    [ "$(field push_attempts) $(field docs_catch_ups)" = "1 0" ] || fail "a first push that went through is not attempt 1 with no catch-ups"
+    [ "$(field gate_pass_line)" = "gate: PASS" ] || fail "gate_pass_line is '$(field gate_pass_line)'"
+    [ "$(field ff_main)" = "main fast-forwarded 1 commit(s)" ] || fail "ff_main is '$(field ff_main)'"
+    [ "$(field worktree_path) $(field merge_branch)" = "$at/lander merge-x" ] || fail "it did not report its own tree and branch"
+    for tree in lane verify lander; do
+        ! locked "$tree" || fail "the $tree tree is still locked"
+    done
+    want=$(printf '%s\n' "just queue apply done Q1 ${lane_sha:0:8} + $steps_line" 'just check-queue' 'just gate quiet' \
+        'just ff-main' "just mark-finished $at/lane $at/verify $at/lander")
+    [ "$(cat "$at/stub/log")" = "$want" ] || fail "the recipes it ran were, in order: $(cat "$at/stub/log")"
+
+    fixture sha-differs
+    run Q1 lane-x "$(git -C "$at/origin.git" rev-parse main)" merge-x "$at/lane" "$at/verify"
+    stopped sha-differs
+    [ ! -s "$at/stub/log" ] || fail "it ran a recipe after the sha differed"
+
+    fixture already-on-main
+    git -C "$at/hub" push -q origin lane-x:main
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped already-on-main
+
+    fixture conflict
+    another_merge lane.rs 'fn not_the_lane() {}'
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped conflict
+    grep -qF lane.rs <<<"$(field not_merged_because)" || fail "the conflict stop does not name the file"
+    ! git -C "$at/lander" rev-parse -q --verify MERGE_HEAD >/dev/null || fail "the conflicting merge was left in progress"
+
+    fixture section-0
+    another_merge docs/decisions.d/000-where-the-work-is.md 'Q1 closes the last of it.'
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped section-0
+
+    fixture queue-apply
+    touch "$at/stub/refuse-apply"
+    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped queue-apply
+
+    fixture check-queue
+    touch "$at/stub/check-queue-fails"
+    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped check-queue
+
+    fixture gate
+    touch "$at/stub/gate-fails"
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped gate
+    [ "$(field not_merged_because)" = "gate: FAIL  first failure: test (exit 100)" ] || fail "the gate stop does not carry the gate's FAIL line"
+
+    fixture attempts-over-code
+    echo code >"$at/stub/race"
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped attempts
+    [ "$(field push_attempts) $(field docs_catch_ups) $(gates)" = "3 0 3" ] \
+        || fail "a race over code each time should spend 3 attempts and 3 gates, not $(field push_attempts) attempts, $(field docs_catch_ups) catch-ups and $(gates) gates"
+
+    fixture attempts-over-docs
+    echo docs >"$at/stub/race"
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped attempts
+    [ "$(field push_attempts) $(field docs_catch_ups) $(gates)" = "1 5 6" ] \
+        || fail "a race over docs each time should spend 5 catch-ups and 6 gates, not $(field push_attempts) attempts, $(field docs_catch_ups) catch-ups and $(gates) gates"
+
+    fixture docs-once
+    echo docs-once >"$at/stub/race"
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a catch-up over docs alone did not end in a merge"
+    [ "$(field push_attempts) $(field docs_catch_ups) $(gates)" = "1 1 2" ] \
+        || fail "one catch-up over docs should cost no attempt, not $(field push_attempts) attempts and $(field docs_catch_ups) catch-ups over $(gates) gates (§367)"
+    git -C "$at/origin.git" merge-base --is-ancestor "$lane_sha" main || fail "the lane did not reach origin/main after the catch-up"
+
+    fixture steps
+    printf '%s\n' done Q5 abcdef1 >"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped steps
+    ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it read the steps"
+    echo "land merges a clean lane and prints its JSON, and stops by name on each of 9 stops"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
