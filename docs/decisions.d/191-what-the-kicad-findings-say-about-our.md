@@ -92,6 +92,23 @@ back too, so that row no longer compares nothing. `just t -p rcad-step
 digits, with no refusal introduced at any digit count. The frustum is still
 refused, as this section says.
 
+**2026-10-03, Q829:** since Q662, landed by Q821, the frustum is written too —
+all 48 configurations, no longer refused by the writer — so that row now
+compares something, though not much of it. Run here,
+`mise exec -- just t -p rcad-step --test a_fuse_read_back_from_rounded_text
+a_frustum_up_through_a_block --no-capture`:
+
+    as built:            144 decided, refused {}
+    read back exactly:   144 decided, refused {}
+    11 digits (48 of 48 files had a real moved): 0 decided, refused {}; 0 refusals the rounding introduced {}, 0 rescued; reader refused {"ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn": 48}; worst volume move 0.00e0 of the bound
+    12 digits (48 of 48 files had a real moved): 0 decided, refused {}; 0 refusals the rounding introduced {}, 0 rescued; reader refused {"ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn": 48}; worst volume move 0.00e0 of the bound
+    13 digits (48 of 48 files had a real moved): 21 decided, refused {"Undecidable": 3}; 3 refusals the rounding introduced {"Undecidable": 3}, 0 rescued; reader refused {"ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn": 40}; worst volume move 2.08e-3 of the bound
+
+So the writer no longer refuses, but the reader refuses most of what it reads
+back, `ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn`: all 48 at 11 and 12
+digits, 40 of 48 at 13. §366.6 has the same measurement from `rcad-step`'s own
+side and traces it no further.
+
 The families bake each placement in before writing — a workaround for §191.2,
 now redundant and left in.
 
