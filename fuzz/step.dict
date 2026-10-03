@@ -44,6 +44,7 @@
 "ORIENTED_EDGE"
 "EDGE_CURVE"
 "VERTEX_POINT"
+"VERTEX_LOOP"
 
 # A solid the reader refuses by name, and shapes it recognizes and skips
 # rather than builds (crates/rcad-step/src/import.rs)

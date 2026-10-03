@@ -26,14 +26,9 @@ use crate::graph::EntityId;
 use crate::names::{
     ADVANCED_FACE, CIRCLE, CLOSED_SHELL, CONICAL_SURFACE, EDGE_CURVE, EDGE_LOOP, ELLIPSE,
     FACE_BOUND, FACE_OUTER_BOUND, FACE_SURFACE, Keyword, LINE, MANIFOLD_SOLID_BREP, ORIENTED_EDGE,
-    VERTEX_POINT,
+    VERTEX_LOOP, VERTEX_POINT,
 };
 use crate::refusal::Refusal;
-
-/// The one loop keyword the walk reads by spelling rather than from
-/// `names.rs`, which with `fuzz/step.dict` lay outside Q746's write set; it
-/// belongs in that list like every other name the reader reads.
-const A_LOOP_OF_ONE_CORNER: &str = "VERTEX_LOOP";
 
 /// Turn one `MANIFOLD_SOLID_BREP` into one solid in `model`.
 pub(crate) fn solid_from(
@@ -394,7 +389,7 @@ impl Walk {
         let Some(corner) = reading
             .file()
             .instance(loop_id)
-            .and_then(|held| held.part(A_LOOP_OF_ONE_CORNER))
+            .and_then(|held| held.part(VERTEX_LOOP.name()))
             .and_then(|record| record.attribute(1))
             .and_then(Value::as_reference)
         else {

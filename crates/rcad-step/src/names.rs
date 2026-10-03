@@ -109,6 +109,7 @@ names!(
         ORIENTED_EDGE,
         EDGE_CURVE,
         VERTEX_POINT,
+        VERTEX_LOOP,
         BREP_WITH_VOIDS,
         SHELL_BASED_SURFACE_MODEL,
         GEOMETRIC_CURVE_SET,
