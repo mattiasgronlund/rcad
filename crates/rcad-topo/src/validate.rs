@@ -919,10 +919,31 @@ impl Model {
     /// it has to be asked *about*.
     ///
     /// **Which side of the partner the face's material lies on** is read off a
-    /// corner of the face that is off it, which is the only place a model says it
-    /// ([`the_side_this_face_lies_on`]). A face with no such corner — a bar's cap
-    /// has its one corner *on* the wall — says nothing, and is skipped rather
-    /// than guessed at.
+    /// corner of the face that is off it ([`the_side_this_face_lies_on`]). A
+    /// face with no such corner — a bar's cap has its one corner *on* the wall —
+    /// says nothing, and is skipped rather than guessed at.
+    ///
+    /// # A circle round a ring's tube is not read off a corner
+    ///
+    /// A plane through a ring's axis cuts it in two circles round the tube, and
+    /// a band of the ring running from one of them past the other comes back to
+    /// the plane's other side: a three-quarter bend's far corner is on the side
+    /// of the near cap's plane the wall does not leave it on. Both bands between
+    /// two such circles have the same corners, so no corner can say which one a
+    /// wall is, and read off one the sweep refused every bend past half a turn
+    /// and passed one walked the wrong way round (`docs/decisions.md` §392).
+    /// So at such a circle:
+    ///
+    /// - **The ring's face is not asked the rule.** Which band it is, is which
+    ///   way it walks its circles, so what is checked is that it walks every
+    ///   other circle round the tube the other way from this one
+    ///   ([`the_other_circles_round_the_tube_are_walked_the_other_way`]). Two
+    ///   walked the same way bound no band.
+    /// - **A flat face whose outer wire is that circle alone lies inside the
+    ///   tube** next to it, since the disc a circle round the tube bounds is the
+    ///   tube's own cross-section. That side is fact, not read, so the rule
+    ///   holds the cap's walk to the way it faces, and the two coedges of the
+    ///   edge running opposite ways carry that onto the ring's face.
     ///
     /// **Both gradients are the ones the solid uses**, which is the clause §36.6
     /// got wrong: it says the face's orientation does not come into it, and for a
@@ -1052,19 +1073,31 @@ impl Model {
                     [&face.stored_surface(), &across.stored_surface()],
                 );
                 let partner = names_it[1];
-                let (partner_outward, material) = if partner == across.stored_surface() {
-                    let Some(material) = which_side_of_it_this_face_lies_on(solid, face, across)?
-                    else {
+                let read = match a_circle_round_the_tube(names_it) {
+                    Some(RoundTheTube::OnTheRing) => {
+                        the_other_circles_round_the_tube_are_walked_the_other_way(
+                            solid, face, coedge,
+                        )?;
                         continue;
-                    };
+                    }
+                    Some(RoundTheTube::OnThePlane)
+                        if is_the_whole_of_its_outer_wire(face, coedge) =>
+                    {
+                        Some(Decision::Neg)
+                    }
+                    Some(RoundTheTube::OnThePlane) | None if partner == across.stored_surface() => {
+                        which_side_of_it_this_face_lies_on(solid, face, across)?
+                    }
+                    Some(RoundTheTube::OnThePlane) | None => {
+                        which_side_of_a_surface_a_run_names_this_face_lies_on(solid, face, partner)?
+                    }
+                };
+                let Some(material) = read else {
+                    continue;
+                };
+                let (partner_outward, material) = if partner == across.stored_surface() {
                     (outward(across), turned_by(material, across.orientation()))
                 } else {
-                    let Some(material) = which_side_of_a_surface_a_run_names_this_face_lies_on(
-                        solid, face, partner,
-                    )?
-                    else {
-                        continue;
-                    };
                     (gradient_of(&partner, at), material)
                 };
                 let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
@@ -2743,6 +2776,120 @@ fn which_side_of_a_surface_a_run_names_this_face_lies_on(
             corners_on_it,
         },
     )
+}
+
+/// Which of the two surfaces a closed edge is between is a ring, when the
+/// other is a plane holding the ring's axis: the edge is then one of the two
+/// circles round the tube that the plane cuts the ring in.
+///
+/// Private and asked of nothing but this one pair, so it has no variant to
+/// grow. Exhaustive on purpose.
+enum RoundTheTube {
+    /// The face's own surface, the first of the two, is the ring.
+    OnTheRing,
+    /// The face's own surface is the plane.
+    OnThePlane,
+}
+
+/// Whether `names_it`, the face's own surface and the one across a closed
+/// edge, are a ring and a plane through its axis, and which is the face's.
+fn a_circle_round_the_tube(names_it: [Surface; 2]) -> Option<RoundTheTube> {
+    if let [Surface::Torus(ring), Surface::Plane(flat)] = names_it
+        && holds_the_axis_of(&flat, &ring)
+    {
+        return Some(RoundTheTube::OnTheRing);
+    }
+    if let [Surface::Plane(flat), Surface::Torus(ring)] = names_it
+        && holds_the_axis_of(&flat, &ring)
+    {
+        return Some(RoundTheTube::OnThePlane);
+    }
+    None
+}
+
+/// Whether the whole of `ring`'s axis lies on `flat`, both questions settled
+/// exactly as stored: the plane's normal square to the axis direction, and
+/// the ring's centre on the plane.
+///
+/// `false` when the dot of the normal and the axis cannot be summed exactly,
+/// which leaves the edge to be read off the face's corners as every other
+/// closed edge is. `holds.rs`'s `how_the_axis_lies_on` asks the same two
+/// questions of the same numbers.
+fn holds_the_axis_of(flat: &Plane, ring: &rcad_geom::Torus) -> bool {
+    let normal = flat.normal().components();
+    let along = ring.axis().direction().components();
+    let mut total = [0.0; 6];
+    let mut used = 0;
+    for axis in 0..3 {
+        if !product_is_exact(normal[axis], along[axis]) {
+            return false;
+        }
+        let (product, roundoff) = two_product(normal[axis], along[axis]);
+        let mut sum = [0.0; 6];
+        used = expansion_sum(&total[..used], &[roundoff, product], &mut sum);
+        total = sum;
+    }
+    expansion_sign(&total[..used]) == Decision::Zero
+        && flat.side_of_point(PredicatePoint::from(ring.centre().coordinates())) == Decision::Zero
+}
+
+/// Whether `coedge` is the one coedge of `face`'s first wire, which is the
+/// wire a flat face's material lies inside.
+fn is_the_whole_of_its_outer_wire(face: FaceView<'_>, coedge: CoedgeView<'_>) -> bool {
+    face.wires().next().is_some_and(|outer| {
+        let mut round_it = outer.coedges();
+        round_it
+            .next()
+            .is_some_and(|only| only.key() == coedge.key())
+            && round_it.next().is_none()
+    })
+}
+
+/// Every other circle round the tube of this ring face is walked along its
+/// edge the other way from `circle`.
+///
+/// Every such circle is stored running the way the tube angle grows
+/// ([`the_way_it_is_parametrised_about`]). A band of the ring between two of
+/// them runs on from one of them and back towards the other, so with its
+/// material on the left it walks one the way the tube angle grows and the
+/// other against it. Two circles walked the same way bound no band: one says
+/// the band runs on round the ring from it and the other says the same.
+///
+/// # Errors
+///
+/// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] for a second circle
+/// walked the same way, and whatever finding the face across an edge refuses.
+fn the_other_circles_round_the_tube_are_walked_the_other_way(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    circle: CoedgeView<'_>,
+) -> Result<()> {
+    for other in face.wires().flat_map(WireView::coedges) {
+        let edge = other.edge();
+        if other.key() == circle.key()
+            || !matches!(
+                edge.stored_run(),
+                EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. }
+            )
+        {
+            continue;
+        }
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        let names_it = which_two_surfaces_a_run_is_between(
+            edge.stored_run(),
+            [&face.stored_surface(), &across.stored_surface()],
+        );
+        if matches!(
+            a_circle_round_the_tube(names_it),
+            Some(RoundTheTube::OnTheRing)
+        ) && other.orientation_on_its_edge() == circle.orientation_on_its_edge()
+        {
+            return Err(Invalid::AClosedEdgeIsWalkedAgainstItsSurface.into());
+        }
+    }
+    Ok(())
 }
 
 /// Which of the two surfaces either side of an edge names which way it runs.
