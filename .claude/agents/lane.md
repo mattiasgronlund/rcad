@@ -40,6 +40,13 @@ files get added. Skip it and your first gate can fail at `lint` over
 formatting alone, the way Q574's did, leaving its recorded tip a
 rustfmt-only commit instead of the real change.
 
+Gate with `mise exec -- just lint check-wildcards gate quiet`, in that order.
+`just` stops at the first recipe that fails, so a clippy warning or a new
+wildcard arm comes back in about 16 s instead of after a whole gate: 4 of 24
+lane gates failed on those two alone, with every test passing (§380). With
+`lint` first, the gate's own `check-wildcards` finds nothing left to re-check;
+the other order costs about 7 s more a gate.
+
 Stage with an explicit `git add <path>`, never `-A`, and commit as you go.
 Report `landed_sha` from `git rev-parse HEAD`, not from memory: a merger lands
 the branch by that sha.
