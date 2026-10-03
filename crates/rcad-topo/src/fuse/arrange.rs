@@ -4604,7 +4604,7 @@ fn round_a_closed_crossing(
     if boxes_overlap(one, other) {
         return Ok(one_point_if_both_are_exact(one, other));
     }
-    Ok(the_one_the_start_is(from, one, other))
+    Ok(the_one_the_start_is(pair, from, one, other))
 }
 
 /// Whether two nodes whose boxes share a point are that one point.
@@ -4634,11 +4634,18 @@ fn one_point_if_both_are_exact(one: PredicatePoint, other: PredicatePoint) -> De
 /// start comes first, [`Decision::Pos`] for `one` and [`Decision::Neg`] for
 /// `other`, which is what the named start already answers.
 ///
-/// Where both boxes hold the start, or neither does, nothing here says which
-/// of the two is the start, and the answer is [`Decision::Undecidable`] as wide
-/// as the wider box. The second case needs a start that is off the conic, which
-/// a walked start can be by a rounding.
+/// Where both boxes hold the start, nothing here says which of the two is the
+/// start, and the answer is [`Decision::Undecidable`] as wide as the wider box.
+///
+/// **Where neither does, the start is off the conic**, which a walked start
+/// can be by a rounding, and then neither point is the start.
+/// [`the_one_ahead_of_the_start`] says which comes first. A block edge grazing
+/// a ball at `x = 0` is the shape: both circles start at `(0, 1, −2⁻²⁵)`,
+/// `2⁻¹⁰³` inside the ball, on the edge halfway between the two exact places
+/// it cuts the ball at, `(±2⁻⁵¹, 1, −2⁻²⁵)`. That was refused here until Q449
+/// (§244.2).
 fn the_one_the_start_is(
+    pair: [&Surface; 2],
     from: PredicatePoint,
     one: PredicatePoint,
     other: PredicatePoint,
@@ -4646,9 +4653,70 @@ fn the_one_the_start_is(
     match (boxes_overlap(one, from), boxes_overlap(other, from)) {
         (true, false) => Decision::Pos,
         (false, true) => Decision::Neg,
-        (true, true) | (false, false) => Decision::Undecidable {
+        (false, false) => the_one_ahead_of_the_start(pair, from, one, other),
+        (true, true) => Decision::Undecidable {
             enclosure: one.uncertainty().max(other.uncertainty()),
         },
+    }
+}
+
+/// Which of two points, in a line with the start and neither of them it, the
+/// crossing reaches first: the one that lies ahead of the start along the way
+/// the crossing runs there.
+///
+/// The crossing of `S` and `T` runs along `∇S × ∇T`, and every row of
+/// [`which_comes_first_round_a_crossing`]'s table of which way a pair winds is
+/// read off that. So the step from the start to a point has a positive dot with
+/// `∇S × ∇T` at the start when the point lies ahead of it.
+///
+/// **Why ahead means first.** The two points and the start are in a line, since
+/// they sweep no area. Where the start lies between the two, one step points
+/// along that line and the other against it, so one point is ahead and one is
+/// behind. The run turns towards the inside of the curve, and the rest of the
+/// curve lies on that side of the line, so the sweep from the start already
+/// puts every other point of the curve after the one ahead and before the one
+/// behind. Putting the one ahead first is the only answer that agrees with
+/// those. Where the start is not between the two, both steps point the same
+/// way and nothing is decided: a round bar whose top corner a file moved a
+/// millimetre up the wall puts that corner straight above a new one, and that
+/// pair stays refused.
+///
+/// **For a ball's circle this is the half-plane through the circle's axis and
+/// the start.** With `c` the circle's centre and `w` the normal it winds about,
+/// `∇S × ∇T` at the start is `w × (from − c)`. That holds for a ball cut by a
+/// plane either way round and for two balls. Then `(P − from) · (w × (from − c))`
+/// is `det(w, from − c, P − c)`, the same polynomial term for term. Nothing
+/// here forms the centre, so there is no second spelling of it to disagree with
+/// [`where_a_closed_crossing_is_centred`] (§23.8, §211.5). On a pipe's or a
+/// cone's ellipse the two are not one polynomial: this reads the side the
+/// curve turns to off the run, and that would read it off the centre.
+///
+/// Only [`Decision::Pos`] for one and [`Decision::Neg`] for the other says
+/// which. Every other pair of answers is [`Decision::Undecidable`] as wide as
+/// the wider box, as this was before it asked.
+fn the_one_ahead_of_the_start(
+    pair: [&Surface; 2],
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Decision {
+    let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+    let start = from.enclosure();
+    let [ahead_of_one, ahead_of_other] = [one, other].map(|place| {
+        let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - start[axis]);
+        dot_of(step, runs).sign()
+    });
+    // Compared rather than matched: only a `Pos` against a `Neg` is read, and
+    // every other answer, `Zero` and `Undecidable` among them, leaves the order
+    // undecided (§40).
+    if ahead_of_one == Decision::Pos && ahead_of_other == Decision::Neg {
+        return Decision::Pos;
+    }
+    if ahead_of_one == Decision::Neg && ahead_of_other == Decision::Pos {
+        return Decision::Neg;
+    }
+    Decision::Undecidable {
+        enclosure: one.uncertainty().max(other.uncertainty()),
     }
 }
 
@@ -7176,8 +7244,9 @@ mod curved {
 #[cfg(test)]
 mod what_the_curved_arrangement_reaches {
     use rcad_geom::{
-        Axis, Cone, Cylinder, EdgeRun, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Torus,
-        Vector, intersect, where_a_closed_crossing_starts,
+        Axis, Cone, Cylinder, EdgeRun, Isometry, Plane, Point, Scale, Sphere, Surface, SurfaceMeet,
+        Torus, Vector, intersect, where_a_closed_crossing_starts,
+        which_comes_first_round_a_crossing,
     };
     use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -7189,7 +7258,7 @@ mod what_the_curved_arrangement_reaches {
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
         round_a_closed_crossing, side_of_surface, split_a_face, two_pipes_run_along_one_line,
-        where_a_cones_apex_stands_against_a_plane,
+        where_a_cones_apex_stands_against_a_plane, where_the_crossing_starts,
     };
     use crate::{Error, Model, SolidKey};
 
@@ -7524,6 +7593,76 @@ mod what_the_curved_arrangement_reaches {
         let inner = ordered_round_the_axis(3.0);
         assert_eq!(outer, Decision::Pos, "the outer circle winds about `+n`");
         assert_eq!(inner, Decision::Neg, "and the inner one about `-n`");
+    }
+
+    /// §244.2's walked start sits `2⁻¹⁰³` inside the ball, on the block edge
+    /// halfway between the two exact places it cuts the ball at, so the start
+    /// and the two places sweep exactly nothing. The one ahead of the start
+    /// comes first, on both circles and with either surface first.
+    ///
+    /// **What says that is the right one** is the sweep from the same start to
+    /// a third point across each circle, which is decided: it puts the third
+    /// point after the place at `+x` and before the place at `−x`. So `+x`
+    /// first is the only answer the order of the whole circle can hold.
+    /// Before Q449 every one of these was `Undecidable`.
+    #[test]
+    fn a_start_inside_the_ball_between_two_places_puts_the_one_ahead_of_it_first() {
+        let place = f64::powi(2.0, -51);
+        let top = -f64::powi(2.0, -25);
+        let ball =
+            Surface::Sphere(Sphere::new(Point::origin(), 1.0 + place).expect("a positive radius"));
+        let lid = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, top), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+        let side = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 1.0, 0.0), Vector::new(0.0, 1.0, 0.0))
+                .expect("a unit normal"),
+        );
+        let start = Point::new(0.0, 1.0, top);
+        let from = PredicatePoint::from(start.coordinates());
+        let plus_x = PredicatePoint::from([place, 1.0, top]);
+        let minus_x = PredicatePoint::from([-place, 1.0, top]);
+        assert_eq!(
+            side_of_surface(&ball, from),
+            Decision::Neg,
+            "the walked start is inside the ball"
+        );
+        for (named, flat, across) in [
+            ("the lid's circle", &lid, [0.0, -1.0, top]),
+            ("the side's circle", &side, [0.0, 1.0, -top]),
+        ] {
+            // The ball first runs both circles towards `+x` from the start, and
+            // the plane first runs them the other way.
+            for (pair, [first, second]) in [
+                ([&ball, flat], [plus_x, minus_x]),
+                ([flat, &ball], [minus_x, plus_x]),
+            ] {
+                let node = where_the_crossing_starts(pair[0], pair[1], start);
+                let order = |one, other| {
+                    round_a_closed_crossing(pair, [from, node], one, other)
+                        .unwrap_or_else(|why| panic!("{named} is a circle: {why:?}"))
+                };
+                let sweep = |one, other| {
+                    which_comes_first_round_a_crossing(pair, from, one, other)
+                        .unwrap_or_else(|why| panic!("{named} is a circle: {why:?}"))
+                };
+                let across = PredicatePoint::from(across);
+                assert_eq!(sweep(first, second), Decision::Zero, "{named}: no area");
+                assert_eq!(
+                    sweep(first, across),
+                    Decision::Pos,
+                    "{named}: the point across comes after the first of the two"
+                );
+                assert_eq!(
+                    sweep(across, second),
+                    Decision::Pos,
+                    "{named}: and before the second"
+                );
+                assert_eq!(order(first, second), Decision::Pos, "{named}");
+                assert_eq!(order(second, first), Decision::Neg, "{named}, swapped");
+            }
+        }
     }
 
     /// A block wall beside a cone cuts a hyperbola, and both of its branches

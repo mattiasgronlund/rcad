@@ -10,13 +10,15 @@ boxes are apart the fuse refuses, as the code says it should. Where the boxes
 touch, a different line folds the pair first — the check in `place_the_meets`
 that throws away a meet already on the list. So this arm was never the one
 that did it, and nothing here reaches it.* **Since §248 it does, and since
-Q663 the arm asks the policy (244.5).**
+Q663 the arm asks the policy (244.5). Since Q449 a start between the two
+places puts the one ahead of it first (244.6).**
 
   244.1   Which proved zeros reach the arm
   244.2   A block edge grazing a ball puts the start between two nodes
   244.3   Where the boxes touch, `place_the_meets` folds the pair first
   244.4   What is not shown
   244.5   The premise lapsed with §248, and the arm now asks the policy
+  244.6   A start between the two places puts the one ahead of it first
 
 ### 244.1 Which proved zeros reach the arm
 
@@ -70,7 +72,9 @@ crossing`, level `Interval`, enclosure `0.0`, on those two points. That is
 `the_one_the_start_is` answering `(false, false)`: two boxes of no width,
 neither holding the start. Its doc comment says of that case that it "needs a
 start that is off the conic, which a walked start can be by a rounding". Here
-it is, by `2⁻¹⁰³`, and the refusal is the right answer.
+it is, by `2⁻¹⁰³`. **The refusal was not the right answer** (244.6): the
+start lies between the two places along the circle, so which comes first has
+an answer, and since Q449 the arm gives it.
 
 ### 244.3 Where the boxes touch, `place_the_meets` folds the pair first
 
@@ -216,3 +220,58 @@ the fuse right and the mesher at fault, and are not pinned here.
 to flip is now `a_certified_fuse_refuses_on_the_order_of_the_two_places`: the
 order refuses before the turn is asked, so §317's gap no longer shows through
 that fuse under a certified policy, only in the file's measurement of the turn.
+
+### 244.6 A start between the two places puts the one ahead of it first
+
+*Queue row Q449, from §317.6. Lane `lane-q449-a-start-between-two-nodes-by-angle`,
+off `bfc39286`.*
+
+**What 244.2 found, run again on the base.** At `cx = 0` both circles start at
+the exact `(0, 1, −2⁻²⁵)`, the two places are the exact `(±2⁻⁵¹, 1, −2⁻²⁵)`,
+the sweep is a proved zero, and neither place's box holds the start. Under
+`Policy::certified` every rule, with either solid first, refused on `order
+along a crossing` with enclosure `0.0`. That record is the `(false, false)`
+arm of `the_one_the_start_is`, not a sweep that stopped at `Interval`. Under
+`Policy::tolerant(25.0)` every rule refused with
+`CannotTellTheCellsOfAFaceApart`. A temporary print in the arm showed this,
+and was taken out before the commit.
+
+**The answer exists.** The start is inside the ball and on the chord between
+the two places, so it lies between them along the circle. Going round from
+there, the place ahead of the start comes first. The crossing of `S` and `T`
+runs along `∇S × ∇T`, the fact `which_comes_first_round_a_crossing`'s table is
+built on. So the arm now asks, for each place, the sign of the step from the
+start dotted with `∇S × ∇T` at the start. It reads only a `Pos` for one place
+against a `Neg` for the other. Every other pair of signs stays `Undecidable`,
+as before, and so does the arm where both boxes hold the start.
+
+**Why not the centre, as the row asked.** The row asked for
+`det(w, from − c, P − c)`, with the centre `c` taken from
+`where_a_closed_crossing_is_centred`. That function's answer keeps its fields
+private to `holds.rs`, which was outside this row's write set. The run at the
+start needs no centre. For a ball's circle the two are one polynomial: `∇S × ∇T`
+at the start is `w × (from − c)`, for a ball and a plane either way round and
+for two balls, and `(P − from) · (w × (from − c))` is `det(w, from − c, P − c)`.
+On a pipe's or a cone's ellipse they are not the same polynomial. This lane did
+not build an ellipse that reaches the arm.
+
+**What says the sign is the right one.** In `fuse/arrange.rs`,
+`a_start_inside_the_ball_between_two_places_puts_the_one_ahead_of_it_first`
+runs both circles, with each surface first. The sweep from the same start to a
+point across the circle is decided. It puts that point after the place the arm
+now calls first, and before the other. Any other answer would leave the
+circle's order with no consistent place to start.
+
+**What the fuse answers now.** Under both policies, every rule, either solid
+first, the one record is `a point inside a piece of a face` on the two places.
+The sliver between them holds no point with `f64` coordinates. That is §346's
+limit, the one the edge along `z` meets at `h = 0` in
+`a_block_edge_grazing_a_ball.rs`. `a_block_edge_grazing_a_ball_at_cx_0.rs` pins
+both facts.
+
+**The broken bar's pin does not move.** The round bar whose top corner a file
+moves to `(3, 0, 11)`, cut along its seam, reaches the same arm. There the two
+points are the moved corner and a new one at `(3, 0, 10)`, one straight above
+the other. The start `(0, 3, 10)` is not between them, so both steps point the
+same way and the arm still refuses. `OFF_THE_CAP` is still `Undecidable` on
+`order along a crossing`.
