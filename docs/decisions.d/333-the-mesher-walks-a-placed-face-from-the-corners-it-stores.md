@@ -233,3 +233,10 @@ coordinates for a flat face, is the one that reaches it.
 
 - Read `cut_up`'s points and corners in the frame they were made in, so a placed bar's triangles are the unplaced bar's too, **without** meshing the collapsed ball at `x = EVEN` (333.6). Whatever keeps it refused has to be named and measured, not found by trial. The table in 333.2 is the test, and `how_far_out_a_ball_can_sit_and_still_mesh.rs` must stay green. The work is in `crates/rcad-topo/src/mesh.rs`, `BuildingAMesh::walk_a_wire_round`.
 - Correct the pinned figure in `whether_the_floor_predicts_the_step_cap.rs` if that change moves it, with its cause.
+
+*2026-10-03, Q378: not fixed. §379 has the table on `3d403339`, where only the
+wall differs because §362 now cuts the caps where the solid sits. It names the
+question that keeps the ball refused (does the mesh enclose space where it lands,
+when it did where it was made) and measures it. It also gives the two reasons
+the change did not land: no `Error` variant for that refusal in the write set,
+and the adapted hunks still leave 141 to 199 wall triangles different.*
