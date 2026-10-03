@@ -350,6 +350,9 @@ impl SolidView<'_> {
     /// predicate inside a triangulation could not settle a sign.
     /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] when two patches folded
     /// onto each other and a side would be used more than twice.
+    /// [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when the solid is
+    /// placed and its mesh, moved out to where it sits, no longer encloses the
+    /// space it did where it was made.
     /// [`Error::AWireWillNotLieFlatOnItsFace`],
     /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`],
     /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
@@ -398,7 +401,53 @@ impl SolidView<'_> {
         for face in self.faces() {
             building.cut_up(face, log)?;
         }
-        building.finish()
+        let made = core::mem::take(&mut building.made);
+        let mesh = building.finish()?;
+        if self
+            .faces()
+            .all(|face| face.location() == Isometry::identity())
+        {
+            return Ok(mesh);
+        }
+        Self::unless_placing_it_took_away_its_space(mesh, made)
+    }
+
+    /// `mesh`, unless it encloses space where its points were made and none
+    /// where they land.
+    ///
+    /// **The one promise of a mesh of a solid that moving it can break on its
+    /// own.** Moved out to where a ball one ulp across sits, the octahedron it
+    /// was meshed as keeps every point within the deviation it claims, every
+    /// side used twice and every corner apart — and lands flat, each triangle
+    /// on a twin (`docs/decisions.md` §333.6). Three questions asked one
+    /// triangle or one side at a time were turned down because a sound placed
+    /// solid can fail each of them, or the flat ball can pass it (§379.2); the
+    /// space the whole mesh encloses is what tells the two apart.
+    ///
+    /// **Both signs, and not only the one where it lands.** A mesh that
+    /// encloses nothing where it was made is about the solid, and
+    /// [`Model::validate`](crate::Model::validate) already says so, or meshes
+    /// it finer first. Only the sign the movement lost is this refusal's.
+    ///
+    /// `made` runs with the mesh's points, each where its face is stored —
+    /// see [`BuildingAMesh::made`]. Both sums are
+    /// [`signed_volume_over`](crate::measure::signed_volume_over), which
+    /// settles its sign exactly where the rounded sum cannot.
+    fn unless_placing_it_took_away_its_space(mut mesh: Mesh, made: Vec<Point>) -> Result<Mesh> {
+        let enclosed_where_placed = crate::measure::signed_volume_over(&mesh);
+        if enclosed_where_placed > 0.0 {
+            return Ok(mesh);
+        }
+        let placed = core::mem::replace(&mut mesh.points, made);
+        let enclosed_where_made = crate::measure::signed_volume_over(&mesh);
+        mesh.points = placed;
+        if enclosed_where_made > 0.0 {
+            return Err(Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+                enclosed_where_made,
+                enclosed_where_placed,
+            });
+        }
+        Ok(mesh)
     }
 
     /// The surfaces of the faces either side of each edge, as the arena holds
@@ -556,6 +605,16 @@ struct BuildingAMesh {
     on_a_cut: HashSet<u32>,
     worst: f64,
     along_each_edge: HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+    /// Where each point of `points` was made, in the frame its face is stored
+    /// in: worked out there for a placed face, and the point itself for a face
+    /// at no placement, whose frame is undone by a shift that loses nothing.
+    ///
+    /// Two readers. [`BuildingAMesh::walk_a_wire_round`] reads a placed curved
+    /// face's points here rather than moving them out and back, and
+    /// [`SolidView::unless_placing_it_took_away_its_space`] asks how much space
+    /// the mesh encloses on them. The faces of one shell share one placement, so
+    /// each shell is closed in one frame here.
+    made: Vec<Point>,
 }
 
 impl BuildingAMesh {
@@ -573,6 +632,7 @@ impl BuildingAMesh {
             on_a_cut: HashSet::new(),
             worst: 0.0,
             along_each_edge,
+            made: Vec::new(),
         }
     }
 
@@ -675,12 +735,13 @@ impl BuildingAMesh {
     /// costs, which is zero for a placed face by its first line. The move of the
     /// corners back in was never charged, so there is nothing to take off.
     ///
-    /// **What it does not reach.** [`BuildingAMesh::cut_up`] still reads each
-    /// point of a wire moved out and back, so a placed bar's *triangles* are not
-    /// yet the unplaced bar's (`docs/decisions.md` §333.3, and §333.6 for why the
-    /// obvious fix there is not taken); and a solid read back from a file is
-    /// meshed in the world, not in its stored frame, so this does not make a STEP
-    /// round trip measure the same (§249.5).
+    /// **What it does not reach.** [`BuildingAMesh::walk_a_wire_round`] now
+    /// reads a placed curved face's points where they were made too (§379), and
+    /// a placed bar's *triangles* are still not the unplaced bar's: between 141
+    /// and 199 of 500 differ on the wall under those twelve placements, and none
+    /// on the caps (§379.5). And a solid read back from a file is meshed in the
+    /// world, not in its stored frame, so this does not make a STEP round trip
+    /// measure the same (§249.5).
     ///
     /// # What a refusal from here is in, and why it is not what was walked
     ///
@@ -835,10 +896,7 @@ impl BuildingAMesh {
             .max(along_it.deviation().magnitude() + moved + moving);
         Ok(points
             .into_iter()
-            .map(|along| {
-                let at = there.apply_to_point(along);
-                self.remember(at)
-            })
+            .map(|along| self.remember_made_on(face, &there, along))
             .collect())
     }
 
@@ -1042,7 +1100,7 @@ impl BuildingAMesh {
         let seam = (least + most) / 2.0 - whole / 2.0;
         let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let [south, north] = [-pole, pole].map(|latitude| {
-            let at = self.remember(there.apply_to_point(stored.point_at(seam, latitude)));
+            let at = self.remember_made_on(face, &there, stored.point_at(seam, latitude));
             self.on_a_cut.insert(at);
             at
         });
@@ -1197,7 +1255,7 @@ impl BuildingAMesh {
         if !at_the_pole.is_finite() {
             return Ok(None);
         }
-        let at_the_pole = self.remember(there.apply_to_point(at_the_pole));
+        let at_the_pole = self.remember_made_on(face, &there, at_the_pole);
         self.on_a_cut.insert(at_the_pole);
 
         let mut cuts = Vec::with_capacity(4);
@@ -1580,7 +1638,7 @@ impl BuildingAMesh {
                 [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
             let on_it = stored.point_at(sits_at[0], sits_at[1]);
             along.corners.push(sits_at);
-            let at = self.remember(there.apply_to_point(on_it));
+            let at = self.remember_made_on(face, &there, on_it);
             self.on_a_cut.insert(at);
             along.points.push(at);
         }
@@ -1678,7 +1736,7 @@ impl BuildingAMesh {
                 [0, 1].map(|which| leaving[which] + part * (arriving[which] - leaving[which]));
             let on_it = stored.point_at(sits_at[0], sits_at[1]);
             along_the_cut.corners.push(sits_at);
-            let at = self.remember(there.apply_to_point(on_it));
+            let at = self.remember_made_on(face, &there, on_it);
             self.on_a_cut.insert(at);
             along_the_cut.points.push(at);
         }
@@ -1742,10 +1800,21 @@ impl BuildingAMesh {
         // Everything past the corners this patch handed over is a point the
         // refinement put strictly inside it, so it belongs to this patch alone
         // and nothing else will ever name it (§25.1).
+        //
+        // A flat patch gets none: a flat piece of a plane strays nothing, so the
+        // triangulator has nothing to refine. That is also what keeps
+        // `self.made` in one frame per shell, since a flat face is cut up where
+        // the solid sits and not where it is stored.
+        assert!(
+            surface.as_plane().is_none() || cut.corners().len() == corner_is.len(),
+            "the triangulator put {} points inside flat face {:?}",
+            cut.corners().len() - corner_is.len(),
+            face.key()
+        );
         let there = back_out_of_the_frame_this_face_is_cut_up_in(face);
         for corner in &cut.corners()[corner_is.len()..] {
             let inside = surface.point_at(corner[0], corner[1]);
-            corner_is.push(self.remember(there.apply_to_point(inside)));
+            corner_is.push(self.remember_made_on(face, &there, inside));
         }
 
         // The triangulator draws every triangle anticlockwise in the chart, and
@@ -1789,7 +1858,17 @@ impl BuildingAMesh {
     /// One wire, as corners in the face's own two coordinates and the points of
     /// the solid's table they stand at. The coordinates are those of `surface`,
     /// which is [`the_surface_this_face_is_cut_up_on`], read off each point
-    /// moved into [`the_frame_this_face_is_cut_up_in`].
+    /// where it stands in [`the_frame_this_face_is_cut_up_in`].
+    ///
+    /// **A placed curved face reads each point where it was made**, its corners
+    /// out of the arena and the rest out of [`BuildingAMesh::made`], and not
+    /// moved out and back: that round trip rounds twice, and out where a solid
+    /// is one ulp across it put the middle of a ball's seam on the axis between
+    /// its poles (`docs/decisions.md` §333.6, §379). Reading a point where it was
+    /// made can hand back a mesh that is sound where it was made and flat where
+    /// it lands, which is [`SolidView::unless_placing_it_took_away_its_space`]'s
+    /// to refuse. A flat face is cut up where the solid sits and a face at no
+    /// placement is moved by an exact shift, so both read the table as it is.
     ///
     /// The two lists run together: corner `i` of the loop is point `points[i]`,
     /// and the same point may turn up at two corners. Both ends of a seam do,
@@ -1826,13 +1905,21 @@ impl BuildingAMesh {
         surface: &Surface,
     ) -> Option<WalkedLoop> {
         let back = the_frame_this_face_is_cut_up_in(face);
+        let read_as_made = face.location() != Isometry::identity() && back != Isometry::identity();
+        let corner_in = |vertex: VertexView<'_>| {
+            if read_as_made {
+                where_this_corner_is_in_the_frame_it_is_meshed_in(vertex, face)
+            } else {
+                back.apply_to_point(vertex.point())
+            }
+        };
         let poles = poles_of(wire);
         let sits_at_a_pole = |at: Point| {
             the_surface_pinches_at(surface, surface.coordinates_of(at).1)
                 || the_pole_a_point_sits_within_a_rounding_of(surface, at).is_some()
         };
         let at_a_pole = |vertex: &VertexView<'_>| {
-            poles.contains(&vertex.key()) || sits_at_a_pole(back.apply_to_point(vertex.point()))
+            poles.contains(&vertex.key()) || sits_at_a_pole(corner_in(*vertex))
         };
         let mut used = HashSet::new();
         let no_side_of_this_wire_is_a_seam = wire
@@ -1851,7 +1938,7 @@ impl BuildingAMesh {
                 WireStepView::Along(coedge) => {
                     let start = coedge.start();
                     let at = self.remember_the_corner(start);
-                    let where_it_is = back.apply_to_point(start.point());
+                    let where_it_is = corner_in(start);
                     let start_is_a_pole = at_a_pole(&start);
                     walk.arrive(at, surface.coordinates_of(where_it_is), start_is_a_pole);
                     let a_pole_step_came_first =
@@ -1884,7 +1971,11 @@ impl BuildingAMesh {
                         } else {
                             walked[step]
                         };
-                        let where_it_is = back.apply_to_point(self.points[at as usize]);
+                        let where_it_is = if read_as_made {
+                            self.made[at as usize]
+                        } else {
+                            back.apply_to_point(self.points[at as usize])
+                        };
                         let sits_at = surface.coordinates_of(where_it_is);
                         let passes_a_pole = sits_at_a_pole(where_it_is);
                         walk.arrive(at, sits_at, passes_a_pole);
@@ -1895,7 +1986,7 @@ impl BuildingAMesh {
                 }
                 WireStepView::Pole(vertex) => {
                     let at = self.remember_the_corner(vertex);
-                    let where_it_is = back.apply_to_point(vertex.point());
+                    let where_it_is = corner_in(vertex);
                     walk.arrive(at, surface.coordinates_of(where_it_is), true);
                     walk.cross_the_pole(a_seam_turns_back_at(&steps, index));
                 }
@@ -1913,16 +2004,32 @@ impl BuildingAMesh {
         if let Some(&at) = self.at_vertex.get(&vertex.key()) {
             return at;
         }
-        let at = self.remember(vertex.point());
+        let at = self.remember(vertex.point(), vertex.stored_point());
         self.at_vertex.insert(vertex.key(), at);
         at
     }
 
-    /// Put a point in the table and say where it went.
-    fn remember(&mut self, point: Point) -> u32 {
+    /// Put a point `face` made in the table, moved out to where the solid sits by
+    /// `there`, and say where it went.
+    ///
+    /// Where it was made is kept as [`BuildingAMesh::made`] says: as made for a
+    /// placed face, and as moved out for a face at no placement, whose `there`
+    /// is an exact shift and whose stored frame is where the solid sits.
+    fn remember_made_on(&mut self, face: FaceView<'_>, there: &Isometry, made: Point) -> u32 {
+        let at = there.apply_to_point(made);
+        if face.location() == Isometry::identity() {
+            return self.remember(at, at);
+        }
+        self.remember(at, made)
+    }
+
+    /// Put a point in the table, with where it was made beside it, and say
+    /// where it went.
+    fn remember(&mut self, point: Point, made: Point) -> u32 {
         let at = u32::try_from(self.points.len())
             .expect("a mesh is refused long before it holds four billion points");
         self.points.push(point);
+        self.made.push(made);
         at
     }
 
