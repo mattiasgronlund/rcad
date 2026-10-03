@@ -3015,6 +3015,14 @@ check-gate-runs-every-check:
         for step in $chain; do printf '%s\n' "$cargo" | grep -qx "$step" || echo "  $step is on the line and its recipe builds nothing with cargo"; done; \
         echo "a cargo step off the line waits on cargo's lock beside test (docs/decisions.md §372.10)"; \
         exit 1; \
+    fi; \
+    test_at=$(printf '%s\n' "$steps" | grep -n -x 'test' | head -1 | cut -d: -f1); \
+    t_selftest_at=$(printf '%s\n' "$steps" | grep -n -x 'check-t-selftest' | head -1 | cut -d: -f1); \
+    if [ -n "$test_at" ] && [ -n "$t_selftest_at" ] && [ "$t_selftest_at" -lt "$test_at" ]; then \
+        echo "check-t-selftest is at line $t_selftest_at of gate_steps, test is at line $test_at"; \
+        echo "check-t-selftest needs the binaries test built, so it must come after"; \
+        echo "test in gate_steps (docs/decisions.md §372.10)"; \
+        exit 1; \
     fi
 
 [doc("Every public enum is #[non_exhaustive] or says it is exhaustive on purpose.")]
