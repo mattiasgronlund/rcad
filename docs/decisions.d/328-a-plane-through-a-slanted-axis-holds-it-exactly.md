@@ -89,7 +89,9 @@ The brief suggested a half bend, corners `(±3, 0, 0)` and both caps on one
 plane. Its wall cannot tell the change: `what_a_ring_face_between_two_planes_holds`
 turns away a plane stored twice, because each circle has to lie strictly in
 front of the other cap's plane and a half bend's lies on it. So the far corner
-moved to `(1, 2, −2)`, and that is the only choice. A scratch search over every
+moved to `(1, 2, −2)`, and that is the only choice. *2026-10-03, Q753: a plane
+stored twice is no longer turned away for that. When it holds the axis, the
+wall is read as the half of the ring its wire keeps (§377.3).* A scratch search over every
 point with coordinates in sixteenths, `|x| ≤ 6` and `|y − z| ≤ 12`, found eight
 points on this ring: `(±3, 0, 0)`, `(±5, 0, 0)`, `(1, ±2, ∓2)` and
 `(−1, ±2, ∓2)`, all on the inner or outer equator. The tests ask the wall about

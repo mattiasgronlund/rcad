@@ -50,6 +50,16 @@ more than a half-turn is the part in front of *either* plane, and step 3 is
 what refuses it. A plane stored twice, or two stored planes that are one plane,
 put a corner on the other plane and are refused by step 3 too.
 
+*2026-10-03, Q753: neither is refused by step 3 now.* A plane stored twice is
+one trimming with both edges along it, and on `0c8a44fc` that wall never
+reached this rule: the general rule refused it with
+`NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` (§377.2). Two stored planes
+that are one plane did reach step 3. Both shapes come here now, and when the
+planes hold the axis with normals along one line, the face is the half of the
+ring on the side its wire keeps. It is refused, with
+`AFaceMissesPartOfWhereItsSurfacesCross`, only when the wire keeps one side at
+one circle and the other side at the other (§377.3).
+
 The dispatched brief listed six legs. Legs 1, 3, 4 and 5 held as written. Leg
 2 needed one more condition: **the planes must hold the axis**, because a plane
 square to the axis also cuts a ring in two circles, or rests on it along one,

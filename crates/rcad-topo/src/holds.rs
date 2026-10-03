@@ -578,12 +578,23 @@ fn what_a_curved_face_holds(
 /// pieces that plane cuts the ring into is the face. Answering it takes the
 /// plane's own geometry, which [`what_a_ring_face_between_two_planes_holds`]
 /// reads.
+///
+/// **Two caps stored on one plane are one trimming with both edges along it**,
+/// because [`what_trims_this_face`] gathers edges by the surface across them. A
+/// half bend's caps both lie on the plane through its two ends, so its wall
+/// comes here as one plane with two edges. The general rule refused that too:
+/// every corner of the wall is on the plane, so no corner says which side of it
+/// the wall is on (`docs/decisions.md` §377).
 fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) -> bool {
     matches!(surface, Surface::Torus(_))
-        && trimmings.len() == 2
-        && trimmings.iter().all(|trimming| {
-            trimming.surface.as_plane().is_some() && trimming.corners_on_it.len() == 1
-        })
+        && trimmings
+            .iter()
+            .all(|trimming| trimming.surface.as_plane().is_some())
+        && trimmings
+            .iter()
+            .map(|trimming| trimming.corners_on_it.len())
+            .sum::<usize>()
+            == 2
 }
 
 /// Whether a ring's face trimmed by two planes, one edge along each, holds
@@ -602,11 +613,22 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 ///    `Model::validate` checks every closed edge against. Not off a corner: a
 ///    three-quarter bend's wall has its far corner on the other side of the
 ///    first cap's plane from where the wall leaves that cap.
-/// 2. **Each circle must lie strictly in front of the other plane.** A circle
-///    round the tube sits at one angle round the axis, so its corner's side is
-///    the whole circle's. This is what turns away a stretch of more than a
-///    half-turn, which is the part of the ring in front of *either* plane and
-///    not of both, and a plane stored twice.
+/// 2. **Two planes that are one plane leave half of the ring** — a half bend's
+///    wall, whose two ends lie on the plane through both of them. Both hold
+///    the ring's centre and their normals lie along one line, so they are one
+///    plane, and it cuts the ring less its two circles into two halves, one
+///    each side. A face with only that plane's circles as edges is one of the
+///    halves, and the side its wire keeps says which. Every corner of it is on
+///    the plane, so no corner could (`docs/decisions.md` §377). Each side is
+///    read against its own stored normal, and two normals along one line can
+///    point opposite ways, so the two sides must differ exactly when the
+///    normals do; a wire that leaves one circle on one side and the other on
+///    the other is not a half.
+/// 3. **Otherwise each circle must lie strictly in front of the other plane.**
+///    A circle round the tube sits at one angle round the axis, so its
+///    corner's side is the whole circle's. This is what turns away a stretch
+///    of more than a half-turn, which is the part of the ring in front of
+///    *either* plane and not of both.
 ///
 /// Then the stretch between the circles is the part of the ring in front of
 /// both planes, and `point` is asked against the planes as they read once
@@ -617,8 +639,9 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 /// # Errors
 ///
 /// [`Error::AFaceMissesPartOfWhereItsSurfacesCross`] when a plane does not hold
-/// the ring's axis or a circle is not in front of the other plane, which is
-/// what the general rule gave every face of this shape.
+/// the ring's axis, a circle is not in front of the other plane, or the wire
+/// keeps one plane's two sides, which is what the general rule gave every face
+/// of this shape.
 /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
 /// cannot, and [`Error::Undecidable`] when a side, or whether a plane holds the
 /// axis, could not be settled.
@@ -695,6 +718,14 @@ fn what_a_ring_face_between_two_planes_holds(
             cuts.len()
         );
     };
+    if let (Some(first), Some(second)) = (one.surface.as_plane(), other.surface.as_plane())
+        && the_normals_lie_along_one_line(first, second)
+    {
+        if (one.kept == other.kept) != point_the_same_way(first, second) {
+            return Err(refuse());
+        }
+        return held_in_front_of_all(core::slice::from_ref(one), point);
+    }
     for (circle, plane) in [(one, other), (other, one)] {
         let at =
             PredicatePoint::from(where_it_is_stored(solid, circle.corners_on_it[0]).coordinates());
@@ -708,6 +739,25 @@ fn what_a_ring_face_between_two_planes_holds(
         }
     }
     held_in_front_of_all(&cuts, point)
+}
+
+/// Whether two planes' normals, already shown to lie along one line, point the
+/// same way.
+///
+/// Along one line, each normal is an exact multiple of the other, so a
+/// component is zero in both or in neither, and the multiple's sign is whether
+/// the signs of any other component agree. Nothing is worked out, so nothing
+/// rounds.
+fn point_the_same_way(one: &Plane, other: &Plane) -> bool {
+    let (one, other) = (one.normal().components(), other.normal().components());
+    let axis = (0..3)
+        .find(|&axis| one[axis] != 0.0)
+        .expect("a plane's normal has a length");
+    assert!(
+        other[axis] != 0.0,
+        "two normals along one line are zero along the same axes: {one:?} and {other:?}"
+    );
+    (one[axis] > 0.0) == (other[axis] > 0.0)
 }
 
 /// Whether the whole of `torus`'s axis lies on `flat`: [`Decision::Zero`] when
@@ -3348,6 +3398,10 @@ mod tests {
         Quarter,
         /// To a cap on `x = 0` at `−y`, the long way round.
         ThreeQuarters,
+        /// To a cap on `y = 0` at `−x`, round through `+y`: both caps on one
+        /// plane, facing `−y`, the way `tests/rings/mod.rs` builds its half
+        /// bend.
+        Half,
     }
 
     /// How a bend's near cap, on `y = 0`, is stored.
@@ -3382,6 +3436,11 @@ mod tests {
                 rcad_geom::Point::new(0.0, -3.0, 0.0),
                 Vector::new(1.0, 0.0, 0.0),
                 HalfSpace::new(Vector::new(-1.0, 1.0, 0.0), -3.0),
+            ),
+            Bend::Half => (
+                rcad_geom::Point::new(-3.0, 0.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+                HalfSpace::new(Vector::new(0.0, 1.0, 0.0), 0.0),
             ),
         };
         let (near_cap_facing, near_cap_used) = match near_cap {
@@ -3777,6 +3836,115 @@ mod tests {
                 matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
                 "{point:?}: {answer:?}"
             );
+        }
+    }
+
+    /// A half bend's wall holds the half of the ring on the side of `y = 0` it
+    /// runs round through, and nothing of the other half (§377).
+    ///
+    /// Both caps are stored on the one plane `y = 0` facing `−y`, so the wall
+    /// is trimmed once, along both of that plane's circles, and every corner of
+    /// it is on the plane. The general rule found no corner to read the side
+    /// off and refused with `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`.
+    #[test]
+    fn a_half_bends_wall_holds_the_half_of_the_ring_its_caps_plane_leaves_on_its_side() {
+        let (model, solid, wall) = a_bend(Bend::Half, NearCap::FacingOut);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the half bend `tests/rings/mod.rs` builds through the sweep");
+        a_half_bends_wall_holds_the_half(&model, solid, wall);
+    }
+
+    /// The same half bend with its near cap stored facing `+y` and used
+    /// reversed holds the same half.
+    ///
+    /// The two caps are now two trimmings, one plane stored two ways, and each
+    /// circle is on the other's plane. §243's rule wanted each circle strictly
+    /// in front of the other plane and refused with
+    /// `AFaceMissesPartOfWhereItsSurfacesCross`. The two sides the wire reads
+    /// differ, as the two normals do, so they are one side.
+    #[test]
+    fn a_half_bends_wall_holds_the_same_half_with_its_near_cap_stored_turned_round() {
+        let (model, solid, wall) = a_bend(Bend::Half, NearCap::FacingInAndUsedReversed);
+        a_half_bends_wall_holds_the_half(&model, solid, wall);
+    }
+
+    /// Every point asked is exactly on the ring: on its outer or inner equator
+    /// at a 3-4-5 angle, at the top or bottom of the tube, or on one of the two
+    /// circles `y = 0` cuts it in.
+    fn a_half_bends_wall_holds_the_half(model: &Model, solid: SolidKey, wall: FaceKey) {
+        let expected = [
+            (at(3.0, 4.0, 0.0), OnAFace::Held),
+            (at(-3.0, 4.0, 0.0), OnAFace::Held),
+            (at(0.0, 4.0, 1.0), OnAFace::Held),
+            (at(0.0, 4.0, -1.0), OnAFace::Held),
+            (at(0.0, 3.0, 0.0), OnAFace::Held),
+            (at(3.0, -4.0, 0.0), OnAFace::NotHeld),
+            (at(-3.0, -4.0, 0.0), OnAFace::NotHeld),
+            (at(0.0, -4.0, 1.0), OnAFace::NotHeld),
+            (at(0.0, -5.0, 0.0), OnAFace::NotHeld),
+            (at(5.0, 0.0, 0.0), OnAFace::OnItsBoundary),
+            (at(-5.0, 0.0, 0.0), OnAFace::OnItsBoundary),
+            (at(4.0, 0.0, 1.0), OnAFace::OnItsBoundary),
+            (at(-4.0, 0.0, -1.0), OnAFace::OnItsBoundary),
+            (at(-3.0, 0.0, 0.0), OnAFace::OnItsBoundary),
+        ];
+        let bend = model.solid(solid).expect("this model made the key");
+        for (point, answer) in expected {
+            let held = bend
+                .face_holds_the_point(wall, point, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a half bend's wall is a face this can follow");
+            assert_eq!(held, answer, "{point:?}");
+        }
+    }
+
+    /// A wall whose two edges both run round the circle `y = 0` cuts at
+    /// `x > 0` is refused, and not read as a half of the ring.
+    ///
+    /// The far corner is `(5, 0, 0)`, on the near circle, so the wall has one
+    /// circle twice and the other circle not at all. Its wire walks that
+    /// circle once each way, so it keeps one side of the plane at one edge and
+    /// the other side at the other, and no half of the ring is that. Whichever
+    /// way the far cap's plane is stored, and however it is used, the two
+    /// sides read off the wire disagree once turned to one normal.
+    #[test]
+    fn a_wall_round_one_circle_twice_is_refused_rather_than_read_as_a_half() {
+        let through_the_axis = |facing| {
+            Plane::from_point_and_normal(rcad_geom::Point::origin(), facing)
+                .expect("a coordinate direction is a unit normal")
+        };
+        for (far_facing, far_used) in [
+            (Vector::new(0.0, -1.0, 0.0), Orientation::Forward),
+            (Vector::new(0.0, 1.0, 0.0), Orientation::Forward),
+            (Vector::new(0.0, 1.0, 0.0), Orientation::Reversed),
+        ] {
+            let (model, solid, wall) = a_piece_of_pipe(
+                rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring"),
+                End {
+                    corner: rcad_geom::Point::new(3.0, 0.0, 0.0),
+                    cap: through_the_axis(Vector::new(0.0, -1.0, 0.0)),
+                    used: Orientation::Forward,
+                },
+                End {
+                    corner: rcad_geom::Point::new(5.0, 0.0, 0.0),
+                    cap: through_the_axis(far_facing),
+                    used: far_used,
+                },
+                None,
+            );
+            let bend = model.solid(solid).expect("this model made the key");
+            for point in [at(3.0, 4.0, 0.0), at(3.0, -4.0, 0.0)] {
+                let answer = bend.face_holds_the_point(
+                    wall,
+                    point,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                assert!(
+                    matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
+                    "far cap facing {far_facing:?}, used {far_used:?}, {point:?}: {answer:?}"
+                );
+            }
         }
     }
 

@@ -175,7 +175,11 @@ Those fuses still refuse, somewhere else:
   circles lie in one plane through the axis, and §243's step 3 refuses a wall
   whose two stored planes are one plane. That it is this step and not another
   is not traced. The wall is the ring on one side of that plane, so an answer
-  exists and the refusal is a gap (§16.10).
+  exists and the refusal is a gap (§16.10). *2026-10-03, Q753: it was not step
+  3. Both caps are stored as one plane, so the wall had one trimming and the
+  general rule refused it (§377.2). The wall is now the half of the ring its
+  wire keeps; of 24 fuses with a quarter bend, 14 answer and 10 refuse later,
+  `ResultIsNotManifold { count: 4 }` (§377).*
 
 The lane also claimed that only a second bend on the same torus can put a flat
 piece on a torus disk through the public API. The verifier checked one leg of
