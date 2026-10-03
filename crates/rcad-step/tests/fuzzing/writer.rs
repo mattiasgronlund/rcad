@@ -297,11 +297,10 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// A plane is the one surface whose numbers are not written as they are
 /// stored. The writer picks the point it writes so that the reader's offset
 /// comes back the same bits (§313). The normal it writes as stored, and the
-/// reader scales it to length one again, so a normal a turn left an ulp off
-/// length one still comes back moved: 1 509 of the 2026-09-26 crash files
-/// stop here for that. It is a gap in the reader, not a limit — the file
-/// carries the bits — and this check keeps failing on it until `rcad-geom`
-/// gives the reader a way to keep them (§313.3).
+/// reader keeps it when it is as near length one as a turn leaves a normal
+/// (§355). The plane a ball's seam is cut from comes back the same way: the
+/// reader reads it off the circle's placement, and the writer places the
+/// circle at a centre that plane reads back from (Q822).
 ///
 /// # Panics
 ///
@@ -361,8 +360,9 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
                 "a sound solid's coedge came back from its own file ending at a different corner"
             );
             let (here_run, back_run) = (here_coedge.edge().run(), back_coedge.edge().run());
+            let chord = here_coedge.end().point() - here_coedge.start().point();
             assert!(
-                the_same_run(&here_run, &back_run),
+                the_same_run(&here_run, &back_run, chord),
                 "a sound solid's coedge came back from its own file with a different edge run: \
                  {here_run:?} went in, {back_run:?} came back"
             );
@@ -402,10 +402,22 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// half-space, spelled another way. What decides which arc is picked is which
 /// way the half-space faces, since both stand on the chord between the two
 /// ends, and those ends and the surface `and` names are compared bit for bit.
-/// So a flat picker is compared by facing the same way — along each other,
-/// the cross product exactly zero, and not opposite — and everything else in
+/// So a flat picker is compared by facing the same way, and everything else in
 /// a run as the same bits.
-fn the_same_run(here: &EdgeRun, back: &EdgeRun) -> bool {
+///
+/// **Where `and` is a plane, the arc lies in it**, and facing the same way is
+/// facing the same side of the chord within that plane: along
+/// `normal × chord`, both picker normals dotted with it the same sign and
+/// neither zero. A ball turned by any angle needs that. Its picker is
+/// `(1, 0, 0)` turned and the reader's is `(B − A) × w`, a multiple of the seam
+/// plane's normal turned a quarter, and the two are not along each other in
+/// exact arithmetic unless the diameter is a power of two (Q822,
+/// `docs/decisions.md` §366). The sign is read in plain `f64`, as the writer
+/// reads its own (`Writing::a_seam_of_one_ball`): a picker standing on the
+/// chord faces along that line or against it, never square to it. Beside any
+/// other surface the arc's plane is not to hand, so the pickers must be along
+/// each other — the cross product exactly zero — and not opposite.
+fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
         EdgeRun::PartOfWhereItCrosses {
@@ -420,13 +432,21 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun) -> bool {
     else {
         return same_bits();
     };
+    let facing_the_same_way = |here: &HalfSpace, back: &HalfSpace| {
+        if let Surface::Plane(cut) = here_and {
+            let into_an_arc = cut.normal().cross(chord);
+            let [here_side, back_side] =
+                [here, back].map(|picker| picker.normal().dot(into_an_arc));
+            (here_side > 0.0 && back_side > 0.0) || (here_side < 0.0 && back_side < 0.0)
+        } else {
+            here.normal().cross(back.normal()) == Vector::zero()
+                && here.normal().dot(back.normal()) > 0.0
+        }
+    };
     format!("{here_and:?}") == format!("{back_and:?}")
         && here_picks.len() == back_picks.len()
         && here_picks.iter().zip(back_picks).all(|pair| match pair {
-            (Picker::InFrontOf(here), Picker::InFrontOf(back)) => {
-                here.normal().cross(back.normal()) == Vector::zero()
-                    && here.normal().dot(back.normal()) > 0.0
-            }
+            (Picker::InFrontOf(here), Picker::InFrontOf(back)) => facing_the_same_way(here, back),
             (here, back) => format!("{here:?}") == format!("{back:?}"),
         })
 }
@@ -534,13 +554,149 @@ fn a_ball_turned_a_quarter_about_its_poles_is_told_apart_by_its_seam() {
     assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
 }
 
+/// The first of the seven turned balls whose seam
+/// [`how_often_a_model_the_mutator_draws_is_refused`] saw come back a different
+/// run (`docs/decisions.md` §366.4): its seam is cut from a plane facing
+/// `(0.1660299346975594, −0.9861207130895915, 0)`, a normal the turn left an ulp
+/// off length one. The reader built that plane again through
+/// `Plane::from_point_and_normal`, which scaled it to `0.16602993469755936`, and
+/// dotted the ball's centre with it for an offset an ulp off the one the turn
+/// left (Q822).
+#[test]
+fn a_ball_turned_about_its_poles_keeps_its_seam_plane_through_its_own_file() {
+    let model = the_ball_the_mutator_drew_turned_about_its_poles();
+    let text = rcad_step::write(&model, "a turned ball").expect("a turned ball is written");
+    let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+    let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a ball this writer wrote is read back");
+    let went_in = format!("{:?}", the_plane_its_seam_is_cut_from(&model));
+    assert!(went_in.contains("0.1660299346975594,"), "{went_in}");
+    assert_eq!(
+        went_in,
+        format!("{:?}", the_plane_its_seam_is_cut_from(back.model()))
+    );
+}
+
+/// The same ball comes back the same in every number this target compares.
+///
+/// **Its seam's picker is not the one that went in, and cannot be.** The
+/// kernel's picker is `(1, 0, 0)` turned, and the reader builds its own as
+/// `(B − A) × w` from the two poles and the circle's axis, which is twelve
+/// times the seam plane's normal turned a quarter, each component rounded. So
+/// the two are not along each other even in exact arithmetic, and comparing
+/// them by a cross product of exactly zero failed for every radius whose
+/// diameter is not a power of two. Both face the same side of the seam within
+/// its plane, so both pick the same half, which is what [`the_same_run`] asks.
+#[test]
+fn a_ball_turned_about_its_poles_comes_back_from_its_own_file() {
+    let bytes = postcard::to_allocvec(&the_ball_the_mutator_drew_turned_about_its_poles())
+        .expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
+/// Draw 367's ball: radius three at `(10, 7, −15)`, turned about `z`. Its seam
+/// plane's offset, `0.80`, is small beside the centre's coordinates, so a step
+/// of either one alone moves the reader's dot past it, and the writer finds
+/// the circle's centre by stepping both (`a_centre_its_plane_reads_back_from`).
+#[test]
+fn a_turned_ball_whose_seam_plane_passes_near_the_origin_comes_back_from_its_own_file() {
+    let turned = Isometry::translation(Vector::new(10.0, 7.0, -15.0))
+        .expect("a finite offset")
+        .compose(
+            &Isometry::rotation(&Axis::z(), 3.818_263_087_845_863_4)
+                .expect("a finite angle about a unit axis"),
+        );
+    let model = one_solid_placed_by(a_ball_of_radius_three, &turned);
+    let cut = format!("{:?}", the_plane_its_seam_is_cut_from(&model));
+    assert!(
+        cut.contains("[[0.6262005639152322, -0.779662012510707, 0.0]]")
+            && cut.contains("offset: 0.8043715515773728 "),
+        "{cut}"
+    );
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
+/// A seam picked by a half-space facing the other half of its circle is told
+/// apart from the seam that went in, though both stand on the same chord.
+#[test]
+fn a_seam_picked_from_the_other_side_is_a_different_run() {
+    let model = the_ball_the_mutator_drew_turned_about_its_poles();
+    let seam = the_seam_of_the_one_ball(&model);
+    let here = seam.edge().run();
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &here else {
+        panic!("a ball's seam is part of where a plane crosses it, not {here:?}");
+    };
+    let [Picker::InFrontOf(picking)] = picked_by.as_slice() else {
+        panic!("a ball's seam is picked by one half-space, not {picked_by:?}");
+    };
+    let the_other_half = EdgeRun::PartOfWhereItCrosses {
+        and: *and,
+        picked_by: [Picker::from(picking.reversed())].into_iter().collect(),
+    };
+    let chord = seam.end().point() - seam.start().point();
+    assert!(the_same_run(&here, &here, chord));
+    assert!(!the_same_run(&here, &the_other_half, chord));
+}
+
+/// The ball draw 89 of [`how_often_a_model_the_mutator_draws_is_refused`]
+/// builds: radius six, turned about `z` by an angle `draw.fraction()` gave and
+/// moved by whole units. The angle is the one whose turn has that draw's
+/// quaternion, bit for bit.
+fn the_ball_the_mutator_drew_turned_about_its_poles() -> Model {
+    let turned = Isometry::translation(Vector::new(11.0, -5.0, -9.0))
+        .expect("a finite offset")
+        .compose(
+            &Isometry::rotation(&Axis::z(), 3.308_395_003_925_273)
+                .expect("a finite angle about a unit axis"),
+        );
+    one_solid_placed_by(a_ball_of_radius_six, &turned)
+}
+
+fn the_seam_of_the_one_ball(model: &Model) -> rcad_topo::CoedgeView<'_> {
+    the_one_solid(model)
+        .faces()
+        .next()
+        .expect("a ball has one face")
+        .wires()
+        .flat_map(WireView::coedges)
+        .next()
+        .expect("a ball's one wire runs down its seam")
+}
+
+fn the_plane_its_seam_is_cut_from(model: &Model) -> Plane {
+    let run = the_seam_of_the_one_ball(model).edge().run();
+    let EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cut),
+        ..
+    } = run
+    else {
+        panic!("a ball's seam is cut from a plane, not {run:?}");
+    };
+    cut
+}
+
 /// How often a model this target's own mutator draws is refused, and by what
 /// name: four hundred draws, each from a checked-in seed or an earlier draw,
 /// the way a fuzzing run grows its corpus. Q70 ran the same loop three
 /// thousand times (`docs/decisions.md` §366).
 ///
 /// Every model written is read back and compared, so a cap this writer has
-/// learned to name and the reader does not take back panics here.
+/// learned to name and the reader does not take back panics here. Those
+/// panics are counted, except one on an edge's run, which fails: seven turned
+/// balls whose seam came back a different run were Q822, and none is left.
+/// Nor may a ball's seam be refused, which is what two of the seven became
+/// before the writer stepped two coordinates of the seam's centre together.
 #[test]
 fn how_often_a_model_the_mutator_draws_is_refused() {
     fn one_byte_bumped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
@@ -630,6 +786,21 @@ fn how_often_a_model_the_mutator_draws_is_refused() {
         a_sound_cone_cap_refused, 0,
         "a sound model was refused where its flat cap meets its cone"
     );
+    let runs_that_came_back_different: usize = comparisons_that_panicked
+        .iter()
+        .filter(|(said, _)| said.contains("with a different edge run"))
+        .map(|(_, (count, _))| count)
+        .sum();
+    assert_eq!(
+        runs_that_came_back_different, 0,
+        "a sound solid's edge came back from its own file as a different run"
+    );
+    assert!(
+        !refusals
+            .keys()
+            .any(|named| named.contains("first: \"ball\", second: \"ball\"")),
+        "a ball's seam was refused: {refusals:?}"
+    );
 }
 
 /// The frustum and the pointed cone this target draws, at each of its four
@@ -717,6 +888,14 @@ fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
 
 fn a_ball(model: &mut Model) -> rcad_topo::Result<SolidKey> {
     model.add_ball(2.0, &Isometry::identity())
+}
+
+fn a_ball_of_radius_six(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    model.add_ball(6.0, &Isometry::identity())
+}
+
+fn a_ball_of_radius_three(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    model.add_ball(3.0, &Isometry::identity())
 }
 
 fn a_cube(model: &mut Model) -> rcad_topo::Result<SolidKey> {

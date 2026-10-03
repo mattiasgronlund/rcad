@@ -169,6 +169,54 @@ failed:
   moved (`0.1660299346975594` read back as `0.16602993469755936`). Where the
   ulp goes was not traced. 366.5 files it.
 
+*2026-10-03, Q822, lane `lane-q822-a-ball-seam-plane-read-back-an-ulp-off-2`
+off `2ad40445`.* On that base the same command prints the same seven, and
+`ASolidWithNoShell` four times, which the print above leaves out. All seven
+are a ball of the mutator's turned about `z` by an angle `draw.fraction()`
+gave. None came back reversed, so none is Q776's guess. The writer turns the
+circle over only where `(B − A) × n · p` is negative, and for `add_ball`'s seam
+that is `2r`: a turn keeps a triple product, so no ball the mutator builds
+reaches Q776. Three causes, each seen alone:
+
+- **The reader scaled the seam plane's normal again.** It built the plane off
+  the circle's placement through `Plane::from_point_and_normal`, not through
+  `plane_through`, which §355 gave a `PLANE`. All four places in `brep.rs`
+  that build a circle's plane now call `plane_through`.
+- **The ball's centre did not read back as the plane's offset.** The writer
+  placed the circle at the ball's centre, and the reader's dot of that centre
+  with the normal can land an ulp off the offset the turn left. The seam is now
+  centred by `a_centre_its_plane_reads_back_from`, as Q767's arcs already were,
+  and that function asks `plane_through` too. On two of the seven no one
+  coordinate stepped alone lands on the offset — for the ball at
+  `(10, 7, −15)` the offset is `0.80`, and one step of either coordinate moves
+  the dot six ulps of it or more — so those two were refused by name until the
+  function stepped two coordinates together, at most four each. It finds a
+  centre for both, so that refusal was a gap.
+- **The target compared the seam's picker by exact parallelism.** The kernel's
+  picker is `(1, 0, 0)` turned; the reader's is `(B − A) × w`, which for the
+  ball of radius six is `12·(n_y, −n_x, 0)` rounded per component, and the two
+  are not along each other even in exact arithmetic. One of the seven came
+  back with its plane the same bits and panicked on the picker alone.
+  `the_same_run` now compares a picker beside a plane by which side of the
+  chord it faces within that plane, which is which half it picks.
+
+After, the same command:
+
+    128 of 400 drawn models refused
+         1  ACurveTheFacesEitherSideOfItDoNotName { first: "plane", second: "cone", closed: true }
+        85  ACurveTheFacesEitherSideOfItDoNotName { first: "plane", second: "ring", closed: true }
+         4  ASolidWithNoShell
+        38  AWireThatStandsStillAtAPole
+        22  written, and the comparison panicked: a sound solid's face came back from its own file with a different surface
+    0 sound models refused where a flat face meets a cone
+
+The test now fails on any comparison that panics on an edge's run and on any
+ball whose seam is refused. The draws are pinned by
+`a_ball_turned_about_its_poles_keeps_its_seam_plane_through_its_own_file`,
+`a_ball_turned_about_its_poles_comes_back_from_its_own_file`,
+`a_turned_ball_whose_seam_plane_passes_near_the_origin_comes_back_from_its_own_file`
+and `a_seam_picked_from_the_other_side_is_a_different_run`.
+
 ### 366.5 What this leaves
 
 - `every_shape_seed_is_the_shape_it_is_named_for`, in
