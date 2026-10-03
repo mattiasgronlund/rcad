@@ -682,6 +682,13 @@ impl Writing {
     /// run's own half-space faces. The sign is read in plain `f64`: the two
     /// directions are along each other or opposite, never square, so a dot
     /// that comes out zero is a run this does not recognise and is refused.
+    ///
+    /// **The circle is centred where the reader's plane comes back as the
+    /// run's** ([`a_centre_its_plane_reads_back_from`]). The reader names the
+    /// seam by the plane through the circle's centre about its axis, and the
+    /// ball's own centre, dotted with a normal a turn left, can land an ulp off
+    /// the offset the turn left (Q822). A centre an ulp or two off the ball's
+    /// is well inside what the reader allows a circle on a ball.
     fn a_seam_of_one_ball(
         &mut self,
         ball: &Sphere,
@@ -712,7 +719,8 @@ impl Writing {
         } else {
             return None;
         };
-        Some(self.circle(ball.centre(), axis, ball.radius()))
+        let centre = a_centre_its_plane_reads_back_from(cut, ball.centre())?;
+        Some(self.circle(centre, axis, ball.radius()))
     }
 
     /// The arc between two curved faces that lies in the plane its run names,
@@ -726,8 +734,8 @@ impl Writing {
     /// So the plane the run carries *is* walked, unlike the plane beside an arc
     /// of a flat face, and it has to come back bit for bit: the curve is
     /// written in it, about its own normal, at a centre from which the reader's
-    /// `Plane::from_point_and_normal` gives back exactly that plane — which is
-    /// asked of that function here rather than trusted.
+    /// [`plane_through`] gives back exactly that plane — which is asked of that
+    /// function here rather than trusted.
     ///
     /// **The curve is where the plane crosses a pipe along the edge, or else a
     /// ball** ([`where_a_plane_crosses_a_pipe`], [`where_a_plane_crosses_a_ball`]):
@@ -1264,9 +1272,9 @@ fn where_a_cap_square_to_a_cone_crosses_it(sides: [&Side; 2]) -> Option<Crossing
     })
 }
 
-/// A point near `near` from which the reader's `Plane::from_point_and_normal`
-/// gives back `cut`, normal and offset bit for bit, or `None` where none of
-/// the few tried does.
+/// A point near `near` from which the reader's [`plane_through`] gives back
+/// `cut`, normal and offset bit for bit, or `None` where none of the few tried
+/// does.
 ///
 /// `near` is where a pipe's axis or a ball's centre meets `cut`, worked out in
 /// `f64`, so it can miss the offset by a rounding or two. The reader dots the
@@ -1281,10 +1289,19 @@ fn where_a_cap_square_to_a_cone_crosses_it(sides: [&Side; 2]) -> Option<Crossing
 /// `−1/√2` does, on the two pipes of `Relay_SPDT_SANYOU_SRD_Series_Form_C`
 /// — where a step of the other lands on it. A normal that does not come back
 /// as itself is not helped by any point, and refuses at once.
+///
+/// **Then the two finest coordinates are stepped together**, nearest first
+/// and at most [`MOST_STEPS_OF_TWO_COORDINATES`] each way. Where the offset is
+/// much smaller than the coordinates — a ball's seam turned to pass near the
+/// origin — one step of any one coordinate moves the dot by several ulps of the
+/// offset, and only a step of each lands between them: the turned ball of
+/// radius three at `(10, 7, −15)` that `how_often_a_model_the_mutator_draws_is_refused`
+/// draws has an offset of `0.80`, and a step of either coordinate moves the dot
+/// six ulps of it or more (Q822).
 fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point> {
     let normal = cut.normal();
     let read = |at: [f64; 3]| {
-        Plane::from_point_and_normal(Point::new(at[0], at[1], at[2]), normal)
+        plane_through(Point::new(at[0], at[1], at[2]), normal)
             .ok()
             .filter(|back| back.normal() == normal)
             .map(|back| back.offset())
@@ -1295,7 +1312,7 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
     let mut finest_first: Vec<usize> = (0..3).filter(|&axis| components[axis] != 0.0).collect();
     finest_first.sort_by(|&a, &b| step_of(a).total_cmp(&step_of(b)));
     let below = read(start)? < cut.offset();
-    for axis in finest_first {
+    for &axis in &finest_first {
         let mut at = start;
         for _ in 0..16 {
             let offset = read(at)?;
@@ -1312,7 +1329,47 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
             };
         }
     }
+    let [first, second, ..] = finest_first[..] else {
+        return None;
+    };
+    let reads_back =
+        |at: [f64; 3]| read(at).is_some_and(|offset| offset.to_bits() == cut.offset().to_bits());
+    for ring in 1..=MOST_STEPS_OF_TWO_COORDINATES {
+        for along_first in -ring..=ring {
+            for along_second in -ring..=ring {
+                if along_first.abs().max(along_second.abs()) != ring {
+                    continue;
+                }
+                let mut at = start;
+                at[first] = stepped(start[first], along_first);
+                at[second] = stepped(start[second], along_second);
+                if reads_back(at) {
+                    return Some(Point::new(at[0], at[1], at[2]));
+                }
+            }
+        }
+    }
     None
+}
+
+/// How many `f64`s either way [`a_centre_its_plane_reads_back_from`] steps
+/// each of two coordinates together.
+///
+/// **The reader has to find the circle on the ball still**, and it allows a
+/// centre `16·ε` of the largest number off (`A_CIRCLE_MAY_MISS_ITS_FACE_BY`
+/// in `brep.rs`). Four steps of a coordinate are at most `8ε` of it, so
+/// two coordinates stepped four each move the centre at most `√2·8ε ≈ 11.3ε`
+/// of the larger.
+const MOST_STEPS_OF_TWO_COORDINATES: i32 = 4;
+
+/// `from` moved `steps` `f64`s up, or down for a negative count.
+fn stepped(from: f64, steps: i32) -> f64 {
+    let step = if steps > 0 {
+        f64::next_up
+    } else {
+        f64::next_down
+    };
+    (0..steps.unsigned_abs()).fold(from, |at, _| step(at))
 }
 
 impl Crossing {

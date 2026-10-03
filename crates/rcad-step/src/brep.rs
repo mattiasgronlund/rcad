@@ -22,7 +22,7 @@ use rcad_topo::{
 use smallvec::smallvec;
 
 use crate::Value;
-use crate::geometry::Reading;
+use crate::geometry::{Reading, plane_through};
 use crate::graph::EntityId;
 use crate::names::{
     ADVANCED_FACE, CIRCLE, CLOSED_SHELL, CONICAL_SURFACE, EDGE_CURVE, EDGE_LOOP, ELLIPSE,
@@ -838,14 +838,12 @@ impl Walk {
             return Ok(None);
         }
         let far = place.origin - (near - place.origin);
-        let and = Surface::Plane(
-            Plane::from_point_and_normal(place.origin, place.axis).map_err(|why| {
-                Refusal::TheGeometryIsNotAWorkingShape {
-                    id: edge_curve,
-                    why,
-                }
-            })?,
-        );
+        let and = Surface::Plane(plane_through(place.origin, place.axis).map_err(|why| {
+            Refusal::TheGeometryIsNotAWorkingShape {
+                id: edge_curve,
+                why,
+            }
+        })?);
         let there = self.the_arc_between(edge_curve, &place, and, [near, far], along_the_curve)?;
         let back = self.the_arc_between(edge_curve, &place, and, [far, near], along_the_curve)?;
 
@@ -1196,6 +1194,12 @@ impl Walk {
     /// in two circles and a slanted pipe in an ellipse, so an unchecked plane
     /// written there would hand the walk a curve the file never drew. A plane
     /// beside two curved faces therefore always means a curve every face holds.
+    ///
+    /// **The plane keeps the normal the file wrote**, through the function that
+    /// reads a `PLANE` ([`plane_through`]). A ball turned by any angle has its
+    /// seam cut from a plane whose normal the turn left an ulp off length one,
+    /// and scaling it to length one again moved its last bit (Q822,
+    /// `docs/decisions.md` §366).
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1226,8 +1230,7 @@ impl Walk {
                 .map_err(not_a_working_shape)?;
             return Ok(Surface::Cylinder(round));
         }
-        let flat =
-            Plane::from_point_and_normal(place.origin, place.axis).map_err(not_a_working_shape)?;
+        let flat = plane_through(place.origin, place.axis).map_err(not_a_working_shape)?;
         Ok(Surface::Plane(flat))
     }
 
@@ -1290,7 +1293,7 @@ impl Walk {
         let Some(faces) = self.surfaces_along_each_edge.get(&edge_curve) else {
             return Ok(false);
         };
-        let Ok(its_plane) = Plane::from_point_and_normal(place.origin, place.axis) else {
+        let Ok(its_plane) = plane_through(place.origin, place.axis) else {
             return Ok(false);
         };
         let normal = its_plane.normal();
@@ -1563,9 +1566,9 @@ impl Walk {
     /// An arc is named by the surfaces either side of it *and a second
     /// surface*, because two ends on a closed curve name two arcs — and
     /// `check_edges` asks the corners of a named arc to be on that second
-    /// surface. The second surface is the plane the circle lies in, and a
-    /// [`Plane`] scales its normal to length one and rounds its offset, so a
-    /// corner is exactly on it only where the numbers cancel.
+    /// surface. The second surface is the plane the circle lies in, built
+    /// as the run's plane is ([`plane_through`]), which rounds its offset, so
+    /// a corner is exactly on it only where the numbers cancel.
     ///
     /// **This measures more corners than the sweep refuses**, because
     /// `d343191` gave `check_edges` `Model::what_writing_a_plane_down_costs` of
@@ -1624,7 +1627,7 @@ impl Walk {
         };
         let position = reading.reference_at(curve, keyword, 1).ok()?;
         let place = reading.placement_at(curve, position).ok()?;
-        let flat = Plane::from_point_and_normal(place.origin, place.axis).ok()?;
+        let flat = plane_through(place.origin, place.axis).ok()?;
         Some((
             flat,
             [

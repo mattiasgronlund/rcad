@@ -422,7 +422,8 @@ pub(crate) struct Placement {
     pub(crate) reference: Option<Vector>,
 }
 
-/// The plane a `PLANE` placed at `origin` and facing along `axis` describes.
+/// The plane a `PLANE` placed at `origin` and facing along `axis` describes,
+/// and the plane a `CIRCLE` or `ELLIPSE` placed there lies in.
 ///
 /// **A direction already of length one to within what a turn leaves is kept
 /// as the file wrote it**, and any other is scaled to length one
