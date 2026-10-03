@@ -8,6 +8,7 @@
 //! the whole description has been through `Model::validate`.
 
 use std::collections::{BTreeMap, HashMap};
+use std::f64::consts::SQRT_2;
 
 use rcad_geom::{
     Axis, Cylinder, EdgeRun, HalfSpace, NEAREST_F64_POINT_ROUNDOFF, Orientation, Picker, Plane,
@@ -2148,8 +2149,16 @@ fn the_faces_along_it_name_no_crossing(faces: &[Surface]) -> bool {
 ///   bounded instead by how far it is from the tube circle it is nearest:
 ///   with `m` the point of the centre circle nearest `c` and `t` the centre
 ///   circle's direction there, that circle is `m`, `t`, `ρ_t`, and a point of
-///   one circle is at most `|c − m| + |r − ρ_t| + 2·r·sin φ` from the point
-///   of the other the turn from `w` to `t` takes it to, `sin φ = |w × t|`.
+///   one circle is at most `|c − m| + |r − ρ_t| + √2·r·sin φ` from the point
+///   of the other that a turn by `φ` takes it to. The turn is the one from
+///   `w` onto whichever of `t` and `−t` is nearer, since each circle is the
+///   same points whichever way its axis points, so `φ` is at most a right
+///   angle and `sin φ = |w × t|` either way. A turn by `φ` moves a unit
+///   vector at most `2·sin(φ/2) = sin φ / cos(φ/2)`, and `cos(φ/2) ≥ 1/√2`
+///   up to a right angle, so `2·sin(φ/2) ≤ √2·sin φ`, equal at a right angle,
+///   where a point of the turned circle lying along `t` is `√2·ρ_t` from every
+///   point of the tube circle. Both of the circles Q563 pinned turn about a
+///   `w` within `1.04e-13` of `−t` (`docs/decisions.md` §387).
 ///   Which of the two is asked is what the walk asks — whether `w` crosses
 ///   `a` to exactly nothing — because the walk draws a flat crossing of a
 ///   torus from the torus alone once it has picked a family, and a circle
@@ -2191,16 +2200,25 @@ fn a_surface_holds_the_circle(surface: &Surface, centre: Point, axis: Vector, ra
 /// **Where sixteen comes from.** It is the sixteen `Model::validate` gives a
 /// corner of a curved face (`MEASURING_SLACK` in `rcad-topo`'s
 /// `validate.rs`), so the reader holds a circle to the standard the validator
-/// holds its corners to. It was not fitted to the corpus, and the corpus
-/// needs much less: over the whole corpus on `b3701c4c`, the furthest a
-/// circle sits off its face in any file that imports is `1.20` of these
-/// units, on `Relay_3PST_COTO_3650.step` and `_3660.step`. An allowance of
-/// `1` loses those two relays (158 imports); every allowance from `4` to
-/// `1000` gives the same 160. The circles sixteen turns away short of `34`
-/// are all in `nist_stc_08_asme1_ap242-e3.stp` and the two Fujitsu `FTR-F1`
+/// holds its corners to. It was not fitted to the corpus. Over the whole
+/// corpus on `b3701c4c`, when only a ball and a pipe had a bound here, the
+/// furthest a circle sat off its face in any file that imports was `1.20` of
+/// these units, on `Relay_3PST_COTO_3650.step` and `_3660.step`; an allowance
+/// of `1` lost those two relays (158 imports), and every allowance from `4`
+/// to `1000` gave the same 160. The circles sixteen turned away short of `34`
+/// were all in `nist_stc_08_asme1_ap242-e3.stp` and the two Fujitsu `FTR-F1`
 /// relays, which are refused for something else first.
 /// `the_furthest_a_circle_an_imported_file_needs_is_inside_the_allowance`
-/// holds the relay's circle against this number.
+/// holds that relay's circle against this number.
+///
+/// **That is no longer the furthest.** Since Q563 (`docs/decisions.md` §387)
+/// `Relay_1-Form-C_Schrack-RYII_RM3.2mm.step` imports with two circles round
+/// a torus's tube whose bound reads `13.74` and `13.65` of these units, so an
+/// allowance under `13.74` refuses a file the corpus imports, and sixteen
+/// clears it by less than a sixth.
+/// `the_relays_two_circles_round_their_tubes_are_inside_the_allowance` holds
+/// both. Nobody has measured the furthest over the whole corpus since the
+/// cone and the torus got their bounds.
 const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
 
 /// The furthest any point of the circle can be from `surface`, and the
@@ -2263,7 +2281,7 @@ fn how_far_off_the_circle_can_be(
             Some((
                 (reach - ring.ring_radius()).hypot(along)
                     + (radius - ring.tube_radius()).abs()
-                    + 2.0 * radius * axis.cross(round_the_ring).length(),
+                    + SQRT_2 * radius * axis.cross(round_the_ring).length(),
                 largest,
             ))
         }
@@ -2451,6 +2469,8 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::{PI, SQRT_2};
+
     use rcad_geom::{
         Axis, Cone, Cylinder, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Sphere, Surface, Torus,
         Vector,
@@ -2568,10 +2588,13 @@ mod tests {
         );
     }
 
-    /// The worst case [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] publishes, held against
-    /// it (`docs/decisions.md` §15.6): circle `#1359` of
-    /// `kicad/Relay_3PST_COTO_3650.step` on its pipe `#1365`, the furthest off
-    /// its face of any circle in a file that imports.
+    /// The worst case [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] published on
+    /// `b3701c4c`, held against it (`docs/decisions.md` §15.6): circle `#1359`
+    /// of `kicad/Relay_3PST_COTO_3650.step` on its pipe `#1365`, then the
+    /// furthest off its face of any circle in a file that imports. Two circles
+    /// round a torus's tube now read further and are held by
+    /// `the_relays_two_circles_round_their_tubes_are_inside_the_allowance`
+    /// (§387).
     ///
     /// Its centre is `15.764` along an axis leaning `2.2e-16`, so it misses the
     /// pipe's axis by `3.5e-15`, which is `1.20` roundings of the pipe's
@@ -2703,6 +2726,153 @@ mod tests {
             drawn, 150,
             "the draw must not shrink without somebody saying so"
         );
+    }
+
+    /// The worst-case search behind the `√2·r·sin φ` a circle round a torus's
+    /// tube is charged for leaning off its tube circle (§15.6, Q563): the tube
+    /// circle at the outside of the ring, turned by every 5° from nothing to a
+    /// half turn about three axes, 720 points round each, each held against
+    /// the bound by its distance from the tube circle the bound measures from
+    /// and from the torus itself.
+    ///
+    /// **Past a right angle is half the draw.** The bound reads `|w × t|`,
+    /// which is the same for a turn `φ` and for `180° − φ`; the circle is the
+    /// same points whichever way its axis points, so those draws are where a
+    /// bound that took `φ` for the turn and not `180° − φ` would fail.
+    ///
+    /// **The control is that the factor is reached**: at a right angle about
+    /// the torus's own axis, the point of the circle that lies along `t` is
+    /// `√2·r` from every point of the tube circle, so a factor below `√2`
+    /// would fail this test. Each circle's points are the tube circle's,
+    /// starting at the outside of the ring, turned with it, so that point is
+    /// the first of them at that angle.
+    #[test]
+    fn a_circle_round_the_tube_turned_by_any_angle_is_within_its_bound() {
+        let ring = Torus::new(
+            Axis::new(Point::new(0.5, 1.0, -1.0), Vector::new(0.1, 1.0, 0.2)).expect("an axis"),
+            5.0,
+            1.5,
+        )
+        .expect("two radii");
+        let surface = Surface::Torus(ring);
+        let up = ring.axis().direction();
+        let (out, _) = ring.basis();
+        let round_the_ring = up.cross(out);
+        let centre = ring.centre() + out * ring.ring_radius();
+        let tube = ring.tube_radius();
+        let mut drawn = 0;
+        let mut the_most_of_the_lean_reached: f64 = 0.0;
+        for turn_about in [
+            up,
+            (up + out).normalized().expect("a direction"),
+            (up - out * 0.6 + round_the_ring * 0.5)
+                .normalized()
+                .expect("a direction"),
+        ] {
+            for step in 0..=36 {
+                let angle = PI * f64::from(step) / 36.0;
+                let axis = turned(round_the_ring, turn_about, angle);
+                let (bound, largest) = how_far_off_the_circle_can_be(&surface, centre, axis, tube)
+                    .expect("a torus has a bound");
+                let slack = 4.0 * NEAREST_F64_POINT_ROUNDOFF * largest;
+                let lean = SQRT_2 * tube * axis.cross(round_the_ring).length();
+                let [across, and] = [out, up].map(|way| turned(way, turn_about, angle));
+                for at in 0..720 {
+                    let point = round_the_circle(
+                        centre,
+                        across,
+                        and,
+                        tube,
+                        std::f64::consts::TAU * f64::from(at) / 720.0,
+                    );
+                    let off_the_tube_circle = {
+                        let apart = point - centre;
+                        let along = apart.dot(round_the_ring);
+                        let from_the_middle = (apart - round_the_ring * along).length();
+                        along.hypot(from_the_middle - tube)
+                    };
+                    for (off, from) in [
+                        (off_the_tube_circle, "the tube circle"),
+                        (distance_from(&surface, point), "the torus"),
+                    ] {
+                        assert!(
+                            off <= bound + slack,
+                            "a circle turned {angle} about {turn_about:?} has a point {off} off \
+                             {from}, past its bound {bound}"
+                        );
+                    }
+                    if lean > 0.0 {
+                        the_most_of_the_lean_reached =
+                            the_most_of_the_lean_reached.max(off_the_tube_circle / lean);
+                    }
+                }
+                drawn += 1;
+            }
+        }
+        assert_eq!(
+            drawn, 111,
+            "the draw must not shrink without somebody saying so"
+        );
+        assert!(
+            the_most_of_the_lean_reached >= 1.0 - 1e-9,
+            "no point came within a rounding of √2·r·sin φ off its tube circle, the most being \
+             {the_most_of_the_lean_reached} of it, so this draw cannot tell √2 from a smaller \
+             factor"
+        );
+    }
+
+    /// Circles `#1375` and `#1568` of
+    /// `kicad/Relay_1-Form-C_Schrack-RYII_RM3.2mm.step`, each round the tube
+    /// of torus `#1558` or `#1588`, from the file's decimals (Q563). Each
+    /// turns about a direction `1.04e-13` off the opposite of the way round
+    /// the ring at its centre, a turn past a right angle that the bound reads
+    /// as the small one. At `2·r·sin φ` they read `19.43` and `19.31`
+    /// roundings, past the sixteen allowed, and the file was refused; at
+    /// `√2·r·sin φ` they read the numbers below.
+    #[test]
+    fn the_relays_two_circles_round_their_tubes_are_inside_the_allowance() {
+        for (centre, leaning, ring_centre, measured) in [
+            (
+                Point::new(-0.9, 1.56, 12.05),
+                Vector::new(-1.0, -1.039_781_074_449e-13, 0.0),
+                Point::new(-0.9, 2.31, 12.05),
+                13.74,
+            ),
+            (
+                Point::new(-0.15, 5.31, 12.05),
+                Vector::new(1.033_119_736_301e-13, -1.0, 0.0),
+                Point::new(-0.9, 5.31, 12.05),
+                13.65,
+            ),
+        ] {
+            let ring = Surface::Torus(
+                Torus::new(
+                    Axis::new(ring_centre, Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+                    0.75,
+                    0.25,
+                )
+                .expect("two radii"),
+            );
+            let axis = Plane::from_point_and_normal(centre, leaning)
+                .expect("a plane")
+                .normal();
+            let (off, largest) =
+                how_far_off_the_circle_can_be(&ring, centre, axis, 0.25).expect("a bound");
+            let roundings = off / (NEAREST_F64_POINT_ROUNDOFF * largest);
+            assert!(
+                (roundings - measured).abs() < 0.01,
+                "the circle at {centre:?} is {roundings} roundings off its torus, where \
+                 {measured} was measured"
+            );
+            assert!(a_surface_holds_the_circle(&ring, centre, axis, 0.25));
+        }
+    }
+
+    /// `v` turned by `angle` about the unit direction `about`.
+    fn turned(v: Vector, about: Vector, angle: f64) -> Vector {
+        v * angle.cos()
+            + about.cross(v) * angle.sin()
+            + about * (about.dot(v) * (1.0 - angle.cos()))
     }
 
     /// A curve these tests draw, as the reader would hand it to a bound.
