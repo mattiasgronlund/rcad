@@ -40,7 +40,9 @@
 //! 97 at the two smallest folds when that rule landed. It is re-measured on
 //! `25860052`, where `bake` no longer refuses the base corner the two folding
 //! faces share, and "with §395" is the same table on this file's commit
-//! (§395.2).
+//! (§395.2). What stopped that refusal is the room `bake`'s picker grants a
+//! corner, `validate`'s and not the rounding alone (§368), and the nine it
+//! answered are pinned by name below (§301.9).
 //!
 //! **This file used to say the refusals left with §356 had every apex meet
 //! folded. They did not** (§344.2, §344.4). A side face has a meet at the apex
@@ -203,6 +205,49 @@ fn a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused() {
     }
 }
 
+/// Nine pyramids bent by a 256th or a 4096th, whose base corner `(0, -1 -
+/// fold, 0)` has one place where its three planes meet and that place lies
+/// 2.8 to 47 rooms past the stored corner, are united.
+///
+/// That corner is where the two folding side faces meet the base. Each
+/// folding plane misses it by its own rounding, and two planes `fold` apart
+/// carry that miss about `1/fold` times further. `bake`'s picker refused all
+/// nine at 'where three surfaces meet' while it granted the corner its own
+/// rounding alone (§344.3). It grants the room `Model::validate` grants the
+/// pyramid's corners as well (§368), and the furthest place is a four
+/// thousandth of that (§301.9). The tenth pyramid §344.3 named, folding a
+/// 4096th, 4 high, through its apex and turned 0.3 about `(3, -1, 2)`, is
+/// placed too and refused later, at its apex: it is the last of the five
+/// above.
+#[test]
+fn a_pyramid_whose_base_corner_lies_past_its_own_rounding_from_where_its_planes_meet_is_united() {
+    for (fold, height, through, turn, axis) in [
+        (1.0 / 256.0, 4.0, Through::TheApex, 0.3, [0.3, 1.0, -0.7]),
+        (1.0 / 256.0, 4.0, Through::TheApex, 0.7, [3.0, -1.0, 2.0]),
+        (1.0 / 4096.0, 0.25, Through::TheApex, 0.1, [1.0, 2.0, 3.0]),
+        (
+            1.0 / 4096.0,
+            0.25,
+            Through::ABaseCorner,
+            1.1,
+            [0.3, 1.0, -0.7],
+        ),
+        (1.0 / 4096.0, 1.0, Through::TheApex, 0.1, [1.0, 2.0, 3.0]),
+        (1.0 / 4096.0, 4.0, Through::TheApex, 0.1, [0.3, 1.0, -0.7]),
+        (1.0 / 4096.0, 4.0, Through::TheApex, 1.9, [1.0, 2.0, 3.0]),
+        (1.0 / 4096.0, 4.0, Through::TheApex, 2.5, [1.0, 2.0, 3.0]),
+        (
+            1.0 / 4096.0,
+            4.0,
+            Through::ABaseCorner,
+            0.3,
+            [3.0, -1.0, 2.0],
+        ),
+    ] {
+        is_united(fold, height, through, turn, axis);
+    }
+}
+
 /// A pyramid bent by `fold`, `height` high, is united with a cube clear of it
 /// at every turn and spelling, under a certified policy, into the two of them
 /// with their volumes to a billionth and an empty log.
@@ -210,39 +255,45 @@ fn every_turn_and_spelling_is_united(fold: f64, height: f64) {
     for through in SPELLINGS {
         for turn in TURNS {
             for axis in AXES {
-                let (mut model, pyramid, cube) =
-                    a_pyramid_and_a_cube_clear_of_it(fold, height, through, turn, axis);
-                let mut log = ProvenanceLog::new();
-                let fused = model
-                    .fuse(
-                        &[pyramid],
-                        &[cube],
-                        Rule::Union,
-                        &Policy::certified(),
-                        &mut log,
-                    )
-                    .unwrap_or_else(|why| {
-                        panic!(
-                            "a pyramid folding {fold} with its planes through {through:?}, turned \
-                             {turn} about {axis:?}, was refused: {why}"
-                        )
-                    });
-                assert_eq!(
-                    fused.solids().len(),
-                    2,
-                    "two solids that do not touch unite as the two of them"
-                );
-                assert!(log.is_empty(), "a certified union recorded {log:?}");
-
-                let pyramid_volume = (2.0 + fold) * height / 3.0;
-                let united = volume_of(&model, fused.solids());
-                assert!(
-                    (united - (pyramid_volume + 1.0)).abs() <= 1e-9,
-                    "a pyramid of {pyramid_volume} and a unit cube united to {united}"
-                );
+                is_united(fold, height, through, turn, axis);
             }
         }
     }
+}
+
+/// One pyramid united with a cube clear of it, as
+/// [`every_turn_and_spelling_is_united`] asks of each.
+fn is_united(fold: f64, height: f64, through: Through, turn: f64, axis: [f64; 3]) {
+    let (mut model, pyramid, cube) =
+        a_pyramid_and_a_cube_clear_of_it(fold, height, through, turn, axis);
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(
+            &[pyramid],
+            &[cube],
+            Rule::Union,
+            &Policy::certified(),
+            &mut log,
+        )
+        .unwrap_or_else(|why| {
+            panic!(
+                "a pyramid folding {fold}, {height} high, with its planes through {through:?}, \
+                 turned {turn} about {axis:?}, was refused: {why}"
+            )
+        });
+    assert_eq!(
+        fused.solids().len(),
+        2,
+        "two solids that do not touch unite as the two of them"
+    );
+    assert!(log.is_empty(), "a certified union recorded {log:?}");
+
+    let pyramid_volume = (2.0 + fold) * height / 3.0;
+    let united = volume_of(&model, fused.solids());
+    assert!(
+        (united - (pyramid_volume + 1.0)).abs() <= 1e-9,
+        "a pyramid of {pyramid_volume} and a unit cube united to {united}"
+    );
 }
 
 #[derive(Clone, Copy, Debug)]
