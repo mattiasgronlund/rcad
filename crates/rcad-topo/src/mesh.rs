@@ -736,12 +736,15 @@ impl BuildingAMesh {
     /// corners back in was never charged, so there is nothing to take off.
     ///
     /// **What it does not reach.** [`BuildingAMesh::walk_a_wire_round`] now
-    /// reads a placed curved face's points where they were made too (§379), and
-    /// a placed bar's *triangles* are still not the unplaced bar's: between 141
-    /// and 199 of 500 differ on the wall under those twelve placements, and none
-    /// on the caps (§379.5). And a solid read back from a file is meshed in the
-    /// world, not in its stored frame, so this does not make a STEP round trip
-    /// measure the same (§249.5).
+    /// reads a placed curved face's points where they were made too (§379), so
+    /// a placed bar's wall is cut into the unplaced wall's triangles, corner for
+    /// corner, under the same twelve placements. Its caps are not: a flat face
+    /// is cut where the solid sits, like its read-back
+    /// ([`the_surface_this_face_is_cut_up_on`]), and between 141 and 199 of the
+    /// bar's 500 triangles, all on the caps, join other points than the
+    /// unplaced bar's (§379.5). And a solid read back from a file is meshed in
+    /// the world, not in its stored frame, so this does not make a STEP round
+    /// trip measure the same (§249.5).
     ///
     /// # What a refusal from here is in, and why it is not what was walked
     ///

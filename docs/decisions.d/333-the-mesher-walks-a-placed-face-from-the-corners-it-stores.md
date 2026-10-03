@@ -240,3 +240,8 @@ question that keeps the ball refused (does the mesh enclose space where it lands
 when it did where it was made) and measures it. It also gives the two reasons
 the change did not land: no `Error` variant for that refusal in the write set,
 and the adapted hunks still leave 141 to 199 wall triangles different.*
+
+*2026-10-03, Q781: the wall and the caps were the other way round. That table
+read the caps' keys off a second model; split properly, the 141 to 199 are all
+on the caps, which §362 cuts where the solid sits, and the wall matches in every
+row since Q780 (§379.5).*

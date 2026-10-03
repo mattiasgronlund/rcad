@@ -44,6 +44,10 @@ and in these twelve rows that happens to give the unplaced caps' triangles; it
 does not promise to (§362.2, "a tie can go the other way"). Everything left is
 the wall, which is still cut in the stored frame from points moved out and back.
 
+*Wrong, found by Q781 (379.5): the test read the caps' keys off a second model,
+so no triangle could count as a cap's. Each row's total is right; split
+properly, the caps hold 141 to 199 of it and the wall 12 to 120.*
+
 ### 379.2 The question: does the mesh still enclose space where it lands
 
 §333.6 measured what goes wrong at `x = EVEN` with the first lane's hunks: the
@@ -126,7 +130,8 @@ mesh's volume or distance, so that last claim is measured only as "it meshed".
    per row. Under §333.6's older `mesh.rs` the same idea gave 0 in every row. So
    on this base something other than the walked points and corners still
    differs between a placed wall and an unplaced one on the way to the
-   triangulator. This lane did not trace it.
+   triangulator. This lane did not trace it. *(Q781, 379.5: nothing did. The
+   141 to 199 are all on the caps, and the wall matched.)*
 
 The pinned `5.994025313141081e-6` in
 `whether_the_floor_predicts_the_step_cap.rs` fails under the probe, as it did
@@ -146,6 +151,7 @@ unchanged here because nothing landed.
 **2026-10-03, Q780: the refusal and the hunks landed.** Lane
 `lane-q780-a-placed-solid-that-loses-its-space-is-refused`, off `6ac09257`.
 The second and third items above are done; the first stays open (Q781).
+*(Q781, below: closed; the wall never differed.)*
 
 - `Error::PlacingItTookAwayTheSpaceItsMeshEncloses { enclosed_where_made,
   enclosed_where_placed }` is the refusal, raised at the end of
@@ -173,7 +179,8 @@ The second and third items above are done; the first stays open (Q781).
   and prints the numbers. The alternation tests now start one ulp above the
   bottom of each band, and pin the bottom as meshing.
 - The bar's wall still differs: 141 to 199 of 500 triangles across the twelve
-  rows, none on the caps — the same as 379.4 item 2.
+  rows, none on the caps — the same as 379.4 item 2. *(Q781, below: all on
+  the caps, none on the wall.)*
 - The floor file's deviation moved from `5.994025313141081e-6` to
   `5.993841838603952e-6`, still 5134 points. With the one read in
   `walk_a_wire_round` put back to the round trip and everything else kept, the
@@ -203,3 +210,50 @@ no placement is meshed from the same points as before: `read_as_made` is false
 there, and `remember_made_on` keeps the point as it lands. So the base's
 `0.0022` above `0.002` can only have come from a placed face. Which placed face
 it was rests on the first run's figure.
+
+**2026-10-03, Q781: the wall never differed; the caps do, by §362's choice.**
+Lane `lane-q781-a-placed-wall-cut-like-the-unplaced-wall`, off `348b9390`.
+`mesh.rs` changed only in a doc comment.
+
+- **What made it look like the wall.** The table test took the caps' face
+  keys from `the_flat_faces_of_a_bar`, which builds a second `Model`. A key
+  names its model (`ModelId::next()` per `Model::new`), so no triangle of the
+  meshed bar was ever counted as a cap's, and every differing triangle landed
+  in the wall's column. Its `placed.triangles() != unplaced.triangles()` failed
+  every row for the same reason, since a `MeshTriangle` carries its face key.
+  With the keys read off the meshed model, on this base: 142, 155, 141, 143,
+  165, 187, 197, 199, 177, 189, 163 and 183 triangles off, the twelve rows in
+  379.1's order, **every one on a cap and none on the wall.**
+- **What the triangulator is handed, placed against unplaced.** Dumped from
+  `hand_over` for each patch: surface, room, each loop's mesh points and chart
+  corners as bits, and what `triangulate` handed back. For an eighth about `z`
+  the six wall patches are the same bytes, the room included
+  (`3f747ae147ad847b`). For an eighth then `(3, −5, 7)` the wall's room
+  differs (`3f747ae147ad067b`), and its corners and triangles are still the
+  same bits. The first value that differs is a cap's chart corners, from
+  `the_surface_this_face_is_cut_up_on` and `the_frame_this_face_is_cut_up_in`:
+  a flat face is read on its located plane from the points where they land.
+  That is §362's fix (`333bb79a`, after `96da3252`), which is why §333.6's
+  older base matched in every row.
+- **The two targets cannot both be met by choosing a frame.** With the caps
+  cut where they are stored (those two functions and
+  `back_out_of_the_frame_this_face_is_cut_up_in` sent to the meshed-in frame
+  for a plane too), all twelve rows come to 0 off and
+  `a_bar_moved_a_tenth_has_its_caps_cut_up_the_same_after_its_own_file`
+  fails: 21 of 121 triangles of the top cap join other points than its
+  read-back's. On the base, the reverse: that test passes and the bar rows
+  are as above. So this lane kept §362, and the caps are not compared. A
+  rule for flat faces that does not read the frame at all, such as breaking
+  a tie by mesh-point index in `crates/rcad-mesh/src/triangulate.rs`, might
+  meet both. It was not tried.
+- **What Q780 did for the wall, measured.** With `walk_a_wire_round`'s
+  `read_as_made` forced false, the wall rows read 14, 20, 16, 12, 88, 104,
+  102, 110, 96, 80, 120 and 108 off, and caps plus wall give 379.1's totals in
+  every row. So Q780's read took the wall to 0.
+- The test is now `a_placed_bars_wall_is_cut_into_the_unplaced_walls_triangles`:
+  the wall's triangles corner for corner and in order, with the caps printed.
+  It passes on this base, and fails under the forced-false read above. Run as
+  `mise exec -- just t -p rcad-topo --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-capture`;
+  the rcad-step side is
+  `mise exec -- just t -p rcad-step --test a_flat_cap_is_cut_up_the_same_after_its_own_file --no-capture`.
+- No pin moved, since no code did.
