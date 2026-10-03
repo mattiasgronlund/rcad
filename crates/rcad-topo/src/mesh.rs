@@ -4243,7 +4243,9 @@ fn the_way_this_face_walks_a_closed_edge(
     let walked = match material {
         Decision::Neg => forward,
         Decision::Pos => -forward,
-        other => panic!("a face with no side to its material: {other:?}"),
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
+            panic!("a face with no side to its material: {material:?}")
+        }
     };
     let used = face
         .wires()
