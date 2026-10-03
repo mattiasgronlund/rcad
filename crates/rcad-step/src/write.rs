@@ -1240,10 +1240,10 @@ fn where_a_cap_square_to_a_cone_crosses_it(sides: [&Side; 2]) -> Option<Crossing
     if first.placed_by != second.placed_by {
         return None;
     }
-    let (flat, cone) = match (first.stored, second.stored) {
-        (Surface::Plane(flat), Surface::Cone(cone))
-        | (Surface::Cone(cone), Surface::Plane(flat)) => (flat, cone),
-        _ => return None,
+    let ((Surface::Plane(flat), Surface::Cone(cone)) | (Surface::Cone(cone), Surface::Plane(flat))) =
+        (first.stored, second.stored)
+    else {
+        return None;
     };
     let along = cone.axis().direction();
     if flat.normal().cross(along) != Vector::zero() {
