@@ -216,10 +216,16 @@ What it buys, and what it costs:
   `test-slow` both build with cargo, so they are chained, one after the other
   (§372.10). A whole gate would wait about 21 s for the rest and then 67 s for
   the slow tier. Today the two share one 75 s step.
-- The split row cuts the two 66 s sweeps into pieces of about 20 s each, with
-  the same shapes in them. `test-slow` then takes about 21 s (503 s over 24
-  cores), and a whole gate is faster than today. The split row also puts the
-  new names in `slow_tests`.
+- The split row cuts every slow-tier test over 21 s into pieces of about 20 s
+  each, with the same shapes or files in them. There are five: the cone sweeps
+  of 66.8, 65.6, 33.0 and 28.5 s, and rcad-step's 60.9 s
+  `no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses`.
+  - Cutting only the two 66 s sweeps would not do. The 60.9 s test would then
+    set `test-slow`'s wall, and the two test steps would take about 82 s,
+    against 75 s today.
+  - With all five cut, `test-slow` takes about 21 s (503 s over 24 cores), and
+    a whole gate is faster than today.
+  - The split row also puts the new names in `slow_tests`.
 
 ### 397.5 Landers share one gate (amends §266.4)
 
@@ -440,13 +446,18 @@ catch-ups in 79 merges, so at most 22% of merges needed a second try.
 
 ### 397.9 The rows, in order
 
-- **The slow tier**: §397.4, items 1 to 6. Tier 2.2, opus.
-- **The split**: the two 66 s sweeps, after the slow tier. Tier 2.5, sonnet.
-- **The shared land gate**: §397.5, after the slow tier, since both may reach
+Filed on 2026-10-03:
+
+- **Q849, the slow tier**: §397.4, items 1 to 6. Tier 2.2, opus.
+- **Q850, the split**: the five slow-tier tests over 21 s, after Q849, and
+  after Q846, which moves a pin in the cone sweeps' file. Tier 2.2, sonnet. It
+  is in the same tier as Q849 because, until it lands, Q849 makes every land
+  gate slower (§397.4).
+- **Q851, the shared land gate**: §397.5, after Q849, since both may reach
   into `verify_lane.py`'s detached run. Tier 2.2, opus.
-- **Four slots**: `queue_slots` and its pins, after the slow tier. Tier 2.2,
+- **Q852, four slots**: `queue_slots` and its pins, after Q849. Tier 2.2,
   sonnet, small.
-- **The measurement**: §397.7's two bars, after four slots, once there are 100
+- **Q853, the measurement**: §397.7's two bars, after Q852, once there are 100
   busy daytime samples at four. Tier 2.2, sonnet.
 
 What this leaves:
