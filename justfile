@@ -4099,9 +4099,13 @@ recipes_file := "justfile"
 #
 # The habit it replaces is `grep -n '^check-hub' justfile` followed by a `Read`
 # at a guessed offset — the two-call shape §144.6 measured, on the file it
-# measured second. This justfile is 307 404 characters over 105 definitions, and
-# the mean answer here is 2 934 of them: a hundredth of the file, in one call.
-# The largest, `check-fuzz-overnight-selftest`, is 40 344.
+# measured second. §153 landed this at 307 404 characters over 105
+# definitions, mean answer 2 934, largest (`check-fuzz-overnight-selftest`)
+# 40 344 — kept there as history and not updated. Measured again on
+# 2026-10-03: 694 933 characters (`wc -m justfile`) over 158 definitions
+# (`just recipe | wc -l`), mean answer 4 408, largest still
+# `check-fuzz-overnight-selftest` at 74 896 (both from summing `just recipe
+# <name> | wc -m` over every name the index lists).
 #
 # **The extent is exact rather than guessed**, which is the one place this beats
 # `just src`. `src` reads a Rust item's end off rustfmt's layout and fails when
@@ -5372,8 +5376,23 @@ fuzz-overnight window="28800":
     # are no boundaries left before the deadline — so a night killed at 04:00
     # would keep nothing, which is worse than what this replaced rather than
     # better. An interval so a test can afford one.
+    # `kill "$copier"` below reaches the subshell, not whatever it is
+    # currently running: a bare `sleep` inside it is a separate process, and a
+    # shell killed by SIGTERM while blocked in `wait` does not pass the signal
+    # on to a child it never trapped for. Q806: the subshell's own `sleep 300`
+    # kept running with `ppid 1` after the subshell that started it was gone,
+    # and `check-fuzz-overnight-selftest`'s eight `run()`s a gate left about
+    # sixteen of them. The `trap … TERM` here is what the subshell needs to
+    # kill its own `sleep` before it exits — `wait "$sleep_pid"` is what makes
+    # that `$sleep_pid` current no matter where in the loop the signal lands.
     copy_every="${RCAD_FUZZ_COPY_EVERY:-300}"
-    ( while sleep "$copy_every"; do copy_out; done ) &
+    ( trap 'kill "${sleep_pid:-}" 2>/dev/null; exit' TERM
+      while :; do
+          sleep "$copy_every" &
+          sleep_pid=$!
+          wait "$sleep_pid"
+          copy_out
+      done ) &
     copier=$!
     trap 'kill "$copier" 2>/dev/null || true' EXIT
 
@@ -7161,6 +7180,25 @@ check-fuzz-overnight-selftest:
         || fail "a clean scan was still read as finding a hooked call"
     }
 
+    # Twenty-seven: nothing the night starts outlives it — in particular the
+    # copier's own `sleep`, orphaned with `ppid 1` once the subshell holding
+    # it was killed from outside (Q806). `copy_every` is set to a number
+    # nothing else on the machine runs `sleep` with, so a `sleep` process
+    # still carrying it after the night has exited can only be this arm's.
+    # Polled rather than checked once, because `kill` only asks the process to
+    # die and this arm cares whether it did, not whether the signal was sent.
+    twenty_seven() {
+    : >"$dir/log"
+    marker=28351
+    RCAD_FUZZ_COPY_EVERY="$marker" run 8
+    deadline=$(( $(date +%s) + 2 ))
+    while pgrep -f "^sleep $marker\$" >/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do
+        sleep 0.1
+    done
+    ! pgrep -f "^sleep $marker\$" >/dev/null \
+        || fail "the copier's sleep outlived the night it belongs to: $(pgrep -af "^sleep $marker\$")"
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -7228,7 +7266,7 @@ check-fuzz-overnight-selftest:
     settle ten
     beside two_with_no_step_corpus five six_and_seven eight nine eleven \
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
-        twenty_two twenty_four twenty_five
+        twenty_two twenty_four twenty_five twenty_seven
     settle
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
     alone three
