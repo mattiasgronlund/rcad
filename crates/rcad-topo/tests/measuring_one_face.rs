@@ -432,16 +432,27 @@ const CURVED_SHAPES: [CurvedShape; 5] = [
 /// nothing comes near it fails here too. Measured over the 96 faces with a
 /// finite wobble: an area came to **0.253** of its error — the area bound's own
 /// quarter, which `Mesh::deviation` records for the solid — and a centroid to
-/// **0.0022** of its wobble. So the wobble is about five hundred times what
-/// these meshes really get wrong where they get the most wrong: symmetric
-/// meshes of symmetric faces put the middle almost exactly where it belongs,
-/// and the bound cannot know that.
+/// **0.0018** of its wobble, the bend's tube at `0.03` where it was built. So
+/// the wobble is over five hundred times what these meshes really get wrong
+/// where they get the most wrong: symmetric meshes of symmetric faces put the
+/// middle almost exactly where it belongs, and the bound cannot know that.
+///
+/// The centroid's figure was `0.0022` until a placed curved face was cut up on
+/// its points where they were made rather than moved out and back
+/// (`docs/decisions.md` §379). Since then the bend turned and a million units
+/// out comes as close as the bend where it was built, to seven digits.
 #[test]
 fn the_middle_of_each_face_is_within_its_wobble() {
     let mut closest_area: f64 = 0.0;
-    let mut closest_middle: f64 = 0.0;
+    let mut closest_middle: (f64, String) = (0.0, String::new());
     let mut checked = 0;
-    for placement in [Isometry::identity(), turned_and_a_million_units_out()] {
+    for (placed, placement) in [
+        ("where it was built", Isometry::identity()),
+        (
+            "turned and a million units out",
+            turned_and_a_million_units_out(),
+        ),
+    ] {
         for (what, build) in CURVED_SHAPES {
             let mut model = a_model();
             let (solid, truths) = build(&mut model, &placement);
@@ -451,33 +462,41 @@ fn the_middle_of_each_face_is_within_its_wobble() {
                     let off = (measured.area - area).abs();
                     assert!(
                         off <= measured.area_error,
-                        "{what} at {how_fine}: a face of area {area} measured {} and owned \
-                         up to {}",
+                        "{what} {placed} at {how_fine}: a face of area {area} measured {} \
+                         and owned up to {}",
                         measured.area,
                         measured.area_error
                     );
                     let moved = measured.centroid.distance_to(middle);
                     assert!(
                         moved <= measured.wobble,
-                        "{what} at {how_fine}: a face balancing at {middle:?} measured \
-                         {:?}, {moved} away, and owned up to {}",
+                        "{what} {placed} at {how_fine}: a face balancing at {middle:?} \
+                         measured {:?}, {moved} away, and owned up to {}",
                         measured.centroid,
                         measured.wobble
                     );
                     if measured.wobble.is_finite() {
                         checked += 1;
                         closest_area = closest_area.max(off / measured.area_error);
-                        closest_middle = closest_middle.max(moved / measured.wobble);
+                        let ratio = moved / measured.wobble;
+                        if ratio > closest_middle.0 {
+                            closest_middle = (
+                                ratio,
+                                format!("{what} {placed} at {how_fine}, the face of area {area}"),
+                            );
+                        }
                     }
                 }
             }
         }
     }
+    let (closest_middle, closest_face) = closest_middle;
+    println!("a centroid came to {closest_middle} of its wobble: {closest_face}");
     assert!(checked >= 90, "only {checked} faces had a finite wobble");
     assert!(
-        closest_area > 0.2 && closest_middle > 0.002,
+        closest_area > 0.2 && closest_middle > 0.0016,
         "the closest an area came to its error was {closest_area}, and a centroid to its \
-         wobble {closest_middle}"
+         wobble {closest_middle}, {closest_face}"
     );
 }
 
