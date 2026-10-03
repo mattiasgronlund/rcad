@@ -170,8 +170,11 @@ standing rules and a brief carries only what is this row's:
 since it gated that tree. `sourcePaths` defaults to the `crates/<c>/src`
 directories in the write set; set it by hand when that is not what the verifier
 should revert — for a tooling row whose test is a recipe, the file the recipe
-checks. A row that changes only `.md` files names no failing test, and its
-verifier traces every paragraph it moved instead. A row that only pins a test
+checks. A row whose `lines-that-run` print ends `lines that run: 0` — `.md`
+files, comments, test code — names no failing test, and its verifier traces
+every paragraph it moved instead; a row that adds a test, a `#[cfg(test)]` pin
+in `src/` included, still names it. A bundle of such rows merges on that print
+with no `pinsOnly` and no `sourcePaths` (§375, §382). A row that only pins a test
 and writes a decisions section, with no `src/` path anywhere in its work,
 needs `pinsOnly: true`: say so explicitly, never leave it to be inferred from
 an empty `sourcePaths`, because that emptiness is also what a tooling row shows

@@ -52,9 +52,11 @@ Stage with an explicit `git add <path>`, never `-A`, and commit as you go.
 Report `landed_sha` from `git rev-parse HEAD`, not from memory: a merger lands
 the branch by that sha.
 
-A change to anything but a `.md` file names the tests that fail without it. A
-lane that changed only `.md` files names none, and its verifier then traces
-every paragraph it moved instead.
+A change to anything but a `.md` file names the tests that fail without it,
+and a lane that adds a test — a `#[cfg(test)]` pin in `src/` included — still
+names it. A lane whose `lines-that-run` print ends `lines that run: 0` (`.md`
+files, comments, test code) may name none, and its verifier then traces every
+paragraph it moved instead.
 
 **What your own change leaves stale is yours to fix, not to file** (§352.5): a
 doc comment or a section's claim your change makes false, a test it leaves

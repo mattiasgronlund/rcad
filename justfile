@@ -2931,11 +2931,12 @@ check-kache-off-on-ci:
 # So bumping the number is how a new `check-*` recipe gets added, deliberately,
 # in the commit that adds it.
 #
-# The last arm pins `check-plugins` **first**, which the three above could not:
+# Another arm pins `check-plugins` **first**, which the three above could not:
 # both sides of every comparison here are `sort -u`, so this recipe was blind to
-# order by construction. CLAUDE.md publishes "first thing in `just gate`" and
-# `ci.yml` leans on it, and a published claim wants a test (§15.6) — it had none,
-# and `check-plugins` ran first only because of where it happened to sit.
+# order by construction. CLAUDE.md says check-plugins is the first failure the
+# summary block names when a plugin is missing, and `ci.yml` leans on it, and a
+# published claim wants a test (§15.6) — it had none, and `check-plugins` ran
+# first only because of where it happened to sit.
 #
 # What the order buys is the error message. Without plugins `check-plugins` exits
 # 1 and names the install command, while `check-hooks` and
@@ -2952,7 +2953,11 @@ check-kache-off-on-ci:
 # command with `cargo` and a subcommand that builds, or calls the `t` recipe. The
 # line is read out of `just --show gate`, and an empty read fails, for the
 # reason the count above is pinned.
-[doc("Every check-* recipe is in `gate`, check-plugins is first, and every step that builds with cargo is in gate's chain.")]
+#
+# **The last arm holds `test` ahead of `check-t-selftest` in `gate_steps`.** The
+# arm above compares the chain as a set, but the chain runs in `gate_steps`
+# order, and `check-t-selftest` needs the binaries `test` builds (§372.10).
+[doc("Every check-* recipe is in `gate`, check-plugins is first, every step that builds with cargo is in gate's chain, and check-t-selftest comes after test.")]
 check-gate-runs-every-check:
     @steps=$(printf '%s\n' {{ gate_steps }}); \
     defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
@@ -2992,8 +2997,8 @@ check-gate-runs-every-check:
     first=$(printf '%s\n' "$steps" | grep -m1 .); \
     if [ "$first" != "check-plugins" ]; then \
         echo "gate names '$first' first, expected 'check-plugins'"; \
-        echo "CLAUDE.md says check-plugins fails first thing in just gate, and"; \
-        echo "ci.yml leans on it: with no plugins, check-hooks and"; \
+        echo "CLAUDE.md says check-plugins is the first failure the summary"; \
+        echo "block names, and ci.yml leans on it: with no plugins, check-hooks and"; \
         echo "check-questions-selftest exit 127 on a missing selftest.sh, which is"; \
         echo "the failure a runner explains worst, while check-plugins exits 1 and"; \
         echo "names the command that installs them"; \
@@ -3013,6 +3018,14 @@ check-gate-runs-every-check:
         for step in $cargo; do printf '%s\n' "$chain" | grep -qx "$step" || echo "  $step runs cargo and is not on the line"; done; \
         for step in $chain; do printf '%s\n' "$cargo" | grep -qx "$step" || echo "  $step is on the line and its recipe builds nothing with cargo"; done; \
         echo "a cargo step off the line waits on cargo's lock beside test (docs/decisions.md §372.10)"; \
+        exit 1; \
+    fi; \
+    test_at=$(printf '%s\n' "$steps" | grep -n -x 'test' | head -1 | cut -d: -f1); \
+    t_selftest_at=$(printf '%s\n' "$steps" | grep -n -x 'check-t-selftest' | head -1 | cut -d: -f1); \
+    if [ -n "$test_at" ] && [ -n "$t_selftest_at" ] && [ "$t_selftest_at" -lt "$test_at" ]; then \
+        echo "check-t-selftest is at line $t_selftest_at of gate_steps, test is at line $test_at"; \
+        echo "check-t-selftest needs the binaries test built, so it must come after"; \
+        echo "test in gate_steps (docs/decisions.md §372.10)"; \
         exit 1; \
     fi
 

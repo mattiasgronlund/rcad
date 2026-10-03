@@ -74,6 +74,24 @@ volume bound is derived from the rounding, not tuned; the worst move used
   `ACurveTheFacesEitherSideOfItDoNotName`), so those rows compare nothing and
   assert that.
 
+**2026-10-03, Q727:** the pin this section named is renamed. Q705 (`9615681b`)
+turned `a_turned_cube_read_back_from_thirteen_digits_cannot_be_united_with_nothing`
+into `a_turned_cube_read_back_from_thirteen_digits_is_united_with_nothing`; it
+now asserts one solid and no longer holds the refusal (§368.3). §368.3's table
+has the turned and skew families' counts: turned, 109 of 144 decided fuses
+from exact text, 107, 105 and 111 at 11, 12 and 13 digits; skew, 122 of 144
+from exact text, 122 at each of the three digit counts. Run here on this base,
+`just t -p rcad-step --no-capture -E
+'test(a_turned_pair_read_back_from_rounded_text)'` and the same for
+`a_skew_pair_read_back_from_rounded_text`, still print those counts.
+
+**2026-10-03, Q739:** since Q730 the ball-and-block family is written and read
+back too, so that row no longer compares nothing. `just t -p rcad-step
+--no-capture -E 'test(a_ball_and_a_block_read_back_from_rounded_text)'` prints
+144 of 144 decided fuses from exact text and 144 of 144 at 11, 12 and 13
+digits, with no refusal introduced at any digit count. The frustum is still
+refused, as this section says.
+
 The families bake each placement in before writing — a workaround for §191.2,
 now redundant and left in.
 
