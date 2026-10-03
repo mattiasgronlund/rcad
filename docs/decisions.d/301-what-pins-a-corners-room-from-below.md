@@ -26,6 +26,7 @@ each fail it (301.5). No kernel code changed.*
   301.6   The probe
   301.7   What this leaves
   301.8   Which draws the 0.49 fold belongs to, and whether shrinking the room changes their answer
+  301.9   The room `bake`'s picker grants, and why it does not grow with how badly three planes cross
 
 ### 301.1 The room shrunk to half, a tenth and nothing
 
@@ -282,3 +283,107 @@ no draws are decided by it (301.7's untried four-plane family is still open).
 The scratch probe test (`q241_scratch_probe.rs`) and its two log files are not
 committed — the probe edit to `arrange.rs` came back out and the test file was
 deleted before this commit, per the row's instruction.
+
+### 301.9 The room `bake`'s picker grants, and why it does not grow with how badly three planes cross
+
+*Queue row Q437, from 301.3 and §344.3. Lane
+`lane-q437-a-thin-wedge-corner-past-the-pickers-room`, off `aee06a5b`.* The
+row was written on `893b2b94`. There, 301.3's wedge at a slope of 1/512,
+turned 2.5 about `(1, 2, 3)`, and ten of §344.3's pyramids were refused in
+`derive_a_corner`: `the_place_the_model_points_at` turned down the only
+place of the only triple at a sharp corner, because the place lay past the
+corner's own rounding. The row asked for a room sized by how badly the
+triple is conditioned. **On `aee06a5b` none of them is refused there, and the
+room is not grown.** No kernel code changed.
+
+**What answered them is §368.** The picker now grants the stored corner the
+room `Model::validate` grants it off a plane, `1e-9` of the solid's size, plus
+the rounding, where it granted the rounding alone. The wedge unites at all 18
+turns with an empty log. Nine of the ten pyramids unite with the right volume
+and an empty log. The tenth, folding 1/4096, 4 high, written through its apex
+and turned 0.3 about `(3, -1, 2)`, is placed and then refused at its apex on
+"order along a crossing". That is Q848's pin,
+`a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused`.
+
+**Where the places lie.** A scratch print in the picker logged every place
+that misses the stored corner's box. For the ten pyramids it gives 2.81 to
+46.6 rounding rooms past the corner, §344.3's column to the digit, and at
+most 0.000251 of today's room. For the wedge, per slope over all 18 turns,
+with the picker's room multiplied by one, a million, and its `validate` half
+taken out:
+
+| Slope | Furthest place, rounding rooms | Share of today's room | Refused | Refused, room ×10⁶ | Refused, rounding alone |
+|---|---|---|---|---|---|
+| 1/512 | 1.68 | 0.000004 | 0 | 0 | 1 |
+| 2⁻¹⁶ | 508 | 0.0011 | 0 | 0 | not read |
+| 2⁻²⁰ | 15 544 | 0.033 | 0 | 0 | not read |
+| 2⁻²⁴ | 107 898 | 0.24 | 0 | 0 | not read |
+| 2⁻²⁶ | 358 649 | 0.77 | 5 | 5 | not read |
+| 2⁻²⁷ | 811 118 | 1.74 | 12 | 11 | not read |
+| 2⁻²⁸ | 1 600 835 | 3.05 | 13 | 13 | not read |
+| 2⁻³⁰ | 5 899 623 | 12.7 | 18 | 18 | not read |
+
+The one refusal under the rounding alone is the row's own union, 1/512 turned
+2.5 about `(1, 2, 3)`, at "where three surfaces meet". All 5 at 2⁻²⁶ are
+refused at "a point inside a piece of a face", before the picker's room runs
+out. From 2⁻²⁷ on, 2 to 4 of each 18 are at "where three surfaces meet".
+
+The pyramids at folds from 2⁻¹² to 2⁻³², 108 unions each, refuse 4, 3, 3, 6,
+9 and 43 at 2⁻¹², 2⁻¹⁶, 2⁻²⁰, 2⁻²⁴, 2⁻²⁸ and 2⁻³². The 4 at 2⁻¹² are
+Q848's. "Where three surfaces meet" first appears at 2⁻²⁴, once. With the
+room ×10⁶ the counts are 4, 3, 3, 5, 6 and 36.
+
+**So the picker's room is not what fails first.** Within §3.5's envelope,
+which covers constructions conditioned down to about `2.2e-5`, the furthest
+place is a thousandth of the room. The picker first refuses at a slope of
+2⁻²⁴, about `6e-8`, and there most unions are already refused somewhere
+else. A millionfold room takes 1 wedge and 11 pyramids off the refused
+counts, all at 2⁻²⁴ or thinner. Whether those answers are right was not
+checked.
+
+**Why the room does not grow with the triple's conditioning.** If the stored
+corner `p` is within `w` of each of three planes `Nx = d`, it is within
+`‖N⁻¹‖ w` of where they meet. So a picker that grants `‖N⁻¹‖ × w` takes every
+corner that sits within `w` of all three of its planes. That is the per-plane
+comparison §136.3's corner passes: `1e-14` off each of three planes that graze
+at `1e-14`, and `1.414` from where they cross. Its `‖N⁻¹‖` is about `2e14`, so
+that room is about `4e5`. Run as a scratch scale on the picker's room,
+`a_corner_near_three_grazing_planes_but_far_from_where_they_cross_is_refused`
+fails at ×10¹⁴, because the corner is placed, and passes at ×10⁶. A room that
+grows more slowly than `‖N⁻¹‖`, a square root say, keeps that corner refused
+at size two. But nothing says which power is right, so it is a constant bump
+in another form. What tells the wedge from §136.3 is how far the corner
+moves, and the picker already bounds that as an absolute distance, the
+tolerance `validate` keeps for the solid.
+
+**The tests.** Both pass on `aee06a5b`. They pin the picker's room from
+below, the way 301.5's unit test pins the fold's.
+
+- `a_thin_turned_wedge_whose_corners_are_meets_wider_than_the_room_is_still_united`,
+  in `crates/rcad-topo/tests/a_meet_that_fills_a_corners_room.rs`, now runs
+  slope 1/512 too: 90 unions.
+- `a_pyramid_whose_base_corner_lies_past_its_own_rounding_from_where_its_planes_meet_is_united`,
+  in `crates/rcad-topo/tests/a_corner_with_four_planes_round_it.rs`: the nine.
+
+With the picker's `validate` half multiplied by zero, a scratch edit to
+`the_place_the_model_points_at`, both fail. `Q437_VSCALE=0 mise exec -- just
+t -p rcad-topo --no-fail-fast --test a_meet_that_fills_a_corners_room --test
+a_corner_with_four_planes_round_it` failed those two, and none of the other
+four of the six failed. Under the same knob the scratch test refused all ten
+of §344.3's pyramids and the wedge at 1/512 turned 2.5 about `(1, 2, 3)`, each
+at "where three surfaces meet".
+
+**How it was run.** A scratch test walked the wedges and pyramids above and
+printed each refusal with the records it carried. A scratch edit to
+`the_place_the_model_points_at` printed every place past the stored corner's
+box. It also read `Q437_SCALE`, which multiplies the whole room, and
+`Q437_VSCALE`, which multiplies the `validate` half alone. Both came back out
+before this commit.
+
+**What this leaves.** Every refusal measured here lies past §3.5's
+conditioning cover, so `refuses/D`, and none is filed. From 2⁻²⁶, about
+`1.5e-8`, the wedge is refused at "a point inside a piece of a face". From
+2⁻²⁴, both shapes are sometimes refused at "where three surfaces meet". At
+2⁻³², about `2.3e-10`, most pyramids build an answer that does not validate:
+a corner `1e-7` off its face's plane. The kernel catches that and writes
+nothing.
