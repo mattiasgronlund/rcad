@@ -1258,19 +1258,18 @@ fn do_they_face_the_same_way(
 /// crossing nothing here used. Where two such faces really cross, the cutting
 /// has already asked for that crossing.
 fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
-    match (one, other) {
-        (Surface::Sphere(_), Surface::Sphere(_))
-        | (Surface::Cylinder(_), Surface::Cylinder(_))
-        | (Surface::Cone(_), Surface::Cone(_))
-        | (Surface::Torus(_), Surface::Torus(_)) => false,
-        (
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
-        ) => true,
-        // A plane is answered by the caller before this. A kind rcad-geom grows
-        // later has not been shown apart from these, so it is still asked about.
-        _ => false,
-    }
+    // A plane is answered by the caller before this. A kind rcad-geom grows
+    // later has not been shown apart from these four, so it is still asked
+    // about.
+    let shown_apart = |surface: &Surface| {
+        matches!(
+            surface,
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_)
+        )
+    };
+    shown_apart(one)
+        && shown_apart(other)
+        && core::mem::discriminant(one) != core::mem::discriminant(other)
 }
 
 /// Whether the material of one face of an input holds a point already known to
