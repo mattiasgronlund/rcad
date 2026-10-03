@@ -4099,9 +4099,13 @@ recipes_file := "justfile"
 #
 # The habit it replaces is `grep -n '^check-hub' justfile` followed by a `Read`
 # at a guessed offset — the two-call shape §144.6 measured, on the file it
-# measured second. This justfile is 307 404 characters over 105 definitions, and
-# the mean answer here is 2 934 of them: a hundredth of the file, in one call.
-# The largest, `check-fuzz-overnight-selftest`, is 40 344.
+# measured second. §153 landed this at 307 404 characters over 105
+# definitions, mean answer 2 934, largest (`check-fuzz-overnight-selftest`)
+# 40 344 — kept there as history and not updated. Measured again on
+# 2026-10-03: 694 680 characters (`wc -m justfile`) over 158 definitions
+# (`just recipe | wc -l`), mean answer 4 406, largest still
+# `check-fuzz-overnight-selftest` at 74 896 (both from summing `just recipe
+# <name> | wc -m` over every name the index lists).
 #
 # **The extent is exact rather than guessed**, which is the one place this beats
 # `just src`. `src` reads a Rust item's end off rustfmt's layout and fails when
