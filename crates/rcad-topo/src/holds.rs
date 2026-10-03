@@ -3769,6 +3769,21 @@ mod tests {
     /// bends walk every coedge the same way, and the near end is the same edge
     /// for both. That is what makes the long one a real bend and not a guess.
     fn a_bend(bend: Bend, near_cap: NearCap) -> (Model, SolidKey, FaceKey) {
+        a_bend_walked(bend, near_cap, Orientation::Reversed)
+    }
+
+    /// [`a_bend`] with its wall walking the near circle
+    /// `near_circle_on_the_wall` and the far circle the other way, and each
+    /// cap walking its circle against the wall. `Reversed` is [`a_bend`]'s
+    /// walk; `Forward` turns every coedge on a circle over and leaves the caps
+    /// and the seam as they were, so each cap is walked against the way it
+    /// faces and the wall's circles say the other stretch of ring from the one
+    /// its seam is on.
+    fn a_bend_walked(
+        bend: Bend,
+        near_cap: NearCap,
+        near_circle_on_the_wall: Orientation,
+    ) -> (Model, SolidKey, FaceKey) {
         let (far_corner, far_cap_facing, the_way_round) = match bend {
             Bend::Quarter => (
                 rcad_geom::Point::new(0.0, 3.0, 0.0),
@@ -3795,7 +3810,7 @@ mod tests {
                 .expect("a coordinate direction is a unit normal")
         };
         let flat_through_the_middle = through_the_axis(Vector::new(0.0, 0.0, 1.0));
-        a_piece_of_pipe(
+        a_piece_of_pipe_walked(
             rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring"),
             End {
                 corner: rcad_geom::Point::new(3.0, 0.0, 0.0),
@@ -3814,6 +3829,7 @@ mod tests {
                     Picker::from(the_way_round.expect("a normal with a length")),
                 ],
             }),
+            near_circle_on_the_wall,
         )
     }
 
@@ -3840,6 +3856,20 @@ mod tests {
         far: End,
         seam: Option<EdgeRun>,
     ) -> (Model, SolidKey, FaceKey) {
+        a_piece_of_pipe_walked(ring, near, far, seam, Orientation::Reversed)
+    }
+
+    /// [`a_piece_of_pipe`] with its wall walking the near circle
+    /// `near_circle_on_the_wall` and the far one the other way, and each cap
+    /// walking its circle against the wall, as [`a_bend_walked`] says.
+    fn a_piece_of_pipe_walked(
+        ring: rcad_geom::Torus,
+        near: End,
+        far: End,
+        seam: Option<EdgeRun>,
+        near_circle_on_the_wall: Orientation,
+    ) -> (Model, SolidKey, FaceKey) {
+        let far_circle_on_the_wall = near_circle_on_the_wall.reversed();
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let near_corner = model.add_vertex(near.corner);
         let far_corner = model.add_vertex(far.corner);
@@ -3852,15 +3882,25 @@ mod tests {
             let wire = model.add_wire(smallvec::smallvec![round_it]);
             model.add_face(Surface::Plane(plane), smallvec::smallvec![wire])
         };
-        let near_cap = cap(&mut model, near.cap, near_circle, Orientation::Forward);
-        let far_cap = cap(&mut model, far.cap, far_circle, Orientation::Reversed);
+        let near_cap = cap(
+            &mut model,
+            near.cap,
+            near_circle,
+            near_circle_on_the_wall.reversed(),
+        );
+        let far_cap = cap(
+            &mut model,
+            far.cap,
+            far_circle,
+            far_circle_on_the_wall.reversed(),
+        );
 
         let wires: SmallVec<[_; 1]> = match seam {
             Some(seam) => {
                 let round_the_wall: SmallVec<[_; 4]> = [
-                    (near_circle, Orientation::Reversed),
+                    (near_circle, near_circle_on_the_wall),
                     (seam, Orientation::Forward),
-                    (far_circle, Orientation::Forward),
+                    (far_circle, far_circle_on_the_wall),
                     (seam, Orientation::Reversed),
                 ]
                 .map(|(edge, turn)| model.add_coedge(edge, turn))
@@ -3869,8 +3909,8 @@ mod tests {
                 smallvec::smallvec![model.add_wire(round_the_wall)]
             }
             None => [
-                (near_circle, Orientation::Reversed),
-                (far_circle, Orientation::Forward),
+                (near_circle, near_circle_on_the_wall),
+                (far_circle, far_circle_on_the_wall),
             ]
             .map(|(edge, turn)| {
                 let round_it = model.add_coedge(edge, turn);
@@ -4157,21 +4197,34 @@ mod tests {
     /// turned round, both circles look in front, and every point of the one
     /// quarter the wall does *not* cover comes back held (§243).
     ///
-    /// `Model::validate` refuses this bend, which is the quarter bend with its
-    /// far end turned half a turn: `AClosedEdgeIsWalkedAgainstItsSurface`. It
-    /// hands the closed-edge rule the side its corners read, and both of the
-    /// wall's circles have the far corner on the other side of their plane.
+    /// The bend itself is sound, and `Model::validate` passes it. The same
+    /// bend with every coedge on a circle turned over is refused
+    /// `AClosedEdgeIsWalkedAgainstItsSurface`: each cap is then walked against
+    /// the way it faces. Until §392 it was the other way round. The sweep read
+    /// which side of each cap's plane the wall keeps off the wall's far corner,
+    /// which past half the ring is the side it does not keep, so it refused
+    /// the sound bend and passed the one walked the wrong way.
     #[test]
     fn a_three_quarter_bends_wall_is_refused_rather_than_read_as_a_quarter() {
         let (model, solid, wall) = a_bend(Bend::ThreeQuarters, NearCap::FacingOut);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a three-quarter bend is a solid");
+        let (walked_the_wrong_way, _, _) = a_bend_walked(
+            Bend::ThreeQuarters,
+            NearCap::FacingOut,
+            Orientation::Forward,
+        );
+        let refused =
+            walked_the_wrong_way.validate(&Policy::certified(), &mut ProvenanceLog::new());
         assert!(
             matches!(
-                model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
+                refused,
                 Err(Error::Invalid(
                     Invalid::AClosedEdgeIsWalkedAgainstItsSurface
                 ))
             ),
-            "the sweep has learned a three-quarter bend, and §243 says what that changes"
+            "the three-quarter bend walked the wrong way came back {refused:?}"
         );
         for point in [at(3.0, -4.0, 0.0), at(-3.0, 4.0, 0.0), at(3.0, 4.0, 0.0)] {
             let answer = model

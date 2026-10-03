@@ -90,8 +90,10 @@ fn a_bend_written_as_the_standard_says_validates_and_places_every_point_as_the_s
 }
 
 /// The bend with every turn turned over — wall `same_sense .F.` and every
-/// `ORIENTED_EDGE` flag the other way — is refused: its wall faces into the
-/// material and its caps out of it.
+/// `ORIENTED_EDGE` flag the other way — is refused: `validate` now holds each
+/// cap whose outer wire is one circle round the ring's tube to the way the
+/// ring face faces, and this bend's caps are walked against it, so `validate`
+/// refuses the bend before the mesh even looks at its wall (§392.3).
 ///
 /// It is how this kernel built its bends until §361, and it imported then,
 /// because the mesher's turn and the file's cancelled.
@@ -102,7 +104,10 @@ fn a_bend_written_with_every_turn_turned_over_is_refused() {
     let Err(refused) = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) else {
         panic!("a bend whose wall faces into its own material imported");
     };
-    assert!(is_faces_do_not_agree(&refused), "{refused:?}");
+    assert!(
+        is_closed_edge_walked_against_its_surface(&refused),
+        "{refused:?}"
+    );
 }
 
 /// Three KiCad relays in the corpus, each with a torus face used forwards,
@@ -151,11 +156,11 @@ const PAST_THE_FAR_CAP: [f64; 3] = [-1.0, 3.5, 0.0];
 /// The same past the cap on `y = 0`.
 const PAST_THE_NEAR_CAP: [f64; 3] = [3.5, -1.0, 0.0];
 
-fn is_faces_do_not_agree(refused: &Refusal) -> bool {
+fn is_closed_edge_walked_against_its_surface(refused: &Refusal) -> bool {
     matches!(
         refused,
         Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }
-            if matches!(**why, Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
+            if matches!(**why, Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface))
     )
 }
 
