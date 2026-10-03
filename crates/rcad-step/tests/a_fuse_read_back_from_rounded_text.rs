@@ -64,7 +64,11 @@
 //!   moves at any of the three digit counts, because every number is a whole
 //!   one, so those rows are controls and not measurements. The ball and block
 //!   decide all 144 fuses at each.
-//! - A frustum: the writer refuses every one, so nothing is read.
+//! - A frustum and a block: written since §366, and all 144 fuses decided from
+//!   exact text. The reader refuses the rounded file,
+//!   `ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn`, in 48 of 48 at 11 and 12
+//!   digits and 40 of 48 at 13. Of the 24 fuses of the eight read at 13
+//!   digits, 21 are decided and rounding introduces 3 `Undecidable`.
 //! - The writer dropped a solid's placement:
 //!   [`a_cube_moved_along_x_is_written_where_it_was_moved_to`], fixed in §191.
 //!
@@ -141,24 +145,21 @@ fn a_block_with_a_bar_through_it_read_back_from_rounded_text() {
         .all_answers_right();
 }
 
-/// **Compares nothing, and says so.** The writer refuses every frustum-and-block
-/// pair by the name `ACurveTheFacesEitherSideOfItDoNotName`, so no file reaches
-/// the reader. The day the writer names that curve, this fails and becomes a
-/// row like the others.
+/// Every frustum of the family is written and read back, since the writer
+/// names the circle where a flat cap meets a cone (`docs/decisions.md` §366).
+/// Until then the writer refused all 48 as
+/// `ACurveTheFacesEitherSideOfItDoNotName` and nothing reached the reader.
 #[test]
-fn a_frustum_up_through_a_block_never_reaches_the_reader_because_the_writer_refuses_it() {
+fn a_frustum_up_through_a_block_read_back_from_rounded_text() {
     let tally = a_family_read_back_from_rounded_text(
         "a frustum and a block",
         a_frustum_and_a_block(),
         FrustumAndBlock::build,
     );
     tally.all_answers_right();
-    assert_eq!(
-        tally
-            .not_written
-            .get("ACurveTheFacesEitherSideOfItDoNotName"),
-        Some(&(CASES as usize)),
-        "every frustum was expected to stop the writer: {:?}",
+    assert!(
+        tally.not_written.is_empty(),
+        "every frustum and block was expected to be written: {:?}",
         tally.not_written
     );
 }

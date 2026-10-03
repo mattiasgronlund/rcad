@@ -107,7 +107,9 @@
 //! refused by name — the ball at its pole, and the frustum, the cone, the bend
 //! and the turned bar at a curve between two faces the writer cannot name yet —
 //! and §241 lists what that costs the fuzzer. Since Q730 the ball is written
-//! and comes back the same, so four are refused.
+//! and comes back the same, since Q405 the turned bar, and since Q662 the
+//! frustum and the pointed cone (`docs/decisions.md` §366), so only the quarter
+//! bend is refused.
 
 #![forbid(unsafe_code)]
 
@@ -445,13 +447,13 @@ fn every_shape_seed_is_the_shape_it_is_named_for() {
             seed: "a_frustum_of_a_half_slope_cone",
             faces: &["cone", "plane", "plane"],
             centroid: [0.0, 0.0, 60.0 / 13.0],
-            comes_back: false,
+            comes_back: true,
         },
         Shape {
             seed: "a_pointed_cone",
             faces: &["cone", "plane"],
             centroid: [0.0, 0.0, 4.5],
-            comes_back: false,
+            comes_back: true,
         },
         Shape {
             seed: "a_quarter_bend_of_pipe",
