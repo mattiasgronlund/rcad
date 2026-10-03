@@ -151,6 +151,10 @@ the block off it answers the same `8π` half bar
    `where_a_closed_crossing_is_centred`. The two `holds.rs` items of 325.2
    come after it. `crates/rcad-topo/src/holds.rs`,
    `crates/rcad-topo/src/fuse/arrange.rs`.
+
+   **Closed by Q350 (`8f9750e2`).** `where_a_closed_crossing_is_centred` gets
+   a pipe arm, and `holds.rs` follows a half bar's faces. §394 has the
+   detail and the tests.
 2. **Two spellings of one wall stay two faces, and the next fuse refuses.**
    Smallest reach: the whole bars' union with the wall spelled twice, less the
    block, refused at `fuse/arrange.rs:1012`; the answer is the same `8π`

@@ -105,10 +105,10 @@ it the same probe gave, for each answer:
 
 With the trial arm, `mise exec -- just t -p rcad-topo --no-fail-fast` ran
 1084 tests, and 1083 passed. The one that failed was
-`a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap`, the new
-pin, failing on its first fuse, the union with `here` as the argument, then
-the union with the top block. The error was the `Undecidable` above. No other
-pin moved.
+`a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`,
+the new pin, failing on its first fuse, the union with `here` as the
+argument, then the union with the top block. The error was the
+`Undecidable` above. No other pin moved.
 
 **Does a corner with two curved edges survive a second fuse?** Yes, where the
 second fuse gets that far. Each of `(3, ±4, 0)` and `(3, ±4, 10)` is where two
@@ -160,12 +160,16 @@ without any other change.
 ### 331.5 What this leaves
 
 - **The pipe arm, and the pin it breaks.** Q330 already adds the arm, for the
-  half bars of §325. `a_second_fuse_of_any_answer_stops_at_the_arcs_of_its_bottom_cap`
+  half bars of §325. `a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`
   fails as soon as it lands, so Q330's write set needs
   `crates/rcad-topo/tests/fusing_two_bars_side_by_side.rs`, and the pin gets
   rewritten there to what the second fuses do next: the unions and lenses
   against a block that touches nothing answer, with the checks 331.3 lists.
   `holds.rs` is Q105's file, so Q330 waits on Q105.
+
+  **Closed by Q350 (`8f9750e2`).** The arm lands, and the pin is rewritten as
+  `a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`,
+  the name §394 (Q586) now carries this test under.
 - **The top half, after the arm.** `"a point in a piece that every solid could
   place"` in `fuse/select.rs` for all six answers, and `"a point inside a piece
   of a face"` for the crescents with the crescent first. `select.rs` is Q102's
