@@ -200,12 +200,22 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
 /// worked out from the shapes now, as the steeper family works it out.
 ///
 /// **Twenty refused on a piece glued out of two cells** until §36.3's sign rule
-/// stopped doing that (§282.7 named them). Six of them answer right now, eight
-/// still find no point in a piece that is one cell, four refuse
-/// `ResultIsNotManifold` further on, and two are the union and a difference of
-/// the block that reaches up to `1.5`: they hold every grid point they are
-/// asked about and do not measure, because a piece of the cone they keep is
-/// bounded by an arc of a parabola the mesher cannot follow finely enough.
+/// stopped doing that (§282.7 named them). Eight of them answer right now, eight
+/// still find no point in a piece that is one cell, and four refuse
+/// `ResultIsNotManifold` further on.
+///
+/// **Two of the eight did not measure until Q423**: the union and the
+/// cone-less-block of the block reaching up to `1.5`, turned `0`. They held
+/// every grid point they decided, 7327 and 16702, and `measure` refused
+/// `DeflectionBelowWhatAMeshCanReach` with a floor of `2069086.58` — before any
+/// point was walked, so the mesher never tried the parabola the block's top
+/// face cuts along a ruling. The floor charges a cone face for how far up the
+/// axis its edges reach, and `mesh.rs` read that parabola's reach off the
+/// plane's lean in `f64`, where `0.447213595499958 − 0.5 · 0.8944271909999159`
+/// came to `5.55e-17` instead of zero, and a distance divided by it to
+/// `5.7e16`. The lean is asked exactly now, and a piece of a curve that runs on
+/// for ever is charged its two ends; both measure, `579.01` and `129.01`,
+/// against `579.03` and `129.03` from the shapes.
 ///
 /// **The four that refuse `ResultIsNotManifold` are every rule of one block**:
 /// leaned at `2`, from `−3` up to `1`, turned `0`. Its top face is parallel to a
@@ -227,10 +237,10 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
 /// cross, not where its corners were rounded to. With the box grown by what
 /// writing a corner down costs, in the tree that traced this, all four answer
 /// and none of them wrongly. The intersection and both differences hold every
-/// grid point asked and do not measure, `DeflectionBelowWhatAMeshCanReach`, like
-/// the block reaching up to `1.5`; the union holds every one of the 6986 grid
-/// points it decides, which is short of the 7 000 an answer that does not
-/// measure is held to. Turned `1`, the same block refuses `order along a
+/// grid point asked and do not measure, `DeflectionBelowWhatAMeshCanReach`, as
+/// the block reaching up to `1.5` did until Q423; the union holds every one of
+/// the 6986 grid points it decides, which is short of the 7 000 an answer that
+/// does not measure is held to. Turned `1`, the same block refuses `order along a
 /// crossing` instead, and those four are among the twenty counted below.
 #[test]
 fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right() {
@@ -260,15 +270,11 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 62,
+            right: 64,
             refused: [
                 ("ResultIsNotManifold", 4),
                 ("a point inside a piece of a face", 8),
                 ("order along a crossing", 20),
-                (
-                    "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
-                    2
-                ),
             ]
             .into()
         }
@@ -850,13 +856,13 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     // through that decide 5529 each and agree with the shapes at every one: the
     // union and the cone-less-block of the family below the frustum's block
     // from `−8` to `1.875` leaned a quarter, whose corner reaches into the
-    // frustum. Every other answer still decides at least 9326.
+    // frustum. The union of the steep block of that family that reaches up to
+    // `1.5` decides 7327, and it has been measured since Q423. Every other
+    // answer still decides at least 9326.
     //
-    // **An answer that does not measure is held to 7 000**, and there is one:
-    // the steep block of the family below the frustum that reaches into it,
-    // whose union keeps a piece of the cone bounded by an arc of the parabola
-    // the block's steep face cuts. It decides 7327 points and every one agrees
-    // with the shapes, and neither the mesher nor the ray caster follows that
+    // **An answer that does not measure is held to 7 000.** It was set for
+    // that union, whose kept piece of the cone is bounded by an arc of the
+    // parabola the block's top face cuts: the ray caster does not follow that
     // arc far enough for more.
     let floor = if measured.is_ok() { 5_500 } else { 7_000 };
     assert!(
