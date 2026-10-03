@@ -144,7 +144,10 @@ refusals is lifted, the classification in 250.1 is what a fuse would get.
 - A puck's lid is now refused where it was wrong (250.1). Answering it needs
   the region a circle round the axis bounds, which is not the tube's inside.
   That is a gap, and it has no consumer yet: nothing dispatched builds a puck
-  (§243.4).
+  (§243.4). **A plane square to the axis that cuts the tube in two circles is
+  answered since 250.9**; the lid's plane rests on the tube and touches it in
+  one circle, which `intersect` names by no picker, so the lid stays refused
+  (Q104).
 
 ### 250.6 What the verifier found
 
@@ -253,7 +256,8 @@ same: `face_holds_the_point` gives `AFaceTrimmedByACurveThisCannotFollow` at
 the six points above, `classify_point` gives `CannotFollowAFacesTrimming` at
 `(4, 0, 0)` and `(0, 0, 0)`, and both `validate` and `mesh` refuse the wall
 `AWireWillNotLieFlatOnItsFace`. So 250.6's reasoned `NotHeld` does not show on
-this commit, and Q415 owns the flat face.
+this commit, and Q415 owns the flat face. **Answered in 250.9** (Q664, Q415
+filed again).
 
 Through `SolidBuilder`, with the wall split into two faces along its top
 circle, only one wall shape reaches the mesher at all: a rim
@@ -317,3 +321,57 @@ is comparable, and it went from one to two once Q199 landed.
 test: a unit test in `select.rs`, `every_picker_keeps_a_point_on_the_half_spaces_own_plane`
 (`1c300b27`), pinning `every_picker_keeps` keeping a point on the meridian
 half-space's own plane — the same `Zero` case this section's rule argues for.
+
+### 250.9 Two circles round the axis, answered (Q664)
+
+*Row Q664 (`lane-q664-a-half-rings-flat-underside-read-back`, off
+`c564dec5`).* The half-ring of 250.7, read back through `Deserialize`.
+
+**Which `cannot()` fired, traced.** A temporary `eprintln!` went before each of
+`what_a_round_wire_encloses`'s six refusals and before `walk_one_outline`'s, and
+the eight read-back half-rings were asked 250.7's six points and the two
+`classify_point` points. All 46 calls that reached the function came out at
+the one after the lookup: `intersect` of `z = 0` and the ring gave two runs,
+picked by `OutsideAPipe` and `InsideAPipe` of the pipe of radius four, and the
+lookup took only a lone `InFrontOf`. 250.2 matched the refusal by its doc; the
+doc was right.
+
+**The rule now.** The lookup, `the_picker_naming_the_circle_through`, takes a
+lone picker of either kind that certainly keeps the wire's corner.
+`the_half_space_naming_the_meridian_circle_through` is that with anything but a
+half-space dropped, so `fuse/select.rs` gets what it got. A plane square to the
+axis cuts circles at `R ± s` with `s > 0`, and on it the ring holds the band
+between them. So, with the ring's sign and the pipe's:
+
+| circle | ring `Neg` | ring `Zero` or `Pos`, kept by the pipe | not kept |
+|---|---|---|---|
+| outer, `OutsideAPipe` | inside | the ring's sign | inside: nearer the axis than `R` |
+| inner, `InsideAPipe` | outside | the ring's sign turned round | outside: further than `R` |
+
+A point on the pipe is kept. On the face's plane such a point is in the band,
+where the pipe is not asked, so which way `Zero` goes cannot move an answer.
+
+**What is pinned**, in `tests/a_half_rings_flat_face_read_back_from_bytes.rs`,
+in all eight orientation choices, each read off `r` against 3 and 5:
+`(4, 0, 0)` and `(3.5, 0, 0)` held, `(0, 0, 0)` and `(6, 0, 0)` not held,
+`(5, 0, 0)` and `(3, 0, 0)` on its boundary; `classify_point` at `(0, 0, 0)`
+`Outside`. The model is written through Q193's mirror of the arenas, and the
+file checks the mirror both ways: a kernel-built bar, bend and cube decode and
+write back to the same bytes, and each half-ring reads back and writes out to
+the bytes the mirror wrote. With `holds.rs` put back to `c564dec5`, both
+answer tests fail, `classify_point` at `(0, 0, 0)` with
+`CannotFollowAFacesTrimming` naming the flat face.
+
+**What this leaves.**
+
+- `classify_point` at `(4, 0, 0)`, on the flat face and so on the skin, is
+  still refused `CannotFollowAFacesTrimming`, now naming the **wall**. Asked
+  directly at `(4, 0, 1)` and `(4, 0, −1)`, the wall refuses
+  `AFaceMissesPartOfWhereItsSurfacesCross` in all eight choices. The route was
+  not traced. That a ray from the point meets the wall, and that
+  `is_a_ring_face_between_two_planes` takes a wall with one plane along two
+  edges (§377) and then refuses a plane that does not hold the axis, is a
+  hypothesis. The test pins the refusal naming the wall, so it moves when the
+  wall is answered.
+- The puck's lid (250.5) rests on the tube in one circle that no picker names,
+  and stays refused. Q104 holds it.
