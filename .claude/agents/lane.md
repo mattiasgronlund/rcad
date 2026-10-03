@@ -36,13 +36,14 @@ commit.
 
 Run `mise exec -- just fmt` before each commit. It reformats the whole tree,
 but staging by explicit path already keeps that harmless — only your own
-files get added. Skip it and your first gate can fail over formatting
-alone, the way Q574's did, leaving its recorded tip a rustfmt-only commit
-instead of the real change.
+files get added. The gate checks formatting but does not fix it: skip
+`just fmt` and `pre-gate` stops you in seconds, but only after the commit,
+so the fix lands as a rustfmt-only commit on top of the real change, the
+way Q574's tip did.
 
 Gate with `mise exec -- just pre-gate gate quiet`. `pre-gate` runs the gate's
 cheapest steps at once — formatting, clippy and the wildcard count — and
-prints the whole output of each one that fails. `just` starts the gate only
+prints the first 60 lines of each one that fails. `just` starts the gate only
 when they all pass, so those failures come back in seconds instead of after a
 whole gate: 4 of 24 lane gates failed on them alone, with every test passing
 (§380, §381).
