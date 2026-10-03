@@ -16,14 +16,30 @@
 //! hundredth, some of these unions refuse. Those two are pinned in
 //! `src/fuse/arrange.rs`'s `tests` module, where the places are written by
 //! hand, and §301 says why no shape was found that needs them.
+//!
+//! **At a slope of `1/512` it does pin a room, the other one: the room `bake`
+//! picks the sharp corner's place with.** Turning the planes rounds them, and
+//! two planes that close carry the rounding about 512 times further, so the
+//! only place the three turned planes meet is up to 1.68 rooms past where the
+//! model stores the corner. A picker that granted the rounding alone refused
+//! the union at 'where three surfaces meet'. It grants the room
+//! `Model::validate` grants the wedge's corners as well (§368), and the place
+//! is four millionths of that (§301.9).
 
 use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule};
 
 /// How steeply the wedge's long wall climbs from its sharp corner, from a
-/// meet box a third of the room wide to one over two rooms wide.
-const SLOPES: [f64; 4] = [1.0 / 16.0, 1.0 / 64.0, 1.0 / 128.0, 1.0 / 256.0];
+/// meet box a third of the room wide to one over two rooms wide, and then to
+/// the slope where `bake` finds the corner's place past its rounding.
+const SLOPES: [f64; 5] = [
+    1.0 / 16.0,
+    1.0 / 64.0,
+    1.0 / 128.0,
+    1.0 / 256.0,
+    1.0 / 512.0,
+];
 
 const TURNS: [f64; 6] = [0.1, 0.3, 0.7, 1.1, 1.9, 2.5];
 
