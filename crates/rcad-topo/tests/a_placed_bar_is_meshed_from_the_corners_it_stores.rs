@@ -1,5 +1,5 @@
 //! A placed bar's mesh points are the unplaced bar's mesh points moved out,
-//! bit for bit.
+//! bit for bit, and its wall is cut into the unplaced wall's triangles.
 //!
 //! A placed face is meshed in the frame it is stored in, and its points are
 //! then moved out by the placement. So the mesh of a bar placed by some
@@ -23,22 +23,35 @@
 //! whether moving the bar's two corners out and back changes them, and a real
 //! share of them must.
 //!
+//! # The wall's triangles
+//!
+//! `BuildingAMesh::walk_a_wire_round` reads each point of a placed curved
+//! face where it was made, not moved out and back, so the wall is handed to
+//! the triangulator as the same numbers as the unplaced wall and cut into the
+//! same triangles. Moved out and back, the same double rounding one step
+//! later, 12 to 120 of the wall's triangles join other points under these
+//! twelve placements (`docs/decisions.md` §379.5). Reading points where they
+//! were made can hand back a mesh that is sound there and flat where it
+//! lands, and the unit ball at `x = 1.0808639105689192e16` of
+//! `how_far_out_a_ball_can_sit_and_still_mesh.rs` is refused for it, as
+//! `PlacingItTookAwayTheSpaceItsMeshEncloses`.
+//!
 //! # What is not compared
 //!
-//! **The triangles.** `BuildingAMesh::cut_up` still reads each point of a wire
-//! from the point table, where it sits moved out, and moves it back in. That
-//! is the same double rounding one step later, and it is enough to change how
-//! a cap is split: for the eighth turn, 174 of 500 triangles join points the
-//! unplaced bar's triangles do not. Reading those points in the frame they
-//! were walked in instead would make every triangle match as well. It would
-//! also turn the unit ball at `x = 1.0808639105689192e16` of
-//! `how_far_out_a_ball_can_sit_and_still_mesh.rs` from a refusal into a flat
-//! mesh that encloses nothing, which `docs/decisions.md` §333.6 measured to be
-//! a wrong answer, so that is left for a change that keeps the refusal.
+//! **The caps' triangles.** A flat face is cut into triangles on its plane
+//! where the solid sits, so that a placed cap is cut like the same cap read
+//! back from its STEP file, which has no placement (§362). The points round a
+//! circle are a tie for the triangulator's Delaunay test, and a tie goes
+//! whichever way the last bits push it, so the placed caps are not cut like
+//! the unplaced ones: 141 to 199 of the bar's 500 triangles join other points,
+//! every one of them on a cap. Cut where they are stored, the caps match the
+//! unplaced bar's in every row and the read-back's are lost (§379.5).
+
+use std::collections::HashSet;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Mesh, Model};
+use rcad_topo::{FaceKey, Mesh, Model};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
@@ -95,7 +108,85 @@ fn a_placed_bar_meshes_to_the_unplaced_bars_mesh_moved_out_point_for_point() {
     );
 }
 
+/// The wall's triangles, corner for corner and in the same order. The caps'
+/// are printed and not compared, for the reason the module doc gives.
+#[test]
+fn a_placed_bars_wall_is_cut_into_the_unplaced_walls_triangles() {
+    let (unplaced, unplaced_caps) = a_bar_meshed_with_its_caps(&Isometry::identity());
+    let unplaced_wall = the_wall_of(&unplaced, &unplaced_caps);
+    let unplaced_as_sets: HashSet<[u32; 3]> = unplaced
+        .triangles()
+        .iter()
+        .map(|triangle| as_a_set(triangle.corners()))
+        .collect();
+    let joins_other_points = |corners: [u32; 3]| !unplaced_as_sets.contains(&as_a_set(corners));
+    assert!(
+        !unplaced_wall.is_empty() && unplaced_wall.len() < unplaced.triangles().len(),
+        "the bar's {} triangles split into {} on the wall and the rest on the caps, so there is \
+         no wall to compare",
+        unplaced.triangles().len(),
+        unplaced_wall.len()
+    );
+    let mut differing = Vec::new();
+
+    for (name, placement) in &some_turns_with_and_without_a_shift() {
+        let (placed, caps) = a_bar_meshed_with_its_caps(placement);
+        let wall = the_wall_of(&placed, &caps);
+        let off_on_the_wall = wall
+            .iter()
+            .filter(|&&corners| joins_other_points(corners))
+            .count();
+        let off_on_the_caps = placed
+            .triangles()
+            .iter()
+            .filter(|triangle| caps.contains(&triangle.face()))
+            .filter(|triangle| joins_other_points(triangle.corners()))
+            .count();
+        println!(
+            "{name}: of {} triangles, {off_on_the_caps} on the caps and {off_on_the_wall} on \
+             the wall join other points",
+            placed.triangles().len()
+        );
+        if wall != unplaced_wall {
+            differing.push((name.clone(), off_on_the_wall));
+        }
+    }
+
+    assert!(
+        differing.is_empty(),
+        "a placed bar's wall is not cut into the unplaced wall's triangles; (placement, wall \
+         triangles joining other points): {differing:?}"
+    );
+}
+
+/// Each triangle not on a cap, as its three corners in the order the mesh
+/// holds them.
+fn the_wall_of(mesh: &Mesh, caps: &HashSet<FaceKey>) -> Vec<[u32; 3]> {
+    mesh.triangles()
+        .iter()
+        .filter(|triangle| !caps.contains(&triangle.face()))
+        .map(|triangle| triangle.corners())
+        .collect()
+}
+
+fn as_a_set(mut corners: [u32; 3]) -> [u32; 3] {
+    corners.sort_unstable();
+    corners
+}
+
 fn a_bar_meshed(placement: &Isometry) -> Mesh {
+    let (mesh, _) = a_bar_meshed_with_its_caps(placement);
+    mesh
+}
+
+/// The mesh of the bar placed by `placement`, and the keys of its two flat
+/// faces.
+///
+/// **The keys come out of the same model as the mesh.** A key names the model
+/// it belongs to, and every `Model::new` is a model of its own, so a cap's key
+/// read off a second bar built beside this one never matches a triangle of this
+/// mesh: every triangle then counts as the wall's.
+fn a_bar_meshed_with_its_caps(placement: &Isometry) -> (Mesh, HashSet<FaceKey>) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let bar = model
         .add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
@@ -103,15 +194,20 @@ fn a_bar_meshed(placement: &Isometry) -> Mesh {
     model
         .place_solid(bar, placement)
         .expect("this model made the key");
-    model
-        .solid(bar)
-        .expect("this model made the key")
+    let solid = model.solid(bar).expect("this model made the key");
+    let caps = solid
+        .faces()
+        .filter(|face| face.surface().as_plane().is_some())
+        .map(|face| face.key())
+        .collect();
+    let mesh = solid
         .mesh(
             Deflection::of(0.005).expect("a positive length"),
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .expect("a bar meshes at five thousandths wherever it is put")
+        .expect("a bar meshes at five thousandths wherever it is put");
+    (mesh, caps)
 }
 
 /// §249.3's eighth about `z`, and turns about two leaning axes, each alone and
