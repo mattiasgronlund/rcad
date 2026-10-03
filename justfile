@@ -2396,6 +2396,17 @@ check-skills-selftest:
 # back the first ten and then `lines that run: 15`. It also checks that the
 # verdict schema's `notes` says at most five lines, and that `verifier.md` says
 # so too.
+#
+# **An eighteenth arm holds who merges (§383.4 item 3, §384).** A `merge` on a
+# lane that wrote its rows goes to the Haiku `lander`, typed as one, which the
+# fourth arm now wants beside the other roles; a `fix_first`, and a lane whose
+# rows `just land` cannot take, go to the Opus merger; so does every merge the
+# recipe stopped on, and a lander that throws, which is what a `claude` process
+# started before `lander.md` existed does. The arm checks those four exact lines,
+# the merger's own branch after a stop, since the lander's `merge-<label>` may
+# exist, the `origin/main` check that brief and `merger.md` both carry, and the
+# lander's command starting with the text `.claude/settings.json` allows. The
+# fifth arm now holds the whole of that, lander and merger, behind `lastMerge`.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2407,7 +2418,7 @@ check-lanes-workflow:
     create='  git switch -c ${branchOf(lane)} ${BASE}'
     reset='  git checkout -B ${branchOf(lane)} ${BASE}'
     refusal='already exists, stop and report it as blocked'
-    serial='lastMerge.then(() => agent(MERGE('
+    serial='lastMerge.then(() => merging('
     pushes=('git fetch origin' 'git merge-base --is-ancestor origin/main HEAD' 'git push origin HEAD:main' 'mise exec -- just ff-main')
     shared_prefix='call needs a `mise exec --` prefix, whichever role'
     shared_guard='no loop over a runtime value, and no `mise exec` inside a loop or compound.'
@@ -2455,6 +2466,15 @@ check-lanes-workflow:
     many_want=$(seq -f 'crates/k/src/lib.rs: +pub fn f%g() {}' 1 10; echo 'lines that run: 15')
     notes_bound="    notes: { type: 'string', description: 'at most five lines, for the merger:"
     notes_rule='`notes` is at most five lines, for the merger: what it must act on and what no'
+    land_only="  return !!prior.check && prior.check.verdict === 'merge' && stepsProblem(prior.report.rows) === null"
+    land_first='  if (!landable(prior)) return byMerger(lane, prior, null)'
+    land_stop='    (land) => land && land.merged === true ? landedBy(land) : byMerger(lane, prior, landStop(land)),'
+    land_throw='    (e) => byMerger(lane, prior, '
+    land_branch='  const branch = stop ? afterLandBranchOf(lane) : mergeBranchOf(lane)'
+    land_check='  git merge-base --is-ancestor ${branchOf(lane)} origin/main'
+    land_check_doc='git merge-base --is-ancestor <lane branch> origin/main'
+    land_prefix='  return `mise exec -- just land '
+    land_allowed='"Bash(mise exec -- just land:*)"'
     settings=.claude/settings.json
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
@@ -2520,7 +2540,7 @@ check-lanes-workflow:
             echo "an agent with no type never loads its file in $2 (§261.6)"
             return 4
         fi
-        for t in lane verifier merger; do
+        for t in lane verifier merger lander; do
             if ! grep -qxF -- "$t" <<<"$types"; then
                 echo "$1 sends no agent of type $t"
                 return 4
@@ -2533,10 +2553,11 @@ check-lanes-workflow:
             fi
         done
         n=$(grep -cF -- 'agent(MERGE(' "$1" || true)
-        if [ "$n" != 1 ] || ! grep -F -- 'agent(MERGE(' "$1" | grep -qF -- "$serial" \
+        at=$(grep -cF -- 'agent(LAND(' "$1" || true)
+        if [ "$n" != 1 ] || [ "$at" != 1 ] \
             || ! grep -A1 -F -- "$serial" "$1" | grep -qF -- 'lastMerge = run.catch('; then
-            echo "$1 does not start its one merger behind the merge before it:"
-            echo "expected '$serial' and then 'lastMerge = run.catch(' on the next line (§266.4)"
+            echo "$1 does not start its one merger and its one lander behind the merge before it:"
+            echo "expected one 'agent(MERGE(', one 'agent(LAND(', and '$serial' with 'lastMerge = run.catch(' on the next line (§266.4)"
             return 5
         fi
         prev=0
@@ -2553,8 +2574,8 @@ check-lanes-workflow:
             fi
             prev=$at
         done
-        if grep -nF 'git push' "$1" "$2/lane.md" "$2/verifier.md"; then
-            echo "only the merger pushes, and the lines above tell another role to (§266)"
+        if grep -nF 'git push' "$1" "$2/lane.md" "$2/verifier.md" "$2/lander.md"; then
+            echo "only the merger and just land push, and the lines above tell another role to (§266)"
             return 6
         fi
         if ! grep -qF -- "$shared_prefix" "$3" || ! grep -qF -- "$shared_guard" "$3"; then
@@ -2595,7 +2616,7 @@ check-lanes-workflow:
             echo "$1 does not tell the verifier's own prompt that this lane is pinsOnly, so a verifier would still be asked for a revert that has nothing to revert (§287)"
             return 10
         fi
-        for t in lane verifier merger; do
+        for t in lane verifier merger lander; do
             if ! grep -qF -- "$foreground_rule" "$2/$t.md"; then
                 echo "$2/$t.md does not say every command stays in the foreground; a backgrounded gate or test run reports back before it finishes and nothing wakes this role for the result (Q216)"
                 return 11
@@ -2707,6 +2728,30 @@ check-lanes-workflow:
             echo "$1's verdict schema or $2/verifier.md no longer holds a verifier's notes to five lines; unbounded, they were about a third of its report (§382)"
             return 17
         fi
+        if ! grep -qxF -- "$land_only" "$1" || ! grep -qxF -- "$land_first" "$1"; then
+            echo "$1 does not send the lander only a merge on a lane whose rows just land takes, and everything else to the Opus merger; a fix_first would then merge with its fixes unmade (§383.4)"
+            return 18
+        fi
+        if ! grep -qxF -- "$land_stop" "$1"; then
+            echo "$1 does not hand a merge just land stopped on to the Opus merger ('$land_stop'); the row would end unmerged on a stop that wants a reader (§383.5)"
+            return 18
+        fi
+        if ! grep -qF -- "$land_throw" "$1"; then
+            echo "$1 does not hand a lander that throws to the Opus merger ('$land_throw'); a claude process older than lander.md would end every row there (§384.3)"
+            return 18
+        fi
+        if ! grep -qxF -- "$land_branch" "$1"; then
+            echo "$1 does not give the merger after a stop a branch of its own ('$land_branch'); the lander's merge-<label> may exist (§383.4)"
+            return 18
+        fi
+        if ! grep -qxF -- "$land_check" "$1" || ! grep -qF -- "$land_check_doc" "$2/merger.md"; then
+            echo "$1's merger brief or $2/merger.md does not check origin/main for the lane's tip after just land; a lander that died after its push would be merged twice (§384.3)"
+            return 18
+        fi
+        if ! grep -qF -- "$land_prefix" "$1" || ! grep -qF -- "$land_allowed" "$settings"; then
+            echo "$1 does not send the lander a command starting with the text $settings allows, so it would stop to ask with nobody there to answer (§383.7)"
+            return 18
+        fi
     }
     scan "$file" "$agents" "$claude" "$recipes" || exit 1
     swap() {
@@ -2730,7 +2775,7 @@ check-lanes-workflow:
     fresh no-merger-file
     rm "$dir/no-merger-file/agents/merger.md"
     fresh merges-at-once
-    awk -v s="$serial" -v r='Promise.resolve().then(() => agent(MERGE(' \
+    awk -v s="$serial" -v r='Promise.resolve().then(() => merging(' \
         '{ i = index($0, s); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(s)); print }' \
         "$file" > "$dir/merges-at-once/lanes.js"
     fresh push-unchecked
@@ -2823,7 +2868,31 @@ check-lanes-workflow:
     swap "$file" 'at most five lines, ' '' > "$dir/notes-unbounded/lanes.js"
     fresh notes-unsaid
     grep -vF -- "$notes_rule" "$agents/verifier.md" > "$dir/notes-unsaid/agents/verifier.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17)
+    fresh untyped-lander
+    grep -vF -- "agentType: 'lander'," "$file" > "$dir/untyped-lander/lanes.js"
+    fresh no-lander-file
+    rm "$dir/no-lander-file/agents/lander.md"
+    fresh lander-pushes
+    printf '\n    git push origin HEAD:main\n' >> "$dir/lander-pushes/agents/lander.md"
+    fresh lander-backgrounds
+    grep -vF -- "$foreground_rule" "$agents/lander.md" > "$dir/lander-backgrounds/agents/lander.md"
+    fresh lands-a-fix-first
+    swap "$file" "prior.check.verdict === 'merge' && stepsProblem" "prior.check.verdict !== 'reject' && stepsProblem" > "$dir/lands-a-fix-first/lanes.js"
+    fresh lands-everything
+    grep -vxF -- "$land_first" "$file" > "$dir/lands-everything/lanes.js"
+    fresh stop-ends-the-row
+    swap "$file" "$land_stop" '    (land) => landedBy(land),' > "$dir/stop-ends-the-row/lanes.js"
+    fresh throw-ends-the-row
+    grep -vF -- "$land_throw" "$file" > "$dir/throw-ends-the-row/lanes.js"
+    fresh merger-takes-the-landers-branch
+    swap "$file" "$land_branch" '  const branch = mergeBranchOf(lane)' > "$dir/merger-takes-the-landers-branch/lanes.js"
+    fresh merges-twice
+    grep -vxF -- "$land_check" "$file" > "$dir/merges-twice/lanes.js"
+    fresh merges-twice-doc
+    grep -vF -- "$land_check_doc" "$agents/merger.md" > "$dir/merges-twice-doc/agents/merger.md"
+    fresh land-command-drifts
+    swap "$file" 'mise exec -- just land ' 'mise exec -- just  land ' > "$dir/land-command-drifts/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -2839,7 +2908,7 @@ check-lanes-workflow:
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, and prunes only what merged; ${#cuts[@]} cuts, each caught"
 
 # Print the changed lines between two commits that could change what runs:
 # everything but `.md` files, comment lines, and test code -- files under

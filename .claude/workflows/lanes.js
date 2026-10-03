@@ -15,6 +15,11 @@
 // one run still work; their merges wait for one another. A run that merged then
 // removes its own three worktrees (§315).
 //
+// Since §383 and §384 the lane writes the rows it leaves, as `add` steps, and a
+// `merge` on such a lane goes to a Haiku lander that runs `just land` once. The
+// Opus merger takes a `fix_first`, a lane with no usable rows, and every merge
+// the recipe stopped on.
+//
 // Invoke it as the `lanes` workflow, which is `meta.name` below and not this
 // file's name: Claude Code loads `.claude/workflows/*.js`, parses `meta`, and
 // registers what `meta.name` says. Pass args:
@@ -56,7 +61,7 @@ export const meta = {
   phases: [
     { title: 'Work', detail: 'one isolated worktree per lane' },
     { title: 'Verify', detail: 're-derive each writing lane\'s claims from its branch', model: 'sonnet' },
-    { title: 'Merge', detail: 'one at a time: merge onto origin/main, close the row, gate, push', model: 'opus' },
+    { title: 'Merge', detail: 'one at a time: just land through a Haiku lander, or the Opus merger when it stops or the verifier asked for fixes', model: 'opus' },
     { title: 'Prune', detail: 'remove the worktrees a merged run leaves', model: 'haiku' },
   ],
 }
@@ -72,6 +77,8 @@ const rowsOf = (lane) => {
 }
 const branchOf = (lane) => lane.branch || `lane-${lane.label}`
 const mergeBranchOf = (lane) => `merge-${lane.label}`
+const afterLandBranchOf = (lane) => `merge-${lane.label}-after-land`
+const STEP_WORDS = { add: 5, after: 3, tag: 3 }
 
 if (!args || typeof args !== 'object') throw new Error('lanes: pass args {base, lanes: [...]}')
 const BASE = args.base
@@ -245,9 +252,73 @@ function sourcePathsOf(lane) {
 // they race only other runs and other sessions, and `ff-main` and the ancestor
 // check before the push settle that without a lock of their own (§266.4).
 function mergeAfterTheLast(lane, prior) {
-  const run = lastMerge.then(() => agent(MERGE(lane, prior), MERGER(lane)))
+  const run = lastMerge.then(() => merging(lane, prior))
   lastMerge = run.catch(() => null)
   return run
+}
+
+// §383.4 item 3 and §383.5: a verifier's `merge` on a lane that wrote its rows
+// goes to the Haiku lander, which runs `just land` once. A `fix_first`, a lane
+// whose rows `just land` cannot take, and every merge the recipe stopped on go
+// to the Opus merger, with the stop in its brief. A lander that throws is a
+// stop too, never the end of the row: a `claude` process started before
+// `lander.md` existed cannot resolve the type (§384.3). One that died after its
+// push has landed the lane already, which is why the merger's brief has it
+// check `origin/main` for the lane's tip before it merges anything.
+function merging(lane, prior) {
+  if (!landable(prior)) return byMerger(lane, prior, null)
+  return agent(LAND(lane, prior), LANDER(lane)).then(
+    (land) => land && land.merged === true ? landedBy(land) : byMerger(lane, prior, landStop(land)),
+    (e) => byMerger(lane, prior, `the lander threw before it reported (${e && e.message}), so nothing says whether it pushed`),
+  )
+}
+
+function landable(prior) {
+  return !!prior.check && prior.check.verdict === 'merge' && stepsProblem(prior.report.rows) === null
+}
+
+// Null when every step is one `just land` takes: `add <tier> <model> <write
+// set> <what>`, `after @N <ids>` or `tag @N <tag>`, each word a line of the
+// steps file the lander writes, so no word may be empty, hold a newline, or be
+// the `+` that separates steps there.
+function stepsProblem(rows) {
+  if (!Array.isArray(rows)) return 'the lane reported no rows'
+  for (const step of rows) {
+    if (!Array.isArray(step) || !step.every((w) => typeof w === 'string' && w.trim() !== '' && w !== '+' && !w.includes('\n'))) {
+      return `the step ${JSON.stringify(step)} is not a list of words`
+    }
+    if (STEP_WORDS[step[0]] !== step.length) return `the step ${JSON.stringify(step)} is not add <tier> <model> <write set> <what>, after @N <ids>, or tag @N <tag>`
+  }
+  return null
+}
+
+function landedBy(land) {
+  land.via = 'merged by just land, which the lander ran'
+  return land
+}
+
+function landStop(land) {
+  if (!land) return 'the lander returned nothing'
+  return `just land stopped at ${land.stop || 'no named stop'}: ${land.not_merged_because || 'it gave no reason'}`
+}
+
+function byMerger(lane, prior, stop) {
+  if (stop) log(`${lane.label}: just land did not merge it, so the Opus merger takes it -- ${stop}`)
+  return agent(MERGE(lane, prior, stop), MERGER(lane)).then((m) => {
+    if (m && stop) m.via = `the Opus merger took it after ${stop}`
+    return m
+  })
+}
+
+function LANDER(lane) {
+  return {
+    label: `land:${lane.label}`,
+    phase: 'Merge',
+    isolation: 'worktree',
+    agentType: 'lander',
+    schema: landedSchema(),
+    model: 'haiku',
+  }
 }
 
 function MERGER(lane) {
@@ -279,6 +350,7 @@ function merged(lane, prior, m) {
   row.lines.push(row.merged
     ? `${lane.queueId} ${branchOf(lane)}: pushed ${m.merged_sha} to main, attempt ${m.push_attempts} of ${MERGE_ATTEMPTS}, catch-ups over docs ${m.docs_catch_ups} of ${DOCS_CATCH_UPS}`
     : `${lane.queueId} ${branchOf(lane)}: ${verified ? 'verified, not merged' : 'not merged'} -- ${m.not_merged_because || 'the merger gave no reason'}`)
+  if (m.via) row.lines.push(m.via)
   if (m.push_attempts > MERGE_ATTEMPTS) log(`${lane.label}: the merger reports ${m.push_attempts} push attempts, past the bound of ${MERGE_ATTEMPTS}`)
   if (m.docs_catch_ups > DOCS_CATCH_UPS) log(`${lane.label}: the merger reports ${m.docs_catch_ups} catch-ups over docs alone, past the bound of ${DOCS_CATCH_UPS}`)
   if (m.gate_pass_line) row.lines.push(`gate: ${m.gate_pass_line}`)
@@ -380,7 +452,12 @@ function reportSchema(lane) {
     core.decisions_section = { type: 'string', description: 'the section number you claimed with just claim-section, if any' }
     core.files_changed = { type: 'array', items: { type: 'string' } }
     core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' }, description: 'empty for a lane that changed only .md files and comments (§375)' }
-    required.push('landed_sha', 'files_changed', 'tests_that_fail_without_the_change')
+    core.rows = {
+      type: 'array',
+      items: { type: 'array', items: { type: 'string' } },
+      description: 'the just queue apply steps that add the rows your work leaves, each a list of words: ["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"], ["tag", "@1", "<class>|small"], ["after", "@1", "<id>[,<id>]"]; @1, @2 are this list\'s own adds, since ids come from a shared counter; empty when you leave nothing to add (§383.4, lane.md)',
+    }
+    required.push('landed_sha', 'files_changed', 'tests_that_fail_without_the_change', 'rows')
   } else {
     core.outcome = { type: 'string', enum: ['answered', 'partial', 'blocked'] }
   }
@@ -425,11 +502,18 @@ function linesThatRunCommand(lane) {
   return `mise exec -- just lines-that-run ${BASE} ${branchOf(lane)}`
 }
 
-function MERGE(lane, prior) {
+function MERGE(lane, prior, stop) {
   const r = prior.report
+  const branch = stop ? afterLandBranchOf(lane) : mergeBranchOf(lane)
   const verifier = prior.check
     ? `the verifier's, ${prior.check.worktree_path}`
     : 'none: the dispatcher set verify: false for this lane, so your gate is the only check'
+  const landed = stop
+    ? `just land ran first and did not merge it: ${stop}
+So your branch is ${branch}, not merge-${lane.label}, which the lander may have made. Straight after your switch, before you merge anything, run:
+  git merge-base --is-ancestor ${branchOf(lane)} origin/main
+Exit 0 means the lander pushed before it stopped or died: merge nothing, and finish by merger.md's paragraph on just land.`
+    : 'The lander did not run: the verifier asked for fixes, or the lane wrote no rows just land takes.'
   return `Merge queue ${rowsOf(lane)}, lane ${lane.label}, onto main, or say why not.
 Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
 The lane's write set: ${lane.writeSet.join(', ')}
@@ -438,13 +522,41 @@ Only if your push went through, after unlocking your own tree: mise exec -- just
 Your first commands, in this order:
   git log --oneline -1
   git fetch origin
-  git switch -c ${mergeBranchOf(lane)} origin/main
-If the switch refuses because ${mergeBranchOf(lane)} already exists, stop and report it as not merged. Never reach for \`checkout -B\` or \`switch -C\`.
+  git switch -c ${branch} origin/main
+If the switch refuses because ${branch} already exists, stop and report it as not merged. Never reach for \`checkout -B\` or \`switch -C\`.
+${landed}
 Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.
+The lane's rows are its add steps for your queue apply, as merger.md step 3 says.
 
 The lane's report (JSON): ${JSON.stringify(r)}
 
 The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
+}
+
+// Every argument the lander types is literal text, since the Bash guard of a
+// worktree-isolated agent refuses `$( )`, variables and loops, and the command
+// must start with the exact text `.claude/settings.json` allows. The steps are
+// the one argument a shell would have to quote: a row's text holds quotes,
+// backticks and `§`. So they travel as a file the lander writes with the Write
+// tool, one word to a line, which no shell ever reads (§384.2).
+function LAND(lane, prior) {
+  const r = prior.report
+  const write = r.rows.length
+    ? `First run git rev-parse --show-toplevel. Then, with the Write tool, write the lines between the two dashed lines below to target/land-steps.txt under the path it printed, exactly as they stand: one word to a line, a + line between steps, nothing added and nothing left out.
+----------
+${r.rows.map((step) => step.join('\n')).join('\n+\n')}
+----------
+`
+    : 'The lane left no rows to add, so there is no steps file to write.\n'
+  return `Land queue ${rowsOf(lane)}, lane ${lane.label}, with just land, and hand back the JSON it ends with.
+${write}Then run this, once, as one plain Bash call in the foreground with timeout 600000, and nothing else:
+  ${landCommand(lane, prior)}
+Its last line is one line of JSON. Report every field of it exactly as it stands.`
+}
+
+function landCommand(lane, prior) {
+  const r = prior.report
+  return `mise exec -- just land ${r.rows.length ? '--steps target/land-steps.txt ' : ''}${lane.queueId} ${branchOf(lane)} ${r.landed_sha} ${mergeBranchOf(lane)} ${treesOf(prior).join(' ')}`
 }
 
 function PRUNE(trees) {
@@ -526,6 +638,15 @@ function mergedSchema() {
       needs_judgement: { type: 'array', items: { type: 'string' }, description: 'only what the dispatcher must decide, one line each' },
     },
   }
+}
+
+// `just land`'s JSON is `mergedSchema`'s fields and the stop it named, so the
+// lander's report goes through `merged()` exactly as a merger's does.
+function landedSchema() {
+  const schema = mergedSchema()
+  schema.properties.stop = { type: 'string', description: 'the stop just land named, as its JSON has it; empty when it merged' }
+  schema.required = schema.required.concat('stop')
+  return schema
 }
 
 function prunedSchema() {

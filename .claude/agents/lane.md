@@ -71,6 +71,41 @@ nobody has run gets no class at all (§360.5). Mark an item `small` when it
 needs no trace, its place is known, and it takes about ten minutes. A defect is
 never small.
 
+**You write the rows your work leaves, in `rows`** (§383.4): the steps of one
+`just queue apply`, each a list of words. A merge on your branch closes your row
+and runs them, and when your verifier says `merge`, a recipe does it with
+nobody reading your report again. So every item of `remaining` and
+`out_of_write_set_needs` that is work for later, and every item of the "what
+this leaves" of a section you wrote (§230.7), gets a step. `remaining` keeps
+what is not a row.
+
+- `["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"]`, with
+  §N your section or the one your row cites. The write set is one word, paths
+  joined by commas, or `-` for none. A row whose fix adds a refusal, or turns a
+  panic into one, names its crate's `error.rs`, since the new variant goes
+  there: Q574, Q604 and Q605 were each dropped and filed again for want of it
+  (§360.6).
+- `["tag", "@1", "<class>"]` or `["tag", "@1", "small"]`, one tag at most per
+  row. A tier 1 row takes its class from `remaining`: `wrong`, `crash` or
+  `refuses`, then `/A` to `/D` as above. A row in any tier is `small` by the
+  rule above.
+- `["after", "@1", "<id>[,<id>]"]` for a row that waits on another.
+
+`@1`, `@2` are the first and second `add` of your own list. Ids come from a
+shared counter, so a step never names a new id itself. Before you add a row,
+look for it among the open rows of `docs/queue.md` in your tree, which is the
+base's copy; `grep -n` a word of it. A row already there is not added again;
+name it in `remaining` instead. An empty list means nothing to add.
+
+Tiers are §230.1's in §311's order: 1 a new defect, 2 a follow-up that measures
+or improves what the tests and the nights search, with §307's 2.2 between 2 and
+2.5. A row that changes how the work is done — the queue and its verbs, the
+lanes workflow and its roles, hooks, skills, `CLAUDE.md`, a recipe that is
+neither a test nor a fuzz night — goes in 2.2, never in 1 or 2. Opus for a
+numerical refusal, a published bound or a claim of impossibility; Sonnet for a
+replay, a fuzz artifact, a bisect or a sweep. What your own change leaves stale
+inside your write set is not a row: fix it, under §352.5 above.
+
 **A brief naming several rows is a bundle of small rows** (§352.4): one branch,
 one report. Do each, and commit each on its own so its verifier and merger can
 tell them apart. One that turns out not to be small you leave undone, and say so

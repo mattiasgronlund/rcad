@@ -124,6 +124,23 @@ code, or it should have.
 8. Check every new sentence that states a fact about the repo — a path, a
    recipe, a count, a section number — against the tree.
 
+## The rows
+
+A writing lane's report carries `rows`, the `just queue apply` steps that add
+the rows its work leaves (§383.4). Check them as you check any claim: on a
+`merge`, `just land` runs them as they stand and nobody reads them again.
+
+- Each `add` matches an item of the lane's `remaining`, its
+  `out_of_write_set_needs`, or the "what this leaves" of a section it wrote,
+  and each such item that is work for later has one.
+- None repeats an open row on `origin/main`: `git fetch origin`, then look in
+  `git show origin/main:docs/queue.md`.
+- Each follows `lane.md`'s rules: the tier, a class only on a tier 1 row and
+  from what `remaining` says, `small` only where nothing needs a trace.
+
+A step missing, wrong or repeated is a `fix_first`, with the step to add,
+change or drop in `fixes`.
+
 ## The verdict
 
 `merge` when every step holds. `fix_first` when the fix is known: name each one
