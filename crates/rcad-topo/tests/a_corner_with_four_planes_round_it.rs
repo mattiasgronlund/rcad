@@ -19,26 +19,41 @@
 //! Measured over 108 certified unions per fold, each pyramid with a cube clear
 //! of it: heights `1/4`, `1` and `4`, each side plane written through the apex
 //! or through a base corner, and the 18 turns below. The two "sticks out"
-//! columns are over every meet the fold was asked about, in rooms past the
-//! corner's own box; "before" is the fold of §253 alone, which takes a meet
-//! only when its whole box lies inside the corner's box grown by the room, and
-//! "after" adds §356's rule, which takes a meet of three planes `bake` solved
-//! the corner among however far it reaches.
+//! columns are in rooms past the corner's own box, over every meet whose box
+//! touched it, since until §395 the fold asked nothing about any other meet.
+//! "§253 alone" takes a meet only when its whole box lies inside the corner's
+//! box grown by the room. "With §356" adds the rule that takes a meet of three
+//! planes `bake` solved the corner among however far it reaches. "With §395"
+//! drops the test that came before both: whether the meet's box touches the
+//! corner's at all.
 //!
-//! | Fold | Meet's box sticks out | Exact meet sticks out | Answered before | Before, room ×0.5 | Before, room ×1000 | Answered after |
-//! |---|---|---|---|---|---|---|
-//! | 1 | 0.12 | 0.04 | 108 | 108 | 108 | 108 |
-//! | 1/4 | 0.24 | 0.12 | 103 | 103 | 103 | 103 |
-//! | 1/16 | 1.17 | 0.46 | 99 | 31 | 103 | 103 |
-//! | 1/64 | 4.7 | 1.6 | 0 | 0 | 107 | 107 |
-//! | 1/256 | 21 | 6.9 | 0 | 0 | 105 | 105 |
-//! | 1/4096 | 290 | 108 | 0 | 0 | 97 | 97 |
+//! | Fold | Meet's box sticks out | Exact meet sticks out | §253 alone | §253 alone, room ×0.5 | §253 alone, room ×1000 | With §356 | With §395 |
+//! |---|---|---|---|---|---|---|---|
+//! | 1 | 0.12 | 0.04 | 108 | 108 | 108 | 108 | 108 |
+//! | 1/4 | 0.24 | 0.12 | 103 | 103 | 103 | 103 | 108 |
+//! | 1/16 | 1.17 | 0.46 | 99 | 31 | 103 | 103 | 108 |
+//! | 1/64 | 4.7 | 1.6 | 0 | 0 | 107 | 107 | 108 |
+//! | 1/256 | 21 | 6.9 | 0 | 0 | 105 | 107 | 107 |
+//! | 1/4096 | 290 | 108 | 0 | 0 | 97 | 104 | 104 |
 //!
-//! After, the room no longer moves any of the six counts: the same numbers
-//! came back with it scaled by 0, 0.5 and 1000 (§356.3). The refusals left —
-//! 5, 5, 1, 3 and 11 — are "could not settle 1 decisions" or "two regions of
-//! one face could not be told apart", with every meet the fold was asked
-//! about folded, and are §310.5's second bullet.
+//! The first six columns are §356.1's, on `9612b25f`. "With §356" was 105 and
+//! 97 at the two smallest folds when that rule landed. It is re-measured on
+//! `25860052`, where `bake` no longer refuses the base corner the two folding
+//! faces share, and "with §395" is the same table on this file's commit
+//! (§395.2).
+//!
+//! **This file used to say the refusals left with §356 had every apex meet
+//! folded. They did not** (§344.2, §344.4). A side face has a meet at the apex
+//! for each pair of the other three side planes, and `bake` solved the apex
+//! from one triple of the four. The other meets' boxes can lie inside the
+//! apex's room and still miss its own box, by up to four tenths of a room, and
+//! the touch test turned them away before the room was looked at. Left beside
+//! the apex, two of them could not be ordered along a crossing, or the cells
+//! they cut off round it wound outside 0 and 1. The 5 left — 1 at a 256th and
+//! 4 at a 4096th — are apex meets of three of the apex's own planes whose boxes
+//! miss the apex's own box by 1.3 to 60 rooms, so its grown box too. §356's
+//! argument would fold those too, and does answer all 648 when it is followed
+//! (§395.4).
 //!
 //! **So a four-plane corner does fill the room, and the room is not what it
 //! should be measured in.** Every plane round the apex passes through the
@@ -102,6 +117,89 @@ fn a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_united_though_its_apex_me
  {
     for fold in [1.0 / 64.0, 1.0 / 256.0] {
         every_turn_and_spelling_is_united(fold, 1.0);
+    }
+}
+
+/// The pyramid bent by a quarter, by a sixteenth and by a sixty-fourth, at
+/// heights `1/4`, `1` and `4`, is united at every turn and spelling: 108
+/// unions for each bend.
+///
+/// **Before §395, 5 of the quarter's 108 were refused, 5 of the sixteenth's
+/// and 1 of the sixty-fourth's**, every one with its side planes written
+/// through a base corner. A side face has a meet at the apex for each pair of
+/// the other three side planes. Some of those meets' boxes lie inside the
+/// apex's room but miss its own box, and the fold asked whether the two boxes
+/// touch before it looked at the room. So they stayed nodes beside the apex,
+/// and the certified policy could not order them along a crossing or tell the
+/// cells round them apart (§344.2). The fold now reads the room alone.
+#[test]
+fn a_pyramid_whose_apex_meets_lie_inside_its_room_but_miss_its_box_is_united_at_every_height() {
+    for fold in [1.0 / 4.0, 1.0 / 16.0, 1.0 / 64.0] {
+        for height in [1.0 / 4.0, 1.0, 4.0] {
+            every_turn_and_spelling_is_united(fold, height);
+        }
+    }
+}
+
+/// Five pyramids bent by a 256th or a 4096th are still refused. Their apex
+/// meets of three of the apex's own planes have boxes that miss the apex's
+/// own box by 1.3 to 60 rooms, so its box grown by the room too, and are left
+/// nodes beside it (§395.4).
+///
+/// **The answer exists, so this is a gap.** §356's argument, that three planes
+/// meet once, folds these meets as well, and folding them answers every one
+/// of the module table's 648 unions with the two solids, their volumes and an
+/// empty log. When one of these is united, check that it is united like that,
+/// and move it to the tests above.
+#[test]
+fn a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused() {
+    for (fold, height, through, turn, axis) in [
+        (
+            1.0 / 256.0,
+            0.25,
+            Through::ABaseCorner,
+            1.9,
+            [3.0, -1.0, 2.0],
+        ),
+        (
+            1.0 / 4096.0,
+            0.25,
+            Through::ABaseCorner,
+            0.3,
+            [3.0, -1.0, 2.0],
+        ),
+        (
+            1.0 / 4096.0,
+            0.25,
+            Through::ABaseCorner,
+            1.9,
+            [0.3, 1.0, -0.7],
+        ),
+        (
+            1.0 / 4096.0,
+            0.25,
+            Through::ABaseCorner,
+            2.5,
+            [1.0, 2.0, 3.0],
+        ),
+        (1.0 / 4096.0, 4.0, Through::TheApex, 0.3, [3.0, -1.0, 2.0]),
+    ] {
+        let (mut model, pyramid, cube) =
+            a_pyramid_and_a_cube_clear_of_it(fold, height, through, turn, axis);
+        let fused = model.fuse(
+            &[pyramid],
+            &[cube],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            fused.is_err(),
+            "a pyramid folding {fold}, {height} high, with its planes through {through:?}, \
+             turned {turn} about {axis:?}, was united: if into the two solids with the right \
+             volume and an empty log, apex meets outside the room are folded now, and it \
+             belongs with the pyramids that unite"
+        );
     }
 }
 
