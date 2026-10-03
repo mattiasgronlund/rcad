@@ -479,6 +479,97 @@ fn a_ball_turned_a_quarter_about_its_poles_is_told_apart_by_its_seam() {
     assert_located_numbers_the_same(the_one_solid(&here), the_one_solid(&back));
 }
 
+/// How often a model this target's own mutator draws is refused, and by what
+/// name: four hundred draws, each from a checked-in seed or an earlier draw,
+/// the way a fuzzing run grows its corpus. Q70 ran the same loop three
+/// thousand times (`docs/decisions.md` §366).
+///
+/// Every model written is read back and compared, so a cap this writer has
+/// learned to name and the reader does not take back panics here.
+#[test]
+fn how_often_a_model_the_mutator_draws_is_refused() {
+    fn one_byte_bumped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
+        if size == 0 {
+            return 0;
+        }
+        let at = (data
+            .iter()
+            .take(size)
+            .map(|&byte| usize::from(byte))
+            .sum::<usize>()
+            * 31
+            + size)
+            % size;
+        data[at] = data[at].wrapping_add(1 + u8::try_from(size % 7).expect("below seven"));
+        size
+    }
+
+    let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fuzz/corpus/no_model_makes_the_writer_panic");
+    let mut pool: Vec<Vec<u8>> = std::fs::read_dir(corpus)
+        .expect("the corpus is checked in beside the target")
+        .map(|entry| std::fs::read(entry.expect("an entry").path()).expect("a seed"))
+        .collect();
+    pool.sort();
+    let mut refusals: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut comparisons_that_panicked: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    let (draws, mut refused, mut a_sound_cone_cap_refused) = (400_u32, 0, 0);
+    let mut state: u64 = 0x5170;
+    for draw in 0..draws {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let pick = usize::try_from(state >> 33).expect("31 bits fit") % pool.len();
+        let mut data = pool[pick].clone();
+        let size = data.len();
+        data.resize(4096, 0);
+        let size = still_a_model(&mut data, size, 4096, draw, one_byte_bumped);
+        data.truncate(size);
+        pool.push(data.clone());
+        let model = postcard::from_bytes::<Model>(&data).expect("the mutator keeps a model");
+        match rcad_step::write(&model, "fuzz") {
+            Ok(_) => {
+                let compared = std::panic::catch_unwind(|| one_model_decoded_and_written(&data));
+                if let Err(why) = compared {
+                    let said = why
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| why.downcast_ref::<&str>().map(|said| (*said).to_owned()))
+                        .unwrap_or_default();
+                    let said = said.lines().next().unwrap_or_default();
+                    let said = said.trim_start_matches("assertion `left == right` failed: ");
+                    let said = said.split(':').next().unwrap_or_default().to_owned();
+                    *comparisons_that_panicked.entry(said).or_default() += 1;
+                }
+            }
+            Err(why) => {
+                refused += 1;
+                let named = format!("{why:?}");
+                if named.contains("\"plane\", second: \"cone\"")
+                    || named.contains("\"cone\", second: \"plane\"")
+                {
+                    let sound = model
+                        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                        .is_ok();
+                    a_sound_cone_cap_refused += usize::from(sound);
+                }
+                *refusals.entry(named).or_default() += 1;
+            }
+        }
+    }
+    let _ = std::panic::take_hook();
+    println!("{refused} of {draws} drawn models refused");
+    for (named, count) in &refusals {
+        println!("{count:6}  {named}");
+    }
+    for (said, count) in &comparisons_that_panicked {
+        println!("{count:6}  written, and the comparison panicked: {said}");
+    }
+    println!("{a_sound_cone_cap_refused} sound models refused where a flat face meets a cone");
+}
+
 fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
     model.add_round_bar(3.0, 5.0, &Isometry::identity())
 }
