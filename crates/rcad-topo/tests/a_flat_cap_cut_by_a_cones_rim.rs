@@ -26,18 +26,20 @@
 //! arithmetic for a favour. Each cap is then a half-disc whose curved side is
 //! half of the rim circle and whose straight side is the chord across it.
 //!
-//! **Only the two caps are asked.** The flat face down the axis is bounded by
-//! the two rulings a plane through the apex cuts, which is a plane leaning
-//! against the cone and not square to it, so it is still refused — and
-//! [`the_face_down_the_axis_is_still_refused`] holds it that way, because a fix
-//! that quietly admitted a hyperbola is exactly what this must not be.
+//! **The flat face down the axis and the skin are not answered by this
+//! family.** Both are bounded by pieces of the two rulings a plane through the
+//! apex cuts, and both were refused until `docs/decisions.md` §334 read a piece
+//! of a ruling as the straight segment it is:
+//! [`the_face_down_the_axis_holds_its_four_corners_and_not_the_other_nappe`] and
+//! [`the_skin_of_a_half_frustum_holds_its_own_half_between_the_caps`]. Neither
+//! admits a leaned plane's hyperbola, which no arm here reads as straight.
 
 use rcad_geom::{
     Axis, Cone, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation, Picker, Plane, Point, Scale,
     Surface, SurfaceMeet, Vector, intersect,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, FaceKey, Model, OnAFace, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, FaceKey, Model, OnAFace, SolidBuilder, SolidKey};
 
 mod cones;
 
@@ -159,43 +161,83 @@ fn a_placed_cap_answers_the_same_points_moved_with_it() {
     }
 }
 
-/// The flat face down the axis is refused, and that is the limit and not an
-/// oversight.
+/// The flat face down the axis holds the four-cornered piece of `x = 0` it is,
+/// and nothing on the cone's other nappe.
 ///
-/// Its two side edges are the rulings a plane **through the apex** cuts, and
-/// such a plane leans against the cone rather than standing square to it: turn
-/// it a little and the crossing is a hyperbola, whose inside on the plane is two
-/// pieces. So the family test must say no here while saying yes to the caps of
-/// the very same solid, and this is the half of the fix that would go unnoticed
-/// if it broke.
+/// Its two side edges are pieces of the two rulings a plane **through the
+/// apex** cuts the cone in. This was refused as a limit: such a plane leans
+/// against the cone, and the cone's inside on it is two pieces, a wedge on each
+/// nappe meeting at the apex. That is true of the cone's inside, and the face is
+/// not read off the cone's inside any more. A piece of a ruling is the straight
+/// segment between its two corners, so the face is the polygon of its corners
+/// and is walked as any flat face with straight sides is (`docs/decisions.md`
+/// §334). `(0, 1, −6)` is inside the cone, on the other nappe's wedge, and
+/// outside the polygon; a reading that took the cone's inside for the face
+/// would hold it.
+///
+/// What admits a side as straight is the plane's own sign at the apex, exactly
+/// zero, and its two ends on one line with the apex. A plane leaned off the
+/// apex cuts a curve, and none of its sides is read as straight.
 #[test]
-fn the_face_down_the_axis_is_still_refused() {
-    let policy = Policy::certified();
+fn the_face_down_the_axis_holds_its_four_corners_and_not_the_other_nappe() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let solid = a_half_frustum(&mut model);
-    let view = model.solid(solid).expect("this model made the key");
-    let flat = view
-        .faces()
-        .find(|face| {
-            face.surface()
-                .as_plane()
-                .is_some_and(|plane| plane.normal().components() == [-1.0, 0.0, 0.0])
-        })
-        .expect("the flat face down the axis")
-        .key();
-    let said = view.face_holds_the_point(
-        flat,
-        PredicatePoint::from([0.0, 1.0, 6.0]),
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(
-            said,
-            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == flat
-        ),
-        "a plane leaning against a cone is not a family this follows, and got {said:?}"
-    );
+    let flat = the_face_on(&model, solid, |surface| {
+        surface
+            .as_plane()
+            .is_some_and(|plane| plane.normal().components() == [-1.0, 0.0, 0.0])
+    });
+    for (point, want) in [
+        ([0.0, 1.0, 6.0], OnAFace::Held),
+        ([0.0, -2.5, 7.5], OnAFace::Held),
+        ([0.0, 3.0, 6.0], OnAFace::OnItsBoundary),
+        ([0.0, 0.0, LOW], OnAFace::OnItsBoundary),
+        ([0.0, 3.5, 6.0], OnAFace::NotHeld),
+        ([0.0, 0.0, 3.0], OnAFace::NotHeld),
+        ([0.0, 0.0, 9.0], OnAFace::NotHeld),
+        ([0.0, 1.0, -6.0], OnAFace::NotHeld),
+    ] {
+        assert_eq!(
+            asked(&model, solid, flat, point),
+            want,
+            "asked about {point:?}"
+        );
+    }
+}
+
+/// The half frustum's skin holds the half of the cone between its caps on the
+/// `x ≥ 0` side, and nothing else.
+///
+/// Its sides along `x = 0` are the same two rulings, read as straight, and it
+/// is cut by three planes: the small cap the apex is behind, the big cap the
+/// apex is in front of, and `x = 0` through the apex. `holds.rs` took one cut
+/// beside the one the apex is behind and refused two; the big cap is side by
+/// side with the small one, and a cut side by side with that one keeps every
+/// ruling or none, so it costs nothing (`docs/decisions.md` §334). This skin
+/// was the first face a ray asked when the half frustum was fused with a block
+/// across its top, and every fuse stopped there.
+#[test]
+fn the_skin_of_a_half_frustum_holds_its_own_half_between_the_caps() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_half_frustum(&mut model);
+    let skin = the_face_on(&model, solid, |surface| matches!(surface, Surface::Cone(_)));
+    for (point, want) in [
+        ([3.0, 0.0, 6.0], OnAFace::Held),
+        ([2.5, 0.0, 5.0], OnAFace::Held),
+        ([0.0, 3.0, 6.0], OnAFace::OnItsBoundary),
+        ([0.0, -3.0, 6.0], OnAFace::OnItsBoundary),
+        ([4.0, 0.0, HIGH], OnAFace::OnItsBoundary),
+        ([-3.0, 0.0, 6.0], OnAFace::NotHeld),
+        ([1.5, 0.0, 3.0], OnAFace::NotHeld),
+        ([4.5, 0.0, 9.0], OnAFace::NotHeld),
+        ([3.0, 0.0, -6.0], OnAFace::NotHeld),
+    ] {
+        assert_eq!(
+            asked(&model, solid, skin, point),
+            want,
+            "asked about {point:?}"
+        );
+    }
 }
 
 /// The cap of the whole frustum the half is cut out of, which is trimmed by one
@@ -239,6 +281,32 @@ fn the_cap_at(model: &Model, solid: SolidKey, at: f64, outward: f64) -> FaceKey 
         })
         .expect("a cap facing that way")
         .key()
+}
+
+/// The one face of `solid` whose surface `which` picks.
+fn the_face_on(model: &Model, solid: SolidKey, which: impl Fn(&Surface) -> bool) -> FaceKey {
+    let mut found = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .filter(|face| which(&face.surface()));
+    let face = found.next().expect("a face on that surface");
+    assert!(found.next().is_none(), "one face on that surface");
+    face.key()
+}
+
+/// What `face` of `solid` says about `point`, which must not be a refusal.
+fn asked(model: &Model, solid: SolidKey, face: FaceKey, point: [f64; 3]) -> OnAFace {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .face_holds_the_point(
+            face,
+            PredicatePoint::from(point),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|error| panic!("asked about {point:?}: {error:?}"))
 }
 
 /// Whether the cap at height `at` holds `point`, which is what the half-disc

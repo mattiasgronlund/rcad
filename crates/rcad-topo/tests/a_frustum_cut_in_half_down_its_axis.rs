@@ -168,21 +168,27 @@ fn a_floor_through_the_apex_is_not_a_manifold_under_the_fuses_that_keep_the_floo
 
 /// The half frustum built face by face — its flat face on `x = 0`, its four
 /// corners exactly where that face meets the rims — fused with the block
-/// `[−10, 10] × [−10, 10] × [6, 12]` across its top.
+/// `[−10, 10] × [−10, 10] × [6, 12]` across its top. All six fuses are one
+/// solid, the model validates, every answer has a corner at each of `(0, ±3, 6)`,
+/// where the block's floor crosses the two rulings, and every volume is the
+/// closed form within what the mesh says it may miss by.
+///
+/// The half frustum is `56π/3`, the block is `20 · 20 · 6 = 2400`, and they
+/// share the half frustum above `z = 6`, which is
+/// `½ · π/3 · ¼ · (8³ − 6³) = 37π/3`.
 ///
 /// **§215.2's defect was this pair's corners folding into one node.** Each
 /// corner is on the cone, the cone crosses `x = 0` in two rulings, and each
-/// corner was put on both of them. Now all six fuses get through the
-/// arrangement and stop one stage later, in `select.rs`, for want of a point in
-/// a piece that both solids can place. That is the half frustum's flat face:
-/// it is bounded by rulings, which `holds.rs` cannot yet follow, and
-/// `a_flat_cap_cut_by_a_cones_rim.rs`'s `the_face_down_the_axis_is_still_refused`
-/// pins that on its own. With `place_the_corners` putting a corner on both
-/// rulings again, all six come back `Invalid::EdgeHasNoLength`.
+/// corner was put on both of them. With `place_the_corners` putting a corner on
+/// both rulings again, all six come back `Invalid::EdgeHasNoLength`.
 ///
-/// Every answer exists. The half frustum is `56π/3`, the block is
-/// `20 · 20 · 6 = 2400`, and they share the half frustum above `z = 6`, which is
-/// `½ · π/3 · ¼ · (8³ − 6³) = 37π/3`.
+/// **After that, all six stopped in `select.rs`** for want of a point in a
+/// piece both solids could place (`docs/decisions.md` §334): the block's floor
+/// piece inside the half frustum, whose every candidate the ray could not place
+/// because `holds.rs` followed neither the half frustum's skin nor its flat face.
+/// Each is bounded by pieces of the two rulings, and a ruling's piece is read
+/// now as the straight segment it is; `a_flat_cap_cut_by_a_cones_rim.rs` asks
+/// the two faces on their own.
 #[test]
 fn a_half_frustums_corners_on_two_rulings_stay_two_corners() {
     let pi = core::f64::consts::PI;
@@ -198,42 +204,59 @@ fn a_half_frustums_corners_on_two_rulings_stay_two_corners() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let half_frustum = a_half_frustum(&mut model);
         let cutter = a_block(&mut model, [-10.0, -10.0, 6.0], [10.0, 10.0, 12.0]);
-        let refused = fuse(&mut model, half_frustum, cutter, rule, half_first);
-        assert_eq!(
-            the_predicate_that_gave_up(&refused),
-            Some("a point in a piece that every solid could place"),
-            "{rule:?} (half frustum first: {half_first}) should be one solid of volume {want}; \
-             today it gets through the arrangement and stops at the half frustum's flat face. \
-             Got {refused:?}"
+        let answer = fuse(&mut model, half_frustum, cutter, rule, half_first);
+        the_answer_is_one_solid(
+            &model,
+            answer,
+            want,
+            &[[0.0, -3.0, 6.0], [0.0, 3.0, 6.0]],
+            &format!("{rule:?} (half frustum first: {half_first})"),
         );
     }
 }
 
 /// Fuse the frustum with the block `[−10, 0] × [−10, 10] × [floor, 12]` under
-/// `rule`, and assert that the answer is one solid, that the model validates,
-/// that the solid has a corner at each of the four points where `x = 0` meets
-/// the rims, and that its volume is the closed form within what the mesh says
-/// it may miss by.
+/// `rule`, and assert what [`the_answer_is_one_solid`] does of it, with a corner
+/// at each of the four points where `x = 0` meets the rims.
 fn is_one_solid_of_the_right_volume(floor: f64, rule: Rule, frustum_first: bool) {
-    let policy = Policy::certified();
     let want = the_right_volume(floor, rule, frustum_first);
-    let what = format!("{rule:?} (frustum first: {frustum_first}, floor at z = {floor})");
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let frustum = cones::a_frustum(&mut model, SLOPE, LOW, HIGH);
     let cutter = a_block(&mut model, [-10.0, -10.0, floor], [0.0, 10.0, 12.0]);
-    let answer = fuse(&mut model, frustum, cutter, rule, frustum_first)
-        .unwrap_or_else(|why| panic!("{what} should be one solid of volume {want}: {why:?}"));
+    let answer = fuse(&mut model, frustum, cutter, rule, frustum_first);
+    the_answer_is_one_solid(
+        &model,
+        answer,
+        want,
+        &CORNERS_DOWN_THE_AXIS,
+        &format!("{rule:?} (frustum first: {frustum_first}, floor at z = {floor})"),
+    );
+}
+
+/// Assert that `answer` is one solid, that the model validates, that the solid
+/// has a corner at each of `corners`, and that its volume is `want` within what
+/// the mesh says it may miss by.
+fn the_answer_is_one_solid(
+    model: &Model,
+    answer: rcad_topo::Result<Vec<SolidKey>>,
+    want: f64,
+    corners: &[[f64; 3]],
+    what: &str,
+) {
+    let policy = Policy::certified();
+    let answer =
+        answer.unwrap_or_else(|why| panic!("{what} should be one solid of volume {want}: {why:?}"));
     model
         .validate(&policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{what} does not validate: {why:?}"));
     let [solid] = answer[..] else {
         panic!("{what} is one solid: {answer:?}")
     };
-    let corners = corners_of(&model, solid);
-    for corner in CORNERS_DOWN_THE_AXIS {
+    let found = corners_of(model, solid);
+    for corner in corners {
         assert!(
-            corners.contains(&corner),
-            "{what} has no corner at {corner:?}: {corners:?}"
+            found.contains(corner),
+            "{what} has no corner at {corner:?}: {found:?}"
         );
     }
     let measured = model
@@ -305,17 +328,6 @@ fn fuse(
             &mut ProvenanceLog::new(),
         )
         .map(|answer| answer.solids().to_vec())
-}
-
-/// The name of the predicate an `Undecidable` refusal gave up on last, and
-/// `None` for any other outcome.
-fn the_predicate_that_gave_up(said: &rcad_topo::Result<Vec<SolidKey>>) -> Option<&'static str> {
-    match said {
-        Err(Error::Undecidable { records }) => {
-            records.records().last().map(|record| record.predicate())
-        }
-        _ => None,
-    }
 }
 
 /// The block from `from` to `to`, extruded straight up from a rectangle on the
