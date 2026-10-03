@@ -113,7 +113,8 @@ whole output in `full.log`, and an `exit` file written after the JSON. A second
 start in the same tree refuses and points at `wait`. A run whose process is
 gone with no `exit` file is reported as dead, with `full.log` named.
 
-How many calls a real cold run takes was not measured.
+A run with a served gate ended inside its first call (§385.4). How many calls
+a cold one takes was not measured.
 
 ### 385.3 What it fills, and what it leaves
 
@@ -173,6 +174,15 @@ Its JSON holds the `verdictSchema` fields it can decide, and two of its own:
   and each record `lanes.js` writes is one `verify_lane.py` reads. With
   `lanes.js` at the base it fails: "does not hand the verifier just
   verify-lane and its wait".
+- **One real run, on this lane's own branch**, from a scratch worktree at its
+  tip f8fd3395, once its gate had passed: a served gate, the revert of
+  `tooling/verify-lane/` and `lanes.js`, both named recipes run against it, and
+  three numbers. It ended inside its first call, in 26.8 s by `time`. It
+  reported `branch_ok`, no file outside the write set, `lines that run: 628`,
+  `tests_pass_on_branch: true` and `tests_fail_without_fix: true`. Of the
+  three numbers, "68 cuts, each caught" and "in 10 arms" were found, and "69
+  cuts", misread on purpose, went to `number_mismatches`. The lane tree it was
+  given was a path with no worktree, so the unlock went to `left_to_you`.
 - **`lanes.js` under node**, outside the gate: parsed inside an async function
   with `export const meta` made `const`, and run with `mise exec
   node@26.10.0 --` against stub agents. Three lanes, one with tests, one

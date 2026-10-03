@@ -189,6 +189,9 @@ def detached_run(path):
         say(f"verify-lane: stopped by {type(error).__name__}: {error}")
         left(report, f"the recipe stopped by {type(error).__name__}: {error}; every step after the last one "
                      f"it printed is yours")
+    for own in ("skipped", "left_to_you"):
+        if own in report:
+            report[own] = report.pop(own)
     say("=== verify-lane: done ===")
     print(json.dumps(report, ensure_ascii=False), flush=True)
     with open(os.path.join(state, "exit"), "w", encoding="utf-8") as f:
