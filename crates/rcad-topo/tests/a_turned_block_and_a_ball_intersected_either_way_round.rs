@@ -90,8 +90,11 @@ fn the_intersection_is_a_piece_of_the_ball_cut_by_three_faces_along_arcs() {
 /// three of its faces to cross each of them in a circle, and more than 1 from
 /// the corner those three share, so the corner is not inside it.
 ///
-/// Turned about `(1, 2, 3)` instead, the same pair is refused
-/// `CannotMeshAFace`, which is not what this file is about.
+/// Turned about `(1, 2, 3)` instead, the same pair used to be refused
+/// `CannotMeshAFace`: a cut up the ball's cap to its pole met the cap's rim a
+/// second time. It meshes now, and
+/// `a_cap_whose_rim_bends_back_past_its_own_meridian.rs` checks it against the
+/// pair upright.
 fn a_turned_block_and_a_ball_at_its_corner() -> (Model, SolidKey, SolidKey) {
     let turn = Isometry::rotation(
         &Axis::new(Point::origin(), Vector::new(1.0, 1.0, 1.0)).expect("an axis"),

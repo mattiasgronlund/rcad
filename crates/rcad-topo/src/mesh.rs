@@ -1532,7 +1532,7 @@ impl BuildingAMesh {
         let quarters: [f64; 4] =
             [0, 1, 2, 3].map(|step| from + way * f64::from(step) * whole_turn / 4.0);
         let cap = &with_a_corner_where_a_pole_side_passes(cap, &quarters, pinch);
-        let along = corners_the_quarter_cuts_leave_from(cap, quarters, pinch);
+        let along = corners_the_quarter_cuts_leave_from(cap, quarters, pinch, towards, whole_turn);
 
         let there = back_out_of_the_frame_this_face_is_meshed_in(face);
         let at_the_pole = stored.point_at(from, towards);
@@ -2770,55 +2770,156 @@ fn passes_strictly(at: f64, one: f64, other: f64) -> bool {
 /// one for each quarter still to come. When they do, that is the same choice,
 /// and it is kept as it was. A cap of fewer than four corners has no four to
 /// give, and goes on to the triangulator as it was.
+///
+/// **A cut leaves only from a corner whose meridian reaches the pole without
+/// meeting the rim again**, when the cap has four such corners. A rim can bend
+/// back past a meridian it has already crossed, and a cut from where it first
+/// crosses runs out of the face and back in. A cube of side 2 at the origin
+/// and a unit ball at `(0.7, 0.65, 0.6)` intersect in a face whose rim leaves
+/// the cube's `y` edge at longitude `2.636` going back to `2.361`, round the
+/// `x = 0` circle: the cut up `2.636` crossed that circle at `x = -0.175`,
+/// outside the cube, and the triangulator refused the patch
+/// `BoundaryCrossesItself`. With the ball at `(0.75, 0.6, 0.7)` both points
+/// where the cube's `z` edge pierces the ball are on the rim, at one
+/// longitude, and the cut from the lower ran through the upper; the mesh was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide`
+/// (`a_cap_whose_rim_bends_back_past_its_own_meridian.rs`).
+///
+/// **Why four cuts from such corners, in the loop's order, leave four patches
+/// that are each one simple loop.** Each cut lies inside the
+/// face, so two of them split it in two, and the piece left of the rim between
+/// them is a disk that touches neither pole but at the one its cuts meet at. It
+/// therefore unwraps whole into the chart, where its pole side is its top edge
+/// and runs back the way the rim came, so the rim gains between its two cuts
+/// more than nothing and less than a turn.
+///
+/// The cut has to start at a corner the rim already has, for the reason
+/// [`where_to_cut`] gives. So the cut from where a quarter's own meridian last
+/// crosses the rim, which is the cut that stays in the face, is taken at the
+/// nearest corner that is a last crossing of its own meridian.
 fn corners_the_quarter_cuts_leave_from(
     cap: &WalkedLoop,
     quarters: [f64; 4],
     pinch: f64,
+    towards: f64,
+    whole: f64,
 ) -> [usize; 4] {
-    let count = cap.corners.len();
-    let nearest = quarters.map(|at| nearest_corner_off_the_rims_poles(cap, 0..count, at, pinch));
+    let clear: Vec<usize> = (0..cap.corners.len())
+        .filter(|&corner| its_meridian_reaches_the_pole_inside_the_cap(cap, corner, towards, whole))
+        .collect();
+    let among = if clear.len() >= 4 {
+        clear
+    } else {
+        (0..cap.corners.len()).collect()
+    };
+    let count = among.len();
+    let nearest_of = |room: &mut dyn Iterator<Item = usize>, at: f64| {
+        nearest_corner_off_the_rims_poles(cap, room, &among, at, pinch)
+    };
+    let nearest = quarters.map(|at| nearest_of(&mut (0..count), at));
     let first = nearest[0];
-    let past_the_first = |corner: usize| (corner + count - first) % count;
+    let past_the_first = |place: usize| (place + count - first) % count;
     let in_loop_order = nearest
         .windows(2)
         .all(|pair| past_the_first(pair[0]) < past_the_first(pair[1]));
     if in_loop_order || count < 4 {
-        return nearest;
+        return nearest.map(|place| among[place]);
     }
     let mut along = nearest;
     let mut taken = 0;
     for step in 1..4 {
-        let room = (taken + 1..=count - (4 - step)).map(|offset| (first + offset) % count);
-        along[step] = nearest_corner_off_the_rims_poles(cap, room, quarters[step], pinch);
+        let mut room = (taken + 1..=count - (4 - step)).map(|offset| (first + offset) % count);
+        along[step] = nearest_of(&mut room, quarters[step]);
         taken = past_the_first(along[step]);
     }
-    along
+    along.map(|place| among[place])
 }
 
-/// Which of `among`, corners of a cap, sits nearest a longitude, and of two as
-/// near, the one off the pole.
+/// Whether the cut up the meridian of `corner` to the pole at `towards` meets
+/// the cap's rim nowhere but at `corner` itself, in the chart, where the cut is
+/// a straight line.
+///
+/// **Touching counts as meeting.** A rim corner on the cut is a point both
+/// patches either side of it would draw from, which is the second example in
+/// [`corners_the_quarter_cuts_leave_from`]. A rim side running along the cut
+/// meets it too, which is what keeps a cut off the step a rim through the
+/// other pole leaves it by ([`starting_off_the_poles`]).
+///
+/// The rim's longitudes are the walk's own, unwrapped, so they run a whole turn
+/// and more where the rim bends back; the cut is checked a whole turn either
+/// side as well.
+fn its_meridian_reaches_the_pole_inside_the_cap(
+    cap: &WalkedLoop,
+    corner: usize,
+    towards: f64,
+    whole: f64,
+) -> bool {
+    let [longitude, from] = cap.corners[corner];
+    let count = cap.corners.len();
+    (0..count).all(|at| {
+        let here = cap.corners[at];
+        let mut there = cap.corners[(at + 1) % count];
+        if at + 1 == count {
+            there[0] += cap.climbed;
+        }
+        [-whole, 0.0, whole].iter().all(|&by| {
+            !a_side_meets_a_cut(
+                [[here[0] + by, here[1]], [there[0] + by, there[1]]],
+                longitude,
+                [from, towards],
+            )
+        })
+    })
+}
+
+/// Whether the side between two corners meets the cut at `longitude` from
+/// latitude `from` to `to`, leaving `from` itself out.
+fn a_side_meets_a_cut([one, other]: [[f64; 2]; 2], longitude: f64, [from, to]: [f64; 2]) -> bool {
+    let on_the_cut = |latitude: f64| latitude != from && passes_or_ends_at(latitude, from, to);
+    if one[0] == longitude && other[0] == longitude {
+        let (low, high) = (one[1].min(other[1]), one[1].max(other[1]));
+        return on_the_cut(low)
+            || on_the_cut(high)
+            || passes_strictly(from, low, high)
+            || passes_strictly(to, low, high);
+    }
+    if !passes_or_ends_at(longitude, one[0], other[0]) {
+        return false;
+    }
+    let part = (longitude - one[0]) / (other[0] - one[0]);
+    on_the_cut(one[1] + part * (other[1] - one[1]))
+}
+
+/// Whether `at` lies between `one` and `other`, or on either.
+fn passes_or_ends_at(at: f64, one: f64, other: f64) -> bool {
+    one.min(other) <= at && at <= one.max(other)
+}
+
+/// Which of the corners of a cap that `room` names places in `among` for sits
+/// nearest a longitude, as its place in `among`, and of two as near, the one
+/// off the pole.
 ///
 /// The end of a pole side shares its longitude with the rim corner beside it,
 /// because the rim leaves the pole up that meridian, and a cut from the pole
 /// end would run along the rim's own step (see [`starting_off_the_poles`]).
 fn nearest_corner_off_the_rims_poles(
     cap: &WalkedLoop,
-    among: impl Iterator<Item = usize>,
+    room: impl Iterator<Item = usize>,
+    among: &[usize],
     at: f64,
     pinch: f64,
 ) -> usize {
-    let on_a_pole = |which: usize| {
-        let latitude = cap.corners[which][1];
+    let on_a_pole = |place: usize| {
+        let latitude = cap.corners[among[place]][1];
         latitude == pinch || latitude == -pinch
     };
-    among
-        .min_by(|&one, &other| {
-            let away = |which: usize| (cap.corners[which][0] - at).abs();
-            away(one)
-                .total_cmp(&away(other))
-                .then(on_a_pole(one).cmp(&on_a_pole(other)))
-        })
-        .expect("a walked loop has a corner, and a quarter still to place has one left")
+    room.min_by(|&one, &other| {
+        let away = |place: usize| (cap.corners[among[place]][0] - at).abs();
+        away(one)
+            .total_cmp(&away(other))
+            .then(on_a_pole(one).cmp(&on_a_pole(other)))
+    })
+    .expect("a walked loop has a corner, and a quarter still to place has one left")
 }
 
 /// Which corner of a loop sits nearest a longitude.
