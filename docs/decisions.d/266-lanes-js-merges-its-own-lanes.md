@@ -125,6 +125,11 @@ fast-forward too (§210). A merger that loses — the check fails, or the push i
 refused — merges `origin/main` again, runs `check-queue`, gates again and tries
 again.
 
+**Amended by §397.5 on 2026-10-03: landers now take a lock.** A lost race is
+still harmless, but it costs a second fresh gate. `just land` waits on a
+`flock` in the git common directory and lands every lane waiting with it,
+behind one gate. The Opus merger takes no lock and still races as above.
+
 The bound is three attempts, `MERGE_ATTEMPTS` in `lanes.js`, passed to the
 merger in its brief and reported back as `push_attempts`; the script logs a
 count past it. Three is a judgement, not a measurement: `main` moved three

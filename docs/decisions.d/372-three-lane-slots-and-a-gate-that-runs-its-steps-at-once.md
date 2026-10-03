@@ -95,6 +95,10 @@ averaged about ten cores (921 CPU-seconds over 91.2 s), so two such gates fill
 most of the machine, and a third lane is usually editing or being verified
 rather than gating. **That is reasoning, not a measurement.**
 
+**Amended by §397.7 on 2026-10-03: four slots once the slow-tier row has
+landed.** `sar` shows a busy window averaging 8 cores of 24 even at six slots;
+spikes, not busy lanes, held the machine back. The counting below stands.
+
 Read-only rows, verifiers and mergers still count toward the three, as they did
 toward six: each builds and runs tests.
 
@@ -132,6 +136,11 @@ Up to four if the rate of mergers needing more than one try falls well below
 this baseline and the one-minute load stays under 24 with three lanes gating.
 Down to two if the load still goes past the core count with the gate running
 its steps at once.
+
+**Amended by §397.7 on 2026-10-03: the load bar is replaced.** One `just t`
+with no gate reached a run queue of 62, so no slot count could keep the load
+under 24. The bar is now the share of busy daytime `sar` samples at a load of
+24 or more, and catch-ups take the place of the push-attempt count.
 
 ### 372.8 What Q713 built
 
@@ -260,3 +269,8 @@ No serial gate was measured under load, so it is not known whether in turn
 would beat at once on a busy machine. The case for "no" is the second reason
 above, not a measurement. If three lanes gating still push the load past the
 core count, §372.7 already says what moves, and it is the cap, not this.
+
+**Amended by §397.6 on 2026-10-03: the order of the levers.** The gate still
+does not throttle itself by load. The slot count is no longer the first lever
+for a busy machine: first what each gate runs (§397.4), then how many gates
+landing needs (§397.5), and then the slot count, by §397.7's bar.
