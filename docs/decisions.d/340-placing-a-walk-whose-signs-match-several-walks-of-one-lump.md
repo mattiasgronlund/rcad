@@ -223,8 +223,67 @@ for bit, which is the same triangles in either list.
   now. Put among that file's `TRIOS_THAT_AGREE_ABOUT_ANSWERING` for a probe and
   then put back, the associativity there compared 4 trios where it compared 3,
   and held. So the new answer is right, and the trio moves to that list. Why
-  this fix reached it was not traced.
+  this fix reached it was not traced. §340.9 moves it and traces it.
 - **The guess is still there** for a closed edge the rule says nothing about:
   one whose run names a third surface, one along which the two surfaces touch,
   and one on a crossing folded into another spelling of its partner. None was
   met here.
+
+### 340.9 The pointed cone's tip is the half ball again
+
+*Queue row Q836, which is Q421 again with `fuse_laws_over_a_cone.rs` in its
+files. Lane `lane-q836-a-half-ball-under-the-floor-faces-the-right-way-2`, off
+`2ad40445` with `b3e5d2fd` merged, which brings §340.7 onto Q815's, Q665's and
+Q821's changes.*
+
+The trio of §340.8 is a block six across, a pointed cone of slope one half and
+height four with its apex at `(3, 3, −1)`, a unit under the floor, and a cube
+of two at `(20, 20, 20)`. `(block ∪ cone) ∪ cube` stopped at the second union
+with `ACurvedFaceGoesRightRoundWithNoSeam`. §340.8 guessed why and did not run
+it: the cone's tip hangs under the floor, bounded by one circle with its one
+corner on the floor, which is the half ball's shape. **The guess was right.**
+
+Traced with a printed probe on this branch, now removed: each time
+`Arrangement::material_is_left_of_forward` got past the corners, it printed the
+face, the crossing's partner and the edge's `inside_across`.
+
+- The first union leaves the tip as a cone face whose one wire is one edge, the
+  circle of radius one half where the cone meets the floor, with its one
+  corner at `(3, 2.5, 0)`. The floor keeps that circle as a hole.
+- Nothing cuts the tip in the second union, so it has no corner off the floor.
+  The corners gave out there once, for that face against the floor `z = 0`
+  with its normal down. Its edge says `inside_across: Some(false)`: the tip lies
+  on the floor's outer side, under it. The guess said `true`, the side above.
+- Every other time the corners gave out, in either grouping, it was the cone's
+  cap and the cone across the cap circle at `z = 3`, and the edge said `true`
+  there, as the guess did. So in this trio the fix changes one answer, the
+  tip's side.
+- With the arrangement put back on the guess and the bake kept, the
+  associativity there finds the asymmetry again: `block ∪ (cone ∪ third)
+  answered and (block ∪ cone) ∪ third refused at the second union:
+  ACurvedFaceGoesRightRoundWithNoSeam`. Where in the second union the
+  inside-out tip was refused was not traced.
+
+**Against the shape worked out by hand.** The file compares one grouping with
+the other and checks none of its trios against a closed form, so none was
+added. The probe measured both groupings anyway: `224.26054293132952` each,
+bit for bit, with a bound of `0.011680353250146892` at deflection `0.01`,
+against `216 + 8 + π/12 = 224.26179938779916`. They are `1.26e-3` short,
+inside the bound.
+
+**What moved, all in this lane's files.** The trio is the fourth of
+`TRIOS_THAT_AGREE_ABOUT_ANSWERING` and `TRIOS_THAT_ANSWER_ONE_WAY_ROUND` keeps
+two; the associativity floor is 4, and the run prints `associativity, a block,
+a cone and a cube: 4 compared, 2 with bit-identical volumes, refusals {}`.
+`three_trios_that_refused_both_ways_now_answer_one_way_round` is
+`two_trios_that_refused_both_ways_now_answer_one_way_round`.
+
+**That renamed test does not fail without the fix**, though Q836's brief said
+it would: once the trio has left its list it holds either way. With
+the arrangement back on the guess, the three that fail are
+`the_same_three_one_pair_at_a_time_make_the_same_block`,
+`uniting_a_ball_and_a_bar_with_a_block_does_not_depend_on_which_two_go_first`
+and `uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first`.
+The whole workspace, `mise exec -- just t --workspace --no-fail-fast`: 2905
+run, 2905 passed, so no test outside these files fails on top of the mesher's
+new changes. A floor that a count only rose past would not show there.
