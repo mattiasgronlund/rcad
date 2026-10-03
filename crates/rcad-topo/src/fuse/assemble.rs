@@ -416,7 +416,7 @@ impl Assembly {
                     sides_of(
                         wire,
                         turned_round,
-                        piece.ancestors[0],
+                        &piece.ancestors,
                         model,
                         &mut corners,
                         &mut edges,
@@ -444,7 +444,7 @@ impl Assembly {
             shells: Vec::new(),
             solids: Vec::new(),
         };
-        assembly.part_each_line_two_faces_rest_against_each_other_along();
+        assembly.part_each_line_two_faces_rest_against_each_other_along(model);
         every_closed_edge_read_off_one_spelling(
             &assembly.edges,
             &assembly.corners,
@@ -594,22 +594,47 @@ impl Assembly {
     /// two touching solids as an answer for that relation unbuilt.
     ///
     /// Which pair keeps the edge is the one whose first dart comes first; the
-    /// other is moved onto a copy. The copy carries the original's input edges,
-    /// and in every case measured that is none: the arrangement gives a
-    /// touching line no input edge to run along, even where it lies over a
-    /// bar's seam.
-    fn part_each_line_two_faces_rest_against_each_other_along(&mut self) {
+    /// other is moved onto a copy. **Each takes the input edges of its own input
+    /// face**, so that a bar whose seam is the touching line hands the seam to
+    /// the skin's edge and not to the wall's, which is dissolved; the line is no
+    /// edge of the wall, so the wall's takes none.
+    ///
+    /// # Panics
+    ///
+    /// If an input edge the line is a piece of runs along neither input face.
+    /// Every one was named by a side of a piece of one of them, along that
+    /// face's own boundary or its seam.
+    fn part_each_line_two_faces_rest_against_each_other_along(&mut self, model: &Model) {
         for by in self.claimants_of_each_edge() {
             let Some(moving) = self.the_second_of_two_input_faces_along(&by) else {
                 continue;
             };
-            let original = &self.edges[self.edge_of(by[0])];
+            let kept = self.edge_of(by[0]);
+            let runs_along = |input: EdgeKey, dart: Dart| {
+                model
+                    .edge(input)
+                    .expect("a side of a piece runs along an edge of the model the fuse was given")
+                    .neighbouring_faces()
+                    .any(|face| self.faces[dart.face].ancestors.contains(&face))
+            };
+            let (keeping, parting): (Vec<EdgeKey>, Vec<EdgeKey>) = self.edges[kept]
+                .from
+                .iter()
+                .partition(|&&input| !runs_along(input, moving[0]));
+            for &input in &keeping {
+                assert!(
+                    runs_along(input, by[0]),
+                    "an input edge a parted line is a piece of runs along one of the two faces"
+                );
+            }
+            let original = &self.edges[kept];
             let copy = Edge {
                 ends: original.ends,
                 carried_by: original.carried_by,
                 arc: original.arc,
-                from: original.from.clone(),
+                from: parting,
             };
+            self.edges[kept].from = keeping;
             self.edges.push(copy);
             let parted = self.edges.len() - 1;
             for dart in moving {
@@ -3600,6 +3625,13 @@ impl Edges {
     /// edge if the pair were the key. Sorting the two surfaces is what makes the
     /// faces either side agree about which edge they share.
     ///
+    /// **The input edges it is a piece of are every side's along it**, and not
+    /// the first side's. Where a cut on one face runs along the boundary of the
+    /// other — a wall along a bar's seam, where the wall's side names nothing and
+    /// the skin's names the seam — which side comes first is the order the
+    /// solids were handed over, and the history of the edge would depend on it.
+    /// `seam` is [`the_seam_a_side_runs_along`], which `meet` cannot carry.
+    ///
     /// # Panics
     ///
     /// If a straight side has no length. §17.4 prevents one rather than
@@ -3613,12 +3645,14 @@ impl Edges {
     fn of(
         &mut self,
         meet: &FaceMeet,
+        seam: Option<EdgeKey>,
         from: usize,
         to: usize,
         face: FaceKey,
         turned_round: bool,
     ) -> Result<Side> {
-        let (carried_by, along) = (meet.carried_by, meet.along.as_slice());
+        let carried_by = meet.carried_by;
+        let along: Vec<EdgeKey> = meet.along.iter().copied().chain(seam).collect();
         assert!(
             from != to
                 || carried_by
@@ -3637,7 +3671,14 @@ impl Edges {
                 .all(|surface| surface.as_plane().is_some()),
         );
         let edge = match self.between.get(&key) {
-            Some(&already) => already,
+            Some(&already) => {
+                for input in along {
+                    if !self.made[already].from.contains(&input) {
+                        self.made[already].from.push(input);
+                    }
+                }
+                already
+            }
             None => {
                 let arc = if from == to {
                     WhichArc::TheOnlyOne
@@ -3648,7 +3689,7 @@ impl Edges {
                     ends: [from.min(to), from.max(to)],
                     carried_by,
                     arc,
-                    from: along.to_vec(),
+                    from: along,
                 });
                 self.between.insert(key, self.made.len() - 1);
                 self.made.len() - 1
@@ -4335,7 +4376,7 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 fn sides_of(
     wire: &[FaceMeet],
     turned_round: bool,
-    face: FaceKey,
+    ancestors: &[FaceKey],
     model: &Model,
     corners: &mut Corners,
     edges: &mut Edges,
@@ -4344,7 +4385,8 @@ fn sides_of(
     for meet in wire {
         let from = corners.of(model, &meet.ends[0]);
         let to = corners.of(model, &meet.ends[1]);
-        sides.push(edges.of(meet, from, to, face, turned_round)?);
+        let seam = the_seam_a_side_runs_along(model, ancestors, meet);
+        sides.push(edges.of(meet, seam, from, to, ancestors[0], turned_round)?);
     }
     if turned_round {
         sides.reverse();
@@ -4353,6 +4395,55 @@ fn sides_of(
         }
     }
     Ok(sides)
+}
+
+/// The seam of a piece's input face that `side` runs the whole of, where it
+/// runs along one.
+///
+/// **A seam is left out at the door** (`bake`'s header), so no arc of the
+/// arrangement is boundary along it and no side ever names it the way a side
+/// along a cap's rim names the rim. A cut can still run exactly along it: a bar
+/// whose seam is the line it touches a wall along is cut open there, and the
+/// side that cut leaves is a piece of the seam, which history has to say.
+///
+/// Only a straight side between the seam's own two corners, and only a straight
+/// seam: two straight sides with the same two ends are one segment, so this
+/// takes no arithmetic. A crossing that cannot be shown to run straight is not
+/// named.
+fn the_seam_a_side_runs_along(
+    model: &Model,
+    ancestors: &[FaceKey],
+    side: &FaceMeet,
+) -> Option<EdgeKey> {
+    let [
+        MeetPoint::Existing { vertex: start, .. },
+        MeetPoint::Existing { vertex: end, .. },
+    ] = &side.ends
+    else {
+        return None;
+    };
+    if start == end
+        || !side.along.is_empty()
+        || the_crossing_of_these_runs_straight(&side.carried_by) != Some(true)
+    {
+        return None;
+    }
+    ancestors.iter().find_map(|&face| {
+        model
+            .face(face)
+            .expect("a piece's ancestor is a face of the model the fuse was given")
+            .wires()
+            .flat_map(|wire| wire.coedges())
+            .map(|coedge| coedge.edge())
+            .find(|edge| {
+                let ends = [edge.start().key(), edge.end().key()];
+                edge.neighbouring_faces().all(|other| other == face)
+                    && *edge.stored_run() == EdgeRun::Straight
+                    && ends.contains(start)
+                    && ends.contains(end)
+            })
+            .map(|edge| edge.key())
+    })
 }
 
 #[cfg(test)]
