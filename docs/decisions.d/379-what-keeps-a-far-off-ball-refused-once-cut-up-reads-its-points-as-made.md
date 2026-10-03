@@ -328,3 +328,65 @@ Only this entry changed.
   ask for the rule) and `crates/rcad-topo/src/mesh.rs` (asking for it) in the
   write set, beside this lane's three files. Not measured: whether a tube's
   flat end, a ring between two circles, has the same near-ties.
+
+**2026-10-03, Q796: a bar's caps are cut by corner order, asked for only where
+the face across reads the rim at one height.** Lane
+`lane-q796-a-placed-bars-caps-cut-by-corner-order`, off `01b6eb41`. All twelve
+rows are 0 off on caps and wall, the read-back test passes, and both ball lid
+tests come back as pinned.
+
+- **Q784's numbers, measured again with its rule rebuilt** and applied to every
+  flat patch with one loop, every corner inside one edge, every corner turning
+  the same way and `v` climbing then falling once. Every other corner cut off,
+  round after round: 0 off on caps and wall in all twelve rows, the read-back
+  test passes, `a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures`
+  is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` for
+  `TheCap`, rim named `ItsTwoFaces`, lid listed first `false`, deflection
+  `0.5`, and `no_sliver_cut_through_a_balls_pole_folds_at_any_deflection`
+  counts 68 folds in 1440, all cured at a later rung. A fan from corner 0: the
+  same, with 96 folds. Every number is Q784's. Run as
+  `mise exec -- just t -E 'binary(a_placed_bar_is_meshed_from_the_corners_it_stores) | binary(a_flat_cap_is_cut_up_the_same_after_its_own_file) | test(=a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures) | test(=no_sliver_cut_through_a_balls_pole_folds_at_any_deflection)' --no-capture --no-fail-fast`.
+- **What landed.** `TrimmedDomain::cut_by_corner_order` is the way to ask. The
+  triangulator honours it for a flat patch with no holes whose outline turns
+  the same way at every corner by `orient2d` and climbs then falls once, and
+  cuts every other corner off, round after round; any other patch asked is cut
+  by spade as though it had not been asked. Every refusal is still asked
+  first. `mesh.rs` asks for a flat face bounded by one closed edge when every
+  face across that edge is curved, its second coordinate does not wrap, and it
+  reads every point of the edge at the same bits of that coordinate — read by
+  the same `HowAFaceReadsThePointsRoundIt` its own walk uses
+  (`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`).
+- **Leg (a), decidable without a tolerance: yes.** The face across hands its
+  triangulator those points on one straight line, the walk passes a second
+  coordinate that does not wrap through as it came, and a side between two of
+  them not next to each other along the edge runs through the points between,
+  which no triangulation draws. The points strictly along the edge lie on no
+  other face. So equal bits are enough, and the test is bit equality.
+- **Leg (b): the bar's wall answers no and the ball's patch yes.** With a
+  print on every flat face bounded by one closed edge, over the four tests
+  above: every bar cap was asked to be cut by corner order (26 per bar test, 6
+  in the read-back file, which covers the bar read back at no placement), and
+  every ball lid was not (140 in the rim test, 2016 in the fold test). The
+  print was taken out before the commit.
+- **Leg (c): both lid tests come back exactly as pinned**, the fold test at its
+  38 of 1440.
+- **The pin.** `a_placed_bar_is_cut_into_the_unplaced_bars_triangles`, which
+  replaces `a_placed_bars_wall_is_cut_into_the_unplaced_walls_triangles`,
+  compares caps and wall corner for corner and in order. With `mesh.rs`'s ask
+  forced off it fails, printing 142, 155, 141, 143, 165, 187, 197, 199, 177,
+  189, 163 and 183 off on the caps, Q781's numbers:
+  `mise exec -- just t -p rcad-topo --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-capture`.
+  In `rcad-mesh`, a disc of 40 corners turned by twelve angles and moved is cut
+  the same in all twelve when asked, where spade cut 11 of the 11 turned ones
+  differently from the first; a clockwise disc comes back anticlockwise; a disc
+  with a hole, five petals, a corner that does not turn and a patch of a pipe
+  are cut as though not asked; and a seven-pointed star drawn by every second
+  point, which turns one way and goes round twice, fails the once-round check:
+  `mise exec -- just t -p rcad-mesh -E 'test(/corner_order|once_round/)' --no-capture`.
+- **The whole suite**, `mise exec -- just t --no-fail-fast`: 2871 run, 2871
+  pass, 9 skipped. No test moved.
+- **Left.** A tube's flat end, a ring between two circles, is not asked for:
+  it has two loops, so the triangulator leaves it to spade whatever is asked.
+  Whether its two circles give the same near-ties, and so whether a placed
+  tube's ends are cut into other triangles than an unplaced tube's, was not
+  measured: no builder makes a tube without a fuse, and a probe was not cheap.

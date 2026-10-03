@@ -116,6 +116,13 @@ impl Patch {
 ///
 /// [`Deflection`]: rcad_geom::Deflection
 ///
+/// # A flat patch the caller asks to be cut by the order of its corners
+///
+/// Is cut that way when it can be ([`TrimmedDomain::cut_by_corner_order`],
+/// [`cut_by_corner_order`]), and the Delaunay test does not choose its
+/// triangles. Every refusal below is asked first all the same, so asking never
+/// turns a refusal into a patch.
+///
 /// # Errors
 ///
 /// About the loops: [`CannotTriangulate::BoundaryCrossesItself`] when two
@@ -240,6 +247,14 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         }
     }
 
+    if let Some(triangles) = cut_by_corner_order(domain) {
+        return Ok(Patch {
+            corners,
+            triangles,
+            deviation: Approximation::new(deviation, Cause::FlatStandIn),
+        });
+    }
+
     let inside = walk_in_from_the_outside(&mesh);
     let mut triangles = Vec::new();
     for face in mesh.inner_faces() {
@@ -254,6 +269,108 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         triangles,
         deviation: Approximation::new(deviation, Cause::FlatStandIn),
     })
+}
+
+/// The triangles of a patch cut by the order of its corners, when the caller
+/// asked for that ([`TrimmedDomain::cut_by_corner_order`]) and the patch is one
+/// it can be done to: flat, with no holes, and an outline that turns the same
+/// way at every corner and goes round once. `None` leaves the patch to the
+/// Delaunay triangulation.
+///
+/// **Every other corner is cut off, round after round.** The first round joins
+/// each corner to the one after next, the next round does the same among the
+/// corners left, and so on, so the triangles stay about as wide as they are
+/// long where a fan from one corner would draw slivers. Done to every flat disc
+/// with nobody asking, this made 68 of 1440 meshes of a ball cut through its
+/// pole fold, and the fan 96, against the Delaunay cut's 38: a lid's corners
+/// are joined by the ball's own triangles too (`docs/decisions.md` §379.5).
+/// That is what the caller's asking is for.
+///
+/// **Why it needs an outline that turns one way, once round:** then the patch
+/// is convex, and any three of its corners in order are a triangle inside it
+/// that turns the way the outline does, so every round leaves a smaller
+/// outline of the same kind. Both are settled exactly: the turns by
+/// [`orient2d`], and going round once by the second coordinate climbing and
+/// then falling once, since an outline that turns one way and goes round twice
+/// climbs and falls twice. A turn of zero, or one that cannot be settled, is
+/// not one way, and leaves the patch to the Delaunay triangulation.
+///
+/// Turned anticlockwise when the outline runs clockwise, since that is how
+/// every triangle [`triangulate`] hands back is turned.
+fn cut_by_corner_order(domain: &TrimmedDomain) -> Option<Vec<[u32; 3]>> {
+    if !domain.is_cut_by_corner_order()
+        || !matches!(domain.surface(), Surface::Plane(_))
+        || !domain.holes().is_empty()
+    {
+        return None;
+    }
+    let corners = domain.outer().corners();
+    let anticlockwise = turns_one_way_once_round(corners)?;
+    let mut left: Vec<u32> = (0..corners.len())
+        .map(|position| u32::try_from(position).expect("a loop of fewer than four billion corners"))
+        .collect();
+    let mut triangles = Vec::with_capacity(corners.len() - 2);
+    while left.len() >= 3 {
+        let mut kept = Vec::with_capacity(left.len() / 2 + 1);
+        let mut at = 0;
+        while at + 2 < left.len() {
+            triangles.push([left[at], left[at + 1], left[at + 2]]);
+            kept.push(left[at]);
+            at += 2;
+        }
+        if at + 2 == left.len() {
+            triangles.push([left[at], left[at + 1], left[0]]);
+            kept.push(left[at]);
+        } else if at + 1 == left.len() {
+            kept.push(left[at]);
+        }
+        left = kept;
+    }
+    if !anticlockwise {
+        for triangle in &mut triangles {
+            triangle.swap(1, 2);
+        }
+    }
+    Some(triangles)
+}
+
+/// Whether an outline turns anticlockwise at every corner (`Some(true)`) or
+/// clockwise at every corner (`Some(false)`) and goes round once; `None` for
+/// any other outline.
+///
+/// # Panics
+///
+/// On a [`Decision`] this file has not been taught.
+fn turns_one_way_once_round(corners: &[[f64; 2]]) -> Option<bool> {
+    let count = corners.len();
+    let mut way = None;
+    for at in 0..count {
+        let anticlockwise = match orient2d(
+            corners[at],
+            corners[(at + 1) % count],
+            corners[(at + 2) % count],
+        ) {
+            Decision::Pos => true,
+            Decision::Neg => false,
+            Decision::Zero | Decision::Undecidable { .. } => return None,
+            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+        };
+        if *way.get_or_insert(anticlockwise) != anticlockwise {
+            return None;
+        }
+    }
+    let climbs: Vec<bool> = (0..count)
+        .map(|at| (corners[at][1], corners[(at + 1) % count][1]))
+        .filter(|(from, to)| to != from)
+        .map(|(from, to)| to > from)
+        .collect();
+    let turns_from_climbing_to_falling = (0..climbs.len())
+        .filter(|&at| climbs[at] != climbs[(at + 1) % climbs.len()])
+        .count();
+    if turns_from_climbing_to_falling != 2 {
+        return None;
+    }
+    way
 }
 
 /// The first corner with a scaled coordinate that is not zero and is under
@@ -1747,6 +1864,37 @@ pub enum CannotTriangulate {
 mod tests {
     use super::*;
     use rcad_geom::{Axis, Cylinder, Point, Sphere, Torus, Vector};
+
+    /// A star of seven points drawn by joining every second one turns the same
+    /// way at every corner and goes round twice, so it is not the convex outline
+    /// [`cut_by_corner_order`] needs. Its sides cross, so [`triangulate`]
+    /// refuses it before the rule is asked; this asks the rule's own check.
+    #[test]
+    fn an_outline_that_turns_one_way_is_cut_by_corner_order_only_once_round() {
+        let seven = |step: usize| {
+            (0..7)
+                .map(|at| {
+                    let angle = core::f64::consts::TAU * (at * step % 7) as f64 / 7.0;
+                    [angle.cos(), angle.sin()]
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut clockwise = seven(1);
+        clockwise.reverse();
+        let dented = vec![[0.0, 0.0], [4.0, 0.0], [2.0, 1.0], [4.0, 4.0], [0.0, 4.0]];
+        let straight = vec![[0.0, 0.0], [2.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+
+        assert_eq!(turns_one_way_once_round(&seven(1)), Some(true));
+        assert_eq!(turns_one_way_once_round(&clockwise), Some(false));
+        assert_eq!(
+            orient2d(seven(2)[0], seven(2)[1], seven(2)[2]),
+            Decision::Pos,
+            "the star turns anticlockwise at its corners"
+        );
+        assert_eq!(turns_one_way_once_round(&seven(2)), None);
+        assert_eq!(turns_one_way_once_round(&dented), None);
+        assert_eq!(turns_one_way_once_round(&straight), None);
+    }
 
     /// [`how_far_a_flat_piece_strays`]'s torus arm is a published bound, so here
     /// is the search that could find something over it (`docs/decisions.md`
