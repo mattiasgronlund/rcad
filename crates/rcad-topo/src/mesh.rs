@@ -4818,6 +4818,10 @@ fn how_far_out_this_face_is_where_its_corners_are(face: FaceView<'_>) -> f64 {
 /// face's surface crosses the one on the other side of it, and either of the two
 /// surfaces named along that edge may be the one that bounds it, so the smaller
 /// answer is taken.
+///
+/// **A piece of a parabola or a hyperbola a plane cuts a cone in is its two
+/// ends as well**, and that is asked before any arithmetic on the plane's lean
+/// is — see [`a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever`].
 fn how_far_along_its_axis_this_face_runs(
     face: FaceView<'_>,
     axis: &Axis,
@@ -4827,13 +4831,13 @@ fn how_far_along_its_axis_this_face_runs(
 ) -> Option<f64> {
     let straight_on = axis.direction() * axis.direction().length().recip();
     let how_far_along = |point: Point| straight_on.dot(point - axis.origin()).abs();
+    let ours = face.surface();
     let mut furthest: f64 = 0.0;
     for coedge in face.wires().flat_map(WireView::coedges) {
         let edge = coedge.edge();
+        let its_ends = how_far_along(edge.start().point()).max(how_far_along(edge.end().point()));
         if *edge.stored_run() == EdgeRun::Straight {
-            furthest = furthest
-                .max(how_far_along(edge.start().point()))
-                .max(how_far_along(edge.end().point()));
+            furthest = furthest.max(its_ends);
             continue;
         }
         let mut others: SmallVec<[Surface; 3]> = along_each_edge
@@ -4852,6 +4856,9 @@ fn how_far_along_its_axis_this_face_runs(
         let bounded = others
             .into_iter()
             .filter_map(|other| {
+                if a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever(&ours, &other) {
+                    return Some(its_ends);
+                }
                 how_far_along_an_axis_a_crossing_with_this_surface_runs(
                     axis.origin(),
                     straight_on,
@@ -4869,6 +4876,40 @@ fn how_far_along_its_axis_this_face_runs(
     Some(furthest)
 }
 
+/// Whether `other` is a plane that cuts `ours`, a cone, in a parabola, a
+/// hyperbola or the rulings through its apex — every way of crossing a cone that
+/// does not close — **decided exactly**, by
+/// [`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by),
+/// the one place that question is asked and the sign [`rcad_geom::walk`] walks
+/// the edge by.
+///
+/// **Then the edge's own two ends are how far up the axis it gets.** `walk`
+/// writes a parabola as `vertex + across·s + bend·s²` and a hyperbola branch as
+/// `centre + out·cosh σ + across·sinh σ`, with `across` square to the cone's
+/// axis. So up the axis the one is `t_v + (bend·ŵ)·s²` and the other
+/// `t_c + (out·ŵ)·cosh σ`: each has its least at the vertex and grows steadily
+/// either way, and a curve that runs on for ever inside one nappe can only grow
+/// away from the apex. An edge is one stretch of one branch between its two
+/// corners, so no point of it is further up the axis than the further corner. A
+/// ruling through the apex is straight and is its two ends for the plainer
+/// reason.
+///
+/// **Why it is not left to the plane's lean, worked out in `f64`.** A plane
+/// along a ruling has `down_the_axis − slope · sideways` exactly zero, and the
+/// two rounded terms leave `5.55e-17` of it: the block below the frustum in
+/// `a_plane_cut_along_a_cones_other_nappe.rs`, leaned `2` against a slope of a
+/// half, made its parabola reach `5.7e16` up the axis that way, and every mesh of
+/// a piece of cone it bounds was refused under a floor of two million.
+fn a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever(
+    ours: &Surface,
+    other: &Surface,
+) -> bool {
+    let (Surface::Cone(cone), Surface::Plane(flat)) = (ours, other) else {
+        return false;
+    };
+    cone.is_cut_in_a_closed_curve_by(flat) == Some(false)
+}
+
 /// How far along `straight_on` from `origin` a point can be that is on both a
 /// surface `radius + slope · along` out from that axis and on `other`, or `None`
 /// where no such bound exists.
@@ -4881,6 +4922,13 @@ fn how_far_along_its_axis_this_face_runs(
 /// when the crossing really does run on for ever — a plane holding the axis
 /// direction cuts a pipe in two rulings, and a ruling is straight, which the
 /// caller has already dealt with.
+///
+/// **"Exactly" holds of the real numbers and not of the rounded ones.** Each
+/// `room` is a difference of rounded terms, and where it is zero in the reals
+/// it can come out a rounding above zero and divide a length by `1e-17`. The
+/// caller asks the plane-and-cone case exactly before it gets here
+/// ([`a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever`]); the other
+/// arms have no shape known to reach theirs.
 fn how_far_along_an_axis_a_crossing_with_this_surface_runs(
     origin: Point,
     straight_on: Vector,
