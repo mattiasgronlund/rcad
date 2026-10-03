@@ -12176,7 +12176,7 @@ check-land-selftest:
             done ;;
         check-queue)
             if [ -e "$STUB_DIR/check-queue-fails" ]; then
-                echo "check-queue: Q900 cites §999, and there is no such section"
+                echo "check-queue: Q900 has no write set"
                 exit 1
             fi
             echo "docs/queue.md: fine" ;;
