@@ -34,7 +34,7 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Cylinder, EdgeRun, Picker, Plane, Point, Scale, Sphere, Surface, Torus, Unit, Vector,
+    Cylinder, EdgeRun, Isometry, Picker, Plane, Point, Scale, Sphere, Surface, Torus, Unit, Vector,
 };
 use rcad_predicates::expansion::two_product;
 use rcad_predicates::{Decision, Point as PredicatePoint};
@@ -338,9 +338,16 @@ impl Writing {
     /// Writing the walk in one sense and each edge's way along it in the other
     /// wrote a loop that does not close, and the reader refused it by name.
     fn solid_from_shell(&mut self, model: &Model, shell: ShellView<'_>) -> Result<(), CannotWrite> {
-        let mut either_side: HashMap<EdgeKey, Vec<Surface>> = HashMap::new();
+        let mut either_side: HashMap<EdgeKey, Vec<Side>> = HashMap::new();
         for face in shell.faces() {
-            let surface = face.surface();
+            let side = Side {
+                located: face.surface(),
+                stored: model
+                    .face(face.key())
+                    .expect("a face of the model being written")
+                    .surface(),
+                placed_by: face.location(),
+            };
             for wire in face.wires() {
                 let walk: Vec<WireStepView<'_>> = wire.steps().collect();
                 for (position, step) in walk.iter().enumerate() {
@@ -348,10 +355,11 @@ impl Writing {
                         WireStepView::Along(coedge) => either_side
                             .entry(coedge.edge().key())
                             .or_default()
-                            .push(surface),
+                            .push(side),
                         WireStepView::Pole(pole)
                             if the_wire_turns_back_at(&walk, position)
-                                && surface
+                                && side
+                                    .located
                                     .the_way_its_first_coordinate_runs_at(pole.point())
                                     .is_none() => {}
                         WireStepView::Pole(_) => {
@@ -445,14 +453,14 @@ impl Writing {
         (edge, run): (EdgeKey, &EdgeRun),
         start: (VertexKey, Point),
         end: (VertexKey, Point),
-        either_side: &[Surface],
+        either_side: &[Side],
     ) -> Result<u64, CannotWrite> {
         let closed = model
             .edge(edge)
             .expect("every key here came off the model being written")
             .is_closed()
             .map_err(|_| CannotWrite::ARunKindThisWriterHasNoCurveFor)?;
-        let [first, second] = match either_side {
+        let sides = match either_side {
             [first, second] => [first, second],
             _ => {
                 return Err(CannotWrite::AnEdgeThatIsNotWalkedTwice {
@@ -460,7 +468,7 @@ impl Writing {
                 });
             }
         };
-        let curve = self.curve(first, second, run, start.1, end.1, closed)?;
+        let curve = self.curve(sides, run, start.1, end.1, closed)?;
         let from = self.vertex_point(corners, start);
         let to = self.vertex_point(corners, end);
         Ok(self.entity(&format!(
@@ -505,7 +513,10 @@ impl Writing {
     ///   top of its tube, is an arc of the circle of the ring's own radius,
     ///   which [`where_a_plane_crosses_a_ring`] names and the run picks, as for
     ///   a pipe. That is the only crossing of a plane and a ring the KiCad
-    ///   corpus carries (Q774); the others refuse.
+    ///   corpus carries (Q774); the others refuse;
+    /// - **a closed edge where a flat cap crosses a cone** square to its axis
+    ///   is the circle [`where_a_cap_square_to_a_cone_crosses_it`] works out in
+    ///   the frame the two faces are stored in, and then places.
     ///
     /// And two the surfaces do not name, which are read off the run instead:
     /// **a seam of one ball from pole to pole** — see
@@ -518,13 +529,13 @@ impl Writing {
     /// it.
     fn curve(
         &mut self,
-        first: &Surface,
-        second: &Surface,
+        sides: [&Side; 2],
         run: &EdgeRun,
         start: Point,
         end: Point,
         closed: bool,
     ) -> Result<Curve, CannotWrite> {
+        let [first, second] = sides.map(|side| &side.located);
         let refuse = || CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
             first: kind_of(first),
             second: kind_of(second),
@@ -576,6 +587,12 @@ impl Writing {
                     .the_way_round_the_arc(run, start, end)
                     .ok_or_else(refuse)?;
                 Ok(Curve::along(self.round(&crossing, turning)))
+            }
+            (Surface::Plane(_), Surface::Cone(_)) | (Surface::Cone(_), Surface::Plane(_))
+                if closed =>
+            {
+                let crossing = where_a_cap_square_to_a_cone_crosses_it(sides).ok_or_else(refuse)?;
+                Ok(Curve::along(self.round(&crossing, crossing.turning)))
             }
             (Surface::Cylinder(pipe), Surface::Cylinder(other)) if !closed && pipe == other => {
                 let along = pipe.axis().direction();
@@ -849,12 +866,15 @@ impl Writing {
     /// Four of the five are written in the numbers the kernel already stores
     /// and read back as those numbers. **The cone is not**, and that is worth
     /// stating: STEP writes a half-angle and [`Cone`](rcad_geom::Cone) stores
-    /// its tangent, so a cone goes out through `atan` and comes back through
-    /// `tan`, neither of which Rust bounds. The apex is exact — a placement at
+    /// its tangent, so a cone goes out as an angle and comes back through
+    /// `tan`, which Rust does not bound. The apex is exact — a placement at
     /// the apex has radius zero and `cone_from` reads that back as the origin
-    /// the file wrote, with no division — and the slope is the round trip of
-    /// two library functions. `a_cone_is_the_one_surface_whose_round_trip_goes_through_a_library_function`
-    /// measures what that costs.
+    /// the file wrote, with no division. The slope is written as the angle
+    /// [`a_half_angle_that_reads_back_as`] finds, whose tangent is the slope
+    /// itself wherever an angle near `atan` has one, and for most slopes over
+    /// one none does (`docs/decisions.md` §366).
+    /// `a_cone_is_the_one_surface_whose_round_trip_goes_through_a_library_function`
+    /// measures what `atan` alone would cost.
     ///
     /// # A plane is written at a point its offset reads back from exactly
     ///
@@ -900,7 +920,7 @@ impl Writing {
                 self.entity(&format!(
                     "CONICAL_SURFACE('',#{place},{},{})",
                     real(0.0),
-                    real(cone.slope().atan())
+                    real(a_half_angle_that_reads_back_as(cone.slope()))
                 ))
             }
             Surface::Torus(ring) => {
@@ -992,6 +1012,23 @@ impl Curve {
             the_edge_runs_its_way: true,
         }
     }
+}
+
+/// One face either side of an edge: the surface it sits on where its solid is
+/// placed, and the same surface in the frame the face is stored in, with the
+/// location that places it.
+///
+/// **The stored frame is where a builder's exact numbers still are.** A cap a
+/// builder put square to its cone is square there bit for bit, and a turn
+/// rounds the cap's normal and the cone's axis apart by an ulp. A curve worked
+/// out there and then placed is the curve the builder meant, moved; one worked
+/// out from the placed surfaces asks a question the rounding has already
+/// answered wrong. Q407 wants the same for a cap on a ring.
+#[derive(Clone, Copy)]
+struct Side {
+    located: Surface,
+    stored: Surface,
+    placed_by: Isometry,
 }
 
 /// The closed curve a plane crosses a pipe, a ball or a ring in.
@@ -1172,6 +1209,61 @@ fn where_a_plane_crosses_a_ring(flat: &Plane, ring: &Torus) -> Option<Crossing> 
     })
 }
 
+/// The circle a flat cap crosses a cone in, worked out in the frame the two
+/// faces are stored in and then placed; `None` where they are not stored in
+/// one frame, the cap is not square to the cone's axis there, or it passes
+/// through the apex.
+///
+/// **Square to the axis, and nothing else.** A plane square to a cone's axis
+/// and off its apex crosses it in one circle, centred where the axis meets the
+/// plane, of the cone's radius that far from the apex. Any other plane that
+/// cuts a cone in a closed curve cuts it in an ellipse whose centre is off the
+/// axis, and no builder or file this writer has met makes one, so it is not
+/// built (`docs/decisions.md` §13) and refuses by name.
+///
+/// **Asked in the stored frame**, for [`Side`]'s reason: the frustum and the
+/// pointed cone of the writer target are built square along `z`, and a turn
+/// leaves the cap's normal and the cone's axis an ulp apart, which would read
+/// as a plane that is not square at all (`docs/decisions.md` §366).
+///
+/// **It turns about the cone's axis**, as the pipe's circle turns about the
+/// pipe's: that is the way `rcad-topo` stores a closed edge round a cone, since
+/// [`Surface::the_way_its_first_coordinate_runs_at`] on a cone is
+/// `a × (p − apex)`, a right hand's turn about `a` on either nappe, and the
+/// reader reads each use of the edge against it
+/// (`Walk::which_way_round_a_closed_edge_is_stored`). The kernel's own
+/// closed-crossing rule, `rcad_geom::which_way_a_closed_crossing_turns`, is not
+/// needed here: it is for a ring, whose coordinate runs round its tube and not
+/// round the circle a cap cuts it in (Q407).
+fn where_a_cap_square_to_a_cone_crosses_it(sides: [&Side; 2]) -> Option<Crossing> {
+    let [first, second] = sides;
+    if first.placed_by != second.placed_by {
+        return None;
+    }
+    let ((Surface::Plane(flat), Surface::Cone(cone)) | (Surface::Cone(cone), Surface::Plane(flat))) =
+        (first.stored, second.stored)
+    else {
+        return None;
+    };
+    let along = cone.axis().direction();
+    if flat.normal().cross(along) != Vector::zero() {
+        return None;
+    }
+    let reached = (flat.offset() - flat.normal().dot(cone.apex() - Point::origin()))
+        / flat.normal().dot(along);
+    if reached == 0.0 || !reached.is_finite() {
+        return None;
+    }
+    let placed_by = first.placed_by;
+    Some(Crossing {
+        centre: placed_by.apply_to_point(cone.apex() + along * reached),
+        turning: placed_by.apply_to_vector(along),
+        shape: Shape::Circle {
+            radius: cone.radius_at(reached * along.length()),
+        },
+    })
+}
+
 /// A point near `near` from which the reader's `Plane::from_point_and_normal`
 /// gives back `cut`, normal and offset bit for bit, or `None` where none of
 /// the few tried does.
@@ -1323,6 +1415,47 @@ fn what_the_pickers_make_of(pickers: &[Picker], point: Point) -> Verdict {
         }
     }
     verdict
+}
+
+/// How many `f64` steps either side of `atan(slope)` [`a_half_angle_that_reads_back_as`]
+/// looks for an angle whose tangent is the slope.
+const HALF_ANGLE_STEPS_SEARCHED: usize = 64;
+
+/// The half-angle to write for a cone of `slope`: the `f64` nearest
+/// `atan(slope)` whose tangent is `slope` bit for bit, since the reader takes
+/// the tangent of what it reads (`cone_from`), or, where none within
+/// [`HALF_ANGLE_STEPS_SEARCHED`] steps has one, the angle among those whose
+/// tangent comes nearest.
+///
+/// **`atan` alone misses slopes the reader can be given exactly.** `atan(0.5)`
+/// reads back as `0.49999999999999994` and the `f64` above it as `0.5`, which
+/// is one of the four slopes the writer target draws
+/// (`each_slope_the_writer_target_draws_reads_back_from_the_angle_written`).
+/// **For most slopes over one no angle reads back at all**: a step of the
+/// angle moves the tangent by about `1 + s²` times as much, which for `s` over
+/// one skips slopes, so that slope comes back as near as an angle can carry it
+/// and no nearer. That is a limit and not a gap; `docs/decisions.md` §366 has
+/// the count and the demonstration.
+fn a_half_angle_that_reads_back_as(slope: f64) -> f64 {
+    let miss = |angle: f64| (angle.tan() - slope).abs();
+    let mut nearest = slope.atan();
+    let mut nearest_miss = miss(nearest);
+    let (mut above, mut below) = (nearest, nearest);
+    for _ in 0..HALF_ANGLE_STEPS_SEARCHED {
+        if nearest_miss == 0.0 {
+            break;
+        }
+        above = above.next_up();
+        below = below.next_down();
+        for angle in [above, below] {
+            let missed_by = miss(angle);
+            if missed_by < nearest_miss {
+                nearest = angle;
+                nearest_miss = missed_by;
+            }
+        }
+    }
+    nearest
 }
 
 /// A point on `flat` from which this crate's reader works out `flat`'s own
@@ -1837,13 +1970,145 @@ mod plane_round_trip_tests {
 mod cone_round_trip_tests {
     use rcad_geom::{Axis, Cone, Point, Vector};
 
+    use super::{HALF_ANGLE_STEPS_SEARCHED, a_half_angle_that_reads_back_as};
+
+    /// The slope the reader makes of a written half-angle: `cone_from` takes
+    /// its tangent, as [`Cone::from_half_angle`] does.
+    fn read_back(half_angle: f64) -> f64 {
+        Cone::from_half_angle(Axis::z(), half_angle)
+            .expect("a half-angle strictly inside a right angle")
+            .slope()
+    }
+
+    /// Two of the four slopes the writer target draws, a power of two each so
+    /// a cone's corner lies on it exactly, come back bit for bit from the
+    /// angle written. Half does not come back from `atan` alone: it comes back
+    /// `0.49999999999999994`, and the comparison in the writer target failed
+    /// on that before the angle was searched (Q70).
+    ///
+    /// **One and two come back from no angle at all.** The `f64` nearest a
+    /// quarter turn is below it, and its tangent rounds to the `f64` below
+    /// one; the next angle up is above it, and its tangent rounds to the `f64`
+    /// above one. Two falls between two neighbouring angles' tangents the same
+    /// way. So a cone of either slope comes back an ulp or two off whatever is
+    /// written, and the target compares its slope as a measurement
+    /// (`docs/decisions.md` §366).
+    #[test]
+    fn each_slope_the_writer_target_draws_reads_back_from_the_angle_written() {
+        assert_eq!(read_back(0.5_f64.atan()), 0.499_999_999_999_999_94);
+        for slope in [0.25, 0.5] {
+            let written = a_half_angle_that_reads_back_as(slope);
+            assert_eq!(
+                read_back(written).to_bits(),
+                slope.to_bits(),
+                "{slope} written as {written}"
+            );
+        }
+
+        let quarter_turn = 1.0_f64.atan();
+        assert_eq!(quarter_turn, core::f64::consts::FRAC_PI_4);
+        assert_eq!(read_back(quarter_turn), 1.0_f64.next_down());
+        assert_eq!(read_back(quarter_turn.next_up()), 1.0_f64.next_up());
+        for slope in [1.0_f64, 2.0] {
+            let first = slope.atan();
+            let [below, at, above] = [first.next_down(), first, first.next_up()].map(read_back);
+            assert!(below < at && at < above, "{slope}: {below} {at} {above}");
+            assert!(
+                (below < slope && slope < at) || (at < slope && slope < above),
+                "{slope} is not strictly between two neighbouring angles' tangents: \
+                 {below} {at} {above}"
+            );
+        }
+    }
+
+    /// Over a hundred thousand slopes from `1e-3` to `1e3`: how many come
+    /// back from `atan`, how many from an angle the search finds, and how many
+    /// from no angle at all — and for every one, that the slope comes back
+    /// within what two neighbouring angles' tangents differ by, the bound the
+    /// writer target's comparison holds a cone's slope to.
+    ///
+    /// **Where no angle is found, none exists**, given only that `tan` is
+    /// faithful — off by less than an ulp of the true tangent — which no
+    /// libm falls short of. The tangents of the angles searched are then
+    /// strictly increasing and the slope lies strictly between two of them, so
+    /// no angle in the window reads back as it, and every angle outside the
+    /// window is further still: below it the tangent is below the window's
+    /// least, above it above its most (`docs/decisions.md` §366).
+    #[test]
+    fn most_slopes_over_one_come_back_from_no_half_angle() {
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let (mut from_atan, mut found, mut over_one, mut none_over_one, mut none) = (0, 0, 0, 0, 0);
+        let mut furthest_found = 0;
+        let mut worst_share_of_the_reach: f64 = 0.0;
+        for _ in 0..100_000 {
+            let slope = 1e-3 + next() * (1e3 - 1e-3);
+            let first = slope.atan();
+            let written = a_half_angle_that_reads_back_as(slope);
+            let back = read_back(written);
+            let reach = (read_back(first.next_up()) - read_back(first.next_down())).abs();
+            worst_share_of_the_reach = worst_share_of_the_reach.max((back - slope).abs() / reach);
+            over_one += usize::from(slope > 1.0);
+            if back == slope {
+                let steps = (written.to_bits() as i64 - first.to_bits() as i64).unsigned_abs();
+                if steps == 0 {
+                    from_atan += 1;
+                } else {
+                    found += 1;
+                    furthest_found = furthest_found.max(steps);
+                }
+                continue;
+            }
+            none += 1;
+            none_over_one += usize::from(slope > 1.0);
+            let mut angle = f64::from_bits(first.to_bits() - HALF_ANGLE_STEPS_SEARCHED as u64);
+            let mut tangents = Vec::with_capacity(2 * HALF_ANGLE_STEPS_SEARCHED + 1);
+            for _ in 0..=2 * HALF_ANGLE_STEPS_SEARCHED {
+                tangents.push(read_back(angle));
+                angle = angle.next_up();
+            }
+            assert!(
+                tangents.windows(2).all(|pair| pair[0] < pair[1]),
+                "{slope}: the tangents near atan are not increasing"
+            );
+            assert!(
+                tangents[0] < slope && slope < tangents[2 * HALF_ANGLE_STEPS_SEARCHED],
+                "{slope}: the window does not straddle the slope"
+            );
+        }
+        println!(
+            "100000 slopes from 1e-3 to 1e3: {from_atan} come back from atan, {found} from an \
+             angle the search finds (furthest {furthest_found} steps), {none} from none \
+             ({none_over_one} of the {over_one} over one); the worst comes back \
+             {worst_share_of_the_reach} of two angles' reach off"
+        );
+        assert!(
+            worst_share_of_the_reach <= 1.0,
+            "a slope came back further off than two neighbouring angles' tangents differ"
+        );
+        assert!(
+            furthest_found < HALF_ANGLE_STEPS_SEARCHED as u64 / 8,
+            "an angle was found {furthest_found} steps out, near the end of the search"
+        );
+        assert!(
+            none_over_one * 10 > over_one * 9,
+            "only {none_over_one} of {over_one} slopes over one come back from no angle"
+        );
+    }
+
     /// The demonstration behind `Writing::surface`'s doc comment: a cone's
     /// slope is not written down — STEP has no field for a tangent, only a
-    /// half-angle — so every cone this writer emits goes out through `atan`
-    /// (here, and in `Writing::surface`) and comes back through `tan` (in
-    /// `cone_from`, and here through the public
+    /// half-angle — so every cone this writer emits goes out as an angle and
+    /// comes back through `tan` (in `cone_from`, and here through the public
     /// [`Cone::from_half_angle`](rcad_geom::Cone::from_half_angle) that does
-    /// the same conversion), and that round trip is not exact.
+    /// the same conversion). Through `atan` alone, as here, that round trip
+    /// is not exact, which is why `Writing::surface` writes the angle
+    /// `a_half_angle_that_reads_back_as` searches for instead.
     #[test]
     fn a_cone_is_the_one_surface_whose_round_trip_goes_through_a_library_function() {
         let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
