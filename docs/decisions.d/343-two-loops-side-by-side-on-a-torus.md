@@ -85,16 +85,17 @@ of `y = 0`.
 
 ### 343.3 What this leaves
 
-- **Through the builder the three-quarter band is still refused**, by the
-  sweep and not the mesher.
-  `the_three_quarter_band_between_the_same_two_circles_is_refused_by_the_sweep`
-  pins that refusal. When Q103 moves the sweep's reading onto the wire, that
-  test is the one to move, to `6π²`.
+- **Through the builder the three-quarter band now builds**, validates and
+  measures `6π²` (§392). Until then the sweep refused it, not the mesher.
+  `the_three_quarter_band_between_the_same_two_circles_measures_what_pappus_says`
+  is the test that pinned the refusal, moved. The sweep no longer reads which
+  side of a cap's plane the wall keeps off a corner; reading it off the wire
+  instead would have checked nothing (392.2).
 - **Two loops that run the same way round the tube are not refused here.** The
   second loop goes where the first loop's direction says, and
   `cut_a_ring_across` turns both to run up before it cuts, as it did before, so
-  nothing in the mesher reads the second loop's direction. Whether the sweep
-  refuses a wall whose two circles run the same way was not run. Read from the
+  nothing in the mesher reads the second loop's direction. The sweep refuses
+  such a wall `AClosedEdgeIsWalkedAgainstItsSurface`, as run in §392.3. Read from the
   code, `cut_a_ring_across` did the same before this change, on a cylinder's
   ring as well as a torus's.
 - The torus orientation §329 found turned round was turned by §361, which
