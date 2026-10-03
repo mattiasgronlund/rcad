@@ -95,6 +95,7 @@ gate_steps := "check-plugins \
     check-kache-off-on-ci \
     check-gate-runs-every-check \
     check-gate-summary-selftest \
+    check-pre-gate-selftest \
     check-gate-docs-selftest \
     check-gate-verdicts-selftest \
     check-lanes-selftest \
@@ -132,11 +133,19 @@ gate_steps := "check-plugins \
     check-systemd-units-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
+    check-fmt \
     lint \
     test \
     check-release-build \
     check-t-selftest \
     deny"
+
+# The steps `pre-gate` runs at once, in front of a lane's gate: the kind that
+# failed lane gates whose tests all passed (§380.1). In the justfile rather
+# than in `.claude/agents/lane.md`, so that moving one reaches the next lane
+# without a new `claude` process (§381). Every one is also a step of
+# `gate_steps`; `check-pre-gate-selftest` holds that.
+pre_gate_steps := "check-fmt lint check-wildcards"
 
 # The steps that cost a runner money, and that a change touching only `docs/`
 # and `*.md` cannot move either way. `gate-docs` runs `gate_steps` **minus**
@@ -151,7 +160,9 @@ gate_steps := "check-plugins \
 #   It needs a build. `check`, `lint`, `test`, `check-release-build`,
 #   `check-fuzz-builds` and `check-systemd-units` obviously; `check-wildcards`
 #   because it reads clippy's output; `deny` because it resolves the dependency
-#   graph, and a prose commit cannot change `Cargo.lock`.
+#   graph, and a prose commit cannot change `Cargo.lock`. `check-fmt` builds
+#   nothing, but `cargo fmt` needs the pinned toolchain, which the docs arm
+#   does not install, and a prose commit cannot change a `.rs` file.
 #
 #   It needs the STEP corpus. `check-corpus` is 0.16 s and compiles nothing, and
 #   it is here anyway: it **fails** when `RCAD_STEP_CORPUS` is not a directory,
@@ -162,7 +173,7 @@ gate_steps := "check-plugins \
 #   fixture and never reads the real corpus.
 #
 # On a metered runner this is 1m07s against 9m46s. `docs/decisions.md` §172.
-gate_metered_steps := "check check-fuzz-builds check-wildcards lint test check-release-build check-systemd-units deny check-corpus"
+gate_metered_steps := "check check-fuzz-builds check-wildcards check-fmt lint test check-release-build check-systemd-units deny check-corpus"
 
 # The steps `gate` may serve from an earlier green of the same code instead of
 # running (`docs/decisions.md` §337). The first nine were the slow ones: together
@@ -189,6 +200,7 @@ gate_reusable_steps := "check \
     check-kache-off-on-ci \
     check-gate-runs-every-check \
     check-gate-summary-selftest \
+    check-pre-gate-selftest \
     check-gate-docs-selftest \
     check-gate-verdicts-selftest \
     check-lanes-selftest \
@@ -217,6 +229,7 @@ gate_reusable_steps := "check \
     check-systemd-units-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
+    check-fmt \
     lint \
     test \
     check-release-build \
@@ -456,6 +469,76 @@ gate-fresh image="rust:1-bookworm":
     {{ just_executable() }} --justfile "{{ justfile() }}" \
         --working-directory "$(git rev-parse --show-toplevel)" \
         _record-green "{{ gate_steps }}"
+
+# The gate's cheapest steps, run at once and in front of it: a lane gates with
+# `mise exec -- just pre-gate gate quiet`. `just` runs the recipes it is given
+# in turn and stops at the first that fails, so a misformatted file, a clippy
+# warning or a new wildcard arm comes back in seconds instead of after a whole
+# gate. `docs/decisions.md` §380 and §381.
+#
+# **Every step runs to its end, and a failure stops nothing.** Two of the four
+# lane gates §380.1 counted broke `lint` and `check-wildcards` both, and
+# stopping the other step at the first failure would have hidden the second
+# until the next call. That would save at most 5 to 10 s, only on a failure,
+# and would kill cargo mid-write (§381.3).
+#
+# A step that passes prints one line. A step that fails prints its first 60
+# lines, first of the list first, because those are what the lane has to fix.
+# Cargo's progress lines are left out of the 60, and the rest is kept in a log
+# the result names. Not the whole output: one parse error in a doc comment
+# made `check-fmt` print 1 136 lines and `lint` 3 445 (§381.3).
+[doc("The gate's cheapest steps at once: formatting, clippy and the wildcard count. A lane runs `just pre-gate gate quiet`, so the gate starts only once these pass.")]
+pre-gate:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    j='{{ just_executable() }}'
+    names=({{ pre_gate_steps }})
+    if [ "${#names[@]}" -eq 0 ]; then
+        echo "pre_gate_steps has no steps, so pre-gate would pass having checked nothing"
+        exit 1
+    fi
+    # A directory of its own, so a run nested in `check-pre-gate-selftest`
+    # inside a gate cannot write over a real run's logs.
+    logs=$(mktemp -d)
+    # Keyed by index rather than by name: a fixture list can name a step twice.
+    declare -A running=()
+    began=()
+    ended_with=()
+    for i in "${!names[@]}"; do
+        began[i]=${EPOCHREALTIME//[!0-9]/}
+        "$j" "${names[$i]}" >"$logs/$i-${names[$i]}.log" 2>&1 &
+        running[$!]=$i
+    done
+    while [ "${#running[@]}" -gt 0 ]; do
+        wait -n -p pid
+        step_status=$?
+        i=${running[$pid]}
+        unset "running[$pid]"
+        ended_with[i]=$step_status
+        tenths=$(( (${EPOCHREALTIME//[!0-9]/} - began[i]) / 100000 ))
+        line="${names[$i]} ($((tenths / 10)).$((tenths % 10)) s)"
+        [ "$step_status" -eq 0 ] || line="$line FAILED, exit $step_status"
+        echo "· $line"
+    done
+    status=0
+    cut=""
+    for i in "${!names[@]}"; do
+        [ "${ended_with[$i]}" -ne 0 ] || continue
+        [ "$status" -ne 0 ] || status=${ended_with[$i]}
+        log="$logs/$i-${names[$i]}.log"
+        echo
+        echo "=== ${names[$i]} ==="
+        said=$(grep -vE '^ *(Compiling|Checking|Fresh|Blocking|Finished) ' "$log")
+        head -60 <<<"$said"
+        more=$(( $(grep -c '' <<<"$said") - 60 ))
+        if [ "$more" -gt 0 ]; then
+            echo "... $more more lines in $log"
+            cut=1
+        fi
+    done
+    # Kept only when the result names a log in it.
+    [ -n "$cut" ] || rm -rf "$logs"
+    exit $status
 
 # The whole gate, and the same command CI runs. Named `gate` rather than
 # `test-all` because it is two dozen checks, a lint and a `cargo-deny` around
@@ -1041,9 +1124,101 @@ check-gate-summary-selftest:
     grep -q '^first failing test: FAIL \[   0.011s\] rcad-geom a_plane_and_a_sphere$' <<<"$got" \
         || fail "a failing suite did not name the first test that failed"
 
+# Holds `pre-gate` to what a lane leans on it for, against fixture step lists
+# moved in with `--set`, as `check-gate-summary-selftest` does for `gate`.
+#
+# Eight ways it can be wrong. A pass that prints a step's own output, which
+# would put clippy's replayed warnings in every lane's result. A failure whose
+# output is not printed, which would send the lane to a log for the lines it
+# needs. A failure printed whole, which a parse error turns into thousands of
+# lines, or cut without naming where the rest is. A failure that stops the
+# steps after it, which would hide the second of two failures until the next
+# call (§381.3). Two failures printed in the order they ended rather than the
+# order of the list. Steps run in turn. A failing `pre-gate` that lets `just`
+# go on to the next recipe, which is what `just pre-gate gate quiet` relies on.
+# And an empty list, which would pass having checked nothing.
+#
+# The real list is held too: every step of it must be a step of the gate, since
+# `pre-gate` is the gate's cheapest steps run early and never a check of its
+# own, and `lint` must not check formatting again (§381.2).
+[private]
+check-pre-gate-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    j='{{ just_executable() }}'
+    got=""
+
+    fail() {
+        echo "pre-gate drifted from its own fixtures: $1"
+        [ -z "$got" ] || { echo "--- got ---"; echo "$got"; }
+        exit 1
+    }
+
+    all=$(printf '%s\n' {{ gate_steps }})
+    early=$(printf '%s\n' {{ pre_gate_steps }})
+    [ "$(grep -c . <<<"$early")" -ge 3 ] || fail "pre_gate_steps came back with fewer than its three steps"
+    while read -r step; do
+        grep -qx "$step" <<<"$all" || fail "pre_gate_steps names '$step', which is not a step of the gate"
+    done <<<"$early"
+    lint_body=$($j --show lint | grep -E '^[[:space:]]+[^#[:space:]]')
+    [ -n "$lint_body" ] || fail "just --show lint gave no recipe body, so the arm below would read nothing"
+    grep -q 'fmt' <<<"$lint_body" \
+        && fail "lint checks formatting, so a misformatted file stops it before clippy says anything, and check-fmt already checks it beside it"
+
+    got=$($j --set pre_gate_steps list pre-gate 2>&1) || fail "a pre-gate whose every step passed exited non-zero"
+    grep -qE '^· list \([0-9]+\.[0-9] s\)$' <<<"$got" || fail "a passing step was not named with its time"
+    grep -q 'Everything this repo can do' <<<"$got" \
+        && fail "a passing step's own output reached the result"
+
+    got=$($j --set pre_gate_steps 'no-such-step list no-such-other-step' pre-gate 2>&1) \
+        && fail "a pre-gate with two failing steps exited 0"
+    grep -qE '^· list \([0-9]+\.[0-9] s\)$' <<<"$got" || fail "a failing step stopped the steps beside it"
+    grep -qE '^· no-such-step \([0-9]+\.[0-9] s\) FAILED, exit [1-9]' <<<"$got" \
+        || fail "a failing step was not named as failed"
+    [ "$(grep -c 'Justfile does not contain recipe' <<<"$got")" -eq 2 ] \
+        || fail "the two failing steps' own output was not both printed"
+    order=$(grep -E '^=== no-such(-other)?-step ===$' <<<"$got" | paste -sd' ')
+    [ "$order" = "=== no-such-step === === no-such-other-step ===" ] \
+        || fail "the failures were printed as '$order', not in the order of the list"
+    grep -q 'Everything this repo can do' <<<"$got" \
+        && fail "a passing step's output was printed beside the failures"
+
+    got=$($j --set pre_gate_steps _pre-gate-selftest-long pre-gate 2>&1) \
+        && fail "a step that exits 1 left pre-gate passing"
+    grep -q 'Compiling' <<<"$got" && fail "cargo's progress lines took up the lines meant for the failure"
+    grep -qx 'line 60' <<<"$got" || fail "a long failure was cut before its sixtieth line"
+    grep -qx 'line 61' <<<"$got" && fail "a long failure was printed past its sixtieth line"
+    kept=$(sed -nE 's/^\.\.\. [0-9]+ more lines in //p' <<<"$got")
+    [ -n "$kept" ] || fail "a long failure did not say how much was cut and where the rest is"
+    grep -qx 'line 100' "$kept" || fail "the log a cut failure names does not hold the rest"
+    rm -rf "$(dirname "$kept")"
+
+    began=$(date +%s%N)
+    got=$($j --set pre_gate_steps '_gate-selftest-sleep _gate-selftest-sleep _gate-selftest-sleep' pre-gate 2>&1) \
+        || fail "three steps that sleep failed"
+    took=$(( ($(date +%s%N) - began) / 1000000 ))
+    [ "$took" -lt 5000 ] || fail "three two-second steps took $took ms, so they ran in turn"
+
+    got=$($j --set pre_gate_steps no-such-step pre-gate list 2>&1) \
+        && fail "a failing pre-gate let the recipe after it run and exit 0"
+    grep -q 'Everything this repo can do' <<<"$got" \
+        && fail "a failing pre-gate let the recipe after it run"
+
+    got=$($j --set pre_gate_steps '' pre-gate 2>&1) && fail "an empty pre-gate passed having checked nothing"
+    grep -q 'no steps' <<<"$got" || fail "an empty pre-gate failed without saying it had no steps"
+
+# A step that fails with more lines than `pre-gate` prints, behind three of
+# cargo's progress lines, so `check-pre-gate-selftest` can see what is cut.
+[private]
+_pre-gate-selftest-long:
+    #!/usr/bin/env bash
+    printf '   Compiling fixture v0.0.0\n%.0s' 1 2 3
+    seq -f 'line %g' 1 100
+    exit 1
+
 # A gate step that takes two seconds and does nothing else, so that
-# `check-gate-summary-selftest` can tell steps run at once from steps run in turn
-# by the clock.
+# `check-gate-summary-selftest` and `check-pre-gate-selftest` can tell steps run
+# at once from steps run in turn by the clock.
 [private]
 _gate-selftest-sleep:
     @sleep 2
@@ -1640,11 +1815,16 @@ check-wildcards:
     # its warnings replayed, not swallowed (two runs back to back, the second
     # recompiling nothing, printed the same count both times); and the
     # arguments after clippy's `--` are themselves part of the fingerprint, so
-    # a crate last linted by `lint`'s `-D warnings` is genuinely re-checked
-    # here rather than silently answered from that unrelated run (switching
-    # between the two forces a real recheck each way, confirmed). Nothing a
-    # touch bought was not already covered by cargo's own fingerprint.
-    if ! CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
+    # a crate last linted by `lint`'s `-D warnings` would be re-checked here
+    # rather than answered from that unrelated run. Nothing a touch bought was
+    # not already covered by cargo's own fingerprint.
+    #
+    # **A target directory of its own, since §381.** In `lint`'s, the two sets
+    # of flags took turns in cargo's cache, and each turn re-checked all 8
+    # crates of the workspace whether the edit reached them or not; run at
+    # once, one of the two waited on the other's lock. Here each re-checks only
+    # what the edit reached. The directory costs 276 MB on its first run.
+    if ! CARGO_TARGET_DIR=target/wildcards CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
             -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
         grep '^error' "$log" | head -5
         echo "clippy did not finish, so this counted nothing"
@@ -1794,6 +1974,18 @@ check-wildcards-selftest:
     w='wildcard match will also match any future added variants'
     printf 'warning: %s\n' "$w" "$w" > "$dir/plain.log"
     printf '\033[1m\033[33mwarning\033[0m\033[1m: %s\033[0m\n' "$w" "$w" > "$dir/coloured.log"
+    # Its clippy keeps a target directory of its own. In `lint`'s, the two
+    # recipes' flags take turns in cargo's cache, and each turn re-checks every
+    # crate of the workspace whether the edit reached it or not (§381.1).
+    clippy_target=$({{ just_executable() }} --show check-wildcards | grep -v '^ *#' \
+        | sed -n 's/.*CARGO_TARGET_DIR=\([^ ]*\) .*cargo clippy.*/\1/p')
+    case "$clippy_target" in
+        ""|target|target/|./target)
+            echo "check-wildcards runs its clippy in lint's target directory ('${clippy_target:-the default}'),"
+            echo "so the two take turns re-checking every crate (docs/decisions.md §381.1)"
+            exit 1 ;;
+    esac
+
     for f in plain coloured; do
         got=$({{ just_executable() }} _wildcard-direct-count "$dir/$f.log")
         if [ "$got" != "2" ]; then
@@ -2678,8 +2870,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "52" ]; then \
-        echo "found $n check-* recipes, expected 52"; \
+    if [ "$n" != "54" ]; then \
+        echo "found $n check-* recipes, expected 54"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -4696,10 +4888,15 @@ check-corpus-selftest:
     [ "$failed" -eq 0 ] || exit 1
     echo "check-corpus named its file in every case, under $dictionary"
 
-[doc("Formatting and clippy, warnings denied. Rust and TOML both.")]
-lint:
+# Apart from `lint` since §381, so that `pre-gate` can run the two at once and a
+# misformatted file no longer stops clippy before it has said anything.
+[doc("Rust and TOML formatting, checked. `just fmt` fixes both.")]
+check-fmt:
     cargo fmt --all -- --check
     taplo fmt --check
+
+[doc("Clippy, warnings denied. Formatting is `check-fmt`.")]
+lint:
     cargo clippy --workspace --all-targets -- -D warnings
 
 [doc("cargo-deny: advisories, bans, licences, sources. No LGPL at runtime.")]
