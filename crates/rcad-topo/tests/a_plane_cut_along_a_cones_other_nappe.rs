@@ -157,6 +157,19 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// the two blocks whose steep face is meant to pass through the apex, at turn
 /// one, where the crossing passes a rounding above it (§285.3): they hold every
 /// grid point they are asked about, and do not measure at `0.002`.
+///
+/// **The two of those four at lean three eighths answer right since Q441**,
+/// held to the same four checks as every right answer here: the volume
+/// measured at `0.002` against the box's closed form and the column sum of
+/// what it shares with the cone, and every grid point. Their cap's walk starts
+/// at the end of the kept rim where the crossing comes up the cone along a
+/// ruling, and the first quarter cut left from that corner and ran down that
+/// ruling to the apex, along the rim's own last side; the triangulator refused
+/// it `ASideCutsOffOneCornerOfACurvedPatch` at every rung. A cut leaves only
+/// from a corner whose meridian meets the rim nowhere else now, and the first
+/// leaves from the next corner along the rim, `0.027` round from the ruling at
+/// `0.002`. The two at lean one quarter still do not measure at `0.002`, and
+/// `the_eighteen_held_to_the_familys_four_checks` says why.
 #[test]
 fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -174,10 +187,10 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 76,
+            right: 78,
             refused: [
                 ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 16),
-                ("the answer does not measure: CannotMeshAFace", 4),
+                ("the answer does not measure: CannotMeshAFace", 2),
             ]
             .into()
         }
