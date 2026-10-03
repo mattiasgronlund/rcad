@@ -158,19 +158,22 @@ fn a_cone_shared_with_its_union_with_a_block_is_the_cone() {
 #[test]
 fn uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first() {
     associativity(&TRIOS_THAT_AGREE_ABOUT_ANSWERING)
-        .print_and_check("associativity, a block, a cone and a cube", 3);
+        .print_and_check("associativity, a block, a cone and a cube", 4);
 }
 
-/// Three trios that refused both ways round until `select.rs` counted the
-/// bulge of a hyperbola arc on the arc's own half of the cone, and answer one
-/// way round now.
+/// Two trios that refused both ways round until `select.rs` counted the bulge
+/// of a hyperbola arc on the arc's own half of the cone, and answer one way
+/// round now.
 ///
-/// Neither grouping of any of them gives a second answer to compare, so no law
-/// is broken; one grouping gets further than it did. Where each of the other
+/// Neither grouping of either gives a second answer to compare, so no law is
+/// broken; one grouping gets further than it did. Where each of the other
 /// groupings stops is pinned by name, so that when it answers too the trio goes
-/// back to [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`] and is compared.
+/// back to [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`] and is compared. A third, the
+/// pointed cone up through the block's floor with a far cube, went back when a
+/// closed edge came to say which side of the face across it its face lies on
+/// (`docs/decisions.md` §340.9).
 #[test]
-fn three_trios_that_refused_both_ways_now_answer_one_way_round() {
+fn two_trios_that_refused_both_ways_now_answer_one_way_round() {
     for (trio, want) in TRIOS_THAT_ANSWER_ONE_WAY_ROUND {
         let (left, right) = both_groupings(trio);
         let found = [left.err(), right.err()];
@@ -518,13 +521,18 @@ const POINTED: [Pair; 3] = [
 ];
 
 /// Trios on which the two groupings both answer: a far cube with a frustum, a
-/// cube on the block's roof with a frustum, and a far cube with a swallowed
-/// pointed cone.
+/// cube on the block's roof with a frustum, a far cube with a swallowed
+/// pointed cone, and a far cube with a pointed cone up through the block's
+/// floor.
 ///
 /// Three more used to be here refusing both ways, so that a change making one
 /// grouping answer would be seen. Counting the bulge of a hyperbola arc was
-/// that change, and they are [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`] now.
-const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 3] = [
+/// that change, and two of them are [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`] now.
+/// The third is the last one here: the tip of its cone hangs under the floor,
+/// and `(block ∪ cone) ∪ third` turned that tip inside out until the circle
+/// it hangs from said which side of the floor it is on (`docs/decisions.md`
+/// §340.9).
+const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 4] = [
     Trio {
         pair: on_the_grid(6, 2, [3, 3]),
         third_side: 2.0,
@@ -540,12 +548,17 @@ const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 3] = [
         third_side: 2.0,
         third_at: [20.0, 20.0, 20.0],
     },
+    Trio {
+        pair: a_pointed_cone_in_a_block_six_across(-1.0),
+        third_side: 2.0,
+        third_at: [20.0, 20.0, 20.0],
+    },
 ];
 
 /// Trios on which one grouping answers and the other refuses, with where each
 /// grouping stops: `(block ∪ cone) ∪ third` first, then `(cone ∪ third) ∪
 /// block`, and `None` for the one that answers.
-const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 3] = [
+const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 2] = [
     (
         Trio {
             pair: on_the_grid(8, 2, [4, 4]),
@@ -570,17 +583,6 @@ const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 3] = [
         [
             None,
             Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
-        ],
-    ),
-    (
-        Trio {
-            pair: a_pointed_cone_in_a_block_six_across(-1.0),
-            third_side: 2.0,
-            third_at: [20.0, 20.0, 20.0],
-        },
-        [
-            Some("the second union: ACurvedFaceGoesRightRoundWithNoSeam"),
-            None,
         ],
     ),
 ];
