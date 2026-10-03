@@ -33,7 +33,9 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{Cylinder, EdgeRun, Picker, Plane, Point, Scale, Sphere, Surface, Unit, Vector};
+use rcad_geom::{
+    Cylinder, EdgeRun, Picker, Plane, Point, Scale, Sphere, Surface, Torus, Unit, Vector,
+};
 use rcad_predicates::expansion::two_product;
 use rcad_predicates::{Decision, Point as PredicatePoint};
 use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
@@ -498,7 +500,12 @@ impl Writing {
     ///   joins two such corners;
     /// - **an arc where a plane crosses a ball** is one of the two arcs its ends
     ///   cut the circle into, which [`where_a_plane_crosses_a_ball`] names and
-    ///   the run picks, as for a pipe.
+    ///   the run picks, as for a pipe;
+    /// - **an arc where a plane rests on a ring**, square to its axis and on
+    ///   top of its tube, is an arc of the circle of the ring's own radius,
+    ///   which [`where_a_plane_crosses_a_ring`] names and the run picks, as for
+    ///   a pipe. That is the only crossing of a plane and a ring the KiCad
+    ///   corpus carries (Q774); the others refuse.
     ///
     /// And two the surfaces do not name, which are read off the run instead:
     /// **a seam of one ball from pole to pole** — see
@@ -555,6 +562,16 @@ impl Writing {
                 if !closed =>
             {
                 let crossing = where_a_plane_crosses_a_ball(flat, ball).ok_or_else(refuse)?;
+                let turning = crossing
+                    .the_way_round_the_arc(run, start, end)
+                    .ok_or_else(refuse)?;
+                Ok(Curve::along(self.round(&crossing, turning)))
+            }
+            (Surface::Plane(flat), Surface::Torus(ring))
+            | (Surface::Torus(ring), Surface::Plane(flat))
+                if !closed =>
+            {
+                let crossing = where_a_plane_crosses_a_ring(flat, ring).ok_or_else(refuse)?;
                 let turning = crossing
                     .the_way_round_the_arc(run, start, end)
                     .ok_or_else(refuse)?;
@@ -977,9 +994,10 @@ impl Curve {
     }
 }
 
-/// The closed curve a plane crosses a pipe or a ball in.
+/// The closed curve a plane crosses a pipe, a ball or a ring in.
 struct Crossing {
-    /// Where the pipe's axis meets the plane.
+    /// Where the pipe's or the ring's axis meets the plane, or the foot of the
+    /// ball's centre on it.
     centre: Point,
     /// The way a closed edge runs round it, which is the way `rcad-topo`
     /// stores one: the pipe's axis where the plane is exactly square to it,
@@ -1101,6 +1119,56 @@ fn where_a_plane_crosses_a_ball(flat: &Plane, ball: &Sphere) -> Option<Crossing>
         centre: ball.centre() - flat.normal() * off,
         turning: flat.normal(),
         shape: Shape::Circle { radius },
+    })
+}
+
+/// The circle a plane resting on a ring touches it along, about the plane's
+/// normal, or `None` for every other plane.
+///
+/// **A plane square to the ring's axis and as far along it from the centre as
+/// the tube's radius `r` rests on the tube**, and touches the ring all the way
+/// round one circle: of the ring's own radius `R`, centred where the axis
+/// meets the plane. A flat face resting on a bend like that is the one
+/// crossing of a plane and a ring the KiCad corpus carries: the eight such
+/// edges of the two `Relay_1-Form-*_Schrack-RYII_RM5mm` relays and
+/// `Relay_SPDT_Finder_34.51_Vertical` are each a quarter of that circle
+/// (`the_edges_where_a_relay_pin_rests_on_a_ring_are_quarters_of_its_own_circle`).
+///
+/// **Which planes rest on the tube is asked the way `rcad_geom::walk` asks
+/// it**, so that this writes the circle the walk draws for the pair either
+/// side: square where `n × w` is exactly zero, and resting where `r² − h²`,
+/// with `h` how far along the axis the plane is from the centre, is not
+/// positive (`circles_round_the_axis` in `crates/rcad-geom/src/walk.rs`). The
+/// reader reads none of this back but the circle's axis, which with
+/// `same_sense` picks the arc, so a centre or a radius rounded differently
+/// from the walk's would still read back as the same edge; it is the walk's
+/// own circle so that what the file says is where the edge is.
+///
+/// **The rest are not built** (`docs/decisions.md` §13). A plane square to
+/// the axis nearer the centre than `r` crosses the ring in two circles, of
+/// radii `R ± √(r² − h²)`, and nothing in the corpus carries one; a plane
+/// holding the axis crosses it in the tube's own two circles, which Q407
+/// wants for a flat cap on a bend and extends this for; and any other plane
+/// crosses a ring in a curve with no name in this kernel.
+fn where_a_plane_crosses_a_ring(flat: &Plane, ring: &Torus) -> Option<Crossing> {
+    let along = ring.axis().direction();
+    if flat.normal().cross(along) != Vector::zero() {
+        return None;
+    }
+    let up = along * along.length_squared().recip();
+    let reach = (flat.offset() - flat.normal().dot(ring.centre() - Point::origin()))
+        / flat.normal().dot(up);
+    let axial = reach * along.length();
+    let tube = ring.tube_radius();
+    if !axial.is_finite() || tube * tube - axial * axial > 0.0 {
+        return None;
+    }
+    Some(Crossing {
+        centre: ring.centre() + up * reach,
+        turning: flat.normal(),
+        shape: Shape::Circle {
+            radius: ring.ring_radius(),
+        },
     })
 }
 
