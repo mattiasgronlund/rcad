@@ -40,6 +40,16 @@ fine.
 git gives is what you merge and what the row records. If they differ, say so
 in `needs_judgement`.
 
+**If your brief says `just land` ran first**, the lander's run stopped, died or
+returned nothing, and you are the escalation (§383.5, §384.3). Your branch is
+`merge-<label>-after-land`, since the lander's `merge-<label>` may exist. Before
+you merge anything, run `git merge-base --is-ancestor <lane branch> origin/main`.
+Exit 0 means the lander pushed before it died: merge nothing, run `ff-main`,
+unlock, `mark-finished` as step 5 says, and report `merged: true` with the
+merge commit on `origin/main` that holds the lane's tip as `merged_sha`, and
+in `needs_judgement` that the lander had already landed it. Otherwise merge as
+below, and settle what the stop line names.
+
 ## 2. Judge the verifier
 
 - `merge`: go on.
@@ -78,39 +88,23 @@ in `needs_judgement`.
    `done` step per row, every one with the same lane tip. A row of it the lane
    left undone stays open under its hold: name it in `needs_judgement`, and the
    dispatcher takes it again.
-4. The batch's `add` steps, one for each thing left behind: every item of the
-   lane's `remaining` and `out_of_write_set_needs`, every verifier finding you
-   did not fix, and every
-   item of the "what this leaves" of a section the merge brings (§230.7). §N is
-   that section, or the one the row cites. Skip what is already a row — `just
-   queue` lists them — and use `mise exec -- just queue after <id> <id>` for
-   one that waits on another. A row whose fix adds a refusal, or turns a panic
-   into one, names its crate's `error.rs` in its write set, since the new
-   variant goes there: Q574, Q604 and Q605 were each dropped and filed again
-   for want of it (§360.6). Tiers are §230.1's in §311's order — 1 a new
-   defect, 2 a follow-up that measures or improves what the tests and the
-   nights search — with §307's 2.2 between 2 and 2.5: a row that changes how
-   the work is done — the queue and its verbs, the lanes workflow and its
-   roles, hooks, skills, `CLAUDE.md`, a recipe that is neither a test nor a
-   fuzz night — goes in 2.2, never in 1 or 2. Opus for a
-   numerical refusal, a published bound or a claim of impossibility; Sonnet for
-   a replay, a fuzz artifact, a bisect or a sweep. A row your brief or the
-   lane's report says belongs in another tier moves with `mise exec -- just
-   queue tier <id> <tier>`, which writes that tier's heading if the file has
-   none.
-
-   The first word of a tier 1 row's `what` is its class (§352.3), which the
-   lane's `remaining` gives and you judge where it does not: `wrong`, `crash`
-   or `refuses`, then `/A` a real input met it, `/B` a shape designers make on
-   purpose, `/C` only a probe builds it, `/D` outside §3.5's scale envelope. A
-   hypothesis nobody has run gets no class at all, whatever it predicts
-   (§360.5): C is for what a probe has built. The first word of a row in any
-   tier is `small` when it needs no trace, its place is known, and it takes
-   about ten minutes. One tag at most; a defect is never small. A stale claim
-   or a missing test the lane's own change caused, inside its write set, is
-   not a row (§352.5): make it a step 2 fix when it is a few lines, and file
-   it only when it is not. Nor is a stale note in a decisions section that
-   step 2's last bullet lets you fix.
+4. The batch's `add` steps are the lane's `rows`, which its report carries
+   as lists of words, each step as it stands (§383.4). The lane wrote them
+   while it still had the context, by the rules for tier, class, `small`, write
+   set and `after` in `.claude/agents/lane.md`; read that paragraph before you
+   change one or write one more. Its verifier checked them against `remaining`
+   and the open rows, so change one only where a `fix_first` names it. Add a
+   step of your own only for a verifier finding you did not fix, or for a
+   lane whose report has no `rows`, which an older lane may not: then every
+   item of its `remaining` and `out_of_write_set_needs`, and of the "what this
+   leaves" of a section the merge brings (§230.7), gets one. Skip what is
+   already a row — `just queue` lists them. A row your brief or the lane's
+   report says belongs in another tier moves with `mise exec -- just queue
+   tier <id> <tier>`, which writes that tier's heading if the file has none.
+   A stale claim or a missing test the lane's own change caused, inside its
+   write set, is not a row (§352.5): make it a step 2 fix when it is a few
+   lines, and file it only when it is not. Nor is a stale note in a decisions
+   section that step 2's last bullet lets you fix.
 5. If §0 names what this merge closes (`mise exec -- just decision 0`), edit
    §0 in this same commit (§172.5).
 6. `mise exec -- just check-queue`.
