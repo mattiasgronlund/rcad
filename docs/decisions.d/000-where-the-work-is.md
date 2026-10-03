@@ -1,6 +1,6 @@
 ## 0. Where the work is
 
-reviewed: 2026-09-25
+reviewed: 2026-10-03
 
 **unit:** *a crossing too nearly parallel to follow* — the corpus files hanging on
 that refusal alone. Chosen by Mattias 2026-09-15 off §107's table: roadmap §4.2 is
@@ -22,7 +22,11 @@ copy on the joiner — absorption's corner and two spellings of one pipe; §232
 §229.3's two torus gaps — a meridian circle's two disks, and a node on its own
 partner; §242 `rcad_testing`'s first asks — one solid validated, a solid copied,
 an edge's length, a face measured; §242.8 two wrong fuse answers, and §48's
-trio with them.
+trio with them. Since, as queue rows with no section of their own: the writer
+round trips all 164 KiCad files that import, up from 45 (Q405, Q763, Q766,
+Q767, Q773, Q774, 2026-10-02..03); the doc of `KICAD_FILES_THAT_ROUND_TRIP` in
+`a_real_file_written_out_and_read_back_is_the_same_solid.rs` says which file
+came in with which.
 
 **What is next is `just queue`.** Every open item is a row of `docs/queue.md`,
 in the tiers of §230.1, §307 and §311 — defects, finding defects better, how the
