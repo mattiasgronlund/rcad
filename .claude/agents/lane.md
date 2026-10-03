@@ -48,6 +48,13 @@ when they all pass, so those failures come back in seconds instead of after a
 whole gate: 4 of 24 lane gates failed on them alone, with every test passing
 (§380, §381).
 
+A base older than §381 has no `pre-gate` recipe at all — `just` says
+`Justfile does not contain recipe pre-gate` — and there you gate with the
+plain `mise exec -- just gate quiet` instead, as Q753's second run did on
+`0c8a44fc`. A run that carries on an earlier run of its own row keeps that
+run's branch and base, so it meets whatever base that was, not whatever
+`main` has moved to since (§381).
+
 Stage with an explicit `git add <path>`, never `-A`, and commit as you go.
 Report `landed_sha` from `git rev-parse HEAD`, not from memory: a merger lands
 the branch by that sha.
