@@ -217,3 +217,46 @@ frame the two faces are stored in (§366). The seeds
 back the same (`every_shape_seed_is_the_shape_it_is_named_for`), so of the
 three shapes the item above names only the bend is still refused, at the
 plane–torus circle (Q407).*
+
+*Since Q407 (2026-10-03, lane `lane-q407-a-bend-cap-written-in-its-stored-frame`,
+off `25860052`) the bend is written and read back, and all three shapes the
+item above names come back the same; the seed `a_quarter_bend_of_pipe` does
+too. Three changes, each in its own doc comment:*
+
+- *The writer names a closed edge where a flat cap holding a ring's axis
+  crosses it: the circle round the tube on the corner's side of the axis,
+  worked out in the stored frame and placed
+  (`where_a_cap_holding_a_rings_axis_crosses_it` in `write.rs`). It turns the
+  way the ring winds round its tube at the corner, which is the cap's normal
+  or its reverse by the same sign that picks the side, so
+  `which_way_a_closed_crossing_turns` is not needed and Q70's four sign
+  choices are not searched. Turned the other way, the seed's file is refused
+  by the reader.*
+- *The writer names the seam, a quarter of the inner equator, as an arc in the
+  plane its run names (`where_a_plane_square_to_a_ring_crosses_it_nearest`),
+  which was the second refusal behind the first.*
+- *The reader adds the pipe of the ring's own radius to the half-space that
+  picks such an arc, inside it for the inner circle and outside for the outer
+  (`which_of_a_rings_two_circles` in `brep.rs`). A half-space alone holds part
+  of both circles, which `rcad_geom`'s own crossing of a plane and a ring says
+  needs the pipe, and the comparison found the read-back seam picked by one
+  picker where the kernel's had two. **The reader was the side that was short,
+  not the comparison.***
+
+*Q70's figures, run again on this base. `how_often_a_model_the_mutator_draws_is_refused`
+counted 85 of 400 draws refused at `{ first: "plane", second: "ring", closed: true }`
+before and none after; 128 of 400 refused before and 43 after. The seed
+measures `118.38670869374307` built and read back
+(`the_quarter_bend_seed_measures_the_same_read_back_from_its_own_file`), which
+is the number Q70 saw read back; Q70's built `118.38685376813798` and the loop
+starting one coedge later were not seen on this base, which builds its bends
+the way a file writes them (§361). That §361 is what moved them is not
+checked.*
+
+*What this leaves: of the 85 draws now written, 3 are refused by the reader
+with `CannotNameWhichPieceOfACrossingThisIs` and 7 more stop at "a different
+surface", a turned bend's axis read back an ulp moved, which is Q497's gap
+reaching tori as it reached cones. `how_often_a_turned_bend_comes_back_from_its_own_file`
+turns the bend about `x`, `y` and `z` by every tenth of a radian: of 372, the
+reader refuses 28, all about `x` or `y`, and the writer refuses one seam. Neither
+was traced.*

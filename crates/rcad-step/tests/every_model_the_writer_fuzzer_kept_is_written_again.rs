@@ -107,9 +107,9 @@
 //! refused by name — the ball at its pole, and the frustum, the cone, the bend
 //! and the turned bar at a curve between two faces the writer cannot name yet —
 //! and §241 lists what that costs the fuzzer. Since Q730 the ball is written
-//! and comes back the same, since Q405 the turned bar, and since Q662 the
-//! frustum and the pointed cone (`docs/decisions.md` §366), so only the quarter
-//! bend is refused.
+//! and comes back the same, since Q405 the turned bar, since Q662 the frustum
+//! and the pointed cone (`docs/decisions.md` §366), and since Q407 the quarter
+//! bend, so all seven come back the same.
 
 #![forbid(unsafe_code)]
 
@@ -459,7 +459,7 @@ fn every_shape_seed_is_the_shape_it_is_named_for() {
             seed: "a_quarter_bend_of_pipe",
             faces: &["plane", "plane", "torus"],
             centroid: [QUARTER_BEND_MIDDLE, QUARTER_BEND_MIDDLE, 0.0],
-            comes_back: false,
+            comes_back: true,
         },
     ];
     let policy = Policy::certified();
@@ -497,6 +497,39 @@ fn every_shape_seed_is_the_shape_it_is_named_for() {
         let expected = if shape.comes_back { (1, 0) } else { (0, 1) };
         assert_eq!(outcome, expected, "{}: {reached:?}", shape.seed);
     }
+}
+
+/// The quarter bend seed, written and read back, measures the same volume to
+/// the bit, with the mesh taken at the read-back model's scale as the target
+/// takes it.
+///
+/// Q70's probe of 2026-09-28 saw it come back `118.38670869374307` against
+/// `118.38685376813798` built, with its wall's loop starting one coedge later.
+/// On a base with the bends built the way a file writes them (§361) and the
+/// cap circles and the seam written as Q407 writes them, neither is so: the
+/// loop starts where it did, and this prints the one volume twice.
+#[test]
+fn the_quarter_bend_seed_measures_the_same_read_back_from_its_own_file() {
+    let bytes =
+        std::fs::read(corpus().join("a_quarter_bend_of_pipe")).expect("the seed is checked in");
+    let model = postcard::from_bytes::<Model>(&bytes).expect("a shape seed decodes");
+    let text = rcad_step::write(&model, "a quarter bend").expect("the bend is written");
+    let file = rcad_step::StepFile::read(text.as_bytes()).expect("this writer's text parses");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let back = rcad_step::Import::read(&file, &policy, &mut log).expect("the bend is read back");
+    let deflection = Deflection::for_scale(back.model().scale());
+    let [built, read_back] = [&model, back.model()].map(|holding| {
+        holding
+            .solids()
+            .next()
+            .expect("one solid")
+            .measure(deflection, &policy, &mut log)
+            .expect("the bend measures")
+            .volume()
+    });
+    println!("built {built:?}, read back {read_back:?}");
+    assert_eq!(built.to_bits(), read_back.to_bits());
 }
 
 /// Q166's seed (`docs/decisions.md` §313), the 2026-09-26 crash file
