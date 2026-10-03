@@ -1,12 +1,22 @@
 //! A closed rim between a ball and a plane, with its one corner on the ball's
-//! north pole: the closed edge neither of the mesher's direction rules answers.
+//! north pole: the closed edge none of the mesher's three direction rules
+//! answers.
 //!
 //! `BuildingAMesh::walk` turns a closed edge's points round to the way the
-//! longitude of a curved surface either side runs at the corner. On a ball's
-//! pole that longitude is exactly zero, and a plane has none, so neither rule
-//! says anything and the walk's own order is kept (`docs/decisions.md` §199.4,
-//! §202.1). Which way that order runs is fixed by the run and its two surfaces
-//! alone; the `and` plane turned over turns it round.
+//! longitude of a curved surface either side runs at the corner
+//! (`the_way_a_closed_edge_is_stored_running`), or, where that reads nothing,
+//! the way the first curved surface's longitude runs where the two faces
+//! merely touch there (`the_way_a_closed_edge_where_its_faces_touch_runs`). On
+//! a ball's pole that longitude is exactly zero, and a plane has none, so
+//! neither says anything. Since Q665, a third rule asks instead which side of
+//! the other surface each face's own corners say it lies on
+//! (`the_way_the_faces_along_a_closed_edge_walk_it`) — and here it reads
+//! nothing too, because every face along this rim has only the rim's own
+//! corner, and that corner is never off either surface for either face to
+//! read a side from. So all three give nothing and the walk's own order is
+//! kept (`docs/decisions.md` §199.4, §202.1, §341.5). Which way that order
+//! runs is fixed by the run and its two surfaces alone; the `and` plane
+//! turned over turns it round.
 //!
 //! **It is not a wrong mesh, and this file is the demonstration.**
 //! `SolidBuilder::build` runs `Model::validate`, whose sweep meshes the solid
