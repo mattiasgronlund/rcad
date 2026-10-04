@@ -12,7 +12,7 @@ use std::f64::consts::SQRT_2;
 
 use rcad_geom::{
     Axis, Cylinder, EdgeRun, HalfSpace, NEAREST_F64_POINT_ROUNDOFF, Orientation, Picker, Plane,
-    Point, Sphere, Surface, Vector,
+    Point, Sphere, Surface, Torus, Vector, which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{
@@ -151,6 +151,10 @@ struct Walk {
     /// The surfaces either side of each closed edge, filled in before any face
     /// of the shell is described — see [`Walk::find_the_closed_edges`].
     closed_edges: BTreeMap<EntityId, Vec<Surface>>,
+    /// The run every closed edge was described with, which
+    /// [`Walk::which_way_round_a_closed_edge_is_stored`] reads the two surfaces
+    /// the edge is between off where the longitude says nothing.
+    closed_runs: BTreeMap<EntityId, EdgeRun>,
     /// The surfaces of the faces along every edge of the shell, filled in by
     /// the same pass — [`Walk::the_surface_that_names_the_curve`] reads it to tell a circle
     /// imprinted on a flat face from one a curved face places.
@@ -174,6 +178,7 @@ impl Walk {
             face_names: Vec::new(),
             face_surfaces: Vec::new(),
             closed_edges: BTreeMap::new(),
+            closed_runs: BTreeMap::new(),
             surfaces_along_each_edge: BTreeMap::new(),
         }
     }
@@ -893,24 +898,27 @@ impl Walk {
     /// later, so a hint that came out wrong is a refusal by name and never a
     /// solid with a seam running backwards.
     ///
-    /// **A travel that dots to exactly zero against the winding is no answer,
-    /// and it says so.** `which_way_a_closed_crossing_turns` reads the surface's
-    /// latitude there, and this has no gradient to build one from — so the hint
-    /// goes back to the file's own flag rather than picking a side. Picking one
-    /// is worse than useless: the two uses of a closed edge travel exact
-    /// opposite ways, so a tie-break that answers the same for both is
-    /// *provably* wrong for one of them, and `SolidBuilder` refuses the whole
-    /// solid by `ADraftEdgeIsWalkedTheSameWayTwice`. That is where 26
-    /// of the corpus's files went, every one of them stopped by this and
-    /// nothing else: a bend of pipe capped by a plane, whose cap circle runs
-    /// round the *ring* while [`Surface::the_way_its_first_coordinate_runs_at`]
-    /// on a bend runs round the **tube**, square to it at every corner.
+    /// **A travel that dots to exactly zero against the winding is a circle
+    /// round a torus's ring**, square at every corner to the winding, which runs
+    /// round the tube. There the way the edge is stored is read the way
+    /// `rcad-topo` reads it, by
+    /// [`the_way_a_closed_edge_runs_where_its_longitude_says_nothing`]: the
+    /// torus's latitude where its two surfaces cross, which is what
+    /// `Model::validate` checks, and the mesher's own rule where a plane
+    /// touches the torus, which `Model::validate` passes over. The disc of
+    /// §229.4 with a round rim in two bands has one of each: its equator, and
+    /// the two circles where its flat faces rest on the rim (§390.5).
     ///
-    /// `ORIENTED_EDGE.orientation` answers a different question (§115), so
-    /// falling back to it is luck — but it is luck that at least tells the two
-    /// uses apart, and `Model::validate` asks the certified question moments
-    /// later and refuses by `AClosedEdgeIsWalkedAgainstItsSurface` when the luck
-    /// runs out.
+    /// **Where neither has an answer the hint goes back to the file's own flag**
+    /// rather than picking a side. Picking one is worse than useless: the two
+    /// uses of a closed edge travel exact opposite ways, so a tie-break that
+    /// answers the same for both is *provably* wrong for one of them, and
+    /// `SolidBuilder` refuses the whole solid by
+    /// `ADraftEdgeIsWalkedTheSameWayTwice`. `ORIENTED_EDGE.orientation` answers
+    /// a different question (§115), so falling back to it is luck — but it is
+    /// luck that at least tells the two uses apart, and `Model::validate` asks
+    /// the certified question moments later and refuses by
+    /// `AClosedEdgeIsWalkedAgainstItsSurface` when the luck runs out.
     fn which_way_round_a_closed_edge_is_stored(
         &self,
         reading: &Reading<'_>,
@@ -935,7 +943,18 @@ impl Walk {
         else {
             return Ok(None);
         };
-        let leaning = travel.dot(winding);
+        let mut leaning = travel.dot(winding);
+        if leaning == 0.0
+            && let (Some(run), [one, other]) =
+                (self.closed_runs.get(&edge_curve), carried_by.as_slice())
+            && let Some(stored) = the_way_a_closed_edge_runs_where_its_longitude_says_nothing(
+                run,
+                [one, other],
+                corner,
+            )
+        {
+            leaning = travel.dot(stored);
+        }
         Ok(if leaning > 0.0 {
             Some(true)
         } else if leaning < 0.0 {
@@ -1010,6 +1029,9 @@ impl Walk {
             [starts_at, ends_at],
             along_the_curve,
         )?;
+        if starts_at == ends_at {
+            self.closed_runs.insert(edge_curve, run.clone());
+        }
         let edge = self
             .builder
             .add_edge(start, end, run)
@@ -2035,6 +2057,115 @@ fn an_edge_with_one_corner(reading: &Reading<'_>, edge_curve: EntityId) -> bool 
         ),
         (Ok(start), Ok(end)) if start == end
     )
+}
+
+/// Which way a closed edge round a torus's ring is stored running, read the
+/// way `rcad-topo` reads it, or `None` where that reads nothing here.
+///
+/// **This mirrors `mesh.rs`'s `the_way_a_closed_edge_is_stored_running`**,
+/// which `rcad-step` cannot call, and through it `Model::validate`'s rule
+/// (`a_closed_crossing_is_walked_the_way_it_is_stored`). The two surfaces are
+/// the ones [`which_two_surfaces_a_run_is_between`] reads off the run, so for
+/// the equator between two bands of one torus they are the torus and the
+/// equator's own plane, not the two bands. The edge runs along `∇S × ∇T`,
+/// turned round where that runs against the torus's longitude `L`; where the
+/// dot is exactly zero, as it is all the way round a circle round the ring,
+/// against the second reference, the gradient crossed into the first:
+/// `∇C × L`. At a torus's outer equator that runs down the ring angle.
+///
+/// **Where the two surfaces touch rather than cross, `∇S × ∇T` is nothing**
+/// and `Model::validate` passes the edge over. The mesher still puts its points
+/// in an order, and a face that walks them the other way is refused
+/// `AWireWillNotLieFlatOnItsFace`. That order is
+/// [`the_way_a_circle_where_a_plane_touches_a_torus_runs`].
+///
+/// Only a torus is read: the curved one of any other pair has a longitude that
+/// is not square to its closed circles, so the caller never gets here, or
+/// gets here at a corner this has not been measured on, and keeps the file's
+/// flag there.
+fn the_way_a_closed_edge_runs_where_its_longitude_says_nothing(
+    run: &EdgeRun,
+    faces: [&Surface; 2],
+    at: Point,
+) -> Option<Vector> {
+    let pair = which_two_surfaces_a_run_is_between(run, faces);
+    let curved = the_curved_one_of(&pair)?;
+    let Surface::Torus(ring) = curved else {
+        return None;
+    };
+    let longitude = curved.the_way_its_first_coordinate_runs_at(at)?;
+    let gradient = gradient_of(&curved, at)?;
+    let forward = gradient_of(&pair[0], at)?.cross(gradient_of(&pair[1], at)?);
+    let with_the_longitude = forward.dot(longitude);
+    let against_the_frame = if with_the_longitude == 0.0 {
+        forward.dot(gradient.cross(longitude))
+    } else {
+        with_the_longitude
+    };
+    if against_the_frame > 0.0 {
+        Some(forward)
+    } else if against_the_frame < 0.0 {
+        Some(-forward)
+    } else {
+        the_way_a_circle_where_a_plane_touches_a_torus_runs(&pair, &ring, at)
+    }
+}
+
+/// Which way the mesher puts the points of a circle where a plane rests on a
+/// torus, round the top or the bottom of its tube, or `None` for any other
+/// pair.
+///
+/// **This mirrors `mesh.rs`'s `the_way_a_closed_edge_where_its_faces_touch_runs`
+/// together with what the mesher does with its answer**, neither of which
+/// `rcad-step` can call. That function hands back the torus's longitude `L`,
+/// and the mesher turns the points `rcad_geom::walk` drew round where the
+/// first of them lies against `L` from the corner. `L` runs round the tube,
+/// square to this circle, so it is the circle's bend that decides and not its
+/// first step: the first point lies towards the circle's centre whichever way
+/// it is drawn. The walk draws a circle round a torus's axis the way a right
+/// hand turns about that axis (`circles_round_the_axis`, from
+/// `Torus::basis`). So the drawn order is kept where `L` points towards the
+/// centre, which is round the top of the tube, and turned round where it
+/// points away, round the bottom.
+fn the_way_a_circle_where_a_plane_touches_a_torus_runs(
+    pair: &[Surface; 2],
+    ring: &Torus,
+    at: Point,
+) -> Option<Vector> {
+    let flat = pair.iter().find_map(Surface::as_plane)?;
+    let along = ring.axis().direction();
+    if flat.normal().cross(along) != Vector::zero() {
+        return None;
+    }
+    let out = at - ring.centre();
+    let centre = ring.centre() + along * (out.dot(along) / along.dot(along));
+    let drawn = along.cross(at - centre);
+    let longitude = Surface::Torus(*ring).the_way_its_first_coordinate_runs_at(at)?;
+    Some(if (centre - at).dot(longitude) < 0.0 {
+        -drawn
+    } else {
+        drawn
+    })
+}
+
+/// Which way a plane or a torus faces at `at`, or `None` for any other surface.
+///
+/// **Spelled exactly as `rcad-topo`'s `validate.rs` spells `gradient_of`**,
+/// the bulge term included, so that a sign read off it here is the sign
+/// `Model::validate` reads: `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for
+/// `x = at − centre`, the quartic's gradient divided by four.
+fn gradient_of(surface: &Surface, at: Point) -> Option<Vector> {
+    if let Some(flat) = surface.as_plane() {
+        return Some(flat.normal());
+    }
+    let Surface::Torus(ring) = surface else {
+        return None;
+    };
+    let (centre, along) = (ring.centre(), ring.axis().direction());
+    let out = at - centre;
+    let (big, small) = (ring.ring_radius(), ring.tube_radius());
+    let bulge = out.dot(out) + big * big - small * small - 2.0 * big * big;
+    Some(out * (along.dot(along) * bulge) + along * (2.0 * big * big * along.dot(out)))
 }
 
 /// Which of the surfaces either side of a closed edge names which way it runs.
