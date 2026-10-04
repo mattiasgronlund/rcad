@@ -12,6 +12,10 @@ ring in **two** circles. That refusal is a gap: with the two circles kept
 apart, in a scratch copy, both unions answer a half bend that validates and
 measures `4π²`.
 
+**Fixed by Q756, 378.6**: a closed crossing is now named by which of the
+plane's two circles it is as well, and both unions answer the half bend. The
+same fix answers all ten of §377's refused fuses.
+
 ### 378.1 The pair, and what each rule should give
 
 Ring four, tube one, both bends about `+z`: one from `+x` round to `+y`, the
@@ -163,3 +167,75 @@ name.
 - **Q513**, the same pair with the second bend's axis turned round, waits on
   Q512 and is not touched here.
 - The three pairs at the end of 378.4 are guesses that nobody has run.
+
+### 378.6 The fix: family 3, a closed crossing named by which circle it is
+
+*Queue row Q756, which replaces Q512, off `51a2d890`. It changed
+`crates/rcad-topo/src/fuse/assemble.rs` and the two test files named below.*
+
+**On the base**, `two_quarter_bends_meeting_end_to_end_are_refused_as_not_a_manifold_when_united`
+with a print of what came back: both orders gave
+`Err(ResultIsNotManifold { count: 4 })`, "the result would not be a solid: an
+edge would have 4 faces along it". Q656's union of names (§284.8) did not
+change it.
+
+**The fix.** `name_of_the_closed_crossing_through` names a closed crossing by
+its two surfaces, as before, and by `which_meridian_circle_it_is`: for a plane
+and a ring, the four numbers of the half-space
+`the_half_space_naming_the_meridian_circle_through` in `holds.rs` picks the
+circle through the side's own point by. Every other pair gets `None` and is
+named as before. The name reaches all four places 378.4 listed: `on_curve` and
+`taken_over` in `Corners::with_each_closed_curve_started_once`,
+`CornerName::RoundACurve` and `HalfWayRoundACurve`, and `EdgeName`'s
+`which_curve_it_is`. The fuse's policy and log now travel down to them, since
+the half-space is found by `intersect`.
+
+**Why the four numbers are one name per circle.** `intersect` writes the two
+circles' half-spaces as `h` and `h` turned round, with `h`'s normal the ring's
+axis crossed with the plane's normal. Turning the plane or the axis round
+negates every number of both exactly, so the half-space that keeps a given
+circle holds the same numbers in every spelling, except that a zero can come
+back `-0.0`. Adding zero turns it back. The test
+`each_circle_a_plane_through_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled`
+in `assemble.rs` asks all four spellings: with the fold taken out, the four
+come back as four names differing only in a zero's sign, and the union below
+fails too. Turning the two surfaces the one way before asking was tried and
+dropped: taking it out failed no test, because the fold already does the work.
+
+**The answer now.** The test is renamed
+`two_quarter_bends_meeting_end_to_end_unite_into_a_half_bend`, and checks both
+orders: one solid, an empty log, `Model::validate` passing, the two caps on
+`y = 0` facing `−y` and the two walls, and the volume inside the bound
+`measure` gives at deflection `0.01`. A probe that printed the volumes gave
+`39.41226215940417 ± 0.7842662817045987` and `39.41226215940403 ±
+0.7842662817045987`, against `4π² = 39.47841760435743`.
+`two_quarter_bends_on_one_ring_turned_round_get_past_the_crossing_either_way_round`
+in `two_frustums_stacked_on_one_cone.rs` said the one-spelling pair refused
+`count: 4`; its doc now names this answer as the one to compare against.
+
+**§377's ten refusals answer too.** The same probe, run on §377's helper
+`a_bend_turned_and_written_out`, fused the half bend with each quarter under
+every rule §377.4 pins as `NotManifold`. All ten come back one solid with an
+empty log that validates: the four unions and the two differences that should
+be the half bend measure `39.412… ± 0.7843`, two quarters, and the four unions
+that should be three quarters measure `59.118… ± 1.1764` against
+`6π² = 59.2176`. So `tests/a_half_bend_fused_with_a_quarter_bend_on_one_torus.rs`
+fails on this branch, in its two tests that pin `NotManifold`, and nothing else
+in `rcad-topo` does. That file is not in this row's write set; 378.7 says what
+it needs.
+
+### 378.7 What this leaves
+
+- **§377's pins.** In `a_quarter_bend_inside_a_half_bend_fuses_to_the_quarters_it_should`
+  the two unions become `Quarters(2)`, and in
+  `a_quarter_bend_against_a_half_bends_cap_fuses_to_the_quarters_it_should`
+  the difference with the half first becomes `Quarters(2)` and the two unions
+  `Quarters(3)`. §377.4 and §377.5, which call those ten refused, move with
+  them. Until that lands this branch's gate fails on those two tests.
+- **Q513**, the pair with the second bend's axis turned round, still refuses
+  `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, before any of this is reached.
+- **Other pairs that cross in more than one closed curve** are still named by
+  their two surfaces alone: a plane square to a ring's axis, which cuts an
+  inner and an outer circle, and two rings. Nobody has fused either.
+  `holds.rs`'s `the_picker_naming_the_circle_through` already picks the inner
+  and the outer circle by a pipe, and is private.

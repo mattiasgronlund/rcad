@@ -240,8 +240,10 @@ fn a_frustum(model: &mut Model, near: f64, far: f64, axis: Axis) -> SolidKey {
 /// question of whether the two walls cross and stops where the two spellings
 /// and a cap meet at a corner, because everything past `intersect` still keys
 /// a surface by the numbers it holds (§357.4). The pair written in one
-/// spelling does not answer either — `ResultIsNotManifold { count: 4 }` — so
-/// there is no answer here yet for this pair to be compared against.
+/// spelling answers the half bend, `4π²`
+/// (`two_quarter_bends_meeting_end_to_end_unite_into_a_half_bend`, §378.6),
+/// and that is the answer this pair should be compared against once it gets
+/// past this refusal.
 #[test]
 fn two_quarter_bends_on_one_ring_turned_round_get_past_the_crossing_either_way_round() {
     for first_quarter_first in [true, false] {

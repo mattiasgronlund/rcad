@@ -8,45 +8,86 @@
 //!
 //! | rule | should give | gives |
 //! |---|---|---|
-//! | union | one half bend from `+x` round to `−x`, `4π²` by Pappus | refused `ResultIsNotManifold { count: 4 }`, both ways round |
+//! | union | one half bend from `+x` round to `−x`, `4π²` by Pappus | the half bend, both ways round |
 //! | intersection | no solid at all (§191) | no solid, both ways round |
 //! | difference | the first argument whole, `2π²` | the first argument whole, both ways round |
 //!
-//! **The union's refusal is a gap.** Selection keeps the right four pieces:
-//! the two caps on `y = 0` and the two walls. Assembly then joins the two caps'
-//! circles into one edge. The plane `y = 0` cuts the ring in two circles, round
-//! `(4, 0, 0)` and round `(−4, 0, 0)`, and `Corners::with_each_closed_curve_started_once`
-//! names a closed curve by its two surfaces alone. So both circles get one
-//! name, the corner at `(3, 0, 0)` is handed over to the one at `(−3, 0, 0)`,
-//! and the one edge left has both caps and both walls along it. Keeping the
-//! two corners apart, in a scratch copy, made both orders answer one solid of
-//! four faces that validates and measures `39.4123 ± 0.7843`. §378 has the
-//! trace and the fixes considered.
+//! **The union used to be refused** `ResultIsNotManifold { count: 4 }`, both
+//! ways round. The plane `y = 0` cuts the ring in two circles, round
+//! `(4, 0, 0)` and round `(−4, 0, 0)`, and assembly named a closed curve by its
+//! two surfaces alone. So both circles got one name, the corner at `(3, 0, 0)`
+//! was handed over to the one at `(−3, 0, 0)`, and the one edge left had both
+//! caps and both walls along it. A closed crossing is now named by which of
+//! the plane's two circles it is as well, and the union is one solid of four
+//! faces that validates and measures `39.4123 ± 0.7843`. §378 has the trace,
+//! the fixes considered and the fix.
 //!
 //! `a_quarter_bend`, `WhereABendSits` and its two consts are copied from
 //! `two_frustums_stacked_on_one_cone.rs`, where the same two bends are fused
 //! with the second one's axis turned round.
 
-use rcad_geom::{Axis, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{
+    Axis, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
 
+/// The two circles `y = 0` cuts the ring in, one round `(4, 0, 0)` and one
+/// round `(−4, 0, 0)`, stay two edges, so the union is the half bend: both
+/// caps on `y = 0` facing `−y` and the two walls, `4π²` by Pappus.
 #[test]
-fn two_quarter_bends_meeting_end_to_end_are_refused_as_not_a_manifold_when_united() {
+fn two_quarter_bends_meeting_end_to_end_unite_into_a_half_bend() {
     for first_quarter_first in [true, false] {
         let (mut model, [first, second]) = the_two_bends(first_quarter_first);
-        let said = model
+        let mut log = ProvenanceLog::new();
+        let solids = model
             .fuse(
                 &[first],
                 &[second],
                 Rule::Union,
                 &Policy::certified(),
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("first quarter first {first_quarter_first}: {why:?}"))
+            .solids()
+            .to_vec();
+        assert!(log.is_empty(), "{log:?}");
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("first quarter first {first_quarter_first}: {why:?}"));
+        let [answer] = solids[..] else {
+            panic!("first quarter first {first_quarter_first}: {solids:?}");
+        };
+        let on_y_zero_facing_down = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -1.0, 0.0))
+                .expect("a coordinate direction is a unit normal"),
+        );
+        let ring = Surface::Torus(
+            Torus::new(Axis::z(), RING, TUBE).expect("a tube narrower than its ring"),
+        );
+        let mut want = vec![on_y_zero_facing_down, on_y_zero_facing_down, ring, ring];
+        want.sort_by(Surface::how_it_sorts_against);
+        assert_eq!(
+            surfaces_of(&model, answer),
+            want,
+            "first quarter first {first_quarter_first}: the two caps on y = 0 and the two walls"
+        );
+        let measured = model
+            .solid(answer)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
-            .map(|fused| fused.solids().len());
+            .unwrap_or_else(|why| panic!("first quarter first {first_quarter_first}: {why:?}"));
+        let half = 4.0 * core::f64::consts::PI * core::f64::consts::PI;
         assert!(
-            matches!(said, Err(Error::ResultIsNotManifold { count: 4 })),
-            "first quarter first {first_quarter_first}: {said:?}"
+            (measured.volume() - half).abs() <= measured.volume_error(),
+            "first quarter first {first_quarter_first}: {} against {half}, and the mesh may \
+             miss by {}",
+            measured.volume(),
+            measured.volume_error()
         );
     }
 }
@@ -187,7 +228,7 @@ const FROM_Y_ROUND_TO_MINUS_X: WhereABendSits = WhereABendSits {
 /// walked right-handed about the outward normal of the face it bounds
 /// (`docs/decisions.md` §361).
 fn a_quarter_bend(model: &mut Model, sits: &WhereABendSits, axis: Axis) -> SolidKey {
-    use rcad_geom::{Cylinder, HalfSpace, Picker, Torus};
+    use rcad_geom::{Cylinder, HalfSpace, Picker};
     let turned_round = axis.direction().components()[2] < 0.0;
     let round = |turn: Orientation| if turned_round { turn.reversed() } else { turn };
     let skin = Surface::Torus(Torus::new(axis, RING, TUBE).expect("a tube narrower than its ring"));
