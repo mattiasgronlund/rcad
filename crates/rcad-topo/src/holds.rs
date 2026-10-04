@@ -2486,6 +2486,19 @@ const WHETHER_TWO_DIRECTIONS_LIE_ALONG_ONE_LINE: &str = "whether two directions 
 /// the plane touching the pipe along the ruling rather than crossing it, and
 /// that reads [`Decision::Zero`] and is refused.
 ///
+/// **A straight side that starts at a cone's apex is read at its end
+/// instead**, because the cone has no gradient at its apex and `∇S × ∇T` is
+/// nothing there for every plane, crossing or touching. Such a side is a piece
+/// of a ruling, the ray from the apex through its end, and along that ray the
+/// cone's gradient is the one at the end scaled by how far out it is
+/// ([`gradient_at`] is linear in the point less the apex), so every point of the
+/// side but the apex reads the sign the end reads. A plane touching the cone
+/// along the ruling still reads [`Decision::Zero`] there and is still refused. A
+/// face with a corner at the apex has one such side wherever its wire passes
+/// the apex: the side that comes in ends there and is read at its start, and the
+/// side that goes out starts there; a quarter of a pointed cone's skin was
+/// refused at that second side until `docs/decisions.md` §389's row Q820.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc between two
@@ -2498,14 +2511,19 @@ fn which_side_of_its_neighbour_a_side_keeps(
     side: &Side,
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let at = side.start.at;
+    let starts_at_the_apex = matches!(surface, Surface::Cone(cone) if cone.apex() == side.start.at);
+    let at = if starts_at_the_apex && matches!(side.run, SideRun::Straight) {
+        side.end.at
+    } else {
+        side.start.at
+    };
     let along_the_crossing =
         the_way_the_crossing_runs(surface, &side.across, at).ok_or_else(cannot)?;
     let flat = [surface, &side.across].map(|one| one.as_plane().is_some());
     let runs = match &side.run {
         SideRun::Straight => {
             let to = side.end.at.coordinates();
-            let from = at.coordinates();
+            let from = side.start.at.coordinates();
             let step = core::array::from_fn(|axis| {
                 Interval::exactly(to[axis]) - Interval::exactly(from[axis])
             });
