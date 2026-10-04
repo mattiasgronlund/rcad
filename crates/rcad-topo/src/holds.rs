@@ -54,7 +54,10 @@ use rcad_geom::{
     WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS, intersect,
     which_two_surfaces_a_run_is_between,
 };
-use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
+use rcad_predicates::expansion::{
+    difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
+    two_product,
+};
 use rcad_predicates::{
     Decision, Filtered, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy,
     Predicate, ProvenanceLog, Record, orient2d,
@@ -1845,7 +1848,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// halves, and any number of halves meet in one piece, where planes that miss
 /// the centre can leave two caps with nothing between them.
 ///
-/// # On a cone it is planes the apex is in front of, any number of them, and at most one it is on
+/// # On a cone it is planes the apex is in front of, any number of them, and one it is on or two that meet inside the cone
 ///
 /// Every point of one nappe but the apex sits on exactly one ray from the apex —
 /// a ruling — and the whole straight segment from the apex out to that point is
@@ -1861,8 +1864,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// one of those intervals starts at the apex. Then the region holds, with each of
 /// its points, the whole segment back to the apex — it is star-shaped from the
 /// apex, so it is one piece. Nothing in that mentions how the cut planes sit
-/// against each other, which is why this arm counts planes and reads one sign per
-/// cut rather than looking for where two of them meet. §216.5's sketch settled a
+/// against each other, which is why this arm reads one sign per cut the apex is
+/// in front of rather than looking for where two of them meet; only two cuts
+/// through the apex are asked where they meet, below. §216.5's sketch settled a
 /// cone cut by exactly **two** planes by walking the circle of rulings; that
 /// sketch is not needed, and it was not enough, because §217.4 counted every
 /// cone-face refusal in `tests/a_plane_cut_along_a_cones_other_nappe.rs` and
@@ -1883,33 +1887,54 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// `tests/a_plane_cut_along_a_cones_other_nappe.rs`, is those two points through
 /// the public [`SolidView::face_holds_the_point`].
 ///
-/// **The same pinch happens on one nappe, and it is why at most one cut may
-/// hold the apex.** A plane through the apex has the value zero there, so along
-/// each ruling it keeps all of it or only the apex, and which is the sign of how
-/// fast it grows along that ruling — affine in `cos φ` and `sin φ`, so one arc of
-/// the circle of rulings. One such arc is one piece. Two can meet in two: keep
-/// `|x| ≤ z/10` on the cone of slope a half and the rulings with
-/// `|cos φ| ≤ 1/5` are left, one run round `+y` and one round `−y`, two sheets
-/// that meet only at the apex. A face on one of them is cut by both planes, has
-/// every side in front of both, and the other sheet is in front of both too, so
-/// `held_in_front_of_all` would hold its points — a wrong answer.
+/// **The same pinch happens on one nappe, and it is why two cuts through the
+/// apex must meet inside the cone.** A plane through the apex has the value zero
+/// there, so along each ruling it keeps all of it or only the apex, and which is
+/// the sign of how fast it grows along that ruling — affine in `cos φ` and
+/// `sin φ`, so one arc of the circle of rulings. One such arc is one piece. Two
+/// can meet in two: keep `|x| ≤ z/10` on the cone of slope a half and the
+/// rulings with `|cos φ| ≤ 1/5` are left, one run round `+y` and one round `−y`,
+/// two sheets that meet only at the apex. A face on one of them is cut by both
+/// planes, has every side in front of both, and the other sheet is in front of
+/// both too, so `held_in_front_of_all` would hold its points — a wrong answer.
 /// `two_planes_through_the_apex_leave_a_nappe_in_two_sheets` below walks those
 /// rulings. Before `docs/decisions.md` §389 a cut through the apex came only
 /// with a side stored as [`EdgeRun::Straight`] along a ruling, since a ruling
 /// stored as part of a crossing was refused as an arc; since it, every ruling
 /// side reaches this arm.
 ///
-/// **That refuses some faces that are one piece, and it is a gap.** Two planes
-/// through the apex meeting along a line inside the cone keep one arc: every
-/// half-plane round that line meets the nappe in one ruling, so a wedge round it
-/// holds one run. A quarter of a pointed cone, cut by `x = 0` and `y = 0` along
-/// its axis, is that, and its skin is refused here
-/// (`a_quarter_of_a_pointed_cone_has_its_skin_refused_by_name_though_it_is_one_piece`
-/// in `tests/a_solid_carrying_a_run_along_a_cones_ruling.rs`, and the quarter's
-/// cuts in `two_planes_through_the_apex_leave_a_nappe_in_two_sheets` below).
-/// It was refused before §389 too, measured, so this took nothing away.
-/// Telling it from two sheets wants where the two planes meet compared with the
-/// cone (`docs/decisions.md` §389).
+/// **Two cuts through the apex that meet in a line strictly inside the cone
+/// keep one run, whichever wedge is kept and on either nappe.** Cut the nappe
+/// square to its axis: the rulings are the rim of a disc, and a ruling carries
+/// more than the apex exactly where its rim point is in front of both planes.
+/// The line the planes meet in crosses that disc at a point `c` strictly inside
+/// it, and each plane crosses it in a straight line through `c`, so the part in
+/// front of both is a wedge with its corner at `c` and an angle under a half
+/// turn — a fan of rays out of `c`. Each of those rays leaves the disc through
+/// its rim exactly once, because `c` is strictly inside, so the rim points in the
+/// wedge are one arc: one run of rulings. Cuts the apex is strictly in front of
+/// only shorten each ruling's piece, never to nothing, so the region is still
+/// star-shaped from the apex over that one run. A quarter of a pointed cone, cut
+/// by `x = 0` and `y = 0` along its axis, is that
+/// (`a_quarter_of_a_pointed_cone_holds_its_points` in
+/// `tests/a_solid_carrying_a_run_along_a_cones_ruling.rs`).
+/// [`do_two_planes_through_the_apex_meet_inside`] settles where the line is.
+///
+/// **The strip `|x| ≤ z/10` is refused because of its shape**, not for want of
+/// arithmetic: its planes meet along `y`, square to the axis and outside the
+/// cone, so there is no corner `c` in the disc, the two planes cross the section
+/// in two lines side by side, and the strip between them cuts the rim in two
+/// arcs. A line outside the cone that does cross the section crosses it outside
+/// the disc, and a wedge out of a point outside a disc can cut its rim in two
+/// arcs the same way. A line along a ruling, or two planes that are one, is
+/// refused as well: the argument above wants `c` strictly inside.
+///
+/// **Two cuts through the apex beside a cut the apex is behind, and three or
+/// more through it, are refused**, and that is a gap and not a limit: neither is
+/// shown to be two pieces. With a third plane through the apex the part of the
+/// section in front of all three is no longer a fan out of one point unless all
+/// three share one line, and with a cut the apex is behind each ruling's piece no
+/// longer starts at the apex, so neither argument above reaches it.
 ///
 /// # And one cut the apex is behind, when it closes, beside at most one other
 ///
@@ -1999,14 +2024,14 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         Surface::Cone(cone) => {
             let apex = PredicatePoint::from(cone.apex().coordinates());
             let mut behind = Vec::new();
-            let mut through_the_apex = 0;
+            let mut through_the_apex = Vec::new();
             for cut in cuts {
                 let Some(flat) = cut.surface.as_plane() else {
                     return false;
                 };
                 let sits = flat.side_of_point(apex);
                 if sits == Decision::Zero {
-                    through_the_apex += 1;
+                    through_the_apex.push(flat);
                     continue;
                 }
                 if sits == cut.kept {
@@ -2017,12 +2042,9 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                 }
                 behind.push(flat);
             }
-            if through_the_apex > 1 {
-                return false;
-            }
-            match behind.as_slice() {
-                [] => true,
-                [flat] => {
+            match (through_the_apex.as_slice(), behind.as_slice()) {
+                ([] | [_], []) => true,
+                ([] | [_], [flat]) => {
                     let not_side_by_side = cuts
                         .iter()
                         .filter_map(|cut| cut.surface.as_plane())
@@ -2030,7 +2052,8 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                         .count();
                     not_side_by_side <= 1 && cone.is_cut_in_a_closed_curve_by(flat) == Some(true)
                 }
-                [_, _, ..] => false,
+                ([one, other], []) => do_two_planes_through_the_apex_meet_inside(cone, one, other),
+                ([] | [_], [_, _, ..]) | ([_, _], [_, ..]) | ([_, _, _, ..], _) => false,
             }
         }
         Surface::Cylinder(pipe) => {
@@ -2038,6 +2061,142 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         }
         Surface::Torus(_) | _ => false,
     }
+}
+
+/// Whether the line two planes through `cone`'s apex meet in lies **strictly
+/// inside** the cone; `false` when it lies on it or outside it, when the two are
+/// one plane, and when the sign could not be settled.
+///
+/// Both planes hold the apex, so the line runs through it along `m = n₁ × n₂`,
+/// the cross product of the two stored normals. The cone's own sign at the
+/// apex plus `m` is `|m × w|² − s²(m·w)²` for `w` the stored axis direction and
+/// `s` the slope — negative inside, as [`side_of_surface`] reads a cone — and
+/// asking it of `m` rather than of a point builds nothing that rounds.
+/// [`WhereTwoPlanesThroughTheApexMeet`] settles it through the cascade, exactly
+/// when the interval cannot. It is even in `m`, so it says nothing of which nappe
+/// and needs to say nothing: the line runs through both, one ray in each.
+///
+/// Only [`Decision::Neg`] is followed. [`Decision::Zero`] is a line along a
+/// ruling, or `m` nothing at all, which is two planes that are one;
+/// [`Decision::Pos`] is a line outside the cone, the strip's two sheets in
+/// `two_planes_through_the_apex_leave_a_nappe_in_two_sheets`. An
+/// [`Decision::Undecidable`] sign costs a refusal, never a guess.
+fn do_two_planes_through_the_apex_meet_inside(
+    cone: &rcad_geom::Cone,
+    one: &Plane,
+    other: &Plane,
+) -> bool {
+    let (sign, _) = rcad_predicates::decide(&WhereTwoPlanesThroughTheApexMeet {
+        one: one.normal().components(),
+        other: other.normal().components(),
+        along: cone.axis().direction().components(),
+        slope: cone.slope(),
+    });
+    match sign {
+        Decision::Neg => true,
+        Decision::Zero | Decision::Pos | Decision::Undecidable { .. } => false,
+        other => panic!("a sign came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// The cone's own sign along the line two planes through its apex meet in:
+/// `|m × w|² − (s·(m·w))²` for `m = n₁ × n₂`, the slope taken inside the
+/// square as `how_a_plane_leans_against_a_cone` takes it.
+///
+/// Degree eight in the stored numbers. The exact level carries every degree of
+/// it in expansions and gives up, as [`SquareToTheAxis`] does, where a product
+/// would round or a sum overflow.
+struct WhereTwoPlanesThroughTheApexMeet {
+    one: [f64; 3],
+    other: [f64; 3],
+    along: [f64; 3],
+    slope: f64,
+}
+
+impl Predicate for WhereTwoPlanesThroughTheApexMeet {
+    fn name(&self) -> &'static str {
+        WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET
+    }
+
+    fn on_floats(&self) -> Option<Filtered> {
+        None
+    }
+
+    fn on_intervals(&self) -> Interval {
+        let meet = cross(exactly(self.one), exactly(self.other));
+        let along = exactly(self.along);
+        let sideways = cross(meet, along);
+        let up = Interval::exactly(self.slope) * dot(meet, along);
+        dot(sideways, sideways) - up * up
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let (one, other, along) = (self.one, self.other, self.along);
+        let mut meet: [Vec<f64>; 3] = Default::default();
+        for (axis, component) in meet.iter_mut().enumerate() {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            let (entries, used) =
+                difference_of_two_products(one[next], other[after], one[after], other[next])?;
+            *component = entries[..used].to_vec();
+        }
+        let mut total = Vec::new();
+        let mut up = Vec::new();
+        for axis in 0..3 {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            let sideways = added(
+                &scaled(&meet[next], along[after])?,
+                &scaled(&meet[after], -along[next])?,
+            );
+            total = added(&total, &multiplied(&sideways, &sideways)?);
+            up = added(&up, &scaled(&meet[axis], along[axis])?);
+        }
+        let up = scaled(&up, self.slope)?;
+        let squared: Vec<f64> = multiplied(&up, &up)?.iter().map(|entry| -entry).collect();
+        match expansion_sign(&added(&total, &squared)) {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            Decision::Undecidable { .. } => None,
+            other => {
+                panic!("exact arithmetic came back with a decision nothing here knows: {other:?}")
+            }
+        }
+    }
+}
+
+/// The name the cone's sign along where two planes through its apex meet goes
+/// by in provenance records.
+const WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET: &str =
+    "where two planes through a cone's apex meet";
+
+/// `expansion` times `factor`, exactly; `None` where one of the products would
+/// round ([`product_is_exact`]).
+fn scaled(expansion: &[f64], factor: f64) -> Option<Vec<f64>> {
+    if !expansion
+        .iter()
+        .all(|&entry| product_is_exact(entry, factor))
+    {
+        return None;
+    }
+    let mut out = vec![0.0; 2 * expansion.len()];
+    let used = scale_expansion(expansion, factor, &mut out);
+    out.truncate(used);
+    Some(out)
+}
+
+/// Two expansions multiplied out, exactly: every entry of one scaling the
+/// other, all added up. `None` where a product would round.
+fn multiplied(left: &[f64], right: &[f64]) -> Option<Vec<f64>> {
+    right.iter().try_fold(Vec::new(), |total, &factor| {
+        Some(added(&total, &scaled(left, factor)?))
+    })
+}
+
+fn added(left: &[f64], right: &[f64]) -> Vec<f64> {
+    let mut sum = vec![0.0; left.len() + right.len()];
+    let used = expansion_sum(left, right, &mut sum);
+    sum.truncate(used);
+    sum
 }
 
 /// Whether the part of `pipe` in front of every cut is one piece because two
@@ -2327,6 +2486,19 @@ const WHETHER_TWO_DIRECTIONS_LIE_ALONG_ONE_LINE: &str = "whether two directions 
 /// the plane touching the pipe along the ruling rather than crossing it, and
 /// that reads [`Decision::Zero`] and is refused.
 ///
+/// **A straight side that starts at a cone's apex is read at its end
+/// instead**, because the cone has no gradient at its apex and `∇S × ∇T` is
+/// nothing there for every plane, crossing or touching. Such a side is a piece
+/// of a ruling, the ray from the apex through its end, and along that ray the
+/// cone's gradient is the one at the end scaled by how far out it is
+/// ([`gradient_at`] is linear in the point less the apex), so every point of the
+/// side but the apex reads the sign the end reads. A plane touching the cone
+/// along the ruling still reads [`Decision::Zero`] there and is still refused. A
+/// face with a corner at the apex has one such side wherever its wire passes
+/// the apex: the side that comes in ends there and is read at its start, and the
+/// side that goes out starts there; a quarter of a pointed cone's skin was
+/// refused at that second side until `docs/decisions.md` §389's row Q820.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc between two
@@ -2339,14 +2511,19 @@ fn which_side_of_its_neighbour_a_side_keeps(
     side: &Side,
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let at = side.start.at;
+    let starts_at_the_apex = matches!(surface, Surface::Cone(cone) if cone.apex() == side.start.at);
+    let at = if starts_at_the_apex && matches!(side.run, SideRun::Straight) {
+        side.end.at
+    } else {
+        side.start.at
+    };
     let along_the_crossing =
         the_way_the_crossing_runs(surface, &side.across, at).ok_or_else(cannot)?;
     let flat = [surface, &side.across].map(|one| one.as_plane().is_some());
     let runs = match &side.run {
         SideRun::Straight => {
             let to = side.end.at.coordinates();
-            let from = at.coordinates();
+            let from = side.start.at.coordinates();
             let step = core::array::from_fn(|axis| {
                 Interval::exactly(to[axis]) - Interval::exactly(from[axis])
             });
@@ -3618,7 +3795,8 @@ mod tests {
         assert_eq!(runs_of_rulings_that_carry_a_point(&two), 1);
     }
 
-    /// Why a cone face is followed beside at most **one** cut through its apex.
+    /// Why a cone face beside **two** cuts through its apex is followed only when
+    /// the two meet inside the cone.
     ///
     /// On the cone of slope a half about `+z`, keep `x ≤ z/10` and `−x ≤ z/10`,
     /// both through the apex, and `z ≤ 8`, which the apex is in front of. Along
@@ -3627,13 +3805,15 @@ mod tests {
     /// than the apex exactly where `|cos φ| < 1/5`: **two** runs of rulings, round
     /// `+y` and round `−y`, two sheets of one nappe meeting only at the apex. The
     /// part in front of every cut is connected through the apex and is still not
-    /// one face, and before this refused it `[] => true` followed it.
+    /// one face, and it is refused: the two planes meet along `y`, outside the
+    /// cone.
     ///
     /// One plane through the apex keeps one run, and that is followed.
     ///
-    /// **Two are refused even where they keep one run**, which is the gap
-    /// `docs/decisions.md` §389 files: `x ≥ 0` and `y ≥ 0`, a quarter of a pointed
-    /// cone, meet along the axis, inside the cone, and keep `0 < φ < 90°`.
+    /// So are two that meet along the axis, inside the cone: `x = 0` and `y = 0`
+    /// keep one run whichever quarter they keep — `0 < φ < 90°` for `x ≥ 0` and
+    /// `y ≥ 0`, a quarter of a pointed cone, and one quarter turn of rulings for
+    /// each of the others.
     #[test]
     fn two_planes_through_the_apex_leave_a_nappe_in_two_sheets() {
         let cone = rcad_geom::Cone::new(Axis::z(), 0.5).expect("a positive slope");
@@ -3663,7 +3843,7 @@ mod tests {
         assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&strip), 2);
         assert!(
             !is_a_family_this_follows(&Surface::Cone(cone), &strip),
-            "two cuts through the apex are refused"
+            "two cuts through the apex meeting outside the cone are refused"
         );
 
         let half = [one_side(), roof()];
@@ -3673,17 +3853,23 @@ mod tests {
             "one cut through the apex, and any the apex is in front of, are followed"
         );
 
-        let quarter = [
-            cut([0.0; 3], [1.0, 0.0, 0.0]),
-            cut([0.0; 3], [0.0, 1.0, 0.0]),
-            roof(),
-        ];
-        assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&quarter), 1);
-        assert!(
-            !is_a_family_this_follows(&Surface::Cone(cone), &quarter),
-            "two cuts through the apex meeting inside the cone keep one run, and are refused \
-             all the same"
-        );
+        for (x_kept, y_kept) in [(1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
+            let quarter = [
+                cut([0.0; 3], [x_kept, 0.0, 0.0]),
+                cut([0.0; 3], [0.0, y_kept, 0.0]),
+                roof(),
+            ];
+            assert_eq!(
+                runs_of_rulings_carrying_more_than_the_apex(&quarter),
+                1,
+                "the quarter facing {x_kept}, {y_kept}"
+            );
+            assert!(
+                is_a_family_this_follows(&Surface::Cone(cone), &quarter),
+                "two cuts through the apex meeting inside the cone keep one run, and are \
+                 followed: the quarter facing {x_kept}, {y_kept}"
+            );
+        }
     }
 
     /// How many runs of the rulings of the slope-one-half cone about `+z` carry a
