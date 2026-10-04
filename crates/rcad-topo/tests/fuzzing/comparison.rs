@@ -348,11 +348,13 @@ fn written_out(face: &Face) -> Vec<u64> {
 ///
 /// **The smallest rotation, not the first smallest corner.** Starting at the
 /// first corner equal to the smallest one is a canonical form only while no
-/// ring visits a corner twice. A face ring that does — and a turned pair makes
-/// one, through the point the turn holds still — is written down as its two
-/// halves by the two orders, and the comparison above then reports a face that
-/// differs when the two answers are the same solid. `docs/decisions.md` §149
-/// is the counterexample that cost a session, §151 is this.
+/// ring visits a corner twice. A face ring that does — an ell covering a
+/// frame's far corner leaves the frame's top face a C whose two ends touch
+/// there, upright or turned (`the_turned_pair_whose_union_lost_a_face_one_way_round.rs`,
+/// `docs/decisions.md` §351.8) — is written down as its two halves by the two
+/// orders, and the comparison above then reports a face that differs when
+/// the two answers are the same solid. `docs/decisions.md` §149 is the
+/// counterexample that cost a session, §151 is this.
 ///
 /// Each step is its corner followed by its run (§165), and a step is turned as
 /// one piece, so a corner never lands beside another corner's run.

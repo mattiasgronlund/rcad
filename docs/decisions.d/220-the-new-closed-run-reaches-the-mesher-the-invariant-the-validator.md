@@ -67,6 +67,14 @@ And a half ball whose skin carries a hole through the north pole is refused four
 different ways across the four coedge orientations, all downstream of pole
 insertion, which did fire. Neither is in the tree and neither is confirmed.
 
+**2026-10-04: the half ball is confirmed and landed.** Q582, `de799a3b`
+(`mesh.rs`'s commit is `2eca0ea0`). `cut_a_ring_across` now gives the band a
+corner wherever a pole side passes a quarter, and breaks a tie toward the
+corner off the pole. All eight right spellings mesh closed and measure half
+the ball, pinned in
+`a_half_ball_holed_through_its_pole_and_capped_on_the_same_ball.rs`. The cap
+finding above is still unreproduced.
+
 ### 220.2 One list instead of two spellings kept in step by hand
 
 §219.7 item 2, one gap in two places. `NamedRun::new` checked

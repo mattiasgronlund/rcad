@@ -190,13 +190,14 @@ fn no_face_of_one_meets_the_other(one: &BakedSolid, other: &BakedSolid) -> bool 
 ///
 /// **Where one of the two has no box here, `bake`'s own boxes are asked
 /// whether they miss.** Those are read off stored corners in plain `f64`
-/// (§35.4) and can be short of the face by a rounding (Q694 measured one), so
-/// a miss between them is not a proof. It is the test the two whole solids'
-/// boxes, those same boxes taken together, have always passed as one, and it
-/// is asked only of a face on a pipe, a cone or a torus, or a flat face with a
-/// side on one, which nothing here bounds (§400.3). Without it a block holding
-/// a cube clear of a frustum through its floor cut the frustum along the
-/// cube's planes in one grouping of a fuse and not in the other.
+/// (§35.4), grown by what writing a corner down costs (Q694, §340.10), but
+/// still plain `f64`, so a miss between them is still not a proof. It is the
+/// test the two whole solids' boxes, those same boxes taken together, have
+/// always passed as one, and it is asked only of a face on a pipe, a cone or
+/// a torus, or a flat face with a side on one, which nothing here bounds
+/// (§400.3). Without it a block holding a cube clear of a frustum through its
+/// floor cut the frustum along the cube's planes in one grouping of a fuse
+/// and not in the other.
 ///
 /// **Asked under a certified policy whatever the fuse runs under, and its
 /// records dropped.** A tolerant policy settling a close call one way would
