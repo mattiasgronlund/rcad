@@ -41,6 +41,9 @@ use rcad_predicates::expansion::two_product;
 use rcad_predicates::{Decision, Point as PredicatePoint};
 use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
 
+use crate::brep::{
+    A_CIRCLE_MAY_MISS_ITS_FACE_BY, a_surface_holds_the_circle, how_far_off_the_circle_can_be,
+};
 use crate::geometry::plane_through;
 
 /// Write every solid in `model` as an ISO 10303-21 file called `called`.
@@ -1542,10 +1545,11 @@ fn stepped(from: f64, steps: i32) -> f64 {
 /// [`MOST_STEPS_OF_ONE_COORDINATE`], whichever comes first.
 ///
 /// **What the reader holds is asked here, not trusted to a bound on the
-/// steps** ([`the_reader_holds_a_circle_round_a_rings_axis`]). A centre that
-/// reads back as the plane but sits further off the ring's axis than the
-/// reader allows is read as a curve off its faces, and the file is then
-/// refused, where this refuses by name.
+/// steps** ([`a_surface_holds_the_circle`] in `brep.rs`, shared with the
+/// reader rather than copied, since Q957). A centre that reads back as the
+/// plane but sits further off the ring's axis than the reader allows is read
+/// as a curve off its faces, and the file is then refused, where this
+/// refuses by name.
 fn the_nearest_centre_a_ring_holds_its_circle_at(
     cut: &Plane,
     ring: &Torus,
@@ -1555,13 +1559,12 @@ fn the_nearest_centre_a_ring_holds_its_circle_at(
         return None;
     };
     let normal = cut.normal();
+    let surface = Surface::Torus(*ring);
     let components = normal.components();
     let start = crossing.centre.coordinates();
     let short = cut.offset() - plane_through(crossing.centre, normal).ok()?.offset();
-    let reach = 2.0
-        * A_CIRCLE_MAY_MISS_ITS_FACE_BY
-        * NEAREST_F64_POINT_ROUNDOFF
-        * the_largest_number_of_a_circle_on_a_ring(ring, crossing.centre, radius);
+    let (_, largest) = how_far_off_the_circle_can_be(&surface, crossing.centre, normal, radius)?;
+    let reach = 2.0 * A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest;
     let leaning: Vec<usize> = (0..3).filter(|&axis| components[axis] != 0.0).collect();
     let mut nearest: Option<(f64, Point)> = None;
     for &walked in &leaning {
@@ -1584,7 +1587,7 @@ fn the_nearest_centre_a_ring_holds_its_circle_at(
                                 && back.offset().to_bits() == cut.offset().to_bits()
                         });
                         if !reads_back
-                            || !the_reader_holds_a_circle_round_a_rings_axis(ring, centre, radius)
+                            || !a_surface_holds_the_circle(&surface, centre, normal, radius)
                         {
                             continue;
                         }
@@ -1609,49 +1612,6 @@ fn the_nearest_centre_a_ring_holds_its_circle_at(
 /// circle to miss its face by. A smaller coordinate stops short of that, and
 /// the larger one, walked in its turn, covers the rest.
 const MOST_STEPS_OF_ONE_COORDINATE: usize = 64;
-
-/// Whether the reader holds the circle of `radius` about `ring`'s axis,
-/// centred at `centre`, on the ring: the reader's own rule for a circle whose
-/// axis crosses the ring's to exactly nothing, in the reader's arithmetic.
-///
-/// The point of the circle furthest from the tube is at most
-/// `|√((r − R)² + h²) − ρ| + q` from it, for a circle of radius `r` whose
-/// centre is `h` along the axis from the ring's and `q` off it, on a ring of
-/// radius `R` and tube `ρ`; and that has to be within sixteen roundings of the
-/// largest number in it. **This is a copy** of the torus arm of
-/// `how_far_off_the_circle_can_be` and of `A_CIRCLE_MAY_MISS_ITS_FACE_BY` in
-/// `brep.rs`, which keeps both to itself. A copy that drifts from the reader's
-/// would write a centre the reader does not hold, and the file would be
-/// refused: `how_often_a_turned_bend_comes_back_from_its_own_file` reads every
-/// one back.
-fn the_reader_holds_a_circle_round_a_rings_axis(ring: &Torus, centre: Point, radius: f64) -> bool {
-    let line = ring.axis();
-    let along = (centre - ring.centre()).dot(line.direction());
-    let across = line.distance_to_point(centre);
-    let from_the_tube = (radius - ring.ring_radius()).hypot(along);
-    (from_the_tube - ring.tube_radius()).abs() + across
-        <= A_CIRCLE_MAY_MISS_ITS_FACE_BY
-            * NEAREST_F64_POINT_ROUNDOFF
-            * the_largest_number_of_a_circle_on_a_ring(ring, centre, radius)
-}
-
-/// The largest coordinate or length the reader measures a circle on a ring
-/// against: `largest_of` in `brep.rs`, over the two centres and the two radii.
-fn the_largest_number_of_a_circle_on_a_ring(ring: &Torus, centre: Point, radius: f64) -> f64 {
-    [
-        centre.largest_coordinate_magnitude(),
-        ring.centre().largest_coordinate_magnitude(),
-        radius.abs(),
-        ring.ring_radius().abs(),
-    ]
-    .into_iter()
-    .fold(0.0, f64::max)
-}
-
-/// How many roundings of the largest number a circle may sit off its face and
-/// still be read as on it: the reader's `A_CIRCLE_MAY_MISS_ITS_FACE_BY` in
-/// `brep.rs`, copied for [`the_reader_holds_a_circle_round_a_rings_axis`].
-const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
 
 impl Crossing {
     /// Which way round this curve to write an arc of it, so that the arc from
@@ -2039,8 +1999,8 @@ mod plane_round_trip_tests {
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
-        a_point_this_reader_reads_back_as, stepped, the_nearest_centre_a_ring_holds_its_circle_at,
-        the_reader_holds_a_circle_round_a_rings_axis,
+        a_point_this_reader_reads_back_as, a_surface_holds_the_circle, stepped,
+        the_nearest_centre_a_ring_holds_its_circle_at,
         where_a_plane_square_to_a_ring_crosses_it_nearest,
     };
     use crate::geometry::plane_through;
@@ -2145,7 +2105,9 @@ mod plane_round_trip_tests {
                 let at = Point::new(stepped(x, along_x), y, stepped(z, along_z));
                 let reads_back = plane_through(at, normal)
                     .is_ok_and(|back| back.offset().to_bits() == cut.offset().to_bits());
-                if reads_back && the_reader_holds_a_circle_round_a_rings_axis(&ring, at, radius) {
+                if reads_back
+                    && a_surface_holds_the_circle(&Surface::Torus(ring), at, normal, radius)
+                {
                     found.push((along_x, along_z));
                 }
             }
