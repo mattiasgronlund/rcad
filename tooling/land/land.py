@@ -25,7 +25,9 @@ directory and waits on a `flock` there. Holding it, a run whose lane an earlier
 holder landed reports that merge and ends. Any other run lands its own lane,
 then every lane waiting whose run is alive, oldest first, each with its own
 merge commit and queue apply, and gates them once. A red gate with other lanes
-in it goes back to `origin/main` and lands its own lane alone.
+in it goes back to `origin/main` and lands its own lane alone. A run outlives
+its lander, so the Opus merger runs `just land wait-for <lane branch>` from its
+own tree, which waits until no run is landing that lane.
 
 Python rather than bash because the tree it runs from is switched under it:
 python reads the whole file before it runs, bash reads a script as it goes.
@@ -65,6 +67,8 @@ def main(argv):
     if argv == ["wait"]:
         top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
         return follow(os.path.join(top, STATE), None)
+    if len(argv) == 2 and argv[0] == "wait-for":
+        return wait_for(argv[1])
     if argv == ["--detached-run"]:
         return detached_run()
     return start(argv)
@@ -238,9 +242,10 @@ def follow(state, child):
                   f"holds what it ran")
             return 1
         if time.monotonic() >= deadline:
+            branch = read_json(os.path.join(state, "args.json"))["branch"]
             print(f"land: still running (pid {pid}). Run `mise exec -- just land wait` to keep waiting; "
-                  f"from another tree, wait with `timeout 540 tail --pid={pid} -f /dev/null` and Read "
-                  f"{os.path.join(state, 'log')}")
+                  f"from another tree, run `mise exec -- just land wait-for {branch}` until it says no run is "
+                  f"landing it, then fetch origin before you read origin/main")
             return 3
         time.sleep(0.2)
 
@@ -271,6 +276,37 @@ def running(pid, child):
         return stat_fields(pid)[0] != "Z"
     except OSError:
         return False
+
+
+def wait_for(branch):
+    """Waits at most `LAND_WAIT` seconds for no run to be landing `branch`, for the Opus merger in another tree.
+
+    A detached run outlives the lander that started it, so `lanes.js` can hand
+    the lane to the Opus merger while the run, or a holder that took its
+    entry, may still push it (§397.5). So it waits while a live run's entry
+    names the lane, and while anyone holds the lock: a holder can be landing an
+    entry whose run died after the holder listed it, and which holder took
+    which lanes is not to be read without the lock.
+    """
+    spool = Spool()
+    lock = os.open(spool.lock, os.O_RDWR | os.O_CREAT, 0o644)
+    deadline = time.monotonic() + WAIT
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            why = "a holder has the land lock"
+        else:
+            landing = [entry for entry in spool.everyone() if entry["branch"] == branch and alive(entry)]
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            if not landing:
+                print(f"land: no run is landing {branch}; fetch origin before you read origin/main")
+                return 0
+            why = f"the run in {landing[0]['tree']} (pid {landing[0]['pid']}) waits to land it"
+        if time.monotonic() >= deadline:
+            print(f"land: still running: {why}. Run `mise exec -- just land wait-for {branch}` to keep waiting")
+            return 3
+        time.sleep(0.5)
 
 
 def detached_run():
@@ -567,11 +603,10 @@ class Spool:
         `lanes.js` has handed that lane to the Opus merger, and taking it as well
         would land it twice (§397.5 item 7).
         """
-        names = sorted(name for name in os.listdir(self.entries) if name.endswith(".json"))
-        assert f"{own['id']}.json" in names, f"this run's own entry {own['id']} is not in {self.entries}"
+        everyone = self.everyone()
+        assert own["id"] in [entry["id"] for entry in everyone], f"this run's own entry {own['id']} is not in {self.entries}"
         found = []
-        for name in names:
-            entry = read_json(os.path.join(self.entries, name))
+        for entry in everyone:
             if entry["id"] == own["id"]:
                 continue
             if not alive(entry):
@@ -581,6 +616,11 @@ class Spool:
             elif not os.path.exists(self.result_path(entry)):
                 found.append(entry)
         return found
+
+    def everyone(self):
+        """Every entry, oldest first. Read it holding the lock, since a holder removes entries."""
+        names = sorted(name for name in os.listdir(self.entries) if name.endswith(".json"))
+        return [read_json(os.path.join(self.entries, name)) for name in names]
 
     def result(self, entry):
         path = self.result_path(entry)

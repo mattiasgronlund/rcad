@@ -12729,6 +12729,12 @@ check-ff-main-selftest:
 # of the batch for its own run, and a red gate with other lanes in it goes back
 # to `origin/main` and lands its own lane alone.
 #
+# **A run outlives its lander**, so the Opus merger that `lanes.js` hands a stop
+# to runs `just land wait-for <lane branch>` from its own tree before it reads
+# `origin/main`. That waits, for the same 540 s and with the same exit 3, while
+# a live run's entry names the lane or anyone holds the lock, and exits 0 once
+# neither is so.
+#
 # `--steps` names a file holding the lane's `add`, `after` and `tag` steps, one
 # word to a line and a `+` line between steps, so that no row's text ever passes
 # through a shell (§384.2). The logic is `tooling/land/land.py`; this hands it
@@ -12752,6 +12758,13 @@ land *args:
 # lane, an entry whose run was killed is never taken, and a holder killed in its
 # gate drops the lock. The test holds the lock from a `flock` process of its own,
 # never on one of its fds, which every `just land` it starts would inherit.
+#
+# The dead-entry arm also pins `wait-for`'s two legs. A run stopped with
+# `SIGSTOP` while it waits on the lock keeps its entry alive and never takes the
+# lock when it is freed, so `wait-for` with the lock free must still wait on the
+# entry; then, with the run killed and the lock held, it must wait on the lock.
+# The briefs in `lanes.js` and `lander.md` are held to the `wait` and `wait-for`
+# lines, `wait-for` ahead of the merger's ancestor check.
 # Which waiting run gets the lock first is not fixed, so those arms hold either
 # order to the same outcome.
 #
@@ -12847,6 +12860,14 @@ check-land-selftest:
     required=$(grep -F "required: ['start_sha', 'worktree_path', 'merge_branch'" .claude/workflows/lanes.js \
         | grep -oE "'[a-z_]+'" | tr -d "'" | tr '\n' ' ' || true)
     [ -n "$required" ] || { echo "found no mergedSchema required list in .claude/workflows/lanes.js, so the JSON would be held to nothing"; exit 1; }
+    grep -qxF '  mise exec -- just land wait' .claude/workflows/lanes.js \
+        || { echo "the lander's brief in .claude/workflows/lanes.js no longer follows just land with just land wait"; exit 1; }
+    grep -qF 'mise exec -- just land wait' .claude/agents/lander.md \
+        || { echo ".claude/agents/lander.md no longer follows just land with just land wait"; exit 1; }
+    waits_at=$(grep -m1 -nxF '  mise exec -- just land wait-for ${branchOf(lane)}' .claude/workflows/lanes.js | cut -d: -f1 || true)
+    checks_at=$(grep -m1 -nxF '  git merge-base --is-ancestor ${branchOf(lane)} origin/main' .claude/workflows/lanes.js | cut -d: -f1 || true)
+    [ -n "$waits_at" ] && [ -n "$checks_at" ] && [ "$waits_at" -lt "$checks_at" ] \
+        || { echo "the merger's brief in .claude/workflows/lanes.js does not run just land wait-for ahead of its ancestor check (lines '$waits_at' and '$checks_at'), so it can read origin/main while the lander's run still lands the lane (§397.5)"; exit 1; }
     steps_line='add 2.2 sonnet justfile small a row the lane left, ending in §384 + tag @1 small'
     arm=""
     at=""
@@ -12909,6 +12930,7 @@ check-land-selftest:
         lane2_sha=$(git -C "$at/lane2" rev-parse HEAD)
     }
     hold_lock() {
+        rm -f "$at/held" "$at/release"
         mkdir -p "$at/hub/.git/rcad-land"
         flock "$at/hub/.git/rcad-land/lock" -c "touch '$at/held'; for _ in \$(seq 1200); do [ ! -e '$at/release' ] || exit 0; sleep 0.05; done" &
         until_there "$at/held"
@@ -13137,7 +13159,18 @@ check-land-selftest:
     second_lane
     hold_lock
     start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
-    kill -9 -- "-$(cat "$at/lander2/target/land/pid")"
+    waiter=$(cat "$at/lander2/target/land/pid")
+    kill -STOP -- "-$waiter"
+    release_lock
+    land_in verify 0.5 wait-for lane-y
+    [ "$rc" -eq 3 ] || fail "wait-for exited $rc with the lock free and a live run waiting to land lane-y, not 3 for still running"
+    grep -qxF "land: still running: the run in $at/lander2 (pid $waiter) waits to land it. Run \`mise exec -- just land wait-for lane-y\` to keep waiting" <<<"$got" \
+        || fail "wait-for does not name the run that waits to land lane-y"
+    hold_lock
+    kill -9 -- "-$waiter"
+    land_in verify 0.5 wait-for lane-y
+    [ "$rc" -eq 3 ] || fail "wait-for exited $rc while a holder had the land lock, not 3 for still running"
+    grep -qF 'land: still running: a holder has the land lock.' <<<"$got" || fail "wait-for does not say a holder has the lock"
     start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     release_lock
     wait_for lander
@@ -13146,6 +13179,10 @@ check-land-selftest:
     ! on_origin "$lane2_sha" || fail "it landed a lane whose run was gone, which the Opus merger lands too (§397.5 item 7)"
     grep -qF 'land: the run that waited to land lane-y' <<<"$got" || fail "nothing says the dead entry was dropped"
     spool_empty
+    land_in verify 5 wait-for lane-y
+    [ "$rc" -eq 0 ] || fail "wait-for exited $rc once no run was landing lane-y, not 0"
+    grep -qxF 'land: no run is landing lane-y; fetch origin before you read origin/main' <<<"$got" \
+        || fail "wait-for does not say that no run is landing lane-y"
 
     fixture killed-holder
     second_lane
@@ -13161,7 +13198,7 @@ check-land-selftest:
     [ "$(gates)" = 2 ] || fail "the killed holder's gate and the waiting lane's are 2 gates, not $(gates)"
     grep -qF 'land: the run that waited to land lane-x' <<<"$got" || fail "nothing says the killed holder's entry was dropped"
     spool_empty
-    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, and outlives a killed holder"
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, and wait-for waits on a live entry and on a held lock"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the
