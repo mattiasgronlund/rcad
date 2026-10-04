@@ -562,27 +562,26 @@ const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.019..=0.084;
 
 /// The same for the turned family, a rate judged the same way.
 ///
-/// The shipped corpus gives 14 of 441, the lattice family's count exactly, and
-/// this family is a rotation of that one. Do not read the equality as anything:
-/// this is the one of the six that the two seeds after `b4890f1` also moved, 13
-/// on 423 and 10 on 426 before it landed on 14 on 429, so it went past the
-/// lattice family's count rather than settling on it.
-/// [`A_LATTICE_PAIR_IS_NOT_A_SOLID`] has the attribution.
+/// **The rate is 0.78%** — 726 of 92 844 fuses, twelve fresh seeds (11 to 22)
+/// at a [`SOAK_FACTOR`] of 20, between 48 and 78 a seed — so the convention
+/// gives 0.52% to 2.3%. The shipped corpus gives 6 of 441.
 ///
-/// **The rate is 2.45%** — 29 847 of 1 219 248 fuses, 48 fresh seeds at a
-/// [`SOAK_FACTOR`] of 66 — so the convention gives 1.6% to 7.3%. It is a
-/// little *above* the lattice family's 2.23%, although getting on for a quarter
-/// of this family's fuses refuse before they get far enough to find out
-/// whether the answer is a solid; §303.4 has what that does and does not say.
-///
-/// It was 2.2% to 9.8%, the lattice band copied because the shipped counts
-/// matched, and it was exposed the same way. Its 48 soaked seeds all passed,
-/// but the lowest came in at 559 of 25 401, 2.2007%, one fuse over that floor,
-/// and at the shipped size 4 of 400 fresh seeds failed it. The shipped 14 is a
-/// low draw for this family rather than a high one: at 441 fuses a fresh seed
-/// gives 3.96% on average, because the nineteen replayed seeds give 8 of their
-/// 57 fuses not a solid, and in a small draw they weigh an eighth of it.
-const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.016..=0.073;
+/// It was 2.45%, 29 847 of 1 219 248 fuses at a factor of 66, and the band
+/// 1.6% to 7.3%, until an input corner with exactly three planes round it was
+/// named by those planes (`docs/decisions.md` §351.6). The shipped corpus gave
+/// 14 of 441 then. In the configuration §351.6 traced, a corner of one solid
+/// lying on an edge of the other was named as a vertex by one solid's pieces
+/// and as the meet of three planes by the other's, so one corner was two and
+/// edges were left with one face each. **Two kinds of fuse moved, and they move
+/// the rate opposite ways**: fuses that were not a solid and are answered now,
+/// and answers that are not a solid now. Each of the second kind measured is
+/// two solids touching along an edge, refused `count: 4` unturned and now
+/// turned as well. Over the 67 pairs of
+/// [`swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit`], counting a
+/// rule both ways round as one: ten that answered one way round only and five
+/// that answered neither way answer both ways now, and two unions that
+/// answered both ways answer neither, so 24 fuses not a solid became 8.
+const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0052..=0.023;
 
 /// How many of its own spreads a draw may land past an end of a not-a-solid
 /// rate band before [`Tally::rate_of_answers_that_were_not_solids_must_be_within`]
@@ -920,41 +919,36 @@ fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
     );
 }
 
-/// §48.2 item 5's defect, at the first configuration that found it, **and it is
-/// wrong**.
+/// §48.2 item 5's defect, at the first configuration that found it, fixed.
 ///
 /// A frame and a comb, turned together by one sixty-fourth of a turn about
-/// `(-2, -1, 0)`. What the two share is two solids, and whether the kernel can
-/// hold them depends on which of the pair is handed over first: comb against
-/// frame gives the two, frame against comb gives
-/// [`Error::ResultIsNotManifold`]. Whether four faces end up along one edge is a
-/// fact about the answer, and the answer does not know which argument came
-/// first.
+/// `(-2, -1, 0)`. What the two share is two solids. Comb against frame gave the
+/// two, and frame against comb gave [`Error::ResultIsNotManifold`]. Whether four
+/// faces end up along one edge is a fact about the answer, and the answer does
+/// not know which argument came first.
 ///
 /// **The same pair unturned gives the two solids either way round**, which is
 /// the control: the two are in the same places relative to each other, and the
 /// only thing between the two rows is that the rotation leaves nothing exactly
 /// representable.
 ///
-/// This is pinned rather than fixed, and what is left of it is now named.
-/// **Two** things split one corner of this pair in two, and only one of them is
-/// still here:
+/// **Two** things split one corner of this pair in two:
 ///
 /// - The two solids are flush on a plane and name it opposite ways round, so a
 ///   corner on it was solved from `P, Q, R` by one face and from `−P, Q, R` by
-///   another. That is gone: three planes are named whichever way each of them
-///   faces now (§48, W5, `assemble::names_of_the_three_surfaces`), which is what
-///   brings the second row below back to the two solids.
+///   another. Three planes are named whichever way each of them faces now (§48,
+///   W5, `assemble::names_of_the_three_surfaces`).
 /// - The two solids also have an input **vertex** each at one shared corner —
 ///   `11v1` and `23v1` — and the rotation lands the two a last bit apart, so
-///   neither the names nor `assemble::exactly_at`'s coordinates join them. That
-///   one is roadmap §7.4's vertex-on-face entry, it needs no fuse to reach, and
-///   it is what the first row below is.
+///   neither the names nor `assemble::exactly_at`'s coordinates joined them.
+///   An input corner with exactly three planes round it is named by those
+///   planes now and put where the three alone put it (§351.6), and that brought
+///   the first order back to the two solids.
 ///
-/// **The day that is fixed this test fails**, and what replaces it is deleting
-/// [`both_agree_about_whether_there_is_an_answer`]'s exemption for this family.
+/// With both gone, [`both_agree_about_whether_there_is_an_answer`] fails on
+/// this family rather than counting.
 #[test]
-fn turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first() {
+fn turning_a_frame_and_a_comb_shares_the_same_two_solids_whichever_comes_first() {
     let frame = Placed {
         shape: Shape::Frame { width: 4, depth: 3 },
         skew: Skew::none(),
@@ -990,16 +984,41 @@ fn turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first() {
         steps: 1,
     }))
     .build();
-    assert_eq!(
-        what_a_fuse_came_back_with(&model, keys[0], keys[1], Rule::Intersection),
-        WhatCameBack::NotASolid,
-        "pinning what happens today, and it is wrong"
-    );
-    assert_eq!(
-        what_a_fuse_came_back_with(&model, keys[1], keys[0], Rule::Intersection),
-        WhatCameBack::Solids(2),
-        "the same two solids, handed over the other way round"
-    );
+    for (arguments, tools) in [(keys[0], keys[1]), (keys[1], keys[0])] {
+        assert_eq!(
+            what_a_fuse_came_back_with(&model, arguments, tools, Rule::Intersection),
+            WhatCameBack::Solids(2),
+            "turned, either order shares the same two solids"
+        );
+    }
+    let forwards = shared(&model, keys[0], keys[1]);
+    let backwards = shared(&model, keys[1], keys[0]);
+    if let Err(why) = same_answer(
+        &answer_of(&forwards.0, &forwards.1),
+        &answer_of(&backwards.0, &backwards.1),
+        Rule::Intersection,
+        "swapping the frame and the comb",
+    ) {
+        panic!("{why}");
+    }
+}
+
+/// What a certified intersection of `arguments` with `tools` hands back, in a
+/// copy of `model`.
+fn shared(model: &Model, arguments: SolidKey, tools: SolidKey) -> (Model, Vec<SolidKey>) {
+    let mut model = model.clone();
+    let solids = model
+        .fuse(
+            &[arguments],
+            &[tools],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the frame and the comb share two solids")
+        .solids()
+        .to_vec();
+    (model, solids)
 }
 
 /// The same defect with **no rotation and no tilt at all**, fixed.
@@ -4355,21 +4374,23 @@ impl Fused {
 ///
 /// # Which family this fails on, and which it only counts on
 ///
-/// **It counts on every family and fails on the round one.** Turning it on found
-/// the disagreement immediately on the flat families — on the turned pairs, on
-/// the skew pairs, and, once the shape was shrunk, on the lattice pairs, where
-/// nothing rounds at all. The lattice end of that is fixed and now says so
-/// ([`a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over`]);
-/// what is left on the turned end is pinned by hand in
-/// [`turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first`],
-/// which names the one cause still open.
+/// **It counts on the lattice and skew families and fails on the rest.** Turning
+/// it on found the disagreement immediately on the flat families — on the
+/// turned pairs, on the skew pairs, and, once the shape was shrunk, on the
+/// lattice pairs, where nothing rounds at all. The lattice end of that is fixed
+/// and now says so
+/// ([`a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over`]).
+/// The turned end is fixed too
+/// ([`turning_a_frame_and_a_comb_shares_the_same_two_solids_whichever_comes_first`],
+/// §351.6): the swap property drew none over 979 turned pairs at a
+/// [`SOAK_FACTOR`] of 20, nor did any property of this file at a factor of 5,
+/// so the turned family fails here now.
 ///
-/// The fuse is not this lane's to fix (§48.4), and a property that is red for a
-/// reason already written down stops catching the reasons that are not. So what
-/// the flat families get is a count in their report and a pin with their name
-/// on it, and what the curved families get is a failure — they have never
-/// handed back an answer no `Model` can hold at all, so a disagreement there
-/// would be new.
+/// A property that is red for a reason already written down stops catching
+/// the reasons that are not. So what the lattice and skew families get is a
+/// count in their report, and what the turned and curved families get is a
+/// failure — the curved ones have never handed back an answer no `Model` can
+/// hold at all, so a disagreement there would be new.
 ///
 /// **The counted rate is the number to watch.** It is printed by [`Tally::report`]
 /// and it is zero on a fixed kernel.
@@ -4390,10 +4411,9 @@ fn both_agree_about_whether_there_is_an_answer(
         .disagreed_about_being_a_solid
         .set(tally.disagreed_about_being_a_solid.get() + 1);
     match coordinates {
-        Coordinates::AreExactlyRepresentable
-        | Coordinates::AreUnderAGeneralRotation
-        | Coordinates::SitOnTiltedWalls => Ok(()),
-        Coordinates::LieOnARoundWall
+        Coordinates::AreExactlyRepresentable | Coordinates::SitOnTiltedWalls => Ok(()),
+        Coordinates::AreUnderAGeneralRotation
+        | Coordinates::LieOnARoundWall
         | Coordinates::LieOnARoundWallAndMayCoincide
         | Coordinates::LieOnAConesWall
         | Coordinates::LieOnATurnedRoundWall => Err(TestCaseError::fail(format!(
@@ -4540,10 +4560,9 @@ struct Tally {
     /// How often two runs of one question disagreed about whether the answer
     /// was a solid at all.
     ///
-    /// §48.2 item 5's blind spot, now a number. Zero is the only right value and
-    /// it is not zero today — see
-    /// [`both_agree_about_whether_there_is_an_answer`] for which families it
-    /// fails on and which it only counts on.
+    /// §48.2 item 5's blind spot, now a number. Zero is the only right value —
+    /// see [`both_agree_about_whether_there_is_an_answer`] for which families
+    /// it fails on and which it only counts on.
     disagreed_about_being_a_solid: Cell<usize>,
     /// Comparisons a property set out to make, and made.
     ///

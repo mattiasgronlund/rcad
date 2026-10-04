@@ -9,8 +9,18 @@
 //!
 //! `.claude/skills/fuse-debugging/SKILL.md` repeats it — *"`count: 1` is
 //! withdrawn (§38.6); seeing it again is a regression, not a refusal"*. Both
-//! sentences are false on this tree, and neither is a near miss: one pair of
-//! boxes reaches it 104 times in 624 fuses.
+//! sentences were false when this file was written, and neither was a near
+//! miss: one pair of boxes reached it 104 times in 624 fuses.
+//!
+//! **That pair reaches it in none of the 624 now** (`docs/decisions.md`
+//! §351.6). The cube's top corners lie on the taller box's side edges, the
+//! shape §351.6 traced in a comb and an ell, where one solid's pieces named
+//! the corner as a vertex and the other's as the meet of three planes, and the
+//! two rounded apart. An input corner with exactly three planes round it is
+//! named by those planes now, and that took this count from 104 to 0. The
+//! turned pairs of `fuses_that_must_agree.rs` that are still not a solid on the
+//! shipped draw are all `count: 4`. Whether a turned pair still reaches
+//! `count: 1` anywhere was not searched again.
 //!
 //! Both fixes that landed the day this was written are in the tree and both
 //! helped. A solid's own planes now cut its own faces, and a plane and its
@@ -45,12 +55,13 @@
 //! answered, and it now pins that answer. The table above is the search as it
 //! was run and was not re-run, so its `81` still counts the trio's refusals.
 //!
-//! # It is a gap and not a limit
+//! # It was a gap and not a limit
 //!
-//! §16.10's test is whether the answer exists. It does for the turned pair: its
+//! §16.10's test is whether the answer exists. It did for the turned pair: its
 //! answer is the taller of the two boxes, and the same pair unturned hands it
-//! back, volume 2, validating. So a pair that is answered standing still is
-//! refused turned. `Policy::tolerant` refuses it too, so it is not a budget.
+//! back, volume 2, validating. So a pair that was answered standing still was
+//! refused turned. `Policy::tolerant` refused it too, so it was not a budget.
+//! Both policies answer it now.
 
 #[path = "fuzzing/comparison.rs"]
 mod comparison;
@@ -130,8 +141,8 @@ fn intersected(model: &mut Model, arguments: &[SolidKey], tool: SolidKey) -> (An
     (answer_of(model, &solids), volume_of(model, &solids))
 }
 
-/// The same box and a taller copy of it in the same place, refused once the two
-/// are turned — and answered when they are not.
+/// The same box and a taller copy of it in the same place unite to the taller
+/// box turned, as they do unturned.
 ///
 /// A unit cube and a `1 × 1 × 2` box, both with their low corner at the origin,
 /// so the cube is exactly the bottom half of the box and their union is the box.
@@ -140,34 +151,35 @@ fn intersected(model: &mut Model, arguments: &[SolidKey], tool: SolidKey) -> (An
 /// coordinates and the same placement on top, so nothing about the pair is
 /// nearly-anything — it is coincident exactly, as it is unturned.
 ///
-/// Unturned the union is the taller box, volume two. Turned, it is
-/// `ResultIsNotManifold { count: 1 }`.
+/// Turned, it was `ResultIsNotManifold { count: 1 }` under both policies. The
+/// cube's top corners lie on the taller box's side edges, the shape of
+/// `a_turned_tooth_corner_on_the_edge_of_an_ell.rs`, and the union has answered
+/// since an input corner with exactly three planes round it is named by those
+/// planes (`docs/decisions.md` §351.6).
 #[test]
-fn a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned() {
-    let (mut model, cube, box_) = a_box_and_a_taller_one(Some(a_sixty_fourth_of_a_turn()));
-    let refused = model.fuse(
-        &[cube],
-        &[box_],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(refused, Err(Error::ResultIsNotManifold { count: 1 })),
-        "an edge of the answer got one face along it, and §39.4 calls that withdrawn: {refused:?}"
-    );
-
-    let tolerant = model.fuse(
-        &[cube],
-        &[box_],
-        Rule::Union,
-        &Policy::tolerant(model.scale().nominal_size()),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(tolerant, Err(Error::ResultIsNotManifold { count: 1 })),
-        "not a budget: tolerant refuses it the same way, {tolerant:?}"
-    );
+fn a_box_and_a_taller_one_in_the_same_place_unite_to_the_taller_box_turned_too() {
+    for policy in [
+        Policy::certified(),
+        Policy::tolerant(a_model().scale().nominal_size()),
+    ] {
+        let (mut model, cube, box_) = a_box_and_a_taller_one(Some(a_sixty_fourth_of_a_turn()));
+        let answered = model
+            .fuse(
+                &[cube],
+                &[box_],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refusal| panic!("the turned pair unites: {refusal:?}"));
+        assert_eq!(answered.solids().len(), 1);
+        let volume = volume_of(&model, answered.solids());
+        assert!(
+            (volume - 2.0).abs() < 1e-12,
+            "the turned union is the taller box, and it takes up {volume}"
+        );
+        validates(&model);
+    }
 
     let (mut still, cube, box_) = a_box_and_a_taller_one(None);
     let answered = still
@@ -186,18 +198,17 @@ fn a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned() {
 /// How often one pair of boxes reaches it, over every turn of a small grid.
 ///
 /// The pair is
-/// [`a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned`]'s,
+/// [`a_box_and_a_taller_one_in_the_same_place_unite_to_the_taller_box_turned_too`]'s,
 /// turned about each of the twenty-six whole-number directions whose parts are
 /// `-1`, `0` or `1`, by one to eight sixty-fourths of a turn, under all three
-/// rules. **104 of the 624 come back `count: 1` and the other 520 are answered**,
-/// so it is neither a corner of the grid nor most of it.
+/// rules. **All 624 are answered.** 104 came back `count: 1` and 520 were
+/// answered until an input corner with exactly three planes round it was named
+/// by those planes (`docs/decisions.md` §351.6).
 ///
-/// The numbers are asserted rather than printed, and §19 is why: the day the
-/// refusal is closed this fails, which is the reminder that §39.4's row and
-/// `fuse-debugging`'s table both need editing back. The wider grid this was cut
-/// down from — every direction with parts in `-3..=3`, every angle to a whole
-/// turn — is 64,638 fuses with 14,230 of them `count: 1`, and takes about a
-/// minute and a half.
+/// The numbers are asserted rather than printed, and §19 is why: a refusal
+/// coming back fails here. The wider grid this was cut down from, every
+/// direction with parts in `-3..=3` and every angle to a whole turn, was 64,638
+/// fuses with 14,230 of them `count: 1`, and was not run again.
 #[test]
 fn how_often_one_pair_of_turned_boxes_leaves_such_an_edge() {
     let mut fuses = 0;
@@ -230,10 +241,8 @@ fn how_often_one_pair_of_turned_boxes_leaves_such_an_edge() {
         }
     }
     assert_eq!(fuses, 624);
-    // 107 and 517 until §120's correctly rounded normalize moved the axis every
-    // one of these turns is built about.
-    assert_eq!(one_face, 104, "an edge with one face along it, §39.4's row");
-    assert_eq!(answered, 520);
+    assert_eq!(one_face, 0, "an edge with one face along it, §39.4's row");
+    assert_eq!(answered, 624);
     assert_eq!(something_else, 0);
 }
 
