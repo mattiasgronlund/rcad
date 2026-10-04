@@ -472,25 +472,21 @@ fn the_short_side_of_a_bar_sliced_along_its_length_is_written_with_arcs_and_come
 }
 
 /// The long side of the same bar is written with its two long arcs and comes
-/// back the same solid, corner for corner and bit for bit — **and the fuse
-/// then refuses the copy read back where it cuts the original**, which is the
-/// reader's gap and not this writer's.
+/// back the same solid, corner for corner and bit for bit, and a block cuts
+/// the copy read back into the same pieces it cuts the bar as built.
 ///
 /// The model names each long arc by a half-space whose plane is the slice, so
-/// both corners are on it. The reader names an arc by a half-space through the
-/// corners that it lowers by a few roundings so that both are sure to be in
-/// front (`Walk::the_arc_between`). For a short arc that is a picker the fuse
-/// reads, because the circle's centre is behind it. For a long arc the centre
-/// is in front too, and `a_picker_that_tells_the_two_arcs_apart` in
-/// `rcad-topo` reads a picker only when its plane holds both ends or the centre
-/// is not in front, so the cut stops at
-/// [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`]. The test
-/// checks both pickers on both sides, so it is not the writer's arc that
-/// fails here: the arc the copy holds is the one that went out, measured the
-/// same.
+/// both corners are on it. `a_picker_that_tells_the_two_arcs_apart` in
+/// `rcad-topo` reads a picker only when its plane holds both ends or the
+/// circle's centre is not in front, and a long arc has its centre on its own
+/// side of the chord. The reader used to name every arc by a plane through the
+/// corners lowered by a few roundings, which put a long arc's centre in front,
+/// and the copy's cut stopped at
+/// [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`] (Q771). So the
+/// test checks that the reader's pickers hold both ends exactly, as the
+/// model's do, and that the cut comes out the same.
 #[test]
-fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_its_long_arcs_stop_a_fuse()
- {
+fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_cuts_the_same() {
     use rcad_geom::Picker;
     use rcad_predicates::{Decision, Point as PredicatePoint};
 
@@ -536,6 +532,25 @@ fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_its_lo
     assert_eq!(here.surface_area(), back.surface_area(), "area");
     assert_eq!(here.centroid(), back.centroid(), "centroid");
 
+    let cutter = |model: &mut Model| a_block(model, [2.0, 3.0, 2.0], Vector::new(-1.0, 3.0, 3.0));
+    let cut_here = cut_by_a_third_solid(&model, built, &cutter, deflection)
+        .unwrap_or_else(|why| panic!("the long side is not cut: {why}"));
+    let left: f64 = cut_here.iter().map(|piece| piece.volume()).sum();
+    assert!(
+        !cut_here.is_empty() && left < here.volume(),
+        "the cut has to leave something and take something away, or the comparison below \
+         compares two solids nothing happened to: {left} of {}",
+        here.volume()
+    );
+    let cut_back = cut_by_a_third_solid(there, came, &cutter, deflection)
+        .unwrap_or_else(|why| panic!("the long side read back is not cut: {why}"));
+    assert_eq!(cut_here.len(), cut_back.len(), "pieces");
+    for (one, other) in cut_here.iter().zip(&cut_back) {
+        assert_eq!(one.volume(), other.volume(), "a piece's volume");
+        assert_eq!(one.surface_area(), other.surface_area(), "a piece's area");
+        assert_eq!(one.centroid(), other.centroid(), "a piece's centroid");
+    }
+
     let where_the_arcs_ends_and_centre_are = |model: &Model, solid: SolidKey| {
         let mut sides = Vec::new();
         for face in model.solid(solid).expect("this model made the key").faces() {
@@ -559,37 +574,27 @@ fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_its_lo
         }
         sides
     };
-    let built_sides = where_the_arcs_ends_and_centre_are(&model, built);
-    let read_sides = where_the_arcs_ends_and_centre_are(there, came);
-    assert_eq!(built_sides.len(), 4, "two arcs, each walked by two faces");
-    assert!(
-        built_sides
-            .iter()
-            .all(|[start, end, _]| *start == Decision::Zero && *end == Decision::Zero),
-        "the model's own pickers hold both ends of each arc: {built_sides:?}"
-    );
-    assert_eq!(read_sides.len(), 4, "two arcs, each walked by two faces");
-    assert!(
-        read_sides
-            .iter()
-            .all(|sides| sides.iter().all(|side| *side == Decision::Pos)),
-        "the reader's pickers have both ends and the centre in front: {read_sides:?}"
-    );
-
-    let cutter = |model: &mut Model| a_block(model, [2.0, 3.0, 2.0], Vector::new(-1.0, 3.0, 3.0));
-    let cut_here = cut_by_a_third_solid(&model, built, &cutter, deflection)
-        .unwrap_or_else(|why| panic!("the long side is not cut: {why}"));
-    assert!(!cut_here.is_empty(), "the cut left nothing");
-    let cut_back = cut_by_a_third_solid(there, came, &cutter, deflection);
-    assert!(
-        matches!(
-            cut_back,
-            Err(rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+    for (whose, sides) in [
+        (
+            "the model's own",
+            where_the_arcs_ends_and_centre_are(&model, built),
         ),
-        "the copy read back was expected to stop the cut where the reader's picker is one \
-         the fuse does not read, and got {:?}; if it now cuts, compare the pieces here",
-        cut_back.map(|pieces| pieces.len())
-    );
+        (
+            "the reader's",
+            where_the_arcs_ends_and_centre_are(there, came),
+        ),
+    ] {
+        assert_eq!(sides.len(), 4, "two arcs, each walked by two faces");
+        assert!(
+            sides
+                .iter()
+                .all(|[start, end, centre]| *start == Decision::Zero
+                    && *end == Decision::Zero
+                    && *centre == Decision::Pos),
+            "{whose} pickers hold both ends of each long arc and have its centre in front: \
+             {sides:?}"
+        );
+    }
 }
 
 /// Which side of the slice [`a_bar_sliced_along_its_length`] keeps.
