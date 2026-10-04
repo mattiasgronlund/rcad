@@ -797,19 +797,43 @@ fn every_bend_this_target_draws_comes_back_from_its_own_file() {
 
 /// A bend of ring seven and tube one, turned about `x`, `y` and `z` by every
 /// tenth of a radian up to a whole turn, in place and moved by whole units:
-/// how many the writer writes and the reader reads back.
+/// how many the writer writes, the reader reads back, and come back the same
+/// solid.
 ///
-/// **This counts what is left after Q407, and fails when a fix moves it.**
-/// Turned about `z` all 124 are written and read back. Turned about `x` or `y`
-/// by 2.5, 2.8, 3.2, 3.3, 3.7, 4.1 or 4.6 radians, in place or moved, the
-/// reader refuses the file with `CannotNameWhichPieceOfACrossingThisIs` —
-/// 28 bends, the same angles about either axis — which was not traced
-/// (`docs/decisions.md` §241.6). The writer writes all 372: turned about `y`
-/// by 5.0 and moved, it refused the seam until Q843 looked further for its
-/// centre (`a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file`).
+/// **This counts what is left, and fails when a fix moves it.** The writer
+/// writes all 372: turned about `y` by 5.0 and moved, it refused the seam
+/// until Q843 looked further for its centre
+/// (`a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file`).
+///
+/// **Whether a bend comes back the same is decided by one thing: whether its
+/// ring's axis keeps its bits when scaled to length one again.** The writer
+/// writes the axis as the model places it, a turn of `z` an ulp or so off
+/// length one, and the reader builds a `TOROIDAL_SURFACE`'s axis with
+/// `Axis::new`, which scales it again (`geometry.rs`). 296 bends keep their
+/// bits and come back the same, every located number bit for bit. 76 do not:
+///
+/// - 48 are read back, with the ring's axis the written one scaled again and
+///   so an ulp moved: not the same solid.
+/// - 28 are refused with `CannotNameWhichPieceOfACrossingThisIs`, all turned
+///   about `x` or `y` by 2.5, 2.8, 3.2, 3.3, 3.7, 4.1 or 4.6, in place or
+///   moved. The reader keeps the normal of the seam's plane as the file wrote
+///   it (§313.3), so that plane and the ring's scaled axis are two spellings
+///   of one written direction. Turned about `x` by 2.5 they are
+///   `(0, -0.5984721441039565, -0.8011436155469336)` and `(…, -0.8011436155469337)`,
+///   and their cross product is `(5.55e-17, 0, 0)` and not exactly nothing.
+///   `rcad_geom`'s walk asks exactly that to tell a plane square to a ring's
+///   axis from one holding it (`where_a_plane_cuts_a_torus`), so it takes the
+///   seam's plane for one holding the axis, and neither meridian circle holds
+///   the seam's two ends (`which_of_these_circles_this_run_is`).
+///
+/// Read with the ring's axis kept as the file wrote it, all 372 came back the
+/// same, measured with that change made by hand and taken out again: the gap
+/// is the reader's, and Q497 is the row that closes it (`docs/decisions.md`
+/// §241.6).
 #[test]
 fn how_often_a_turned_bend_comes_back_from_its_own_file() {
-    let (mut bends, mut writer_refused, mut reader_refused) = (0, 0, Vec::new());
+    let (mut bends, mut writer_refused, mut the_same, mut ring_moved) = (0, 0, 0, 0);
+    let mut reader_refused = Vec::new();
     for axis in [Axis::x(), Axis::y(), Axis::z()] {
         for tenths in 1..63 {
             for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
@@ -830,26 +854,75 @@ fn how_often_a_turned_bend_comes_back_from_its_own_file() {
                     writer_refused += 1;
                     continue;
                 };
+                let written = the_ring_axis(the_one_solid(&model));
+                let scaled_again = Axis::new(written.origin(), written.direction())
+                    .expect("a ring's placed axis is finite and has a length");
                 let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
-                if let Err(why) =
-                    Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-                {
-                    reader_refused.push(format!("{why:?}"));
+                let read = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new());
+                if format!("{scaled_again:?}") == format!("{written:?}") {
+                    let back = read.unwrap_or_else(|why| {
+                        panic!("{turned:?}: a bend whose ring keeps its axis is refused: {why:?}")
+                    });
+                    assert!(
+                        assert_located_numbers_the_same(
+                            the_one_solid(&model),
+                            the_one_solid(back.model())
+                        ),
+                        "{turned:?}"
+                    );
+                    the_same += 1;
+                    continue;
+                }
+                match read {
+                    Ok(back) => {
+                        let read = the_ring_axis(the_one_solid(back.model()));
+                        assert_eq!(
+                            format!("{read:?}"),
+                            format!("{scaled_again:?}"),
+                            "{turned:?}: the reader holds a ring's axis as written, \
+                             scaled to length one again"
+                        );
+                        ring_moved += 1;
+                    }
+                    Err(why) => reader_refused.push(format!("{why:?}")),
                 }
             }
         }
     }
     println!(
-        "{bends} turned bends: {writer_refused} refused by the writer, {} by the reader",
+        "{bends} turned bends: {writer_refused} refused by the writer, {the_same} the same, \
+         {ring_moved} with the ring's axis an ulp moved, {} refused by the reader",
         reader_refused.len()
     );
-    assert_eq!((bends, writer_refused, reader_refused.len()), (372, 0, 28));
+    assert_eq!(
+        (
+            bends,
+            writer_refused,
+            the_same,
+            ring_moved,
+            reader_refused.len()
+        ),
+        (372, 0, 296, 48, 28)
+    );
     assert!(
         reader_refused
             .iter()
             .all(|why| why.contains("CannotNameWhichPieceOfACrossingThisIs")),
         "{reader_refused:?}"
     );
+}
+
+/// The axis of the one ring `solid` is bounded by, where it is placed.
+fn the_ring_axis(solid: SolidView) -> Axis {
+    let mut rings = solid.faces().filter_map(|face| {
+        let Surface::Torus(ring) = face.surface() else {
+            return None;
+        };
+        Some(ring.axis())
+    });
+    let ring = rings.next().expect("a bend has one ring");
+    assert!(rings.next().is_none(), "a bend has one ring");
+    ring
 }
 
 /// The one bend of [`how_often_a_turned_bend_comes_back_from_its_own_file`]
