@@ -2648,11 +2648,38 @@ impl<'f> Arrangement<'f> {
     /// the two arcs either side of it become one. A node the input already had
     /// is never dropped: the faces around it still have it, and dropping it here
     /// would leave an edge with a corner on one side and none on the other.
+    ///
+    /// **Each join is at the lowest-numbered node that has two arcs to join**,
+    /// and keeps the lower-numbered arc of the two, in its own direction and
+    /// its own place among the arcs. So a run of arcs between corners comes out
+    /// as its lowest-numbered arc, and a ring of them through no corner as one
+    /// arc from its highest node back to itself.
+    ///
+    /// The arcs at each node are gathered once, and a join moves arcs at two
+    /// nodes only: the node it joins at, and the far end of the arc it drops,
+    /// which that arc's partner reaches now. Only those two can have two arcs
+    /// to join where they had none, or none where they had two, so only they
+    /// are looked at again. Searching from the first node for each join, and
+    /// gathering each node's arcs from all of them, costs joins × nodes × arcs,
+    /// and a pin header's cut has faces with thousands of each.
     fn join_arcs_that_meet_at_nothing(&mut self) {
-        loop {
-            let Some((node, first, second)) = self.a_node_that_is_no_corner() else {
-                return;
+        let mut touching: Vec<SmallVec<[usize; 4]>> = vec![SmallVec::new(); self.nodes.len()];
+        for (arc, Arc { ends, .. }) in self.arcs.iter().enumerate() {
+            touching[ends[0]].push(arc);
+            if ends[1] != ends[0] {
+                touching[ends[1]].push(arc);
+            }
+        }
+        let mut to_look_at: std::collections::BTreeSet<usize> = (0..self.nodes.len()).collect();
+        let mut dropped = vec![false; self.arcs.len()];
+        while let Some(node) = to_look_at.pop_first() {
+            let Some((first, second)) = self.the_two_arcs_to_join_at(node, &touching[node]) else {
+                continue;
             };
+            assert!(
+                !dropped[first] && !dropped[second],
+                "an arc dropped by a join is no longer at any node"
+            );
             let other_end = |arc: &Arc| {
                 if arc.ends[0] == node {
                     arc.ends[1]
@@ -2666,37 +2693,55 @@ impl<'f> Arrangement<'f> {
             } else {
                 [after, before]
             };
+            for end in self.arcs[first]
+                .ends
+                .into_iter()
+                .chain(self.arcs[second].ends)
+            {
+                touching[end].retain(|&mut arc| arc != first && arc != second);
+            }
             self.arcs[first].ends = ends;
-            self.arcs.remove(second);
+            touching[ends[0]].push(first);
+            if ends[1] != ends[0] {
+                touching[ends[1]].push(first);
+            }
+            dropped[second] = true;
+            to_look_at.extend([node, after]);
         }
+        let arcs = core::mem::take(&mut self.arcs);
+        self.arcs = arcs
+            .into_iter()
+            .zip(dropped)
+            .filter_map(|(arc, dropped)| (!dropped).then_some(arc))
+            .collect();
     }
 
-    fn a_node_that_is_no_corner(&self) -> Option<(usize, usize, usize)> {
-        for node in 0..self.nodes.len() {
-            if self.nodes[node].vertex.is_some() {
-                continue;
-            }
-            let touching: Vec<usize> = (0..self.arcs.len())
-                .filter(|&arc| self.arcs[arc].ends.contains(&node))
-                .collect();
-            if touching.len() != 2 {
-                continue;
-            }
-            let (first, second) = (&self.arcs[touching[0]], &self.arcs[touching[1]]);
-            // A closed crossing with one node is one arc that starts and ends
-            // there, and joining it to itself would leave a curve with no point
-            // on it at all. And a ruling's two arcs either side of the apex
-            // have the partner's inside on opposite sides, so one arc across
-            // the apex would have no one side (§347).
-            if first.crossing == second.crossing
-                && first.boundary == second.boundary
-                && first.against_its_gradients == second.against_its_gradients
-                && !self.crossings[first.crossing].order.closes()
-            {
-                return Some((node, touching[0], touching[1]));
-            }
+    /// The two arcs to join at `node`, lower-numbered first, given `touching`,
+    /// every arc with an end there.
+    ///
+    /// They are joined where the node is no corner of the face and is an end
+    /// of these two arcs alone, and the two are one stretch of an open
+    /// crossing: on the same crossing, along the same boundary, and running
+    /// the same way against their gradients.
+    fn the_two_arcs_to_join_at(&self, node: usize, touching: &[usize]) -> Option<(usize, usize)> {
+        if self.nodes[node].vertex.is_some() {
+            return None;
         }
-        None
+        let &[one, other] = touching else {
+            return None;
+        };
+        let (lower, higher) = (one.min(other), one.max(other));
+        let (first, second) = (&self.arcs[lower], &self.arcs[higher]);
+        // A closed crossing with one node is one arc that starts and ends
+        // there, and joining it to itself would leave a curve with no point
+        // on it at all. And a ruling's two arcs either side of the apex
+        // have the partner's inside on opposite sides, so one arc across
+        // the apex would have no one side (§347).
+        (first.crossing == second.crossing
+            && first.boundary == second.boundary
+            && first.against_its_gradients == second.against_its_gradients
+            && !self.crossings[first.crossing].order.closes())
+        .then_some((lower, higher))
     }
 
     /// Walk every arc from both sides, keeping the region on the left, and see
