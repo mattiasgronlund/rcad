@@ -1848,7 +1848,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// halves, and any number of halves meet in one piece, where planes that miss
 /// the centre can leave two caps with nothing between them.
 ///
-/// # On a cone it is planes the apex is in front of, any number of them, and at most one it is on
+/// # On a cone it is planes the apex is in front of, any number of them, and one it is on or two that meet inside the cone
 ///
 /// Every point of one nappe but the apex sits on exactly one ray from the apex —
 /// a ruling — and the whole straight segment from the apex out to that point is
@@ -1864,8 +1864,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// one of those intervals starts at the apex. Then the region holds, with each of
 /// its points, the whole segment back to the apex — it is star-shaped from the
 /// apex, so it is one piece. Nothing in that mentions how the cut planes sit
-/// against each other, which is why this arm counts planes and reads one sign per
-/// cut rather than looking for where two of them meet. §216.5's sketch settled a
+/// against each other, which is why this arm reads one sign per cut the apex is
+/// in front of rather than looking for where two of them meet; only two cuts
+/// through the apex are asked where they meet, below. §216.5's sketch settled a
 /// cone cut by exactly **two** planes by walking the circle of rulings; that
 /// sketch is not needed, and it was not enough, because §217.4 counted every
 /// cone-face refusal in `tests/a_plane_cut_along_a_cones_other_nappe.rs` and
@@ -1886,33 +1887,54 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// `tests/a_plane_cut_along_a_cones_other_nappe.rs`, is those two points through
 /// the public [`SolidView::face_holds_the_point`].
 ///
-/// **The same pinch happens on one nappe, and it is why at most one cut may
-/// hold the apex.** A plane through the apex has the value zero there, so along
-/// each ruling it keeps all of it or only the apex, and which is the sign of how
-/// fast it grows along that ruling — affine in `cos φ` and `sin φ`, so one arc of
-/// the circle of rulings. One such arc is one piece. Two can meet in two: keep
-/// `|x| ≤ z/10` on the cone of slope a half and the rulings with
-/// `|cos φ| ≤ 1/5` are left, one run round `+y` and one round `−y`, two sheets
-/// that meet only at the apex. A face on one of them is cut by both planes, has
-/// every side in front of both, and the other sheet is in front of both too, so
-/// `held_in_front_of_all` would hold its points — a wrong answer.
+/// **The same pinch happens on one nappe, and it is why two cuts through the
+/// apex must meet inside the cone.** A plane through the apex has the value zero
+/// there, so along each ruling it keeps all of it or only the apex, and which is
+/// the sign of how fast it grows along that ruling — affine in `cos φ` and
+/// `sin φ`, so one arc of the circle of rulings. One such arc is one piece. Two
+/// can meet in two: keep `|x| ≤ z/10` on the cone of slope a half and the
+/// rulings with `|cos φ| ≤ 1/5` are left, one run round `+y` and one round `−y`,
+/// two sheets that meet only at the apex. A face on one of them is cut by both
+/// planes, has every side in front of both, and the other sheet is in front of
+/// both too, so `held_in_front_of_all` would hold its points — a wrong answer.
 /// `two_planes_through_the_apex_leave_a_nappe_in_two_sheets` below walks those
 /// rulings. Before `docs/decisions.md` §389 a cut through the apex came only
 /// with a side stored as [`EdgeRun::Straight`] along a ruling, since a ruling
 /// stored as part of a crossing was refused as an arc; since it, every ruling
 /// side reaches this arm.
 ///
-/// **That refuses some faces that are one piece, and it is a gap.** Two planes
-/// through the apex meeting along a line inside the cone keep one arc: every
-/// half-plane round that line meets the nappe in one ruling, so a wedge round it
-/// holds one run. A quarter of a pointed cone, cut by `x = 0` and `y = 0` along
-/// its axis, is that, and its skin is refused here
-/// (`a_quarter_of_a_pointed_cone_has_its_skin_refused_by_name_though_it_is_one_piece`
-/// in `tests/a_solid_carrying_a_run_along_a_cones_ruling.rs`, and the quarter's
-/// cuts in `two_planes_through_the_apex_leave_a_nappe_in_two_sheets` below).
-/// It was refused before §389 too, measured, so this took nothing away.
-/// Telling it from two sheets wants where the two planes meet compared with the
-/// cone (`docs/decisions.md` §389).
+/// **Two cuts through the apex that meet in a line strictly inside the cone
+/// keep one run, whichever wedge is kept and on either nappe.** Cut the nappe
+/// square to its axis: the rulings are the rim of a disc, and a ruling carries
+/// more than the apex exactly where its rim point is in front of both planes.
+/// The line the planes meet in crosses that disc at a point `c` strictly inside
+/// it, and each plane crosses it in a straight line through `c`, so the part in
+/// front of both is a wedge with its corner at `c` and an angle under a half
+/// turn — a fan of rays out of `c`. Each of those rays leaves the disc through
+/// its rim exactly once, because `c` is strictly inside, so the rim points in the
+/// wedge are one arc: one run of rulings. Cuts the apex is strictly in front of
+/// only shorten each ruling's piece, never to nothing, so the region is still
+/// star-shaped from the apex over that one run. A quarter of a pointed cone, cut
+/// by `x = 0` and `y = 0` along its axis, is that
+/// (`a_quarter_of_a_pointed_cone_holds_its_points` in
+/// `tests/a_solid_carrying_a_run_along_a_cones_ruling.rs`).
+/// [`do_two_planes_through_the_apex_meet_inside`] settles where the line is.
+///
+/// **The strip `|x| ≤ z/10` is refused because of its shape**, not for want of
+/// arithmetic: its planes meet along `y`, square to the axis and outside the
+/// cone, so there is no corner `c` in the disc, the two planes cross the section
+/// in two lines side by side, and the strip between them cuts the rim in two
+/// arcs. A line outside the cone that does cross the section crosses it outside
+/// the disc, and a wedge out of a point outside a disc can cut its rim in two
+/// arcs the same way. A line along a ruling, or two planes that are one, is
+/// refused as well: the argument above wants `c` strictly inside.
+///
+/// **Two cuts through the apex beside a cut the apex is behind, and three or
+/// more through it, are refused**, and that is a gap and not a limit: neither is
+/// shown to be two pieces. With a third plane through the apex the part of the
+/// section in front of all three is no longer a fan out of one point unless all
+/// three share one line, and with a cut the apex is behind each ruling's piece no
+/// longer starts at the apex, so neither argument above reaches it.
 ///
 /// # And one cut the apex is behind, when it closes, beside at most one other
 ///
