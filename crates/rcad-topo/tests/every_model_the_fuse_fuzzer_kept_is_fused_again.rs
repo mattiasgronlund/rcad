@@ -99,6 +99,13 @@
 //!
 //! in 0.82 s, and each floor is set at roughly three quarters of that.
 //!
+//! **The refusal floor was set again on 2026-10-04**, when `bake.rs` grew a
+//! face's box by what writing a corner down costs and refusals fell from 310 to
+//! 262 (`docs/decisions.md` §340.10). That tree read `ok: 428, refused: 262,
+//! solids_made: 447, ok_that_wrote_something: 411, asked_both_ways_round: 108,
+//! the_same_both_ways_round: 40`, so the floor is three quarters of 262, and
+//! every other floor is still at most three quarters of its own count.
+//!
 //! # The last two counters are the ones that keep the checks honest
 //!
 //! §95.6 added three correctness checks to the harness — a refusal leaves the
@@ -220,8 +227,10 @@ fn every_seed_in_the_checked_in_corpus_is_fused_without_panicking() {
          like it is",
         reached.ok
     );
+    // Three quarters of the 262 refusals left once `bake.rs` grew a face's
+    // box by what writing a corner down costs (`docs/decisions.md` §340.10).
     assert!(
-        reached.refused >= 300,
+        reached.refused >= 195,
         "only {} fuses refused, so the refusal paths are no longer reached",
         reached.refused
     );

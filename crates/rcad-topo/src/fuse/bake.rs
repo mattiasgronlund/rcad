@@ -235,8 +235,22 @@ pub(crate) struct BakedCorner {
 
 /// A box round some geometry, in world coordinates.
 ///
-/// Only ever used to skip pairs that cannot meet. A box test changes no answer,
-/// so plain `f64` is honest here in a way it would not be one line further on.
+/// Round a face, it is the box round the face as the model stores it
+/// ([`Bounds::round_a_face`]), or round its corners as the joiner derived them,
+/// **grown on every side by [`what_writing_the_corner_down_cost`]** at the
+/// box's farthest corner. The fuse meets a face where the baked surfaces cross,
+/// and a corner written down is that place rounded to `f64`, so the box round
+/// the corners alone can stop a rounding short of the face. Ungrown, the top
+/// face of a block leaned 2 under a frustum stopped at `x = 1.341640786499874`,
+/// its corners as stored, while its ridge met the cone at `x` from
+/// `1.341640786499873` to `1.3416407864998736`; the cut through those two
+/// meets was dropped as missing the face, and thirty fuses in three families
+/// refused `ResultIsNotManifold` for it (`docs/decisions.md` §340.10).
+///
+/// Still plain `f64`, read off stored geometry (§35.4), and not grown by the
+/// room `Model::validate_solid` grants a corner off its plane, so it is the
+/// rounding of the corners it allows for and not every way a face can reach
+/// past them.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Bounds {
     low: [f64; 3],
@@ -249,12 +263,11 @@ impl Bounds {
         (0..3).all(|axis| self.low[axis] <= other.high[axis] && other.low[axis] <= self.high[axis])
     }
 
-    /// Whether the box provably holds no part of `point`'s own box.
+    /// Whether the box holds no part of `point`'s own box.
     ///
-    /// A proof and not a hint: [`Bounds`] round a face is a box the face is
-    /// certainly inside, so a point whose whole enclosure is clear of it is
-    /// certainly off the face. Plain `f64` is honest here because the comparison
-    /// only ever *widens* what is kept.
+    /// Round a face, a point whose whole enclosure is clear of the box is taken
+    /// as off the face, and `arrange.rs` drops a cut whose every node is. That
+    /// is as sure as the box is, and [`Bounds`] says what it allows for.
     pub(crate) fn provably_misses(self, point: PredicatePoint) -> bool {
         let box_of_it = point.enclosure();
         (0..3).any(|axis| {
@@ -269,7 +282,8 @@ impl Bounds {
         }
     }
 
-    /// A box round one face of one solid, curved or flat.
+    /// A box round one face of one solid, curved or flat, grown by what writing
+    /// a corner down costs.
     ///
     /// **Not a box round the face's corners**, which is what this used to read
     /// off [`FaceView::for_each_triangle`] and which is wrong for every curved
@@ -283,7 +297,25 @@ impl Bounds {
             Some((low, high)) => Self {
                 low: low.coordinates(),
                 high: high.coordinates(),
-            },
+            }
+            .grown_by_what_writing_a_corner_down_costs(),
+        }
+    }
+
+    /// The box grown on every side by [`what_writing_the_corner_down_cost`] at
+    /// its farthest corner, which no corner of the face is farther out than.
+    ///
+    /// # Panics
+    ///
+    /// If the box is empty, which a box round a face with a corner never is.
+    fn grown_by_what_writing_a_corner_down_costs(self) -> Self {
+        let room = what_writing_the_corner_down_cost(core::array::from_fn(|axis| {
+            Interval::new(self.low[axis], self.high[axis])
+                .expect("a box round a face's corners holds at least one point")
+        }));
+        Self {
+            low: self.low.map(|side| side - room),
+            high: self.high.map(|side| side + room),
         }
     }
 
@@ -503,6 +535,7 @@ fn bake_the_joined_faces(
             }
             wires.push(walked);
         }
+        let round_this_face = round_this_face.grown_by_what_writing_a_corner_down_costs();
         bounds.take_in(round_this_face);
         faces.push(BakedFace {
             keys: face.faces.clone(),

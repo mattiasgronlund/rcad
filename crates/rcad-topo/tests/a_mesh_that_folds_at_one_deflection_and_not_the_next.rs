@@ -197,15 +197,17 @@ fn no_sliver_cut_through_a_balls_pole_folds_at_any_deflection() {
 ///
 /// Swept at four leans, twelve turns and six widths, the widths given as a
 /// fraction of the rim's own radius so the chop lands in the same place on every
-/// rim. **288 solids, 270 of which answer, and not one of their 2 700 meshes
+/// rim. **288 solids, 278 of which answer, and not one of their 2 780 meshes
 /// folds.** The bare cut is real — instrumenting `cut_in_two` over this sweep
 /// showed 93 cuts of 2 798 taken with `steps = 1` — but the chop also puts the
 /// rim's own arc off the plane of the cut, so no coarse mesh here comes back
 /// flat and none of them reaches the rescue's ladder at all.
 ///
-/// The eighteen that refuse are named rather than dropped: a chop that grazes
-/// the rim leaves the fuse a piece it calls `ResultIsNotManifold`, or a point it
-/// cannot place.
+/// The ten that refuse are named rather than dropped: a chop that grazes the rim
+/// leaves the fuse a point it cannot place. Eight more refused
+/// `ResultIsNotManifold`, at leans `1.35` and `1.5` turned `0`, until §340.10:
+/// the box round one of the block's faces stopped a rounding short of the nodes
+/// on the ball's cut across it, and the cut was dropped as missing the face.
 #[test]
 fn no_sliver_chopped_by_the_blocks_own_sides_folds_at_any_deflection() {
     const LEANS: [f64; 4] = [0.9, 1.2, 1.35, 1.5];
@@ -241,10 +243,9 @@ fn no_sliver_chopped_by_the_blocks_own_sides_folds_at_any_deflection() {
     assert_eq!(
         tally,
         BTreeMap::from([
-            ("answered", 270),
-            ("ResultIsNotManifold", 8),
+            ("answered", 278),
             ("Undecidable", 10),
-            ("meshed", 2700),
+            ("meshed", 2780),
             ("folds a later rung cured", 0),
             ("folds no later rung cured", 0),
         ]),
