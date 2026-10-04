@@ -131,7 +131,7 @@ fn the_rim_between_the_pipe_and_the_cone_measures_six_pi_however_the_file_is_wri
 fn two_bars_on_one_axis_with_their_pipes_written_opposite_ways_join_into_one_sound_solid() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    let text = two_bars_on_one_axis();
+    let text = two_bars_on_one_axis(PipeAxis::Up, PipeAxis::Down);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let import = Import::read(&file, &policy, &mut log).expect("two round bars read");
     let [(_, lower), (_, upper)] = import.solids() else {
@@ -166,6 +166,92 @@ fn two_bars_on_one_axis_with_their_pipes_written_opposite_ways_join_into_one_sou
         measured.volume(),
         measured.volume_error()
     );
+}
+
+/// The same two bars, each pipe's axis written either way, united, intersected
+/// and differenced with either bar handed over first: each answer is one sound
+/// solid of the volume by hand.
+///
+/// United they are `z` 0 to 6, `54π`. Intersected they are `z` 2 to 4, and the
+/// lower less the upper is `z` 0 to 2 and the upper less the lower `z` 4 to 6:
+/// each is `18π`.
+///
+/// Fails on the base for the intersections and differences of bars whose pipes
+/// are written opposite ways, which refuse
+/// `TheFuseWroteABrokenAnswer { CoedgesRunTheSameWay }`.
+#[test]
+fn two_bars_on_one_axis_fuse_into_one_sound_solid_however_each_pipe_is_written() {
+    let policy = Policy::certified();
+    let mut wrong = Vec::new();
+    for lower_axis in [PipeAxis::Up, PipeAxis::Down] {
+        for upper_axis in [PipeAxis::Up, PipeAxis::Down] {
+            for lower_first in [true, false] {
+                for (rule, rule_name) in [
+                    (Rule::Union, "united"),
+                    (Rule::Intersection, "intersected"),
+                    (Rule::Difference, "differenced"),
+                ] {
+                    let what = format!(
+                        "the lower pipe {lower_axis:?}, the upper {upper_axis:?}, the lower \
+                         first {lower_first}, {rule_name}"
+                    );
+                    let mut log = ProvenanceLog::new();
+                    let text = two_bars_on_one_axis(lower_axis, upper_axis);
+                    let file =
+                        StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
+                    let import =
+                        Import::read(&file, &policy, &mut log).expect("two round bars read");
+                    let [(_, lower), (_, upper)] = import.solids() else {
+                        panic!("two MANIFOLD_SOLID_BREPs are two solids");
+                    };
+                    let (arguments, tools) = if lower_first {
+                        (*lower, *upper)
+                    } else {
+                        (*upper, *lower)
+                    };
+                    let mut model = import.into_model();
+                    let fused = match model.fuse(&[arguments], &[tools], rule, &policy, &mut log) {
+                        Ok(fused) => fused,
+                        Err(why) => {
+                            wrong.push(format!("{what}: refused {why:?}"));
+                            continue;
+                        }
+                    };
+                    let [solid] = fused.solids() else {
+                        wrong.push(format!("{what}: {} solids", fused.solids().len()));
+                        continue;
+                    };
+                    if let Err(why) = model.validate(&policy, &mut log) {
+                        wrong.push(format!("{what}: does not validate: {why:?}"));
+                        continue;
+                    }
+                    let height = if matches!(rule, Rule::Union) {
+                        6.0
+                    } else {
+                        2.0
+                    };
+                    let closed_form = PI * 3.0 * 3.0 * height;
+                    let measured = model
+                        .solid(*solid)
+                        .expect("the fuse made the key")
+                        .measure(
+                            rcad_geom::Deflection::of(0.01).expect("a length"),
+                            &policy,
+                            &mut log,
+                        )
+                        .unwrap_or_else(|why| panic!("{what}: the answer measures: {why:?}"));
+                    if (measured.volume() - closed_form).abs() > measured.volume_error() {
+                        wrong.push(format!(
+                            "{what}: measured {} ± {}, and by hand it is {closed_form}",
+                            measured.volume(),
+                            measured.volume_error()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 fn read(text: &str, what: &str) -> (Model, SolidKey) {
@@ -280,16 +366,16 @@ fn a_flared_bar(axis: PipeAxis, first: FirstInTheShell) -> String {
 }
 
 /// Two round bars of radius `3` on the `z` axis, the lower from `z = 0` to `4`
-/// with its pipe's axis written up, the upper from `z = 2` to `6` with its
-/// pipe's axis written down.
-fn two_bars_on_one_axis() -> String {
+/// with its pipe's axis written `lower`, the upper from `z = 2` to `6` with its
+/// pipe's axis written `upper`.
+fn two_bars_on_one_axis(lower: PipeAxis, upper: PipeAxis) -> String {
     let mut text = a_header(".MILLI.");
     text += "#20=DIRECTION('',(0.,0.,1.));\n";
     text += "#21=DIRECTION('',(1.,0.,0.));\n";
     text += "#22=DIRECTION('',(0.,0.,-1.));\n";
     text += &format!("#26=VECTOR('',#20,{});\n", real(1.0));
-    text += &a_round_bar(1000, (0.0, 4.0), PipeAxis::Up);
-    text += &a_round_bar(2000, (2.0, 6.0), PipeAxis::Down);
+    text += &a_round_bar(1000, (0.0, 4.0), lower);
+    text += &a_round_bar(2000, (2.0, 6.0), upper);
     text + "ENDSEC;\nEND-ISO-10303-21;\n"
 }
 
