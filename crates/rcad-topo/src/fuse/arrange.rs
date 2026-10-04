@@ -709,20 +709,23 @@ struct Crossing {
 }
 
 /// One straight line a plane or a pipe rests along a pipe on, the fillet's
-/// touch among them: a wall on `y = −2` against a bar of radius two, or two
-/// bars side by side, two radii apart.
+/// touch among them — a wall on `y = −2` against a bar of radius two, or two
+/// bars side by side, two radii apart — or a plane rests along a cone's side
+/// on.
 ///
 /// **`∇S × ∇Q` is nothing along the whole line**, because the two surfaces are
 /// tangent there and their gradients are parallel. So neither of the two things
 /// every other crossing reads off that cross product is there to read. Its
-/// direction is the pipe's own axis, which is a stored triple; and the region
-/// left of it is not the partner's negative side, because the face lies on one
-/// side of the partner on **both** sides of the line.
+/// direction is the pipe's own axis, which is a stored triple, or the cone's
+/// ruling ([`the_ruling_a_plane_rests_along`]); and the region left of it is
+/// not the partner's negative side, because the face lies on one side of the
+/// partner on **both** sides of the line.
 #[derive(Clone, Copy)]
 struct AlongATouch {
-    /// The pipe's axis direction, exactly as stored. Which way it points is
-    /// the crossing's forward direction, and nothing else reads it: no
-    /// gradient is there to agree with.
+    /// The pipe's axis direction, exactly as stored, or the ruling's, up the
+    /// nappe the cone's axis points into. Which way it points is the
+    /// crossing's forward direction, and nothing else reads it: no gradient is
+    /// there to agree with.
     along: [Interval; 3],
     /// Which side of the partner the face lies on, either side of the line.
     face_lies_on: Decision,
@@ -1135,12 +1138,8 @@ impl<'f> Arrangement<'f> {
                 None => {
                     let through_an_apex =
                         a_ruling_through_an_apex(&self.surface, &partner, &run, policy, log)?;
-                    let touching = a_line_one_surface_rests_on_another_along(
-                        &self.surface,
-                        &partner,
-                        &run,
-                        log,
-                    )?;
+                    let touching =
+                        a_line_one_surface_rests_on_another_along(self.face, &partner, &run, log)?;
                     self.crossings.push(Crossing {
                         partner,
                         through_an_apex,
@@ -2792,6 +2791,17 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::half_of_the_turn`] wants which way along the line, and
     /// [`Arrangement::turns_anticlockwise_or_bends`] wants how the two curves
     /// bend.
+    ///
+    /// **Where the two partners are a plane resting along a cone, nothing is
+    /// what the determinant is, whatever box the node is in.** The node is on
+    /// both partners, and everything a plane resting along a cone shares with
+    /// it is the one ruling it rests on, where the cone's gradient is along the
+    /// plane's normal. So two rows are parallel. A face crossing that plane
+    /// meets it in a line that touches the face's conic of the cone there, and
+    /// the node is a meet of two planes and a cone at a double root, which no
+    /// box narrows to one point. Read off that box the determinant straddles
+    /// nothing; the touch is proved by [`a_plane_rests_along_a_cone`], so it is
+    /// read as nothing and the order of the two is left to how they bend.
     fn turns_anticlockwise(
         &self,
         node: usize,
@@ -2813,11 +2823,19 @@ impl<'f> Arrangement<'f> {
             return self.turn_between_two_ways_out(node, first, second, policy, log);
         }
         let at = self.nodes[node].point;
+        let [first_partner, second_partner] =
+            [first, second].map(|way| self.crossings[way.crossing].partner);
         let mine = gradient_at(&self.surface, at);
-        let one = gradient_at(&self.crossings[first.crossing].partner, at);
-        let other = gradient_at(&self.crossings[second.crossing].partner, at);
+        let one = gradient_at(&first_partner, at);
+        let other = gradient_at(&second_partner, at);
+        let turn = orient3d_of_points(mine, one, other, PredicatePoint::from([0.0; 3]));
+        if matches!(turn, Decision::Undecidable { .. })
+            && a_plane_rests_along_a_cone(&first_partner, &second_partner)
+        {
+            return Ok(Decision::Zero);
+        }
         let decision = must_decide(
-            orient3d_of_points(mine, one, other, PredicatePoint::from([0.0; 3])),
+            turn,
             ORIENT3D,
             &[mine, one, other],
             Measures::Volume,
@@ -5068,13 +5086,13 @@ fn how_a_crossing_runs(
     // arrangement reads their sides off it. So only a touch reads the axis, and
     // `Arrangement::way_out_of`, `Arrangement::turns_anticlockwise` and
     // `Arrangement::wire_from` read the same line off [`AlongATouch`]. A plane
-    // resting along a cone's ruling is the same shape and is not read here yet
-    // (queue row Q473).
+    // resting along a cone's ruling is the same shape, and reads the ruling.
     if a_pair_that_crosses_in_straight_lines(surface, partner, log)? {
-        let direction = match the_axis_one_surface_rests_on_another_along(surface, partner, run) {
-            Some(axis) => axis.map(Interval::exactly),
-            None => cross_of(gradient_at(surface, at), gradient_at(partner, at)),
-        };
+        let direction =
+            match the_line_one_surface_rests_on_another_along(surface, partner, run, log)? {
+                Some(along) => along,
+                None => cross_of(gradient_at(surface, at), gradient_at(partner, at)),
+            };
         let (axis, forward_climbs_the_axis) = dominant_axis_of_a_direction(direction, log)?;
         return Ok(HowItRuns::AlongAnAxis {
             axis,
@@ -5125,43 +5143,59 @@ fn how_a_crossing_runs(
     }
 }
 
-/// The pipe's axis direction, where `surface` and `partner` are a plane and a
-/// pipe or two pipes and `run` is the one line they rest against each other
-/// along; `None` for every other pair and every other run.
+/// The direction of the one line `surface` and `partner` rest against each
+/// other along, where `run` is that line; `None` for every other pair and every
+/// other run.
 ///
 /// **`intersect` has already told a touch from a cut**, and this reads its
-/// answer rather than asking again. A plane along a pipe's axis and two pipes
-/// side by side come back as two lines a half-space picks apart where they
-/// really cross, and as one bare [`EdgeRun::Straight`] where they touch. Two
-/// planes cross in a bare straight run too, and are not a plane and a pipe. A
-/// plane resting along a cone's ruling is one as well, and is left out until
-/// queue row Q473: its direction is the ruling's and not a stored one.
-fn the_axis_one_surface_rests_on_another_along(
+/// answer rather than asking again. A plane along a pipe's axis, two pipes side
+/// by side and a plane through a cone's apex steeper than its side come back as
+/// two lines a half-space picks apart where they really cross, and as one bare
+/// [`EdgeRun::Straight`] where they touch. Two planes cross in a bare straight
+/// run too, and are none of these.
+///
+/// A pipe's touch runs along its stored axis, exactly. A cone's runs along the
+/// ruling the plane rests on, which no stored triple names
+/// ([`the_ruling_a_plane_rests_along`]).
+///
+/// # Errors
+///
+/// What [`the_ruling_a_plane_rests_along`] refuses.
+fn the_line_one_surface_rests_on_another_along(
     surface: &Surface,
     partner: &Surface,
     run: &NamedRun,
-) -> Option<[f64; 3]> {
+    log: &mut ProvenanceLog,
+) -> Result<Option<[Interval; 3]>> {
     if !matches!(run.run(), EdgeRun::Straight) {
-        return None;
+        return Ok(None);
     }
     if let Surface::Cylinder(pipe) = surface
         && matches!(partner, Surface::Plane(_) | Surface::Cylinder(_))
     {
-        return Some(pipe.axis().direction().components());
+        return Ok(Some(
+            pipe.axis().direction().components().map(Interval::exactly),
+        ));
     }
     if let (Surface::Plane(_), Surface::Cylinder(pipe)) = (surface, partner) {
-        return Some(pipe.axis().direction().components());
+        return Ok(Some(
+            pipe.axis().direction().components().map(Interval::exactly),
+        ));
     }
-    None
+    if let Some((flat, cone)) = a_plane_and_a_cone(surface, partner) {
+        return the_ruling_a_plane_rests_along(flat, cone, log).map(Some);
+    }
+    Ok(None)
 }
 
-/// [`AlongATouch`] for one crossing, or `None` when the partner does not rest
-/// on the face's surface along a line.
+/// [`AlongATouch`] for one crossing on `face`, or `None` when the partner does
+/// not rest on the face's surface along a line.
 ///
 /// **Which side of the partner the face lies on is read off an axis, never off
 /// the line**, where every sign is nothing:
 ///
-/// - a plane resting on a pipe is outside it everywhere off the line, so `Pos`;
+/// - a plane resting on a pipe or a cone is outside it everywhere off the
+///   line, so `Pos`;
 /// - a pipe a plane rests on lies within its radius of its own axis, and the
 ///   plane is exactly that far from the axis, so the pipe is on the side of the
 ///   plane its axis is on;
@@ -5169,25 +5203,38 @@ fn the_axis_one_surface_rests_on_another_along(
 ///   thinner is inside the thicker and touching its wall. Then the thinner is
 ///   inside, and so is its axis, which is `r₂ − r₁` from the thicker one's
 ///   axis rather than the `r₁ + r₂` of a touch from outside. The thicker is
-///   outside the thinner either way.
+///   outside the thinner either way;
+/// - a cone a plane rests on lies on one side of the plane on one nappe and on
+///   the other side on the other, and the face is on one nappe
+///   ([`the_side_of_a_resting_plane_a_cone_face_lies_on`]).
 ///
 /// # Errors
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the side of a stored
 /// axis origin cannot be proved. It is a radius off the plane or the other
-/// pipe's skin, so `Zero` is arithmetic that ran out and not a shape.
+/// pipe's skin, so `Zero` is arithmetic that ran out and not a shape. And what
+/// [`the_line_one_surface_rests_on_another_along`] and
+/// [`the_side_of_a_resting_plane_a_cone_face_lies_on`] refuse.
 fn a_line_one_surface_rests_on_another_along(
-    surface: &Surface,
+    face: &BakedFace,
     partner: &Surface,
     run: &NamedRun,
     log: &mut ProvenanceLog,
 ) -> Result<Option<AlongATouch>> {
-    let Some(along) = the_axis_one_surface_rests_on_another_along(surface, partner, run) else {
+    let surface = &face.surface;
+    let Some(along) = the_line_one_surface_rests_on_another_along(surface, partner, run, log)?
+    else {
         return Ok(None);
     };
+    if let (Surface::Cone(cone), Some(flat)) = (surface, partner.as_plane()) {
+        return Ok(Some(AlongATouch {
+            along,
+            face_lies_on: the_side_of_a_resting_plane_a_cone_face_lies_on(face, flat, cone, log)?,
+        }));
+    }
     let Surface::Cylinder(pipe) = surface else {
         return Ok(Some(AlongATouch {
-            along: along.map(Interval::exactly),
+            along,
             face_lies_on: Decision::Pos,
         }));
     };
@@ -5195,7 +5242,7 @@ fn a_line_one_surface_rests_on_another_along(
         && pipe.radius() >= other.radius()
     {
         return Ok(Some(AlongATouch {
-            along: along.map(Interval::exactly),
+            along,
             face_lies_on: Decision::Pos,
         }));
     }
@@ -5212,9 +5259,124 @@ fn a_line_one_surface_rests_on_another_along(
         }
     };
     Ok(Some(AlongATouch {
-        along: along.map(Interval::exactly),
+        along,
         face_lies_on,
     }))
+}
+
+/// The direction of the ruling a plane rests along a cone on, pointing up the
+/// nappe the cone's axis points into: `(n·n)w − (n·w)n`, for the plane's
+/// normal `n` and the axis direction `w`, as stored.
+///
+/// **Why that is the ruling.** The cone's gradient at `apex + t·d` is
+/// `t(|w|²d − (1 + slope²)(d·w)w)`, and along the ruling `d` the plane rests
+/// on it is along `n`. So `n` lies in the flat surface `d` and `w` span, and
+/// `d` in the one `n` and `w` span; of the directions there, the one square to
+/// `n` is `w` with its part along `n` taken off, which is the form above. Its
+/// dot with `w` is `‖n × w‖²`, nothing only for a plane square to the axis,
+/// which meets the cone at the apex alone; so it points up `w`.
+///
+/// **Read only off a touch the arithmetic proved.** `intersect` asks the two
+/// signs that make a touch through the caller's policy, and a tolerant one can
+/// read a plane a rounding off the cone's side as resting on it. Then the form
+/// above is the axis laid flat on a plane that cuts two rulings, or touches the
+/// apex alone, and is the direction of no line the two share. So the two signs
+/// are asked again of the doors [`a_plane_cuts_a_cone_in_rulings`] asks, which
+/// prove both and round neither, and the direction is read only when both are
+/// nothing. Then the touch is exact for the stored numbers, and each component
+/// here is a box round the true one: the order along the line reads an axis
+/// whose box is clear of nothing, as any worked-out direction is
+/// ([`dominant_axis_of_a_direction`]).
+///
+/// # Errors
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when either sign is not
+/// proved nothing.
+fn the_ruling_a_plane_rests_along(
+    flat: &Plane,
+    cone: &Cone,
+    log: &mut ProvenanceLog,
+) -> Result<[Interval; 3]> {
+    if !a_plane_rests_along_a_cone(&Surface::Plane(*flat), &Surface::Cone(*cone)) {
+        return Err(gave_up(
+            A_PLANE_AGAINST_A_CONE,
+            &[
+                PredicatePoint::from(flat.normal().components()),
+                PredicatePoint::from(cone.axis().direction().components()),
+            ],
+            Measures::Length,
+            log,
+        ));
+    }
+    let normal = flat.normal().components().map(Interval::exactly);
+    let up = cone.axis().direction().components().map(Interval::exactly);
+    let (square, leaning) = (dot_of(normal, normal), dot_of(normal, up));
+    Ok([0, 1, 2].map(|axis| square * up[axis] - leaning * normal[axis]))
+}
+
+/// Which side of a plane resting along a cone the face on that cone lies on.
+///
+/// **The two nappes are on opposite sides.** The plane holds the apex, so
+/// turning a point of the cone through the apex turns its side round: the nappe
+/// the axis `w` points into is on the side `apex + w` is on, which is the sign
+/// of `n·w`, and the other nappe is on the other. `n·w` is not nothing, since
+/// `E = (n·w)² − slope²‖n × w‖²` is nothing and `n × w` is not.
+///
+/// Which nappe the face is on is read off its corners, the way
+/// `select.rs` reads a piece's: the sign of `(corner − apex)·w`. A corner at
+/// the apex says nothing and the others say.
+///
+/// # Errors
+///
+/// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] when no corner is
+/// proved off the apex's flat surface square to the axis, or corners are on
+/// both nappes: then the face is not on one, and has the plane on both sides.
+/// [`Error::Undecidable`](crate::Error::Undecidable) when the sign of `n·w`
+/// cannot be proved.
+fn the_side_of_a_resting_plane_a_cone_face_lies_on(
+    face: &BakedFace,
+    flat: &Plane,
+    cone: &Cone,
+    log: &mut ProvenanceLog,
+) -> Result<Decision> {
+    let apex = cone.apex().coordinates();
+    let up = cone.axis().direction().components();
+    let mut nappe = None;
+    for edge in face.wires.iter().flatten() {
+        let at = edge.start.point.enclosure();
+        let found = (0..3)
+            .map(|axis| (at[axis] - Interval::exactly(apex[axis])) * Interval::exactly(up[axis]))
+            .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
+            .sign();
+        if !matches!(found, Decision::Pos | Decision::Neg) {
+            continue;
+        }
+        if nappe.is_some_and(|already| already != found) {
+            nappe = None;
+            break;
+        }
+        nappe = Some(found);
+    }
+    let Some(nappe) = nappe else {
+        return Err(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.keys[0] });
+    };
+    let normal = flat.normal().components();
+    let up_side = match dot_of(normal.map(Interval::exactly), up.map(Interval::exactly)).sign() {
+        side @ (Decision::Pos | Decision::Neg) => side,
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
+            return Err(gave_up(
+                A_PLANE_AGAINST_A_CONE,
+                &[PredicatePoint::from(normal), PredicatePoint::from(up)],
+                Measures::Length,
+                log,
+            ));
+        }
+    };
+    Ok(if nappe == Decision::Pos {
+        up_side
+    } else {
+        the_other_way(up_side)
+    })
 }
 
 /// The apex and the line's direction, for one of the two rulings a plane
@@ -5223,9 +5385,9 @@ fn a_line_one_surface_rests_on_another_along(
 /// A ruling is told from the other by a pair of opposite half-spaces whose flat
 /// surface holds it (`rcad-geom`'s `two_lines_through_a_cones_apex`), so the
 /// line is where that flat surface and the plane cross, `n × p`. The one ruling
-/// a plane resting along the cone touches it in carries no picker and is left
-/// as it was: there `∇S × ∇Q` is nothing along the whole line, not only at the
-/// apex, and that is another gap.
+/// a plane resting along the cone touches it in carries no picker and is not
+/// one of these: there `∇S × ∇Q` is nothing along the whole line, not only at
+/// the apex, and it is an [`AlongATouch`].
 ///
 /// Whether `∇S × ∇Q` runs towards the apex or away from it is read a step out,
 /// at `apex + d` for the direction `d`, as the sign of `(∇S × ∇Q) · d`. That
@@ -5292,6 +5454,17 @@ fn a_ruling_through_an_apex(
         along,
         towards_the_apex,
     }))
+}
+
+/// Whether one of the two is a plane resting along the other, a cone, touching
+/// it along one ruling and crossing it nowhere: the cone's apex on the plane
+/// and `E = (n·w)² − slope²‖n × w‖²` nothing, both **proved** by the doors
+/// [`a_plane_cuts_a_cone_in_rulings`] asks, which round neither.
+fn a_plane_rests_along_a_cone(one: &Surface, other: &Surface) -> bool {
+    a_plane_and_a_cone(one, other).is_some_and(|(flat, cone)| {
+        where_a_cones_apex_stands_against_a_plane(flat, cone) == Decision::Zero
+            && how_a_plane_leans_against_a_cone(flat, cone) == Decision::Zero
+    })
 }
 
 /// The pair as a plane and a cone, whichever way round it arrived.
@@ -8006,7 +8179,8 @@ mod what_the_curved_arrangement_reaches {
     /// is an endless straight line and is ordered the way a plane along a pipe's
     /// axis already was.
     ///
-    /// **The tangent plane is left out on purpose and the last block says why.**
+    /// **The tangent plane is the last block**: one ruling, ordered along the
+    /// line it rests on rather than along `∇S × ∇Q`, which is nothing there.
     #[test]
     fn the_two_rulings_a_plane_through_a_cones_apex_cuts_are_ordered_along_an_axis() {
         let policy = Policy::certified();
@@ -8060,13 +8234,11 @@ mod what_the_curved_arrangement_reaches {
             "a plane cutting across a cone still runs round a closed curve"
         );
 
-        // **A tangent plane's one ruling is still refused**, the gap a plane
-        // resting on a pipe was until `AlongATouch`. The gate lets it through,
-        // and the line under the gate is `∇S × ∇Q`, which for a plane lying
-        // along a cone's own side is exactly nothing — the two gradients are
-        // parallel everywhere on the ruling. A pipe's touch reads the pipe's
-        // stored axis instead; a cone's ruling has no stored direction, and is
-        // queue row Q473's.
+        // **A tangent plane's one ruling runs up `z` too**, though `∇S × ∇Q`
+        // is exactly nothing along it: the two gradients are parallel
+        // everywhere on the ruling. It reads the ruling `(n·n)w − (n·w)n`
+        // instead, which for `n = (−1, 0, 1/2)` and `w = z` is `(1/2, 0, 1)`,
+        // the line through `(2, 0, 4)`.
         let touching = Surface::Plane(
             Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.5))
                 .expect("a plane resting along one ruling"),
@@ -8085,15 +8257,17 @@ mod what_the_curved_arrangement_reaches {
                     PredicatePoint::from([2.0, 0.0, 4.0]),
                     &mut log
                 ),
-                Err(Error::Undecidable { .. })
+                Ok(HowItRuns::AlongAnAxis {
+                    axis: 2,
+                    forward_climbs_the_axis: true
+                })
             ),
-            "the direction of a tangent plane's ruling is `∇S × ∇Q`, which is nothing"
+            "a tangent plane's ruling runs up the nappe the axis points into"
         );
+        assert!(log.records().is_empty(), "a proved touch records nothing");
 
-        // `.is_err()` used to be the whole of the line above, and it would have
-        // passed just as well had the straight gate turned the pair away — which
-        // is `ACrossingThisCannotBeOrderedAlong` and a different sentence. The
-        // gate lets it through, and what gives up is the direction.
+        // The gate lets the pair through, and the cross product the ruling
+        // would otherwise run along is nothing.
         assert!(
             a_pair_that_crosses_in_straight_lines(&touching, &cone, &mut log)
                 .expect("a plane and a cone is a row nothing can run out of arithmetic on"),
@@ -8231,7 +8405,17 @@ mod what_the_curved_arrangement_reaches {
             ),
             "the shared ruling runs up `z`, the pipes' own axis"
         );
-        let touch = a_line_one_surface_rests_on_another_along(&here, &there, &runs[0], &mut log)
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model
+            .add_round_bar(5.0, 4.0, &Isometry::identity())
+            .expect("a bar of radius five up `z`");
+        let baked = bake(&model, &[bar], &policy, &mut log).expect("a bar bakes");
+        let wall = baked[0]
+            .faces
+            .iter()
+            .find(|face| face.surface == here)
+            .expect("the bar's wall is the pipe of radius five up `z`");
+        let touch = a_line_one_surface_rests_on_another_along(wall, &there, &runs[0], &mut log)
             .expect("two stored axis origins ten apart are proved outside each pipe")
             .expect("one bare straight run between two pipes is a touch");
         assert_eq!(
