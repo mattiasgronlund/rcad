@@ -864,16 +864,19 @@ impl Assembly {
     /// each lie flat, and the input's own seam is not among their sides. Joined,
     /// a wall the block took a notch out of is a band with two rings right
     /// round it and nothing across, which is not a face the writer can lay out
-    /// flat (`AWireWillNotLieFlatOnItsFace`). So one of the dissolved edges
-    /// that runs from one ring to the other stays, as the seam (§224.2 item 2).
-    /// Which one is read off its corners, lowest first, and never off its index
-    /// here, which depends on the order the solids were handed over — the same
+    /// flat (`AWireWillNotLieFlatOnItsFace`). So dissolved edges that run from
+    /// one ring to the other stay, as the seam (§224.2 item 2): one edge where
+    /// one runs across, and otherwise a chain of rulings, as where a box inside
+    /// a bar cuts its wall into a grid ([`Assembly::a_seam_across_the_band`]).
+    /// Which is read off the corners, lowest first, and never off the indices
+    /// here, which depend on the order the solids were handed over — the same
     /// rule [`Assembly::which_to_keep_first`] keeps a corner by.
     ///
     /// Anything else that goes right round — a group with other than two such
-    /// rings, no edge across, or a seam that still leaves a ring going round —
-    /// and a group whose rings cannot be counted, stays apart. The answer is
-    /// then the one the fuse gave before it joined curved faces at all.
+    /// rings, neither an edge nor a chain of rulings across, or a seam that
+    /// still leaves a ring going round — and a group whose rings cannot be
+    /// counted, stays apart. The answer is then the one the fuse gave before it
+    /// joined curved faces at all.
     fn edges_a_curved_face_keeps(&self, along: &[[Dart; 2]], dissolved: &[bool]) -> Vec<usize> {
         let same = joined_across(along, dissolved, self.faces.len());
         let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
@@ -893,7 +896,7 @@ impl Assembly {
             }
             let seam = self.a_seam_across_the_band(&members, along, dissolved, &inside);
             match seam {
-                Some(seam) => staying.push(seam),
+                Some(seam) => staying.extend(seam),
                 None => staying.extend(inside),
             }
         }
@@ -924,15 +927,46 @@ impl Assembly {
             })
     }
 
-    /// The dissolved edge that runs from one ring of a band to the other with
-    /// the lowest corners, where keeping it leaves a face that lies flat.
+    /// The dissolved edges to keep as the seam across a band, where keeping
+    /// them leaves a face that lies flat: one edge from one ring to the other
+    /// where there is one, and otherwise the chain of rulings from ring to ring
+    /// with the fewest edges.
+    ///
+    /// **A seam is a chain of edges where no one edge runs across.** A box
+    /// standing inside a bar cuts the bar's wall at the box's floor and roof as
+    /// well as down its four walls, so the wall comes back as a grid of 24
+    /// pieces, 8 round by 3 up, and each line down it is three rulings broken
+    /// where the floor and the roof cross it. No one edge runs from rim to rim,
+    /// and asking for one left all 24 pieces apart where the answer has one
+    /// wall (`a_box_inside_a_bar.rs`). The corners in the middle of the chain
+    /// stay, as every corner where pieces of one cone or pipe met does
+    /// ([`Assembly::what_is_left`]).
+    ///
+    /// **A chain is of rulings only**, which keep their angle round the axis,
+    /// so it cuts the wall straight down as the input's own seam did. That is
+    /// measured and not traced: a pointed cone united with a cube stood on its
+    /// corner round its apex has no edge from its rim to the ring round its
+    /// apex, and the fewest edges across are two arcs where the cube's planes
+    /// cross the wall. Kept as the seam, they joined the nine pieces into a face
+    /// the mesher refused, `TwoPatchesOfTheMeshDrewTheSameSide`
+    /// (`a_wire_that_rings_a_cones_apex.rs`). Chains of any edges were refused
+    /// that way in seven tests across four files, a frustum with a cube round
+    /// its apex among them, and all seven answer with the pieces apart. A seam
+    /// of one edge is kept whatever it runs along, as it was before chains.
+    ///
+    /// **Which is read off the corners and never off the indices here**, which
+    /// depend on the order the solids were handed over: of the chains with the
+    /// fewest edges, the one whose corners come lowest one after another by
+    /// [`Assembly::which_to_keep_first`]. For one edge that is the edge whose
+    /// lower end is lowest, then whose other end is, the rule a seam was chosen
+    /// by before chains.
     fn a_seam_across_the_band(
         &self,
         members: &[usize],
         along: &[[Dart; 2]],
         dissolved: &[bool],
         inside: &[usize],
-    ) -> Option<usize> {
+    ) -> Option<Vec<usize>> {
         let surface = self.faces[members[0]].surface;
         let rings = self.rings_of_a_curved_face(members, along, dissolved);
         let [one, other] = rings.as_slice() else {
@@ -942,30 +976,121 @@ impl Assembly {
             ring.iter().map(|&dart| self.starts_at(dart)).collect()
         };
         let (one, other) = (corners_of(one), corners_of(other));
-        let lowest_first = |edge: usize| {
-            let mut ends = self.edges[edge].ends;
-            ends.sort_by(|&a, &b| self.which_to_keep_first(a, b));
-            ends
-        };
-        let seam = inside
+        let rulings: Vec<usize> = inside
             .iter()
             .copied()
             .filter(|&edge| {
-                let [a, b] = self.edges[edge].ends;
-                (one.contains(&a) && other.contains(&b)) || (one.contains(&b) && other.contains(&a))
+                let [from, to] = self.edges[edge].ends;
+                from != to && matches!(self.edges[edge].arc, WhichArc::TheOnlyOne)
             })
-            .min_by(|&a, &b| {
-                let (a, b) = (lowest_first(a), lowest_first(b));
-                self.which_to_keep_first(a[0], b[0])
-                    .then_with(|| self.which_to_keep_first(a[1], b[1]))
-            })?;
+            .collect();
+        let seam = match self.the_lowest_way_across(inside, &one, &other)? {
+            one_edge if one_edge.len() == 1 => one_edge,
+            _ => self.the_lowest_way_across(&rulings, &one, &other)?,
+        };
         let mut with_the_seam = dissolved.to_vec();
-        with_the_seam[seam] = false;
+        for &edge in &seam {
+            with_the_seam[edge] = false;
+        }
         let rings = self.rings_of_a_curved_face(members, along, &with_the_seam);
         rings
             .iter()
             .all(|ring| self.a_ring_goes_right_round(ring, &surface) == Some(false))
             .then_some(seam)
+    }
+
+    /// The chain of `edges` from a corner of `one` to a corner of `other` with
+    /// the fewest edges, and of those the one whose corners come lowest one
+    /// after another, walked from whichever ring that puts first; or `None`
+    /// where no chain joins them, or where two of `edges` join the same two
+    /// corners of it, which would leave the choice between them to the indices.
+    fn the_lowest_way_across(
+        &self,
+        edges: &[usize],
+        one: &BTreeSet<usize>,
+        other: &BTreeSet<usize>,
+    ) -> Option<Vec<usize>> {
+        let mut next_to: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for &edge in edges {
+            let [a, b] = self.edges[edge].ends;
+            next_to.entry(a).or_default().push(b);
+            next_to.entry(b).or_default().push(a);
+        }
+        let there = self.the_lowest_walk(&next_to, one, other)?;
+        let back = self.the_lowest_walk(&next_to, other, one)?;
+        let back_is_lower = there
+            .iter()
+            .zip(&back)
+            .map(|(&there, &back)| self.which_to_keep_first(back, there))
+            .find(|order| order.is_ne())
+            .is_some_and(Ordering::is_lt);
+        let corners = if back_is_lower { back } else { there };
+        corners
+            .windows(2)
+            .map(|step| {
+                let [only] = edges
+                    .iter()
+                    .copied()
+                    .filter(|&edge| {
+                        let [a, b] = self.edges[edge].ends;
+                        [a, b] == [step[0], step[1]] || [b, a] == [step[0], step[1]]
+                    })
+                    .collect::<Vec<_>>()[..]
+                else {
+                    return None;
+                };
+                Some(only)
+            })
+            .collect()
+    }
+
+    /// The corners of the chain through `next_to` from a corner of `from` to
+    /// one of `to` with the fewest steps, and of those the one whose corners
+    /// come lowest one after another, or `None` where none joins them.
+    ///
+    /// Every corner is first given how many steps it is from `to`. The walk
+    /// then starts at the lowest corner of `from` that is fewest steps away,
+    /// and steps each time to the lowest neighbour one step nearer. A corner in
+    /// the middle is never on either ring: one on `to` would be no steps away,
+    /// and one on `from` nearer than where the walk started would have been the
+    /// start.
+    fn the_lowest_walk(
+        &self,
+        next_to: &BTreeMap<usize, Vec<usize>>,
+        from: &BTreeSet<usize>,
+        to: &BTreeSet<usize>,
+    ) -> Option<Vec<usize>> {
+        let mut away: BTreeMap<usize, usize> = to.iter().map(|&corner| (corner, 0)).collect();
+        let mut waiting: std::collections::VecDeque<usize> = to.iter().copied().collect();
+        while let Some(corner) = waiting.pop_front() {
+            let further = away[&corner] + 1;
+            for &next in next_to.get(&corner).into_iter().flatten() {
+                if !away.contains_key(&next) {
+                    away.insert(next, further);
+                    waiting.push_back(next);
+                }
+            }
+        }
+        let lowest = |one: &usize, other: &usize| self.which_to_keep_first(*one, *other);
+        let fewest = from.iter().filter_map(|corner| away.get(corner)).min()?;
+        let mut at = from
+            .iter()
+            .copied()
+            .filter(|corner| away.get(corner) == Some(fewest))
+            .min_by(lowest)
+            .expect("the fewest steps away is how far some corner of the ring is");
+        let mut walk = vec![at];
+        while away[&at] > 0 {
+            let nearer = away[&at] - 1;
+            at = next_to[&at]
+                .iter()
+                .copied()
+                .filter(|next| away.get(next) == Some(&nearer))
+                .min_by(lowest)
+                .expect("a corner some steps away has a neighbour one step nearer");
+            walk.push(at);
+        }
+        Some(walk)
     }
 
     /// The rings round a joined face on a cone or a pipe, in the order they are
