@@ -1834,7 +1834,13 @@ impl Assembly {
             // the only corner a closed curve has. Dissolving it leaves the
             // joined edge with no ends at all.
             match by[..] {
-                [one, other] if one != other && !where_curved_pieces_met[corner] => {
+                [one, other]
+                    if one != other
+                        && !where_curved_pieces_met[corner]
+                        && !by
+                            .iter()
+                            .any(|&edge| self.is_the_apex_of_a_cone_along(corner, edge)) =>
+                {
                     straight_through.insert((lump, corner));
                 }
                 _ => still_a_corner[corner] = true,
@@ -1861,6 +1867,50 @@ impl Assembly {
             edge_now,
             closed_a_curve_up,
         }
+    }
+
+    /// Whether `corner` is the apex of a cone `edge` is carried by, which no
+    /// lump walks straight through.
+    ///
+    /// **Two rulings of one cone are not one straight line**, though both run
+    /// through the apex. A plane through a pointed cone's apex cuts it in two
+    /// rulings, and where nothing else meets there the lump has only those two
+    /// edges at the apex. Folded, they were one straight edge between their far
+    /// ends, beside the cap's chord between the same two corners, and the
+    /// shell was refused by the mesher that measures it
+    /// (`a_block_face_through_a_cones_apex.rs`, `docs/decisions.md` §347.4).
+    ///
+    /// **The apex is never a point walked straight through**, so keeping it is
+    /// never wrong. A face on a cone lies on one nappe (the arrangement's
+    /// `part_the_two_nappes_at_the_apex` keeps it to one), and every edge of it
+    /// that reaches the apex leaves it heading along a ruling of that nappe.
+    /// Two rulings of one nappe are never opposite, since a cone's slope is
+    /// finite.
+    ///
+    /// **The match is exact, not a direction test at the corner.** The
+    /// arrangement puts the node where two rulings cross at the apex as the
+    /// cone stores it, so that corner is the apex bit for bit, and
+    /// [`Corners::of`] already takes two corners at the same bits to be one
+    /// ([`exactly_at`]). A corner only near the apex has other bits, and is not
+    /// kept on this ground. A test of whether the two edges leave the corner in
+    /// opposite directions would read two rounded directions instead, and on a
+    /// nearly flat cone, whose slope is large, the two rulings a plane through
+    /// its axis cuts are nearly opposite.
+    fn is_the_apex_of_a_cone_along(&self, corner: usize, edge: usize) -> bool {
+        let at = exactly_at(self.corners[corner].point);
+        self.edges[edge]
+            .carried_by
+            .iter()
+            .any(|surface| match surface {
+                Surface::Cone(cone) => exactly_at(cone.apex()) == at,
+                Surface::Plane(_)
+                | Surface::Cylinder(_)
+                | Surface::Sphere(_)
+                | Surface::Torus(_) => false,
+                // A surface kind added to `rcad-geom` after this is not read
+                // as having an apex.
+                _ => false,
+            })
     }
 
     /// The corners to keep on each run of edges that closes on itself with
@@ -6368,6 +6418,48 @@ mod tests {
             model.data().shells.len(),
             model.data().solids.len(),
         ]
+    }
+
+    /// A corner is the apex of a cone an edge there is carried by when it is
+    /// the apex the cone stores, bit for bit but for the sign of a zero, and
+    /// not when it is the next `f64` along from it (§347.4, Q862).
+    #[test]
+    fn only_a_corner_exactly_at_a_cones_apex_is_read_as_the_apex() {
+        let apex = Point::new(0.0, -0.7, 3.3);
+        let cone = Cone::new(
+            Axis::new(apex, Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+            0.5,
+        )
+        .expect("a cone leaning a half");
+        let through_the_apex =
+            Plane::from_point_and_normal(apex, Vector::new(1.0, 0.0, 0.0)).expect("a unit normal");
+        let corner = |point: Point| Corner {
+            point,
+            wobble: 0.0,
+            from: None,
+        };
+        let assembly = Assembly {
+            corners: vec![
+                corner(apex),
+                corner(Point::new(-0.0, -0.7, 3.3)),
+                corner(Point::new(0.0, -0.7, f64::from_bits(3.3f64.to_bits() + 1))),
+                corner(Point::new(0.0, 1.3, 7.3)),
+            ],
+            edges: vec![Edge {
+                ends: [0, 3],
+                carried_by: [Surface::Plane(through_the_apex), Surface::Cone(cone)],
+                arc: WhichArc::TheOnlyOne,
+                from: Vec::new(),
+            }],
+            runs: vec![EdgeRun::Straight],
+            faces: Vec::new(),
+            shells: Vec::new(),
+            solids: Vec::new(),
+        };
+        let read: Vec<bool> = (0..4)
+            .map(|corner| assembly.is_the_apex_of_a_cone_along(corner, 0))
+            .collect();
+        assert_eq!(read, [true, true, false, false]);
     }
 
     /// A broken answer is refused, and the caller's model does not so much as
