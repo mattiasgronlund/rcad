@@ -228,25 +228,69 @@ fn a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name() {
 }
 
 /// A block `10 × 10 × 4` with a bar of radius 3 bored down through the middle
-/// of one edge. Its floor keeps the outside of the pipe and is **one piece**,
-/// the square less half a disc, so `(5, 5, 0)` is held and `(1, 5, 0)` is not.
-/// It is refused by name all the same: what `is_a_family_this_follows` asks
-/// cannot tell it from the top of the block above, where the same cuts leave
-/// two pieces. A gap, pinned so that answering it fails here and gets moved to
-/// a test of its answers.
+/// of one edge. Its floor and its top each keep the outside of the pipe and are
+/// **one piece**, the square less half a disc: the circle crosses the edge of
+/// the square twice, where the block above crosses it four times. Each says
+/// which points it holds, across the square and past it, every answer worked
+/// out from the coordinates against the square and the disc
+/// ([`on_the_square_less_half_a_disc`]).
 #[test]
-fn a_block_with_a_bar_bored_through_one_edge_has_its_floor_refused_though_it_is_one_piece() {
-    let mut model = a_model();
-    let block = a_block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
-    let bar = a_bar(&mut model, 3.0, [0.0, 5.0, -1.0]);
-    let solid = the_one_solid(&mut model, block, bar, Rule::Difference);
-    let floor = the_only_face(&model, solid, |surface| {
-        surface
-            .as_plane()
-            .is_some_and(|flat| flat.normal().components() == [0.0, 0.0, -1.0])
-    });
-    for point in [[5.0, 5.0, 0.0], [1.0, 5.0, 0.0]] {
-        assert_eq!(holds(&model, solid, floor, point), Err(floor));
+fn a_block_with_a_bar_bored_through_one_edge_holds_the_points_of_its_floor_and_its_top() {
+    let (model, solid) = a_block_with_a_bar_bored_through_one_edge();
+    let mut counted = [0; 3];
+    for (z, facing) in [(0.0, -1.0), (4.0, 1.0)] {
+        let face = the_only_face(&model, solid, |surface| {
+            surface
+                .as_plane()
+                .is_some_and(|flat| flat.normal().components() == [0.0, 0.0, facing])
+        });
+        for x in [-1.0, 0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 9.5, 10.0, 11.0] {
+            for y in [-1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 8.0, 9.0, 10.0, 11.0] {
+                let expected = on_the_square_less_half_a_disc([x, y]);
+                counted[match expected {
+                    OnAFace::Held => 0,
+                    OnAFace::OnItsBoundary => 1,
+                    OnAFace::NotHeld => 2,
+                    other => unreachable!("the test's own answer is one of three: {other:?}"),
+                }] += 1;
+                assert_eq!(
+                    holds(&model, solid, face, [x, y, z]),
+                    Ok(expected),
+                    "the face at z = {z}, at ({x}, {y})"
+                );
+            }
+        }
+    }
+    assert_eq!(counted, [64, 56, 100]);
+}
+
+/// The whole block with the bar bored through one edge, asked point by point:
+/// the ray caster crosses the floor and the top, so a face that refuses makes
+/// the solid refuse.
+#[test]
+fn a_block_with_a_bar_bored_through_one_edge_says_which_points_are_inside_it() {
+    let (model, solid) = a_block_with_a_bar_bored_through_one_edge();
+    let view = model.solid(solid).expect("this model made the key");
+    for (point, expected) in [
+        ([5.0, 5.0, 2.0], Containment::Inside),
+        ([5.0, 1.0, 2.0], Containment::Inside),
+        ([2.0, 8.5, 1.0], Containment::Inside),
+        ([9.0, 9.0, 3.0], Containment::Inside),
+        ([1.0, 5.0, 2.0], Containment::Outside),
+        ([1.0, 2.5, 3.0], Containment::Outside),
+        ([-1.0, 5.0, 2.0], Containment::Outside),
+        ([5.0, 5.0, 4.5], Containment::Outside),
+        ([5.0, 5.0, -0.5], Containment::Outside),
+        ([11.0, 5.0, 2.0], Containment::Outside),
+    ] {
+        let mut log = ProvenanceLog::new();
+        let [x, y, z] = point;
+        assert_eq!(
+            view.classify_point(Point::new(x, y, z), &Policy::certified(), &mut log),
+            expected,
+            "the block bored through one edge, at {point:?}"
+        );
+        assert!(log.is_empty(), "a certified answer logs nothing: {log:?}");
     }
 }
 
@@ -269,6 +313,17 @@ fn a_bar_with_two_flats() -> (Model, SolidKey) {
     let bar = a_bar(&mut model, 5.0, [0.0, 0.0, 0.0]);
     let slab = a_block(&mut model, [-3.0, -10.0, -1.0], [6.0, 20.0, 6.0]);
     let solid = the_one_solid(&mut model, bar, slab, Rule::Intersection);
+    (model, solid)
+}
+
+/// A block `10 × 10 × 4` less a bar of radius 3 standing on `(0, 5)`, which is
+/// the middle of the block's edge along `x = 0`, and running out through the
+/// floor and the top.
+fn a_block_with_a_bar_bored_through_one_edge() -> (Model, SolidKey) {
+    let mut model = a_model();
+    let block = a_block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+    let bar = a_bar(&mut model, 3.0, [0.0, 5.0, -1.0]);
+    let solid = the_one_solid(&mut model, block, bar, Rule::Difference);
     (model, solid)
 }
 
@@ -392,6 +447,24 @@ fn on_a_wall_of_the_bar_with_two_flats(round: f64, point: [f64; 3]) -> OnAFace {
     if !(0.0..=4.0).contains(&z) || x.abs() > 3.0 || round * y < 0.0 {
         OnAFace::NotHeld
     } else if z == 0.0 || z == 4.0 || x.abs() == 3.0 {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::Held
+    }
+}
+
+/// Where a point of the plane of the floor or the top of the block bored
+/// through one edge is against that face, worked out from its coordinates: the
+/// square `0 ≤ x, y ≤ 10` less the inside of the circle of radius 3 round
+/// `(0, 5)`, on its boundary on the edge of the square or on the circle. Every
+/// coordinate asked is a whole number or a half, so the distance is exact.
+fn on_the_square_less_half_a_disc(point: [f64; 2]) -> OnAFace {
+    let [x, y] = point;
+    let from_the_axis = x * x + (y - 5.0) * (y - 5.0);
+    let in_the_square = (0.0..=10.0).contains(&x) && (0.0..=10.0).contains(&y);
+    if !in_the_square || from_the_axis < 9.0 {
+        OnAFace::NotHeld
+    } else if from_the_axis == 9.0 || x == 0.0 || x == 10.0 || y == 0.0 || y == 10.0 {
         OnAFace::OnItsBoundary
     } else {
         OnAFace::Held
