@@ -257,7 +257,9 @@ the six points above, `classify_point` gives `CannotFollowAFacesTrimming` at
 `(4, 0, 0)` and `(0, 0, 0)`, and both `validate` and `mesh` refuse the wall
 `AWireWillNotLieFlatOnItsFace`. So 250.6's reasoned `NotHeld` does not show on
 this commit, and Q415 owns the flat face. **Answered in 250.9** (Q664, Q415
-filed again).
+filed again). *2026-10-04, Q826: on `c11bf21f`, `validate` passes two of the
+eight, one of them walking the flat face's hole the same way round as its
+outline (§243.8).*
 
 Through `SolidBuilder`, with the wall split into two faces along its top
 circle, only one wall shape reaches the mesher at all: a rim
@@ -367,12 +369,11 @@ answer tests fail, `classify_point` at `(0, 0, 0)` with
 - `classify_point` at `(4, 0, 0)`, on the flat face and so on the skin, is
   still refused `CannotFollowAFacesTrimming`, now naming the **wall**. Asked
   directly at `(4, 0, 1)` and `(4, 0, −1)`, the wall refuses
-  `AFaceMissesPartOfWhereItsSurfacesCross` in all eight choices. The route was
-  not traced. That a ray from the point meets the wall, and that
-  `is_a_ring_face_between_two_planes` takes a wall with one plane along two
-  edges (§377) and then refuses a plane that does not hold the axis, is a
-  hypothesis. The test pins the refusal naming the wall, so it moves when the
-  wall is answered. Q826 holds it: Q789, the same wall built in the arena,
-  filed again with this test in its write set.
+  `AFaceMissesPartOfWhereItsSurfacesCross` in all eight choices. **Answered in
+  §243.8** (Q826): the route was traced as this item guessed it, and the wall
+  is now the half of the ring its wire keeps. `(4, 0, 0)` is `OnBoundary` in
+  the four choices whose flat face walks its two circles opposite ways round.
+  In the other four the wall's wire keeps a different side of `z = 0` at each
+  circle, and the wall is still refused, naming it.
 - The puck's lid (250.5) rests on the tube in one circle that no picker names,
   and stays refused. Q104 holds it.
