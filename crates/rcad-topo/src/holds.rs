@@ -1231,7 +1231,9 @@ fn is_one_circle_cut_in_two(
 ///
 /// **Only the family where each step of that is a sign is taken**: a flat face
 /// whose curved sides are arcs of a ball it lies inside or of a cone or a pipe
-/// it lies inside and crosses in a closed curve, a sphere face whose sides are
+/// it lies inside and crosses in a closed curve, a flat face that is a polygon
+/// with one bite out of its edge where it lies outside a pipe
+/// ([`is_a_polygon_less_one_bite_of_a_pipe`]), a sphere face whose sides are
 /// arcs cut by planes through its centre, and a cone face or a pipe face cut by
 /// planes as [`is_a_family_this_follows`] sets out. Each arc must be picked by a
 /// half-space that tells it from its sibling ([`the_way_into_an_arc`]), which
@@ -1813,11 +1815,15 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// one. A pipe's closed crossing is a circle or an ellipse
 /// ([`rcad_geom::Cylinder::is_cut_in_a_closed_curve_by`]), whose inside is
 /// convex, so it is the cone's argument word for word. Keeping a pipe's outside
-/// is not admitted either: the outside of an ellipse is not convex, which is
-/// the first of the cone's reasons below, and a block with a bar bored down
-/// across the whole of its top keeps two pieces of that top outside the bar
-/// (`a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` in
-/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`).
+/// is not admitted by that argument: the outside of an ellipse is not convex,
+/// which is the first of the cone's reasons below, and a block with a bar bored
+/// down across the whole of its top keeps two pieces of that top outside the
+/// bar (`a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` in
+/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`). It is admitted by
+/// another, when the pipe's curve crosses the edge of the polygon the straight
+/// cuts leave only at the two ends of the face's one arc
+/// ([`is_a_polygon_less_one_bite_of_a_pipe`]): the floor of a block with a bar
+/// bored through the middle of one edge.
 ///
 /// **Convexity does not need the crossing to close on a pipe**, where it does on
 /// a cone: the inside of a pipe is every point within its radius of the axis,
@@ -2046,6 +2052,7 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         Surface::Plane(flat) if is_a_pair_of_pipes_running_the_same_way(flat, cuts) => {
             cuts.iter().any(|cut| cut.kept == Decision::Neg)
         }
+        Surface::Plane(flat) if is_a_polygon_less_one_bite_of_a_pipe(flat, cuts) => true,
         Surface::Plane(flat) => cuts.iter().all(|cut| match cut.surface {
             Surface::Plane(_) => true,
             Surface::Sphere(_) => cut.kept == Decision::Neg,
@@ -2491,11 +2498,7 @@ fn keep_the_strip_between_them(flats: [(&Cut, &Plane); 2]) -> bool {
 /// plane, but it reads the touch at a corner, and a corner rounded off the ruling
 /// it should be on reads as a crossing.
 fn crosses_the_pipe_in_two_rulings(pipe: &rcad_geom::Cylinder, flat: &Plane) -> bool {
-    let normal = exactly(flat.normal().components());
-    let off_the_axis =
-        Interval::exactly(flat.offset()) - dot(normal, exactly(pipe.axis().origin().coordinates()));
-    let radius = Interval::exactly(pipe.radius());
-    (off_the_axis * off_the_axis - radius * radius * dot(normal, normal)).sign() == Decision::Neg
+    off_the_axis_against_the_radius(pipe, flat) == Decision::Neg
 }
 
 /// Which side of the plane through `pipe`'s axis square to `flat` the box `at`
@@ -2550,6 +2553,91 @@ fn is_a_pair_of_pipes_running_the_same_way(flat: &Plane, cuts: &[Cut]) -> bool {
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_) | _ => {
                 false
             }
+        })
+}
+
+/// Whether the part of `flat` in front of every cut is one piece because it is
+/// a polygon with one bite out of its edge: the cuts are planes and one pipe,
+/// the face keeps the pipe's **outside**, it has one arc along that pipe, and
+/// every plane either misses the pipe altogether ([`misses_the_pipe`]) or holds
+/// both ends of that arc, which at least one plane does. The floor of a block
+/// with a bar bored down through the middle of one edge is that: the square
+/// less half a disc.
+///
+/// **What it is told apart from** is the top of a block too narrow for the bar,
+/// `a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` in
+/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`. There the bar's circle
+/// crosses each long side twice, so the strip outside the bar is two pieces,
+/// and each piece's arc has one end on each long side. Neither long side holds
+/// both ends, and neither misses the pipe, so that top is refused as it was.
+///
+/// **Why this is one piece.** Let `P` be the part of the plane in front of
+/// every plane cut, `C` the curve the pipe cuts the plane in — a circle or an
+/// ellipse, since the crossing must close — `D` the inside of `C`, and `A` and
+/// `B` the arc's two ends. The region asked about is `P` less the inside of `D`.
+///
+/// 1. **`C` meets the edge of `P` only at `A` and `B`.** The edge of `P` lies
+///    on the lines the plane cuts leave on `flat`. A plane that misses the pipe
+///    leaves a line that misses `C`. A plane that holds `A` and `B` leaves the
+///    line through them, and a line meets a circle or an ellipse in at most two
+///    points, so in those two.
+/// 2. **The arc `α` runs through the inside of `P`**, every point but its ends
+///    strictly in front of every plane cut: that is what the caller's loop asks
+///    of every side against every cut it does not run along, and refuses
+///    otherwise.
+/// 3. **The rest of `C`, call it `β`, is outside `P`.** Take a plane cut
+///    holding both ends: its line meets `C` only at `A` and `B`, so `α` and `β`
+///    are on opposite sides of it, and `α` is in front of it, so `β` is behind.
+///    So `C` meets `P` in `α` alone.
+/// 4. **So `α` cuts `P` in two**, as any arc through the inside of a convex
+///    region with both ends on its edge does. Neither piece meets `C`, so each
+///    lies wholly inside `D` or wholly outside it. Just beside `α` there are
+///    points of both pieces, on both sides of `C`, so one piece is inside and
+///    the other outside, and `P` less the inside of `D` is the outside piece
+///    with `α` along its edge: one piece.
+///
+/// The caller's step 3 then makes the face all of it. Its loop also asks that
+/// every straight side stays outside the pipe ([`where_a_side_lies`] reads it,
+/// through [`a_straight_side_stays_outside_the_pipe`]), which is the part of the
+/// face's boundary this argument does not already place.
+///
+/// **A plane that crosses the pipe beside `A` and `B` is refused, and that is a
+/// gap.** A block with a bar bored down through one corner keeps the square
+/// less a quarter of a disc, one piece, but each of its two sides through the
+/// bite holds one end of the arc and crosses the pipe again outside the square.
+/// Telling that from the narrow top above wants to know whether the second
+/// crossing is on the edge of `P`, which is where two of the plane cuts meet —
+/// a part with no named consumer (§13). So is a leaned plane that misses `C`
+/// on `flat` but meets the pipe elsewhere: [`misses_the_pipe`] asks the plane,
+/// not the line it leaves on `flat`.
+fn is_a_polygon_less_one_bite_of_a_pipe(flat: &Plane, cuts: &[Cut]) -> bool {
+    let (round, planes): (Vec<&Cut>, Vec<&Cut>) = cuts
+        .iter()
+        .partition(|cut| cut.surface.as_plane().is_none());
+    let [bitten_by] = round[..] else {
+        return false;
+    };
+    let Surface::Cylinder(pipe) = bitten_by.surface else {
+        return false;
+    };
+    let [one_end, other_end] = bitten_by.corners_on_it[..] else {
+        return false;
+    };
+    if bitten_by.kept != Decision::Pos
+        || one_end == other_end
+        || pipe.is_cut_in_a_closed_curve_by(flat) != Some(true)
+    {
+        return false;
+    }
+    let holds_both_ends =
+        |cut: &Cut| cut.corners_on_it.contains(&one_end) && cut.corners_on_it.contains(&other_end);
+    planes.iter().any(|cut| holds_both_ends(cut))
+        && planes.iter().all(|cut| {
+            holds_both_ends(cut)
+                || cut
+                    .surface
+                    .as_plane()
+                    .is_some_and(|plane| misses_the_pipe(&pipe, plane))
         })
 }
 
@@ -2784,6 +2872,9 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   on such a plane is one convex region, and a convex region holds every
 ///   segment between two of its points. A closed crossing is what
 ///   [`is_a_family_this_follows`] has already asked of every cone and pipe here.
+/// - A straight side of a flat face against a pipe that face's plane crosses in
+///   a curve that closes, **outside** it but for an end:
+///   [`a_straight_side_stays_outside_the_pipe`].
 /// - An arc against a plane that holds both its ends: that plane meets the arc's
 ///   own plane in the line through the two ends, which is the chord, and the arc
 ///   is the whole of the side of the chord [`the_way_into_an_arc`] points to. So
@@ -2797,6 +2888,11 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   two planes never meet, so the whole of the arc's plane is on that side. A
 ///   half bar's wall is cut by its two caps, and each cap's arc is this against
 ///   the other cap.
+/// - An arc of a pipe against a plane that misses that pipe altogether
+///   ([`misses_the_pipe`]), both ends on the same side of it: the arc is on the
+///   pipe, so it never reaches the plane, and is on the side its ends are. The
+///   floor of a block with a bar bored through one edge has its arc against the
+///   three sides of the block the bar is clear of.
 ///
 /// Everything else is [`Lies::Across`]: an arc with neither end on the plane may
 /// bulge across it, and nothing here builds the point where it would.
@@ -2848,6 +2944,14 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             {
                 Lies::Beside(Decision::Neg)
             }
+            Surface::Cylinder(pipe)
+                if surface
+                    .as_plane()
+                    .is_some_and(|own| pipe.is_cut_in_a_closed_curve_by(own) == Some(true))
+                    && a_straight_side_stays_outside_the_pipe(&pipe, &cut.surface, side, ends) =>
+            {
+                Lies::Beside(Decision::Pos)
+            }
             Surface::Sphere(_)
             | Surface::Cylinder(_)
             | Surface::Cone(_)
@@ -2855,13 +2959,13 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             | _ => Lies::Across,
         },
         SideRun::Arc { into_the_arc } => {
+            let arcs_own_round_surface = match (surface.as_plane(), side.across.as_plane()) {
+                (Some(_), None) => Some(&side.across),
+                (None, Some(_)) => Some(surface),
+                (Some(_), Some(_)) | (None, None) => None,
+            };
             let Surface::Plane(flat) = cut.surface else {
-                let arcs_own_pipe = match (surface.as_plane(), side.across.as_plane()) {
-                    (Some(_), None) => Some(&side.across),
-                    (None, Some(_)) => Some(surface),
-                    (Some(_), Some(_)) | (None, None) => None,
-                };
-                let on_a_pipe_running_the_same_way = arcs_own_pipe
+                let on_a_pipe_running_the_same_way = arcs_own_round_surface
                     .is_some_and(|own| are_pipes_running_the_same_way(own, &cut.surface));
                 return if on_a_pipe_running_the_same_way && ends == [Decision::Zero, Decision::Zero]
                 {
@@ -2906,10 +3010,13 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 }
                 [one @ (Decision::Pos | Decision::Neg), other]
                     if one == other
-                        && surface
+                        && (surface
                             .as_plane()
                             .or(side.across.as_plane())
-                            .is_some_and(|own| the_normals_lie_along_one_line(own, &flat)) =>
+                            .is_some_and(|own| the_normals_lie_along_one_line(own, &flat))
+                            || arcs_own_round_surface.is_some_and(|own| {
+                                matches!(own, Surface::Cylinder(pipe) if misses_the_pipe(pipe, &flat))
+                            })) =>
                 {
                     Lies::Beside(one)
                 }
@@ -3000,6 +3107,81 @@ fn where_an_arc_between_two_points_of_a_pipe_lies(
         found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
         Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
     }
+}
+
+/// Whether a straight side lies strictly outside `pipe` but for an end on it,
+/// in the two shapes the floor of a block with a bar bored through one edge
+/// has; `cut` is `pipe` as a surface and `ends` what [`where_a_side_lies`]
+/// read at the two ends.
+///
+/// - **Both ends outside, along a plane that misses the pipe**
+///   ([`misses_the_pipe`]): every point of such a plane is outside, and the
+///   side is on it.
+/// - **One end on the pipe, by topology, leaving it outwards**: the way from
+///   that end to the other reads positive against the pipe's gradient there.
+///   A pipe's sign `f` is convex — its part of degree two, `|w|²|x|² − (w·x)²`,
+///   is never negative — so along the side `f(A + t·v) ≥ f(A) + t·∇f(A)·v`,
+///   which is `t` times a positive number for every `t > 0`, `f(A)` being zero.
+///   So every point past `A` is strictly outside. The far end is asked to read
+///   outside as well, which it then must.
+///
+/// Anything else is `false`. A side with both ends outside along a plane that
+/// crosses the pipe may run through it, as each long side of the narrow top in
+/// `a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` would if it
+/// were one side.
+fn a_straight_side_stays_outside_the_pipe(
+    pipe: &rcad_geom::Cylinder,
+    cut: &Surface,
+    side: &Side,
+    ends: [Decision; 2],
+) -> bool {
+    let leaves_outwards = |on: Corner, off: Corner| {
+        let Some(out) = gradient_at(cut, on.at) else {
+            return false;
+        };
+        let [from, to] = [on.at, off.at].map(|corner| corner.coordinates());
+        let way = core::array::from_fn(|axis| {
+            Interval::exactly(to[axis]) - Interval::exactly(from[axis])
+        });
+        dot(way, out).sign() == Decision::Pos
+    };
+    if ends == [Decision::Pos, Decision::Pos] {
+        side.across
+            .as_plane()
+            .is_some_and(|along| misses_the_pipe(pipe, along))
+    } else if ends == [Decision::Zero, Decision::Pos] {
+        leaves_outwards(side.start, side.end)
+    } else if ends == [Decision::Pos, Decision::Zero] {
+        leaves_outwards(side.end, side.start)
+    } else {
+        false
+    }
+}
+
+/// Whether `flat` misses `pipe` altogether: it lies along the axis and further
+/// than the radius from it. A plane that does not lie along the axis crosses
+/// every ruling, so these are the only planes that miss a pipe. `false` when
+/// either sign could not be settled.
+fn misses_the_pipe(pipe: &rcad_geom::Cylinder, flat: &Plane) -> bool {
+    let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
+        named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+        normal: flat.normal().components(),
+        along: pipe.axis().direction().components(),
+    });
+    leans == Decision::Zero && off_the_axis_against_the_radius(pipe, flat) == Decision::Pos
+}
+
+/// The sign of `(d − n·o)² − r²|n|²`, with `n·x = d` the plane and `o` the
+/// axis origin. For a plane along `pipe`'s axis that is how far it is from the
+/// axis against the radius: positive when it misses the pipe, zero when it
+/// touches it along a ruling, negative when it crosses it in two. Interval
+/// arithmetic: a sign it cannot settle reads [`Decision::Undecidable`].
+fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Decision {
+    let normal = exactly(flat.normal().components());
+    let off_the_axis =
+        Interval::exactly(flat.offset()) - dot(normal, exactly(pipe.axis().origin().coordinates()));
+    let radius = Interval::exactly(pipe.radius());
+    (off_the_axis * off_the_axis - radius * radius * dot(normal, normal)).sign()
 }
 
 /// Which way the curve two surfaces cross in runs where it passes `at`, as
