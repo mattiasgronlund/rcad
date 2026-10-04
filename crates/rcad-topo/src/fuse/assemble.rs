@@ -89,7 +89,9 @@ use super::arrange::{
 };
 use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
-use super::{FaceMeet, MeetPoint, Sameness, Scratch, as_exact_as_it_is, gave_up, middle_of};
+use super::{
+    FaceMeet, MeetPoint, NamesOfOnePoint, Sameness, Scratch, as_exact_as_it_is, gave_up, middle_of,
+};
 
 /// Work out the whole result: its corners, edges, faces, shells and solids.
 ///
@@ -406,6 +408,7 @@ impl Assembly {
         let mut corners = Corners::with_each_closed_curve_started_once(
             model,
             input_corners_on_exactly_three_planes(model, scratch),
+            &scratch.names_of_one_point,
             kept_wires.iter().flatten().flat_map(|wire| wire.iter()),
         );
         let mut edges = Edges::default();
@@ -3573,6 +3576,14 @@ struct Corners {
     /// The input corners named by their three planes rather than as vertices.
     /// See [`input_corners_on_exactly_three_planes`].
     on_three_planes: BTreeMap<VertexSlot, [Plane; 3]>,
+    /// For every name some arrangement found to be one point with another, the
+    /// one name all of that point's names go by: the least of them, so that
+    /// which face folded which cannot matter. See
+    /// [`Corners::join_the_names_of_each_point`].
+    goes_by: BTreeMap<CornerName, CornerName>,
+    /// Where a point of more than one name goes when one of the names is an
+    /// input corner, and which corner that is, by the name the point goes by.
+    put_at: BTreeMap<CornerName, (PredicatePoint, VertexKey)>,
 }
 
 /// What two faces agree to call the same corner.
@@ -3632,9 +3643,13 @@ impl Corners {
     ///
     /// A curve with two input vertices on it that other kept sides end at is
     /// left with both: it is cut there, and nothing here joins the halves.
+    ///
+    /// Every name an arrangement found to be one point with another goes by
+    /// one name from the start, [`Corners::join_the_names_of_each_point`].
     fn with_each_closed_curve_started_once<'a>(
         model: &Model,
         on_three_planes: BTreeMap<VertexSlot, [Plane; 3]>,
+        names_of_one_point: &[NamesOfOnePoint],
         kept_sides: impl Iterator<Item = &'a FaceMeet>,
     ) -> Self {
         let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<[[u64; 9]; 2]>>> = BTreeMap::new();
@@ -3656,6 +3671,7 @@ impl Corners {
             on_three_planes,
             ..Self::default()
         };
+        corners.join_the_names_of_each_point(model, names_of_one_point);
         for (curve, mut candidates) in on_curve {
             let only_closes_this =
                 |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
@@ -3668,16 +3684,79 @@ impl Corners {
             candidates.dedup_by_key(|(slot, _)| *slot);
             let (_, first) = candidates[0];
             let start = corners.of(model, first);
-            corners
-                .taken_over
-                .insert(CornerName::RoundACurve(curve), start);
+            let curve = corners.goes_by(CornerName::RoundACurve(curve));
+            corners.taken_over.insert(curve, start);
             for (slot, _) in &candidates[1..] {
                 if only_closes_this(slot) {
-                    corners.taken_over.insert(CornerName::Vertex(*slot), start);
+                    let vertex = corners.goes_by(CornerName::Vertex(*slot));
+                    corners.taken_over.insert(vertex, start);
                 }
             }
         }
         corners
+    }
+
+    /// Make every name of one point go by one name, and put the point where
+    /// its input corner is, when one of its names is an input corner.
+    ///
+    /// **A union of names, not a map from one name to one corner.** A meet
+    /// can be folded into a corner of one solid on one face and into a corner
+    /// of the other solid on another, and then all three are one point; a meet
+    /// can be folded into a second meet that a third face folds into a
+    /// corner. Each fold was decided by an arrangement under the policy the
+    /// fuse was asked under (§284.7), so nothing here asks again.
+    ///
+    /// The name a point goes by is the least of its names, and where it goes
+    /// is the lowest of its input corners, put where [`Corners::of`] would put
+    /// that corner alone. Both are taken over every face of both groups, so
+    /// neither the order the solids came in nor which pieces are kept moves
+    /// them. The input corner wins as it wins the fold, where its point is the
+    /// one the faces round it agree on.
+    fn join_the_names_of_each_point(
+        &mut self,
+        model: &Model,
+        names_of_one_point: &[NamesOfOnePoint],
+    ) {
+        let mut leads_to: BTreeMap<CornerName, CornerName> = BTreeMap::new();
+        let leader = |leads_to: &BTreeMap<CornerName, CornerName>, mut name: CornerName| {
+            while let Some(&next) = leads_to.get(&name) {
+                name = next;
+            }
+            name
+        };
+        for one_point in names_of_one_point {
+            let kept = self.name_of(model, &one_point.kept);
+            for (surfaces, which) in &one_point.folded {
+                let folded = CornerName::Meet(names_of_the_three_surfaces(surfaces), *which);
+                let (one, other) = (leader(&leads_to, kept), leader(&leads_to, folded));
+                match one.cmp(&other) {
+                    Ordering::Less => leads_to.insert(other, one),
+                    Ordering::Greater => leads_to.insert(one, other),
+                    Ordering::Equal => None,
+                };
+            }
+        }
+        for &name in leads_to.keys() {
+            let least = leader(&leads_to, name);
+            self.goes_by.insert(name, least);
+            self.goes_by.insert(least, least);
+        }
+        for one_point in names_of_one_point {
+            let MeetPoint::Existing { vertex, .. } = &one_point.kept else {
+                continue;
+            };
+            let point = self.where_it_goes(model, &one_point.kept);
+            let name = self.goes_by(self.name_of(model, &one_point.kept));
+            let lower = match self.put_at.get(&name) {
+                None => true,
+                Some((already, theirs)) => lowest_first(point, *already)
+                    .then_with(|| vertex.slot_in(model.id()).cmp(&theirs.slot_in(model.id())))
+                    .is_lt(),
+            };
+            if lower {
+                self.put_at.insert(name, (point, *vertex));
+            }
+        }
     }
 
     /// The corner `end` names, made the first time it is asked for.
@@ -3691,7 +3770,98 @@ impl Corners {
     /// which pieces selection kept, and that depends on the order the solids
     /// came in. Picking the lower of what arrived would still let the order
     /// decide where the corner goes whenever only one of them arrives (§351.5).
+    ///
+    /// **A point of more than one name with an input corner among them goes
+    /// where that corner goes**, whichever of its names arrives
+    /// ([`Corners::join_the_names_of_each_point`]), and is as wide as the
+    /// wider of the corner and what arrived.
     fn of(&mut self, model: &Model, end: &MeetPoint) -> usize {
+        let name = self.goes_by(self.name_of(model, end));
+        if let Some(&chosen) = self.taken_over.get(&name) {
+            return chosen;
+        }
+        let (point, wobble, was) = match self.put_at.get(&name) {
+            Some(&(input_corner, vertex)) => (
+                input_corner,
+                input_corner.uncertainty().max(end.point().uncertainty()),
+                Some(vertex),
+            ),
+            None => {
+                let point = self.where_it_goes(model, end);
+                let was = match end {
+                    MeetPoint::Existing { vertex, .. } => Some(*vertex),
+                    MeetPoint::OfThreeSurfaces { .. }
+                    | MeetPoint::WhereAClosedCurveStarts { .. }
+                    | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                    | MeetPoint::APoleOfAClosedSurface { .. } => None,
+                };
+                (point, point.uncertainty(), was)
+            }
+        };
+        let at = middle_of(point);
+        if let Some(&already) = self.named.get(&name) {
+            self.settle_on_the_lower_rounding(already, at, wobble);
+            return already;
+        }
+        let index = match self.at.get(&exactly_at(at)) {
+            Some(&already) => {
+                self.made[already].wobble = self.made[already].wobble.max(wobble);
+                self.made[already].from = self.made[already].from.or(was);
+                already
+            }
+            None => {
+                self.made.push(Corner {
+                    point: at,
+                    wobble,
+                    from: was,
+                });
+                self.at.insert(exactly_at(at), self.made.len() - 1);
+                self.made.len() - 1
+            }
+        };
+        self.named.insert(name, index);
+        index
+    }
+
+    /// The name every name of `name`'s point goes by: `name` itself unless an
+    /// arrangement found the point to be more than one name.
+    fn goes_by(&self, name: CornerName) -> CornerName {
+        self.goes_by.get(&name).copied().unwrap_or(name)
+    }
+
+    /// What `end` is called, before [`Corners::goes_by`] is asked.
+    fn name_of(&self, model: &Model, end: &MeetPoint) -> CornerName {
+        match end {
+            MeetPoint::Existing { vertex, .. } => {
+                match self.on_three_planes.get(&vertex.slot_in(model.id())) {
+                    Some(planes) => CornerName::Meet(
+                        names_of_the_three_surfaces(&planes.map(Surface::Plane)),
+                        0,
+                    ),
+                    None => CornerName::Vertex(vertex.slot_in(model.id())),
+                }
+            }
+            MeetPoint::OfThreeSurfaces {
+                surfaces, which, ..
+            } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
+            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
+                CornerName::RoundACurve(names_of_the_two_surfaces(carried_by))
+            }
+            MeetPoint::HalfWayRoundAClosedCurve { carried_by, .. } => {
+                CornerName::HalfWayRoundACurve(names_of_the_two_surfaces(carried_by))
+            }
+            MeetPoint::APoleOfAClosedSurface {
+                surface,
+                at_the_top,
+                ..
+            } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
+        }
+    }
+
+    /// Where `end` goes when it is the only name of its point: where its three
+    /// planes alone put it, when it is on three planes, and where it arrived
+    /// otherwise.
+    fn where_it_goes(&self, model: &Model, end: &MeetPoint) -> PredicatePoint {
         let three_planes = match end {
             MeetPoint::Existing { vertex, .. } => self
                 .on_three_planes
@@ -3707,64 +3877,9 @@ impl Corners {
             | MeetPoint::HalfWayRoundAClosedCurve { .. }
             | MeetPoint::APoleOfAClosedSurface { .. } => None,
         };
-        let name = match end {
-            MeetPoint::Existing { vertex, .. } => match three_planes {
-                Some(planes) => {
-                    CornerName::Meet(names_of_the_three_surfaces(&planes.map(Surface::Plane)), 0)
-                }
-                None => CornerName::Vertex(vertex.slot_in(model.id())),
-            },
-            MeetPoint::OfThreeSurfaces {
-                surfaces, which, ..
-            } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
-            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
-                CornerName::RoundACurve(names_of_the_two_surfaces(carried_by))
-            }
-            MeetPoint::HalfWayRoundAClosedCurve { carried_by, .. } => {
-                CornerName::HalfWayRoundACurve(names_of_the_two_surfaces(carried_by))
-            }
-            MeetPoint::APoleOfAClosedSurface {
-                surface,
-                at_the_top,
-                ..
-            } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
-        };
-        if let Some(&chosen) = self.taken_over.get(&name) {
-            return chosen;
-        }
-        let point = three_planes
+        three_planes
             .and_then(where_three_planes_meet_whichever_face_asks)
-            .unwrap_or_else(|| end.point());
-        let at = middle_of(point);
-        if let Some(&already) = self.named.get(&name) {
-            self.settle_on_the_lower_rounding(already, at, point.uncertainty());
-            return already;
-        }
-        let was = match end {
-            MeetPoint::Existing { vertex, .. } => Some(*vertex),
-            MeetPoint::OfThreeSurfaces { .. }
-            | MeetPoint::WhereAClosedCurveStarts { .. }
-            | MeetPoint::HalfWayRoundAClosedCurve { .. }
-            | MeetPoint::APoleOfAClosedSurface { .. } => None,
-        };
-        let index = match self.at.get(&exactly_at(at)) {
-            Some(&already) => {
-                self.made[already].wobble = self.made[already].wobble.max(point.uncertainty());
-                self.made[already].from = self.made[already].from.or(was);
-                already
-            }
-            None => {
-                self.made.push(Corner {
-                    point: at,
-                    wobble: point.uncertainty(),
-                    from: was,
-                });
-                self.at.insert(exactly_at(at), self.made.len() - 1);
-                self.made.len() - 1
-            }
-        };
-        self.named.insert(name, index);
-        index
+            .unwrap_or_else(|| end.point())
     }
 
     /// Keep the lower of two roundings of one corner, so that which face asked

@@ -407,6 +407,9 @@ pub(crate) struct Scratch {
     /// later copy, every piece then lay on the earlier one and was dropped as
     /// the one that came second, and `a ∪ a` came back empty.
     pub(crate) cut_from: Vec<usize>,
+    /// Every point some face's arrangement found to be more than one name,
+    /// from the faces of both groups, kept piece or not.
+    pub(crate) names_of_one_point: Vec<NamesOfOnePoint>,
 }
 
 impl Scratch {
@@ -439,9 +442,12 @@ impl Scratch {
 
         let mut pieces = Vec::new();
         let mut cut_from = Vec::new();
+        let mut names_of_one_point = Vec::new();
         for (operand, solid) in arguments.iter().chain(&tools).enumerate() {
             for face in &solid.faces {
-                pieces.extend(split_a_face(face, policy, log)?);
+                let split = split_a_face(face, policy, log)?;
+                pieces.extend(split.pieces);
+                names_of_one_point.extend(split.names_of_one_point);
             }
             cut_from.resize(pieces.len(), operand);
         }
@@ -450,6 +456,7 @@ impl Scratch {
             tools,
             pieces,
             cut_from,
+            names_of_one_point,
         })
     }
 }
@@ -568,6 +575,31 @@ impl MeetPoint {
             | MeetPoint::APoleOfAClosedSurface { point, .. } => *point,
         }
     }
+}
+
+/// One point that a face's arrangement found to be more than one name.
+///
+/// The arrangement folds a meet of three surfaces into a corner of the face,
+/// or into another meet, when the two are one point within rounding, and
+/// hands the survivor on as the end of every side there. A face that has
+/// neither that corner nor the fold keeps the meet as a node of its own and
+/// names it by its three surfaces, so the same point came into the answer as
+/// two corners under two names, a few ulps apart, and an edge was left with
+/// one face along it (§284.7). This carries the fold to `assemble`, which
+/// makes every name here one corner before any piece is walked.
+///
+/// **Not a [`MeetPoint`] field.** The names travel beside the pieces, from
+/// every node of every face whether or not a kept piece ends there, because
+/// the face that folded may keep no piece at the point while the face that
+/// did not fold keeps one.
+#[derive(Clone, Debug)]
+pub(crate) struct NamesOfOnePoint {
+    /// The end the arrangement hands on for the point.
+    pub(crate) kept: MeetPoint,
+    /// The meets folded into it: their three surfaces, in
+    /// `meet_of_three_surfaces`'s own fixed order, and which of their meeting
+    /// points each one was, as [`MeetPoint::OfThreeSurfaces`] carries them.
+    pub(crate) folded: Vec<([Surface; 3], u8)>,
 }
 
 /// Give up on a decision nothing can bound, recording that it was asked.
