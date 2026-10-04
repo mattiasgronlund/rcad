@@ -4490,7 +4490,7 @@ fn the_most_even_chord_that_stays_inside(piece: &WalkedLoop, span: f64) -> Optio
             up_to_from.1.max(longitude(from)),
         );
         let mut from_to = (longitude(from), longitude(from));
-        for to in from + 1..count {
+        for (to, &(least, most)) in from_the_end.iter().enumerate().take(count).skip(from + 1) {
             from_to = (from_to.0.min(longitude(to)), from_to.1.max(longitude(to)));
             if to == from + 1 || (from == 0 && to == count - 1) {
                 continue;
@@ -4498,7 +4498,6 @@ fn the_most_even_chord_that_stays_inside(piece: &WalkedLoop, span: f64) -> Optio
             if piece.points[from] == piece.points[to] {
                 continue;
             }
-            let (least, most) = from_the_end[to];
             let round_the_rest = up_to_from.1.max(most) - up_to_from.0.min(least);
             let wider = (from_to.1 - from_to.0).max(round_the_rest);
             if wider >= span || best.is_some_and(|(narrowest, _)| wider >= narrowest) {
