@@ -6422,8 +6422,9 @@ mod tests {
     };
 
     use super::{
-        Arrangement, Piece, as_exact_as_it_is, canonical_cut_surfaces, prove_the_hinted_order,
-        split_a_face, the_other_way, three_planes_faced_the_one_way, where_the_crossing_starts,
+        Arc, Arrangement, Boundary, HowItRuns, Node, Piece, as_exact_as_it_is,
+        canonical_cut_surfaces, prove_the_hinted_order, split_a_face, the_other_way,
+        three_planes_faced_the_one_way, where_the_crossing_starts,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake, what_writing_the_corner_down_cost};
     use crate::fuse::{FaceMeet, MeetPoint};
@@ -7285,6 +7286,130 @@ mod tests {
         assert!(
             !folds(from_to(room.next_up(), 1000.0 * room)),
             "a meet whose box misses the corner's room altogether is left a node"
+        );
+    }
+
+    /// Arcs that meet at a node nothing else touches are joined into the
+    /// lowest-numbered arc of each run. That arc keeps its own direction and
+    /// its place among the arcs, and every arc left alone keeps its place too.
+    ///
+    /// The nodes and arcs are written by hand on a face's real crossings, so
+    /// that every case `join_arcs_that_meet_at_nothing` tells apart is here at
+    /// once, with the arcs of each case spread through the list:
+    ///
+    /// - a run from corner 0 to corner 4 whose lowest arc is in its middle and
+    ///   whose last arc runs backwards. It comes out as that middle arc, running
+    ///   from corner 0 to corner 4.
+    /// - three arcs in a ring through no corner. The lowest node is joined
+    ///   first, so they come out as one arc from node 7, the ring's highest,
+    ///   back to node 7.
+    /// - node 9, with three arcs: two of them a pair to node 8 and one to
+    ///   corner 10. Joining node 8 makes the pair one arc from node 9 back to
+    ///   itself, node 9 then has two arcs, and that loop is joined away.
+    /// - two arcs that differ in their boundary, in their crossing, or in which
+    ///   way they run against their gradients, and two of a closed crossing.
+    ///   None of these is joined.
+    #[test]
+    fn arcs_meeting_where_nothing_else_does_are_joined_into_the_lowest_numbered_of_them() {
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let cube = model
+            .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a unit cube");
+        let ball = model
+            .add_ball(
+                0.25,
+                &Isometry::translation(Vector::new(0.5, 0.5, 0.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius");
+        let [cube, ball] = baked(&model, [cube, ball]);
+        let bottom = cut_by_the_ball(the_face_facing(&cube, [0.0, 0.0, -1.0]), &ball);
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let line = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let other_line = the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
+        let circle = the_crossing_along(&arrangement, ball.faces[0].clone());
+        // Read off a node on the circle once the meets are placed, and no step
+        // that places them has run here.
+        let on_the_circle = PredicatePoint::from([0.75, 0.5, 0.0]);
+        arrangement.crossings[circle].order = HowItRuns::RoundAClosedCurve {
+            from: on_the_circle,
+            node: on_the_circle,
+        };
+
+        let corners = [0, 4, 10];
+        let vertex = bottom.wires[0][0].start.vertex;
+        arrangement.nodes = (0..22)
+            .map(|node| Node {
+                point: PredicatePoint::from([0.0; 3]),
+                boxed_tight: PredicatePoint::from([0.0; 3]),
+                vertex: corners.contains(&node).then_some(vertex),
+                made_of: None,
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: Vec::new(),
+            })
+            .collect();
+        let walked = Some(Boundary {
+            wire: 0,
+            runs_forward: true,
+            position: 0,
+        });
+        let arc = |crossing, ends, boundary, against_its_gradients| Arc {
+            crossing,
+            ends,
+            boundary,
+            against_its_gradients,
+        };
+        arrangement.arcs = vec![
+            arc(line, [2, 3], None, false),
+            arc(line, [12, 11], None, false),
+            arc(line, [0, 1], None, false),
+            arc(other_line, [6, 7], None, false),
+            arc(line, [9, 10], None, false),
+            arc(line, [1, 2], None, false),
+            arc(circle, [14, 15], None, false),
+            arc(other_line, [7, 5], None, false),
+            arc(line, [8, 9], None, false),
+            arc(line, [11, 13], walked, false),
+            arc(line, [4, 3], None, false),
+            arc(circle, [15, 14], None, false),
+            arc(other_line, [5, 6], None, false),
+            arc(line, [9, 8], None, false),
+            arc(line, [16, 17], None, false),
+            arc(other_line, [17, 18], None, false),
+            arc(line, [19, 20], None, false),
+            arc(line, [20, 21], None, true),
+        ];
+
+        arrangement.join_arcs_that_meet_at_nothing();
+
+        let left: Vec<(usize, [usize; 2], bool, bool)> = arrangement
+            .arcs
+            .iter()
+            .map(|arc| {
+                (
+                    arc.crossing,
+                    arc.ends,
+                    arc.boundary.is_some(),
+                    arc.against_its_gradients,
+                )
+            })
+            .collect();
+        assert_eq!(
+            left,
+            [
+                (line, [0, 4], false, false),
+                (line, [12, 11], false, false),
+                (other_line, [7, 7], false, false),
+                (line, [9, 10], false, false),
+                (circle, [14, 15], false, false),
+                (line, [11, 13], true, false),
+                (circle, [15, 14], false, false),
+                (line, [16, 17], false, false),
+                (other_line, [17, 18], false, false),
+                (line, [19, 20], false, false),
+                (line, [20, 21], false, true),
+            ],
+            "each run is its lowest-numbered arc, and nothing else moved"
         );
     }
 
