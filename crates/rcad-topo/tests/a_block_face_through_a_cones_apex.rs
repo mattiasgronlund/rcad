@@ -1,7 +1,6 @@
 //! A pointed cone and a block whose face `x = 0` runs through the cone's apex.
 //! `docs/decisions.md` §283 found every fuse of the two refused on that face,
-//! and §347 is the fix: three of the six now answer, right, and the other
-//! three get as far as the mesher and are refused there.
+//! and §347 is the fix: every fuse answers, right.
 //!
 //! The cone stands on its apex at the origin, slope one half and eight tall,
 //! so its cap is a disc of radius four at `z = 8`. The block is
@@ -25,39 +24,20 @@
 //! node per nappe, since the rulings run on through it into the nappe the
 //! solid does not have.
 //!
-//! **What still refuses is the mesher, and the mesher is right to.** Every
-//! fuse that keeps a piece of the block's face `x = 0` with the apex on its
-//! edge, or the cone's skin cut down to the apex, is refused by the check a
-//! fuse makes by meshing a curved answer before it writes it — `nest_the_shells`
-//! in `fuse/assemble.rs`, measuring each shell. What it is handed is broken.
-//! Where only the two rulings leave the apex, `Assembly::what_is_left` reads
-//! the apex as a point walked straight through, because two edges leave it,
-//! and folds the two rulings into one `Straight` edge between their far ends.
-//! With the floor at `z = −2` that edge runs from `(0, 4, 8)` to
-//! `(0, −4, 8)`, beside the cap's chord between the same two corners. The
-//! face `x = 0` then has a hole of two sides (`TooFewCorners { count: 2 }`
-//! when it is meshed first), and the cone's skin is an arc and a straight side
-//! that the mesher reads as a loop right round the cone, cuts up to the apex
-//! as a cap, and gets one piece with the apex twice at one point of its chart
-//! (`CornersCoincide { position: 2 }` when the skin is meshed first). With the
-//! floor at `z = 1` it is the tip below the block, cut along the rulings into
-//! two pieces of one cone that are kept as two faces. No change to `mesh.rs`
-//! answers these: meshing that answer would be measuring a solid that is not
-//! the one asked for.
-//!
-//! **A probe of the fix.** Keeping, in `what_is_left`, every corner that is
-//! the apex of a cone an edge there is carried by — not committed, since
-//! `fuse/assemble.rs` was outside this row's write set — answered all twelve
-//! fuses of the two tests below, one solid each, and the model validated: the
-//! unions `931.0165 ± 0.0374` (floor `z = −2`, `864 + 64π/3 ≈ 931.0206`) and
-//! `715.1469 ± 0.0571` (floor `z = 1`, `648 + 128π/3 − 511π/24 ≈ 715.1519`),
-//! and the block less the cone `796.9835 ± 0.0374` (`864 − 64π/3 ≈ 796.9794`);
-//! the other eight as in the tables of §347.3.
+//! **And the apex stays a corner** (§347.4, Q862). Where only the two rulings
+//! leave the apex, `Assembly::what_is_left` in `fuse/assemble.rs` read the
+//! apex as a point walked straight through, because two edges leave it, and
+//! folded the two rulings into one `Straight` edge between their far ends.
+//! With the floor at `z = −2` that edge ran from `(0, 4, 8)` to `(0, −4, 8)`,
+//! beside the cap's chord between the same two corners, and the mesher that
+//! measures a curved answer before it is written was right to refuse what it
+//! was handed: the unions, and the block less the cone, as `CornersCoincide`
+//! or `TooFewCorners { count: 2 }`. A corner that is the apex of a cone an
+//! edge there is carried by, bit for bit, now stays a corner.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
-use rcad_mesh::{CannotTriangulate, NotALoop};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
 
@@ -66,80 +46,71 @@ use cones::a_pointed_cone;
 const SLOPE: f64 = 0.5;
 const HEIGHT: f64 = 8.0;
 
-/// What one fuse comes back as today.
-enum Today {
-    /// One solid of this volume, which is the right one.
-    Answers(f64),
-    /// The mesher cannot triangulate a face of the answer: two of its corners
-    /// land on one point of the face's chart. The face is a piece of the
-    /// cone's skin whose two rulings were folded into one straight side.
-    TwoCornersOnOnePointOfTheChart,
-    /// A wire of a face of the answer fans into two corners, which is no loop:
-    /// the hole in the face `x = 0`, the cap's chord and the two rulings
-    /// folded into one straight side between the same two corners.
-    AWireOfTwoCorners,
-}
-
-/// The intersection and the cone less the block answer, one solid each, the
-/// model validates, and the volume is the one worked out by hand. The union
-/// and the block less the cone are refused by the mesher.
+/// Every fuse answers one solid of the volume worked out by hand, with the
+/// faces it should have, and the model validates.
 ///
 /// The face cuts the cone exactly in half and the block holds the `x > 0` half
 /// whole. Half the cone is `π · 4² · 8 / 6 = 64π/3 ≈ 67.0206` and the block is
-/// `6 · 12 · 12 = 864`.
+/// `6 · 12 · 12 = 864`. A half cone is its half of the skin, its half of the
+/// cap, and the triangle on `x = 0`. The block with the other half standing
+/// out of it, or with this half cut out of it, is the block's six faces, the
+/// face `x = 0` with a triangular hole whose point is the apex, and the half
+/// cone's skin and cap.
 #[test]
-fn a_block_face_through_the_apex_cuts_the_cone_in_half_and_the_mesher_refuses_the_rest() {
+fn a_block_face_through_the_apex_cuts_the_cone_in_half_and_every_fuse_answers() {
     let half_the_cone = core::f64::consts::PI * SLOPE * SLOPE * HEIGHT.powi(3) / 6.0;
     let block = 6.0 * 12.0 * 12.0;
-    for (rule, cone_first, answer, volume, today) in [
+    for (rule, cone_first, answer, volume, faces) in [
         (
             Rule::Union,
             true,
             "the block with the cone's x < 0 half standing out of its face x = 0",
             block + half_the_cone,
-            Today::TwoCornersOnOnePointOfTheChart,
+            8,
         ),
         (
             Rule::Union,
             false,
             "the block with the cone's x < 0 half standing out of its face x = 0",
             block + half_the_cone,
-            Today::AWireOfTwoCorners,
+            8,
         ),
         (
             Rule::Intersection,
             true,
             "the cone's x > 0 half",
             half_the_cone,
-            Today::Answers(half_the_cone),
+            3,
         ),
         (
             Rule::Intersection,
             false,
             "the cone's x > 0 half",
             half_the_cone,
-            Today::Answers(half_the_cone),
+            3,
         ),
         (
             Rule::Difference,
             true,
             "the cone's x < 0 half",
             half_the_cone,
-            Today::Answers(half_the_cone),
+            3,
         ),
         (
             Rule::Difference,
             false,
             "the block with a half-cone groove in its face x = 0, the groove's point at the origin",
             block - half_the_cone,
-            Today::AWireOfTwoCorners,
+            8,
         ),
     ] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let (cone, block) = a_cone_and_a_block(&mut model, 0.0, -2.0);
         let said = fuse(&mut model, cone, block, rule, cone_first);
-        let what = format!("{rule:?} (cone first: {cone_first}), {answer} of volume {volume}");
-        is_what_it_is_today(&mut model, said, &today, &what);
+        let what = format!(
+            "{rule:?} (cone first: {cone_first}), {answer} of volume {volume} and {faces} faces"
+        );
+        answers(&mut model, said, volume, faces, &what);
     }
 }
 
@@ -172,95 +143,89 @@ fn the_same_block_one_unit_off_the_apex_answers_every_fuse() {
 
 /// The block's floor raised from `z = −2` to `z = 1`, so the apex is off the
 /// face, just below it. The two rulings still cross at the apex, off the face,
-/// and a node is there now as well. Both intersections and both differences
-/// answer, right; the unions are refused by the mesher.
+/// and a node is there as well. Every fuse answers, right.
 ///
 /// §283 pinned all six refused one stage after the arrangement, for want of a
 /// point inside a piece of the face. That was the missing node and the
 /// rulings' direction together: with the node alone the cone's skin refuses in
-/// the arrangement, and with both the fuses get through selection.
+/// the arrangement, and with both the fuses get through selection. The unions
+/// were then refused by the mesher, for the apex folded away below the block.
 ///
 /// The cone below `z = 1` is a tip of radius one half, `π/12`, so the block
 /// holds `64π/3 − π/24 = 511π/24` of the cone, and the block is
-/// `6 · 12 · 9 = 648`.
+/// `6 · 12 · 9 = 648`. What the block holds is four faces: the cone's skin,
+/// its cap and the trapezium on `x = 0`, each cut to `x > 0`, and the half
+/// disc on the floor. The block less the cone is eight: the block's six, the
+/// floor and the face `x = 0` each notched where the cone runs through them,
+/// and the skin and the cap the other way round.
+///
+/// **The skin outside the block is three faces where one would do**, so the
+/// cone less the block is six faces and not four, and the union ten and not
+/// eight. The cut along the rulings below the floor and round the cone at
+/// `z = 1` for `x < 0` leaves three pieces of the one cone: the tip either
+/// side of `x = 0`, and the `x < 0` half above the floor. Joined, they are
+/// one face whose one ring, of four sides, goes right round the apex, and
+/// `Assembly::edges_a_curved_face_keeps` in `fuse/assemble.rs` leaves apart
+/// every group with a ring that goes right round and is not a band between
+/// two rings. A temporary print there showed that group, one ring of four
+/// sides going round and no seam, in both unions and the cone less the block.
+/// The answer is still the right solid, and it validates.
 #[test]
-fn the_same_block_with_the_apex_just_below_its_face_answers_all_but_the_unions() {
+fn the_same_block_with_the_apex_just_below_its_face_answers_every_fuse() {
     let pi = core::f64::consts::PI;
     let (block, cone) = (6.0 * 12.0 * 9.0, 128.0 * pi / 3.0);
     let shared = 511.0 * pi / 24.0;
     for (rule, cone_first) in six_fuses() {
-        let (volume, today) = match (rule, cone_first) {
-            (Rule::Union, _) => (block + cone - shared, Today::TwoCornersOnOnePointOfTheChart),
-            (Rule::Intersection, _) => (shared, Today::Answers(shared)),
-            (Rule::Difference, true) => (cone - shared, Today::Answers(cone - shared)),
-            (Rule::Difference, false) => (block - shared, Today::Answers(block - shared)),
+        let (volume, faces) = match (rule, cone_first) {
+            (Rule::Union, _) => (block + cone - shared, 10),
+            (Rule::Intersection, _) => (shared, 4),
+            (Rule::Difference, true) => (cone - shared, 6),
+            (Rule::Difference, false) => (block - shared, 8),
             (other, _) => panic!("{other:?} is not one of the six"),
         };
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let (cone, block) = a_cone_and_a_block(&mut model, 0.0, 1.0);
         let said = fuse(&mut model, cone, block, rule, cone_first);
-        let what = format!("{rule:?} (cone first: {cone_first}), one solid of volume {volume}");
-        is_what_it_is_today(&mut model, said, &today, &what);
+        let what = format!(
+            "{rule:?} (cone first: {cone_first}), one solid of volume {volume} and {faces} faces"
+        );
+        answers(&mut model, said, volume, faces, &what);
     }
 }
 
-/// Assert that `said` is what `today` says it is: the answer, measured and
-/// validated, or the mesher's refusal by name. `what` is the right answer,
-/// which is what every message carries.
-fn is_what_it_is_today(
+/// Assert that `said` is one solid with `faces` faces, that the model
+/// validates, and that the solid measures `volume` to within the mesh's own
+/// error. `what` is the right answer, which is what every message carries.
+fn answers(
     model: &mut Model,
     said: rcad_topo::Result<Vec<SolidKey>>,
-    today: &Today,
+    volume: f64,
+    faces: usize,
     what: &str,
 ) {
     let policy = Policy::certified();
-    match today {
-        Today::Answers(volume) => {
-            let solids = said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
-            let [solid] = solids[..] else {
-                panic!("{what}: {} solids", solids.len())
-            };
-            model
-                .validate(&policy, &mut ProvenanceLog::new())
-                .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
-            let measured = model
-                .solid(solid)
-                .expect("a solid the fuse made")
-                .measure(
-                    Deflection::of(0.001).expect("a positive length"),
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .expect("the answer measures");
-            assert!(
-                (measured.volume() - volume).abs() <= measured.volume_error(),
-                "{what}: measured {} and the mesh may miss by {}",
-                measured.volume(),
-                measured.volume_error()
-            );
-        }
-        Today::TwoCornersOnOnePointOfTheChart => assert!(
-            matches!(
-                said,
-                Err(Error::CannotMeshAFace {
-                    why: CannotTriangulate::CornersCoincide { .. },
-                    ..
-                })
-            ),
-            "{what}: today the mesher finds two corners of a face on one point of its chart. \
-             Got {said:?}"
-        ),
-        Today::AWireOfTwoCorners => assert!(
-            matches!(
-                said,
-                Err(Error::AWireDoesNotFanIntoALoopToMesh {
-                    why: NotALoop::TooFewCorners { count: 2 },
-                    ..
-                })
-            ),
-            "{what}: today a wire of a face fans into two corners. Got {said:?}"
-        ),
-    }
+    let solids = said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
+    let [solid] = solids[..] else {
+        panic!("{what}: {} solids", solids.len())
+    };
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
+    let view = model.solid(solid).expect("a solid the fuse made");
+    assert_eq!(view.faces().count(), faces, "{what}: faces");
+    let measured = view
+        .measure(
+            Deflection::of(0.001).expect("a positive length"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the answer measures");
+    assert!(
+        (measured.volume() - volume).abs() <= measured.volume_error(),
+        "{what}: measured {} and the mesh may miss by {}",
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 fn six_fuses() -> [(Rule, bool); 6] {
