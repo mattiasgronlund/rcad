@@ -951,6 +951,28 @@ impl BuildingAMesh {
                 *chain = with_its_second_coordinate_in_the_turn_of(chain, first, whole);
             }
         }
+        // **A wire that sets off from one corner of the model twice is two loops
+        // touching there**, and handed over whole it names that corner twice,
+        // which the triangulator refuses as `CornersCoincide` and must: a loop
+        // through one point twice says nothing about which of the pieces it
+        // draws is the face. A ball touching the edge between two walls leaves
+        // one: the wall's circle and the ball's other circle both start and end
+        // where the edge touches it, so the ball's face between them is bounded
+        // by a figure eight, and the wall's wire runs down the edge, round the
+        // circle and on down the edge. Cut apart there, the wall is an outline
+        // with a hole touching it, and the ball is two holes touching each
+        // other, which the triangulator and the strips below take
+        // (`docs/decisions.md` §364).
+        let walked: Vec<WalkedLoop> = face
+            .wires()
+            .zip(walked)
+            .flat_map(|(wire, around)| {
+                apart_where_it_passes_a_corner_twice(
+                    around,
+                    &self.corners_a_wire_sets_off_from_twice(wire),
+                )
+            })
+            .collect();
         // **A wire that winds is only allowed beside wires that wind too**, or
         // as the rim of a cap on a ball beside islands. The loops of a face cut
         // the chart into stretches, and the one the face is has every one of
@@ -986,6 +1008,26 @@ impl BuildingAMesh {
             self.hand_over(face, &surface, patch, room, by_corner_order, log)?;
         }
         Ok(())
+    }
+
+    /// The entries in the point table of every corner of the model that starts
+    /// two coedges of `wire`, each once.
+    fn corners_a_wire_sets_off_from_twice(&self, wire: WireView<'_>) -> Vec<u32> {
+        let mut starts: HashMap<VertexKey, u32> = HashMap::new();
+        let mut twice = Vec::new();
+        for coedge in wire.coedges() {
+            let start = coedge.start().key();
+            let times = starts.entry(start).or_default();
+            *times += 1;
+            if *times == 2 {
+                twice.push(
+                    *self.at_vertex.get(&start).expect(
+                        "walking the wire put the corner every coedge starts at in the table",
+                    ),
+                );
+            }
+        }
+        twice
     }
 
     /// Whether `face` is bounded by one closed edge and every face across it
@@ -1165,6 +1207,7 @@ impl BuildingAMesh {
             let Some(strips) = self.open_the_ball_into_strips(face, stored, &walked, room)? else {
                 return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
             };
+            let touching = the_points_two_loops_pass(&walked);
             let mut pieces = Vec::with_capacity(2 * strips.len());
             for AStripAndItsHoles { strip, holes } in strips {
                 let Some(cut) =
@@ -1172,7 +1215,10 @@ impl BuildingAMesh {
                 else {
                     return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
                 };
-                pieces.extend(cut);
+                pieces.extend(
+                    cut.into_iter()
+                        .flat_map(|piece| apart_where_two_holes_touch(piece, &touching)),
+                );
             }
             return self.cut_each_narrow_enough(face, stored, Chart::Upright, pieces, widest, room);
         }
@@ -4042,6 +4088,118 @@ fn longitudes_of(around: &WalkedLoop) -> (f64, f64) {
 fn it_passes_each_of_its_points_once(around: &WalkedLoop) -> bool {
     let mut seen = HashSet::with_capacity(around.points.len());
     around.points.iter().all(|&at| seen.insert(at))
+}
+
+/// One walked wire cut into the loops it is made of, at each of `twice` it
+/// passes twice, the loop that holds the most of the chart first: the outline
+/// before a hole that touches it.
+///
+/// **Only a cut into loops that each pass every point once is taken.** A slit
+/// runs out along one edge and back from a corner that starts two of its
+/// coedges, and the loop out and back passes each point of the slit twice, so
+/// it stays whole for [`BuildingAMesh::open_a_slit`]. So does a wire that goes
+/// right round either way: a seam's corner starts two coedges a whole turn
+/// apart, and [`apart_at`] would not cut there anyway.
+fn apart_where_it_passes_a_corner_twice(around: WalkedLoop, twice: &[u32]) -> Vec<WalkedLoop> {
+    if around.goes_right_round || around.goes_right_round_the_second_way {
+        return vec![around];
+    }
+    let mut loops = vec![around];
+    for &at in twice {
+        loops = loops
+            .into_iter()
+            .flat_map(|one| match apart_at(&one, at) {
+                Some(parts) if parts.iter().all(it_passes_each_of_its_points_once) => {
+                    parts.to_vec()
+                }
+                Some(_) | None => vec![one],
+            })
+            .collect();
+    }
+    loops.sort_by(|one, other| {
+        how_much_of_the_chart_this_loop_encloses(other)
+            .abs()
+            .total_cmp(&how_much_of_the_chart_this_loop_encloses(one).abs())
+    });
+    loops
+}
+
+/// A piece between two holes that touch, cut apart where they touch into the
+/// pieces it is made of, or the piece whole unless each of them has the
+/// face's material inside it.
+///
+/// Two holes touching at a point leave the piece between them pinched shut
+/// there: one piece above the point and one below, joined at it.
+/// [`BuildingAMesh::cut_holes_side_by_side_up_to_both_poles`] walks round both
+/// as one loop through that point twice, which the triangulator refuses.
+fn apart_where_two_holes_touch(piece: WalkedLoop, touching: &[u32]) -> Vec<WalkedLoop> {
+    let mut pieces = vec![piece];
+    for &at in touching {
+        pieces = pieces
+            .into_iter()
+            .flat_map(|one| match apart_at(&one, at) {
+                Some(parts)
+                    if parts
+                        .iter()
+                        .all(|part| how_much_of_the_chart_this_loop_encloses(part) > 0.0) =>
+                {
+                    parts.to_vec()
+                }
+                Some(_) | None => vec![one],
+            })
+            .collect();
+    }
+    pieces
+}
+
+/// Every point that two different loops of `loops` pass, once in the list.
+fn the_points_two_loops_pass(loops: &[WalkedLoop]) -> Vec<u32> {
+    let mut on: HashMap<u32, usize> = HashMap::new();
+    for (which, around) in loops.iter().enumerate() {
+        for &at in &around.points {
+            on.entry(at).or_insert(which);
+        }
+    }
+    let mut shared: Vec<u32> = loops
+        .iter()
+        .enumerate()
+        .flat_map(|(which, around)| {
+            let on = &on;
+            around
+                .points
+                .iter()
+                .copied()
+                .filter(move |at| on[at] != which)
+        })
+        .collect();
+    shared.sort_unstable();
+    shared.dedup();
+    shared
+}
+
+/// `around` cut in two where it passes point `at`: the loop from the first
+/// time it gets there up to the second, and the rest.
+///
+/// `None` unless it passes `at` exactly twice, **at one corner of the chart
+/// both times**, with at least three corners each side. The corner is what
+/// makes each part close in the chart as `around` did; a seam's corner, a whole
+/// turn apart, or a pole's two ends of a side, are no place to cut.
+fn apart_at(around: &WalkedLoop, at: u32) -> Option<[WalkedLoop; 2]> {
+    let count = around.points.len();
+    let mut visits = (0..count).filter(|&corner| around.points[corner] == at);
+    let (Some(first), Some(second), None) = (visits.next(), visits.next(), visits.next()) else {
+        return None;
+    };
+    if around.corners[first] != around.corners[second]
+        || second - first < 3
+        || count - (second - first) < 3
+    {
+        return None;
+    }
+    Some([
+        around.between(first, second - 1),
+        around.between(second, (first + count - 1) % count),
+    ])
 }
 
 /// The longitude halfway across the widest stretch of longitude that none of
