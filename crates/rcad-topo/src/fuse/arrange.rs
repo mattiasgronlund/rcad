@@ -822,6 +822,25 @@ impl HowItRuns {
 /// A point of the arrangement.
 struct Node {
     point: PredicatePoint,
+    /// A tighter box round the node, asked **one question only**: which of two
+    /// nodes comes first along a crossing, where their own boxes cannot say
+    /// ([`Arrangement::as_the_boxes_say`]). Every other question reads `point`.
+    ///
+    /// [`MeetOfThree::boxed_tight`] for a meet of two planes and a ball, a
+    /// pipe or a cone, and `point` for every other node. Wired in as `point`
+    /// itself, the tighter box of a meet of three planes moved 13 tests, most
+    /// of them to a refusal or to no solid (§345.2).
+    ///
+    /// **A meet of three planes keeps `point` here too**, as measured and not
+    /// argued. Asked by the order, its tighter box moved four pins in files
+    /// Q209 did not own: two frustum tallies in
+    /// `a_plane_cut_along_a_cones_other_nappe.rs` went from 64 to 68 and from
+    /// 68 to 80 right answers, one of the pyramid unions §395.4 leaves refused
+    /// was united, with its volume not checked, and the turned wedge in
+    /// `a_narrow_lune_from_a_pole_corner.rs` went from a refusal by name to
+    /// `Undecidable` on a point inside a piece. With three planes left out,
+    /// none of them moves and the whole workspace passes.
+    boxed_tight: PredicatePoint,
     /// The input corner this is, when it is one.
     vertex: Option<VertexKey>,
     /// The three surfaces that placed it, in [`meet_of_three_surfaces`]'s own
@@ -1221,6 +1240,7 @@ impl<'f> Arrangement<'f> {
                 corners.push(self.nodes.len());
                 self.nodes.push(Node {
                     point: at,
+                    boxed_tight: at,
                     vertex: Some(self.face.wires[wire][position].start.vertex),
                     made_of: None,
                     half_way_round: false,
@@ -1318,6 +1338,8 @@ impl<'f> Arrangement<'f> {
                 };
                 let places: SmallVec<[PredicatePoint; 2]> =
                     places.into_iter().map(as_exact_as_it_is).collect();
+                let tight: SmallVec<[PredicatePoint; 2]> =
+                    tight.into_iter().map(as_exact_as_it_is).collect();
                 for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
                     // Being *on* both surfaces is what the meet just worked out,
                     // and asking a predicate to confirm it would be a second
@@ -1333,6 +1355,12 @@ impl<'f> Arrangement<'f> {
                     if self.a_corner_is_this_place(first, second, place, boxed_tight, &places) {
                         continue;
                     }
+                    let ordered_by = if surfaces.iter().all(|surface| surface.as_plane().is_some())
+                    {
+                        place
+                    } else {
+                        boxed_tight
+                    };
                     let mut sorted = surfaces;
                     sorted.sort_by(|one, other| {
                         name_of_surface_bits(one).cmp(&name_of_surface_bits(other))
@@ -1340,6 +1368,7 @@ impl<'f> Arrangement<'f> {
                     let which = u8::try_from(which).expect("three surfaces meet at most twice");
                     self.nodes.push(Node {
                         point: place,
+                        boxed_tight: ordered_by,
                         vertex: None,
                         made_of: Some((sorted, which)),
                         half_way_round: false,
@@ -1397,6 +1426,7 @@ impl<'f> Arrangement<'f> {
         named.sort_by_key(name_of_surface_bits);
         self.nodes.push(Node {
             point: apex,
+            boxed_tight: apex,
             vertex: None,
             made_of: Some((named, 0)),
             half_way_round: false,
@@ -1467,14 +1497,18 @@ impl<'f> Arrangement<'f> {
     /// allowance, and the 224 into corners proved off a surface lie within
     /// under one percent of it (§253.2).
     ///
-    /// **For a meet of three planes `boxed_tight` is Cramer's box narrowed by
-    /// one checked step** ([`MeetOfThree::boxed_tight`]); for anything else it
-    /// is `place`. Only this one question reads it. The node a meet becomes
-    /// when it does not fold keeps Cramer's box, and every other question here
-    /// reads Cramer's box too, the reach below included: wired in as the
-    /// node's own box, the narrowed one moved 13 tests, most of them to a
-    /// refusal or to no solid, where asked only here it moves one, to the
-    /// right answer (§345).
+    /// **For a meet of three planes, or of two planes and a ball, a pipe or a
+    /// cone, `boxed_tight` is `place` narrowed by one checked step**
+    /// ([`MeetOfThree::boxed_tight`]); for anything else it is `place`. The
+    /// node a meet becomes when it does not fold keeps `place` as its own box,
+    /// and every other question here reads `place`, the reach below included:
+    /// wired in as the node's own box, the narrowed one moved 13 tests, most of
+    /// them to a refusal or to no solid, where asked only here it moves one,
+    /// to the right answer (§345). The one other question that reads it is the
+    /// order along a crossing, for a meet with a curved surface in it, where
+    /// the node's own box cannot say ([`Node::boxed_tight`]). Narrowing a
+    /// curved meet's box here changed no fold over the whole workspace's tests
+    /// when Q209 measured it.
     ///
     /// **Or when the three are planes `bake` solved the corner among**, however
     /// far past the corner's grown box the meet's box reaches, as long as it
@@ -1637,6 +1671,7 @@ impl<'f> Arrangement<'f> {
             if let Some(pole) = the_one_pole_a_circle_runs_through([&self.surface, &partner]) {
                 self.nodes.push(Node {
                     point: pole,
+                    boxed_tight: pole,
                     vertex: None,
                     made_of: None,
                     half_way_round: false,
@@ -1661,6 +1696,7 @@ impl<'f> Arrangement<'f> {
             let point = where_the_crossing_starts(&self.surface, &partner, from);
             self.nodes.push(Node {
                 point,
+                boxed_tight: point,
                 vertex: None,
                 made_of: None,
                 half_way_round: false,
@@ -1673,6 +1709,7 @@ impl<'f> Arrangement<'f> {
             ) {
                 self.nodes.push(Node {
                     point: across,
+                    boxed_tight: across,
                     vertex: None,
                     made_of: None,
                     half_way_round: true,
@@ -1811,6 +1848,7 @@ impl<'f> Arrangement<'f> {
                     folded[index] = Some(nodes.len());
                     nodes.push(Node {
                         point: self.nodes[index].point,
+                        boxed_tight: self.nodes[index].boxed_tight,
                         vertex: self.nodes[index].vertex,
                         made_of: self.nodes[index].made_of,
                         half_way_round: self.nodes[index].half_way_round,
@@ -1835,6 +1873,7 @@ impl<'f> Arrangement<'f> {
                     if takes_over {
                         nodes[into].vertex = mine.vertex;
                         nodes[into].point = mine.point;
+                        nodes[into].boxed_tight = mine.boxed_tight;
                         nodes[into].made_of = mine.made_of;
                     }
                     let crossings = mine.crossings.clone();
@@ -1945,8 +1984,92 @@ impl<'f> Arrangement<'f> {
     /// The same, without asking a policy: [`Decision::Undecidable`] comes back
     /// as `None` for a caller that has another route to try.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
-        let (one, other) = (self.nodes[first].point, self.nodes[second].point);
+        let decided = self.as_the_boxes_say(crossing, first, second).ok()?;
+        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
+    }
+
+    /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
+    /// when `first` does, [`Decision::Zero`] when they are the same point.
+    fn order_along(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Decision> {
+        let measures = match self.crossings[crossing].order {
+            HowItRuns::AlongAnAxis { .. } => Measures::Length,
+            HowItRuns::AlongABend { .. } | HowItRuns::RoundAClosedCurve { .. } => Measures::Volume,
+        };
+        must_decide(
+            self.as_the_boxes_say(crossing, first, second)?,
+            ALONG_A_CROSSING,
+            &[self.nodes[first].point, self.nodes[second].point],
+            measures,
+            policy,
+            log,
+        )
+    }
+
+    /// Which of two nodes on a crossing comes first along it, from their boxes
+    /// and without asking a policy.
+    ///
+    /// **Where their own boxes cannot say, their tighter boxes are asked**
+    /// ([`Node::boxed_tight`]), and only a proved [`Decision::Pos`] or
+    /// [`Decision::Neg`] is taken from them. Each tighter box holds the same
+    /// point as the node's own, so a sign proved over the two of them is the
+    /// order of those two points. A node's own box is what every other
+    /// question here reads, and what the record of a refusal names.
+    ///
+    /// A block turned by `−π/4` about `x` meets a round bar's cap circle
+    /// `2.5e-15` round from the rim start `(5, 0, 0)`, in a box `±3` ulps of
+    /// `5` wide along `x`. Round the circle from `(0, −5, 0)` the sweep over
+    /// that box straddles zero, and all six certified fuses of the two refused
+    /// (§284.3). Over the tighter box, `[5 − 1 ulp, 5]` along `x`, it does not.
+    ///
+    /// **Round a closed crossing the tighter boxes are swept and not named.**
+    /// [`round_a_closed_crossing`] recognises the start by comparing a node's
+    /// box with the start's, bit for bit, which is a name and not a place. A
+    /// tighter box is a place, and two equal ones need not be one point. The
+    /// node's own box has been asked by name already, and an undecided answer
+    /// means neither node was the start.
+    fn as_the_boxes_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> rcad_geom::Result<Decision> {
+        let [one, other] = [first, second].map(|node| self.nodes[node].point);
         let decided = match self.crossings[crossing].order {
+            HowItRuns::RoundAClosedCurve { from, node } => {
+                let partner = self.crossings[crossing].partner;
+                round_a_closed_crossing([&self.surface, &partner], [from, node], one, other)?
+            }
+            HowItRuns::AlongAnAxis { .. } | HowItRuns::AlongABend { .. } => {
+                self.how_far_apart_along(crossing, one, other)?
+            }
+        };
+        let tight = [first, second].map(|node| self.nodes[node].boxed_tight);
+        if !matches!(decided, Decision::Undecidable { .. }) || tight == [one, other] {
+            return Ok(decided);
+        }
+        match self.how_far_apart_along(crossing, tight[0], tight[1]) {
+            Ok(proved @ (Decision::Pos | Decision::Neg)) => Ok(proved),
+            Ok(_) | Err(_) => Ok(decided),
+        }
+    }
+
+    /// The sign of how far `other` lies past `one` along the crossing, read
+    /// off the two boxes alone: along its axis, across its bend, or swept round
+    /// from where a closed crossing starts.
+    fn how_far_apart_along(
+        &self,
+        crossing: usize,
+        one: PredicatePoint,
+        other: PredicatePoint,
+    ) -> rcad_geom::Result<Decision> {
+        Ok(match self.crossings[crossing].order {
             HowItRuns::AlongAnAxis {
                 axis,
                 forward_climbs_the_axis,
@@ -1968,75 +2091,11 @@ impl<'f> Arrangement<'f> {
                 one,
                 other,
             ),
-            HowItRuns::RoundAClosedCurve { from, node } => {
+            HowItRuns::RoundAClosedCurve { from, .. } => {
                 let partner = self.crossings[crossing].partner;
-                round_a_closed_crossing([&self.surface, &partner], [from, node], one, other).ok()?
+                which_comes_first_round_a_crossing([&self.surface, &partner], from, one, other)?
             }
-        };
-        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
-    }
-
-    /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
-    /// when `first` does, [`Decision::Zero`] when they are the same point.
-    fn order_along(
-        &self,
-        crossing: usize,
-        first: usize,
-        second: usize,
-        policy: &Policy,
-        log: &mut ProvenanceLog,
-    ) -> Result<Decision> {
-        let (one, other) = (self.nodes[first].point, self.nodes[second].point);
-        match self.crossings[crossing].order {
-            HowItRuns::AlongAnAxis {
-                axis,
-                forward_climbs_the_axis,
-            } => {
-                let mut apart = other.enclosure()[axis] - one.enclosure()[axis];
-                if !forward_climbs_the_axis {
-                    apart = -apart;
-                }
-                must_decide(
-                    apart.sign(),
-                    ALONG_A_CROSSING,
-                    &[one, other],
-                    Measures::Length,
-                    policy,
-                    log,
-                )
-            }
-            HowItRuns::AlongABend {
-                plane_normal,
-                cone_axis,
-                forward_runs_with_the_bend,
-            } => must_decide(
-                along_a_bend(
-                    plane_normal,
-                    cone_axis,
-                    forward_runs_with_the_bend,
-                    one,
-                    other,
-                ),
-                ALONG_A_CROSSING,
-                &[one, other],
-                Measures::Volume,
-                policy,
-                log,
-            ),
-            HowItRuns::RoundAClosedCurve { from, node } => {
-                let partner = self.crossings[crossing].partner;
-                let decided =
-                    round_a_closed_crossing([&self.surface, &partner], [from, node], one, other)?;
-                must_decide(
-                    decided,
-                    ALONG_A_CROSSING,
-                    &[one, other],
-                    Measures::Volume,
-                    policy,
-                    log,
-                )
-            }
-        }
+        })
     }
 
     /// Cut every crossing into the arcs between neighbouring nodes on it, and
@@ -2182,6 +2241,7 @@ impl<'f> Arrangement<'f> {
         let twin = self.nodes.len();
         self.nodes.push(Node {
             point: self.nodes[node].point,
+            boxed_tight: self.nodes[node].boxed_tight,
             vertex: None,
             made_of: self.nodes[node].made_of,
             half_way_round: false,

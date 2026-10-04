@@ -62,7 +62,9 @@ use rcad_predicates::{
 };
 use smallvec::{SmallVec, smallvec};
 
-use crate::enclosure::{quotient_or_everything, root_enclosing};
+use crate::enclosure::{
+    cross_enclosing, dot_enclosing, exactly, quotient_or_everything, root_enclosing,
+};
 use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two, slid_exactly};
 use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
 use crate::plane::which_side_of_a_flat_surface;
@@ -116,8 +118,9 @@ pub enum MeetOfThree {
 
 impl MeetOfThree {
     /// This meet, which [`meet_of_three_surfaces`] handed back for `surfaces`,
-    /// with the box round a meet of **three planes** narrowed by one checked
-    /// step. Any other meet comes back as it is.
+    /// with the box round a meet of **three planes, or of two planes and a
+    /// ball, a pipe or a cone,** narrowed by one checked step. Any other meet
+    /// comes back as it is.
     ///
     /// Cramer's rule sums its numerators in intervals, and each numerator is a
     /// small number built out of products near one that all round. Where two of
@@ -138,6 +141,16 @@ impl MeetOfThree {
     /// overlap is sound: it is a proof and not a threshold (§17), and on that
     /// draw it is `8.9e-16` wide (§281.2).
     ///
+    /// **Two planes and a quadric take the same step**, with the quadric in the
+    /// third plane's row ([`narrowed_onto_a_quadric_by_one_checked_step`]).
+    /// Their meet is a root of a quadratic along the line the planes cross in,
+    /// and the box is that root's box carried into space through a division
+    /// and a product, each rounding outward. A block turned by `−π/4` about `x`
+    /// meets a round bar's cap circle `2.5e-15` round from its rim start
+    /// `(5, 0, 0)` in a box `±3` ulps wide along `x`, and round the circle
+    /// from `(0, −5, 0)` the two cannot be put in order from it. Narrowed, the
+    /// box is `[5 − 1 ulp, 5]` along `x`, which orders them (§284.3, Q209).
+    ///
     /// **Why this is not what [`meet_of_three_surfaces`] hands back to everyone.**
     /// A narrower box round a meet is not a narrower box round a stored corner:
     /// `rcad-topo`'s `bake.rs` derives a face's corners through
@@ -145,10 +158,12 @@ impl MeetOfThree {
     /// stored corner sits ulps off the planes it is on. Cramer's slack covers
     /// that; the narrowed box does not. Narrowed for every caller, nine tests
     /// failed and the draw above refused on another face (§281.3). The one
-    /// caller is `rcad-topo`'s fold of a meet into a corner of a face, which
-    /// asks the narrowed box only whether every point of the meet lies within
-    /// the corner's rounding, and keeps Cramer's box for the node it places
-    /// (§345).
+    /// caller is `rcad-topo`'s arrangement of a face. It asks the narrowed box
+    /// whether every point of the meet lies within a corner's rounding, before
+    /// it folds the meet into the corner (§345), and, for a meet with a curved
+    /// surface in it, which of two points comes first along a crossing where
+    /// the meet's own box cannot say (Q209). The node it places keeps the box
+    /// [`meet_of_three_surfaces`] handed back.
     ///
     /// The three planes are narrowed in [`meet_of_three_surfaces`]'s own fixed
     /// order, so the box that comes back depends on which three they are and
@@ -161,21 +176,29 @@ impl MeetOfThree {
     /// points, and a corner placed from where they overlap would be nowhere.
     #[must_use]
     pub fn boxed_tight(&self, surfaces: [&Surface; 3]) -> MeetOfThree {
-        let [
-            Surface::Plane(one),
-            Surface::Plane(other),
-            Surface::Plane(last),
-        ] = in_a_fixed_order(surfaces)
-        else {
+        let [Surface::Plane(one), Surface::Plane(other), third] = in_a_fixed_order(surfaces) else {
             return self.clone();
         };
         let MeetOfThree::At(places) = self else {
             return self.clone();
         };
+        if let Surface::Plane(last) = third {
+            return MeetOfThree::At(
+                places
+                    .iter()
+                    .map(|&place| narrowed_by_one_checked_step([&one, &other, &last], place))
+                    .collect(),
+            );
+        }
+        let Some(quadric) = how_a_surface_is_written(&third) else {
+            return self.clone();
+        };
         MeetOfThree::At(
             places
                 .iter()
-                .map(|&place| narrowed_by_one_checked_step([&one, &other, &last], place))
+                .map(|&place| {
+                    narrowed_onto_a_quadric_by_one_checked_step([&one, &other], &quadric, place)
+                })
                 .collect(),
         )
     }
@@ -821,6 +844,105 @@ fn the_step_to_the_meet(planes: [&Plane; 3], guess: [f64; 3]) -> Option<[Interva
         });
         quotient_or_everything(over, determinant)
     }))
+}
+
+/// `place`, a box round where two planes and a quadric meet, narrowed by one
+/// checked step from its middle: [`narrowed_by_one_checked_step`]'s step, with
+/// the quadric in the third plane's row.
+///
+/// **The row.** Write the quadric `Q(p) = p·(M p) + 2b·p + c`, with `M`
+/// symmetric. Then for any two points `Q(x) − Q(g) = (x − g)·(M(x + g) + 2b)`,
+/// exactly. At the meet `x`, `Q(x)` is zero, so `x − g` solves the system whose
+/// rows are the two normals and `M(x + g) + 2b`, with right-hand sides how far
+/// the guess misses each plane and `−Q(g)`. `x` lies in `place`, so
+/// `M(place + g) + 2b` worked out in intervals holds that row, and Cramer's rule
+/// worked out in intervals over it holds the answer for the row's true value.
+/// `Q(g)` is worked out from the stored numbers like the planes' misses, so
+/// every term of the numerator again carries a factor of how far the guess
+/// misses, and what rounds there is a rounding of something small.
+///
+/// **The box is handed back as it was where the step cannot be taken**: a
+/// product that overflows, or a determinant whose enclosure reaches zero,
+/// which a line that all but grazes the quadric gives.
+///
+/// # Panics
+///
+/// If the stepped box and `place` do not overlap, as
+/// [`narrowed_by_one_checked_step`] does.
+fn narrowed_onto_a_quadric_by_one_checked_step(
+    planes: [&Plane; 2],
+    quadric: &HowASurfaceIsWritten,
+    place: PredicatePoint,
+) -> PredicatePoint {
+    let PredicatePoint::Constructed(boxed) = place else {
+        return place;
+    };
+    let guess = boxed.map(|side| 0.5 * side.lo() + 0.5 * side.hi());
+    let Some(step) = the_step_onto_the_quadric(planes, quadric, boxed, guess) else {
+        return place;
+    };
+    PredicatePoint::Constructed(core::array::from_fn(|axis| {
+        where_two_boxes_of_one_number_overlap(
+            Interval::exactly(guess[axis]) + step[axis],
+            boxed[axis],
+        )
+    }))
+}
+
+/// How far the meet of two planes and a quadric inside `boxed` is from
+/// `guess`, as an enclosure, or `None` where a product it needs overflows.
+fn the_step_onto_the_quadric(
+    planes: [&Plane; 2],
+    quadric: &HowASurfaceIsWritten,
+    boxed: [Interval; 3],
+    guess: [f64; 3],
+) -> Option<[Interval; 3]> {
+    let misses = [
+        how_far_a_guess_misses(planes[0], guess)?,
+        how_far_a_guess_misses(planes[1], guess)?,
+        -how_far_a_quadric_reaches_at(quadric, guess)?.enclosure(),
+    ];
+    let [one, other] = planes.map(|plane| plane.normal().components());
+    let row: [Interval; 3] = core::array::from_fn(|axis| {
+        (0..3).fold(
+            Interval::exactly(2.0) * quadric.half_linear[axis].enclosure(),
+            |so_far, column| {
+                so_far
+                    + quadric.squared[axis][column].enclosure()
+                        * (boxed[column] + Interval::exactly(guess[column]))
+            },
+        )
+    });
+    let flat = nearly_cross_of(one, other)?.map(|component| component.enclosure());
+    let across = [
+        cross_enclosing(exactly(other), row),
+        cross_enclosing(row, exactly(one)),
+        flat,
+    ];
+    let determinant = dot_enclosing(row, flat);
+    Some(core::array::from_fn(|axis| {
+        let over = (0..3).fold(Interval::exactly(0.0), |so_far, which| {
+            so_far + misses[which] * across[which][axis]
+        });
+        quotient_or_everything(over, determinant)
+    }))
+}
+
+/// `Q(guess)` for a quadric written out, from the stored numbers with nothing
+/// rounded but what falls off the bottom of the range, or `None` where a
+/// product overflows.
+fn how_far_a_quadric_reaches_at(quadric: &HowASurfaceIsWritten, guess: [f64; 3]) -> Option<Nearly> {
+    let mut total = Nearly::from(quadric.constant.clone());
+    for axis in 0..3 {
+        let mut pulled = Nearly::from(quadric.half_linear[axis].clone()).times(&Nearly::of(2.0))?;
+        for (column, &along) in guess.iter().enumerate() {
+            pulled = pulled.plus(
+                &Nearly::from(quadric.squared[axis][column].clone()).times(&Nearly::of(along))?,
+            );
+        }
+        total = total.plus(&pulled.times(&Nearly::of(guess[axis]))?);
+    }
+    Some(total)
 }
 
 /// `offset − normal · guess` for one plane, from the stored numbers with
@@ -2706,6 +2828,106 @@ mod tests {
             other => panic!("an exact sign that is not a sign: {other:?}"),
         };
         agrees(&above_the_bottom) && agrees(&below_the_top)
+    }
+
+    /// A bar's bottom cap, `z = 0`, a block's face turned by `−π/4` about `x` to
+    /// lean along `z = y`, and the bar's wall, `x² + y² = 25`: the meet near
+    /// the rim start `(5, 0, 0)` that §284 could not order round the cap
+    /// circle. The quadratic along the two planes' line boxes it `±3` ulps of
+    /// `5` along `x`, and one checked step onto the wall boxes it one ulp
+    /// wide. Each side of the narrowed box is checked to hold the meet with
+    /// nothing rounded, from the stored numbers. On `z = 0` the turned face
+    /// `n·p = d` puts the meet at `y = d / n_y`, and the wall then puts it at
+    /// `x² = 25 − y²` with `x` above zero, so `x` lies in `[lo, hi]` when
+    /// `25 n_y² − d²` lies between `lo² n_y²` and `hi² n_y²`.
+    #[test]
+    fn a_meet_of_two_planes_and_a_pipe_is_boxed_to_one_ulp_by_one_step_and_still_holds_it() {
+        let lean = crate::Isometry::rotation(&Axis::x(), -core::f64::consts::FRAC_PI_4)
+            .expect("a finite turn")
+            .compose(
+                &crate::Isometry::translation(Vector::new(0.0, 0.0, -20.0))
+                    .expect("a finite shift"),
+            );
+        let cap = flat([0.0, 0.0, -1.0], [0.0, 0.0, 0.0]);
+        let turned = flat([0.0, -1.0, 0.0], [0.0, 0.0, 0.0]).transformed(&lean);
+        let wall = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a radius"));
+        let three = [&cap, &turned, &wall];
+        let as_placed = meet(three).expect("two planes and a pipe meet");
+        let MeetOfThree::At(narrowed) = as_placed.boxed_tight(three) else {
+            panic!("the turned face crosses the cap circle at two points");
+        };
+        let MeetOfThree::At(as_placed) = as_placed else {
+            panic!("the turned face crosses the cap circle at two points");
+        };
+        let near = (0..as_placed.len())
+            .find(|&which| as_placed[which].enclosure()[0].lo() > 0.0)
+            .expect("one of the two is near (5, 0, 0)");
+        let (wide, tight) = (as_placed[near].enclosure(), narrowed[near].enclosure());
+        for axis in 0..3 {
+            assert!(
+                wide[axis].lo() <= tight[axis].lo() && tight[axis].hi() <= wide[axis].hi(),
+                "the narrowed box {tight:?} is not inside the quadratic's {wide:?}"
+            );
+        }
+        let ulp = 5.0_f64.next_up() - 5.0;
+        assert!(
+            wide[0].width() >= 4.0 * ulp,
+            "the quadratic's box is already narrow along x, {wide:?}"
+        );
+        assert!(
+            tight[0].width() <= ulp,
+            "one step left the box {tight:?} wider than an ulp along x"
+        );
+
+        let Surface::Plane(turned) = turned else {
+            unreachable!("a turned plane is a plane")
+        };
+        let [_, n_y, n_z] = turned.normal().components();
+        assert!(n_z != 0.0 && n_y < 0.0, "the turned face leans along z = y");
+        let offset = turned.offset();
+        let exactly =
+            |one: f64, other: f64| Exact::product_of(one, other).expect("an exact product");
+        let at_or_above_zero =
+            |value: Exact| matches!(value.sign(), Decision::Pos | Decision::Zero);
+        let inside_along_y = at_or_above_zero(
+            Exact::of(tight[1].lo())
+                .times(&Exact::of(n_y))
+                .expect("an exact product")
+                .minus(&Exact::of(offset)),
+        ) && at_or_above_zero(
+            Exact::of(offset).minus(
+                &Exact::of(tight[1].hi())
+                    .times(&Exact::of(n_y))
+                    .expect("an exact product"),
+            ),
+        );
+        assert!(
+            inside_along_y,
+            "the narrowed box {tight:?} misses the meet's y"
+        );
+        let squared_x_times = exactly(5.0, 5.0)
+            .times(&exactly(n_y, n_y))
+            .expect("an exact product")
+            .minus(&exactly(offset, offset));
+        let past = |side: f64| {
+            exactly(side, side)
+                .times(&exactly(n_y, n_y))
+                .expect("an exact product")
+        };
+        let holds_x = |lo: f64, hi: f64| {
+            lo > 0.0
+                && at_or_above_zero(squared_x_times.minus(&past(lo)))
+                && at_or_above_zero(past(hi).minus(&squared_x_times))
+        };
+        assert!(
+            holds_x(tight[0].lo(), tight[0].hi()),
+            "the narrowed box {tight:?} misses the meet's x"
+        );
+        assert!(
+            !holds_x(5.0_f64.next_up(), 5.0_f64.next_up().next_up()),
+            "the exact check holds the meet's x in a box one ulp past it"
+        );
+        println!("as placed {wide:?}, narrowed {tight:?}");
     }
 
     #[test]
