@@ -1045,7 +1045,9 @@ mod tests {
         let the_other_way = match order {
             Decision::Pos => Decision::Neg,
             Decision::Neg => Decision::Pos,
-            decided => panic!("a rounding apart is two points in some order, not {decided:?}"),
+            decided @ (Decision::Zero | Decision::Undecidable { .. }) => {
+                panic!("a rounding apart is two points in some order, not {decided:?}")
+            }
         };
         let turned = |plane: [f64; 4]| plane.map(|coefficient| -coefficient);
         assert_eq!(
