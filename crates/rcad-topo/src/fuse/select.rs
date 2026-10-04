@@ -35,6 +35,16 @@
 //! its normal, and that is [`orient3d_of_points`] against a fourth point off the
 //! plane whose side has been proved — see [`InPlane`]. No new predicate, and
 //! nothing is projected into two dimensions, which is §15.5's rule.
+//!
+//! # A piece that holds no point is placed by a side it shares
+//!
+//! **The one exception, and only where the search above found no point inside
+//! the piece at all.** A piece can be narrower than the spacing of `f64`, and
+//! then no point it could be handed is inside it (§346.3). Such a piece is
+//! placed against a solid by a side it shares with a piece cut from one of that
+//! solid's faces, from which side of that face its own material is on
+//! ([`SidesItShares`], §365.3). A fuse that found a point for every piece never
+//! gets there, and answers as it did.
 
 use rcad_geom::{
     Cone, EdgeRun, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
@@ -51,7 +61,8 @@ use crate::holds::{
 use crate::validate::side_of_surface;
 use crate::{Containment, Error, Model, Result, SolidView};
 
-use super::arrange::{Piece, agreement_of_two_planes};
+use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
+use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
 use super::bake::{BakedFace, BakedSolid};
 use super::{FaceMeet, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
 
@@ -88,8 +99,10 @@ pub(crate) struct Chosen {
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when no point inside a piece could be placed against
-/// the solids it has to be placed against.
+/// [`Error::Undecidable`] when a piece could not be placed against the solids
+/// it has to be placed against: under [`INSIDE_A_PIECE`] when no point inside
+/// it was found and no side it shares placed it either, and under
+/// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -105,6 +118,7 @@ pub(crate) fn choose(
         "every piece is cut from one operand"
     );
 
+    let mut by_a_shared_side = SidesItShares::of(model, scratch, &solids);
     let mut chosen = Vec::new();
     for (index, (piece, &mine)) in scratch.pieces.iter().zip(&scratch.cut_from).enumerate() {
         let side = if mine < arguments {
@@ -120,20 +134,28 @@ pub(crate) fn choose(
             None => None,
         };
         let candidates = candidate_points(piece, &corners);
+        let mut place = |against: &[usize], log: &mut ProvenanceLog| -> Result<Placement> {
+            if let Some(placement) = place_the_piece(
+                model,
+                &solids,
+                against,
+                &candidates,
+                piece,
+                in_plane.as_ref(),
+                policy,
+                log,
+            )? {
+                return Ok(placement);
+            }
+            by_a_shared_side
+                .place(index, against, policy, log)
+                .ok_or_else(|| gave_up(INSIDE_A_PIECE, &corners.concat(), Measures::Length, log))
+        };
 
         let own_group: Vec<usize> = (0..solids.len())
             .filter(|&other| other != mine && (other < arguments) == (mine < arguments))
             .collect();
-        let against_own = place_the_piece(
-            model,
-            &solids,
-            &own_group,
-            &candidates,
-            piece,
-            in_plane.as_ref(),
-            policy,
-            log,
-        )?;
+        let against_own = place(&own_group, log)?;
         if keeps(
             row_for(Rule::Union).row(side).fate(against_own),
             against_own,
@@ -147,16 +169,7 @@ pub(crate) fn choose(
         let other_group: Vec<usize> = (0..solids.len())
             .filter(|&other| (other < arguments) != (mine < arguments))
             .collect();
-        let against_other = place_the_piece(
-            model,
-            &solids,
-            &other_group,
-            &candidates,
-            piece,
-            in_plane.as_ref(),
-            policy,
-            log,
-        )?;
+        let against_other = place(&other_group, log)?;
         let fate = row_for(rule).row(side).fate(against_other);
         if let Some(reversed) = keeps(fate, against_other, mine) {
             chosen.push(Chosen {
@@ -323,21 +336,25 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
     }
 }
 
-/// Where one piece sits relative to a set of solids.
+/// Where one piece sits relative to a set of solids, or `None` when no
+/// candidate was inside the piece at all.
 ///
 /// Inside beats on, and on beats outside: a piece lying on one solid of a group
 /// but buried in another is inside the union of them. So is a piece lying on
 /// two of them that face opposite ways — see [`LyingOn::placement`].
 ///
+/// **Two searches happen here, and a caller that cannot tell them apart is told
+/// the wrong thing.** `None` says no point inside the piece was found, which is
+/// [`INSIDE_A_PIECE`] unless a side the piece shares places it
+/// ([`SidesItShares`]); [`PLACED_AGAINST_EVERY_SOLID`] says one was found and
+/// could not be classified against every solid in the set. The first says to
+/// look at the piece's trimming, the second says the piece is fine and a
+/// surface further down gave up — the lens in §216.4 is the second wearing the
+/// first's name.
+///
 /// # Errors
 ///
-/// [`Error::Undecidable`], under one of **two** names, because two searches
-/// happen here and a caller that cannot tell them apart is told the wrong
-/// thing. [`INSIDE_A_PIECE`] when no candidate was inside the piece at all;
-/// [`PLACED_AGAINST_EVERY_SOLID`] when one was and it could not be classified
-/// against every solid in the set. The first says to look at the piece's
-/// trimming, the second says the piece is fine and a surface further down gave
-/// up — the lens in §216.4 is the second wearing the first's name.
+/// [`Error::Undecidable`] under [`PLACED_AGAINST_EVERY_SOLID`].
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -352,9 +369,9 @@ fn place_the_piece(
     in_plane: Option<&InPlane>,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Placement> {
+) -> Result<Option<Placement>> {
     if against.is_empty() {
-        return Ok(Placement::Outside);
+        return Ok(Some(Placement::Outside));
     }
     let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
     let try_one =
@@ -377,7 +394,7 @@ fn place_the_piece(
         };
         one_was_inside = true;
         if let Some(placement) = settled {
-            return Ok(placement);
+            return Ok(Some(placement));
         }
     }
     if !one_was_inside {
@@ -387,21 +404,166 @@ fn place_the_piece(
             };
             one_was_inside = true;
             if let Some(placement) = settled {
-                return Ok(placement);
+                return Ok(Some(placement));
             }
         }
     }
-    let which_search_gave_up = if one_was_inside {
-        PLACED_AGAINST_EVERY_SOLID
-    } else {
-        INSIDE_A_PIECE
-    };
+    if !one_was_inside {
+        return Ok(None);
+    }
     Err(gave_up(
-        which_search_gave_up,
+        PLACED_AGAINST_EVERY_SOLID,
         &corners_of(piece).concat(),
         Measures::Length,
         log,
     ))
+}
+
+/// §365.3's rule: a piece no point inside which was found, placed against each
+/// solid by a side it shares with a piece cut from one of that solid's faces.
+///
+/// A piece `P` and a solid `S`. If a side of `P` is also a side of a piece cut
+/// from a face `G` of `S`, the other piece's side runs along none of `G`'s own
+/// edges, `P`'s side names `G`'s surface bit for bit as its partner, and `P` is
+/// not on `G`'s surface, then **`P` is inside `S` when its material is on
+/// `S`'s inner side of `G`**, and outside it otherwise.
+///
+/// `P` was cut by every surface of `S`, so it is all inside `S` or all outside
+/// it, which is what one point already rests on (§17.4). Beside the middle of
+/// the side, `S`'s skin is `G` alone, because the side is a cut of `G` and not
+/// one of its edges, and `P` is on the side of `G`'s surface that
+/// [`FaceMeet::material_side`] names, which the walk that made the side decided
+/// for nothing (§36.6). No number is built and nothing is a tolerance.
+///
+/// Which sides are one is [`the_edge_each_side_of_every_piece_is`], the
+/// naming `assemble` gives the kept pieces, worked out once and only for a fuse
+/// that reaches here, so a fuse that found a point in every piece never pays
+/// for it.
+struct SidesItShares<'a> {
+    model: &'a Model,
+    scratch: &'a Scratch,
+    solids: &'a [&'a BakedSolid],
+    /// Every side of every piece with the edge it names: `None` until a piece
+    /// first needs it, and `Some(None)` when the naming gave up.
+    named: Option<Option<Vec<Vec<NamedSide>>>>,
+    /// What naming the sides asked the policy, kept out of the log until a
+    /// piece is placed by them.
+    asked: ProvenanceLog,
+}
+
+impl<'a> SidesItShares<'a> {
+    fn of(model: &'a Model, scratch: &'a Scratch, solids: &'a [&'a BakedSolid]) -> Self {
+        Self {
+            model,
+            scratch,
+            solids,
+            named: None,
+            asked: ProvenanceLog::new(),
+        }
+    }
+
+    /// Where piece number `piece` sits against the solids `against`, or `None`
+    /// when some solid of them could not be placed this way and none had the
+    /// piece inside it.
+    ///
+    /// **Nothing here refuses.** A naming that gives up, a plane agreement
+    /// that cannot be told, or two shared sides that disagree each leave the
+    /// piece where the point search left it, and the caller refuses under
+    /// [`INSIDE_A_PIECE`] as it did before this was tried.
+    fn place(
+        &mut self,
+        piece: usize,
+        against: &[usize],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<Placement> {
+        if self.named.is_none() {
+            self.named = Some(
+                the_edge_each_side_of_every_piece_is(
+                    self.model,
+                    self.scratch,
+                    policy,
+                    &mut self.asked,
+                )
+                .ok(),
+            );
+        }
+        let named = self.named.as_ref().and_then(Option::as_ref)?;
+        let mut trial = ProvenanceLog::new();
+        let mut inside_one = false;
+        let mut outside_every_one = true;
+        for &solid in against {
+            match self.is_inside(named, piece, solid, policy, &mut trial) {
+                Some(true) => inside_one = true,
+                Some(false) => (),
+                None => outside_every_one = false,
+            }
+        }
+        let placement = if inside_one {
+            Placement::Inside
+        } else if outside_every_one {
+            Placement::Outside
+        } else {
+            return None;
+        };
+        self.asked.drain_into(log);
+        trial.drain_into(log);
+        Some(placement)
+    }
+
+    /// Whether piece number `piece` is inside solid number `solid`, read off
+    /// every side it shares with a piece cut from a face of that solid, or
+    /// `None` when no side says or two say different things.
+    fn is_inside(
+        &self,
+        named: &[Vec<NamedSide>],
+        piece: usize,
+        solid: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<bool> {
+        let mine = &self.scratch.pieces[piece];
+        let mut found = None;
+        for shared in &named[piece] {
+            let theirs = named
+                .iter()
+                .zip(&self.scratch.cut_from)
+                .enumerate()
+                .filter(|(_, (_, from))| **from == solid)
+                .flat_map(|(other, (sides, _))| sides.iter().map(move |side| (other, side)))
+                .filter(|(_, side)| side.edge == shared.edge && side.side.along.is_empty());
+            for (other, _) in theirs {
+                let cut_from = &self.scratch.pieces[other];
+                let face = self.solids[solid]
+                    .faces
+                    .iter()
+                    .find(|face| face.keys == cut_from.ancestors)
+                    .expect("a piece is cut from a face of the solid it is credited to");
+                if name_of_surface_bits(&shared.side.carried_by[1])
+                    != name_of_surface_bits(&face.surface)
+                {
+                    continue;
+                }
+                let on_its_surface =
+                    do_they_face_the_same_way(mine, outward_plane_of(mine), face, policy, log)
+                        .ok()?;
+                if on_its_surface.is_some() {
+                    return None;
+                }
+                let inner = if face.orientation.is_reversed() {
+                    Decision::Pos
+                } else {
+                    Decision::Neg
+                };
+                let inside = shared.side.material_side == inner;
+                if found.is_some_and(|already| already != inside) {
+                    return None;
+                }
+                found = Some(inside);
+            }
+        }
+        found
+    }
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
