@@ -41,14 +41,20 @@ files get added. The gate checks formatting but does not fix it: skip
 so the fix lands as a rustfmt-only commit on top of the real change, the
 way Q574's tip did.
 
-Gate with `mise exec -- just pre-gate gate quiet`. `pre-gate` runs the gate's
+Gate with `mise exec -- just pre-gate gate-lane`. `pre-gate` runs the gate's
 cheapest steps at once — formatting, clippy and the wildcard count — and
 prints the first 60 lines of each one that fails. `just` starts the gate only
 when they all pass, so those failures come back in seconds instead of after a
 whole gate: 4 of 24 lane gates failed on them alone, with every test passing
 (§380, §381).
 
-A base older than §381 has no `pre-gate` recipe at all — `just` says
+`gate-lane` is the whole gate but `test-slow`, the slow tier, which the land
+gate runs (§397.4). The slow tier is listed in `slow_tests` in the justfile:
+run the ones that cover what you changed with `mise exec -- just t <name>`.
+
+A base older than §397.4 has `pre-gate` but no `gate-lane`, and there you gate
+with `mise exec -- just pre-gate gate quiet`. A base older than §381 has no
+`pre-gate` recipe at all — `just` says
 `Justfile does not contain recipe pre-gate` — and there you gate with the
 plain `mise exec -- just gate quiet` instead, as Q753's second run did on
 `0c8a44fc`. A run that carries on an earlier run of its own row keeps that

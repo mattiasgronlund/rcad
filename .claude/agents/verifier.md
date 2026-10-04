@@ -37,7 +37,8 @@ harness's ten minutes do (§385.2).
 It does the fixed steps below, in order: it unlocks the lane's tree, then runs
 step 1's log, its files outside the write set and its lines-that-run before the
 checkout, step 2's checkout, step 3's gate, step 6's one run of a named recipe
-the gate does not run, step 7's revert, test run and restore, and step 4's
+the gate does not run and of a named test that reaches the slow tier, step 7's
+revert, test run and restore, and step 4's
 numbers. Its last line is one line of JSON holding every verdict field it could
 fill. Take those as they stand and do not run its steps again. `skipped` says
 what it skipped and why, for `notes`. `left_to_you` is what it could not
@@ -83,9 +84,11 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    or an assertion removed or weakened with no word from the lane on why is a
    `fix_first`.
 2. `git checkout --detach <branch>`.
-3. `mise exec -- just gate quiet` on the branch tip, including any docs commit —
+3. `mise exec -- just gate-lane` on the branch tip, including any docs commit —
    one plain Bash call, `timeout` 600000, no redirect and no pipe through `tail`.
-   Record the summary block verbatim.
+   It is the whole gate but `test-slow`, the slow tier, which the land gate
+   runs (§397.4). On a branch with no `gate-lane` recipe, run
+   `mise exec -- just gate quiet` instead. Record the summary block verbatim.
 4. Re-run every command in the lane's `numbers` and compare the values you get.
    The recipe runs each on the branch tip and says whether its `value` is in
    what it printed, since a lane's value must be text its command prints. It
@@ -100,8 +103,8 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
 ## Tests
 
 6. Say whether step 3's gate already proves the lane's named tests or recipe
-   pass, before running anything again. A test name is always inside `test`,
-   itself in `gate_steps`: nextest finds every compiled test in the workspace
+   pass, before running anything again. A test name is always inside `test` or
+   `test-slow`, both in `gate_steps`: nextest finds every compiled test in the workspace
    unless it is `#[ignore]`d, and an ignored one never ran under a direct
    `just t <name>` either, so naming one there never proved anything. A
    `check-*` recipe is always in `gate_steps` too — `check-gate-runs-every-check`
@@ -113,6 +116,10 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    Only a named recipe that is none of the above needs its own run, because
    step 3 never touches it — check it literally against `gate_steps` first,
    and only then `mise exec -- just <recipe>`, once, watching it pass.
+   The one test name step 3 does not prove is one that is part of a name in
+   `slow_tests`, when step 3 was `gate-lane`: `just t` filters on part of a
+   name, so it would select a slow test that `gate-lane` left out. Run it
+   once with `mise exec -- just t <name>`, watching it pass.
 7. Put the source paths back to the base — `git checkout <base> -- <path>` for
    each — and rerun the same tests. They must **fail**; record the exact
    failure, because a test that passes here proves nothing about the change.
