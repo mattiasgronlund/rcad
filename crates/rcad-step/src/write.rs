@@ -34,7 +34,8 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Cylinder, EdgeRun, Isometry, Picker, Plane, Point, Scale, Sphere, Surface, Torus, Unit, Vector,
+    Cylinder, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, Picker, Plane, Point, Scale, Sphere,
+    Surface, Torus, Unit, Vector,
 };
 use rcad_predicates::expansion::two_product;
 use rcad_predicates::{Decision, Point as PredicatePoint};
@@ -762,6 +763,13 @@ impl Writing {
     /// written facing the way it faces, so the arc the run picks is chosen by
     /// `EDGE_CURVE.same_sense` rather than by turning the curve over, which
     /// would read back as the plane reversed.
+    ///
+    /// **A seam with one ring on both sides may have its centre further out**
+    /// than [`a_centre_its_plane_reads_back_from`] steps, and then
+    /// [`the_nearest_centre_a_ring_holds_its_circle_at`] looks as far as the
+    /// reader would still hold the circle on the ring. A pipe or a ball beside
+    /// the edge has no such second search, since the reader's rule for those
+    /// is not copied here.
     fn an_arc_its_own_plane_names(
         &mut self,
         first: &Surface,
@@ -800,16 +808,23 @@ impl Writing {
                 None
             }
         };
-        let crossing = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
-            where_a_plane_crosses_a_pipe(cut, &pipe)?
+        let (crossing, centre) = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
+            let crossing = where_a_plane_crosses_a_pipe(cut, &pipe)?;
+            let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+            (crossing, centre)
         } else if let Some(ball) = a_ball(first).or_else(|| a_ball(second)) {
-            where_a_plane_crosses_a_ball(cut, &ball)?
+            let crossing = where_a_plane_crosses_a_ball(cut, &ball)?;
+            let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+            (crossing, centre)
         } else {
             let ring = a_ring(first).or_else(|| a_ring(second))?;
-            where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?
+            let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?;
+            let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)
+                .or_else(|| the_nearest_centre_a_ring_holds_its_circle_at(cut, &ring, &crossing))?;
+            (crossing, centre)
         };
         let crossing = Crossing {
-            centre: a_centre_its_plane_reads_back_from(cut, crossing.centre)?,
+            centre,
             turning: cut.normal(),
             shape: crossing.shape,
         };
@@ -1502,6 +1517,142 @@ fn stepped(from: f64, steps: i32) -> f64 {
     (0..steps.unsigned_abs()).fold(from, |at, _| step(at))
 }
 
+/// The centre nearest `crossing`'s own from which the reader's
+/// [`plane_through`] gives back `cut` bit for bit and the reader still holds
+/// the circle on `ring`, with two coordinates moved; `None` where this finds
+/// none.
+///
+/// **Where the offset is much smaller than the coordinates, a step of one
+/// coordinate moves the dot by dozens of ulps of it**, so the dot lands on the
+/// offset only at a few points of the lattice, which can lie twenty steps
+/// out, past the four [`a_centre_its_plane_reads_back_from`] tries. The writer
+/// target's bend turned about `y` by `5.0` and moved by `(3, 5, 10)` has its
+/// seam's offset `0.04`, the turned normal dotted with the move in plain `f64`
+/// and `32` ulps from the ring's centre dotted and rounded once. A step of `x`
+/// moves the dot `61` ulps and a step of `z` `73`, and the one centre the
+/// reader holds is `23` steps of `x` and `19` of `z` out, at `15.88` of the
+/// sixteen units it allows (Q843,
+/// `a_turned_bends_seam_has_one_centre_its_plane_reads_back_from`).
+///
+/// **So one coordinate is walked an `f64` at a time, and for each step the
+/// other is put where the dot comes back**, then the `f64`s either side of
+/// that are tried too, since the dot is not worked out exactly here and
+/// [`plane_through`] is what decides. Every pair of the coordinates the normal
+/// leans along is walked both ways, out to twice the reader's allowance or
+/// [`MOST_STEPS_OF_ONE_COORDINATE`], whichever comes first.
+///
+/// **What the reader holds is asked here, not trusted to a bound on the
+/// steps** ([`the_reader_holds_a_circle_round_a_rings_axis`]). A centre that
+/// reads back as the plane but sits further off the ring's axis than the
+/// reader allows is read as a curve off its faces, and the file is then
+/// refused, where this refuses by name.
+fn the_nearest_centre_a_ring_holds_its_circle_at(
+    cut: &Plane,
+    ring: &Torus,
+    crossing: &Crossing,
+) -> Option<Point> {
+    let Shape::Circle { radius } = crossing.shape else {
+        return None;
+    };
+    let normal = cut.normal();
+    let components = normal.components();
+    let start = crossing.centre.coordinates();
+    let short = cut.offset() - plane_through(crossing.centre, normal).ok()?.offset();
+    let reach = 2.0
+        * A_CIRCLE_MAY_MISS_ITS_FACE_BY
+        * NEAREST_F64_POINT_ROUNDOFF
+        * the_largest_number_of_a_circle_on_a_ring(ring, crossing.centre, radius);
+    let leaning: Vec<usize> = (0..3).filter(|&axis| components[axis] != 0.0).collect();
+    let mut nearest: Option<(f64, Point)> = None;
+    for &walked in &leaning {
+        for &solved in leaning.iter().filter(|&&solved| solved != walked) {
+            for step in [f64::next_up as fn(f64) -> f64, f64::next_down] {
+                let mut at = start;
+                for _ in 0..=MOST_STEPS_OF_ONE_COORDINATE {
+                    let moved = at[walked] - start[walked];
+                    if moved.abs() > reach {
+                        break;
+                    }
+                    let landing =
+                        start[solved] + (short - components[walked] * moved) / components[solved];
+                    for tried in [landing.next_down(), landing, landing.next_up()] {
+                        let mut centre = at;
+                        centre[solved] = tried;
+                        let centre = Point::new(centre[0], centre[1], centre[2]);
+                        let reads_back = plane_through(centre, normal).is_ok_and(|back| {
+                            back.normal() == normal
+                                && back.offset().to_bits() == cut.offset().to_bits()
+                        });
+                        if !reads_back
+                            || !the_reader_holds_a_circle_round_a_rings_axis(ring, centre, radius)
+                        {
+                            continue;
+                        }
+                        let off = (centre - crossing.centre).length();
+                        if nearest.is_none_or(|(nearest_off, _)| off < nearest_off) {
+                            nearest = Some((off, centre));
+                        }
+                    }
+                    at[walked] = step(at[walked]);
+                }
+            }
+        }
+    }
+    nearest.map(|(_, centre)| centre)
+}
+
+/// How many `f64`s either way [`the_nearest_centre_a_ring_holds_its_circle_at`]
+/// walks one coordinate at most.
+///
+/// An `f64` is at least `ε/2` of itself, so sixty-four steps of the largest
+/// coordinate reach `32·ε` of it, which is twice what the reader allows a
+/// circle to miss its face by. A smaller coordinate stops short of that, and
+/// the larger one, walked in its turn, covers the rest.
+const MOST_STEPS_OF_ONE_COORDINATE: usize = 64;
+
+/// Whether the reader holds the circle of `radius` about `ring`'s axis,
+/// centred at `centre`, on the ring: the reader's own rule for a circle whose
+/// axis crosses the ring's to exactly nothing, in the reader's arithmetic.
+///
+/// The point of the circle furthest from the tube is at most
+/// `|√((r − R)² + h²) − ρ| + q` from it, for a circle of radius `r` whose
+/// centre is `h` along the axis from the ring's and `q` off it, on a ring of
+/// radius `R` and tube `ρ`; and that has to be within sixteen roundings of the
+/// largest number in it. **This is a copy** of the torus arm of
+/// `how_far_off_the_circle_can_be` and of `A_CIRCLE_MAY_MISS_ITS_FACE_BY` in
+/// `brep.rs`, which keeps both to itself. A copy that drifts from the reader's
+/// would write a centre the reader does not hold, and the file would be
+/// refused: `how_often_a_turned_bend_comes_back_from_its_own_file` reads every
+/// one back.
+fn the_reader_holds_a_circle_round_a_rings_axis(ring: &Torus, centre: Point, radius: f64) -> bool {
+    let line = ring.axis();
+    let along = (centre - ring.centre()).dot(line.direction());
+    let across = line.distance_to_point(centre);
+    let from_the_tube = (radius - ring.ring_radius()).hypot(along);
+    (from_the_tube - ring.tube_radius()).abs() + across
+        <= A_CIRCLE_MAY_MISS_ITS_FACE_BY
+            * NEAREST_F64_POINT_ROUNDOFF
+            * the_largest_number_of_a_circle_on_a_ring(ring, centre, radius)
+}
+
+/// The largest coordinate or length the reader measures a circle on a ring
+/// against: `largest_of` in `brep.rs`, over the two centres and the two radii.
+fn the_largest_number_of_a_circle_on_a_ring(ring: &Torus, centre: Point, radius: f64) -> f64 {
+    [
+        centre.largest_coordinate_magnitude(),
+        ring.centre().largest_coordinate_magnitude(),
+        radius.abs(),
+        ring.ring_radius().abs(),
+    ]
+    .into_iter()
+    .fold(0.0, f64::max)
+}
+
+/// How many roundings of the largest number a circle may sit off its face and
+/// still be read as on it: the reader's `A_CIRCLE_MAY_MISS_ITS_FACE_BY` in
+/// `brep.rs`, copied for [`the_reader_holds_a_circle_round_a_rings_axis`].
+const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
+
 impl Crossing {
     /// Which way round this curve to write an arc of it, so that the arc from
     /// `start` to `end` is the one `run` picks; `None` where the run's
@@ -1882,9 +2033,16 @@ fn text(string: &str) -> String {
 mod plane_round_trip_tests {
     use core::f64::consts::TAU;
 
-    use rcad_geom::{Axis, Isometry, Plane, Point, Vector};
+    use rcad_geom::{
+        Axis, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Surface, Torus, Vector,
+    };
 
-    use super::{CannotWrite, a_point_this_reader_reads_back_as};
+    use super::{
+        A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
+        a_point_this_reader_reads_back_as, stepped, the_nearest_centre_a_ring_holds_its_circle_at,
+        the_reader_holds_a_circle_round_a_rings_axis,
+        where_a_plane_square_to_a_ring_crosses_it_nearest,
+    };
     use crate::geometry::plane_through;
 
     /// The point `Writing::surface` used to write, the foot of the
@@ -1913,6 +2071,90 @@ mod plane_round_trip_tests {
             "only {misses} of {} planes miss, so this population no longer shows \
              what the point this writer chooses is for",
             planes.len()
+        );
+    }
+
+    /// The seam of the writer target's quarter bend (ring seven, tube one),
+    /// turned about `y` by `5.0` and moved by `(3, 5, 10)`: one representable
+    /// centre reads back as its plane and lies on the ring as the reader asks
+    /// it, and the writer finds it. Four steps each way of two coordinates, all
+    /// [`a_centre_its_plane_reads_back_from`] tries, do not reach it, and the
+    /// writer refused the seam until
+    /// [`the_nearest_centre_a_ring_holds_its_circle_at`] (Q843).
+    ///
+    /// **The plane is the seam's own, not a rounding off square.** Its normal
+    /// and the ring's axis are the same turn of `z`, bit for bit, so the two
+    /// cross to exactly nothing. Its offset is the turned normal dotted with
+    /// `(3, 5, 10)` in plain `f64` (`Plane::transformed`), which is `32` ulps
+    /// from the reader's dot of the ring's centre, rounded once.
+    ///
+    /// **Every centre the reader could hold is searched.** A file can carry
+    /// any `f64` point as a `CIRCLE`'s centre, and the reader holds a circle
+    /// about a ring's axis when its centre is within `16·ε` of the largest
+    /// number of the axis (`how_far_off_the_circle_can_be` in `brep.rs`). The
+    /// normal has no `y`, so moving `y` leaves the dot alone and only moves
+    /// the centre off the axis; every centre the reader could hold then has
+    /// `x` and `z` within twice that of the ring's centre, and those are all
+    /// tried. Of them exactly one reads back as the plane and is held: `23`
+    /// steps down in `x` and `19` in `z`, at `15.88` of the sixteen units the
+    /// reader allows. So this is a gap and not a limit (`docs/decisions.md`
+    /// §16.10): the answer exists, and four steps each way of two coordinates
+    /// was where the search stopped. The reader's rule is asked through the
+    /// writer's copy of it; that the reader itself holds this centre is
+    /// `how_often_a_turned_bend_comes_back_from_its_own_file`, which reads the
+    /// bend back.
+    #[test]
+    fn a_turned_bends_seam_has_one_centre_its_plane_reads_back_from() {
+        let turned = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+            .and_then(|moved| Isometry::rotation(&Axis::y(), 5.0).map(|turn| moved.compose(&turn)))
+            .expect("a finite move and turn");
+        let through_the_middle =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        let Surface::Plane(cut) = Surface::Plane(through_the_middle).transformed(&turned) else {
+            unreachable!("a plane moves as a plane");
+        };
+        let Surface::Torus(ring) =
+            Surface::Torus(Torus::new(Axis::z(), 7.0, 1.0).expect("a tube narrower than its ring"))
+                .transformed(&turned)
+        else {
+            unreachable!("a ring moves as a ring");
+        };
+        let normal = cut.normal();
+        assert_eq!(normal.cross(ring.axis().direction()), Vector::zero());
+        let centre = ring.centre();
+        let read_back = plane_through(centre, normal)
+            .expect("a finite point")
+            .offset();
+        assert_eq!(read_back.to_bits() - cut.offset().to_bits(), 32);
+
+        let corner = turned.apply_to_point(Point::new(6.0, 0.0, 0.0));
+        let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(&cut, &ring, corner)
+            .expect("a plane square to the axis through the ring's centre");
+        let Shape::Circle { radius } = crossing.shape else {
+            unreachable!("a plane square to a ring's axis crosses it in circles");
+        };
+        assert_eq!((crossing.centre, radius), (centre, 6.0));
+
+        let [x, y, z] = centre.coordinates();
+        let reach = 2.0 * A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * 10.0;
+        let steps = |of: f64| (reach / (of.next_up() - of)).ceil() as i32;
+        let mut found = Vec::new();
+        for along_x in -steps(x)..=steps(x) {
+            for along_z in -steps(z)..=steps(z) {
+                let at = Point::new(stepped(x, along_x), y, stepped(z, along_z));
+                let reads_back = plane_through(at, normal)
+                    .is_ok_and(|back| back.offset().to_bits() == cut.offset().to_bits());
+                if reads_back && the_reader_holds_a_circle_round_a_rings_axis(&ring, at, radius) {
+                    found.push((along_x, along_z));
+                }
+            }
+        }
+        assert_eq!(found, [(-23, -19)]);
+        assert_eq!(a_centre_its_plane_reads_back_from(&cut, centre), None);
+        assert_eq!(
+            the_nearest_centre_a_ring_holds_its_circle_at(&cut, &ring, &crossing),
+            Some(Point::new(stepped(x, -23), y, stepped(z, -19)))
         );
     }
 
