@@ -293,6 +293,8 @@ function sourcePathsOf(lane) {
 // Merges inside one run wait for one another, so they never race each other;
 // they race only other runs and other sessions, and `ff-main` and the ancestor
 // check before the push settle that without a lock of their own (§266.4).
+// Landers in different runs take one, and share one gate (§397.5); the Opus
+// merger takes none.
 function mergeAfterTheLast(lane, prior) {
   const run = lastMerge.then(() => merging(lane, prior))
   lastMerge = run.catch(() => null)
@@ -305,8 +307,9 @@ function mergeAfterTheLast(lane, prior) {
 // to the Opus merger, with the stop in its brief. A lander that throws is a
 // stop too, never the end of the row: a `claude` process started before
 // `lander.md` existed cannot resolve the type (§384.3). One that died after its
-// push has landed the lane already, which is why the merger's brief has it
-// check `origin/main` for the lane's tip before it merges anything.
+// push has landed the lane already, and its detached run can still be landing
+// it, which is why the merger's brief has it wait with `just land wait-for`,
+// then check `origin/main` for the lane's tip, before it merges anything.
 function merging(lane, prior) {
   if (!landable(prior)) return byMerger(lane, prior, null)
   return agent(LAND(lane, prior), LANDER(lane)).then(
@@ -621,9 +624,12 @@ function MERGE(lane, prior, stop) {
     : 'none: the dispatcher set verify: false for this lane, so your gate is the only check'
   const landed = stop
     ? `just land ran first and did not merge it: ${stop}
-So your branch is ${branch}, not merge-${lane.label}, which the lander may have made. Straight after your switch, before you merge anything, run:
+So your branch is ${branch}, not merge-${lane.label}, which the lander may have made. The lander's run can outlive the lander (§397.5), so straight after your switch, before you merge anything, run this as one plain Bash call with timeout 600000, and again for as long as its last line says still running:
+  mise exec -- just land wait-for ${branchOf(lane)}
+Then run these two:
+  git fetch origin
   git merge-base --is-ancestor ${branchOf(lane)} origin/main
-Exit 0 means the lander pushed before it stopped or died: merge nothing, and finish by merger.md's paragraph on just land.`
+Exit 0 from the second means the lander's run pushed before it stopped or died: merge nothing, and finish by merger.md's paragraph on just land.`
     : 'The lander did not run: the verifier asked for fixes, or the lane wrote no rows just land takes.'
   return `Merge queue ${rowsOf(lane)}, lane ${lane.label}, onto main, or say why not.
 Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
@@ -660,9 +666,11 @@ ${r.rows.map((step) => step.join('\n')).join('\n+\n')}
 `
     : 'The lane left no rows to add, so there is no steps file to write.\n'
   return `Land queue ${rowsOf(lane)}, lane ${lane.label}, with just land, and hand back the JSON it ends with.
-${write}Then run this, once, as one plain Bash call in the foreground with timeout 600000, and nothing else:
+${write}Then run this, once, as one plain Bash call in the foreground with timeout 600000:
   ${landCommand(lane, prior)}
-Its last line is one line of JSON. Report every field of it exactly as it stands.`
+While its last line says land: still running, run this the same way, as often as it takes, and nothing else:
+  mise exec -- just land wait
+Its last line is then one line of JSON. Report every field of it exactly as it stands.`
 }
 
 function landCommand(lane, prior) {

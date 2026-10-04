@@ -12754,8 +12754,8 @@ check-ff-main-selftest:
     grep -qF "git worktree add" <<<"$got" || fail "the empty case did not name the way back"
 
 # One clean merge of a verified lane onto main, or a named stop (§383.4 item 2,
-# §384). The `lander` agent runs it once, and `lanes.js` hands any stop to the
-# Opus merger with the stop line in its brief (§383.5).
+# §384). The `lander` agent runs it, and `lanes.js` hands any stop to the Opus
+# merger with the stop line in its brief (§383.5).
 #
 # It runs `merger.md`'s steps 1, 3, 4 and 5 as they stand, from a tree of its
 # own: fetch, branch from `origin/main`, unlock, check the sha, merge, close the
@@ -12767,14 +12767,33 @@ check-ff-main-selftest:
 # attempts run out. Its last line is one line of JSON holding `mergedSchema`'s
 # fields and `stop`.
 #
+# **Landers share one gate** (§397.5). The first call starts one run in a
+# session of its own and follows its log for at most `LAND_WAIT` seconds, 540
+# by default, and while its last line says the run is still going, `just land
+# wait` follows it again, as `verify-lane` does (§385.2). The run writes its
+# lane's entry to a spool under `rcad-land/` in the git common directory and
+# waits on the `flock` beside it, which goes when the process does. Holding it,
+# a run whose lane an earlier holder landed reports that merge. Any other run
+# lands its own lane, then every lane waiting whose run is alive, oldest first,
+# each with its own merge commit and queue apply, gates them once, and leaves a
+# result file for each other lane it pushed. A lane that stops is put back out
+# of the batch for its own run, and a red gate with other lanes in it goes back
+# to `origin/main` and lands its own lane alone.
+#
+# **A run outlives its lander**, so the Opus merger that `lanes.js` hands a stop
+# to runs `just land wait-for <lane branch>` from its own tree before it reads
+# `origin/main`. That waits, for the same 540 s and with the same exit 3, while
+# a live run's entry names the lane or anyone holds the lock, and exits 0 once
+# neither is so.
+#
 # `--steps` names a file holding the lane's `add`, `after` and `tag` steps, one
 # word to a line and a `+` line between steps, so that no row's text ever passes
 # through a shell (§384.2). The logic is `tooling/land/land.py`; this hands it
 # the arguments, and `LAND_JUST` is the one seam `check-land-selftest` uses to
 # put a stub where `just` would run the gate, `ff-main` and `mark-finished`. A
-# stop exits 1, and `[no-exit-message]` keeps `just`'s own error line from
-# landing after the JSON, so that line is the last on a stop too.
-[doc("Merge one verified lane onto main as merger.md's steps 1, 3, 4 and 5 do, or stop and say which stop; ends with one line of JSON.")]
+# stop exits 1, a run still going 3 and a refusal 2, and `[no-exit-message]`
+# keeps `just`'s own error line from landing after the last line.
+[doc("Merge one verified lane onto main as merger.md's steps 1, 3, 4 and 5 do, sharing one gate with the lanes waiting, or stop and say which stop: `just land <args>`, then `just land wait` while it says it is still running. Ends with one line of JSON.")]
 [no-exit-message]
 land *args:
     #!/usr/bin/env bash
@@ -12784,6 +12803,21 @@ land *args:
 # Pins `land` against repositories it builds itself, each with a bare `origin`
 # on disk, one per arm: a clean merge lands and prints its JSON, and each stop
 # of §383.4 item 2 stops by name and pushes nothing.
+#
+# Four arms pin §397.5, with a second lane and a lander for it: two landers
+# waiting on the lock share one gate, a red batch falls back to the holder's own
+# lane, an entry whose run was killed is never taken, and a holder killed in its
+# gate drops the lock. The test holds the lock from a `flock` process of its own,
+# never on one of its fds, which every `just land` it starts would inherit.
+#
+# The dead-entry arm also pins `wait-for`'s two legs. A run stopped with
+# `SIGSTOP` while it waits on the lock keeps its entry alive and never takes the
+# lock when it is freed, so `wait-for` with the lock free must still wait on the
+# entry; then, with the run killed and the lock held, it must wait on the lock.
+# The briefs in `lanes.js` and `lander.md` are held to the `wait` and `wait-for`
+# lines, `wait-for` ahead of the merger's ancestor check.
+# Which waiting run gets the lock first is not fixed, so those arms hold either
+# order to the same outcome.
 #
 # **A stub stands where `just` would run a recipe**, on `LAND_JUST`, the way the
 # fuzz selftests put a stub `cargo` on `PATH`. The real `gate` would gate this
@@ -12853,13 +12887,17 @@ check-land-selftest:
         gate)
             n=$(( $(cat "$STUB_DIR/gates" 2>/dev/null || echo 0) + 1 ))
             echo "$n" >"$STUB_DIR/gates"
+            if [ -e "$STUB_DIR/gate-blocks" ] && [ "$n" = 1 ]; then
+                touch "$STUB_DIR/gate-started"
+                for _ in $(seq 1200); do sleep 0.05; done
+            fi
             case "$(cat "$STUB_DIR/race" 2>/dev/null)" in
                 code) race code ;;
                 docs) race docs ;;
                 docs-once) [ "$n" != 1 ] || race docs ;;
             esac
             echo "=== gate summary ==="
-            if [ -e "$STUB_DIR/gate-fails" ]; then
+            if [ -e "$STUB_DIR/gate-fails" ] || { [ -e "$STUB_DIR/gate-fails-with-lane2" ] && [ -e lane2.rs ]; }; then
                 echo "gate: FAIL  first failure: test (exit 100)"
                 exit 1
             fi
@@ -12873,6 +12911,14 @@ check-land-selftest:
     required=$(grep -F "required: ['start_sha', 'worktree_path', 'merge_branch'" .claude/workflows/lanes.js \
         | grep -oE "'[a-z_]+'" | tr -d "'" | tr '\n' ' ' || true)
     [ -n "$required" ] || { echo "found no mergedSchema required list in .claude/workflows/lanes.js, so the JSON would be held to nothing"; exit 1; }
+    grep -qxF '  mise exec -- just land wait' .claude/workflows/lanes.js \
+        || { echo "the lander's brief in .claude/workflows/lanes.js no longer follows just land with just land wait"; exit 1; }
+    grep -qF 'mise exec -- just land wait' .claude/agents/lander.md \
+        || { echo ".claude/agents/lander.md no longer follows just land with just land wait"; exit 1; }
+    waits_at=$(grep -m1 -nxF '  mise exec -- just land wait-for ${branchOf(lane)}' .claude/workflows/lanes.js | cut -d: -f1 || true)
+    checks_at=$(grep -m1 -nxF '  git merge-base --is-ancestor ${branchOf(lane)} origin/main' .claude/workflows/lanes.js | cut -d: -f1 || true)
+    [ -n "$waits_at" ] && [ -n "$checks_at" ] && [ "$waits_at" -lt "$checks_at" ] \
+        || { echo "the merger's brief in .claude/workflows/lanes.js does not run just land wait-for ahead of its ancestor check (lines '$waits_at' and '$checks_at'), so it can read origin/main while the lander's run still lands the lane (§397.5)"; exit 1; }
     steps_line='add 2.2 sonnet justfile small a row the lane left, ending in §384 + tag @1 small'
     arm=""
     at=""
@@ -12922,6 +12968,36 @@ check-land-selftest:
             >"$at/lander/target/land-steps.txt"
         lane_sha=$(git -C "$at/lane" rev-parse HEAD)
     }
+    second_lane() {
+        git -C "$at/hub" worktree add -q -b lane-y "$at/lane2" origin/main
+        printf 'fn lane2() {}\n' >"$at/lane2/lane2.rs"
+        git -C "$at/lane2" add lane2.rs
+        git -C "$at/lane2" commit -q -m "the second lane's work"
+        git -C "$at/hub" worktree add -q --detach "$at/verify2" origin/main
+        git -C "$at/hub" worktree add -q --detach "$at/lander2" origin/main
+        for tree in lane2 verify2 lander2; do
+            git -C "$at/hub" worktree lock --reason "an agent at work" "$at/$tree"
+        done
+        lane2_sha=$(git -C "$at/lane2" rev-parse HEAD)
+    }
+    hold_lock() {
+        rm -f "$at/held" "$at/release"
+        mkdir -p "$at/hub/.git/rcad-land"
+        flock "$at/hub/.git/rcad-land/lock" -c "touch '$at/held'; for _ in \$(seq 1200); do [ ! -e '$at/release' ] || exit 0; sleep 0.05; done" &
+        until_there "$at/held"
+    }
+    release_lock() {
+        touch "$at/release"
+        wait
+    }
+    until_there() {
+        for _ in $(seq 400); do
+            if [ $# -eq 1 ] && [ -e "$1" ]; then return 0; fi
+            if [ $# -eq 2 ] && grep -qF "$2" "$1" 2>/dev/null; then return 0; fi
+            sleep 0.05
+        done
+        fail "waited 20 s for $1 ${2:-}"
+    }
     another_merge() {
         git -C "$at/stub/other" pull -q --ff-only origin main
         printf '%s\n' "$2" >>"$at/stub/other/$1"
@@ -12929,9 +13005,30 @@ check-land-selftest:
         git -C "$at/stub/other" commit -q -m "another merge"
         git -C "$at/stub/other" push -q origin HEAD:main
     }
+    land_in() {
+        local tree=$1 wait=$2
+        shift 2
+        got=$(STUB_DIR="$at/stub" LAND_JUST="$dir/bin/just" LAND_WAIT="$wait" \
+            {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/$tree" land "$@" 2>&1) && rc=0 || rc=$?
+    }
     run() {
-        got=$(STUB_DIR="$at/stub" LAND_JUST="$dir/bin/just" \
-            {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/lander" land "$@" 2>&1) && rc=0 || rc=$?
+        land_in lander 60 "$@"
+        ended
+    }
+    wait_for() {
+        land_in "$1" 60 wait
+        ended
+    }
+    start_in() {
+        local tree=$1
+        shift
+        land_in "$tree" 0.2 "$@"
+        [ "$rc" -eq 3 ] || fail "a run started in $tree ended with exit $rc while it waited, not 3 for one still going"
+        [[ "$(printf '%s\n' "$got" | tail -n 1)" == "land: still running (pid "* ]] || fail "a run still going does not say so on its last line"
+        until_there "$at/$tree/target/land/log" 'land: waiting for the land lock'
+    }
+    ended() {
+        [ "$rc" -ne 3 ] || fail "the run was still going a minute later"
         json=$(printf '%s\n' "$got" | tail -n 1)
         local missing
         missing=$(python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(" ".join(k for k in (sys.argv[2].split() + ["stop"]) if k not in d))' "$json" "$required" 2>&1) \
@@ -12946,6 +13043,14 @@ check-land-selftest:
     }
     gates() {
         cat "$at/stub/gates" 2>/dev/null || echo 0
+    }
+    on_origin() {
+        git -C "$at/origin.git" merge-base --is-ancestor "$1" main 2>/dev/null
+    }
+    spool_empty() {
+        local left
+        left=$(find "$at/hub/.git/rcad-land/spool" "$at/hub/.git/rcad-land/results" -type f)
+        [ -z "$left" ] || fail "the spool still holds $left"
     }
     stopped() {
         [ "$rc" -ne 0 ] || fail "it exited 0 on a stop"
@@ -12979,6 +13084,12 @@ check-land-selftest:
     want=$(printf '%s\n' "just queue apply done Q1 ${lane_sha:0:8} + $steps_line" 'just check-queue' 'just gate quiet' \
         'just ff-main' "just mark-finished $at/lane $at/verify $at/lander")
     [ "$(cat "$at/stub/log")" = "$want" ] || fail "the recipes it ran were, in order: $(cat "$at/stub/log")"
+    spool_empty
+    ran=$json
+    land_in lander 60 wait
+    [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$got" | tail -n 1)" = "$ran" ] || fail "a wait after the run ended did not print its JSON again"
+    land_in lander 60 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 2 ] || fail "a second just land in a tree that has started a run exited $rc, not 2"
 
     fixture sha-differs
     run Q1 lane-x "$(git -C "$at/origin.git" rev-parse main)" merge-x "$at/lane" "$at/verify"
@@ -13045,7 +13156,100 @@ check-land-selftest:
     run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped steps
     ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it read the steps"
-    echo "land merges a clean lane and prints its JSON, and stops by name on each of 9 stops"
+
+    fixture shared
+    second_lane
+    hold_lock
+    start_in lander --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    release_lock
+    wait_for lander
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the first lane did not merge beside a second"
+    [ "$(field worktree_path) $(field rows_closed)" = "$at/lander [\"Q1 done:${lane_sha:0:8}\"]" ] \
+        || fail "the first lane's JSON names another tree or another lane's rows"
+    first="$(field merged_sha) $(field merge_branch)"
+    wait_for lander2
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the second lane did not merge beside the first"
+    [ "$(field worktree_path) $(field rows_closed) $(field rows_added)" = "$at/lander2 [\"Q2 done:${lane2_sha:0:8}\"] []" ] \
+        || fail "the second lane's JSON names another tree or another lane's rows"
+    [ "$(field merged_sha) $(field merge_branch)" = "$first" ] \
+        || fail "the two lanes name different merges, $first and $(field merged_sha) $(field merge_branch), so they did not share one push"
+    [ "$(field merged_sha)" = "$(git -C "$at/origin.git" rev-parse main)" ] || fail "merged_sha is not what origin/main holds"
+    [ "$(gates)" = 1 ] || fail "two lanes waiting together ran $(gates) gates, not one"
+    [ "$(git -C "$at/origin.git" log --merges --grep 'by just land' --format=%H main | wc -l)" -eq 2 ] \
+        || fail "origin/main does not hold one merge commit for each lane"
+    [ "$(grep -c '^just ff-main' "$at/stub/log")" -eq 1 ] || fail "ff-main did not run exactly once for one push"
+    marked=$(grep '^just mark-finished ' "$at/stub/log" | cut -d' ' -f3- | tr ' ' '\n' | sort || true)
+    [ "$marked" = "$(printf '%s\n' "$at"/{lane,verify,lander,lane2,verify2,lander2} | sort)" ] \
+        || fail "mark-finished was given, all told: $marked"
+    for tree in lane verify lander lane2 verify2 lander2; do
+        ! locked "$tree" || fail "the $tree tree is still locked"
+    done
+    spool_empty
+
+    fixture red-batch
+    second_lane
+    touch "$at/stub/gate-fails-with-lane2"
+    hold_lock
+    start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    release_lock
+    wait_for lander
+    both=$got
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the lane the gate passes alone did not merge after a red batch"
+    wait_for lander2
+    both+=$got
+    [ "$rc" -eq 1 ] && [ "$(field stop)" = gate ] || fail "the lane the gate fails on did not stop at the gate"
+    [ "$(gates)" = 3 ] || fail "a red batch, then each lane alone, is 3 gates, not $(gates)"
+    on_origin "$lane_sha" || fail "the lane the gate passes is not on origin/main"
+    ! on_origin "$lane2_sha" || fail "the lane the gate fails on reached origin/main"
+    grep -qF 'land: the gate failed with 2 lanes merged, so lane-' <<<"$both" || fail "nothing says the batch fell back to one lane"
+    spool_empty
+
+    fixture dead-entry
+    second_lane
+    hold_lock
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    waiter=$(cat "$at/lander2/target/land/pid")
+    kill -STOP -- "-$waiter"
+    release_lock
+    land_in verify 0.5 wait-for lane-y
+    [ "$rc" -eq 3 ] || fail "wait-for exited $rc with the lock free and a live run waiting to land lane-y, not 3 for still running"
+    grep -qxF "land: still running: the run in $at/lander2 (pid $waiter) waits to land it. Run \`mise exec -- just land wait-for lane-y\` to keep waiting" <<<"$got" \
+        || fail "wait-for does not name the run that waits to land lane-y"
+    hold_lock
+    kill -9 -- "-$waiter"
+    land_in verify 0.5 wait-for lane-y
+    [ "$rc" -eq 3 ] || fail "wait-for exited $rc while a holder had the land lock, not 3 for still running"
+    grep -qF 'land: still running: a holder has the land lock.' <<<"$got" || fail "wait-for does not say a holder has the lock"
+    start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    release_lock
+    wait_for lander
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the live lane did not land beside an entry whose run was killed"
+    [ "$(gates)" = 1 ] || fail "one live lane ran $(gates) gates"
+    ! on_origin "$lane2_sha" || fail "it landed a lane whose run was gone, which the Opus merger lands too (§397.5 item 7)"
+    grep -qF 'land: the run that waited to land lane-y' <<<"$got" || fail "nothing says the dead entry was dropped"
+    spool_empty
+    land_in verify 5 wait-for lane-y
+    [ "$rc" -eq 0 ] || fail "wait-for exited $rc once no run was landing lane-y, not 0"
+    grep -qxF 'land: no run is landing lane-y; fetch origin before you read origin/main' <<<"$got" \
+        || fail "wait-for does not say that no run is landing lane-y"
+
+    fixture killed-holder
+    second_lane
+    touch "$at/stub/gate-blocks"
+    start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    until_there "$at/stub/gate-started"
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    kill -9 -- "-$(cat "$at/lander/target/land/pid")"
+    wait_for lander2
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane waiting behind a holder that was killed did not land"
+    on_origin "$lane2_sha" || fail "the waiting lane is not on origin/main"
+    ! on_origin "$lane_sha" || fail "the killed holder's lane reached origin/main"
+    [ "$(gates)" = 2 ] || fail "the killed holder's gate and the waiting lane's are 2 gates, not $(gates)"
+    grep -qF 'land: the run that waited to land lane-x' <<<"$got" || fail "nothing says the killed holder's entry was dropped"
+    spool_empty
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, and wait-for waits on a live entry and on a held lock"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the
