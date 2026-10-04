@@ -652,13 +652,16 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// `three_surfaces.rs`'s module doc names the two
+    /// `three_surfaces.rs`'s module doc names the three
     /// families it excludes: two quadrics that square `p` the same way differ by
-    /// something flat, and a plane that misses or barely touches one of the two
+    /// something flat; two surfaces turned about one axis are cut by a plane
+    /// square to it in two circles about one centre, which are one circle or
+    /// share nothing; and a plane that misses or barely touches one of the two
     /// settles the triple with a sign. Two pipes running the same way and a cap
-    /// plane — a union of two overlapping parallel bars — is the first, and a
-    /// ball and a bar both resting on a block's floor is the second. Both are
-    /// answered, and this is what is left over.
+    /// plane — a union of two overlapping parallel bars — is the first, a bar
+    /// through a ball and a cap across both is the second, and a ball and a bar
+    /// both resting on a block's floor is the third. All three are answered,
+    /// and this is what is left over.
     ///
     /// A **gap** and not a limit (§16.10): the points are there, and a real
     /// algebraic solver reaches them. The family of fixes is the
