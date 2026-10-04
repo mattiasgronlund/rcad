@@ -78,15 +78,14 @@ all. Both pass here; a touch is never a proof of anything above.
 Where one of the two faces has no box of 400.2's — a face on a pipe, a cone or
 a torus, or a flat face with a side on one — `bake`'s own face boxes are asked
 whether they miss, before the four. Those are read off stored corners in plain
-`f64` (§35.4), and Q694 measured one short of its face by a rounding, so a miss
-between them is not a proof. The whole-solid boxes are those same boxes taken
-together, and a miss between those has always been taken as two solids apart.
-Face by face it is a little weaker than that: two solids whose whole boxes
-overlap but which touch only where both faces' boxes are short by a rounding
-were joined, and are now left uncut. Asked only where no proof is to be had, it
-is weaker only for those faces; growing `bake`'s boxes by what writing a corner
-down costs, as Q694 proposes, would close it, and bounding those faces soundly
-would retire it.
+`f64` (§35.4), grown by what writing a corner down costs (Q694, §340.10), but
+still plain `f64`, so a miss between them is still not a proof. The whole-solid
+boxes are those same boxes taken together, and a miss between those has always
+been taken as two solids apart. Face by face it is a little weaker than that:
+two solids whose whole boxes overlap but which touch only where both faces'
+boxes miss, grown or not, were joined, and are now left uncut. Asked only
+where no proof is to be had, it is weaker only for those faces; bounding those
+faces soundly would retire it.
 
 It is there because without it an associativity pin moved.
 `fuse_laws_over_a_cone.rs`'s
