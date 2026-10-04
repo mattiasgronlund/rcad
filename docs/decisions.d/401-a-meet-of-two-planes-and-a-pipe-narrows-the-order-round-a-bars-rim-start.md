@@ -95,7 +95,7 @@ measured on the uncommitted change before the exclusion
 With the three-plane case kept out of §401.3's path (`PROBE_Q209_NO_PLANES`,
 the committed rule), all four pass, and the whole workspace gave `2953 of
 2953`. Letting three-plane meets' narrowed boxes be asked by the order too is
-row `@1` below, queued rather than built here, since checking each of the
+row Q866, queued rather than built here, since checking each of the
 four new answers against its volume by hand, and arguing the fourth under
 §16.10, is more than this section's row.
 
