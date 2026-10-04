@@ -239,17 +239,34 @@ each spacing along it is another chance for a double to fall inside.
 **Measured, on the base and after.** A throwaway probe fused every draw with
 both policies and both argument orders (`crates/rcad-topo/tests/q658_probe.rs`,
 taken out). On the base all 56 refused `a point inside a piece of a face`.
-After, each draw answers alike under both policies and both orders:
+After, each draw answers alike under both policies and both orders. The last
+column is since §402 (Q904), which the second and third rows' paragraphs below
+say why:
 
-| draws (`off`, turned) | refused with |
-|---|---|
-| −0.5: 1, 1.5, 2.5, 3; −0.3: 0.3, 0.5, 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` |
-| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` |
-| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` |
+| draws (`off`, turned) | refused with, after Q658 | since §402 |
+|---|---|---|
+| −0.5: 1, 1.5, 2.5, 3; −0.3: 0.3, 0.5, 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` | the same |
+| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` | answers |
+| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` | answers |
 
-`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with` pins that
-table and fails on the base. `mise exec -- just t -p rcad-topo --no-fail-fast`:
-1209 run, 1209 passed, 11 skipped. No other pin moved.
+`what_each_ball_shaved_by_a_turned_blocks_face_comes_to` pins that table, its
+last column now, and was `…_is_refused_with` until Q904. Q658's pin failed on
+its base. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1209 run, 1209
+passed, 11 skipped. No other pin moved.
+
+A draw that answers is checked to validate, to be one solid where the circle is
+on the block's face and two where it is beside it, to measure within the error
+it publishes of `8 + 4π/3` summed over its solids, and to keep a face on the
+ball with two holes. The cap is below `1e-29` in volume and the closed form
+leaves it out. The volumes are measured summed because the turn rounds the
+block's corners: on its own, the block measured `7.999999999999997` with an
+error of `1.4e-15` in `off 0.3` turned 0.5 (a throwaway probe, taken out),
+which is the solid's own distance from `8` and not its sums' (§338.1). `mise
+exec -- just t -p rcad-topo --test a_ball_shaved_by_a_turned_blocks_face
+--no-capture` prints each of the 16 answers, four draws in two orders under two
+policies: from `12.16826` to `12.16910`, against `12.18879`, with published
+errors from `0.12615` to `0.12655`. The two policies give the same volume, and
+the two orders give it to within `3e-14`.
 
 **Why the first row still refuses: the block's ray and its stored plane
 disagree about the cap.** A trace printed each segment's placement against the
@@ -273,10 +290,47 @@ ball face whose outer loop and hole reach no pole, which neither cut takes —
 was not traced; that second reading is a guess nobody has run, so it carries no
 class.
 
+*2026-10-04, Q904: traced, and it was the shape, though not that one.* The
+plane of the block's face `y = 0` cuts the ball too, beside the block, in a
+circle `|off|` from the ball's middle and `2 acos |off|` round in longitude:
+`2.532` for `off ±0.3`, `2.094` for `0.5`. So the ball's skin is a face that
+holds both poles and has two holes, that wide circle and the tiny one of
+`x = 0`, about `1.3e-8` round. An `eprintln` in the base's
+`cut_off_what_goes_too_far_round` (taken out) printed that face in all eight
+runs of this row, two draws in two orders under two policies: two loops, both
+enclosing less than nothing of the chart, so both holes, neither going right
+round, and the wide one first. Only a face of one wire was opened along a seam
+(§202.1), and the first loop went more than a quarter turn round, so the face
+went to `cut_a_ring_across`, which declined because no loop goes right round,
+and to `cut_a_hole_up_to_both_poles`, which declined because no loop encloses
+any of the chart, so there is no outer loop to cut the hole up to. **A gap**:
+the skin exists. §402 fills it by opening such a face into strips from pole to
+pole. A second `eprintln`, in the branch's strip cut and taken out too, printed
+two strips of one hole each for the face of every answer, and each such strip
+is cut exactly as the one hole of a ball less a disc is (§402.3). With the
+base's `mesh.rs` put back, all eight runs refuse
+`CurvedFaceWithAHoleGoesTooFarRound` again.
+
 **The third row gets past `select` and the answer's own check refuses it.** In
 `off +0.5` turned 5 the segment through the cap was placed `Outside` the block,
 which is right: the cap is beside the block. What `validate` then found two
 faces disagreeing about was not traced.
+
+*2026-10-04, Q904: traced. The answer was built wrong and the check was
+right.* The ball's skin is the same face with two holes, and here the tiny hole
+came first, `1.1e-8` and `2.0e-8` round for `off 0.5` and `0.3`. A first loop
+no more than a quarter turn round was handed over whole, so the triangulator
+had the tiny hole for the face's outer loop and filled it, not the skin round
+it. The check is `every_side_of_the_skin_is_used_both_ways` in `validate.rs`,
+over the coarsest mesh. An `eprintln` there (taken out) printed, in all eight
+runs, the sides that were not used once each way and the faces whose triangles
+used them: four sides drawn by the face with two holes and one cap of the ball,
+and four drawn by it and the other cap. The ball, beside the block, is three
+faces there: those two caps of one wire each, the tiny one beyond `x = 0` and
+the one beyond `y = 0`, and the face with both their circles for holes. The
+strips cut that face as they do the second row's, and all eight runs answer.
+With the base's `mesh.rs` put back, all eight refuse
+`Invalid(FacesDoNotAgreeWhichWayTheyFace)` again.
 
 **A guess Q658 named, demonstrated.** A flat piece's candidate is three doubles
 off its plane by a rounding, and a round wire's partner is asked about the point
@@ -327,7 +381,8 @@ All three tests fail on the base with the hold they assert against.
 taken out). Every answer that changed became `None`. 111 of them had been
 `Some(false)`, which the caller reads the same way. 9 had been `Some(true)`:
 the three new unit tests, and six in
-`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with`, on the disks of
+`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with` (now
+`…_comes_to`), on the disks of
 `off −0.3` turned 0.3 and turned 2. The probe also wrote two lines that were cut
 by two test processes writing at once. In each of the six, the point was within
 `2.1e-17` of the disk's centre, on the ball's side of the plane. Exact
@@ -350,6 +405,7 @@ It is a guess nobody has run, so it carries no class.
 - The first row needs `classify.rs` to read a flat face's crossing by its stored
   plane, or `select` to place a piece some other way (§346.3 family 6).
 - The second row needs `mesh.rs`'s `cut_up` traced for a ball face with a
-  small hole.
+  small hole. *Q904: done above; it answers since §402.*
 - The third row needs the answer's check traced for which two faces disagree.
+  *Q904: done above; it answers since §402.*
 - The winding of a point off a flat piece's plane, above, if anyone runs it.

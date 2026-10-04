@@ -118,16 +118,25 @@ curve's longitude. Both are cut, one way and then the other.
   both orders, and the answer under one named rule is checked to hold a face
   on the ball with two holes. Throwaway prints confirmed each test reaches the
   path its name says.
-- **Four of Q669's draws now answer**, in
-  `tests/a_ball_shaved_by_a_turned_blocks_face.rs`: off `−0.3` turned `2` and
-  off `0.3` turned `0.5`, pinned `AHoleGoesTooFarRound`, and off `0.3` and off
-  `0.5`, both turned `5`, pinned `FacesDoNotAgreeWhichWayTheyFace`. Each has a
-  face on the ball with two holes, so Q669's question gets its answer: these
-  draws are this site. A probe measured each in both orders and under both
-  policies. Each validates. The first is one solid of `12.168` within `0.127`
-  of `8 + 4π/3 = 12.189`. The other three are the block at `8` and a ball of
-  `4.168` or `4.169`, within `0.127` of `4π/3`. The pin is outside this lane's
-  write set and is left red; see 402.6.
+- **Four of the draws of
+  `tests/a_ball_shaved_by_a_turned_blocks_face.rs` now answer**: off `−0.3`
+  turned `2` and off `0.3` turned `0.5`, Q669's, pinned
+  `AHoleGoesTooFarRound`, and off `0.3` and off `0.5`, both turned `5`,
+  Q670's, pinned `FacesDoNotAgreeWhichWayTheyFace`. Each has a face on the
+  ball with two holes, so Q669's question gets its answer: these draws are
+  this site. A probe measured each in both orders and under both policies.
+  Each validates. The first is one solid of `12.168` within `0.127` of
+  `8 + 4π/3 = 12.189`. The other three are the block at `8` and a ball of
+  `4.168` or `4.169`, within `0.127` of `4π/3`. The pin was outside this
+  lane's write set and was left red.
+
+  *Q904, which landed this branch, moved it:*
+  `what_each_ball_shaved_by_a_turned_blocks_face_comes_to` now holds each of
+  the four to answering, checked to validate, counted in solids and measured
+  within its error of `8 + 4π/3` under both policies and both orders. Its
+  trace of the base found which cut declined for Q669's two and which faces
+  disagreed for Q670's two, and that the strips are what answers both. §346.6
+  has it.
 
 The single-hole path is unchanged bit for bit, and the slow tests that cover it
 (`a_ball_less_a_cap_built_face_by_face_meshes_closed_and_measures`,
@@ -139,7 +148,8 @@ pass, with the rest of the whole suite but that one pin.
 - The pin of Q669's four draws in `a_ball_shaved_by_a_turned_blocks_face.rs`
   has to move to answering, checked against the block's `8` and the ball's
   `4π/3`, with that file's module doc ("None answers yet"). Q669's row holds
-  the file, and the remaining draws are its own.
+  the file, and the remaining draws are its own. *Q904: done, in 402.5; the
+  ten draws left are Q668's.*
 - §400.5's chain of three whose upright rim left "a band of two loops,
   `CurvedFaceWithAHoleGoesTooFarRound`, Q451's site" was not run again here.
 - `crates/rcad-topo/src/error.rs`: the doc of

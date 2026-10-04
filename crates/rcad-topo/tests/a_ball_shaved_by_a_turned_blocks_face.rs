@@ -16,48 +16,59 @@
 //! face` before §346.6: each point put back on the ball is a box `±5.7e-14`
 //! wide, far thicker than the cap. Now `select` finds points inside the cap and
 //! inside the disk the ball leaves on the face, and each draw gets past that
-//! search. What each then answers is pinned below, by name. None answers yet.
+//! search. What each then does is pinned below, by name.
+//!
+//! Four of them answer since §402. The plane of the block's face `y = 0` cuts
+//! the ball too, beside the block, in a circle `|off|` from its middle, so the
+//! ball's skin is left with a face holding both poles and two holes: that wide
+//! circle and the tiny one. The mesher had no cut for a ball face whose loops
+//! are all holes, and it now opens one into strips from pole to pole, here a
+//! hole in each (§346.6, §402.5). The other ten still find no point every solid
+//! could place.
 
-use rcad_geom::{Axis, Isometry, Scale, Surface, SurfaceMeet, Vector, intersect};
+use core::f64::consts::PI;
+
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Surface, SurfaceMeet, Vector, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
+use rcad_topo::{Error, Model, Rule, SolidKey};
 
-/// What a draw is refused with, whichever policy and argument order.
+/// What a draw's union does, whichever policy and argument order.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Refused {
-    /// A point was found inside the cap, and the block could not place it. The
-    /// block's ray reads its face `x = 0` by the triangles of its stored
-    /// corners and put the point outside, where the stored plane puts it
-    /// inside, so `select` dropped it; or the ray could not say at all.
+enum TheUnion {
+    /// It is refused: a point was found inside the cap, and the block could not
+    /// place it. The block's ray reads its face `x = 0` by the triangles of its
+    /// stored corners and put the point outside, where the stored plane puts
+    /// it inside, so `select` dropped it; or the ray could not say at all.
     NoPointEverySolidCouldPlace,
-    /// Every piece was placed, and a face of the ball with a hole of radius
-    /// about `1e-8` in it could not be meshed.
-    AHoleGoesTooFarRound,
-    /// Every piece was placed, and the answer's own check found two faces that
-    /// do not agree which way they face.
-    FacesDoNotAgreeWhichWayTheyFace,
+    /// It answers, and the answer holds ([`the_answer_holds`]).
+    Answers,
 }
 
-/// `(off, turned, what it is refused with)`.
-const DRAWS: [(f64, f64, Refused); 14] = [
-    (-0.5, 1.0, Refused::NoPointEverySolidCouldPlace),
-    (-0.5, 1.5, Refused::NoPointEverySolidCouldPlace),
-    (-0.5, 2.5, Refused::NoPointEverySolidCouldPlace),
-    (-0.5, 3.0, Refused::NoPointEverySolidCouldPlace),
-    (-0.3, 0.3, Refused::NoPointEverySolidCouldPlace),
-    (-0.3, 0.5, Refused::NoPointEverySolidCouldPlace),
-    (-0.3, 1.5, Refused::NoPointEverySolidCouldPlace),
-    (-0.3, 2.0, Refused::AHoleGoesTooFarRound),
-    (-0.3, 2.5, Refused::NoPointEverySolidCouldPlace),
-    (-0.3, 3.0, Refused::NoPointEverySolidCouldPlace),
-    (0.3, 0.5, Refused::AHoleGoesTooFarRound),
-    (0.3, 2.5, Refused::NoPointEverySolidCouldPlace),
-    (0.3, 5.0, Refused::FacesDoNotAgreeWhichWayTheyFace),
-    (0.5, 5.0, Refused::FacesDoNotAgreeWhichWayTheyFace),
+/// `(off, turned, what the union does)`.
+const DRAWS: [(f64, f64, TheUnion); 14] = [
+    (-0.5, 1.0, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.5, 1.5, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.5, 2.5, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.5, 3.0, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.3, 0.3, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.3, 0.5, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.3, 1.5, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.3, 2.0, TheUnion::Answers),
+    (-0.3, 2.5, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.3, 3.0, TheUnion::NoPointEverySolidCouldPlace),
+    (0.3, 0.5, TheUnion::Answers),
+    (0.3, 2.5, TheUnion::NoPointEverySolidCouldPlace),
+    (0.3, 5.0, TheUnion::Answers),
+    (0.5, 5.0, TheUnion::Answers),
 ];
 
+/// The block and the ball together. The cap they share, or the ball loses, is
+/// a rounding deep and `1e-8` wide, so its volume is below `1e-29` and the
+/// closed form leaves it out.
+const THE_BLOCK_AND_THE_BALL: f64 = 8.0 + 4.0 * PI / 3.0;
+
 #[test]
-fn what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with() {
+fn what_each_ball_shaved_by_a_turned_blocks_face_comes_to() {
     let mut wrong = Vec::new();
     for (off, turned, expected) in DRAWS {
         for (name, policy) in [
@@ -66,7 +77,7 @@ fn what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with() {
         ] {
             for ball_first in [false, true] {
                 let what = format!("off {off}, turned {turned}, {name}, ball first {ball_first}");
-                let got = what_the_union_is_refused_with(turned, off, &policy, ball_first);
+                let got = what_the_union_does(turned, off, &policy, ball_first, &what);
                 if got != Ok(expected) {
                     wrong.push(format!("{what}: {got:?} where {expected:?} is pinned"));
                 }
@@ -113,12 +124,13 @@ fn the_turned_face_cuts_the_ball_in_every_draw() {
     }
 }
 
-fn what_the_union_is_refused_with(
+fn what_the_union_does(
     turned: f64,
     off: f64,
     policy: &Policy,
     ball_first: bool,
-) -> Result<Refused, String> {
+    what: &str,
+) -> Result<TheUnion, String> {
     let (mut model, block, ball) = a_block_and_a_ball_beside_it(turned, off, policy);
     let (arguments, tools) = if ball_first {
         ([ball], [block])
@@ -132,25 +144,77 @@ fn what_the_union_is_refused_with(
         policy,
         &mut ProvenanceLog::new(),
     );
-    match fused {
-        Ok(fused) => Err(format!(
-            "answered with {} solids; check it validates, is one solid where the circle is on \
-             the face, and holds the block's volume and the ball's",
-            fused.solids().len()
-        )),
+    let answer = match fused {
+        Ok(fused) => fused.solids().to_vec(),
         Err(Error::Undecidable { records })
             if records.records().iter().any(|record| {
                 record.predicate() == "a point in a piece that every solid could place"
             }) =>
         {
-            Ok(Refused::NoPointEverySolidCouldPlace)
+            return Ok(TheUnion::NoPointEverySolidCouldPlace);
         }
-        Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. }) => Ok(Refused::AHoleGoesTooFarRound),
-        Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace)) => {
-            Ok(Refused::FacesDoNotAgreeWhichWayTheyFace)
-        }
-        Err(other) => Err(format!("{other:?}")),
+        Err(other) => return Err(format!("{other:?}")),
+    };
+    the_answer_holds(&model, &answer, off, policy, what)?;
+    Ok(TheUnion::Answers)
+}
+
+/// The union validates; it is one solid where the circle is on the block's
+/// face and two, the block and the ball, where it is beside it; it measures
+/// within the error it publishes of [`THE_BLOCK_AND_THE_BALL`]; and the ball's
+/// skin in it keeps the face with two holes that §402 cuts into strips.
+///
+/// **Measured summed over the solids, not one by one.** The turn rounds the
+/// block's corners, so the block on its own measures a few `1e-15` off `8`,
+/// which the error it publishes for its sums does not cover (§338.1). Summed,
+/// the error is the ball's mesh's, about `0.13`.
+fn the_answer_holds(
+    model: &Model,
+    answer: &[SolidKey],
+    off: f64,
+    policy: &Policy,
+    what: &str,
+) -> Result<(), String> {
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .map_err(|why| format!("the answer does not validate: {why:?}"))?;
+    let solids = if off < 0.0 { 1 } else { 2 };
+    if answer.len() != solids {
+        return Err(format!("{} solids where {solids} are right", answer.len()));
     }
+    let (mut volume, mut error) = (0.0, 0.0);
+    let mut wires_of_each_ball_face = Vec::new();
+    for &solid in answer {
+        let view = model.solid(solid).expect("the fuse's own key");
+        let measured = view
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                policy,
+                &mut ProvenanceLog::new(),
+            )
+            .map_err(|why| format!("the answer does not measure: {why:?}"))?;
+        volume += measured.volume();
+        error += measured.volume_error();
+        wires_of_each_ball_face.extend(
+            view.faces()
+                .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+                .map(|face| face.wires().count()),
+        );
+    }
+    println!(
+        "{what}: {solids} solids measuring {volume} within {error} of {THE_BLOCK_AND_THE_BALL}"
+    );
+    if (volume - THE_BLOCK_AND_THE_BALL).abs() > error {
+        return Err(format!(
+            "measures {volume}, {error} off at most, against {THE_BLOCK_AND_THE_BALL}"
+        ));
+    }
+    if !wires_of_each_ball_face.contains(&2) {
+        return Err(format!(
+            "no face on the ball with two holes; its faces have {wires_of_each_ball_face:?} wires"
+        ));
+    }
+    Ok(())
 }
 
 /// A cube of side 2 from `(−2, −2, 0)` and a ball of radius 1 at `(1, off, 1)`,
