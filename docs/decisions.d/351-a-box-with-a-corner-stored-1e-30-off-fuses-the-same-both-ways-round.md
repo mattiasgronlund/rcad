@@ -258,3 +258,59 @@ both ways. That was a scratch test and is not pinned here.
 - An input corner on three planes whose meet Cramer's rule cannot bound keeps
   `bake`'s point, and can still round apart from a meet of the same planes.
   How often a fuse reaches that was not measured.
+
+### 351.8 Landed, and the turned pair's file pinned again
+
+*Queue row Q925. Lane `lane-q925-land-a-comb-and-an-ell-turned-27-64`, Q711's
+branch merged onto `5d28a70c`, which holds Q609's and Q668's changes. The
+first item of 351.7 is done here, and the third.*
+
+**The ell and the comb.** `the_turned_pair_whose_union_lost_a_face_one_way_round.rs`
+pins §149's pair's union as `ResultIsNotManifold { count: 4 }` both ways
+round, upright and turned half a turn about `(0, 3, 2)`, in one test.
+Upright, the comb's right tooth sits flat against the ell and its left tooth
+meets the ell along one edge only, from the origin to `(0, 0, 1)`. Why the
+turned pair answered before 351.6, with a ring through the origin twice, was
+not traced. The intersection test is kept as it was.
+
+**The ring through one corner twice.** No other test reached a fused answer
+with a ring through one corner twice. `fuses_that_must_agree.rs`'s own ring
+test writes its ring by hand, and the ball against a prism's edge that Q686
+is about makes its wire through one corner twice inside the fuse and refuses
+at meshing, so no answer reaches the caller. So a scratch test,
+since deleted, searched the suite's families: 2 000 draws each under proptest's
+`TestRunner::deterministic`, every rule both ways round.
+
+| family | fuses | answered | with a ring through one corner twice |
+|---|---|---|---|
+| lattice | 12 000 | 11 750 | 26 |
+| turned | 12 000 | 9 848 | 8 |
+| skew | 12 000 | 9 978 | 4 |
+
+All 16 it printed were unions. One of the turned draws is an ell five by four
+with a three-by-one bite, three high, and a frame four by four, one high, at
+`(-3, -3, 0)`. The ell covers the frame's far corner, so the frame's top face
+is left a C whose two ends touch at `(0, 0, 1)`, a corner of its hole. Its
+union has that ring upright and turned by the file's half turn, the same both
+ways round, and its intersection has none.
+`an_ell_and_a_frame_unite_to_a_face_whose_ring_goes_through_one_corner_twice`
+pins that, in place of
+`the_union_of_this_pair_has_a_ring_that_goes_through_one_corner_twice`.
+
+So §151.5's "the only ring-with-a-repeated-corner anyone has produced" is
+answered: the lattice family draws them upright, about one answered fuse in
+450 there, and the smallest-rotation rule is asked of real answers and not
+only of the ring written by hand.
+
+**The citations.** §303.4 gives the turned band since 351.6, and §242 names
+the box and the taller one's test by its new name.
+
+### 351.9 What this leaves
+
+- `fuzzing/comparison.rs`'s doc on `turned_to_its_smallest` still says a
+  turned pair makes a ring through one corner twice at the point the turn
+  holds still. 351.8 shows it is the frame's C, upright or turned. The file was
+  outside this row's.
+- 351.7's last item, how often an input corner keeps `bake`'s point, is a row.
+- Q915's union answers since 351.6, by that section's scratch test; its row
+  is still open for its own pins.

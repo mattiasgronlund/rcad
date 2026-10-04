@@ -5720,8 +5720,10 @@ impl Dice {
 /// One ring, written down from two of its own corners, has to come back as one
 /// list.
 ///
-/// The ring below goes through the origin twice, which is what a turned pair
-/// does when both inputs have a corner at the point the turn holds still.
+/// The ring below goes through the origin twice. A union makes such a ring
+/// where one solid covers the corner of a frame and leaves its top face a C
+/// whose ends touch, upright or turned:
+/// `the_turned_pair_whose_union_lost_a_face_one_way_round.rs` pins one.
 #[test]
 fn a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side() {
     let here = [0.0, 0.0, 0.0];
