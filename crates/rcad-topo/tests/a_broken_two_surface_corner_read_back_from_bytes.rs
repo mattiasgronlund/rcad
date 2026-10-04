@@ -58,11 +58,13 @@
 //! - **A ball's south pole** `(0, 0, -3)`, moved to five places. `validate`
 //!   refuses four with `VertexOffItsFaceSurface`, and the one moved onto the
 //!   equator at `(3, 0, 0)` with `APoleStandsWhereTheSurfaceDoesNotPinch`.
-//!   **No fuse blames itself.** In six pairs, a block far away among them, the
-//!   answer is the sound ball's corner for corner to the last bit, so the
-//!   moved pole never reaches it. The seventh pair, a small block round the
-//!   pole, refuses with `ACurvedFaceGoesRightRoundWithNoSeam` for the sound
-//!   ball too. The same under both policies.
+//!   **No fuse blames itself.** In all seven pairs, a block far away and a
+//!   small block round the pole among them, the answer is the sound ball's
+//!   corner for corner to the last bit, so the moved pole never reaches it.
+//!   The same under both policies. Until Q508 the small block round the pole
+//!   refused with `ACurvedFaceGoesRightRoundWithNoSeam` for the sound ball
+//!   too, because the mesher could not tell which pole the cap the ball keeps
+//!   reaches.
 //! - **A frustum's top corner** `(3, 0, 6)`, from `cones::a_frustum(model,
 //!   0.5, 2, 6)`, moved off the wall, off the cap and a quarter turn round:
 //!   the bar's outcomes, and one refusal more. Moved off the cap to
@@ -306,7 +308,6 @@ enum Outcome {
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
     TwoCurvesTouchWithoutCrossing,
-    ACurvedFaceGoesRightRoundWithNoSeam,
 }
 
 #[test]
@@ -557,7 +558,7 @@ fn a_ball_whose_south_pole_is_moved_in_its_file_reads_back_and_does_not_validate
 
 /// **A moved pole never reaches the answer.** Even with a block far away,
 /// where the whole ball is kept, the answer's corners are the sound ball's to
-/// the last bit. The one pair refused is refused for the sound ball too.
+/// the last bit. So are they with a small block cut out round the pole itself.
 #[test]
 fn a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
@@ -581,7 +582,7 @@ fn a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer() {
             (
                 ROUND_THE_SOUTH_POLE,
                 Rule::Difference,
-                Outcome::ACurvedFaceGoesRightRoundWithNoSeam,
+                Outcome::TheSoundAnswer,
             ),
             (
                 THE_BALLS_X_ABOVE_NOUGHT_HALF,
@@ -778,8 +779,7 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing
-        | Outcome::ACurvedFaceGoesRightRoundWithNoSeam => {
+        | Outcome::TwoCurvesTouchWithoutCrossing => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
     }
@@ -812,9 +812,6 @@ fn refuses_as(
         }
         Outcome::TwoCurvesTouchWithoutCrossing => {
             matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
-        }
-        Outcome::ACurvedFaceGoesRightRoundWithNoSeam => {
-            matches!(refused, Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
         }
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
             unreachable!("{refusal:?} is not a refusal")
