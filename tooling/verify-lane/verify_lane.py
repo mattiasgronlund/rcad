@@ -3,11 +3,12 @@
 
 `docs/decisions.md` §383.4 item 4 is the spec and §385 the build. In order: unlock
 the lane's tree, `git log` from the base to the branch, the files outside the
-write set, `lines-that-run` before the checkout, the checkout, `gate quiet`,
-then `verifier.md` step 7's revert of the source paths, the test run and the
-restore, and last the lane's numbers. For a lane marked `sameBehaviour` the
-revert's tests must pass rather than fail (§399). It ends with one line of
-JSON holding every `verdictSchema` field it could fill, `skipped` for what it
+write set, `lines-that-run` before the checkout, the checkout, `gate-lane`,
+which leaves out the slow tier (§397.4), one run of each named test that
+reaches that tier, then `verifier.md` step 7's revert of the source paths, the
+test run and the restore, and last the lane's numbers. For a lane marked
+`sameBehaviour` the revert's tests must pass rather than fail (§399). It ends
+with one line of JSON holding every `verdictSchema` field it could fill, `skipped` for what it
 skipped and why, and `left_to_you` for what it could not decide.
 
 **One run, detached, that the verifier waits on** (§385.2). The harness ends a
@@ -216,10 +217,10 @@ def verify(lane, report, full_log):
         left(report, f"git checkout --detach {tip} failed, so nothing after it ran: {last_line(said)}")
         return
     say(f"checked out {tip}")
-    passed = gate(run, report)
+    passed, left_out_slow = gate(run, report)
     if lane["tests"]:
         kinds = {name: test_kind(run, name) for name in lane["tests"]}
-        tests_pass(run, kinds, passed, report)
+        tests_pass(run, kinds, passed, left_out_slow, report)
         revert(run, lane, kinds, count, tip, report)
     numbers(run, lane["numbers"], report)
 
@@ -292,8 +293,14 @@ def lines_that_run(run, base, branch, report):
 
 
 def gate(run, report):
-    """`gate quiet` on the branch tip. Relays all but the one line each passing step prints."""
-    rc, said = run(JUST, "gate", "quiet")
+    """`gate-lane` on the branch tip, or `gate quiet` where the branch has no `gate-lane`.
+
+    The second is a lane carried on from a base older than §397.4. Relays all
+    but the one line each passing step prints, and returns whether the gate
+    passed and whether it left the slow tier out.
+    """
+    left_out_slow = run(JUST, "--show", "gate-lane")[0] == 0
+    rc, said = run(JUST, "gate-lane") if left_out_slow else run(JUST, "gate", "quiet")
     lines = said.splitlines()
     for line in lines:
         if not re.fullmatch(r"· \S+ \([0-9.]+ s\)", line):
@@ -301,9 +308,9 @@ def gate(run, report):
     at = next((i for i, line in enumerate(lines) if line == "=== gate summary ==="), None)
     if at is None:
         left(report, f"the gate exited {rc} and printed no summary block; its output is in the log above")
-        return False
+        return False, left_out_slow
     report["gate_summary"] = "\n".join(lines[at:])
-    return rc == 0 and "gate: PASS" in lines[at:]
+    return rc == 0 and "gate: PASS" in lines[at:], left_out_slow
 
 
 def test_kind(run, name):
@@ -315,11 +322,13 @@ def test_kind(run, name):
     return None
 
 
-def tests_pass(run, kinds, passed, report):
+def tests_pass(run, kinds, passed, left_out_slow, report):
     """`verifier.md` step 6: the gate is the proof for a test name and for a recipe it runs.
 
-    A named recipe outside `gate_steps` is the one thing the gate never ran, so
-    that alone runs here, once.
+    Two things the gate never ran run here, once each: a named recipe outside
+    `gate_steps`, and, when the gate left the slow tier out, a named test whose
+    name is part of a slow test's. `just t` filters on part of a name, so the
+    second would select a slow test.
     """
     unknown = [name for name, kind in kinds.items() if kind is None]
     for name in unknown:
@@ -330,6 +339,12 @@ def tests_pass(run, kinds, passed, report):
         return
     _, steps = run(JUST, "--evaluate", "gate_steps")
     outside_gate = [name for name, kind in kinds.items() if kind == "recipe" and name not in steps.split()]
+    slow = []
+    if left_out_slow:
+        _, tier = run(JUST, "--evaluate", "slow_tests")
+        slow_names = [token.rsplit("/", 1)[-1] for token in tier.split()]
+        slow = [name for name, kind in kinds.items()
+                if kind == "nextest" and any(name in slow_name for slow_name in slow_names)]
     failed = []
     for name in outside_gate:
         rc, said = run(JUST, name)
@@ -337,12 +352,20 @@ def tests_pass(run, kinds, passed, report):
         if rc != 0:
             failed.append(name)
             tail(said)
+    for name in slow:
+        rc, said = run(JUST, "t", name)
+        say(f"{name}, which reaches the slow tier gate-lane leaves out: "
+            f"{'passed' if rc == 0 else f'FAILED, exit {rc}'} on the branch")
+        if rc != 0:
+            failed.append(name)
+            tail(said)
     if failed:
         report["tests_pass_on_branch"] = False
     elif not unknown:
         report["tests_pass_on_branch"] = True
+        ran_once = outside_gate + slow
         say("tests_pass_on_branch: true, from the gate's PASS line" +
-            (f" and {', '.join(outside_gate)} run once" if outside_gate else ""))
+            (f" and {', '.join(ran_once)} run once" if ran_once else ""))
 
 
 def revert(run, lane, kinds, count, tip, report):

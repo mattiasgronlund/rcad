@@ -17,10 +17,11 @@
 //! the constructors' half of it.
 //!
 //! Of the five fuses of this pair, the three whose answer leaves the bend out
-//! answer now and are pinned here. The union and the bend less the cube keep
-//! the bend and are refused writing it back, `TheFuseWroteABrokenAnswer` with
-//! `CoedgesRunTheSameWay`: the stop a bend fused with a copy of itself reaches
-//! (`how_often_a_fuse_with_a_torus_refuses.rs`), and not this file's.
+//! are pinned here. Since Q667 the other two also answer, with the certified
+//! log empty and `Model::validate` passing: the union is two solids, the cube
+//! at 8 exactly and the bend at 19.7061 give or take 0.3921 at deflection
+//! 0.01, and the bend less the cube is one solid, the bend. No test here pins
+//! that pair yet.
 //!
 //! **Two curved faces of different kinds**, Q463: `intersect` refuses a ring
 //! against a ball, a pipe or a cone, and a cone against a ball. A ball twenty

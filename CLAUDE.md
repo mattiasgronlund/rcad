@@ -108,8 +108,8 @@ summary block useless. Never write down a gate you have not read.
 
 **Code already gated green is served, not run again.** If this commit's code
 (its tree without `docs/` and `*.md`) passed a gate on this machine in the last
-day, `just gate` skips the steps in `gate_reusable_steps`, prints `·
-served:` naming the commit whose gate it is, and marks that gate's counts
+day, `just gate` skips the steps in `gate_reusable_steps` that gate passed,
+prints `· served:` naming the commit whose gate it is, and marks that gate's counts
 `(served from <sha>)` in the summary. `just gate quiet fresh` runs everything.
 So does a commit whose sha starts with `0`: that is the audit. **A `!!! verdict
 violated` line is a finding, not a flake** — read `docs/decisions.md` §337.6

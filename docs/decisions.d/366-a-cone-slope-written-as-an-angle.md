@@ -45,6 +45,12 @@ cap needs: a ring's coordinate runs round its tube, not round the circle a cap
 cuts from it. The stored frame is kept per side in the writer's `Side` struct,
 in `write.rs`, so Q407 can reach it for the ring.
 
+**2026-10-04:** Since Q407 the plane-torus cap circle is written too, and it
+needed no `which_way_a_closed_crossing_turns` either: it turns about the cap's
+normal, or its reverse, by whichever sign picks the corner's side of the axis.
+`how_often_a_model_the_mutator_draws_is_refused`'s 85 of 400 draws refused at
+the plane–ring circle are now 0 (§241.6).
+
 ### 366.2 The half-angle written, and the slopes no half-angle carries
 
 STEP writes a cone's half-angle, and the reader takes its tangent
@@ -239,6 +245,10 @@ and `a_seam_picked_from_the_other_side_is_a_different_run`.
 - Q407, the torus cap, is still refused: 85 of the 400 draws.
 - §191.3 still says the frustum is refused by the writer. Its file was in
   neither lane's write set; a row adds the dated note.
+
+**2026-10-04:** Since Q407 the torus cap is written, and
+`how_often_a_model_the_mutator_draws_is_refused` now refuses 0 of 400 draws at
+the plane–ring circle, not 85 (§241.6).
 
 ### 366.6 A frustum and a block read back from rounded text
 

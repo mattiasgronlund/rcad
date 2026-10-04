@@ -94,6 +94,7 @@ gate_steps := "check-plugins \
     check-lanes-workflow \
     check-kache-off-on-ci \
     check-gate-runs-every-check \
+    check-gate-lane-callers \
     check-gate-summary-selftest \
     check-pre-gate-selftest \
     check-gate-docs-selftest \
@@ -138,9 +139,54 @@ gate_steps := "check-plugins \
     check-fmt \
     lint \
     test \
+    test-slow \
     check-release-build \
     check-t-selftest \
     deny"
+
+# The slow tier: the tests that cost a gate 5 s or more and were never the only
+# test red in a whole-suite run (§397.2). `test` runs every test but these and
+# `test-slow` runs only these, so `gate-lane` can leave them out of a lane's gate
+# while the land gate runs them all. That is 57% of the test step's time.
+#
+# One test a line, as `binary_id/test_name`. The token splits at its **last**
+# `/`, since a bench binary's id holds one (`rcad::bench/...`) and a test name
+# cannot.
+#
+# **`test` fails unless every name here selects exactly one test.** A renamed
+# or split test then fails the gate of the lane that renamed it, not the land
+# gate after it. A test joins only when both its cost and its catches are scored
+# again, and leaves in the commit that fixes what it caught alone (§397.4).
+slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_round_a_pointed_cones_apex_answers_right \
+    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_steeper_plane_across_a_frustum_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right \
+    rcad-topo::whether_a_coarser_deflection_always_meshes/which_refusals_never_turned_into_a_mesh_anywhere_on_the_ladder \
+    rcad-topo::whether_a_coarser_deflection_always_meshes/the_verdict_is_scoped_to_the_family_that_was_swept \
+    rcad-step::the_same_file_read_twice_by_two_readers/the_two_readers_agree_about_every_corpus_file_except_where_escapes_are_decoded \
+    rcad-topo::a_cap_whose_rim_runs_through_the_other_pole/a_ball_cut_through_its_south_pole_keeps_its_north_pole_and_measures_a_cap \
+    rcad-topo::a_piece_of_a_ball_holding_both_poles/a_ball_less_a_cap_built_face_by_face_meshes_closed_and_measures \
+    rcad-topo::meshing_a_plane_cut_along_a_cones_other_nappe/the_eighteen_held_to_the_familys_four_checks \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses \
+    rcad-topo::what_a_deflection_costs_a_measured_volume/the_volume_a_mesh_misses_falls_in_step_with_the_deflection \
+    rcad-topo::fuses_that_must_agree/every_fuse_a_turned_curved_fixture_refuses_has_an_answer_turned_from_the_upright_one \
+    rcad-geom::why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes/the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_two_orders_is_the_sizing_walk \
+    rcad-geom::why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes/the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_nine_orders_is_the_sizing_walk \
+    rcad-topo::a_ball_cut_through_its_pole/a_block_taken_out_of_a_ball_through_its_south_pole_leaves_the_same_cap \
+    rcad-topo::a_ball_cut_through_its_pole/a_ball_cut_through_its_south_pole_by_a_block_keeps_a_cap_that_measures_right \
+    rcad-topo::fuses_that_must_agree/what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_they_declare \
+    rcad-step::styling_is_never_among_the_shapes_walked_past/a_file_with_styled_items_reports_no_styling_keyword_walked_past \
+    rcad-topo::whether_a_coarser_deflection_always_meshes/a_coarser_deflection_meshes_whenever_a_finer_one_did_on_solids_drawn_at_random \
+    rcad-step::no_cone_face_arrives_out_of_the_corpus/no_cone_face_arrives_out_of_the_corpus \
+    rcad-topo::fuses_that_must_agree/how_often_a_certified_fuse_of_a_turned_frustum_and_block_refuses \
+    rcad-topo::what_the_answered_block_fuses_actually_say/every_block_and_frustum_fuse_that_answers_adds_up \
+    rcad-topo::whether_a_coarser_deflection_always_meshes/the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves \
+    rcad-geom::why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes/the_zero_on_the_moved_hair_thin_pair_is_the_sizing_walk_refusing \
+    rcad-topo::how_often_a_curved_fuse_refuses/every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates \
+    rcad-topo::fuses_that_must_agree/what_a_block_and_a_ball_take_up_adds_up_inside_a_stated_share_of_what_they_declare \
+    rcad-topo::a_ball_cut_through_its_pole/the_sliver_that_holds_no_pole_is_answered_or_refused_by_name"
 
 # The steps `pre-gate` runs at once, in front of a lane's gate: the kind that
 # failed lane gates whose tests all passed (§380.1). In the justfile rather
@@ -159,7 +205,7 @@ pre_gate_steps := "check-fmt lint check-wildcards"
 # Two reasons land a step here, and "metered" rather than "compiling" is the
 # name because of the second:
 #
-#   It needs a build. `check`, `lint`, `test`, `check-release-build`,
+#   It needs a build. `check`, `lint`, `test`, `test-slow`, `check-release-build`,
 #   `check-fuzz-builds` and `check-systemd-units` obviously; `check-wildcards`
 #   because it reads clippy's output; `deny` because it resolves the dependency
 #   graph, and a prose commit cannot change `Cargo.lock`. `check-fmt` builds
@@ -175,7 +221,7 @@ pre_gate_steps := "check-fmt lint check-wildcards"
 #   fixture and never reads the real corpus.
 #
 # On a metered runner this is 1m07s against 9m46s. `docs/decisions.md` §172.
-gate_metered_steps := "check check-fuzz-builds check-wildcards check-fmt lint test check-release-build check-systemd-units deny check-corpus"
+gate_metered_steps := "check check-fuzz-builds check-wildcards check-fmt lint test test-slow check-release-build check-systemd-units deny check-corpus"
 
 # The steps `gate` may serve from an earlier green of the same code instead of
 # running (`docs/decisions.md` §337). The first nine were the slow ones: together
@@ -236,6 +282,7 @@ gate_reusable_steps := "check \
     check-fmt \
     lint \
     test \
+    test-slow \
     check-release-build \
     check-t-selftest"
 
@@ -284,6 +331,37 @@ gate-docs mode="loud":
     fi
     echo "gate-docs: dropped${dropped:- nothing}"
     exec {{ just_executable() }} --set gate_steps "${steps# }" --set gate_log '{{ gate_log }}' gate '{{ mode }}'
+
+# The gate a lane and its verifier run: `gate_steps` without `test-slow`, the
+# tier `slow_tests` names, which the land gate runs (§397.4). A lane's test step
+# then runs 383 test-seconds instead of 886, and its longest test takes 20 s
+# instead of 67.
+#
+# **Only `lane.md`, `verifier.md` and `verify_lane.py` call it**, and
+# `check-gate-lane-callers` holds that. Everything else runs the whole gate:
+# `land.py`, the merger, CI, and a session landing its own work. A caller that
+# forgets it pays time; a caller that took it up wrongly would put code on
+# `main` that the slow tier never read.
+#
+# A recipe rather than a word to `gate`, as `gate-docs` is: it gives the check
+# one name to look for, and `just pre-gate gate-lane` is two recipes in one
+# call, so `pre-gate` has nothing to pass on. Always `quiet`, since only a tool
+# call runs it.
+[doc("The gate a lane and its verifier run: every step but `test-slow`, the slow tier, which the land gate runs. Always quiet; `just gate-lane fresh` serves nothing.")]
+gate-lane verdicts="reuse":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    steps=""
+    left_out=""
+    for step in {{ gate_steps }}; do
+        if [ "$step" = test-slow ]; then left_out=yes; else steps="$steps $step"; fi
+    done
+    if [ -n "$left_out" ]; then
+        echo "gate-lane: leaves out test-slow, which the land gate runs"
+    else
+        echo "gate-lane: gate_steps has no test-slow to leave out, so this is the whole gate"
+    fi
+    exec {{ just_executable() }} --set gate_steps "${steps# }" --set gate_log '{{ gate_log }}' gate quiet '{{ verdicts }}'
 
 # The gate with what this machine supplies taken away, which is the one thing a
 # local run cannot otherwise be: a fresh clone, in a container, with no `HOME`
@@ -475,7 +553,7 @@ gate-fresh image="rust:1-bookworm":
         _record-green "{{ gate_steps }}"
 
 # The gate's cheapest steps, run at once and in front of it: a lane gates with
-# `mise exec -- just pre-gate gate quiet`. `just` runs the recipes it is given
+# `mise exec -- just pre-gate gate-lane`. `just` runs the recipes it is given
 # in turn and stops at the first that fails, so a misformatted file, a clippy
 # warning or a new wildcard arm comes back in seconds instead of after a whole
 # gate. `docs/decisions.md` §380 and §381.
@@ -491,7 +569,7 @@ gate-fresh image="rust:1-bookworm":
 # Cargo's progress lines are left out of the 60, and the rest is kept in a log
 # the result names. Not the whole output: one parse error in a doc comment
 # made `check-fmt` print 1 136 lines and `lint` 3 445 (§381.3).
-[doc("The gate's cheapest steps at once: formatting, clippy and the wildcard count. A lane runs `just pre-gate gate quiet`, so the gate starts only once these pass.")]
+[doc("The gate's cheapest steps at once: formatting, clippy and the wildcard count. A lane runs `just pre-gate gate-lane`, so the gate starts only once these pass.")]
 pre-gate:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -575,12 +653,18 @@ pre-gate:
 #
 # **Code that has already gated green on this machine is served, not run
 # again.** If this commit's code, which is its tree without `docs/` and `*.md`,
-# passed a gate here in the last day, the steps in `gate_reusable_steps` are
-# skipped and that pass stands in for them. Every other step still runs. The
-# second word `fresh` serves nothing. A commit whose sha starts with `0` also
-# serves nothing. That is the audit: it re-runs about one gate in sixteen. If a
-# re-run fails where the record said pass, that is reported as a violation and
-# the record is deleted. `docs/decisions.md` §337.
+# passed a gate here in the last day, the steps of `gate_reusable_steps` that
+# gate ran are skipped and that pass stands in for them. Every other step still
+# runs. The second word `fresh` serves nothing. A commit whose sha starts with
+# `0` also serves nothing. That is the audit: it re-runs about one gate in
+# sixteen. If a re-run fails a step the record says passed, that is reported as
+# a violation and the record is deleted. `docs/decisions.md` §337.
+#
+# **The record names the steps it passed** (§397.4). A run that leaves some out,
+# as `gate-lane` and `gate-docs` do, records the ones it ran, and a later gate
+# of the same code is served those and runs the rest. Its pass adds what it ran
+# to the record and keeps the record's date: a served verdict never gets a new
+# day.
 #
 # **The steps run at once, as many as there are cores.** In turn they took 308 s
 # on 24 idle cores; at once, with the steps that build with cargo run one after
@@ -646,12 +730,16 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # violation in another worktree can delete the record before then.
     served_copy="$log.served"
     rm -f "$served_copy"
+    trusted=""
     if [ -n "$record" ] && cp "$record" "$served_copy" 2>/dev/null; then
         from=$(sed -n 's/^commit //p' "$served_copy")
         at=$(sed -n 's/^date //p' "$served_copy")
+        passed=$(sed -n 's/^steps //p' "$served_copy")
         at_s=$(date -u -d "${at:-unreadable}" +%s 2>/dev/null || echo 0)
         age=$(( $(date +%s) - at_s ))
-        if [ -z "$from" ] || [ "$at_s" -eq 0 ]; then
+        # A record from before §397.4 names no steps, so it cannot say which
+        # of them it passed.
+        if [ -z "$from" ] || [ "$at_s" -eq 0 ] || [ -z "$passed" ]; then
             note "· verdicts: the record for this code cannot be read, so everything runs: $record"
         elif [ "$verdicts" = fresh ]; then
             note "· verdicts: fresh, so ${from:0:8}'s green for this code is run again, not served"
@@ -660,8 +748,11 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         elif [[ "$head" == 0* ]]; then
             note "· verdicts: audit, since this sha starts with 0: ${from:0:8}'s green for this code is run again"
         else
-            served=$reusable
-            note "· served:$served from ${from:0:8}'s gate at $at"
+            trusted=yes
+            for step in $reusable; do
+                case " $passed " in *" $step "*) served="$served $step" ;; esac
+            done
+            [ -z "$served" ] || note "· served:$served from ${from:0:8}'s gate at $at"
         fi
     fi
 
@@ -673,7 +764,7 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # built, which is why it comes after `test` in the list.
     # `check-gate-runs-every-check` holds this line to the steps whose recipes
     # run cargo, so a new one cannot be left off it unnoticed.
-    cargo_steps="check check-fuzz-builds check-wildcards check-ignored lint test check-release-build check-t-selftest"
+    cargo_steps="check check-fuzz-builds check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
     names=()
     chained=()
     unchained=()
@@ -755,43 +846,63 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     fi
     summary=$($j _gate-summary "$log" "$status" "$failed" "${served:+$served_copy}")
 
-    # The first failing step that an earlier green of this code also ran.
+    # The first failing step that the green on record for this code passed. Not
+    # any reusable step: a land gate whose `test-slow` fails over a lane's
+    # record, which never ran it, has found a failure and not a violation.
     violated=""
-    for step in $failed; do
-        case " $reusable " in *" $step "*) violated=$step; break ;; esac
+    if [ -n "$fingerprint" ] && [ -f "$record" ]; then
+        passed=$(sed -n 's/^steps //p' "$record")
+        for step in $failed; do
+            case " $passed " in *" $step "*) violated=$step; break ;; esac
+        done
+    fi
+    # The reusable steps this run ran, which are what it can add to the record.
+    ran=""
+    for step in $reusable; do
+        case " $served " in *" $step "*) ;; *) ran="$ran $step" ;; esac
     done
 
     # What this run learned about the code, written down before the block is
-    # printed so that the block stays last. A served run learned nothing new.
-    if [ -n "$fingerprint" ] && [ -z "$served" ]; then
+    # printed so that the block stays last. A run served every step learned
+    # nothing new.
+    if [ -n "$fingerprint" ] && [ -n "$ran" ]; then
         if [ "$status" -eq 0 ]; then
-            # A pass stands in for the whole list later, so it has to have run
-            # the whole list. `gate-docs` runs a trimmed one and never records.
-            left_out=""
-            for step in {{ gate_reusable_steps }}; do
-                case " {{ gate_steps }} " in *" $step "*) ;; *) left_out="$left_out $step" ;; esac
-            done
-            if [ -n "$left_out" ]; then
-                note "· verdicts: not recorded, because this run left out$left_out"
-            elif [ "$($j _code-fingerprint)" != "$fingerprint" ]; then
+            if [ "$($j _code-fingerprint)" != "$fingerprint" ]; then
                 note "· verdicts: not recorded, because the tree changed while the gate ran"
             else
                 store=$(dirname "$record")
                 mkdir -p "$store"
                 new=$(mktemp "$store/.new.XXXXXX")
+                # The record as it is now and not the copy this run read: a
+                # violation in another worktree may have deleted it since, and
+                # what it was found wrong about must not come back.
+                old=""
+                [ -z "$trusted" ] || old=$(cat "$record" 2>/dev/null)
+                own=$($j _gate-summary "$log" 0 | grep -E '^(tests|doc tests): ' | grep -v ': not reached$')
                 {
-                    echo "commit $head"
-                    echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                    echo "host $(hostname)"
-                    grep -E '^(tests|doc tests): ' <<<"$summary"
+                    if grep -q '^steps ' <<<"$old"; then
+                        grep -E '^(commit|date|host) ' <<<"$old"
+                        echo "$(grep '^steps ' <<<"$old")$ran"
+                        grep -E '^(tests|doc tests): ' <<<"$old"
+                    else
+                        echo "commit $head"
+                        echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                        echo "host $(hostname)"
+                        echo "steps$ran"
+                    fi
+                    [ -z "$own" ] || echo "$own"
                 } >"$new"
                 mv "$new" "$record"
                 # Nothing is served past a day, and a week keeps enough to
                 # catch a violation against an expired record.
                 find "$store" -maxdepth 1 -type f -mtime +7 -delete
-                note "· verdicts: this code's green is recorded as ${fingerprint:0:12}"
+                if grep -q '^steps ' <<<"$old"; then
+                    note "· verdicts:$ran added to this code's green, ${fingerprint:0:12}"
+                else
+                    note "· verdicts: this code's green is recorded as ${fingerprint:0:12}"
+                fi
             fi
-        elif [ -f "$record" ] && [ -n "$violated" ]; then
+        elif [ -n "$violated" ]; then
             # The same code and the same environment gave a different answer,
             # so the fingerprint is missing an input or a step is not
             # deterministic. Either way the record is wrong and must go before
@@ -884,6 +995,9 @@ _code-fingerprint:
 # describe a pass as a gate that died early. `served` is that gate's record
 # (§337). If that record is gone by the end, the summary says so. The first real
 # served gate printed no counts at all, because a nested run had deleted it.
+# **A partly served run prints the record's counts and then its own**: a land
+# gate served everything but `test-slow` from a lane's record has both (§397.4).
+# `not reached` is printed only for a kind of count that neither has.
 #
 # **`failed` is every step that failed, first of `gate_steps` first.** The steps
 # run at once and a failure stops none of them (§372.9), so a gate can end with
@@ -909,18 +1023,24 @@ _gate-summary log status failed="" served="":
         first=$(grep -m1 -E '^ *FAIL \[' <<<"$plain" | sed 's/^ *//')
         [ -z "$first" ] || echo "first failing test: $first"
     fi
+    kept=""
     if [ -n '{{ served }}' ] && [ ! -r '{{ served }}' ]; then
         echo "tests: served, but the record it was served from is gone: {{ served }}"
+        kept=gone
     elif [ -n '{{ served }}' ]; then
         from=$(sed -n 's/^commit //p' '{{ served }}')
-        grep -E '^(tests|doc tests): ' '{{ served }}' | sed "s/\$/ (served from ${from:0:8})/"
-    else
-        if [ -z "$tests" ]; then
-            echo "tests: not reached"
-        else
-            sed 's/^ *//; s/^/tests: /' <<<"$tests"
-        fi
-        echo "doc tests: ${doctests:-not reached}"
+        kept=$(grep -E '^(tests|doc tests): ' '{{ served }}')
+        [ -z "$kept" ] || sed "s/\$/ (served from ${from:0:8})/" <<<"$kept"
+    fi
+    if [ -n "$tests" ]; then
+        sed 's/^ *//; s/^/tests: /' <<<"$tests"
+    elif [ "$kept" != gone ] && ! grep -q '^tests: ' <<<"$kept"; then
+        echo "tests: not reached"
+    fi
+    if [ -n "$doctests" ]; then
+        echo "doc tests: $doctests"
+    elif [ "$kept" != gone ] && ! grep -q '^doc tests: ' <<<"$kept"; then
+        echo "doc tests: not reached"
     fi
     echo "full log: {{ log }}"
 
@@ -940,7 +1060,8 @@ _gate-summary log status failed="" served="":
 #     list, so it lands here as a pass having compiled nothing at all. A green
 #     that skipped `test` is not a reading of the code, and this is the one
 #     mistake that would be invisible afterwards — the file would just name a
-#     commit, with no trace of how little was run for it.
+#     commit, with no trace of how little was run for it. `gate-lane` leaves
+#     out `test-slow`, and its pass is not a reading end to end either.
 #   - **the tree is clean**, because the sha is the whole record. A green
 #     recorded against a dirty tree names something nobody can get back.
 #   - **it never fails the gate.** Bookkeeping that can turn a green run red is
@@ -957,7 +1078,7 @@ _record-green steps:
     for heavy in {{ gate_metered_steps }}; do
         case " {{ steps }} " in
             *" $heavy "*) ;;
-            *) echo "green not recorded: this run skipped $heavy, so it read no code"; exit 0 ;;
+            *) echo "green not recorded: this run skipped $heavy, so it did not read the code end to end"; exit 0 ;;
         esac
     done
     git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null || {
@@ -1139,7 +1260,7 @@ check-gate-summary-selftest:
 # steps after it, which would hide the second of two failures until the next
 # call (§381.3). Two failures printed in the order they ended rather than the
 # order of the list. Steps run in turn. A failing `pre-gate` that lets `just`
-# go on to the next recipe, which is what `just pre-gate gate quiet` relies on.
+# go on to the next recipe, which is what `just pre-gate gate-lane` relies on.
 # And an empty list, which would pass having checked nothing.
 #
 # The real list is held too: every step of it must be a step of the gate, since
@@ -1246,6 +1367,12 @@ _gate-selftest-sleep:
 # Both directions are exercised. A filter that dropped nothing and a filter that
 # dropped everything are both "the list came out wrong", and only one of them is
 # visible from a run that passes.
+#
+# `gate-lane` is the other gate that trims the list, and is held here the same
+# way: it drops `test-slow` and nothing else, and passes its word on to `gate`.
+# So is `check-gate-lane-callers`, which keeps it to its callers, against a
+# repository built here, and the split of `test` and `test-slow`, against a stub
+# `cargo` (§397.4).
 [private]
 check-gate-docs-selftest:
     #!/usr/bin/env bash
@@ -1254,9 +1381,10 @@ check-gate-docs-selftest:
     trap 'rm -rf "$dir"' EXIT
     j='{{ just_executable() }}'
     got=""
+    held=gate-docs
 
     fail() {
-        echo "gate-docs drifted from what it promises: $1"
+        echo "$held drifted from what it promises: $1"
         [ -n "$got" ] && { echo "--- got ---"; echo "$got"; }
         exit 1
     }
@@ -1287,7 +1415,7 @@ check-gate-docs-selftest:
     # counted, because the count would survive the swap that matters.
     for needed in check-decisions check-decisions-selftest check-claim-section-selftest \
                   check-plan check-plan-selftest check-queue check-queue-selftest \
-                  check-where-the-work-is; do
+                  check-where-the-work-is check-gate-lane-callers; do
         grep -qx "$needed" <<<"$docs_arm" \
             || fail "$needed is not in the docs arm, so a docs commit would be checked by nothing that reads docs"
     done
@@ -1299,7 +1427,7 @@ check-gate-docs-selftest:
     # and takes 0.16 s, and it **fails** when `RCAD_STEP_CORPUS` is not a
     # directory (§44.10) — so a docs arm that ran it would have gone red on the
     # runner, every time, until somebody added a 119 MiB fetch to the cheap job.
-    for costly in check lint test check-release-build check-corpus; do
+    for costly in check lint test test-slow check-release-build check-corpus; do
         grep -qx "$costly" <<<"$docs_arm" \
             && fail "$costly is still in the docs arm, which is the whole cost it exists to drop"
     done
@@ -1341,6 +1469,81 @@ check-gate-docs-selftest:
     grep -q 'no steps at all' <<<"$got" \
         || fail "an empty docs arm failed without saying that it had nothing to run"
 
+    # `gate-lane` drops `test-slow` and nothing else. Any other line naming
+    # `test-slow` fails, and not only its step line: the outer `--set` does not
+    # reach the inner `just`, so the real `gate_reusable_steps` applies there,
+    # and a filter that kept the step could serve it from the real store.
+    held=gate-lane
+    got=$($j --set gate_steps 'list test-slow' --set gate_log "$dir/lane.log" gate-lane 2>&1) \
+        || fail "a lane gate of one passing step failed"
+    grep -qx 'gate-lane: leaves out test-slow, which the land gate runs' <<<"$got" \
+        || fail "the lane gate did not say it left out test-slow"
+    grep -q '^· list (' <<<"$got" || fail "the lane gate did not run the step it keeps"
+    grep -v '^gate-lane: leaves out test-slow' <<<"$got" | grep -q 'test-slow' \
+        && fail "the lane gate ran or served test-slow"
+    # The word is passed on, so `gate` refuses a misspelt one.
+    got=$($j --set gate_steps 'list test-slow' --set gate_log "$dir/lane.log" gate-lane quite 2>&1) \
+        && fail "a lane gate given 'quite' ran"
+    grep -q "not 'quite'" <<<"$got" || fail "a lane gate given 'quite' was refused without gate's own word"
+
+    # `check-gate-lane-callers`, in a repository built here.
+    held=check-gate-lane-callers
+    repo="$dir/callers"
+    mkdir -p "$repo/.claude/agents" "$repo/tooling/verify-lane"
+    git init -q "$repo"
+    printf 'gate-lane:\n    echo gate-lane\n' >"$repo/justfile"
+    printf 'Gate with `just pre-gate gate-lane`.\n' >"$repo/.claude/agents/lane.md"
+    printf 'run(JUST, "gate-lane")\n' >"$repo/tooling/verify-lane/verify_lane.py"
+    printf 'run: just check-gate-lane-callers\n' >"$repo/ci.yml"
+    git -C "$repo" add -A
+    got=$($j check-gate-lane-callers "$repo" 2>&1) \
+        || fail "it refused the three callers, or took check-gate-lane-callers for a call"
+    printf 'run(JUST, "gate-lane")\n' >"$repo/land.py"
+    git -C "$repo" add -A
+    got=$($j check-gate-lane-callers "$repo" 2>&1) && fail "a fifth file calling gate-lane passed"
+    grep -q '^land.py names gate-lane' <<<"$got" || fail "a fifth file calling gate-lane was refused without its name"
+    git -C "$repo" rm -q -f land.py
+    printf 'land:\n    just gate-lane\n' >>"$repo/justfile"
+    git -C "$repo" add -A
+    got=$($j check-gate-lane-callers "$repo" 2>&1) && fail "a justfile recipe calling gate-lane passed"
+    grep -q 'justfile:4, in land: ' <<<"$got" || fail "a justfile recipe calling gate-lane was refused without its line"
+    printf 'gate-lane:\n    echo gate-lane\n[doc("not gate-lane")]\nland:\n    # just gate-lane\nland-selftest:\n    just gate-lane\n' \
+        >"$repo/justfile"
+    git -C "$repo" add -A
+    got=$($j check-gate-lane-callers "$repo" 2>&1) \
+        || fail "a comment, an attribute or a selftest naming gate-lane was refused"
+
+    # `test` and `test-slow`, with a stub `cargo` whose `nextest list` prints a
+    # fixture as what the filter selected, and which logs every other call. A
+    # bench binary's id holds a `/`, so the split must be at the last one.
+    held='test and test-slow'
+    mkdir -p "$dir/bin"
+    printf '%s\n' '#!/usr/bin/env bash' \
+        'if [ "$1 $2" = "nextest list" ]; then cat "$STUB_LISTED"; else echo "cargo $*" >>"$STUB_LOG"; fi' \
+        >"$dir/bin/cargo"
+    chmod +x "$dir/bin/cargo"
+    stub() {
+        : >"$dir/cargo.log"
+        PATH="$dir/bin:$PATH" STUB_LISTED="$dir/listed" STUB_LOG="$dir/cargo.log" "$j" --set slow_tests "$@" 2>&1
+    }
+    printf '%s\n' 'rcad-x::a t1' 'rcad-x::bench/b t2' >"$dir/listed"
+    filter='(binary_id(=rcad-x::a) & test(=t1)) | (binary_id(=rcad-x::bench/b) & test(=t2))'
+    got=$(stub 'rcad-x::a/t1 rcad-x::bench/b/t2' test) || fail "a slow tier whose names each select one test failed"
+    [ "$(cat "$dir/cargo.log")" = "cargo nextest run --workspace -E not ($filter)"$'\n'"cargo test --workspace --doc" ] \
+        || fail "test did not run every test but the slow tier, then the doc tests: $(cat "$dir/cargo.log")"
+    got=$(stub 'rcad-x::a/t1 rcad-x::bench/b/t2' test-slow) || fail "test-slow failed"
+    [ "$(cat "$dir/cargo.log")" = "cargo nextest run --workspace --no-tests fail -E $filter" ] \
+        || fail "test-slow did not run only the slow tier: $(cat "$dir/cargo.log")"
+    printf '%s\n' 'rcad-x::a t1' >"$dir/listed"
+    got=$(stub 'rcad-x::a/t1 rcad-x::a/gone rcad-x::a/t1' test) && fail "a name that selects nothing and a name written twice passed"
+    grep -qx 'slow_tests names 3 tests and selects 1:' <<<"$got" || fail "the count did not say what it counted"
+    grep -qx '  rcad-x::a/gone selects no test' <<<"$got" || fail "a name that selects nothing was not named"
+    grep -qx '  named twice: rcad-x::a/t1' <<<"$got" || fail "a name written twice was not named"
+    [ ! -s "$dir/cargo.log" ] || fail "test ran tests after its count failed: $(cat "$dir/cargo.log")"
+    got=$(stub 'rcad-x::a' test-slow) && fail "a name with no binary passed"
+    grep -q "names 'rcad-x::a', which is not binary_id/test_name" <<<"$got" || fail "a name with no binary was refused without its name"
+    [ ! -s "$dir/cargo.log" ] || fail "test-slow ran with a name it could not split: $(cat "$dir/cargo.log")"
+
 # Holds the verdict cache to what §337 says it does, in a scratch repository.
 #
 # `GIT_DIR` and `GIT_WORK_TREE` point every git call at the scratch repository,
@@ -1379,7 +1582,7 @@ check-gate-verdicts-selftest:
     for never in check-plugins check-hooks check-hub check-corpus check-systemd-units deny \
                  check-decisions check-plan check-queue check-where-the-work-is \
                  check-skills check-lanes-workflow check-questions-selftest \
-                 check-queue-merge-driver; do
+                 check-queue-merge-driver check-gate-lane-callers; do
         grep -qx "$never" <<<"$reusable" \
             && fail "$never reads prose or something outside the tree, and gate_reusable_steps would serve it"
     done
@@ -1456,8 +1659,8 @@ check-gate-verdicts-selftest:
         || fail "a gate of code that was already green did not serve it"
     grep -q '^· list (' <<<"$got" && fail "a served step ran anyway"
     grep -qx 'gate: PASS' <<<"$got" || fail "a served gate did not say it passed"
-    grep -qx "tests: not reached (served from ${base:0:8})" <<<"$got" \
-        || fail "a served gate's summary did not say where its counts came from"
+    grep -qx 'tests: not reached' <<<"$got" \
+        || fail "a served gate whose record holds no counts did not say no tests were reached"
 
     # A commit on top that touches only prose is the case all of this is for.
     g reset -q --hard "$prose"
@@ -1510,7 +1713,9 @@ check-gate-verdicts-selftest:
     grep -q '^· verdicts: audit' <<<"$got" || fail "an audit did not say it was one"
     g reset -q --hard "$base"
 
-    # A violation: a reusable step fails on code that has a green on record.
+    # A violation: a step the record says passed fails on the same code. No
+    # step passes and fails here, so the record is told it passed.
+    sed -i 's/^steps .*/steps no-such-step/' "$store/$f0"
     got=$(gate no-such-step no-such-step fresh) && fail "a gate whose only step fails exited 0"
     grep -q '^!!! verdict violated: no-such-step failed' <<<"$got" \
         || fail "a reusable step failed on code with a green on record, and nothing said so"
@@ -1520,23 +1725,70 @@ check-gate-verdicts-selftest:
     [ "$(tail -6 <<<"$got" | grep -c '=== gate summary ===')" -eq 1 ] \
         || fail "the violation pushed the summary block off the end"
 
-    # A run that left out a reusable step records nothing. That is `gate-docs`,
-    # which re-enters `gate` with the compiling steps taken out.
-    got=$(gate list 'list no-such-step') || fail "a gate of one passing step failed"
-    [ -f "$store/$f0" ] && fail "a run that left out a reusable step recorded a green for all of them"
-    grep -q 'left out no-such-step' <<<"$got" || fail "a run that recorded nothing did not say why"
-
     # A failure stops no step (§372.9), so a run can pass every reusable step
     # and still fail. It records nothing.
     got=$(gate 'no-such-other-step list' list) && fail "a gate with a failing step exited 0"
     [ -f "$store/$f0" ] && fail "a failing run recorded a green because every reusable step in it passed"
-    # And a reusable step that fails after another failure is still a violation.
+    # And a step the record names that fails after another failure is still a
+    # violation.
     got=$(gate list list) || fail "a gate of one passing step failed"
     [ -f "$store/$f0" ] || fail "a passing gate that ran every reusable step recorded nothing"
+    sed -i 's/^steps .*/steps no-such-step/' "$store/$f0"
     got=$(gate 'no-such-other-step no-such-step' no-such-step fresh) && fail "a gate with two failing steps exited 0"
     grep -q '^!!! verdict violated: no-such-step failed' <<<"$got" \
-        || fail "a reusable step failed after a step that is not reusable, and the violation went unsaid"
+        || fail "a step the record names failed after a step it does not, and the violation went unsaid"
     [ -f "$store/$f0" ] && fail "a violated record was kept, so the next gate would serve it"
+
+    # A run that leaves a reusable step out records the steps it ran, as a lane's
+    # gate leaves out the slow tier (§397.4). Each fixture step prints a nextest
+    # summary, so the counts can be followed into the record and out of it.
+    fast=_gate-selftest-tests
+    slow=_gate-selftest-slow-tests
+    fast_count='tests: Summary [   0.100s] 3 tests run: 3 passed, 0 skipped'
+    slow_count='tests: Summary [   0.200s] 2 tests run: 2 passed, 0 skipped'
+    got=$(gate "$fast" "$fast $slow") || fail "a gate of one passing step failed"
+    grep -qx "steps $fast" "$store/$f0" || fail "a run that left out a reusable step did not record the one it ran"
+    grep -qxF "$fast_count" "$store/$f0" || fail "a record does not hold the counts of the run it records"
+
+    # A failure of a step the record does not name is a failure, not a
+    # violation: a land gate's slow tier failing over a lane's record.
+    got=$(gate "$fast no-such-step" "$fast no-such-step") && fail "a gate with a failing step exited 0"
+    grep -q 'verdict violated' <<<"$got" && fail "a step the record never passed was taken as a violation"
+    grep -qx "steps $fast" "$store/$f0" || fail "a failure of a step the record does not name changed or deleted the record"
+
+    # The whole list is served what the record names and runs the rest. Its
+    # pass adds to the record and keeps its date: a served verdict gets no new
+    # day.
+    hour_ago=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
+    sed -i "s/^date .*/date $hour_ago/" "$store/$f0"
+    got=$(gate "$fast $slow" "$fast $slow") || fail "a partly served gate failed"
+    grep -q "^· served: $fast from ${base:0:8}'s gate at " <<<"$got" \
+        || fail "a gate was not served the step its record names"
+    grep -q "^· $fast (" <<<"$got" && fail "a step the record names ran anyway"
+    grep -q "^· $slow (" <<<"$got" || fail "a step the record does not name was not run"
+    grep -qxF "$fast_count (served from ${base:0:8})" <<<"$got" \
+        || fail "a partly served summary did not show the record's counts as served"
+    grep -qxF "$slow_count" <<<"$got" || fail "a partly served summary did not show its own counts"
+    grep -qx 'tests: not reached' <<<"$got" && fail "a summary with counts said no tests were reached"
+    grep -q "^· verdicts: $slow added to this code's green" <<<"$got" \
+        || fail "a partly served pass did not say it added to the record"
+    grep -qx "date $hour_ago" "$store/$f0" || fail "a partly served pass gave the record a new date"
+    grep -qx "steps $fast $slow" "$store/$f0" || fail "the record does not name both runs' steps"
+    grep -qxF "$fast_count" "$store/$f0" && grep -qxF "$slow_count" "$store/$f0" \
+        || fail "the record does not hold both runs' counts"
+    grep -q 'served from' "$store/$f0" && fail "the record took a count with its served suffix"
+
+    # A run served every step learned nothing, and leaves the record alone.
+    cp "$store/$f0" "$dir/before"
+    got=$(gate "$fast $slow" "$fast $slow") || fail "a served gate failed"
+    grep -q "^· served: $fast $slow from " <<<"$got" || fail "a gate was not served both steps its record names"
+    cmp -s "$dir/before" "$store/$f0" || fail "a gate served every step wrote the record again"
+
+    # A record from before §397.4 names no steps, so nothing in it is served.
+    sed -i '/^steps /d' "$store/$f0"
+    got=$(gate "$fast $slow" "$fast $slow") || fail "a gate over a record without steps failed"
+    grep -q 'cannot be read, so everything runs' <<<"$got" || fail "a record without steps did not say why nothing was served"
+    grep -q "^· $fast (" <<<"$got" && grep -q "^· $slow (" <<<"$got" || fail "a record without steps served a step"
 
     # The summary of a served run, from a record holding the counts a real
     # gate writes.
@@ -1553,7 +1805,31 @@ check-gate-verdicts-selftest:
     got=$("$j" _gate-summary "$dir/empty.log" 0 "" "$dir/gone" 2>&1)
     grep -qxF "tests: served, but the record it was served from is gone: $dir/gone" <<<"$got" \
         || fail "a served summary whose record had gone said nothing about the counts"
+
+    # A partly served run: the record's counts, then its own.
+    printf '\e[1m     Summary\e[0m [  21.004s] 30 tests run: 30 passed, 0 skipped\n' >"$dir/own.log"
+    got=$("$j" _gate-summary "$dir/own.log" 0 "" "$dir/record")
+    want=$(printf '%s\n' "tests: Summary [  94.982s] 2672 tests run: 2672 passed (served from ${base:0:8})" \
+        "doc tests: 25 passed, 0 failed, across 9 crate(s) (served from ${base:0:8})" \
+        'tests: Summary [  21.004s] 30 tests run: 30 passed, 0 skipped')
+    [ "$(grep -E '^(tests|doc tests): ' <<<"$got")" = "$want" ] \
+        || fail "a partly served summary did not print the record's counts and then its own"
+    got=$("$j" _gate-summary "$dir/own.log" 0 "" "$dir/gone" 2>&1)
+    grep -qxF 'tests: Summary [  21.004s] 30 tests run: 30 passed, 0 skipped' <<<"$got" \
+        || fail "a summary whose record had gone dropped its own counts"
+    grep -q 'not reached' <<<"$got" && fail "a summary whose record had gone said the tests were not reached"
     exit 0
+
+# Two gate steps that print the line a nextest run ends with, one for 3 tests
+# and one for 2, so `check-gate-verdicts-selftest` can follow each step's counts
+# through a partly served gate.
+[private]
+_gate-selftest-tests:
+    @echo '     Summary [   0.100s] 3 tests run: 3 passed, 0 skipped'
+
+[private]
+_gate-selftest-slow-tests:
+    @echo '     Summary [   0.200s] 2 tests run: 2 passed, 0 skipped'
 
 # The STEP corpus lives outside the tree, because it is other people's CAD files
 # and this repo has no business carrying them. Seven test files in `rcad-step`
@@ -3089,8 +3365,9 @@ check-kache-off-on-ci:
         exit 1; \
     fi
 
-# `gate` runs `check`, `lint`, `test`, `deny` and every `check-*` there is,
-# which is what CLAUDE.md publishes and so is a claim that wants a test (§15.6).
+# `gate` runs `check`, `lint`, `test`, `test-slow`, `deny` and every `check-*`
+# there is, which is what "the whole gate" in CLAUDE.md promises and so is a
+# claim that wants a test (§15.6).
 #
 # Since 2026-09-07 CI runs `gate` itself rather than those four separately,
 # which makes this recipe the thing that carries a new `check-*` onto the runner:
@@ -3150,8 +3427,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "56" ]; then \
-        echo "found $n check-* recipes, expected 56"; \
+    if [ "$n" != "57" ]; then \
+        echo "found $n check-* recipes, expected 57"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -3164,10 +3441,11 @@ check-gate-runs-every-check:
         echo "a check nobody runs is not a check"; \
         exit 1; \
     fi; \
-    if [ "$others" != "check deny lint test " ]; then \
-        echo "gate's non-check-* recipes are '$others', expected 'check deny lint test '"; \
-        echo "CLAUDE.md says gate runs these four and every check-* besides"; \
-        echo "change that sentence in the same commit, or this is now false"; \
+    if [ "$others" != "check deny lint test test-slow " ]; then \
+        echo "gate's non-check-* recipes are '$others', expected 'check deny lint test test-slow '"; \
+        echo "gate runs these five and every check-* besides: test-slow is the slow tier,"; \
+        echo "which test leaves out (docs/decisions.md §397.4)"; \
+        echo "a step added or taken out changes this pin in the same commit"; \
         exit 1; \
     fi; \
     decl=$(awk '/^gate_steps := /{f=1} f{print} f && !/\\$/{exit}' justfile); \
@@ -3214,6 +3492,61 @@ check-gate-runs-every-check:
         echo "test in gate_steps (docs/decisions.md §372.10)"; \
         exit 1; \
     fi
+
+# Holds `gate-lane` to its callers: `lane.md`, `verifier.md` and
+# `verify_lane.py` (§397.4). Everything else runs the whole gate. A caller that
+# took `gate-lane` up wrongly would put code on `main` that the slow tier never
+# read, and nothing else would notice, since a lane's gate passes like any
+# other.
+#
+# In the justfile a line naming it is allowed in `gate-lane`, in this recipe and
+# in a `*-selftest`, and anywhere as a comment or an attribute, which run
+# nothing. `docs/` is left out, since the decisions talk about it. The
+# justfile, `lane.md` and `verify_lane.py` must each name it, or the search
+# found nothing and this compared nothing.
+#
+# **Not in `gate_reusable_steps`**, because it reads `.md` files and the
+# fingerprint leaves those out: a served copy would never see the commit that
+# broke it. `dir` is the repository to search, so the selftest can hand it a
+# fixture.
+[doc("Only lane.md, verifier.md and verify_lane.py call gate-lane; everything else runs the whole gate.")]
+check-gate-lane-callers dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    word='(^|[^A-Za-z0-9_-])gate-lane([^A-Za-z0-9_-]|$)'
+    rc=0
+    files=$(git -C "{{ dir }}" grep -l -E "$word" -- ':!docs/') || rc=$?
+    if [ "$rc" -gt 1 ]; then
+        echo "git grep failed in {{ dir }} with exit $rc, so this checked nothing"
+        exit 1
+    fi
+    wrong=0
+    while read -r file; do
+        case "$file" in
+            ''|justfile|.claude/agents/lane.md|.claude/agents/verifier.md|tooling/verify-lane/verify_lane.py) ;;
+            *) echo "$file names gate-lane, and only lane.md, verifier.md and verify_lane.py may call it"; wrong=1 ;;
+        esac
+    done <<<"$files"
+    for needed in justfile .claude/agents/lane.md tooling/verify-lane/verify_lane.py; do
+        grep -qxF "$needed" <<<"$files" \
+            || { echo "$needed does not name gate-lane, so the search found less than it must and compared nothing"; wrong=1; }
+    done
+    stray=$(awk -v word="$word" '
+        /^[A-Za-z_@]/ { item = $0; sub(/^@/, "", item); sub(/[^A-Za-z0-9_-].*/, "", item) }
+        /^\[/ || /^[[:space:]]*#/ { next }
+        $0 ~ word && item != "gate-lane" && item != "check-gate-lane-callers" && item !~ /-selftest$/ {
+            print "  justfile:" NR ", in " item ": " $0
+        }' "{{ dir }}/justfile")
+    if [ -n "$stray" ]; then
+        echo "the justfile names gate-lane outside gate-lane, this check and the selftests:"
+        echo "$stray"
+        wrong=1
+    fi
+    if [ "$wrong" -ne 0 ]; then
+        echo "everything but a lane and its verifier runs the whole gate, slow tier and all (docs/decisions.md §397.4)"
+        exit 1
+    fi
+    echo "gate-lane is called only from lane.md, verifier.md and verify_lane.py"
 
 [doc("Every public enum is #[non_exhaustive] or says it is exhaustive on purpose.")]
 check-enums:
@@ -4410,14 +4743,71 @@ check-recipe-selftest:
         exit 1
     fi
 
-[doc("The whole test suite, and the doc tests.")]
+# Every test but the slow tier, then the doc tests. `test-slow` runs the tier,
+# and `gate-lane` leaves that step out of a lane's gate (§397.4).
+#
+# **It first counts the tests `slow_tests` selects, and fails unless there is
+# one for each name.** Every gate has this step, run or served, and `slow_tests`
+# is in the fingerprint, so a lane that renames or splits a slow test fails its
+# own gate and not the land gate after it. The filter matches binary and test
+# exactly, so a name selects one test at most, and the count fails on a name
+# that selects none and on a name written twice. Either would leave the list
+# saying something about the tier that is not so.
+[doc("Every test but the slow tier, which `test-slow` runs, and the doc tests. Fails first unless each name in `slow_tests` selects exactly one test.")]
 test:
-    cargo nextest run --workspace
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter=$({{ just_executable() }} _slow-tests-filter '{{ slow_tests }}')
+    names=$(printf '%s\n' {{ slow_tests }})
+    listed=$(cargo nextest list --workspace -E "$filter" --message-format oneline)
+    named=$(grep -c . <<<"$names")
+    selected=$(grep -c . <<<"$listed" || true)
+    if [ "$selected" != "$named" ]; then
+        echo "slow_tests names $named tests and selects $selected:"
+        while read -r token; do
+            grep -qxF "${token%/*} ${token##*/}" <<<"$listed" || echo "  $token selects no test"
+        done <<<"$names"
+        sort <<<"$names" | uniq -d | sed 's/^/  named twice: /'
+        echo "a renamed or split slow test is renamed in slow_tests in the same commit (docs/decisions.md §397.4)"
+        exit 1
+    fi
+    cargo nextest run --workspace -E "not ($filter)"
     cargo test --workspace --doc
+
+# The slow tier `slow_tests` names, and nothing else. The land gate runs it and
+# `gate-lane` does not (§397.4).
+[doc("Only the slow tier, the tests `slow_tests` names. The land gate runs it; `gate-lane` leaves it out.")]
+test-slow:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter=$({{ just_executable() }} _slow-tests-filter '{{ slow_tests }}')
+    cargo nextest run --workspace --no-tests fail -E "$filter"
+
+# `slow_tests` as a nextest filterset, `(binary_id(=B) & test(=T)) | …`. The `=`
+# makes each match exact. The list comes in as a word rather than being read
+# here, because a `--set` given to the caller does not reach a nested `just`,
+# and `test` must count the same list it filters on.
+[private]
+_slow-tests-filter names:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter=""
+    for token in {{ names }}; do
+        case "$token" in
+            */*) ;;
+            *) echo "slow_tests names '$token', which is not binary_id/test_name" >&2; exit 1 ;;
+        esac
+        filter="$filter | (binary_id(=${token%/*}) & test(=${token##*/}))"
+    done
+    if [ -z "$filter" ]; then
+        echo "slow_tests is empty, so test would leave out nothing and test-slow would run nothing" >&2
+        exit 1
+    fi
+    echo "${filter# | }"
 
 # The tests that are about what a release build does, built the way it ships.
 #
-# `test` above runs every one of its 1820 tests with `debug_assertions` **on**:
+# `test` and `test-slow` above run every one of its 1820 tests with `debug_assertions` **on**:
 # `Cargo.toml` has no `[profile.release]` section and `[profile.test]` sets only
 # `opt-level`, so until this recipe nothing that gates had ever built the
 # shipping code path. That is not a speed question — the two profiles measured
@@ -7477,8 +7867,14 @@ check-fuzz-watermark-selftest:
     record "check-decisions check-hub" >"$dir/said" 2>&1
     [ ! -s "$greens" ] \
         || fail "a step list that compiles nothing recorded a green anyway"
-    grep -q 'read no code' "$dir/said" \
+    grep -q 'did not read the code end to end' "$dir/said" \
         || fail "it declined to record without saying why: $(cat "$dir/said")"
+    # `gate-lane`'s list, every step but the slow tier (§397.4).
+    record "$(printf '%s\n' {{ gate_steps }} | grep -vx test-slow | tr '\n' ' ')" >"$dir/said" 2>&1
+    [ ! -s "$greens" ] \
+        || fail "a step list without test-slow recorded a green, and a lane's gate never ran the slow tier"
+    grep -q 'skipped test-slow' "$dir/said" \
+        || fail "a step list without test-slow was refused for another reason: $(cat "$dir/said")"
 
     record "{{ gate_steps }}" >"$dir/said" 2>&1
     grep -q "^$(git -C "$repo" rev-parse HEAD) " "$greens" \
@@ -9849,11 +10245,12 @@ check-plan-selftest:
     exit 0
 
 # The queue of `docs/decisions.md` §230: one file holding a row per open item,
-# and a fill that gives every free slot the highest ready row that fits. Three
-# slots is §372's number, down from §230.8's six. It lives here so that `queue
-# next` and the line `check-queue` prints on a pass count against the same one.
+# and a fill that gives every free slot the highest ready row that fits. Four
+# slots is §397.7's number, up from §372's three now that lane gates leave out
+# the slow tier; §230.8 had six. It lives here so that `queue next` and the line
+# `check-queue` prints on a pass count against the same one.
 queue_file := "docs/queue.md"
-queue_slots := "3"
+queue_slots := "4"
 
 # How many rows tagged `small` one lane takes at once (§352.4). Five small rows
 # of about ten minutes each fit the 45 minutes a lane is given (`lane.md`), with
@@ -10070,7 +10467,7 @@ queue mode="" *args:
                 if (n == "") { n = slots - running; if (n < 0) n = 0 }
                 n += 0
                 if (running + n > slots)
-                    printf "note: %d running and %d more is past the %d slots of §372\n", running, n, slots
+                    printf "note: %d running and %d more is past the %d slots of §397.7\n", running, n, slots
                 lanes_n = 0; taken_n = 0; skipped = 0
                 if (n > 0) {
                     m = 0
@@ -10666,7 +11063,7 @@ check-queue-selftest:
 
     got=$(q _queue-check "$dir/good.md" "$decisions" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
-    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 3 slots, 1 parked, 2 closed' <<<"$got" \
+    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 4 slots, 1 parked, 2 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
     got=$(q check-queue "$dir/good.md" 2>&1) \
         || fail "check-queue rejected the good queue against the sections in decisions_dir"
@@ -10819,7 +11216,7 @@ check-queue-selftest:
         || fail "a row meeting a running lane was not skipped with the lane named"
     [ "$(takes)" = "Q3 " ] || fail "the slot a blocked tier 1 row left did not go to tier 2"
     drive lane next 6
-    grep -qx 'note: 1 running and 6 more is past the 3 slots of §372' <<<"$got" \
+    grep -qx 'note: 1 running and 6 more is past the 4 slots of §397.7' <<<"$got" \
         || fail "a fill past the slots did not say so, citing the section that sets them"
 
     fence items <<'MD'
@@ -10957,7 +11354,7 @@ check-queue-api-selftest:
     g() { git -C "$1" -c user.name=selftest -c user.email=selftest@invalid "${@:2}"; }
     # Six slots of its own, whatever the cap is: the machine count's case holds
     # three and needs slots left over for two ready rows. `check-queue-selftest`
-    # is where the real cap is pinned (§372).
+    # is where the real cap is pinned (§397.7).
     q() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" --set queue_slots 6 queue "${@:2}"; }
     check() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" check-queue 2>&1; }
     lock() { g "$hub" worktree lock --reason "agent $(basename "$1") since 2026-09-26T00:00:00Z" "$1"; }
@@ -12561,7 +12958,7 @@ verify-lane *args:
 # Pins `verify-lane` against repositories it builds itself, one per arm, each
 # with a lane's worktree on its branch and a verifier's worktree at the base, as
 # the `lanes` workflow leaves them. A stub on `VERIFY_LANE_JUST` stands in for
-# `just`: its `gate` prints a summary block, its `t <name>` runs the fixture's
+# `just`: its `gate` and `gate-lane` print a summary block, its `t <name>` runs the fixture's
 # `tests/<name>.sh` and exits 100 when that fails and 4 when there is no such
 # file, as nextest does, and its recipes are the fixture's `recipes/`. Its
 # `lines-that-run` is the real recipe, run on the fixture. It logs `HEAD` for
@@ -12571,12 +12968,14 @@ verify-lane *args:
 # The arms: a test that fails with the source reverted, beside a number whose
 # value is in its command's print, one whose value is not, and one whose command
 # writes; a revert that takes the new test out, which is no failure (Q231); tests
-# that pass with the source reverted; a `pinsOnly` lane; a `sameBehaviour` lane
-# whose tests pass with the source reverted, and one whose test fails there,
-# which says the behaviour changed (§399); a lines-that-run count of 0; a source
-# path holding test code the branch changed; a lane that names no test; a run
-# longer than one call, which a second call follows to its end; and an input
-# file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
+# that pass with the source reverted; a test in the slow tier `gate-lane` leaves
+# out, which runs once on the branch; the same on a branch with no `gate-lane`,
+# where `gate quiet` ran it; a `pinsOnly` lane; a `sameBehaviour` lane whose
+# tests pass with the source reverted, and one whose test fails there, which
+# says the behaviour changed (§399); a lines-that-run count of 0; a source path
+# holding test code the branch changed; a lane that names no test; a run longer
+# than one call, which a second call follows to its end; and an input file it
+# cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -12595,8 +12994,8 @@ check-verify-lane-selftest:
         lines-that-run)
             echo "lines-that-run at $(git rev-parse HEAD)" >>"$STUB_DIR/heads"
             exec "$REAL_JUST" --justfile "$REAL_JUSTFILE" --working-directory "$PWD" lines-that-run "$2" "$3" ;;
-        gate)
-            echo "gate at $(git rev-parse HEAD)" >>"$STUB_DIR/heads"
+        gate|gate-lane)
+            echo "$1 at $(git rev-parse HEAD)" >>"$STUB_DIR/heads"
             [ ! -e "$STUB_DIR/gate-sleeps" ] || sleep "$(cat "$STUB_DIR/gate-sleeps")"
             echo "· check-fixed (0.1 s)"
             echo
@@ -12605,7 +13004,12 @@ check-verify-lane-selftest:
             echo "tests: Summary [   0.1s] 2 tests run: 2 passed, 0 skipped"
             echo "full log: target/last-gate.log" ;;
         --show) [ -f "recipes/${2:-}.sh" ] ;;
-        --evaluate) echo "check-plugins check-fixed lint test" ;;
+        --evaluate)
+            case "${2:-}" in
+                gate_steps) echo "check-plugins check-fixed lint test" ;;
+                slow_tests) echo "rcad-x::slow/a_slow_test" ;;
+                *) echo "the stub has no variable ${2:-}" >&2; exit 1 ;;
+            esac ;;
         t)
             if [ ! -f "tests/${2:-}.sh" ]; then
                 echo "error: no tests to run"
@@ -12664,6 +13068,8 @@ check-verify-lane-selftest:
         printf 'true\n' >"$at/hub/tests/always_passes.sh"
         printf 'grep -q fixed src/lib.txt\n' >"$at/hub/recipes/check-fixed.sh"
         printf 'true\n' >"$at/hub/recipes/check-always.sh"
+        printf 'true\n' >"$at/hub/recipes/gate-lane.sh"
+        printf 'grep -q fixed src/lib.txt\n' >"$at/hub/tests/a_slow_test.sh"
         printf '# Notes\n' >"$at/hub/docs/notes.md"
         git -C "$at/hub" add -A
         git -C "$at/hub" commit -q -m base
@@ -12732,7 +13138,7 @@ check-verify-lane-selftest:
     [ "$(field lines_that_run_command)" = "mise exec -- just lines-that-run $base lane-x" ] \
         || fail "lines_that_run_command is not the command lanes.js hands a verifier: $(field lines_that_run_command)"
     [ "$(field lines_that_run | tail -n 1)" = "lines that run: 3" ] || fail "the lines-that-run print does not end in its count of 3"
-    [ "$(printf '%s\n' "$(cat "$at/stub/heads")")" = "lines-that-run at $base"$'\n'"gate at $tip" ] \
+    [ "$(printf '%s\n' "$(cat "$at/stub/heads")")" = "lines-that-run at $base"$'\n'"gate-lane at $tip" ] \
         || fail "lines-that-run must run before the checkout and the gate after it, and they ran at: $(cat "$at/stub/heads")"
     [ "$(field gate_summary | head -n 2)" = $'=== gate summary ===\ngate: PASS' ] || fail "gate_summary is not the block: $(field gate_summary)"
     [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "true true" ] \
@@ -12765,6 +13171,32 @@ check-verify-lane-selftest:
         || fail "tests that pass with the source reverted gave $(field tests_pass_on_branch) and $(field tests_fail_without_fix)"
     [ "$(grep -cxF 'just check-always' "$at/stub/log")" = 2 ] \
         || fail "a named recipe the gate does not run should run once on the branch and once reverted"
+    back_at_the_tip
+
+    fixture slow-tier
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + tests a_slow_test
+    run
+    [ "$(tail -n 1 "$at/stub/heads")" = "gate-lane at $tip" ] || fail "the branch has gate-lane and was gated with something else: $(cat "$at/stub/heads")"
+    [ "$(grep -cxF 'just t a_slow_test' "$at/stub/log")" = 2 ] \
+        || fail "a named test in the slow tier gate-lane leaves out should run once on the branch and once reverted"
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "true true" ] \
+        || fail "a slow test that passes on the branch and fails reverted gave $(field tests_pass_on_branch) and $(field tests_fail_without_fix)"
+    back_at_the_tip
+
+    fixture old-base
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    git -C "$at/lane" rm -q recipes/gate-lane.sh
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ recipes/ + source-paths src/ + tests a_slow_test
+    run
+    [ "$(tail -n 1 "$at/stub/heads")" = "gate at $tip" ] || fail "a branch with no gate-lane was not gated with gate quiet: $(cat "$at/stub/heads")"
+    grep -qxF 'just gate quiet' "$at/stub/log" || fail "a branch with no gate-lane was not gated with gate quiet"
+    [ "$(grep -cxF 'just t a_slow_test' "$at/stub/log")" = 1 ] \
+        || fail "the whole gate ran the slow tier, and its slow test ran on the branch again"
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "true true" ] \
+        || fail "a slow test under the whole gate gave $(field tests_pass_on_branch) and $(field tests_fail_without_fix)"
     back_at_the_tip
 
     fixture pins-only
@@ -12858,7 +13290,7 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 12 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 14 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #

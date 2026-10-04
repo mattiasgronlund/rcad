@@ -150,6 +150,16 @@ right grid points. A cone apex within a rounding is the same case a ball's pole
 already has a rule for. Two of the four measure right with that rule. The other
 two show the rule is not all of the fix.
 
+**2026-10-04:** Q846 (Q441's branch, cap cuts leaving only from corners whose
+meridian meets the rim nowhere else) answers the two lean-3/8 caps at crossing
+0, turn 1 of `meshing_a_plane_cut_along_a_cones_other_nappe.rs`, without
+experiment C. Their old first cut ran down the ruling the rim comes up by,
+along the rim's own last side, which is not this section's quarter-turn strip:
+cuts still land on the near-apex stretch and the mesh answers. The lean-1/4
+pair now refuses `ASideCutsOffOneCornerOfACurvedPatch` at 0.01, 0.005 and
+0.002, not `BoundaryCrossesItself`
+(`mise exec -- just t the_eighteen_held_to_the_familys_four_checks --nocapture`).
+
 ### 285.4 Two folds on the frustum
 
 For lean 3/8, crossing −1/4, turn 3, the intersection has four faces. Two are

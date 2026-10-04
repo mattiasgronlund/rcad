@@ -142,9 +142,9 @@ whose copy of the `dispatch-lanes` skill is older than this section.
   passes with the source reverted reports `tests_pass_without_change: true`
   and no `tests_fail_without_fix`. One whose test fails there reports `false`
   and says the behaviour changed. An input with both marks is refused before a
-  run starts. It prints "in 12 arms". Run from a copy of this tree with
-  `origin/main`'s `verify_lane.py` (`5ccdea3c`) put in, it fails at the first
-  new arm: "record 6 of target/verify-lane.txt is 'same-behaviour', and the
+  run starts. It prints "in 14 arms", two of them §397.4's. Run from a copy
+  of this tree with `origin/main`'s `verify_lane.py` (`5ccdea3c`) put in, it
+  fails at the first new arm: "record 6 of target/verify-lane.txt is 'same-behaviour', and the
   records are base, branch, lane-tree, write-set, source-paths, pins-only,
   tests, number".
 - **The probe of 399.1.** Neither recipe runs the workflow; the probe does. On

@@ -227,6 +227,33 @@ What it buys, and what it costs:
     a whole gate is faster than today.
   - The split row also puts the new names in `slow_tests`.
 
+**2026-10-04, since Q849 (b80f5e88).** Built as above, with four differences
+and the times measured.
+
+- **The times.** A fresh whole gate on b80f5e88: `test` 27.8 s (nextest's own
+  wall 24.0 s, 2920 tests), then `test-slow` 60.0 s (59.5 s, 30 tests), so
+  87.8 s in all, against the 88 s predicted above. A `gate-lane fresh` on the
+  same commit, while two other sessions were busy, took 44.1 s for `test`
+  (36.2 s). A plain gate over that lane gate's record was served every
+  reusable step but `test-slow`, ran it in 57.9 s, and added it to the record.
+  Until Q850 cuts the five long tests, the whole gate is about 13 s slower
+  than today's single 75 s step, as predicted.
+- **`gate-lane` is a recipe, not a word to `gate`** as item 3 says. It mirrors
+  `gate-docs`. `check-gate-lane-callers` then has one literal to search for.
+  And `just pre-gate gate-lane` is two recipes in one call, so `pre-gate` has
+  nothing to pass on. The check is its own step, not an arm of
+  `check-gate-runs-every-check`. `lane.md`, `verifier.md` and `verify_lane.py`
+  may call it: the verifier runs a lane's gate too, which item 3 left out.
+- **The filter is exact.** Each name in `slow_tests` becomes
+  `binary_id(=…) & test(=…)`, so a name selects at most one test. The count of item 5 therefore catches a name
+  that selects nothing and a name written twice. Item 5's "a name that matches
+  two tests" cannot happen.
+- **A `--set` on the outer `just` does not reach a nested one.** `test` and
+  `test-slow` first read `slow_tests` through a nested `just`. A selftest
+  that set a fixture list counted the fixture and then filtered on the real
+  list. `_slow-tests-filter` now takes the list as an argument. The stub-cargo
+  arm of `check-gate-docs-selftest` caught it and now holds it.
+
 ### 397.5 Landers share one gate (amends §266.4)
 
 What `origin/main` shows, from 09-29 12:00 to 10-03 21:00 UTC (104.9 h at
