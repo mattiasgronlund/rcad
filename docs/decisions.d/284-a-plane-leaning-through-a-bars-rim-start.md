@@ -181,7 +181,11 @@ measured one. It is a **gap**, since the table in 284.4 holds.
   found narrowing moves. `crates/rcad-topo/src/fuse/arrange.rs` or
   `crates/rcad-geom/src/three_surfaces.rs`. Its check is
   `a_block_turned_to_lean_through_a_bars_rim_start_cannot_order_two_points_round_its_cap`,
-  whose messages carry the volumes.
+  whose messages carry the volumes. **Done by §401 (Q209, `164b8f73`)**, which
+  renamed the check to
+  `a_block_turned_to_lean_through_a_bars_rim_start_answers_all_six_fuses_with_one_solid_each`
+  when a meet of two planes and a pipe came to narrow by one checked step and
+  the order read that narrower box.
 - **Name an arc by its plane as well** where two planes cut one curved
   surface between the same corners (284.5). `crates/rcad-topo/src/fuse/assemble.rs`.
   Its check is
@@ -193,7 +197,9 @@ measured one. It is a **gap**, since the table in 284.4 holds.
 - **§39.4's table** has one row for "order along a crossing", the turned
   notched bar. This is a second cause of that refusal, and the table should
   gain a row when either item above lands. `docs/decisions.d/039-*.md` is
-  outside this lane's write set.
+  outside this lane's write set. **Corrected by §401.7**: the second cause's
+  row is struck rather than kept, since §401 closes it rather than merely
+  demonstrating it.
 - §252.8's sentence "a plane leaning through a bar's rim start" describes the
   turned block. It stays as written, and this section corrects it.
 
