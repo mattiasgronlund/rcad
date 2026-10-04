@@ -182,16 +182,25 @@ pub(crate) struct InputSide {
 /// read through as they are for the kept pieces. A second matcher would be a
 /// second answer to which sides are one, and the two could disagree.
 ///
+/// **`None` where a straight side's two ends come out one corner.** Of the
+/// kept pieces that is a splitter bug, and [`Edges::of`] panics on it. Over
+/// every piece it is not: two corners of two names that land on one `f64`
+/// triple are one corner ([`Corners::of`]), and a piece no rule keeps can have
+/// a straight side between two such. Two fuses in the suite reach one, a seed
+/// of the fuse fuzzer's corpus and the draw of
+/// `a_fused_draw_hands_its_provenance_back_through_the_door.rs`, and asserting
+/// it panicked both. Nothing is named then, and no piece is placed by a side.
+///
 /// # Errors
 ///
-/// Whatever [`Corners::with_each_closed_curve_started_once`] and
-/// [`sides_of`] give.
+/// Whatever [`Corners::with_each_closed_curve_started_once`],
+/// [`Corners::of`] and [`Edges::of`] give.
 pub(crate) fn the_edge_each_side_of_every_piece_is(
     model: &Model,
     scratch: &Scratch,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Vec<Vec<NamedSide>>> {
+) -> Result<Option<Vec<Vec<NamedSide>>>> {
     let only_where_a_closed_edge_starts = vertices_that_only_start_a_closed_edge(
         model,
         scratch.pieces.iter().flat_map(|piece| &piece.wires),
@@ -219,25 +228,27 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
     let mut named = Vec::with_capacity(scratch.pieces.len());
     for (piece, wires) in scratch.pieces.iter().zip(&wires) {
         let mut of_this_piece = Vec::new();
-        for wire in wires {
-            let sides = sides_of(
-                wire,
-                false,
-                &piece.ancestors,
-                model,
-                &mut corners,
-                &mut edges,
-                policy,
-                log,
-            )?;
-            of_this_piece.extend(wire.iter().zip(sides).map(|(side, named)| NamedSide {
-                side: side.clone(),
-                edge: named.edge,
-            }));
+        for meet in wires.iter().flat_map(|wire| wire.iter()) {
+            let from = corners.of(model, &meet.ends[0], policy, log)?;
+            let to = corners.of(model, &meet.ends[1], policy, log)?;
+            if from == to
+                && meet
+                    .carried_by
+                    .iter()
+                    .all(|surface| surface.as_plane().is_some())
+            {
+                return Ok(None);
+            }
+            let seam = the_seam_a_side_runs_along(model, &piece.ancestors, meet);
+            let side = edges.of(meet, seam, from, to, piece.ancestors[0], false, policy, log)?;
+            of_this_piece.push(NamedSide {
+                side: meet.clone(),
+                edge: side.edge,
+            });
         }
         named.push(of_this_piece);
     }
-    Ok(named)
+    Ok(Some(named))
 }
 
 /// One side of a piece, and the edge of an answer it would be.

@@ -485,7 +485,8 @@ impl<'a> SidesItShares<'a> {
                     policy,
                     &mut self.asked,
                 )
-                .ok(),
+                .ok()
+                .flatten(),
             );
         }
         let named = self.named.as_ref().and_then(Option::as_ref)?;
