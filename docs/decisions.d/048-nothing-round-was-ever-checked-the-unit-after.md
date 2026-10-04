@@ -88,6 +88,11 @@ where an `Undecidable` refusal is a hard failure. So `A ∪ B` coming back
 non-manifold while `B ∪ A` answers is silently skipped. That is
 order-dependence, invisible to the suite whose job is finding it.
 
+*Later:* the suite counts it now, and §351.6 closed the turned family's last
+known cause. The frame and comb that first showed it share the same two
+solids both ways round, and `both_agree_about_whether_there_is_an_answer`
+fails on the turned family instead of counting.
+
 **What is not wrong, and was checked.** The vacuity guard is sound:
 `SOME_COMPARISONS_MUST_HAPPEN = 0.3` (`:274`) with a `meant_to > 0` guard, so it
 is not §47.4 item 1's shape. The file's own doc says the risk out loud at
