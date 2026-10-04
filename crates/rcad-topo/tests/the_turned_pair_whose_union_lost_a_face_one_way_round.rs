@@ -13,70 +13,116 @@
 //! the tree that failed, that pair fails the property on its own, with no seed
 //! and no search.
 //!
-//! **And the two answers are the same solid.** The union has a face whose ring
-//! goes through the origin twice — the origin is the one point the turn holds
+//! **And the two answers were the same solid.** The union had a face whose ring
+//! went through the origin twice — the origin is the one point the turn holds
 //! still, and both solids have an input corner there. `fuses_that_must_agree`
-//! starts a ring at the *first* corner equal to the smallest one, so two walks
-//! that reach the origin from different sides write the same ring down as two
-//! different lists. Compare the ring by its smallest **rotation** instead and
-//! the two orders agree bit for bit, on that tree and on this one.
+//! started a ring at the *first* corner equal to the smallest one, so two walks
+//! that reached the origin from different sides wrote the same ring down as two
+//! different lists. Compared by its smallest **rotation** instead, the two
+//! orders agreed bit for bit.
 //!
 //! So what §126.5 saw was a false positive in the oracle: starting a ring at
 //! the first corner equal to the smallest one is not a canonical form for a
 //! ring that repeats a corner. **§151 fixed that** — `fuses_that_must_agree`
 //! takes the smallest rotation now, and its own test holds the rule.
 //!
-//! What is left here is the pair itself, which is worth keeping: the suite
-//! draws it about once in 2 300 runs, and these tests ask it every time.
+//! # The union is not a solid now, either way round
+//!
+//! Upright, the comb's right tooth sits flat against the ell's front and its
+//! left tooth meets the ell along one edge only, from the origin to
+//! `(0, 0, 1)`. So the union is `ResultIsNotManifold { count: 4 }` both ways
+//! round, which §80.9 leaves refused. Turned, the union used to answer, with
+//! the ring through the origin twice. It has been refused the same way as the
+//! upright pair, both ways round, since an input corner with exactly three
+//! planes round it is named by those planes and put where they put it
+//! (`docs/decisions.md` §351.6). The intersection still answers, the same
+//! solid both ways round.
+//!
+//! # A ring through one corner twice, from another pair
+//!
+//! With this pair's union gone, the ring that repeats a corner comes from an
+//! ell and a frame, and it is not something a turn makes. The ell is five by
+//! four with a three-by-one bite, three high; the frame is four by four, one
+//! high, at `(-3, -3, 0)`. The ell covers the frame's far corner, where two of
+//! its walls meet, so the frame's top face is left a C whose two ends touch at
+//! `(0, 0, 1)`, a corner of its hole. That face's ring goes through
+//! `(0, 0, 1)` twice upright, and through where the turn puts it when turned.
+//!
+//! §151.5 called §149's pair the only ring with a repeated corner anyone had
+//! produced. The suite's lattice, turned and skew families all draw them,
+//! upright ones included (`docs/decisions.md` §351.8).
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
 mod pairs;
 
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule, SolidKey};
+use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn};
 
+/// The turned union is refused as the upright one is: the comb's left tooth
+/// meets the ell along one edge, which then has four faces along it.
 #[test]
-fn an_ell_and_a_comb_turned_half_a_turn_unite_to_the_same_solid_either_way_round() {
-    both_ways_round_agree(Rule::Union);
+fn an_ell_and_a_comb_unite_to_no_solid_either_way_round_turned_or_not() {
+    for turn in [None, Some(half_a_turn())] {
+        let (model, keys) = the_pair_that_disagreed(turn).build();
+        for (one, other) in [(keys[0], keys[1]), (keys[1], keys[0])] {
+            let refused = fused(&model, &[one], &[other], Rule::Union);
+            assert!(
+                matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
+                "turned {}: the ell and the comb touch along an edge, and their \
+                 union came back {:?}",
+                turn.is_some(),
+                refused.map(|answer| answer.len()),
+            );
+        }
+    }
 }
 
 #[test]
 fn an_ell_and_a_comb_turned_half_a_turn_intersect_to_the_same_solid_either_way_round() {
-    both_ways_round_agree(Rule::Intersection);
+    both_ways_round_agree(
+        &the_pair_that_disagreed(Some(half_a_turn())),
+        Rule::Intersection,
+    );
 }
 
-/// The condition the suite's rule needs and this answer breaks: the union has a
-/// face whose ring goes through one corner twice.
+/// The condition the suite's ring rule needs: an answer with a face whose ring
+/// goes through one corner twice, which two orders reach from different sides.
 ///
-/// The origin is what the turn holds still, and both solids have an input corner
-/// there, so the turned pair meets itself at exactly one point of `f64`.
+/// Upright as well as turned, so the ring is the pair's and not the turn's. The
+/// intersection is the control, with no such ring.
 #[test]
-fn the_union_of_this_pair_has_a_ring_that_goes_through_one_corner_twice() {
-    let (model, keys) = the_pair_that_disagreed().build();
-    assert!(
-        a_ring_visits_one_corner_twice(&model, &[keys[0]], &[keys[1]], Rule::Union),
-        "the union no longer has a ring that repeats a corner, so this pair no \
-         longer demonstrates anything"
-    );
-    assert!(
-        !a_ring_visits_one_corner_twice(&model, &[keys[0]], &[keys[1]], Rule::Intersection),
-        "the intersection has grown one too, and it is the control"
-    );
+fn an_ell_and_a_frame_unite_to_a_face_whose_ring_goes_through_one_corner_twice() {
+    for turn in [None, Some(half_a_turn())] {
+        let pair = an_ell_and_a_frame(turn);
+        assert!(
+            a_ring_visits_one_corner_twice(&both_ways_round_agree(&pair, Rule::Union)),
+            "turned {}: the union has no ring that repeats a corner, so this pair \
+             no longer demonstrates anything",
+            turn.is_some()
+        );
+        assert!(
+            !a_ring_visits_one_corner_twice(&both_ways_round_agree(&pair, Rule::Intersection)),
+            "turned {}: the intersection has grown one too, and it is the control",
+            turn.is_some()
+        );
+    }
 }
 
-fn both_ways_round_agree(rule: Rule) {
-    let (model, keys) = the_pair_that_disagreed().build();
+/// The answer, after checking the two orders give it bit for bit.
+fn both_ways_round_agree(pair: &Configuration, rule: Rule) -> Vec<Vec<Face>> {
+    let (model, keys) = pair.build();
     let (one, other) = (keys[0], keys[1]);
 
-    let forwards = fused(&model, &[one], &[other], rule).expect("the ell against the comb answers");
-    let backwards =
-        fused(&model, &[other], &[one], rule).expect("the comb against the ell answers");
+    let forwards = fused(&model, &[one], &[other], rule)
+        .unwrap_or_else(|refusal| panic!("{rule:?}, first against second: {refusal:?}"));
+    let backwards = fused(&model, &[other], &[one], rule)
+        .unwrap_or_else(|refusal| panic!("{rule:?}, second against first: {refusal:?}"));
 
     if forwards == backwards {
-        return;
+        return forwards;
     }
     panic!(
         "{rule:?} depends on which of the two comes first: {} solids and {} faces one way, \
@@ -101,9 +147,17 @@ fn where_they_part(forwards: &[Vec<Face>], backwards: &[Vec<Face>]) -> String {
     "no face in common position differs, so the counts do".to_owned()
 }
 
+/// The turn the pair that disagreed was drawn with.
+fn half_a_turn() -> Turn {
+    Turn {
+        direction: [0, 3, 2],
+        steps: 32,
+    }
+}
+
 /// The configuration proptest shrank the failure to, copied out of the seed it
-/// persisted before the tree was put back.
-fn the_pair_that_disagreed() -> Configuration {
+/// persisted before the tree was put back, with its turn left to the caller.
+fn the_pair_that_disagreed(turn: Option<Turn>) -> Configuration {
     Configuration {
         solids: vec![
             Placed {
@@ -127,10 +181,34 @@ fn the_pair_that_disagreed() -> Configuration {
                 at: [-1, -4, 0],
             },
         ],
-        turn: Some(Turn {
-            direction: [0, 3, 2],
-            steps: 32,
-        }),
+        turn,
+        elsewhere: Elsewhere::here(),
+    }
+}
+
+/// An ell covering a frame's far corner, a pair the suite's turned family drew.
+fn an_ell_and_a_frame(turn: Option<Turn>) -> Configuration {
+    Configuration {
+        solids: vec![
+            Placed {
+                shape: Shape::Ell {
+                    width: 5,
+                    depth: 4,
+                    bite_width: 3,
+                    bite_depth: 1,
+                },
+                skew: Skew::none(),
+                height: 3,
+                at: [0, 0, 0],
+            },
+            Placed {
+                shape: Shape::Frame { width: 4, depth: 4 },
+                skew: Skew::none(),
+                height: 1,
+                at: [-3, -3, 0],
+            },
+        ],
+        turn,
         elsewhere: Elsewhere::here(),
     }
 }
@@ -140,15 +218,12 @@ fn the_pair_that_disagreed() -> Configuration {
 type Face = (String, Vec<Vec<u64>>);
 
 /// Fuse a copy of `model` and write the answer down so that two of them compare.
-///
-/// `None` covers both ways there is no answer — a refusal, and an answer no
-/// `Model` can hold. Neither happens here, and the callers say so by name.
 fn fused(
     model: &Model,
     arguments: &[SolidKey],
     tools: &[SolidKey],
     rule: Rule,
-) -> Option<Vec<Vec<Face>>> {
+) -> Result<Vec<Vec<Face>>, Error> {
     let mut model = model.clone();
     let solids = model
         .fuse(
@@ -157,23 +232,14 @@ fn fused(
             rule,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
-        )
-        .ok()?
+        )?
         .solids()
         .to_vec();
-    Some(written_out(&model, &solids))
+    Ok(written_out(&model, &solids))
 }
 
 /// Whether any ring of the answer comes back to a corner it has already been to.
-fn a_ring_visits_one_corner_twice(
-    model: &Model,
-    arguments: &[SolidKey],
-    tools: &[SolidKey],
-    rule: Rule,
-) -> bool {
-    let Some(answer) = fused(model, arguments, tools, rule) else {
-        return false;
-    };
+fn a_ring_visits_one_corner_twice(answer: &[Vec<Face>]) -> bool {
     answer.iter().flatten().any(|(_, wires)| {
         wires.iter().any(|wire| {
             let corners: Vec<&[u64]> = wire.chunks(3).collect();
@@ -216,12 +282,12 @@ fn written_out(model: &Model, solids: &[SolidKey]) -> Vec<Vec<Face>> {
 /// A ring starts wherever the walk started, so start it where the whole ring
 /// reads smallest instead.
 ///
-/// **The smallest rotation, not the smallest corner.** `fuses_that_must_agree`'s
-/// copy of this takes the first corner equal to the smallest one, which is a
-/// canonical form only while no ring visits one corner twice. This pair's union
-/// has a face whose outer ring passes through the origin twice, so the two
-/// orders pick different starting corners for the same ring and the comparison
-/// reports a difference that is not there.
+/// **The smallest rotation, not the smallest corner.** Taking the first corner
+/// equal to the smallest one is a canonical form only while no ring visits one
+/// corner twice. The ell and the frame's union has a face whose ring passes
+/// through one corner twice, so the two orders could pick different
+/// starting corners for the same ring and the comparison would report a
+/// difference that is not there.
 fn turned_to_its_smallest(wire: &[[f64; 3]]) -> Vec<u64> {
     let corners: Vec<[u64; 3]> = wire.iter().map(|&at| at.map(bits)).collect();
     (0..corners.len())

@@ -156,5 +156,164 @@ No pin moved in a file outside this row.
 - **The 25 absorption refusals over a ball**, still
   `a point in a piece that every solid could place`, not traced.
 - **One turned pair that answers one way round only** is new to the count
-  (351.3). Its other order was not a solid on the base as well.
+  (351.3). Its other order was not a solid on the base as well. Configuration
+  52 is the one this row's lane traced, and 351.6 closes it.
 - §316.6's side finding was §324's. It answers both ways round here too.
+
+### 351.6 An input corner on three planes is named by them, and put where they put it
+
+*Queue row Q711, from 351.5 and Q476. Lane
+`lane-q711-a-comb-and-an-ell-turned-27-64`, off `c3c02942`.*
+
+**The shape.** Configuration 52 of the turned swap test is a comb (3 teeth, 1
+high) at the origin and an ell (4 by 3, a 1 by 1 bite, 3 high) at `(2, 0, 0)`,
+turned about `(2, 1, 2)` by 27/64 of a turn. The comb's corner `(2, 2, 0)`
+lies on the ell's floor-and-`x = 2` edge, and the two solids store those
+planes with the same bits. Selection keeps the floor and the wall of whichever
+came first. In one order `Corners::of` named the corner as the meet of three
+planes from the ell's pieces and as `Vertex(8v1)` from the comb's `y = 2` wall,
+4 ulps apart in `y`, and four edges got one face each: the union comb first
+and the intersection ell first were `ResultIsNotManifold { count: 1 }`.
+
+**The fix, in two halves, both in `assemble.rs`.**
+
+- *The name.* An input corner whose `around` is exactly three planes is named
+  `CornerName::Meet` of those planes, `which` zero, so the other solid's
+  pieces that meet it there name it alike. The planes travel from
+  `BakedCorner::around`, read off `Scratch`, as Q476's probe did.
+- *The point.* A corner on three planes is put where the three alone put it:
+  each turned to face the one way, sorted, solved by Cramer's rule. That is
+  `arrange`'s own solve for a meet of three planes, so a meet arriving from a
+  piece lands on the same bits. Q476 measured the name alone and found four
+  turned pairs that then answered both ways round but differed bit for bit,
+  because `settle_on_the_lower_rounding` picks among the spellings that
+  arrived and which arrive depends on the order. Where Cramer's rule cannot
+  bound the meet, the point that arrived is kept; an input corner there keeps
+  `bake`'s solve, the one case left that can still round apart.
+
+The reproducer is `tests/a_turned_tooth_corner_on_the_edge_of_an_ell.rs`:
+union and intersection, both orders, one solid of volume 36 and 5, the same
+bit for bit, validating. Both tests fail on `c3c02942`.
+
+**What moved.** A temporary switch putting the old naming back gave base and
+fix from one build, on the shipped corpus:
+
+| | base | fix |
+|---|---|---|
+| commutativity, turned pairs: not a solid of 268 | 24 | 8 |
+| disagreed about being a solid | 10 | 0 |
+| comparisons reached of 134 | 101 | 114 |
+| §17.7 headline, turned pairs: not a solid of 441 | 14 | 6 |
+| §17.7 headline, turned pairs: refused of 441 | 72 | 72 |
+
+Over the 67 pairs, counting a rule both ways round as one: ten that answered
+one way round only (#6, #17, #41, #52 and #55, union and intersection each)
+and five that answered neither way (#7 both rules, #24, #28 and #50 unions)
+answer both ways now, bit for bit. Two unions that answered both ways, #37 and
+#44, answer neither now. Each is two solids touching along an edge, which the
+same pair unturned refuses `count: 4` both ways round, and turned they now
+refuse the same. #19 and #49 unions were not a solid both ways before and
+still are, `count: 4`. **Turning a pair no longer changes whether those
+answer.**
+
+Elsewhere in `rcad-topo` (`mise exec -- just t -p rcad-topo --no-fail-fast`):
+
+- `how_often_one_pair_of_turned_boxes_leaves_such_an_edge`: 104 of 624
+  `count: 1` went to 0, all 624 answered. The cube and the taller box turned
+  by a sixty-fourth now unite to the taller box under both policies.
+- `turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first`
+  flipped: the turned frame and comb share the same two solids both ways
+  round, bit for bit. It is renamed
+  `turning_a_frame_and_a_comb_shares_the_same_two_solids_whichever_comes_first`,
+  and, as its doc asked, `both_agree_about_whether_there_is_an_answer` fails
+  on the turned family now instead of counting. The swap property drew no
+  disagreement over 979 turned pairs at `RCAD_SOAK_FACTOR=20`, and no
+  property of `fuses_that_must_agree.rs` failed for it at a factor of 5.
+- `the_turned_pair_whose_union_lost_a_face_one_way_round.rs`: the ell and
+  comb turned half a turn no longer unite. The union is
+  `ResultIsNotManifold { count: 4 }` both ways round, which is what the same
+  pair unturned gives. Its two union tests fail, and that file was outside
+  this row's write set.
+
+**The band.** The turned not-a-solid rate fell from 2.45% to 0.78%: 726 of
+92 844 fuses, `RCAD_SOAK_SEED` 11 to 22 at `RCAD_SOAK_FACTOR=20`, 48 to 78 a
+seed. Q915 forecast 0.81%. `A_TURNED_PAIR_IS_NOT_A_SOLID` is re-derived by
+the convention to 0.52%–2.3%. §303.4 still cites the old band.
+
+**Q915's two cubes answer.** Two cubes of side 2, the second moved by
+`(2, 0.5, 0.25)`, both turned 0.7 about the axis through `(1, 0, 0)` along
+`(1, 2, 3)`: the union is one solid of volume 16.000000000000004 both ways
+round and validates, where the switch gives `ResultIsNotManifold { count: 1 }`
+both ways. That was a scratch test and is not pinned here.
+
+### 351.7 What this leaves
+
+- `the_turned_pair_whose_union_lost_a_face_one_way_round.rs` needs its union
+  tests to pin the `count: 4` both ways round, and its ring test a pair whose
+  union still repeats a corner, or none.
+- Q915's own pins and the questions it asks beyond the union.
+- §303.4's sentence on the turned band, and §242's citation of
+  `a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned`,
+  now `a_box_and_a_taller_one_in_the_same_place_unite_to_the_taller_box_turned_too`.
+- An input corner on three planes whose meet Cramer's rule cannot bound keeps
+  `bake`'s point, and can still round apart from a meet of the same planes.
+  How often a fuse reaches that was not measured.
+
+### 351.8 Landed, and the turned pair's file pinned again
+
+*Queue row Q925. Lane `lane-q925-land-a-comb-and-an-ell-turned-27-64`, Q711's
+branch merged onto `5d28a70c`, which holds Q609's and Q668's changes. The
+first item of 351.7 is done here, and the third.*
+
+**The ell and the comb.** `the_turned_pair_whose_union_lost_a_face_one_way_round.rs`
+pins §149's pair's union as `ResultIsNotManifold { count: 4 }` both ways
+round, upright and turned half a turn about `(0, 3, 2)`, in one test.
+Upright, the comb's right tooth sits flat against the ell and its left tooth
+meets the ell along one edge only, from the origin to `(0, 0, 1)`. Why the
+turned pair answered before 351.6, with a ring through the origin twice, was
+not traced. The intersection test is kept as it was.
+
+**The ring through one corner twice.** No other test reached a fused answer
+with a ring through one corner twice. `fuses_that_must_agree.rs`'s own ring
+test writes its ring by hand, and the ball against a prism's edge that Q686
+is about makes its wire through one corner twice inside the fuse and refuses
+at meshing, so no answer reaches the caller. So a scratch test,
+since deleted, searched the suite's families: 2 000 draws each under proptest's
+`TestRunner::deterministic`, every rule both ways round.
+
+| family | fuses | answered | with a ring through one corner twice |
+|---|---|---|---|
+| lattice | 12 000 | 11 750 | 26 |
+| turned | 12 000 | 9 848 | 8 |
+| skew | 12 000 | 9 978 | 4 |
+
+All 16 it printed were unions. One of the turned draws is an ell five by four
+with a three-by-one bite, three high, and a frame four by four, one high, at
+`(-3, -3, 0)`. The ell covers the frame's far corner, so the frame's top face
+is left a C whose two ends touch at `(0, 0, 1)`, a corner of its hole. Its
+union has that ring upright and turned by the file's half turn, the same both
+ways round, and its intersection has none.
+`an_ell_and_a_frame_unite_to_a_face_whose_ring_goes_through_one_corner_twice`
+pins that, in place of
+`the_union_of_this_pair_has_a_ring_that_goes_through_one_corner_twice`. It
+fails on `5d28a70c`'s `src/`, which the lane expected it not to: the
+verifier's revert gave `ResultIsNotManifold { count: 1 }` for the union
+second against first.
+
+So §151.5's "the only ring-with-a-repeated-corner anyone has produced" is
+answered: the lattice family draws them upright, about one answered fuse in
+450 there, and the smallest-rotation rule is asked of real answers and not
+only of the ring written by hand.
+
+**The citations.** §303.4 gives the turned band since 351.6, and §242 names
+the box and the taller one's test by its new name.
+
+### 351.9 What this leaves
+
+- `fuzzing/comparison.rs`'s doc on `turned_to_its_smallest` still says a
+  turned pair makes a ring through one corner twice at the point the turn
+  holds still. 351.8 shows it is the frame's C, upright or turned. The file was
+  outside this row's, and Q936 fixes the doc.
+- 351.7's last item, how often an input corner keeps `bake`'s point, is Q927.
+- Q915's union answers since 351.6, by that section's scratch test. Q915 was
+  dropped and re-filed as Q926, which is open for its own pins.

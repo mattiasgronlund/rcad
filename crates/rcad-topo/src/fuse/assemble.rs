@@ -13,7 +13,9 @@
 //!
 //! Two pieces meet at a corner when they name the same corner, and the name is
 //! either the input vertex it is or the three planes it is the meet of, sorted.
-//! No coordinate is ever compared: two faces solving the same three planes in a
+//! An input vertex with exactly three planes round it is named by those planes
+//! too, so a piece of the other solid that meets it there names it alike. No
+//! coordinate is ever compared: two faces solving the same three planes in a
 //! different order would round differently, and comparing what they rounded to
 //! would either miss the join or invent one.
 //!
@@ -87,7 +89,7 @@ use super::arrange::{
 };
 use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
-use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
+use super::{FaceMeet, MeetPoint, Sameness, Scratch, as_exact_as_it_is, gave_up, middle_of};
 
 /// Work out the whole result: its corners, edges, faces, shells and solids.
 ///
@@ -403,6 +405,7 @@ impl Assembly {
             .collect();
         let mut corners = Corners::with_each_closed_curve_started_once(
             model,
+            input_corners_on_exactly_three_planes(model, scratch),
             kept_wires.iter().flatten().flat_map(|wire| wire.iter()),
         );
         let mut edges = Edges::default();
@@ -3516,6 +3519,47 @@ fn the_wider(one: Option<Approximation>, other: Option<Approximation>) -> Option
     }
 }
 
+/// Each corner of an input solid with exactly three planes round it, and those
+/// three planes, for [`Corners::of`] to name it by.
+///
+/// **An input corner can lie on an edge of the other solid**, and then that
+/// solid's pieces bring the same corner as the meet of three planes. A comb's
+/// tooth corner on the floor-and-wall edge of an ell, turned, is one: the two
+/// solids store the floor and the wall with the same bits, selection keeps
+/// the floor and the wall of whichever solid came first, and the tooth's own
+/// wall brings the comb's vertex. Named as the vertex on one side and as the
+/// three planes on the other, and rounded 4 ulps apart in `y`, the one corner
+/// was two, and four edges got one face each, in one order only (§351.5).
+///
+/// Only three planes, because only there is the meet one point that the three
+/// names settle on their own ([`names_of_the_three_surfaces`]). A corner with
+/// four planes round it, or with anything curved, keeps its vertex's name.
+fn input_corners_on_exactly_three_planes(
+    model: &Model,
+    scratch: &Scratch,
+) -> BTreeMap<VertexSlot, [Plane; 3]> {
+    let mut on_three_planes = BTreeMap::new();
+    for solid in scratch.arguments.iter().chain(&scratch.tools) {
+        for side in solid
+            .faces
+            .iter()
+            .flat_map(|face| face.wires.iter().flatten())
+        {
+            let corner = &side.start;
+            let [one, other, last] = corner.around.as_slice() else {
+                continue;
+            };
+            let (Some(one), Some(other), Some(last)) =
+                (one.as_plane(), other.as_plane(), last.as_plane())
+            else {
+                continue;
+            };
+            on_three_planes.insert(corner.vertex.slot_in(model.id()), [*one, *other, *last]);
+        }
+    }
+    on_three_planes
+}
+
 /// The corners built so far, and the ways to find one again.
 #[derive(Default)]
 struct Corners {
@@ -3526,6 +3570,9 @@ struct Corners {
     /// the one corner of a closed curve, wherever a piece started it. See
     /// [`Corners::with_each_closed_curve_started_once`].
     taken_over: BTreeMap<CornerName, usize>,
+    /// The input corners named by their three planes rather than as vertices.
+    /// See [`input_corners_on_exactly_three_planes`].
+    on_three_planes: BTreeMap<VertexSlot, [Plane; 3]>,
 }
 
 /// What two faces agree to call the same corner.
@@ -3535,11 +3582,14 @@ struct Corners {
 /// a join or invent one; comparing the *names* of the surfaces cannot.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CornerName {
-    /// A corner the input already had.
+    /// A corner the input already had, unless exactly three planes meet there
+    /// ([`input_corners_on_exactly_three_planes`]).
     Vertex(VertexSlot),
     /// One of the places three surfaces meet, each surface written out as the
     /// bits it stores and sorted so the three arrive the same way round
     /// whichever face asked, and **which** of their meeting points this is.
+    /// An input corner with exactly three planes round it is this, with
+    /// `which` zero.
     ///
     /// Three surfaces can meet at more than one point, so the three names do not
     /// pick a corner on their own; §31.3 is where that field comes from and it
@@ -3584,6 +3634,7 @@ impl Corners {
     /// left with both: it is cut there, and nothing here joins the halves.
     fn with_each_closed_curve_started_once<'a>(
         model: &Model,
+        on_three_planes: BTreeMap<VertexSlot, [Plane; 3]>,
         kept_sides: impl Iterator<Item = &'a FaceMeet>,
     ) -> Self {
         let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<[[u64; 9]; 2]>>> = BTreeMap::new();
@@ -3601,7 +3652,10 @@ impl Corners {
                 }
             }
         }
-        let mut corners = Self::default();
+        let mut corners = Self {
+            on_three_planes,
+            ..Self::default()
+        };
         for (curve, mut candidates) in on_curve {
             let only_closes_this =
                 |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
@@ -3626,9 +3680,40 @@ impl Corners {
         corners
     }
 
+    /// The corner `end` names, made the first time it is asked for.
+    ///
+    /// **A corner on three planes is put where the three planes alone put
+    /// it**, [`where_three_planes_meet_whichever_face_asks`], and not where the
+    /// spelling that arrived first put it. An input corner on three planes was
+    /// solved by `bake` from the three as its solid stores them, and a meet of
+    /// the same three by `arrange` from the three turned to face the one way,
+    /// so the two can round a few ulps apart. Which of them arrives depends on
+    /// which pieces selection kept, and that depends on the order the solids
+    /// came in. Picking the lower of what arrived would still let the order
+    /// decide where the corner goes whenever only one of them arrives (§351.5).
     fn of(&mut self, model: &Model, end: &MeetPoint) -> usize {
+        let three_planes = match end {
+            MeetPoint::Existing { vertex, .. } => self
+                .on_three_planes
+                .get(&vertex.slot_in(model.id()))
+                .copied(),
+            MeetPoint::OfThreeSurfaces { surfaces, .. } => {
+                match surfaces.map(|surface| surface.as_plane().copied()) {
+                    [Some(one), Some(other), Some(last)] => Some([one, other, last]),
+                    [_, _, _] => None,
+                }
+            }
+            MeetPoint::WhereAClosedCurveStarts { .. }
+            | MeetPoint::HalfWayRoundAClosedCurve { .. }
+            | MeetPoint::APoleOfAClosedSurface { .. } => None,
+        };
         let name = match end {
-            MeetPoint::Existing { vertex, .. } => CornerName::Vertex(vertex.slot_in(model.id())),
+            MeetPoint::Existing { vertex, .. } => match three_planes {
+                Some(planes) => {
+                    CornerName::Meet(names_of_the_three_surfaces(&planes.map(Surface::Plane)), 0)
+                }
+                None => CornerName::Vertex(vertex.slot_in(model.id())),
+            },
             MeetPoint::OfThreeSurfaces {
                 surfaces, which, ..
             } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
@@ -3647,7 +3732,9 @@ impl Corners {
         if let Some(&chosen) = self.taken_over.get(&name) {
             return chosen;
         }
-        let point = end.point();
+        let point = three_planes
+            .and_then(where_three_planes_meet_whichever_face_asks)
+            .unwrap_or_else(|| end.point());
         let at = middle_of(point);
         if let Some(&already) = self.named.get(&name) {
             self.settle_on_the_lower_rounding(already, at, point.uncertainty());
@@ -3696,6 +3783,11 @@ impl Corners {
     /// **This is not a coordinate deciding what is one corner.** The name has
     /// already decided that. It picks between two roundings of a corner both
     /// spellings agree on, and the wobble carries how far apart they were.
+    ///
+    /// **A corner on three planes no longer reaches it with two roundings**:
+    /// [`Corners::of`] puts every spelling of one at the same point. Picking
+    /// the lower of what arrived is only order-free when every spelling
+    /// arrives in both orders, and which ones arrive is selection's to decide.
     fn settle_on_the_lower_rounding(&mut self, corner: usize, at: Point, uncertainty: f64) {
         let made = &mut self.made[corner];
         made.wobble = made.wobble.max(uncertainty);
@@ -3720,6 +3812,46 @@ impl Corners {
             self.at.insert(exactly_at(at), corner);
         }
     }
+}
+
+/// Where three planes meet, worked out from the three alone: each turned to
+/// face the one way, put in [`Surface::how_it_sorts_against`]'s order, and
+/// solved by Cramer's rule.
+///
+/// That is the solve `arrange` makes for every meet of three planes
+/// (`three_planes_faced_the_one_way`, then `meet_of_three_surfaces`), so a meet
+/// that arrives from a piece lands on the same bits here, and an input corner
+/// on the same three planes lands on them too.
+///
+/// `None` where Cramer's rule cannot bound the meet. `meet_of_three_surfaces`
+/// then goes on along the line two of the planes cross in, which wants a
+/// policy, and the caller keeps the point that arrived. A meet from a piece
+/// already went that way, so it is the same point. An input corner keeps the
+/// point `bake` solved, and that one case can still round apart from a meet of
+/// the same planes.
+fn where_three_planes_meet_whichever_face_asks(planes: [Plane; 3]) -> Option<PredicatePoint> {
+    let mut faced = planes.map(|flat| {
+        let backwards = flat
+            .coefficients()
+            .iter()
+            .find(|coefficient| **coefficient != 0.0)
+            .is_some_and(|coefficient| *coefficient < 0.0);
+        Surface::Plane(if backwards { flat.reversed() } else { flat })
+    });
+    faced.sort_by(Surface::how_it_sorts_against);
+    let [
+        Surface::Plane(one),
+        Surface::Plane(other),
+        Surface::Plane(last),
+    ] = faced
+    else {
+        unreachable!("three planes sorted are still three planes")
+    };
+    let point = Plane::meet_of_three(&one, &other, &last).ok()?;
+    point
+        .uncertainty()
+        .is_finite()
+        .then(|| as_exact_as_it_is(point))
 }
 
 /// Whether a side starts and ends at one corner, which only a closed curve does.
