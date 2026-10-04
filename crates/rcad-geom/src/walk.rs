@@ -2655,11 +2655,20 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 /// The circle where a plane cuts a torus, picked out of the two the crossing can
 /// come in.
 ///
-/// **Two families reach here and no others.** A plane square to the axis cuts
-/// circles round the axis; a plane holding the axis cuts the two meridian
-/// circles. Every other plane is refused by name in
-/// [`intersect`](crate::intersect) before a run exists, so this never has to
-/// stand in for a quartic.
+/// **Two families reach here from [`intersect`](crate::intersect) and no
+/// others.** A plane square to the axis cuts circles round the axis; a plane
+/// holding the axis cuts the two meridian circles. Every other plane is
+/// refused by name there before a run exists, so this never has to stand in
+/// for a quartic.
+///
+/// **A run read from a file has not been through
+/// [`intersect`](crate::intersect), and can be a rounding off square.**
+/// `rcad-step` reads a seam's plane with the normal the file wrote and a
+/// ring's axis scaled to length one again, so a bend turned about `x` by 2.5
+/// came in with `n × w = (5.55e-17, 0, 0)` for two spellings of one written
+/// direction. This sends such a plane to the meridian circles, neither of
+/// which holds the seam's ends, and it is refused below rather than drawn
+/// (Q842, `docs/decisions.md` §241.6).
 ///
 /// # Which of the two circles this run is, is asked two ways
 ///
@@ -2693,8 +2702,8 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 /// builds two unit vectors one `f64` apart whose cross product comes out zero
 /// with a true value near `1e-17`. So a test on the computed cross product would
 /// be worth nothing if the two families it separates ran up against each other.
-/// They do not. A run only reaches here in one of the two families
-/// [`intersect`](crate::intersect) certified **exactly**, and the family this
+/// They do not. A run [`intersect`](crate::intersect) named reaches here only
+/// in one of the two families it certified **exactly**, and the family this
 /// arm sends away is the one holding the axis, where `n·w = 0` for two vectors
 /// of length one — so `‖n × w‖` is one there, and no rounding of anything walks
 /// a whole unit. The pipe arm's `n·w == 0.0` has a three-term sum in it and
@@ -2704,8 +2713,8 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the circle's own numbers do
 /// not come out finite, and
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the pickers hold both
-/// candidates or neither.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the run's ends and
+/// pickers hold both candidates or neither.
 fn where_a_plane_cuts_a_torus(
     flat: &Plane,
     ring: &Torus,
