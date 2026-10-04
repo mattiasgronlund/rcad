@@ -229,5 +229,76 @@ without any other change.
   forward read and arrange's reading of `orientation`, and both files are
   outside Q596's write set. It is a gap: every one of the twelve has an
   answer, and cutting each bar first builds the crescent less the block.
+
+  **Closed by Q609 (331.6).** The first leg holds and the second does not.
 - **The crescents against a block that touches nothing, after the arm.**
   `ACurvedFaceGoesRightRoundWithNoSeam`, not traced.
+
+  **Closed by Q609 too (331.6).** The same cause, and the same fix.
+
+### 331.6 A face used reversed reached the arrangement walked the wrong way round
+
+*Queue row Q609, lane `lane-q609-crescents-with-a-block-over-their-top`, off
+`2c349f2b`. One `src/` change, in `fuse/bake.rs`.*
+
+**What `bake_one_face` gets.** A temporary unit test in `bake.rs` baked the
+crescent `here − there` and printed each face's wire two ways. Through the
+solid's view, the inner wall `10v1` (pipe round `(6, 0, ·)`, used reversed)
+walks `(3, 4, 0) → (3, −4, 0) → (3, −4, 10) → (3, 4, 10) → (3, 4, 0)`, down the
+ruling at `(3, 4)`, which is the walk with the wall on its left about the
+pipe's own outward gradient. Baked, through `model.face_at`, it walked
+`(3, 4, 0) → (3, 4, 10) → (3, −4, 10) → (3, −4, 0) → (3, 4, 0)`, up that
+ruling: the stored walk, which `fuse/assemble.rs`'s `sides_of` writes the way
+the solid uses the face. The three faces used forwards baked the same walk as
+their view. So the first leg holds.
+
+**Whether the arrangement turns it round again.** It does not.
+`fuse/arrange.rs` reads `self.face.orientation` only to copy it onto each
+piece (`the_whole_surface` and `piece_from`), and `split_a_face` on the baked
+inner wall with nothing cutting it gave back one piece walked exactly as it was
+baked. The second leg does not hold. The arrangement reads the face on the
+left of its boundary about `∇S`, the face's own surface
+(`count_the_windings_inside_each_lump`; `material_is_left_of_forward` takes
+`o = ∇S`), and nothing turns the stored walk into that.
+
+**Where the piece comes from.** A temporary trace in `split_a_face` showed what
+the fuse cut the inner wall by, five surfaces: the planes `z = 0`, `z = 5`,
+`z = 10` and `z = 15`, and the other pipe. Handed the stored walk and those
+five, the same unit test got four pieces: `[0, 5]`, `[5, 10]`, a piece of two
+sides at `z = 0`, and a piece of six sides from `(3, ±4, 10)` to
+`(3, ±4, 15)` that walks each ruling there and back, which is the piece
+`INSIDE_A_PIECE` named. Handed the walk turned round, it got exactly
+`[0, 5]` and `[5, 10]`. With only the block's floor and roof as cuts, both
+walks gave `[0, 5]` and `[5, 10]`, so the wrong walk does not always show.
+Why the face's own neighbours' surfaces are among its cuts here was not
+traced.
+
+**The fix.** `bake_one_face` reads the stored walk as before, and for a face
+used reversed turns each wire round, the order and each side's two ends, which
+is what `WireView::coedges` does. `inside_across` is still read off the stored
+walk, since the rule it reads is checked by `Model::validate` against the
+coedge's stored turn and the faces' outward gradients. `fuse/assemble.rs`
+already expected this: it turns a kept piece's wire round where the piece's
+use and the rule's turn differ, so a reversed input piece kept as it is comes
+out stored the used way round again, as the arena wants.
+
+**What it changes.** All twelve fuses of the crescents with the block over the
+top half answer, one solid each, validated, at the volumes cutting each bar
+first gives: `a_block_over_the_top_half_of_a_crescent_cuts_it_as_cutting_each_bar_first_does`.
+And Q352's shape answers too. With the fix switched off, six of the twelve
+fuses of the crescents with the block that touches nothing, the unions and
+the differences with the crescent first, refused
+`ACurvedFaceGoesRightRoundWithNoSeam`; with it, all twelve answer and
+validate, and `a_crescent_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`
+checks them. `a_face_used_reversed_is_baked_walked_the_way_its_view_walks_it`
+in `bake.rs` pins the walk itself. All three fail with the fix switched off,
+and `mise exec -- just t -p rcad-topo --no-fail-fast` ran 1333 tests and all
+1333 passed, with 9 skipped.
+
+**What this leaves.** Nothing in this shape. A reversed face that a first fuse
+writes and a second fuse cuts is not rare (a bore through a block, then a
+second cut across it), and why no test met this before was not looked into;
+a row pins such a bore. Q772's slab with a round scoop, its scoop a pipe face
+used reversed and built face by face, still refuses its cut on this branch,
+`could not settle 1 decisions the answer depends on`, so this is not its
+cause.

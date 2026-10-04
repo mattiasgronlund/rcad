@@ -131,8 +131,17 @@ pub(crate) struct BakedFace {
     pub(crate) surface: Surface,
     /// Which way round the solid uses the face.
     pub(crate) orientation: Orientation,
-    /// The wires that trim it, each walked the way the face itself stores it,
-    /// **with its seams left out** — see this module's header.
+    /// The wires that trim it, each walked with the face on its left about the
+    /// face's own surface, **with its seams left out** — see this module's
+    /// header.
+    ///
+    /// **That is the way a face used forwards stores its wire, and not the way
+    /// a face used reversed does.** `fuse/assemble.rs` stores a reversed curved
+    /// face's wire the way the solid uses it, so that every edge's two coedges
+    /// run opposite ways in the arena, and [`bake_one_face`] turns it round
+    /// again, as `WireView::coedges` does. The arrangement counts the face on
+    /// the left of its boundary about `∇S`, and handed the stored walk it took
+    /// the rest of the surface for the face (`docs/decisions.md` §331.6).
     ///
     /// The first is the face's own first wire, which [`FaceData`] calls the
     /// outer one by fiat. On a closed surface that is an order the face stores
@@ -1045,9 +1054,16 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
 ///
 /// The wires are every wire of every face of the group, each with those edges
 /// left out, so a wire can be left empty, as a ball's skin's one wire is. What
-/// is left of each is walked the way its own face walks it: the faces of a group
-/// face one way, so an edge walked with one of them on its left has the group
-/// on its left.
+/// is left of each is walked with its own face on the left about that face's
+/// surface ([`BakedFace::wires`]): the stored walk, turned round for a face used
+/// reversed. The faces of a group face one way, so an edge walked with one of
+/// them on its left has the group on its left.
+///
+/// [`BakedEdge::inside_across`] is read off the stored walk, before it is
+/// turned round, because that is the walk the rule it reads,
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`], is checked against by
+/// `Model::validate`: the coedge's turn as stored, against the faces' outward
+/// gradients.
 ///
 /// **The face is on the one spelling [`spell_each_group_one_way`] gave the
 /// group**, and so is the `across` of each side whose face across is in a
@@ -1102,6 +1118,12 @@ fn bake_one_face(
                         [surfaces[&mine], surfaces[&across]],
                     )?,
                 });
+            }
+            if surfaces[&mine].used.is_reversed() {
+                walked.reverse();
+                for edge in &mut walked {
+                    core::mem::swap(&mut edge.start, &mut edge.end);
+                }
             }
             wires.push(walked);
         }
@@ -1226,6 +1248,76 @@ mod tests {
     use crate::validate::{CornerRoom, MEASURING_SLACK, side_of_surface};
     use crate::{Error, Model, SolidKey};
     use rcad_predicates::Decision;
+
+    /// **A face used reversed is baked walked the way the solid's view walks
+    /// it**, with the face on the left about its own surface, and not the way it
+    /// is stored.
+    ///
+    /// A bar less an overlapping bar is a crescent whose inner wall is used
+    /// reversed, and `fuse/assemble.rs` stores that wall's wire the way the
+    /// solid uses it, up the ruling at `(3, 4)`. The arrangement reads a face on
+    /// the left of its boundary about `∇S`, so handed the stored walk it counted
+    /// the rest of the pipe as the wall, and a block over the crescent's top
+    /// half cut a piece of the pipe above `z = 10` out of it
+    /// (`docs/decisions.md` §331.6).
+    #[test]
+    fn a_face_used_reversed_is_baked_walked_the_way_its_view_walks_it() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let here = model
+            .add_round_bar(5.0, 10.0, &Isometry::identity())
+            .expect("a bar of radius five, ten tall");
+        let there = model
+            .add_round_bar(
+                5.0,
+                10.0,
+                &Isometry::translation(Vector::new(6.0, 0.0, 0.0)).expect("a shift along `x`"),
+            )
+            .expect("a second bar six along `x`");
+        let fused = model
+            .fuse(
+                &[here],
+                &[there],
+                crate::Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("one bar less the other is a crescent");
+        let [crescent] = fused.solids() else {
+            panic!("a crescent is one solid: {:?}", fused.solids());
+        };
+        let baked = bake(&model, &[*crescent], &policy, &mut ProvenanceLog::new())
+            .expect("a crescent bakes");
+        let solid = model.solid(*crescent).expect("this model made the key");
+
+        let mut used_reversed = 0;
+        for (face, view) in baked[0].faces.iter().zip(solid.faces()) {
+            assert_eq!(face.keys, vec![view.key()], "one baked face per face");
+            let walked: Vec<[VertexKey; 2]> = face
+                .wires
+                .iter()
+                .flatten()
+                .map(|edge| [edge.start.vertex, edge.end.vertex])
+                .collect();
+            let viewed: Vec<[VertexKey; 2]> = view
+                .wires()
+                .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+                .map(|coedge| [coedge.start().key(), coedge.end().key()])
+                .collect();
+            assert_eq!(
+                walked,
+                viewed,
+                "{:?}, used {:?}",
+                view.surface(),
+                view.orientation()
+            );
+            used_reversed += usize::from(view.orientation().is_reversed());
+        }
+        assert_eq!(
+            used_reversed, 1,
+            "the crescent has one face used reversed, its inner wall"
+        );
+    }
 
     fn a_cube_of_side_two() -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
