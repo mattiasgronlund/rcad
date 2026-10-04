@@ -11,10 +11,6 @@ something other than blanks, and a heading is `## ` outside a fence.
 import re
 
 TIERS_IN_ORDER = ["1", "2", "2.2", "2.5", "3", "4", "5"]
-# The queue page's tiers. tooling/queue-page/render.py has a label and a colour
-# for five and fails on any other, so it is handed the five until it has one
-# for 2.2 and 5 too (§307.4, §403.8).
-TIERS = [tier for tier in TIERS_IN_ORDER if tier not in ("2.2", "5")]
 CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 TIER_HEADING = re.compile(r"^Tier (" + "|".join(re.escape(tier) for tier in TIERS_IN_ORDER) + r")( |$)")
 # The first word of a description may be a tag (§352): a defect's class, or
