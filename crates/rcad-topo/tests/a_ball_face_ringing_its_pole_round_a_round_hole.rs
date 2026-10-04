@@ -11,8 +11,9 @@
 //! ball, the two fuses that keep that skin, were refused both ways round,
 //! upright and at 17 of the 20 turns below. Now an island no cut meets goes
 //! whole into its patch as a hole, and a cut whose meridian meets one goes
-//! through it, each patch beside it taking half the island. 16 of the 17 turns
-//! answer; the last is refused by name.
+//! through it, each patch beside it taking half the island. Where two cuts
+//! meet one island, the strip between them is cut in two along the island.
+//! All 17 turns answer.
 //!
 //! Every answer is held to its closed form: the ball inside the cube is the
 //! ball less the three caps the planes cut off, plus the piece beyond both
@@ -22,7 +23,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
 const BALL: f64 = 4.0 * PI / 3.0;
 const CENTRE: [f64; 3] = [0.8, 0.7, 0.65];
@@ -51,28 +52,16 @@ fn the_turned_cube_and_ball_measure_under_every_rule() {
     }
 }
 
-/// A gap the cut leaves, which Q921 takes up: turned 2 about `(2, −1, 1)`, the
-/// island reaches more than half a turn round the ball and its rim is walked at
-/// four corners, so two of the four cuts up to the pole meet the island and a
-/// cut through it leaves only two pieces of it. The intersection exists, the
-/// closed form above, and is refused by name.
+/// Turned 2 about `(2, −1, 1)`, the island reaches `3.24` radians of longitude
+/// round the ball, more than half a turn, and the rim is walked at four
+/// corners, two of them under the island. Every cut up to the pole leaves from
+/// one of the four, so two of them meet the island whichever way the quarters
+/// are turned. Each cut is taken through it, and the strip between the two is
+/// two patches, one under the island and one over it. The intersection and the
+/// cube less the ball were refused `CurvedFaceWithAHoleGoesTooFarRound` here.
 #[test]
-fn an_island_two_cuts_meet_is_refused_by_name() {
-    let (mut model, cube, ball) = a_cube_and_a_ball(Some(([2.0, -1.0, 1.0], 2.0)));
-    let refused = model.fuse(
-        &[cube],
-        &[ball],
-        Rule::Intersection,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(
-            refused,
-            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
-        ),
-        "{refused:?}"
-    );
+fn an_island_two_cuts_meet_measures_under_every_rule() {
+    every_rule_both_ways(Some(([2.0, -1.0, 1.0], 2.0)));
 }
 
 /// The cube and the ball under union, intersection and difference, each with
