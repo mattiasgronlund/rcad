@@ -1163,9 +1163,11 @@ fn the_points_it_could_not_order(why: &Error) -> Vec<[[f64; 2]; 3]> {
         .expect("a refusal names a decision");
     last.inputs()
         .iter()
-        .map(|node| match node {
-            PredicatePoint::Constructed(box_) => box_.map(|along| [along.lo(), along.hi()]),
-            other => panic!("a node this refusal names is worked out, got {other:?}"),
+        .map(|node| {
+            let PredicatePoint::Constructed(box_) = node else {
+                panic!("a node this refusal names is worked out, got {node:?}");
+            };
+            box_.map(|along| [along.lo(), along.hi()])
         })
         .collect()
 }
