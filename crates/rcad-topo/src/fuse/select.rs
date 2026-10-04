@@ -2478,18 +2478,21 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cone, Orientation, Plane, Point, Sphere, Surface, Torus};
+    use rcad_geom::{
+        Axis, Cone, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
+    };
     use rcad_predicates::{
         Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
     };
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, candidate_points, corners_of, every_picker_keeps, midway_between,
-        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
-        what_else_each_round_wire_asks,
+        InPlane, Piece, Rule, candidate_points, choose, corners_of, every_picker_keeps,
+        midway_between, the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through,
+        the_piece_holds, what_else_each_round_wire_asks,
     };
-    use crate::fuse::{FaceMeet, MeetPoint};
+    use crate::fuse::{FaceMeet, MeetPoint, Scratch};
+    use crate::{Model, ProfileBuilder};
 
     /// Adding first overflows here: `1e308 + 1.5e308` is past the largest
     /// double, and the middle, `1.25e308`, is not.
@@ -2954,6 +2957,92 @@ mod tests {
                 "at {height}"
             );
         }
+    }
+
+    /// The grazing block of `tests/a_block_edge_grazing_a_ball.rs` at `h = 0`.
+    ///
+    /// No point with `f64` coordinates is inside any of the three slivers its
+    /// two places fence off (§346.3), so no point search places them. Each is
+    /// placed by the side it shares with a piece of the other solid's face
+    /// (§365.3): the ball's sliver is inside the block, and the block's two are
+    /// inside the ball. Every other piece holds a point and is outside the other
+    /// solid. So an intersection keeps the three slivers and nothing else, and a
+    /// union keeps everything but them.
+    #[test]
+    fn the_three_slivers_of_a_block_edge_grazing_a_ball_are_placed_by_the_sides_they_share() {
+        let place = f64::powi(2.0, -51);
+        let edge = f64::powi(2.0, -25);
+        let the_two_places = [
+            PredicatePoint::Exact([-1.0, edge, -place]),
+            PredicatePoint::Exact([-1.0, edge, place]),
+        ];
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let ball = model
+            .add_ball(1.0 + place, &Isometry::identity())
+            .expect("a positive radius");
+        let square = ProfileBuilder::new(vec![
+            [-4.0, edge],
+            [-1.0, edge],
+            [-1.0, edge + 3.0],
+            [-4.0, edge + 3.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+        let block = model
+            .add_extrusion(
+                &square,
+                4.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a finite shift"),
+            )
+            .expect("a positive height");
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let scratch = Scratch::split_both_groups(&model, &[ball], &[block], &policy, &mut log)
+            .expect("the two places are exact and apart, so the cutting decides everything");
+        let mut kept = |rule: Rule| -> Vec<usize> {
+            choose(&model, &scratch, rule, &policy, &mut log)
+                .expect("every piece is placed, the three slivers by their sides")
+                .iter()
+                .map(|chosen| {
+                    assert!(!chosen.reversed, "{rule:?} turns nothing round");
+                    chosen.piece
+                })
+                .collect()
+        };
+
+        let inside_the_other = kept(Rule::Intersection);
+        let surfaces: Vec<Surface> = inside_the_other
+            .iter()
+            .map(|&index| {
+                let sliver = &scratch.pieces[index];
+                assert!(
+                    corners_of(sliver)
+                        .concat()
+                        .iter()
+                        .all(|corner| the_two_places.contains(corner)),
+                    "a sliver's corners are the two places: {sliver:?}"
+                );
+                sliver.surface
+            })
+            .collect();
+        let the_ball = Sphere::new(Point::from([0.0, 0.0, 0.0]), 1.0 + place).expect("a radius");
+        let the_wall_at = |coefficients| {
+            Surface::Plane(Plane::from_coefficients(coefficients).expect("a normal"))
+        };
+        assert_eq!(
+            surfaces,
+            [
+                Surface::Sphere(the_ball),
+                the_wall_at([0.0, -1.0, 0.0, edge]),
+                the_wall_at([1.0, 0.0, 0.0, 1.0]),
+            ],
+            "the ball's sliver, then the block's on y = 2^-25 and on x = -1"
+        );
+        let everything_else: Vec<usize> = (0..scratch.pieces.len())
+            .filter(|index| !inside_the_other.contains(index))
+            .collect();
+        assert_eq!(kept(Rule::Union), everything_else);
+        assert!(log.is_empty(), "a certified fuse asked nothing: {log:?}");
     }
 
     /// A ball of radius 1 whose centre is `below` under the origin, and the

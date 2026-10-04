@@ -31,7 +31,7 @@
 //! an `f64`: their boxes are `[15.999999999999998, 16]` and
 //! `[16, 16.000000000000004]`, and they share the point `16`.
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
+use rcad_geom::{Error as GeometryError, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
 use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule};
 
@@ -73,9 +73,12 @@ fn two_meets_whose_boxes_touch_are_what_a_certified_fuse_refuses_on() {
 /// folds it.
 ///
 /// The fuse still refuses in the end, and for a reason this file is not about:
-/// the plane `x = −1` cuts the ball in a circle of radius `2⁻²⁵`, and no point
-/// can be placed inside that piece. It refuses the same way at `h = 0`, where
-/// there is no pair to fold — see the test below.
+/// the plane `x = −1` cuts the ball in a circle of radius `2⁻²⁵`, and a point
+/// found inside the piece the fold leaves at the one point could not be placed
+/// against the other solid (`a point in a piece that every solid could
+/// place`). At `h = 0`, where there is no pair to fold, the pieces between the
+/// two places hold no point at all and are placed by their sides — see the
+/// tests below.
 #[test]
 fn a_tolerant_policy_asked_about_the_same_two_meets_folds_them() {
     for rule in EVERY_RULE {
@@ -100,29 +103,79 @@ fn a_tolerant_policy_asked_about_the_same_two_meets_folds_them() {
 }
 
 /// The control: where the two meets are exact and apart, nothing asks whether
-/// they are one, under either policy.
-///
-/// What the fuse refuses on at `h = 0` is the tiny piece, the same as the
-/// tolerant fuse at `h = 16` — which is what says that refusal is not the fold.
-/// That piece holds no point with `f64` coordinates, which the next test
-/// shows, so `select` cannot place it (`docs/decisions.md` §346).
+/// they are one, under either policy, in either order.
 #[test]
 fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
         for rule in EVERY_RULE {
-            let records = what_it_recorded(0.0, rule, &policy);
-            assert!(
-                records
-                    .iter()
-                    .all(|record| record.predicate() != ALONG_A_CROSSING),
-                "{rule:?}: {records:#?}"
-            );
-            assert!(
-                records
-                    .iter()
-                    .any(|record| record.predicate() == "a point inside a piece of a face"),
-                "{rule:?}: {records:#?}"
-            );
+            for ball_first in [true, false] {
+                let (_, records) = fused_and_recorded(rule, &policy, ball_first);
+                assert!(
+                    records
+                        .iter()
+                        .all(|record| record.predicate() != ALONG_A_CROSSING),
+                    "{rule:?}, ball first {ball_first}: {records:#?}"
+                );
+            }
+        }
+    }
+}
+
+/// At `h = 0` every fuse gets past `select`, and none of the six answers.
+///
+/// The two places fence off three slivers that hold no point with `f64`
+/// coordinates (the next test), so no point search places them. Each is placed
+/// by the side it shares with a piece of the other solid's face, the ball's
+/// inside the block and the block's two inside the ball (`docs/decisions.md`
+/// §365.3; `src/fuse/select.rs` pins which pieces each rule then keeps). Until
+/// that rule, all six refused `a point inside a piece of a face` on the two
+/// places, under either policy.
+///
+/// What each answer would be is a solid with a sliver `2⁻⁵⁰` long and `2⁻⁷⁸`
+/// wide in it or of it, and each is refused while it is written:
+///
+/// - the union and the ball less the block, whose ball face keeps a hole that
+///   size, by `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`;
+/// - the intersection, which is the three slivers alone, and the block less
+///   the ball, whose dent is the ball's sliver, by
+///   `ACurvedFaceGoesRightRoundWithNoSeam` out of meshing the curved face —
+///   the refusal §346.2's small ball on a cube's corner is given too.
+///
+/// Each comes back with the same two records, `side of a half-space`, under
+/// either policy, and the two policies agree. Neither record has been traced.
+#[test]
+fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_refused_later() {
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for rule in EVERY_RULE {
+            for ball_first in [true, false] {
+                let case = (policy.strictness(), rule, ball_first);
+                let (fused, records) = fused_and_recorded(rule, &policy, ball_first);
+                assert_eq!(
+                    records
+                        .iter()
+                        .map(|record| (record.predicate(), record.level()))
+                        .collect::<Vec<_>>(),
+                    [("side of a half-space", Level::Interval); 2],
+                    "{case:?}: {records:#?}"
+                );
+                let a_ball_face_with_a_hole = match (rule, ball_first) {
+                    (Rule::Union, _) | (Rule::Difference, true) => true,
+                    (Rule::Intersection, _) | (Rule::Difference, false) => false,
+                    (other, _) => panic!("a rule this file does not know: {other:?}"),
+                };
+                match fused {
+                    Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs))
+                        if a_ball_face_with_a_hole => {}
+                    Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
+                        if !a_ball_face_with_a_hole => {}
+                    Ok(fused) => panic!(
+                        "{case:?}: the fuse answered with {} solids; check each against its \
+                         volume and pin it",
+                        fused.solids().len()
+                    ),
+                    Err(other) => panic!("{case:?}: {other:?}"),
+                }
+            }
         }
     }
 }
@@ -183,11 +236,26 @@ fn no_point_with_f64_coordinates_is_inside_the_piece_between_the_two_places() {
 /// else coming back is not what this file is about.
 fn what_it_recorded(height: f64, rule: Rule, policy: &Policy) -> Vec<Record> {
     let mut log = ProvenanceLog::new();
-    match fuse_a_block_edge_grazing_a_ball(height, rule, policy, &mut log) {
+    match fuse_a_block_edge_grazing_a_ball(height, rule, policy, true, &mut log) {
         Ok(_) => log.records().to_vec(),
         Err(Error::Undecidable { records }) => records.records().to_vec(),
         Err(other) => panic!("{rule:?} at height {height}: {other:?}"),
     }
+}
+
+/// What the fuse at `h = 0` gave, and every record it wrote, whatever it gave.
+fn fused_and_recorded(
+    rule: Rule,
+    policy: &Policy,
+    ball_first: bool,
+) -> (rcad_topo::Result<Fused>, Vec<Record>) {
+    let mut log = ProvenanceLog::new();
+    let fused = fuse_a_block_edge_grazing_a_ball(0.0, rule, policy, ball_first, &mut log);
+    let records = match &fused {
+        Err(Error::Undecidable { records }) => records.records().to_vec(),
+        Ok(_) | Err(_) => log.records().to_vec(),
+    };
+    (fused, records)
 }
 
 /// Whether a record's two inputs are the two places the edge cuts the ball at
@@ -218,6 +286,7 @@ fn fuse_a_block_edge_grazing_a_ball(
     height: f64,
     rule: Rule,
     policy: &Policy,
+    ball_first: bool,
     log: &mut ProvenanceLog,
 ) -> rcad_topo::Result<Fused> {
     let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
@@ -243,5 +312,9 @@ fn fuse_a_block_edge_grazing_a_ball(
             &Isometry::translation(Vector::new(0.0, 0.0, height - 2.0)).expect("a finite shift"),
         )
         .expect("a positive height");
-    model.fuse(&[ball], &[block], rule, policy, log)
+    if ball_first {
+        model.fuse(&[ball], &[block], rule, policy, log)
+    } else {
+        model.fuse(&[block], &[ball], rule, policy, log)
+    }
 }
