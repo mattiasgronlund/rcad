@@ -322,17 +322,19 @@ fn the_check_both_ways_round_refuses_two_different_answers() {
     );
 }
 
-/// **A union whose answer carries a rim that names the plane that cut it is
-/// written down, not panicked on.**
+/// **The seed of a ball by a block clear of it is fused and written down.**
 ///
 /// The smallest of the 24 crash files of 2026-09-26 and 2026-09-27, all one
-/// shape: a block and a ball clear of each other, the ball cut in two by one of
-/// the block's planes (`a_rim_that_names_its_cutting_surface.rs`). Its first
-/// half is that union under a certified policy and its second half does not
-/// decode. Until the comparison had a shape for the rim it panicked writing the
-/// answer down.
+/// shape: a block and a ball clear of each other. Its first half is their union
+/// under a certified policy and its second half does not decode. The fuse cut
+/// the ball in two along one of the block's planes and wrote a rim naming that
+/// plane, and until the comparison had a shape for the rim it panicked writing
+/// the answer down. Since `docs/decisions.md` §400 the fuse proves the two
+/// apart and leaves the ball whole, so this seed no longer reaches the rim;
+/// `a_rim_that_names_its_cutting_surface.rs` reaches it with a ball that
+/// touches its block.
 #[test]
-fn a_ball_cut_by_the_plane_of_a_block_clear_of_it_is_fused_and_written_down() {
+fn a_ball_by_a_block_clear_of_it_is_fused_and_written_down() {
     let reached = control_seed("a_ball_cut_by_the_plane_of_a_block_clear_of_it");
     assert_eq!(reached.decoded, 1, "{reached:?}");
     assert_eq!(reached.ok, 1, "{reached:?}");

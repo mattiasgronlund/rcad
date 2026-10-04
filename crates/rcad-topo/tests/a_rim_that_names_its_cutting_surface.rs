@@ -1,4 +1,4 @@
-//! A ball cut in two by the plane of a block that does not touch it, and the
+//! A ball cut in two by the plane of a block it touches at one point, and the
 //! both-orders comparison writing the rim between the two halves down.
 //!
 //! # What the fuzzer found
@@ -7,10 +7,11 @@
 //! different, all panicked in `tests/fuzzing/comparison.rs`'s `Run::of`:
 //! *"the fuse does not write a rim that names its cutting surface"*. Every one
 //! is the same shape: a block and a ball of radius 1 standing clear of each
-//! other, fused under `Union`. The fuse puts every face plane of the block to
-//! the ball's face whether or not the solids meet (§17.4 keeps no box test),
-//! one of those planes crosses the ball, and the answer carries the ball's face
-//! cut in two with a closed rim between the halves. Both halves sit on the one
+//! other, fused under `Union`. The fuse put every face plane of the block to
+//! the ball's face whenever the two solids' boxes touched, whether or not the
+//! solids met (until §400), one of those planes crossed the ball, and the
+//! answer carried the ball's face cut in two with a closed rim between the
+//! halves. Both halves sit on the one
 //! ball, so the pair either side of the rim says nothing about where it runs,
 //! and the fuse names **the block's plane that crossed the ball** instead:
 //! `EdgeRun::RightRoundWhereItCrosses { and }` (§217.1).
@@ -24,22 +25,21 @@
 //! # The draw
 //!
 //! The fuzzer's shape, with the ball's centre moved from about `3.05e-5` off
-//! the block's `y = 0` plane to half a unit off it. That plane crosses the ball
-//! in a circle of radius `√3/2`, **parallel to the ball's seam**, which lies in
-//! the plane through its centre square to `y`. The ball touches the block's
-//! planes `x = 0`, `z = 0` and `z = 2` at one point each, all three outside the
-//! block, as it did in the fuzzer's files.
+//! the block's `y = 0` plane to half a unit off it, **on the block's side**.
+//! That plane crosses the ball in a circle of radius `√3/2`, **parallel to the
+//! ball's seam**, which lies in the plane through its centre square to `y`.
+//! The ball touches the block's face `x = 0` at the one point `(0, −0.5, 1)`,
+//! and its planes `z = 0` and `z = 2` at one point each outside the block.
 //!
-//! **Not every block beside a ball cuts it**, and which ones do was measured
-//! rather than assumed. The same block and ball moved apart until no plane of
-//! the block comes near the ball except `y = 0` — the ball at `(0, 0.5, 10)`,
-//! the block from `(-4, -2, 0)` to `(-2, 0, 2)` — comes back with the ball
-//! whole, one face and its seam, and no rim anywhere. Why the one is cut and the
-//! other is not is not answered here. And a ball tucked into the corner of a
-//! bigger block so that two of its planes cross it, the ball at
-//! `(2.75, 0.75, 1)` and the block from `(-2, -4, -1)` to `(2, 0, 3)`, is refused
-//! `Invalid(FacesDoNotAgreeWhichWayTheyFace)`; that one is written up as its own
-//! finding and not pinned here.
+//! **A ball clear of the block is no longer cut at all** (`docs/decisions.md`
+//! §400). The fuzzer's balls stood clear of their blocks, and so did this draw
+//! until §400, half a unit off `y = 0` on the other side: the fuse used to cut
+//! two solids against each other whenever their whole-solid boxes touched, and
+//! now cuts them only where it cannot prove they do not meet. A ball that
+//! touches the block meets it, so the block's planes still cut it, and the rim
+//! is still written. That is the one kind of draw found where two solids meet
+//! and a rim between two faces of one ball survives into an answer; §400 says
+//! which others were tried and where each stops.
 
 #[path = "fuzzing/comparison.rs"]
 mod comparison;
@@ -53,8 +53,8 @@ use comparison::{answer_of, same_answer};
 /// The rim between the two halves of the ball names the block's plane `y = 0`,
 /// which is the only surface of the draw it lies on besides the ball.
 #[test]
-fn a_ball_cut_in_two_by_the_plane_of_a_block_clear_of_it_names_that_plane() {
-    let (mut model, block, ball) = a_block_and_a_ball_clear_of_it();
+fn a_ball_touching_a_block_cut_in_two_by_the_blocks_plane_names_that_plane() {
+    let (mut model, block, ball) = a_block_and_a_ball_touching_it();
     let fused = model
         .fuse(
             &[block],
@@ -63,7 +63,7 @@ fn a_ball_cut_in_two_by_the_plane_of_a_block_clear_of_it_names_that_plane() {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .expect("a block and a ball that miss each other unite");
+        .expect("a block and a ball that touch at one point unite");
 
     let rims: Vec<Surface> = every_run_of(&model, fused.solids())
         .into_iter()
@@ -93,7 +93,7 @@ fn a_ball_cut_in_two_by_the_plane_of_a_block_clear_of_it_names_that_plane() {
 /// panicked, so neither order was held to the other.
 #[test]
 fn the_union_is_the_same_answer_both_ways_round_with_the_rim_written_down() {
-    let (model, block, ball) = a_block_and_a_ball_clear_of_it();
+    let (model, block, ball) = a_block_and_a_ball_touching_it();
     let answered = |arguments: SolidKey, tools: SolidKey| {
         let mut model = model.clone();
         let fused = model
@@ -104,7 +104,7 @@ fn the_union_is_the_same_answer_both_ways_round_with_the_rim_written_down() {
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
-            .expect("a block and a ball that miss each other unite");
+            .expect("a block and a ball that touch at one point unite");
         answer_of(&model, fused.solids())
     };
 
@@ -119,10 +119,10 @@ fn the_union_is_the_same_answer_both_ways_round_with_the_rim_written_down() {
     );
 }
 
-/// A block from `(-4, -2, 0)` to `(-2, 0, 2)`, and a ball of radius 1 centred
-/// at `(0, 0.5, 10)`: the block's plane `y = 0` crosses the ball, and nothing
-/// else of the block comes within a unit of it.
-fn a_block_and_a_ball_clear_of_it() -> (Model, SolidKey, SolidKey) {
+/// A block from `(-2, -2, 0)` to `(0, 0, 2)`, and a ball of radius 1 centred
+/// at `(1, -0.5, 1)`, touching the block's face `x = 0` at `(0, -0.5, 1)`. The
+/// block's plane `y = 0` crosses the ball outside the block.
+fn a_block_and_a_ball_touching_it() -> (Model, SolidKey, SolidKey) {
     let mut model = Model::new(rcad_geom::Scale::millimetres(100.0).expect("a working size"));
     let block = model
         .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
@@ -136,12 +136,12 @@ fn a_block_and_a_ball_clear_of_it() -> (Model, SolidKey, SolidKey) {
     let ball = model
         .add_ball(
             1.0,
-            &Isometry::translation(Vector::new(1.0, 0.5, 1.0)).expect("a finite placement"),
+            &Isometry::translation(Vector::new(1.0, -0.5, 1.0)).expect("a finite placement"),
         )
         .expect("a ball of radius 1");
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a block and a ball clear of it are a sound model");
+        .expect("a block and a ball touching it are a sound model");
     (model, block, ball)
 }
 

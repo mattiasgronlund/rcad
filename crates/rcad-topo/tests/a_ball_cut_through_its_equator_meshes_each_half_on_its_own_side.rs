@@ -31,7 +31,7 @@
 //! plane `y = 0`, moved half a unit further from the block so that it touches
 //! none of the block's faces, and the whole draw turned about `z`. Turning it
 //! puts the rim's corner on the ball's equator (`Plane::basis` gives an upright
-//! plane a level first direction). Of the eight draws below, the five with the
+//! plane a level first direction). Of eight such draws, the five with the
 //! ball on the far side of the plane came back from the narrow copy with **the
 //! two faces' triangles swapped**: the cap's face carried the rest of the ball,
 //! `9.4057` to `9.4062` of area where the cap is `π = 3.1416`, and the rest's
@@ -41,6 +41,13 @@
 //! way. The union of the two faces is still the ball, so the volume and the
 //! closed-ness of the mesh did not move, and nothing in the suite read which
 //! face a triangle belongs to.
+//!
+//! **Those eight draws come back whole since `docs/decisions.md` §400**: a
+//! ball clear of a block is no longer cut by the block's planes. The draws
+//! below are a ball resting on a notched block, touching it at one point, cut
+//! by the upright plane of one wall of the notch — the same rim with its corner
+//! on the equator, on either side of the plane. They were written after the
+//! narrow copy was gone, so they have not been run against it.
 //!
 //! # The oracle
 //!
@@ -55,46 +62,46 @@
 
 use rcad_geom::{Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{FaceView, Mesh, Model, Rule, SolidKey, SolidView};
+use rcad_topo::{FaceView, Mesh, Model, ProfileBuilder, Rule, SolidKey, SolidView};
 
 const RADIUS: f64 = 1.0;
 
-/// How far the ball's centre stands off the block's plane `y = 0`, before the
-/// draw is turned. The cap on the far side of the plane is `RADIUS − OFF` high.
+/// How far the ball's centre stands off the block's plane `y = 0` in the
+/// unturned draw. The cap on the far side of the plane is `RADIUS − OFF` high.
 const OFF: f64 = 0.5;
 
 const DEFLECTION: f64 = 0.01;
 
-/// The draw turned about `z`, so the plane that cuts the ball stands upright
-/// with a normal along no axis, and the rim's corner sits on the equator.
+/// A ball resting on the top of a notched block, cut by the plane of one of the
+/// two walls of the notch, which stands upright with a normal along no axis, so
+/// the rim's corner sits on the equator.
 ///
-/// The ball's centre is `1.5` out from the block's plane `x = 0`, half a unit
-/// more than its radius, so the ball stands clear of the block on either side of
-/// `y = 0`. Turned and off to either side as listed: not every turn leaves the
-/// ball cut at all (`a_rim_that_names_its_cutting_surface.rs` names that and
-/// does not answer it), and these are the ones that do.
+/// The block's top is the outline `(0, 0), (10, 0), (10, 10), (5, 6), (0, 10)`
+/// at `z = 0`, and the ball of `RADIUS` rests on it at one point, its centre
+/// one unit up. The walls of the notch run along `y = 0.8x + 2` and
+/// `y = 10 − 0.8x`, and each centre below is `0.45` across from one of those
+/// lines, `0.351` off its plane, on the side of the wall the block is on or on
+/// the other, and more than two units from every other wall. Neither wall's
+/// plane runs through a corner of the outline, which `(5, 5)` would put both
+/// through, and the fuse then cannot order that corner along the crossing.
+///
+/// The ball touches the block, so the two are cut against each other (§400).
+/// The draw this used to be, a ball clear of a block and turned about `z`,
+/// comes back whole since then, and turning a ball that touches a block rounds
+/// it either clear of the block or into it.
 #[test]
 fn each_half_of_a_ball_cut_upright_through_its_equator_is_meshed_on_its_own_side() {
     let draws = [
-        (0.3, 1.0),
-        (3.5, 1.0),
-        (5.0, 1.0),
-        (0.3, -1.0),
-        (0.5, -1.0),
-        (2.0, -1.0),
-        (4.0, -1.0),
-        (5.5, -1.0),
+        ([7.75, 7.75], "y = 0.8x + 2, the block's side"),
+        ([2.25, 4.25], "y = 0.8x + 2, the other side"),
+        ([2.5, 7.55], "y = 10 − 0.8x, the block's side"),
+        ([7.5, 4.45], "y = 10 − 0.8x, the other side"),
     ];
-    let across = 1.5;
     let wrong: Vec<String> = draws
         .into_iter()
-        .flat_map(|(turned, side)| {
-            let what = format!("turned {turned} about z, the ball {side} × {OFF} off y = 0");
-            assert!(
-                how_far_the_ball_stands_off_the_block(across, side * OFF) > 0.0,
-                "{what}: the ball is meant to be clear of the block"
-            );
-            let (model, ball) = a_block_and_a_ball_beside_it_united(turned, across, side * OFF);
+        .flat_map(|(centre, plane)| {
+            let what = format!("the ball at {centre:?}, cut by {plane}");
+            let (model, ball) = a_notched_block_and_a_ball_resting_on_it_united(centre);
             let rim = the_rim_between_the_halves(&model, ball, &what);
             assert_eq!(
                 rim.along_the_longitude, 0.0,
@@ -112,32 +119,29 @@ fn each_half_of_a_ball_cut_upright_through_its_equator_is_meshed_on_its_own_side
 /// Both readings of the pair always agreed here, so this is the check on the
 /// oracle rather than on the mesher.
 ///
-/// **The ball is one unit out from `x = 0` here, not one and a half**, because
-/// unturned the block's plane `y = 0` cuts the ball only when the ball rests on
-/// the plane `x = 0`: at each of ten distances from `1.01` to `1.9` out it came
-/// back whole, on both sides of `y = 0`. On the near side
-/// that rests the ball on the plane outside the block. On the far side it
-/// **touches the block** at the one point `(0, −0.5, 1)` of its face `x = 0`, and
-/// the union still answers the block and the ball apart.
+/// **The ball touches the block** at the one point `(0, −0.5, 1)` of its face
+/// `x = 0`, and the union still answers the block and the ball apart. A ball
+/// that touches a block meets it, so the two are cut against each other and
+/// the block's plane `y = 0` cuts the ball. The same ball on the other side of
+/// `y = 0` rests on the plane `x = 0` outside the block, clear of it, and comes
+/// back whole since §400; it was the second draw here until then.
 #[test]
 fn each_half_of_a_ball_cut_where_its_longitude_says_which_way_is_meshed_on_its_own_side() {
-    let across = 1.0;
-    for (side, touches) in [(1.0, false), (-1.0, true)] {
-        let what = format!("unturned, the ball {side} × {OFF} off y = 0");
-        assert_eq!(
-            how_far_the_ball_stands_off_the_block(across, side * OFF) == 0.0,
-            touches,
-            "{what}: whether the ball touches the block"
-        );
-        let (model, ball) = a_block_and_a_ball_beside_it_united(0.0, across, side * OFF);
-        let rim = the_rim_between_the_halves(&model, ball, &what);
-        assert_ne!(
-            rim.along_the_longitude, 0.0,
-            "{what}: the corner is meant to be where the ball's longitude says which way"
-        );
-        let wrong = what_is_wrong_with_each_half(&model, ball, &rim, &what);
-        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
-    }
+    let (across, off) = (1.0, -OFF);
+    let what = format!("the ball {off} off y = 0");
+    assert_eq!(
+        how_far_the_ball_stands_off_the_block(across, off),
+        0.0,
+        "{what}: the ball touches the block"
+    );
+    let (model, ball) = a_block_and_a_ball_beside_it_united(across, off);
+    let rim = the_rim_between_the_halves(&model, ball, &what);
+    assert_ne!(
+        rim.along_the_longitude, 0.0,
+        "{what}: the corner is meant to be where the ball's longitude says which way"
+    );
+    let wrong = what_is_wrong_with_each_half(&model, ball, &rim, &what);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// How far the surface of a ball of `RADIUS` at `(across, off, 1)` stands off
@@ -152,31 +156,63 @@ fn how_far_the_ball_stands_off_the_block(across: f64, off: f64) -> f64 {
 }
 
 /// A cube of side 2 from `(-2, -2, 0)` and a ball of `RADIUS` at
-/// `(across, off, 1)`, both turned `turned` about `z`, united; and the solid of
-/// the answer that is the ball.
-fn a_block_and_a_ball_beside_it_united(turned: f64, across: f64, off: f64) -> (Model, SolidKey) {
+/// `(across, off, 1)`, united; and the solid of the answer that is the ball.
+fn a_block_and_a_ball_beside_it_united(across: f64, off: f64) -> (Model, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let policy = Policy::certified();
-    let everything = Isometry::rotation(&rcad_geom::Axis::z(), turned).expect("a finite turn");
     let block = model
-        .add_cube(2.0, &policy, &mut ProvenanceLog::new())
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube of side 2");
     model
         .place_solid(
             block,
-            &everything.compose(
-                &Isometry::translation(Vector::new(-2.0, -2.0, 0.0)).expect("a finite shift"),
-            ),
+            &Isometry::translation(Vector::new(-2.0, -2.0, 0.0)).expect("a finite shift"),
         )
         .expect("this model made the key");
     let ball = model
         .add_ball(
             RADIUS,
-            &everything.compose(
-                &Isometry::translation(Vector::new(across, off, 1.0)).expect("a finite shift"),
-            ),
+            &Isometry::translation(Vector::new(across, off, 1.0)).expect("a finite shift"),
         )
         .expect("a ball");
+    united_and_the_ball_of_the_answer(model, block, ball)
+}
+
+/// The block whose top is the outline `(0, 0), (10, 0), (10, 10), (5, 6),
+/// (0, 10)` at `z = 0`, two deep, and a ball of `RADIUS` resting on that top at
+/// `(x, y, 0)`, united; and the solid of the answer that is the ball.
+fn a_notched_block_and_a_ball_resting_on_it_united([x, y]: [f64; 2]) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let outline = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [10.0, 0.0],
+        [10.0, 10.0],
+        [5.0, 6.0],
+        [0.0, 10.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a notched outline");
+    let block = model
+        .add_extrusion(
+            &outline,
+            2.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a finite shift"),
+        )
+        .expect("a positive depth");
+    let ball = model
+        .add_ball(
+            RADIUS,
+            &Isometry::translation(Vector::new(x, y, RADIUS)).expect("a finite shift"),
+        )
+        .expect("a ball");
+    united_and_the_ball_of_the_answer(model, block, ball)
+}
+
+fn united_and_the_ball_of_the_answer(
+    mut model: Model,
+    block: SolidKey,
+    ball: SolidKey,
+) -> (Model, SolidKey) {
+    let policy = Policy::certified();
     let fused = model
         .fuse(
             &[block],
@@ -283,7 +319,8 @@ fn what_is_wrong_with_each_half(
         )
         .unwrap_or_else(|why| panic!("{what}: the ball meshes: {why:?}"));
     let strays = mesh.deviation().magnitude();
-    let cap = 2.0 * core::f64::consts::PI * RADIUS * (RADIUS - OFF);
+    let off = (rim.centre - rim.corner).dot(rim.cut.normal()).abs();
+    let cap = 2.0 * core::f64::consts::PI * RADIUS * (RADIUS - off);
     let whole = 4.0 * core::f64::consts::PI * RADIUS * RADIUS;
 
     let mut wrong = Vec::new();

@@ -27,6 +27,15 @@
 //! and reads as nothing, the reason
 //! `a_fused_draw_hands_its_provenance_back_through_the_door.rs` gives for the
 //! same choice.
+//!
+//! **Since `docs/decisions.md` §400 this draw no longer reaches the fold.** The
+//! fuse now cuts two solids against each other only where it cannot prove they
+//! do not meet, and it proves these two blocks apart, so neither is cut by the
+//! other's planes and the meet is never asked about. The answer below is the
+//! same two blocks; what holds the fold now is
+//! `a_meet_is_folded_when_its_tighter_box_lies_inside_the_corners_room_however_far_cramers_reaches`
+//! in `src/fuse/arrange.rs`'s `tests` module, which asks `a_corner_is_this_place`
+//! directly.
 
 #![forbid(unsafe_code)]
 
