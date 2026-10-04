@@ -1588,82 +1588,69 @@ impl BuildingAMesh {
         Ok(Some(patches))
     }
 
-    /// Which of a surface's two poles a cap reaches, as the latitude of it.
+    /// Which of a surface's two poles a cap reaches, as the latitude of it:
+    /// **the one on the left of the walk round its rim.**
     ///
-    /// **Not read off which way the loop runs**, and that is the trap this
-    /// walked into once. A closed edge has no direction rule in the model
-    /// (§30.8 item 10, still open), so which of its two coedges is the forward
-    /// one says only which of the two faces along it came first — it is fixed
-    /// within one solid, because the two have to disagree, and it is arbitrary
-    /// against anything else. A pole chosen from it is right for half the caps
-    /// there are.
+    /// A wire keeps its face's material on its left about the stored surface's
+    /// own normal, whichever way the face is used (`holds.rs`,
+    /// `which_side_of_its_neighbour_a_side_keeps`, says why), and a ball's and
+    /// a cone's two coordinates are right-handed about that normal
+    /// (`every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`),
+    /// so left of the longitude growing is the latitude growing. A cap goes
+    /// right round, so its walk gains a whole turn or loses one, and
+    /// [`runs_up`] says which: a cap walked up reaches the pinch above every
+    /// corner of its rim, and one walked down the pinch below them all. That
+    /// is the count [`BuildingAMesh::cut_a_cap_up_to_its_pole`] steps its
+    /// quarters by, so the pole and the way round each patch come from one
+    /// reading and cannot disagree. No sign is asked of the arithmetic here: a
+    /// walk that goes right round is a whole turn from nothing.
     ///
-    /// What is not arbitrary is the *step the loop actually takes in space*
-    /// against `∇S × ∇T`. The wire keeps the face's material on its left, and
-    /// left of a crossing's forward direction is always the negative side of the
-    /// partner — `(∇S × ∇T) × ∇S · ∇T = −‖∇S × ∇T‖²` by Cauchy–Schwarz, with no
-    /// case analysis (§36.6). So the step says which side of `T` the material is
-    /// on, and the pole on that side is the one this face reaches.
+    /// **What stood here read the pole off the surface across the rim's first
+    /// edge**: the step along that edge against `∇S × ∇T` said which side of
+    /// that surface the material is on, and the first pole on that side was
+    /// taken. That needs a surface across that puts the two poles on different
+    /// sides, and a block crossing a ball round its south pole leaves two caps
+    /// with none (`a_cap_whose_pole_no_partner_separates.rs`). The cap the block
+    /// keeps is cut by `x = ±1` and `y = ±1`, with both poles on the material's
+    /// side of all four, so the north pole was taken for a cap round the south
+    /// one, its patches were drawn inside out, and the fuse refused
+    /// `FacesDoNotAgreeWhichWayTheyFace`. The cap the ball keeps has the ball
+    /// itself across every edge of its rim, because the fuse cuts the skin
+    /// along the whole of each circle and never joins the pieces back, so there
+    /// was no surface across to read and the fuse refused
+    /// `ACurvedFaceGoesRightRoundWithNoSeam`. The ball less a block over one
+    /// corner of it was refused the same way (`a_ball_less_a_wedge.rs`).
     ///
     /// **Never the pole the rim runs through.** That pole is on the face's
-    /// edge, not inside it, so a cap whose rim runs through one pole reaches the
-    /// other. The side of `T` cannot say so: a plane written through a pole
-    /// holds it only to a rounding, and the pole then reads as on whichever
-    /// side the rounding put it. A ball of radius 5 less the cap
-    /// `y + 3z ≥ 15` had its north pole read as inside the plane, and the pole
-    /// on its own rim was taken for the one it reaches. Three of the four
-    /// quarter cuts then left from corners on that pole side and ran nowhere,
-    /// two corners in one place, refused `CornersCoincide`. At radius 4 the plane
-    /// holds the pole exactly and it reads as on it; the mirror at radius 5,
-    /// through the south pole, is asked about the north one first and answers
-    /// before its own pole is read (`docs/decisions.md` §199.4,
-    /// `a_ball_less_a_cap_whose_rim_runs_through_its_north_pole.rs`). The walk
-    /// already put that pole on the rim as a corner at its latitude
-    /// ([`put_in_the_poles_a_closed_crossing_passes`]), so that corner is what
-    /// is read here, and no distance is compared with anything.
+    /// edge, not inside it, so a cap whose rim runs through one pole reaches
+    /// the other, and its walk keeps the other on its left. The walk put the
+    /// pole on its rim as a corner at its latitude
+    /// ([`put_in_the_poles_a_closed_crossing_passes`]), so that pole is not
+    /// strictly beyond every corner and is never taken
+    /// (`a_ball_less_a_cap_whose_rim_runs_through_its_north_pole.rs`,
+    /// `docs/decisions.md` §199.4).
     ///
-    /// `None` when the face is not a cap this can read: it has no partner
-    /// surface to be cut by, or its loop is too short to take a step along.
+    /// `None` when no pinch is strictly beyond every corner the way the walk
+    /// keeps the material: a cone's apex on the side away from the material,
+    /// or a rim with a corner at the pole it would reach. Neither bounds a
+    /// face, and the caller refuses it.
     fn which_pole_this_cap_reaches(
         &self,
-        face: FaceView<'_>,
+        _: FaceView<'_>,
         stored: &Surface,
         cap: &WalkedLoop,
     ) -> Option<f64> {
-        let pole = where_this_surface_pinches(stored)?;
-        let back = the_frame_this_face_is_meshed_in(face);
-        let mine = SurfaceAlongAnEdge {
-            stored: face.stored_surface(),
-            placed_at: face.location(),
-        };
-        let coedge = face.wires().flat_map(WireView::coedges).next()?;
-        let partner = self
-            .along_each_edge
-            .get(&coedge.edge().key())?
-            .iter()
-            .find(|surface| **surface != mine)?
-            .in_the_frame(&back);
-
-        let [first, second] = [0, 1].map(|step| cap.points.get(step).copied());
-        let (first, second) = (first?, second?);
-        let at = back.apply_to_point(self.points[first as usize]);
-        let step = back.apply_to_point(self.points[second as usize]) - at;
-        let forward = gradient_of(stored, at).cross(gradient_of(&partner, at));
-        // Along the crossing's own direction means the material is inside the
-        // partner; against it means outside.
-        let inside = step.dot(forward) > 0.0;
-
-        for towards in [pole, -pole] {
-            if cap.corners.iter().any(|corner| corner[1] == towards) {
-                continue;
-            }
-            let corner = PredicatePoint::from(stored.point_at(0.0, towards).coordinates());
-            let side = side_of_surface(&partner, corner);
-            if (side == Decision::Neg) == inside {
-                return Some(towards);
-            }
-        }
-        None
+        let pinch = where_this_surface_pinches(stored)?;
+        let up = runs_up(cap);
+        [pinch, -pinch].into_iter().find(|&towards| {
+            cap.corners.iter().all(|&[_, latitude]| {
+                if up {
+                    latitude < towards
+                } else {
+                    latitude > towards
+                }
+            })
+        })
     }
 
     /// Cut a **ring** — two loops that each go right round the surface, with
