@@ -1769,7 +1769,21 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// ([`rcad_geom::Cylinder::is_cut_in_a_closed_curve_by`]), whose inside is
 /// convex, so it is the cone's argument word for word. Keeping a pipe's outside
 /// is not admitted either: the outside of an ellipse is not convex, which is
-/// the first of the cone's reasons below.
+/// the first of the cone's reasons below, and a block with a bar bored down
+/// across the whole of its top keeps two pieces of that top outside the bar
+/// (`a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` in
+/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`).
+///
+/// **Convexity does not need the crossing to close on a pipe**, where it does on
+/// a cone: the inside of a pipe is every point within its radius of the axis,
+/// which is convex, so every plane keeps a convex piece of it — a strip between
+/// two rulings when the plane lies along the axis. Only the closed crossings are
+/// admitted because only they are what the sides can be placed against:
+/// [`where_a_side_lies`] reads a straight side as inside a pipe only on a plane
+/// that crosses it in a closed curve, and [`the_way_into_an_arc`] reads an arc
+/// only off a closed curve. A fuse stores a ruling as a straight side, so a flat
+/// face along a bar's axis takes [`what_a_flat_face_holds`] instead and is
+/// answered there.
 ///
 /// What this needs of the cone is that the region be one piece, which is
 /// [`Cone::is_cut_in_a_closed_curve_by`]'s question and not the narrower circle.
@@ -1823,7 +1837,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// straight cuts. That is a part with no named consumer (§13), and until one
 /// appears this refuses.
 ///
-/// On a pipe it is planes, as [`leaves_a_pipe_in_one_piece`] sets out.
+/// On a pipe it is planes, as [`leaves_a_pipe_in_one_piece`] sets out, or two
+/// planes along the axis meeting inside the pipe in place of its one
+/// ([`is_a_wedge_of_a_pipe`]).
 ///
 /// On a sphere, it is planes through the centre: each cuts the sphere into two
 /// halves, and any number of halves meet in one piece, where planes that miss
@@ -2017,9 +2033,107 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                 [_, _, ..] => false,
             }
         }
-        Surface::Cylinder(pipe) => leaves_a_pipe_in_one_piece(pipe, cuts),
+        Surface::Cylinder(pipe) => {
+            leaves_a_pipe_in_one_piece(pipe, cuts) || is_a_wedge_of_a_pipe(pipe, cuts)
+        }
         Surface::Torus(_) | _ => false,
     }
+}
+
+/// Whether the part of `pipe` in front of every cut is one piece because two
+/// of the cuts are planes along the axis that meet **strictly inside** the
+/// pipe, and the others are what [`leaves_a_pipe_in_one_piece`] admits beside
+/// one plane along the axis. A quarter of a bar's wall is that: `x ≥ 0` and
+/// `y ≥ 0` meet along the axis.
+///
+/// **Two such planes keep one run of rulings.** Look down the axis: the pipe is
+/// a circle, each plane a line, and what both keep is a wedge whose point is
+/// where the two lines meet, its angle less than a half turn. From a point
+/// strictly inside a circle every ray leaves the circle exactly once, so the
+/// rulings the wedge keeps are the ones whose direction from that point lies in
+/// the wedge's angle: one run. One run is all [`leaves_a_pipe_in_one_piece`]
+/// reads off a single plane along the axis, so its argument for the floor and
+/// the roof carries over word for word, and it is asked with one of the two
+/// planes left out.
+///
+/// **Where they meet on or outside the pipe is refused.** The wedge can then
+/// keep two runs, and the face is only one of them, so "in front of every cut"
+/// would hold a point on the other. Two parallel planes are the extreme case: a
+/// bar with two flats, `|x| ≤ 3` across a bar of radius 5, keeps a run round
+/// `+y` and a run round `−y`, and each is a wall of its own
+/// (`a_bar_with_two_flats_has_each_wall_refused_by_name` in
+/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`). That refusal is this
+/// argument's and not the face's: the face's answer exists, and reading it
+/// wants something that tells the two runs apart, such as the plane through the
+/// wall's two rulings, which is not a cut of the face.
+///
+/// A cut that is a second pipe running the same way is left to
+/// [`leaves_a_pipe_in_one_piece`], which counts it beside the plane kept here
+/// and refuses the two.
+fn is_a_wedge_of_a_pipe(pipe: &rcad_geom::Cylinder, cuts: &[Cut]) -> bool {
+    let axis = pipe.axis().direction().components();
+    let along_the_axis: Vec<(usize, &Plane)> = cuts
+        .iter()
+        .enumerate()
+        .filter_map(|(at, cut)| Some((at, cut.surface.as_plane()?)))
+        .filter(|(_, flat)| {
+            let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
+                named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+                normal: flat.normal().components(),
+                along: axis,
+            });
+            leans == Decision::Zero
+        })
+        .collect();
+    let [(_, one_plane), (other, other_plane)] = along_the_axis[..] else {
+        return false;
+    };
+    if !do_two_planes_along_the_axis_meet_inside(pipe, one_plane, other_plane) {
+        return false;
+    }
+    let all_but_one: Vec<Cut> = cuts
+        .iter()
+        .enumerate()
+        .filter(|&(at, _)| at != other)
+        .map(|(_, cut)| Cut {
+            surface: cut.surface,
+            placed: cut.placed,
+            kept: cut.kept,
+            corners_on_it: cut.corners_on_it.clone(),
+        })
+        .collect();
+    leaves_a_pipe_in_one_piece(pipe, &all_but_one)
+}
+
+/// Whether the line two planes along `pipe`'s axis meet in lies strictly inside
+/// the pipe; `false` when they are parallel, and when the sign could not be
+/// settled.
+///
+/// With `nᵢ·x = dᵢ` the planes, `o` the axis origin, `eᵢ = dᵢ − nᵢ·o` and
+/// `m = n₁ × n₂`, the point `o + U/|m|²` with `U = e₁(n₂ × m) + e₂(m × n₁)` is
+/// on both, because `nᵢ·U = eᵢ|m|²` by the triple product. Both normals are
+/// square to the axis, so `m` lies along it and `U`, square to `m`, is square
+/// to the axis too: the line is `|U|/|m|²` from the axis everywhere. So it is
+/// strictly inside exactly when `|U|² < r²|m|⁴`, a sign of stored numbers with
+/// no division. Parallel planes have `m = 0`, both sides read zero, and that is
+/// refused.
+fn do_two_planes_along_the_axis_meet_inside(
+    pipe: &rcad_geom::Cylinder,
+    one: &Plane,
+    other: &Plane,
+) -> bool {
+    let origin = exactly(pipe.axis().origin().coordinates());
+    let [one_normal, other_normal] = [one, other].map(|flat| exactly(flat.normal().components()));
+    let [one_offset, other_offset] = [(one, one_normal), (other, other_normal)]
+        .map(|(flat, normal)| Interval::exactly(flat.offset()) - dot(normal, origin));
+    let meet = cross(one_normal, other_normal);
+    let [towards_one, towards_other] = [cross(other_normal, meet), cross(meet, one_normal)];
+    let off_the_axis: [Interval; 3] = core::array::from_fn(|axis| {
+        one_offset * towards_one[axis] + other_offset * towards_other[axis]
+    });
+    let radius = Interval::exactly(pipe.radius());
+    let squared = dot(meet, meet);
+    (dot(off_the_axis, off_the_axis) - radius * radius * squared * squared).sign() == Decision::Neg
 }
 
 /// Whether `cuts` are exactly two pipes whose axes run the same way, each cut
