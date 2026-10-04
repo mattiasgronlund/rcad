@@ -803,9 +803,10 @@ fn every_bend_this_target_draws_comes_back_from_its_own_file() {
 /// Turned about `z` all 124 are written and read back. Turned about `x` or `y`
 /// by 2.5, 2.8, 3.2, 3.3, 3.7, 4.1 or 4.6 radians, in place or moved, the
 /// reader refuses the file with `CannotNameWhichPieceOfACrossingThisIs` —
-/// 28 bends, the same angles about either axis — and turned about `y` by 5.0
-/// and moved, the writer refuses the seam, the quarter of the inner equator.
-/// Neither was traced (`docs/decisions.md` §241.6).
+/// 28 bends, the same angles about either axis — which was not traced
+/// (`docs/decisions.md` §241.6). The writer writes all 372: turned about `y`
+/// by 5.0 and moved, it refused the seam until Q843 looked further for its
+/// centre (`a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file`).
 #[test]
 fn how_often_a_turned_bend_comes_back_from_its_own_file() {
     let (mut bends, mut writer_refused, mut reader_refused) = (0, 0, Vec::new());
@@ -842,12 +843,45 @@ fn how_often_a_turned_bend_comes_back_from_its_own_file() {
         "{bends} turned bends: {writer_refused} refused by the writer, {} by the reader",
         reader_refused.len()
     );
-    assert_eq!((bends, writer_refused, reader_refused.len()), (372, 1, 28));
+    assert_eq!((bends, writer_refused, reader_refused.len()), (372, 0, 28));
     assert!(
         reader_refused
             .iter()
             .all(|why| why.contains("CannotNameWhichPieceOfACrossingThisIs")),
         "{reader_refused:?}"
+    );
+}
+
+/// The one bend of [`how_often_a_turned_bend_comes_back_from_its_own_file`]
+/// the writer refused, ring seven and tube one turned about `y` by `5.0` and
+/// moved by `(3, 5, 10)`, is written and comes back the same, every located
+/// number bit for bit.
+///
+/// **Its seam's plane reads back from one centre the reader holds, and it is
+/// twenty steps out.** The plane's offset is the turned normal dotted with the
+/// move in plain `f64`, `32` ulps from the ring's centre dotted and rounded
+/// once, and of every `f64` centre the reader could hold on the ring, the one
+/// it reads back from is `23` steps of `x` and `19` of `z` from the ring's
+/// centre, at `15.88` of the sixteen units the reader allows
+/// (`a_turned_bends_seam_has_one_centre_its_plane_reads_back_from` in
+/// `write.rs`). The writer stepped four and refused the seam by name (Q843).
+#[test]
+fn a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file() {
+    let turned = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis"));
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_quarter_bend(&mut model, 7.0, 1.0).expect("a bend fits this model");
+    model
+        .place_solid(solid, &turned)
+        .expect("the key came from this model");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}, {:?}",
+        rcad_step::write(&model, "a turned bend").err()
     );
 }
 
