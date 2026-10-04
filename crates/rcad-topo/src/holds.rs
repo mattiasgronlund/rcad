@@ -54,7 +54,10 @@ use rcad_geom::{
     WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS, intersect,
     which_two_surfaces_a_run_is_between,
 };
-use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
+use rcad_predicates::expansion::{
+    difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
+    two_product,
+};
 use rcad_predicates::{
     Decision, Filtered, Interval, Level, Measures, ORIENT3D, Point as PredicatePoint, Policy,
     Predicate, ProvenanceLog, Record, orient2d,
@@ -1999,14 +2002,14 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         Surface::Cone(cone) => {
             let apex = PredicatePoint::from(cone.apex().coordinates());
             let mut behind = Vec::new();
-            let mut through_the_apex = 0;
+            let mut through_the_apex = Vec::new();
             for cut in cuts {
                 let Some(flat) = cut.surface.as_plane() else {
                     return false;
                 };
                 let sits = flat.side_of_point(apex);
                 if sits == Decision::Zero {
-                    through_the_apex += 1;
+                    through_the_apex.push(flat);
                     continue;
                 }
                 if sits == cut.kept {
@@ -2017,12 +2020,9 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                 }
                 behind.push(flat);
             }
-            if through_the_apex > 1 {
-                return false;
-            }
-            match behind.as_slice() {
-                [] => true,
-                [flat] => {
+            match (through_the_apex.as_slice(), behind.as_slice()) {
+                ([] | [_], []) => true,
+                ([] | [_], [flat]) => {
                     let not_side_by_side = cuts
                         .iter()
                         .filter_map(|cut| cut.surface.as_plane())
@@ -2030,7 +2030,8 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                         .count();
                     not_side_by_side <= 1 && cone.is_cut_in_a_closed_curve_by(flat) == Some(true)
                 }
-                [_, _, ..] => false,
+                ([one, other], []) => do_two_planes_through_the_apex_meet_inside(cone, one, other),
+                ([] | [_], [_, _, ..]) | ([_, _], [_, ..]) | ([_, _, _, ..], _) => false,
             }
         }
         Surface::Cylinder(pipe) => {
@@ -2038,6 +2039,142 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         }
         Surface::Torus(_) | _ => false,
     }
+}
+
+/// Whether the line two planes through `cone`'s apex meet in lies **strictly
+/// inside** the cone; `false` when it lies on it or outside it, when the two are
+/// one plane, and when the sign could not be settled.
+///
+/// Both planes hold the apex, so the line runs through it along `m = n₁ × n₂`,
+/// the cross product of the two stored normals. The cone's own sign at the
+/// apex plus `m` is `|m × w|² − s²(m·w)²` for `w` the stored axis direction and
+/// `s` the slope — negative inside, as [`side_of_surface`] reads a cone — and
+/// asking it of `m` rather than of a point builds nothing that rounds.
+/// [`WhereTwoPlanesThroughTheApexMeet`] settles it through the cascade, exactly
+/// when the interval cannot. It is even in `m`, so it says nothing of which nappe
+/// and needs to say nothing: the line runs through both, one ray in each.
+///
+/// Only [`Decision::Neg`] is followed. [`Decision::Zero`] is a line along a
+/// ruling, or `m` nothing at all, which is two planes that are one;
+/// [`Decision::Pos`] is a line outside the cone, the strip's two sheets in
+/// `two_planes_through_the_apex_leave_a_nappe_in_two_sheets`. An
+/// [`Decision::Undecidable`] sign costs a refusal, never a guess.
+fn do_two_planes_through_the_apex_meet_inside(
+    cone: &rcad_geom::Cone,
+    one: &Plane,
+    other: &Plane,
+) -> bool {
+    let (sign, _) = rcad_predicates::decide(&WhereTwoPlanesThroughTheApexMeet {
+        one: one.normal().components(),
+        other: other.normal().components(),
+        along: cone.axis().direction().components(),
+        slope: cone.slope(),
+    });
+    match sign {
+        Decision::Neg => true,
+        Decision::Zero | Decision::Pos | Decision::Undecidable { .. } => false,
+        other => panic!("a sign came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// The cone's own sign along the line two planes through its apex meet in:
+/// `|m × w|² − (s·(m·w))²` for `m = n₁ × n₂`, the slope taken inside the
+/// square as `how_a_plane_leans_against_a_cone` takes it.
+///
+/// Degree eight in the stored numbers. The exact level carries every degree of
+/// it in expansions and gives up, as [`SquareToTheAxis`] does, where a product
+/// would round or a sum overflow.
+struct WhereTwoPlanesThroughTheApexMeet {
+    one: [f64; 3],
+    other: [f64; 3],
+    along: [f64; 3],
+    slope: f64,
+}
+
+impl Predicate for WhereTwoPlanesThroughTheApexMeet {
+    fn name(&self) -> &'static str {
+        WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET
+    }
+
+    fn on_floats(&self) -> Option<Filtered> {
+        None
+    }
+
+    fn on_intervals(&self) -> Interval {
+        let meet = cross(exactly(self.one), exactly(self.other));
+        let along = exactly(self.along);
+        let sideways = cross(meet, along);
+        let up = Interval::exactly(self.slope) * dot(meet, along);
+        dot(sideways, sideways) - up * up
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let (one, other, along) = (self.one, self.other, self.along);
+        let mut meet: [Vec<f64>; 3] = Default::default();
+        for (axis, component) in meet.iter_mut().enumerate() {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            let (entries, used) =
+                difference_of_two_products(one[next], other[after], one[after], other[next])?;
+            *component = entries[..used].to_vec();
+        }
+        let mut total = Vec::new();
+        let mut up = Vec::new();
+        for axis in 0..3 {
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            let sideways = added(
+                &scaled(&meet[next], along[after])?,
+                &scaled(&meet[after], -along[next])?,
+            );
+            total = added(&total, &multiplied(&sideways, &sideways)?);
+            up = added(&up, &scaled(&meet[axis], along[axis])?);
+        }
+        let up = scaled(&up, self.slope)?;
+        let squared: Vec<f64> = multiplied(&up, &up)?.iter().map(|entry| -entry).collect();
+        match expansion_sign(&added(&total, &squared)) {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            Decision::Undecidable { .. } => None,
+            other => {
+                panic!("exact arithmetic came back with a decision nothing here knows: {other:?}")
+            }
+        }
+    }
+}
+
+/// The name the cone's sign along where two planes through its apex meet goes
+/// by in provenance records.
+const WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET: &str =
+    "where two planes through a cone's apex meet";
+
+/// `expansion` times `factor`, exactly; `None` where one of the products would
+/// round ([`product_is_exact`]).
+fn scaled(expansion: &[f64], factor: f64) -> Option<Vec<f64>> {
+    if !expansion
+        .iter()
+        .all(|&entry| product_is_exact(entry, factor))
+    {
+        return None;
+    }
+    let mut out = vec![0.0; 2 * expansion.len()];
+    let used = scale_expansion(expansion, factor, &mut out);
+    out.truncate(used);
+    Some(out)
+}
+
+/// Two expansions multiplied out, exactly: every entry of one scaling the
+/// other, all added up. `None` where a product would round.
+fn multiplied(left: &[f64], right: &[f64]) -> Option<Vec<f64>> {
+    right.iter().try_fold(Vec::new(), |total, &factor| {
+        Some(added(&total, &scaled(left, factor)?))
+    })
+}
+
+fn added(left: &[f64], right: &[f64]) -> Vec<f64> {
+    let mut sum = vec![0.0; left.len() + right.len()];
+    let used = expansion_sum(left, right, &mut sum);
+    sum.truncate(used);
+    sum
 }
 
 /// Whether the part of `pipe` in front of every cut is one piece because two
