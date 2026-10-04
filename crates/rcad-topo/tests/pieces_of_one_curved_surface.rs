@@ -11,10 +11,12 @@
 //!    picker's plane ran through both boxes, and the second union refused with
 //!    [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`]. The picker now
 //!    clears each corner grown by the room a re-solved corner is allowed.
-//! 2. **The cone pieces are never joined.** Behind the picker, the second union
-//!    refuses with [`rcad_topo::Error::AFaceMeetsItsNeighbourOnItsOwnSurface`]:
-//!    nothing folds pieces of one curved surface into one face the way pieces of
-//!    one plane are folded. That one is still open.
+//! 2. **The cone pieces were never joined.** Behind the picker, the second union
+//!    refused with [`rcad_topo::Error::AFaceMeetsItsNeighbourOnItsOwnSurface`]:
+//!    nothing folded pieces of one curved surface into one face the way pieces
+//!    of one plane are folded. The fuse now bakes pieces of one cone as one face
+//!    (row Q898), and behind them is a third gap, the frustum's floor, which
+//!    `holds.rs` cannot ask what it holds. That one is still open.
 //!
 //! # The risk the picker's room carries
 //!
@@ -28,7 +30,7 @@ mod cones;
 
 use rcad_geom::{Deflection, EdgeRun, Isometry, Picker, Scale, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey};
 
 use cones::a_frustum;
 
@@ -206,27 +208,75 @@ fn a_near_semicircle_keeps_its_centre_behind_its_picker() {
     }
 }
 
-/// With the centre kept behind, the arcs the room can be granted to get past
-/// the picker on the way back in, and reach the cone pieces.
+/// With the centre kept behind, the arcs the room can be granted get past the
+/// picker on the way back in, past the cone pieces, and stop at the frustum's
+/// floor: the disc at `z = 4`, its circle cut in two where the wall's plane
+/// crosses it, cannot say whether it holds a point.
 ///
-/// `t = 2⁻³⁰` and `2⁻⁴⁰` refused with
+/// `t = 2⁻³⁰` and `2⁻⁴⁰` refused at the block floor's picker with
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] before the room. `2⁻⁴⁴` and
 /// `2⁻⁴⁵` still do: there the room would take the plane past the centre, so it
 /// is not granted, and the re-solved corners straddle the picker as before.
+///
+/// **The cone pieces are passed in two steps** (row Q898). The first union keeps
+/// the cone as five faces, cut apart by the wall's plane and by the block's
+/// floor and top, and they were refused
+/// [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`] until pieces of one cone
+/// were baked as one face. Baked as one, they were refused `Undecidable` on
+/// "order along a crossing" at every `t`: the corner where the wall's cut meets
+/// the floor circle was read out of the model, exact, while the wall's plane,
+/// still a crossing of the joined face, met that circle at a point solved a few
+/// ulps away. The corner now keeps the wall's plane from the run of the edge
+/// left out, is solved from the three, and is that meet.
+///
+/// **What stops it now is the floor, and the first union's floor on its own
+/// refuses the same way**, before any second fuse: one of its two arcs is the
+/// longer, so its picker has the circle's centre in front, and `holds.rs`
+/// takes a lowered picker only with the centre behind.
 #[test]
-fn a_frustum_and_a_wall_near_its_axis_taken_back_in_reach_the_unjoined_cone_pieces() {
+fn a_frustum_and_a_wall_near_its_axis_taken_back_in_stop_at_the_floor_disc() {
     for exponent in [1, 10, 30, 40, 42] {
         let t = 2.0_f64.powi(-exponent);
         let (model, united) =
             a_frustum_united_with_a_wall_near_its_axis(t).expect("the first union answers");
+        let floor = the_floor_disc(&model, &united);
         let refusal = the_union_again_with_a_far_cube(&model, &united)
-            .expect_err("the cone pieces are not joined yet");
+            .expect_err("the floor disc cannot say what it holds");
         assert!(
-            matches!(refusal, Error::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }),
-            "t = 2^-{exponent}: the second union refused before reaching the cone pieces: \
+            matches!(refusal, Error::AFaceTrimmedByACurveThisCannotFollow { face } if face == floor),
+            "t = 2^-{exponent}: the second union refused before reaching the floor disc: \
              {refusal:?}"
         );
+        let view = model.solid(united[0]).expect("this model made the key");
+        let asked = view.face_holds_the_point(
+            floor,
+            PredicatePoint::from([0.0, 0.0, 4.0]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(asked, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == floor),
+            "t = 2^-{exponent}: the floor disc said what it holds at its centre: {asked:?}"
+        );
     }
+}
+
+/// The one face of the union on the plane `z = 4`, the frustum's floor.
+fn the_floor_disc(model: &Model, solids: &[SolidKey]) -> FaceKey {
+    let floors: Vec<FaceKey> = solids
+        .iter()
+        .flat_map(|&solid| model.solid(solid).expect("this model made the key").faces())
+        .filter(|face| {
+            face.surface()
+                .as_plane()
+                .is_some_and(|flat| flat.normal().z().abs() == 1.0 && flat.offset().abs() == 4.0)
+        })
+        .map(|face| face.key())
+        .collect();
+    let [floor] = floors.as_slice() else {
+        panic!("the union has one floor at z = 4, not {}", floors.len());
+    };
+    *floor
 }
 
 /// A frustum about `z` and a block over `z ∈ [5, 8]` whose wall leans across
