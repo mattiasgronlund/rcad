@@ -3099,9 +3099,9 @@ fn how_much_space_it_encloses(
 /// that exactly. Two bars stacked on one pipe, the upper one written in its own
 /// frame, leave the wall as two spellings either side of the circle between
 /// them. Left apart, that circle is an edge with the one surface on both sides,
-/// and every later fuse of the answer asks `intersect` about it, hears
-/// `SameSurface` and refuses `AFaceMeetsItsNeighbourOnItsOwnSurface`
-/// (`docs/decisions.md` §231.5, §325.5). Joined, the face takes the lowest of
+/// which every later fuse of the answer has to bake the two faces as one to get
+/// past (`docs/decisions.md` §231.5, §325.5, `faces_baked_as_one` in
+/// [`bake`](super::bake)). Joined, the face takes the lowest of
 /// its spellings ([`Assembly::rings_of_each_joined_face`]) and every closed
 /// side read off another is read again
 /// ([`Assembly::turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way`]).
@@ -3132,7 +3132,7 @@ fn one_cone_or_pipe_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
 }
 
 /// Whether two surfaces are one point set, however each is written.
-fn one_surface(one: &Surface, other: &Surface) -> bool {
+pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
     name_of_the_surface_either_way_round(one) == name_of_the_surface_either_way_round(other)
 }
 
