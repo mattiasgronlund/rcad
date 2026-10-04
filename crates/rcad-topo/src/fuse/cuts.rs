@@ -420,6 +420,7 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
         Surface::Plane(_) => sides().find_map(|side| match &side.across {
             Surface::Cylinder(pipe) => Some(axis_numbers(pipe.axis())),
             Surface::Cone(cone) => Some(axis_numbers(cone.axis())),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => None,
             _ => None,
         })?,
         Surface::Sphere(_) | Surface::Torus(_) => return None,

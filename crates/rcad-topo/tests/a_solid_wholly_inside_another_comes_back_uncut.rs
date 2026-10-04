@@ -48,30 +48,30 @@ use cones::{a_frustum, a_pointed_cone};
 
 #[test]
 fn a_frustum_inside_a_bar_fuses_all_six_ways_into_one_of_the_two() {
-    every_fuse_of(APair::AFrustumInABar);
+    every_fuse_of(APair::FrustumInABar);
 }
 
 #[test]
 fn a_pointed_cone_inside_a_bar_fuses_all_six_ways_into_one_of_the_two() {
-    every_fuse_of(APair::APointedConeInABar);
+    every_fuse_of(APair::PointedConeInABar);
 }
 
 #[test]
 fn a_bar_inside_a_ball_fuses_all_six_ways_into_one_of_the_two() {
-    every_fuse_of(APair::ABarInABall);
+    every_fuse_of(APair::BarInABall);
 }
 
 #[test]
 fn a_box_inside_a_ball_fuses_all_six_ways_into_one_of_the_two() {
-    every_fuse_of(APair::ABoxInABall);
+    every_fuse_of(APair::BoxInABall);
 }
 
 #[derive(Clone, Copy, Debug)]
 enum APair {
-    AFrustumInABar,
-    APointedConeInABar,
-    ABarInABall,
-    ABoxInABall,
+    FrustumInABar,
+    PointedConeInABar,
+    BarInABall,
+    BoxInABall,
 }
 
 /// What one solid of a pair is: its volume, and how many of its faces are flat
@@ -85,19 +85,19 @@ impl APair {
     /// The outer solid and the inner one.
     fn built(self, model: &mut Model) -> [SolidKey; 2] {
         match self {
-            Self::AFrustumInABar => {
+            Self::FrustumInABar => {
                 let bar = model
                     .add_round_bar(4.0, 6.0, &at(0.0, 0.0, 1.0))
                     .expect("a bar of radius four");
                 [bar, a_frustum(model, 0.5, 2.0, 6.0)]
             }
-            Self::APointedConeInABar => {
+            Self::PointedConeInABar => {
                 let bar = model
                     .add_round_bar(3.0, 6.0, &at(0.0, 0.0, -1.0))
                     .expect("a bar of radius three");
                 [bar, a_pointed_cone(model, 0.5, 4.0)]
             }
-            Self::ABarInABall => {
+            Self::BarInABall => {
                 let ball = model
                     .add_ball(5.0, &at(0.0, 0.0, 0.0))
                     .expect("a ball of radius five");
@@ -106,7 +106,7 @@ impl APair {
                     .expect("a bar of radius three");
                 [ball, bar]
             }
-            Self::ABoxInABall => {
+            Self::BoxInABall => {
                 let ball = model
                     .add_ball(3.0, &at(0.0, 0.0, 0.0))
                     .expect("a ball of radius three");
@@ -133,7 +133,7 @@ impl APair {
         };
         match self {
             // `πh(R² + Rr + r²)/3` with `h = 4`, `R = 3`, `r = 1`.
-            Self::AFrustumInABar => [
+            Self::FrustumInABar => [
                 a_bar(4.0, 6.0),
                 What {
                     volume: PI * 4.0 * (9.0 + 3.0 + 1.0) / 3.0,
@@ -141,15 +141,15 @@ impl APair {
                 },
             ],
             // `πr²h/3` with `r = 2`, `h = 4`.
-            Self::APointedConeInABar => [
+            Self::PointedConeInABar => [
                 a_bar(3.0, 6.0),
                 What {
                     volume: PI * 4.0 * 4.0 / 3.0,
                     faces: [1, 1],
                 },
             ],
-            Self::ABarInABall => [a_ball(5.0), a_bar(3.0, 4.0)],
-            Self::ABoxInABall => [
+            Self::BarInABall => [a_ball(5.0), a_bar(3.0, 4.0)],
+            Self::BoxInABall => [
                 a_ball(3.0),
                 What {
                     volume: 8.0,
