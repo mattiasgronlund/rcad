@@ -718,12 +718,12 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 /// Whether a ring's face trimmed by two planes, one edge along each, holds
 /// `point`, which is taken as being on the ring (`docs/decisions.md` §243).
 ///
-/// **Only planes through the ring's axis are followed.** Such a plane cuts the
-/// ring in two circles round the tube, each at one angle round the axis. With
-/// one of those circles from each plane as its only edges, the face is one of
-/// the two stretches of ring between them, and it is the part of the ring in
-/// front of both planes exactly when that stretch is less than a half-turn.
-/// So:
+/// **Planes through the ring's axis are followed, and one plane square to
+/// it.** A plane through the axis cuts the ring in two circles round the tube,
+/// each at one angle round the axis. With one of those circles from each plane
+/// as its only edges, the face is one of the two stretches of ring between
+/// them, and it is the part of the ring in front of both planes exactly when
+/// that stretch is less than a half-turn. So:
 ///
 /// 1. **Which side of each plane the face keeps** is read off the way its wire
 ///    walks the circle on that plane, by the closed-edge rule
@@ -754,12 +754,25 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 /// for §168's reason: a movement keeps each of these facts and rounds the
 /// numbers they are read from.
 ///
+/// **A plane square to the axis that cuts the ring in two circles round the
+/// axis** — the top half of a ring on `z = 0` — splits the ring less those
+/// circles into two halves, one each side of it, and each half has both
+/// circles as its edges. So a face whose only edges are those two circles is
+/// one of the halves, and step 1's read says which, at each circle. Both edges
+/// must be along the one stored plane, its normal along the axis
+/// ([`lie_along_one_line`]), and the two sides must agree: a wire keeping one
+/// side at one circle and the other side at the other walks its two circles the
+/// same way round, which no half's does. Then `point` is asked against that
+/// plane alone. A plane that rests on the tube touches it along one circle, and
+/// step 1 finds no way to read a side there (`docs/decisions.md` §243.8).
+///
 /// # Errors
 ///
-/// [`Error::AFaceMissesPartOfWhereItsSurfacesCross`] when a plane does not hold
-/// the ring's axis, a circle is not in front of the other plane, or the wire
-/// keeps one plane's two sides, which is what the general rule gave every face
-/// of this shape.
+/// [`Error::AFaceMissesPartOfWhereItsSurfacesCross`] when a plane neither
+/// holds the ring's axis nor is square to it, when one plane is square to it
+/// and the other is not, or is another plane, a circle is not in front of the
+/// other plane, or the wire keeps one plane's two sides, which is what the
+/// general rule gave every face of this shape.
 /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
 /// cannot, and [`Error::Undecidable`] when a side, or whether a plane holds the
 /// axis, could not be settled.
@@ -774,6 +787,7 @@ fn what_a_ring_face_between_two_planes_holds(
         panic!("only a face on a ring is sent here, and this one is on {ring:?}");
     };
     let mut cuts: Vec<Cut> = Vec::with_capacity(2);
+    let mut square_to_the_axis = 0;
     for coedge in face.wires().flat_map(WireView::coedges) {
         let edge = coedge.edge();
         let Some(across) = the_face_across(solid, face, edge)? else {
@@ -788,6 +802,14 @@ fn what_a_ring_face_between_two_planes_holds(
         };
         match how_the_axis_lies_on(flat, &torus) {
             Decision::Zero => (),
+            Decision::Pos | Decision::Neg
+                if lie_along_one_line(
+                    flat.normal().components(),
+                    torus.axis().direction().components(),
+                ) =>
+            {
+                square_to_the_axis += 1;
+            }
             Decision::Pos | Decision::Neg => return Err(refuse()),
             Decision::Undecidable { enclosure } => {
                 return Err(gave_up_on_the_axis(flat, &torus, enclosure));
@@ -836,6 +858,13 @@ fn what_a_ring_face_between_two_planes_holds(
             cuts.len()
         );
     };
+    match square_to_the_axis {
+        0 => (),
+        2 if one.surface == other.surface && one.kept == other.kept => {
+            return held_in_front_of_all(core::slice::from_ref(one), point);
+        }
+        _ => return Err(refuse()),
+    }
     if let (Some(first), Some(second)) = (one.surface.as_plane(), other.surface.as_plane())
         && the_normals_lie_along_one_line(first, second)
     {
