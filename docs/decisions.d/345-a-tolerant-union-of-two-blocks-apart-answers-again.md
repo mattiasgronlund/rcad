@@ -1,138 +1,180 @@
-## 345. A tolerant union of two blocks apart answers again — 2026-09-28
+## 345. A tolerant union of two blocks apart answers again — 2026-10-04
 
-*Queue row Q429 (Q122, then Q202). Lane
-`lane-q429-meets-boxed-tight-in-place-the-meets`, off `82f20827`. **Not
-finished: the lane stopped where its brief says to stop, on a pin outside its
-write set.** §281.2's checked step is rebuilt and wired into
-`place_the_meets` alone, as §281.3's second probe was. It also moves both pins
-in `a_corner_with_four_planes_round_it.rs`, a file §281 predates and this row
-does not own. One of the two moves is a right answer lost, and a change to the
-fold in `arrange.rs` gives it back. The other is the gap that file pins
-closing, and it cannot be turned round from here. So the row goes out again
-with that file in its write set. The eight moved tests §281.3 lists have not
-been answered for yet.*
+*Queue row Q438 (Q122, then Q202 and Q429). Lane
+`lane-q438-a-tolerant-union-of-two-blocks-apart`, off `aa08c916`, after §395.
+Q429's lane, off `82f20827`, drafted this section and stopped on a pin
+outside its write set. This is the section rewritten from what was measured on
+the newer base. **The union answers again, with the two blocks, their volume
+and a certified sweep that passes, and no other test in the workspace
+moves.** §281.2's checked step narrows the box round a meet of three planes,
+and the narrowed box is asked **one question only**: whether every point of
+the meet lies inside the corner's room, in `a_corner_is_this_place`. The node
+a meet becomes when it does not fold keeps Cramer's box. Wired in as the
+node's own box, as §281.3's probe and Q429's commit had it, the narrowed box
+moved 13 tests on this base, most of them to a refusal or to no solid. So it
+is not wired in there.*
 
-### 345.1 What is built
+### 345.1 The narrowed box
 
-`MeetOfThree::boxed_tight` in `crates/rcad-geom/src/three_surfaces.rs`. It
-calls `meet_of_three_surfaces` and, where all three surfaces are planes,
-narrows the box round their meet by §281.2's one step. The step starts from
-the middle of the box, takes `offset − normal · guess` per plane and the cross
-products and determinant as `Nearly` (exact, or exact but for what falls off
-the bottom of the range, which the floor's subnormal offset needs). The sum
-is in intervals, and what comes back is where the stepped box and the first
-box overlap. An empty overlap panics, because both hold the meet. Where a
-product overflows, or the determinant's enclosure reaches zero, the first box
-comes back as it was. The planes are narrowed in `meet_of_three_surfaces`'s
-fixed order, so the box does not depend on argument order (§31.3).
-
-It is an associated function on `MeetOfThree` and not a free function beside
-`meet_of_three_surfaces` because `rcad-geom/src/lib.rs`, which re-exports the
-free ones, is not in this row's write set. `MeetOfThree` is already exported.
+`MeetOfThree::boxed_tight` in `crates/rcad-geom/src/three_surfaces.rs`, Q429's
+code (`472f7420`, cherry-picked). Since then it is a method that narrows a
+meet `meet_of_three_surfaces` already worked out, so the fold's caller solves
+Cramer once and keeps both boxes. Where the three surfaces are planes, it
+takes the middle of Cramer's box as a guess and works out
+`offset − normal · guess` per plane, and the cross products and the
+determinant, as `Nearly`. That is exact, or exact but for what falls off the
+bottom of the range, which the floor's subnormal offset in §281.1 needs. It
+sums the step in intervals and hands back where the stepped box and Cramer's
+box overlap. Both hold the meet, so the overlap is sound, and an empty one
+panics. Where a product overflows, or the determinant's enclosure reaches
+zero, Cramer's box comes back as it was. The planes are narrowed in
+`meet_of_three_surfaces`'s fixed order, so the box does not depend on argument
+order (§31.3).
 
 `a_meet_of_two_walls_nearly_parallel_is_boxed_to_a_few_ulps_and_still_holds_it`
 takes a floor and two walls `1e-6`, `1.5e-6` and `3e-6` off parallel. Cramer's
-box is wider than `1e-12` and the narrowed one narrower than `1e-14` and inside
-it. Each side of the narrowed box is checked to hold the meet exactly: along
-an axis the meet is `D / det`, so it is inside `[lo, hi]` when `D − lo·det` and
-`hi·det − D` both have `det`'s sign. A box `1e-12` past the narrowed one fails
-that check, so the check can fail. `just t -p rcad-geom
-a_meet_of_two_walls_nearly_parallel`: passes.
+box is wider than `1e-12`, and the narrowed one is narrower than `1e-14` and
+inside it. Each side of the narrowed box is checked exactly to hold the meet.
+Along an axis the meet is `D / det`, so it is inside `[lo, hi]` when
+`D − lo·det` and `hi·det − D` both have `det`'s sign. A box `1e-12` past the
+narrowed one fails that check, so the check can fail.
+
+On the Q122 draw the narrowed box is `[5.0, 5.000000000000001] ×
+[−1.1394645277447636e-33, −1.1394645047858895e-33] × [−3.5384182432833117e-39,
+−3.538418243283311e-39]`, bit for bit §281.2's. Cramer's box there is
+`2.860170061287985e-10` wide and the corner's room is `7.37e-14` either side
+of it. That was read with a temporary log in `a_corner_is_this_place`, taken
+back out (345.3).
 
 **One step is enough at these angles and not at every angle.** The step's
 error is the first box's width times about `ε / det`. At `det ≈ 3e-6` that
 factor is `3e-11`. At `det ≈ 1e-12` the first box is about `1e-4` wide and
-one step leaves about `1e-8`. That is worked from the formula, not measured.
-Nothing here needs more, and a second step is the same thirty lines again.
+one step leaves about `1e-8`. That is worked from the formula and was not
+measured. Nothing here needs more.
 
-### 345.2 The pin outside the write set
+### 345.2 Where the narrowed box is asked, and where it is not
 
-`crates/rcad-topo/tests/a_corner_with_four_planes_round_it.rs` came after §281
-(Q240, `034111e9`, `4b6e3e2e`). Its two tests unite a pyramid with a cube
-clear of it, under `Policy::certified()`, 36 ways each. The pyramid's base is
-bent at one corner by a fold, so four planes meet at its apex.
+Q429's commit asked `boxed_tight` in `place_the_meets` in place of
+`meet_of_three_surfaces`, so every node of three planes carried the narrowed
+box. On `aa08c916`, with §395's fold, `mise exec -- just t -p rcad-geom -p
+rcad-topo --no-fail-fast` gave `2311 tests run: 2298 passed, 13 failed, 9
+skipped`:
 
-- **A fold of 1/16**, pinned as all 36 answered with two solids.
-- **A fold of 1/64**, pinned as all 36 refused on "order along a crossing". Its
-  doc calls that a gap and says the change that closes it turns the test
-  round.
-
-Measured with a probe: a copy of that file, untracked and deleted after, with
-a test that runs both spellings, the six turns and the three axes at height
-one and counts. An answer counts as right when it has two solids, a volume
-within `1e-9` of the pyramid's plus one, an empty log, and passes
-`Model::validate` under `Policy::certified()`. Every answer in both rows below
-was right.
-
-| Fold | Narrowed, fold as on `main` | Narrowed, fold without the overlap |
+| Test | On the base | With the node narrowed |
 |---|---|---|
-| 1 | 33 of 36 | 36 of 36 |
-| 1/4 | 20 | 36 |
-| 1/16 | 12 | 36 |
-| 1/64 | 2 | 36 |
-| 1/256 | 1 | 25 |
-| 1/4096 | 0 | 4 |
+| `a_meet_further_from_a_corner_than_rounding_reaches_is_not_folded_into_it` (Q122) | refused | `ok: 1`, two solids |
+| `a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_united_…` | united | refused, two regions of one face |
+| `a_pyramid_whose_apex_meets_lie_inside_its_room_but_miss_its_box_…` | united | refused at 1/16, two regions of one face |
+| `a_pyramid_whose_base_corner_lies_past_its_own_rounding_…` | united | refused at 1/4096, two regions of one face |
+| `turning_a_pair_makes_what_the_two_share_depend_on_…` | `Solids(2)` | `NotASolid` |
+| `how_often_one_pair_of_turned_boxes_leaves_such_an_edge` | 104 | 207 |
+| `an_ell_and_a_comb_turned_half_a_turn_unite_…` | answers | refused |
+| `the_union_of_this_pair_has_a_ring_that_goes_through_one_corner_twice` | the ring | no ring |
+| `a_wedge_cut_with_the_turned_knife_first_is_refused_by_name` | by name | `Undecidable`, a point inside a piece |
+| `a_comb_standing_in_a_block_fuses_turned_as_it_does_upright` | answers | not a solid, all six |
+| `a_frame_with_a_block_over_one_corner_fuses_turned_as_it_does_upright` | answers | not a solid, all six |
+| the two frustum tallies in `a_plane_cut_along_a_cones_other_nappe.rs` | as pinned | moved |
 
-The file's own table, from §301.6's probe over 108 per fold with three
-heights, has `main` at 108, 103, 99, 0, 0 and 0. That table was not re-run
-here.
+The last two `a_turned_piece_…` tests are in a file this row does not own,
+and they came after §281.3's list of eight.
 
-**The first column is a right answer lost, 24 times of 36 at the pinned fold.**
-The refusals named "two regions of one face could not be told apart" (10 at
-1/16) and "order along a crossing" (14). `a_corner_is_this_place` folded a meet
-into a corner only when the meet's box **touched the corner's own box** and
-lay inside that box grown by `what_writing_the_corner_down_cost`. Cramer's box
-was wide enough to touch whatever it lay near. A box a few ulps wide round the
-meet of one face's three planes need not touch the apex's box, which `bake`
-solved from another triple. So the meet stayed a node beside the corner.
+**The three pyramids move because the fold's reach reads the narrowed box.**
+A temporary switch made the reach test alone read the narrowed box, with every
+node keeping Cramer's. All three pyramid tests failed the same way. §356's
+branch folds a meet of three of the corner's own planes as long as its box
+reaches the corner's room. At a fold of 1/64 the meet of the three stored
+planes is 1.6 rooms past the apex's box (§356). Cramer's box round it reaches
+the room, and a box a few ulps wide round it does not. So the meet stays a
+node, and the face refuses. That is §395.4's gap made wider, and Q848 is the
+row for it.
 
-That reading is inferred from the tally moving and was not traced meet by
-meet. What was measured is its consequence: with the touch taken out of the
-fold, and the room test left as it was, the second column. `just t -p
-rcad-geom -p rcad-topo --no-fail-fast` then passes the 1/16 pin again, and
-moves nothing that the narrowing alone did not already move.
+**The other ten move only when the node itself keeps the narrowed box.** With
+the narrowed box asked by the room test alone (345.3), none of them moves.
+Why each one moves when the node is narrowed was not traced. §281.4's reason
+was that a tolerant policy merges only points whose boxes touch, so narrower
+boxes merge fewer. That reason cannot be the whole story: all but the Q122
+draw run under `Policy::certified()`, where two touching boxes are not merged
+but refused (`merge_points_that_are_one_point` refuses on an undecided order).
+**So no pin moves to a worse answer here, and none needs the argument §16.10
+asks of one.** The node keeps Cramer's box.
 
-The touch is not what §253 argued for. §253's argument is that inside the
-room a meet and a corner are one point written down two ways. The touch is
-left over from the fold before §253, which folded on a touch alone. So this
-lane keeps the change, and `a_corner_is_this_place`'s doc says why.
+**The room test is where the narrowing belongs.** §253's argument for the
+fold is that every point of the meet's box lies within the corner's
+rounding, so the meet and the corner are one point written down two ways. A
+narrower box that soundly holds the meet makes that argument for more meets
+and no different one. Since the narrowed box lies inside Cramer's, the one
+condition that reads it can only become true where it was false, and never
+the other way: the narrowing only adds folds. The reach and the count of places
+reaching the room still read Cramer's box, so §356's branch and §288's two
+places are exactly as §395 left them.
 
-**The second column turns the 1/64 pin round: 36 of 36 answer, all right.**
-That is the gap closing, which the file asks for. But the file is not this
-row's, so the pin stays where it was and the lane stops.
+### 345.3 What moves with the room test narrowed
 
-### 345.3 What moves, and what is not answered for
+`mise exec -- just t -p rcad-geom -p rcad-topo --no-fail-fast`, with the room
+test reading the narrowed box: `2311 tests run: 2310 passed (2 slow), 1
+failed, 9 skipped`. The one is the Q122 pin, now answering. `mise exec -- just
+t --workspace --no-fail-fast`: `2955 tests run: 2954 passed (2 slow), 1
+failed, 9 skipped`, the same one.
 
-With both changes, `just t -p rcad-geom -p rcad-topo --no-fail-fast` fails
-nine tests: the 1/64 pyramid above and §281.3's eight.
+A temporary log in `a_corner_is_this_place` recorded every call where the
+fold with the narrowed room test and the fold as on the base disagree, over
+the whole workspace run. There were 26, every one a fold the base did not
+make and none the other way. 16 were in
+`a_fused_draw_hands_its_provenance_back_through_the_door`, 8 in
+`every_seed_in_the_checked_in_corpus_is_fused_without_panicking` and 2 in the
+Q122 test. Cramer's box in them was from 1.3 times the half-room wide up to
+1.9 million times it, and in 6 of them the coordinates are near `2.4e21`.
 
-- the Q122 pin in `a_meet_folds_into_a_corner_only_as_far_as_rounding_reaches.rs`
-- `an_edge_with_one_face_along_it::how_often_one_pair_of_turned_boxes_leaves_such_an_edge`
-- `fuses_that_must_agree::turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first`
-- both tests in `the_turned_pair_whose_union_lost_a_face_one_way_round.rs`.
-  The first fails with "the ell against the comb answers", so the ell and the
-  comb now refuse where they answered.
-- `a_narrow_lune_from_a_pole_corner::a_wedge_cut_with_the_turned_knife_first_is_refused_by_name`
-- both frustum tallies in `a_plane_cut_along_a_cones_other_nappe.rs`
+The corpus replay prints its tallies. The same binary with the fold switched
+back to the base's gave `ok: 349, refused: 341, solids_made: 356`, and with
+the narrowed room test `ok: 350, refused: 340, solids_made: 358`. One more
+fuse answers, with two solids. The replay's both-ways check (`asked: 108`,
+`the same: 36`) did not move.
 
-**None of the eight was answered for**, and no pin in them moved. §281.4's
-explanation, that narrower boxes merge fewer points, was not checked against
-any of them. The Q122 draw's volume and a certified sweep of its answer were
-not run either. Only the pyramid rows above are measured.
+The pyramid pins all pass. They are the 324 unions at folds of 1/4, 1/16 and
+1/64, the 36 at 1/64 and height one, and the base-corner test. So does
+`a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused`: the
+narrowing closes none of §395.4's 5. The row's "12 of 36" and "36 of 36" were
+measured off `82f20827`, with the touch test still in, and do not describe
+this base.
 
-The fold change bears on the eight. A test §281.3 saw move might now move
-back, or differently. §281.3 measured without it, and this lane did not
-measure them one by one.
+### 345.4 The Q122 draw's answer
 
-### 345.4 What the next row needs
+`the_two_blocks_unite_with_their_volumes_and_pass_a_certified_sweep` reads
+the half of the draw the fuzz harness fuses, the same way the harness reads
+it. The fuse is a union under `Policy::tolerant` with working size 100. It
+answers with two solids. Their volume is `1999.9999999999993`, against
+`1999.9999999999995` for the two blocks before the fuse. That was read with a
+temporary print and taken back out, and the test holds them to within `1e-9`
+of each other, relatively. A sweep of the answer under
+`Policy::certified()` passes and records nothing.
 
-- `a_corner_with_four_planes_round_it.rs` in the write set. Its 1/64 test
-  turns round, and its doc's table and paragraph move with it.
-- A per-test answer for the eight, as Q429's brief asks: check first whether
-  each moved test's change comes from two points that used to merge now
-  staying apart, and then whether those points really are distinct.
-  `turning_a_pair_…`'s `NotASolid` and `an_edge_…`'s 104 → 207 are the two
-  that look worst.
-- Whether the 1/256 and 1/4096 refusals are the step running out (§345.1) or
-  something else. The narrowing helps them from 0 to 25 and 4 of 36, and does
-  not finish them.
+### 345.5 The tests, and what fails without the change
+
+- `a_tolerant_union_of_two_blocks_apart_answers_with_the_two_of_them` takes
+  the place of `a_meet_further_from_a_corner_than_rounding_reaches_is_not_folded_into_it`,
+  in the same file, and holds the harness's `ok: 1, refused: 0, solids_made:
+  2`.
+- `the_two_blocks_unite_with_their_volumes_and_pass_a_certified_sweep`, 345.4.
+- `a_meet_is_folded_when_its_tighter_box_lies_inside_the_corners_room_however_far_cramers_reaches`,
+  in `arrange.rs`'s `tests` module. On the cut `x = y` at the unit cube's
+  corner, a meet whose Cramer box reaches a thousand rooms is folded when the
+  tighter box reaches the room's edge, and is not when it reaches one step
+  past it, or when it is Cramer's.
+- `a_meet_of_two_walls_nearly_parallel_is_boxed_to_a_few_ulps_and_still_holds_it`,
+  345.1.
+
+With the room test reading Cramer's box again (`place.enclosure()` in
+place of `boxed_tight.enclosure()`), `mise exec -- just t -p rcad-topo
+--no-fail-fast -E 'test(/a_meet_is_folded_when_its_tighter_box|a_tolerant_union_of_two_blocks_apart_answers|the_two_blocks_unite_with_their_volumes/)'`
+gave `3 tests run: 0 passed, 3 failed`.
+
+### 345.6 What this leaves
+
+- **Q209** waits on this row and wants a narrower box to *order* two points
+  round a cap, not to fold one. Narrowing the node's box is what moved the
+  ten tests in 345.2. So that row should narrow only the comparison it needs,
+  and answer for those ten if it narrows more.
+- **Q848** holds §395.4's 5 pyramid unions. The narrowing does not reach them,
+  and narrowing the reach test as well would add more of the same kind
+  (345.2).
