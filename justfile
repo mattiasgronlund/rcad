@@ -10180,11 +10180,12 @@ check-plan-selftest:
     exit 0
 
 # The queue of `docs/decisions.md` §230: one file holding a row per open item,
-# and a fill that gives every free slot the highest ready row that fits. Three
-# slots is §372's number, down from §230.8's six. It lives here so that `queue
-# next` and the line `check-queue` prints on a pass count against the same one.
+# and a fill that gives every free slot the highest ready row that fits. Four
+# slots is §397.7's number, up from §372's three now that lane gates leave out
+# the slow tier; §230.8 had six. It lives here so that `queue next` and the line
+# `check-queue` prints on a pass count against the same one.
 queue_file := "docs/queue.md"
-queue_slots := "3"
+queue_slots := "4"
 
 # How many rows tagged `small` one lane takes at once (§352.4). Five small rows
 # of about ten minutes each fit the 45 minutes a lane is given (`lane.md`), with
@@ -10401,7 +10402,7 @@ queue mode="" *args:
                 if (n == "") { n = slots - running; if (n < 0) n = 0 }
                 n += 0
                 if (running + n > slots)
-                    printf "note: %d running and %d more is past the %d slots of §372\n", running, n, slots
+                    printf "note: %d running and %d more is past the %d slots of §397.7\n", running, n, slots
                 lanes_n = 0; taken_n = 0; skipped = 0
                 if (n > 0) {
                     m = 0
@@ -10997,7 +10998,7 @@ check-queue-selftest:
 
     got=$(q _queue-check "$dir/good.md" "$decisions" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
-    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 3 slots, 1 parked, 2 closed' <<<"$got" \
+    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 4 slots, 1 parked, 2 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
     got=$(q check-queue "$dir/good.md" 2>&1) \
         || fail "check-queue rejected the good queue against the sections in decisions_dir"
@@ -11150,7 +11151,7 @@ check-queue-selftest:
         || fail "a row meeting a running lane was not skipped with the lane named"
     [ "$(takes)" = "Q3 " ] || fail "the slot a blocked tier 1 row left did not go to tier 2"
     drive lane next 6
-    grep -qx 'note: 1 running and 6 more is past the 3 slots of §372' <<<"$got" \
+    grep -qx 'note: 1 running and 6 more is past the 4 slots of §397.7' <<<"$got" \
         || fail "a fill past the slots did not say so, citing the section that sets them"
 
     fence items <<'MD'
@@ -11288,7 +11289,7 @@ check-queue-api-selftest:
     g() { git -C "$1" -c user.name=selftest -c user.email=selftest@invalid "${@:2}"; }
     # Six slots of its own, whatever the cap is: the machine count's case holds
     # three and needs slots left over for two ready rows. `check-queue-selftest`
-    # is where the real cap is pinned (§372).
+    # is where the real cap is pinned (§397.7).
     q() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" --set queue_slots 6 queue "${@:2}"; }
     check() { "$j" --justfile '{{ justfile() }}' --working-directory "$1" check-queue 2>&1; }
     lock() { g "$hub" worktree lock --reason "agent $(basename "$1") since 2026-09-26T00:00:00Z" "$1"; }
