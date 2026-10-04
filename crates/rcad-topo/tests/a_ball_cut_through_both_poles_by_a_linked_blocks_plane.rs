@@ -23,7 +23,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const BALL: f64 = 4.0 * PI / 3.0;
 const SLAB: f64 = 4.1 * 10.0 * 10.0;
@@ -75,38 +75,75 @@ fn the_other_rules_answer_the_same_three() {
 }
 
 /// The union keeps the ball in two faces, either side of the circle `x = 0`,
-/// and fused again with a cube far from it is refused on one of them: the
-/// arrangement asks where the face meets its neighbour across that circle,
-/// and the neighbour is the same ball. That is the refusal of every solid with
-/// two faces on one ball, and queue row Q584 holds it. When Q584 answers it,
-/// this is two solids, the cube and the union.
+/// and fused again with a cube far from it is two solids, the union as it
+/// stands and the cube, both ways round.
+///
+/// It was refused `AFaceMeetsItsNeighbourOnItsOwnSurface` on one of the ball's
+/// two faces: the arrangement asked where the face meets its neighbour across
+/// that circle, and the neighbour is the same ball. Now `bake` hands the two
+/// faces over as one, and the circle between them is left out as a seam is
+/// (row Q575).
 #[test]
-fn the_union_fused_again_with_a_far_cube_is_refused_on_the_balls_two_faces() {
-    let (mut model, first) = fused(Rule::Union, true);
-    let far = model
-        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a cube");
-    model
-        .place_solid(far, &shifted([20.0, 20.0, 20.0]))
-        .expect("this model made the key");
-    let refused = model.fuse(
-        &first,
-        &[far],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    let Err(Error::AFaceMeetsItsNeighbourOnItsOwnSurface { face }) = refused else {
-        panic!("refused on a face of the ball, got {refused:?}");
-    };
-    let surface = model
-        .face(face)
-        .expect("the refusal names a face of the model")
-        .surface();
-    assert!(
-        matches!(surface, Surface::Sphere(_)),
-        "refused on a face of the ball, got one on {surface:?}"
-    );
+fn the_union_fused_again_with_a_far_cube_is_the_union_and_the_cube() {
+    let truth = BALL + SLAB + LINK - THE_BLOCKS_SHARE - the_ball_and_the_slab_share();
+    for union_first in [true, false] {
+        let what = format!("the union first {union_first}");
+        let (mut model, first) = fused(Rule::Union, true);
+        assert_eq!(
+            balls_faces(&model, &first),
+            2,
+            "{what}: the union keeps the ball in two faces"
+        );
+        let far = model
+            .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube");
+        model
+            .place_solid(far, &shifted([20.0, 20.0, 20.0]))
+            .expect("this model made the key");
+        let (arguments, tools) = if union_first {
+            (first, vec![far])
+        } else {
+            (vec![far], first)
+        };
+        let both = model
+            .fuse(
+                &arguments,
+                &tools,
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what}: refused {why:?}"))
+            .solids()
+            .to_vec();
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let [one, other] = both[..] else {
+            panic!("{what}: two solids, got {both:?}");
+        };
+        let measured =
+            [one, other].map(|solid| measured_against(&model, solid, &[truth, 1.0], &what));
+        assert!(
+            measured[0] != measured[1],
+            "{what}: one solid is the union and the other the cube, got {measured:?}"
+        );
+    }
+}
+
+/// How many faces of `solids` are on a ball.
+fn balls_faces(model: &Model, solids: &[SolidKey]) -> usize {
+    solids
+        .iter()
+        .flat_map(|&solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+                .collect::<Vec<_>>()
+        })
+        .count()
 }
 
 /// The ball, the slab and the link, fused by `rule` with the ball as the

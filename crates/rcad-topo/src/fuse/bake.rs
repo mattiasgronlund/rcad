@@ -71,8 +71,8 @@ use crate::validate::{
 use crate::view::CoedgeView;
 use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
-use super::assemble::{InputFace, joined_faces_of_an_input};
-use super::{as_exact_as_it_is, gave_up, middle_of};
+use super::assemble::{InputFace, joined_faces_of_an_input, one_surface};
+use super::{Sameness, as_exact_as_it_is, gave_up, middle_of, name_of_surface_bits};
 
 /// Move every solid in `solids` into world coordinates.
 ///
@@ -294,20 +294,27 @@ impl Bounds {
 }
 
 /// Move one solid into world coordinates, joining any two faces of it that are
-/// really one flat region first.
+/// really one region first.
 ///
-/// A solid built by this fuse never has such a pair (§17.4's amendment of
-/// 2026-08-30), and one built by `ProfileBuilder` from three profile points in a
-/// row does. Two faces on one plane with an edge between them carry no crossing
-/// for that edge to run along, so the arrangement would be handed a boundary
-/// edge with nowhere to be.
+/// A solid built by this fuse never has such a pair on a plane (§17.4's
+/// amendment of 2026-08-30), and one built by `ProfileBuilder` from three
+/// profile points in a row does. Two faces on one surface with an edge between
+/// them carry no crossing for that edge to run along, so the arrangement would
+/// be handed a boundary edge with nowhere to be, and it refuses one by name
+/// ([`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`](crate::Error::AFaceMeetsItsNeighbourOnItsOwnSurface)).
 ///
-/// **The joiner is only asked about a wholly flat solid**, because it is written
-/// in planes and nothing in this milestone builds a curved solid with two faces
-/// on one surface. A curved *answer* of this fuse could have one; it would
-/// arrive at [`split_a_face`](super::arrange::split_a_face) as a face whose
-/// neighbour across an edge is the same surface, which refuses by name rather
-/// than guessing. That refusal is where a lane that meets this finds it.
+/// **A wholly flat solid is joined by the joiner**, which re-derives the
+/// planes and wires of the joined faces and drops every corner a lump of faces
+/// runs straight through, so that each corner left has three planes round it.
+///
+/// **Any other solid is joined here, at the bake, and only on a ball, a pipe
+/// or a ring** ([`faces_baked_as_one`]). A curved solid can carry two faces on
+/// one ball or one pipe: a caller builds one, and a union whose pieces the
+/// joiner leaves apart writes one (row Q575, `docs/decisions.md` §231.5,
+/// §325.5). Those faces are baked as one face, and an edge between two of them
+/// is left out the way a seam is. Nothing has to be re-derived, because a
+/// corner with fewer than three surfaces round it is read out of the model
+/// rather than solved (§31.3), and every corner left keeps the surfaces it had.
 fn bake_one_solid(
     model: &Model,
     key: SolidKey,
@@ -323,17 +330,129 @@ fn bake_one_solid(
         return bake_the_joined_faces(model, key, solid, &joined, validate_allows, policy, log);
     }
 
-    let surfaces = surface_of_every_face(model, solid);
+    let mut surfaces = surface_of_every_face(model, solid);
+    let groups = faces_baked_as_one(model, solid, &surfaces);
+    spell_each_group_one_way(model, &groups, &mut surfaces);
     let corners = corner_of_every_vertex(model, solid, &surfaces, validate_allows, policy, log)?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
-    for face in solid.faces() {
-        let baked = bake_one_face(model, solid, face, &surfaces, &corners)?;
+    for members in &groups {
+        let baked = bake_one_face(model, solid, members, &surfaces, &corners)?;
         bounds.take_in(baked.bounds);
         faces.push(baked);
     }
     Ok(BakedSolid { key, faces, bounds })
+}
+
+/// The faces of a solid, in the groups that are baked as one face each, in the
+/// order the model stores the first face of each group.
+///
+/// Two faces are in one group when an edge runs between them and they are one
+/// ball, pipe or ring used one way round ([`one_curved_surface_used_one_way`]).
+/// Then the edge is not where the solid's skin stops but only where two faces
+/// of it were written apart, which is what a seam is too. Every other face is a
+/// group of one.
+fn faces_baked_as_one<'model>(
+    model: &'model Model,
+    solid: SolidView<'model>,
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+) -> Vec<Vec<FaceView<'model>>> {
+    let faces: Vec<FaceView<'model>> = solid.faces().collect();
+    let position: BTreeMap<FaceSlot, usize> = faces
+        .iter()
+        .enumerate()
+        .map(|(at, face)| (face.key().slot_in(model.id()), at))
+        .collect();
+    let mut one_face = Sameness::of(faces.len());
+    for (at, face) in faces.iter().enumerate() {
+        let mine = face.key().slot_in(model.id());
+        for wire in model.face_at(mine).wires() {
+            for coedge in wire.coedges() {
+                if let Some(across) = face_across(model, mine, coedge.edge().key())
+                    && one_curved_surface_used_one_way(surfaces[&mine], surfaces[&across])
+                {
+                    one_face.join(at, position[&across]);
+                }
+            }
+        }
+    }
+
+    let mut groups: Vec<Vec<FaceView<'model>>> = Vec::new();
+    let mut group_led_by: BTreeMap<usize, usize> = BTreeMap::new();
+    for (at, face) in faces.into_iter().enumerate() {
+        let group = *group_led_by.entry(one_face.leader(at)).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[group].push(face);
+    }
+    groups
+}
+
+/// Whether two faces are one ball, one pipe or one ring, however each is
+/// written, and the solid uses both the same way round.
+///
+/// `used` means the same thing for every spelling of these: a pipe or a ring
+/// written with its axis turned round has the same gradient everywhere, and a
+/// ball has one spelling. So the two faces face the same way exactly when the
+/// solid uses them the same way.
+///
+/// **A plane is left to the joiner**, which runs on a wholly flat solid before
+/// this does. Two faces on one plane of a curved solid are not joined here: a
+/// plane does have two spellings that face opposite ways, and nothing here
+/// builds such a solid to try it on.
+///
+/// **A cone is left apart, and refused as before.** Joined here, the pieces of
+/// the cone `tests/pieces_of_one_curved_surface.rs` takes back in get past
+/// `AFaceMeetsItsNeighbourOnItsOwnSurface` and are refused `Undecidable` on
+/// "order along a crossing" instead, at all five of
+/// `a_frustum_and_a_wall_near_its_axis_taken_back_in_reach_the_unjoined_cone_pieces`'s
+/// walls, on two points of one crossing a few ulps apart: one read out of the
+/// model and one solved. That is a row of its own (Q575's lane).
+fn one_curved_surface_used_one_way(one: PlacedSurface, other: PlacedSurface) -> bool {
+    matches!(
+        one.placed,
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_)
+    ) && one_surface(&one.placed, &other.placed)
+        && one.used == other.used
+}
+
+/// Write the one spelling each group is baked on into every face of it, as
+/// [`PlacedSurface::baked_as`]: the lowest of its faces' spellings by
+/// [`name_of_surface_bits`], which depends on the faces and not on the order
+/// they are stored in.
+///
+/// **Every surface the fuse is handed is then one spelling**: the group's own,
+/// the `across` of a side of a face next to it, and a corner's `around`. A
+/// closed side is walked one way or the other as its pair of surfaces says
+/// (§336), and turning a pipe's axis round turns that way round, so a cap
+/// reading its circle off the band's own spelling while the wall reads it off
+/// the group's walked it the same way as the wall did, and the answer came
+/// back `CoedgesRunTheSameWay`. And a corner where two spellings of one surface
+/// meet is two surfaces round it, not three.
+fn spell_each_group_one_way(
+    model: &Model,
+    groups: &[Vec<FaceView<'_>>],
+    surfaces: &mut BTreeMap<FaceSlot, PlacedSurface>,
+) {
+    for members in groups {
+        let slots: Vec<FaceSlot> = members
+            .iter()
+            .map(|face| face.key().slot_in(model.id()))
+            .collect();
+        let spelling = slots
+            .iter()
+            .map(|slot| surfaces[slot].placed)
+            .min_by_key(name_of_surface_bits)
+            .expect("a group of faces has a face in it");
+        for slot in &slots {
+            surfaces
+                .get_mut(slot)
+                .expect("every face of the solid has its surface")
+                .baked_as = spelling;
+        }
+    }
 }
 
 /// The same, for a solid whose coplanar faces have just been joined.
@@ -458,6 +577,7 @@ fn surface_of_every_face(model: &Model, solid: SolidView<'_>) -> BTreeMap<FaceSl
             PlacedSurface {
                 stored: model.data().faces[slot].surface,
                 placed: face.surface(),
+                baked_as: face.surface(),
                 movement: face.location(),
                 used: face.orientation(),
             },
@@ -478,10 +598,16 @@ fn surface_of_every_face(model: &Model, solid: SolidView<'_>) -> BTreeMap<FaceSl
 /// surfaces, and applying the movement to each of them separately is what
 /// [`where_a_corner_lands_after_moving`] does. The use is what the closed-edge
 /// rule needs of the face across a closed edge ([`BakedEdge::inside_across`]).
+///
+/// `baked_as` is `placed`, or another spelling of it when the face is baked
+/// together with faces on other spellings ([`spell_each_group_one_way`]). It is
+/// what the arrangement is handed; `stored` and `placed` stay the face's own,
+/// for the questions asked of the face itself.
 #[derive(Clone, Copy, Debug)]
 struct PlacedSurface {
     stored: Surface,
     placed: Surface,
+    baked_as: Surface,
     movement: Isometry,
     used: Orientation,
 }
@@ -568,8 +694,8 @@ fn place_a_corner(
 
     let mut distinct: Vec<Surface> = Vec::with_capacity(around.len());
     for face in around {
-        if !distinct.contains(&face.placed) {
-            distinct.push(face.placed);
+        if !distinct.contains(&face.baked_as) {
+            distinct.push(face.baked_as);
         }
     }
     if distinct.len() >= 3 {
@@ -913,48 +1039,83 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
     })
 }
 
-/// One face of a solid in world coordinates, with its seams left out.
+/// One group of faces of a solid ([`faces_baked_as_one`]) in world coordinates,
+/// as one face, with its seams and every edge between two of its faces left
+/// out.
+///
+/// The wires are every wire of every face of the group, each with those edges
+/// left out, so a wire can be left empty, as a ball's skin's one wire is. What
+/// is left of each is walked the way its own face walks it: the faces of a group
+/// face one way, so an edge walked with one of them on its left has the group
+/// on its left.
+///
+/// **The face is on the one spelling [`spell_each_group_one_way`] gave the
+/// group**, and so is the `across` of each side whose face across is in a
+/// group. A closed side's [`BakedEdge::inside_across`] is still read off the
+/// two faces' own spellings: it is a side of the surface across, and every
+/// spelling of a curved surface has one inside and one outside.
 ///
 /// # Errors
 ///
 /// Whatever [`the_side_a_closed_edge_is_walked_for`] refuses.
+///
+/// # Panics
+///
+/// If `members` is empty.
 fn bake_one_face(
     model: &Model,
     solid: SolidView<'_>,
-    face: FaceView<'_>,
+    members: &[FaceView<'_>],
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
     corners: &BTreeMap<VertexSlot, BakedCorner>,
 ) -> Result<BakedFace> {
-    let key = face.key();
-    let bounds = Bounds::round_a_face(solid, face);
-    let mine = key.slot_in(model.id());
+    let in_the_group: BTreeSet<FaceSlot> = members
+        .iter()
+        .map(|face| face.key().slot_in(model.id()))
+        .collect();
 
     let mut wires = Vec::new();
-    for wire in model.face_at(mine).wires() {
-        let mut walked = Vec::new();
-        for coedge in wire.coedges() {
-            let Some(across) = face_across(model, mine, coedge.edge().key()) else {
-                continue;
-            };
-            walked.push(BakedEdge {
-                keys: core::iter::once(coedge.edge().key()).collect(),
-                start: corners[&coedge.start().key().slot_in(model.id())].clone(),
-                end: corners[&coedge.end().key().slot_in(model.id())].clone(),
-                across: surfaces[&across].placed,
-                picked_by: pickers_moved_into_place(coedge.edge().stored_run(), &face.location()),
-                inside_across: the_side_a_closed_edge_is_walked_for(
-                    coedge,
-                    [surfaces[&mine], surfaces[&across]],
-                )?,
-            });
+    let mut bounds = Bounds::nothing();
+    for face in members {
+        bounds.take_in(Bounds::round_a_face(solid, *face));
+        let mine = face.key().slot_in(model.id());
+        for wire in model.face_at(mine).wires() {
+            let mut walked = Vec::new();
+            for coedge in wire.coedges() {
+                let Some(across) = face_across(model, mine, coedge.edge().key()) else {
+                    continue;
+                };
+                if in_the_group.contains(&across) {
+                    continue;
+                }
+                walked.push(BakedEdge {
+                    keys: core::iter::once(coedge.edge().key()).collect(),
+                    start: corners[&coedge.start().key().slot_in(model.id())].clone(),
+                    end: corners[&coedge.end().key().slot_in(model.id())].clone(),
+                    across: surfaces[&across].baked_as,
+                    picked_by: pickers_moved_into_place(
+                        coedge.edge().stored_run(),
+                        &face.location(),
+                    ),
+                    inside_across: the_side_a_closed_edge_is_walked_for(
+                        coedge,
+                        [surfaces[&mine], surfaces[&across]],
+                    )?,
+                });
+            }
+            wires.push(walked);
         }
-        wires.push(walked);
     }
 
+    let first = surfaces[&members
+        .first()
+        .expect("a group of faces has a face in it")
+        .key()
+        .slot_in(model.id())];
     Ok(BakedFace {
-        keys: vec![key],
-        surface: face.surface(),
-        orientation: face.orientation(),
+        keys: members.iter().map(|face| face.key()).collect(),
+        surface: first.baked_as,
+        orientation: first.used,
         wires,
         cuts: Vec::new(),
         bounds,
