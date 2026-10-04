@@ -2698,6 +2698,24 @@ impl BuildingAMesh {
     /// Pappus gives (`docs/decisions.md` §390). Every face cut that way was
     /// refused before such a cut existed, so the point moves no answer the
     /// kernel gave.
+    ///
+    /// **A cut that leaves the piece is no cut, and another chord is found.**
+    /// [`where_to_cut`] pulls each end back to the nearer corner of the side
+    /// the middle crosses, and near a pole one side of a coarse walk spans
+    /// most of a half turn, so the ends can land far either side of the
+    /// middle. Where the piece bends back past the middle, the chord between
+    /// them runs out of it. A cube of side 2 at the origin turned 1 rad about
+    /// `(−1, 3, 2)` and a unit ball at `(0.7, 0.65, 0.6)` in its frame leave a
+    /// ball face shaped like a `C` in the chart, its two horns at longitudes
+    /// `−1.37` and `−1.18` either side of the `y = 0` circle, which reaches in
+    /// to `−0.13`. Walked at a deflection of `0.3`, the cut across the middle
+    /// `0.176` was pulled back to the tips of the two horns, ran across that
+    /// circle, and the patch was refused `BoundaryCrossesItself` at all three
+    /// deflections (`a_cap_whose_rim_bends_back_past_its_own_meridian.rs`).
+    /// So a chord that leaves the piece is replaced by the chord between two of
+    /// its corners that stays inside and leaves the wider half narrowest
+    /// ([`the_most_even_chord_that_stays_inside`]). Where none does, the chord
+    /// is kept and the triangulator refuses the piece as it did.
     fn cut_in_two(
         &mut self,
         face: FaceView<'_>,
@@ -2714,6 +2732,14 @@ impl BuildingAMesh {
         let (least, most) = longitudes_of(piece);
         let Some((opened, at)) = where_to_cut(piece, (least + most) / 2.0) else {
             return Ok(None);
+        };
+        let (opened, at) = if a_chord_stays_inside(&opened, at) {
+            (opened, at)
+        } else {
+            match the_most_even_chord_that_stays_inside(piece, span) {
+                Some(at) => (piece.clone(), at),
+                None => (opened, at),
+            }
         };
         let mut one = opened.between(at[0], at[1]);
         let mut other = opened.between(at[1], at[0]);
@@ -4385,6 +4411,104 @@ fn passes(middle: f64, from: f64, to: f64) -> bool {
 fn the_nearer_of(middle: f64, here: f64, next: f64) -> bool {
     let (mine, theirs) = ((here - middle).abs(), (next - middle).abs());
     mine < theirs || (mine == theirs && here < next)
+}
+
+/// Whether the straight chord between corners `from` and `to` of a loop lies
+/// inside it in the chart: it meets no side but at its own two ends, and a
+/// point half way along it is inside.
+///
+/// **Touching counts as meeting**, as it does for a cut up to a cap's pole
+/// ([`a_cut_up_meets_the_rim`]): a chord through a third corner is two sides
+/// for the triangulator, and a chord along a side draws that side twice. A
+/// chord that meets no side is wholly inside or wholly outside, which the
+/// point half way along tells apart.
+fn a_chord_stays_inside(around: &WalkedLoop, [from, to]: [usize; 2]) -> bool {
+    let count = around.corners.len();
+    let chord = [around.corners[from], around.corners[to]];
+    let meets_a_side = (0..count).any(|at| {
+        let next = (at + 1) % count;
+        let side = [around.corners[at], around.corners[next]];
+        match [at, next]
+            .iter()
+            .filter(|&&end| end == from || end == to)
+            .count()
+        {
+            0 => two_sides_meet(chord, side),
+            1 => {
+                let far = if at == from || at == to {
+                    side[1]
+                } else {
+                    side[0]
+                };
+                let own = if at == from || next == from {
+                    chord[1]
+                } else {
+                    chord[0]
+                };
+                a_point_lies_along(chord, far) || a_point_lies_along(side, own)
+            }
+            _ => true,
+        }
+    });
+    let half_way = [0, 1].map(|which| (chord[0][which] + chord[1][which]) / 2.0);
+    !meets_a_side && a_loop_holds(around, half_way)
+}
+
+/// Whether `point` lies on the straight side between `ends`, either end
+/// included.
+fn a_point_lies_along(ends: [[f64; 2]; 2], point: [f64; 2]) -> bool {
+    let [a, b] = ends;
+    (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]) == 0.0
+        && passes_or_ends_at(point[0], a[0], b[0])
+        && passes_or_ends_at(point[1], a[1], b[1])
+}
+
+/// The two corners, in loop order, whose chord stays inside a piece that
+/// goes `span` round and leaves the wider of its two halves narrowest, both
+/// narrower than `span`; of two as good, the one found first. `None` when no
+/// chord does.
+///
+/// Both ends are corners the piece already has, for the reason
+/// [`where_to_cut`] gives, and two corners at one point — the ends of a pole
+/// side, or a seam's — are not a chord. Each half's reach is read off running
+/// least and most longitudes, so finding it costs the square of the corners,
+/// and each chord that might beat the best so far is checked against every
+/// side.
+fn the_most_even_chord_that_stays_inside(piece: &WalkedLoop, span: f64) -> Option<[usize; 2]> {
+    let count = piece.corners.len();
+    let longitude = |corner: usize| piece.corners[corner][0];
+    let mut from_the_end = vec![(f64::MAX, f64::MIN); count + 1];
+    for corner in (0..count).rev() {
+        let (least, most) = from_the_end[corner + 1];
+        from_the_end[corner] = (least.min(longitude(corner)), most.max(longitude(corner)));
+    }
+    let mut best: Option<(f64, [usize; 2])> = None;
+    let mut up_to_from = (f64::MAX, f64::MIN);
+    for from in 0..count {
+        up_to_from = (
+            up_to_from.0.min(longitude(from)),
+            up_to_from.1.max(longitude(from)),
+        );
+        let mut from_to = (longitude(from), longitude(from));
+        for (to, &(least, most)) in from_the_end.iter().enumerate().take(count).skip(from + 1) {
+            from_to = (from_to.0.min(longitude(to)), from_to.1.max(longitude(to)));
+            if to == from + 1 || (from == 0 && to == count - 1) {
+                continue;
+            }
+            if piece.points[from] == piece.points[to] {
+                continue;
+            }
+            let round_the_rest = up_to_from.1.max(most) - up_to_from.0.min(least);
+            let wider = (from_to.1 - from_to.0).max(round_the_rest);
+            if wider >= span || best.is_some_and(|(narrowest, _)| wider >= narrowest) {
+                continue;
+            }
+            if a_chord_stays_inside(piece, [from, to]) {
+                best = Some((wider, [from, to]));
+            }
+        }
+    }
+    best.map(|(_, at)| at)
 }
 
 /// The corner a slit ends at inside the face: the one whose two neighbours are
