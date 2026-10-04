@@ -1065,8 +1065,8 @@ impl Assembly {
         while let Some(corner) = waiting.pop_front() {
             let further = away[&corner] + 1;
             for &next in next_to.get(&corner).into_iter().flatten() {
-                if !away.contains_key(&next) {
-                    away.insert(next, further);
+                if let std::collections::btree_map::Entry::Vacant(unseen) = away.entry(next) {
+                    unseen.insert(further);
                     waiting.push_back(next);
                 }
             }
