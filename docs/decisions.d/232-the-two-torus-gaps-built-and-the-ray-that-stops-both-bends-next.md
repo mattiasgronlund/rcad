@@ -179,7 +179,9 @@ Those fuses still refuse, somewhere else:
   3. Both caps are stored as one plane, so the wall had one trimming and the
   general rule refused it (§377.2). The wall is now the half of the ring its
   wire keeps; of 24 fuses with a quarter bend, 14 answer and 10 refuse later,
-  `ResultIsNotManifold { count: 4 }` (§377).*
+  `ResultIsNotManifold { count: 4 }` (§377). *2026-10-04, Q756: all 24 now
+  answer, pinned in `a_half_bend_fused_with_a_quarter_bend_on_one_torus.rs`
+  (§377.5).*
 
 The lane also claimed that only a second bend on the same torus can put a flat
 piece on a torus disk through the public API. The verifier checked one leg of

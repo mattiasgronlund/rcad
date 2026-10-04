@@ -2393,7 +2393,12 @@ fn which_of_a_rings_two_circles(
 ///
 /// Anything else holds nothing, which is the safe direction: the run is then
 /// named by its faces as before.
-fn a_surface_holds_the_circle(surface: &Surface, centre: Point, axis: Vector, radius: f64) -> bool {
+pub(crate) fn a_surface_holds_the_circle(
+    surface: &Surface,
+    centre: Point,
+    axis: Vector,
+    radius: f64,
+) -> bool {
     how_far_off_the_circle_can_be(surface, centre, axis, radius).is_some_and(|(off, largest)| {
         off <= A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest
     })
@@ -2440,13 +2445,13 @@ fn a_surface_holds_the_circle(surface: &Surface, centre: Point, axis: Vector, ra
 /// `the_relays_two_circles_round_their_tubes_are_inside_the_allowance` holds
 /// both. Nobody has measured the furthest over the whole corpus since the
 /// cone and the torus got their bounds.
-const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
+pub(crate) const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
 
 /// The furthest any point of the circle can be from `surface`, and the
 /// largest number the bound was worked out from — see
 /// [`a_surface_holds_the_circle`] for the bounds. `None` for a surface with no
 /// bound here.
-fn how_far_off_the_circle_can_be(
+pub(crate) fn how_far_off_the_circle_can_be(
     surface: &Surface,
     centre: Point,
     axis: Vector,

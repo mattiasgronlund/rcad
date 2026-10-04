@@ -260,3 +260,16 @@ reaching tori as it reached cones. `how_often_a_turned_bend_comes_back_from_its_
 turns the bend about `x`, `y` and `z` by every tenth of a radian: of 372, the
 reader refuses 28, all about `x` or `y`, and the writer refuses one seam. Neither
 was traced.*
+
+*Since Q843 (2026-10-04) the writer writes the one turned bend it refused,
+ring 7 and tube 1 turned about y by 5.0 and moved by (3, 5, 10). Its seam's
+plane has as offset the turned normal dotted with the move in plain f64, 32
+ulps from the ring's centre dotted and rounded once, and of every f64 centre
+the reader could hold on the ring exactly one reads back as that plane: 23
+steps of x and 19 of z out, at 15.88 of the 16 units the reader allows. So a
+gap and not a limit (a_turned_bends_seam_has_one_centre_its_plane_reads_back_from
+in write.rs). The writer now looks that far for a ring's seam
+(the_nearest_centre_a_ring_holds_its_circle_at), asking the reader's own
+rule (`a_surface_holds_the_circle` in brep.rs, shared rather than copied
+since Q957), and how_often_a_turned_bend_comes_back_from_its_own_file
+writes all 372; the reader still refuses 28 (Q842).*
