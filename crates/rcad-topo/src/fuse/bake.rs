@@ -307,8 +307,8 @@ impl Bounds {
 /// planes and wires of the joined faces and drops every corner a lump of faces
 /// runs straight through, so that each corner left has three planes round it.
 ///
-/// **Any other solid is joined here, at the bake, and only on curved
-/// surfaces** ([`faces_baked_as_one`]). A curved solid can carry two faces on
+/// **Any other solid is joined here, at the bake, and only on a ball, a pipe
+/// or a ring** ([`faces_baked_as_one`]). A curved solid can carry two faces on
 /// one ball or one pipe: a caller builds one, and a union whose pieces the
 /// joiner leaves apart writes one (row Q575, `docs/decisions.md` §231.5,
 /// §325.5). Those faces are baked as one face, and an edge between two of them
@@ -349,7 +349,7 @@ fn bake_one_solid(
 /// order the model stores the first face of each group.
 ///
 /// Two faces are in one group when an edge runs between them and they are one
-/// curved surface used one way round ([`one_curved_surface_used_one_way`]).
+/// ball, pipe or ring used one way round ([`one_curved_surface_used_one_way`]).
 /// Then the edge is not where the solid's skin stops but only where two faces
 /// of it were written apart, which is what a seam is too. Every other face is a
 /// group of one.
@@ -390,22 +390,31 @@ fn faces_baked_as_one<'model>(
     groups
 }
 
-/// Whether two faces are one curved surface, however each is written, and the
-/// solid uses both the same way round.
+/// Whether two faces are one ball, one pipe or one ring, however each is
+/// written, and the solid uses both the same way round.
 ///
-/// `used` means the same thing for every spelling of a curved surface: a pipe,
-/// a cone or a ring written with its axis turned round has the same gradient
-/// everywhere, and a ball has one spelling. So the two faces face the same way
-/// exactly when the solid uses them the same way.
+/// `used` means the same thing for every spelling of these: a pipe or a ring
+/// written with its axis turned round has the same gradient everywhere, and a
+/// ball has one spelling. So the two faces face the same way exactly when the
+/// solid uses them the same way.
 ///
 /// **A plane is left to the joiner**, which runs on a wholly flat solid before
-/// this does. Two faces on one plane of a curved solid are not joined here
-/// (row Q575): a plane does have two spellings that face opposite ways, and a
-/// corner on the straight line between two such faces would be counted as two
-/// surfaces by [`place_a_corner`].
+/// this does. Two faces on one plane of a curved solid are not joined here: a
+/// plane does have two spellings that face opposite ways, and nothing here
+/// builds such a solid to try it on.
+///
+/// **A cone is left apart, and refused as before.** Joined here, the pieces of
+/// the cone `tests/pieces_of_one_curved_surface.rs` takes back in get past
+/// `AFaceMeetsItsNeighbourOnItsOwnSurface` and are refused `Undecidable` on
+/// "order along a crossing" instead, at all five of
+/// `a_frustum_and_a_wall_near_its_axis_taken_back_in_reach_the_unjoined_cone_pieces`'s
+/// walls, on two points of one crossing a few ulps apart: one read out of the
+/// model and one solved. That is a row of its own (Q575's lane).
 fn one_curved_surface_used_one_way(one: PlacedSurface, other: PlacedSurface) -> bool {
-    one.placed.as_plane().is_none()
-        && one_surface(&one.placed, &other.placed)
+    matches!(
+        one.placed,
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_)
+    ) && one_surface(&one.placed, &other.placed)
         && one.used == other.used
 }
 
