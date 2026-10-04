@@ -555,8 +555,9 @@ fn a_ball_turned_a_quarter_about_its_poles_is_told_apart_by_its_seam() {
 }
 
 /// The first of the seven turned balls whose seam
-/// [`how_often_a_model_the_mutator_draws_is_refused`] saw come back a different
-/// run (`docs/decisions.md` §366.4): its seam is cut from a plane facing
+/// `how_often_a_model_the_mutator_draws_is_refused` (in
+/// `every_model_the_writer_fuzzer_kept_is_written_again.rs`) saw come back a
+/// different run (`docs/decisions.md` §366.4): its seam is cut from a plane facing
 /// `(0.1660299346975594, −0.9861207130895915, 0)`, a normal the turn left an ulp
 /// off length one. The reader built that plane again through
 /// `Plane::from_point_and_normal`, which scaled it to `0.16602993469755936`, and
@@ -649,8 +650,9 @@ fn a_seam_picked_from_the_other_side_is_a_different_run() {
     assert!(!the_same_run(&here, &the_other_half, chord));
 }
 
-/// The ball draw 89 of [`how_often_a_model_the_mutator_draws_is_refused`]
-/// builds: radius six, turned about `z` by an angle `draw.fraction()` gave and
+/// The ball draw 89 of `how_often_a_model_the_mutator_draws_is_refused` (in
+/// `every_model_the_writer_fuzzer_kept_is_written_again.rs`) builds: radius
+/// six, turned about `z` by an angle `draw.fraction()` gave and
 /// moved by whole units. The angle is the one whose turn has that draw's
 /// quaternion, bit for bit.
 fn the_ball_the_mutator_drew_turned_about_its_poles() -> Model {
@@ -684,128 +686,6 @@ fn the_plane_its_seam_is_cut_from(model: &Model) -> Plane {
         panic!("a ball's seam is cut from a plane, not {run:?}");
     };
     cut
-}
-
-/// How often a model this target's own mutator draws is refused, and by what
-/// name: four hundred draws, each from a checked-in seed or an earlier draw,
-/// the way a fuzzing run grows its corpus. Q70 ran the same loop three
-/// thousand times (`docs/decisions.md` §366).
-///
-/// Every model written is read back and compared, so a cap this writer has
-/// learned to name and the reader does not take back panics here. Those
-/// panics are counted, except one on an edge's run, which fails: seven turned
-/// balls whose seam came back a different run were Q822, and none is left.
-/// Nor may a ball's seam be refused, which is what two of the seven became
-/// before the writer stepped two coordinates of the seam's centre together,
-/// nor a sound model's flat cap on a cone (Q662) or on a bend (Q407).
-#[test]
-fn how_often_a_model_the_mutator_draws_is_refused() {
-    fn one_byte_bumped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
-        if size == 0 {
-            return 0;
-        }
-        let at = (data
-            .iter()
-            .take(size)
-            .map(|&byte| usize::from(byte))
-            .sum::<usize>()
-            * 31
-            + size)
-            % size;
-        data[at] = data[at].wrapping_add(1 + u8::try_from(size % 7).expect("below seven"));
-        size
-    }
-
-    let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fuzz/corpus/no_model_makes_the_writer_panic");
-    let mut pool: Vec<Vec<u8>> = std::fs::read_dir(corpus)
-        .expect("the corpus is checked in beside the target")
-        .map(|entry| std::fs::read(entry.expect("an entry").path()).expect("a seed"))
-        .collect();
-    pool.sort();
-    let mut refusals: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    let mut comparisons_that_panicked: std::collections::BTreeMap<String, (usize, String)> =
-        std::collections::BTreeMap::new();
-    std::panic::set_hook(Box::new(|_| {}));
-    let (draws, mut refused, mut a_sound_cone_cap_refused) = (400_u32, 0, 0);
-    let mut state: u64 = 0x5170;
-    for draw in 0..draws {
-        state = state
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        let pick = usize::try_from(state >> 33).expect("31 bits fit") % pool.len();
-        let mut data = pool[pick].clone();
-        let size = data.len();
-        data.resize(4096, 0);
-        let size = still_a_model(&mut data, size, 4096, draw, one_byte_bumped);
-        data.truncate(size);
-        pool.push(data.clone());
-        let model = postcard::from_bytes::<Model>(&data).expect("the mutator keeps a model");
-        match rcad_step::write(&model, "fuzz") {
-            Ok(_) => {
-                let compared = std::panic::catch_unwind(|| one_model_decoded_and_written(&data));
-                if let Err(why) = compared {
-                    let said = why
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| why.downcast_ref::<&str>().map(|said| (*said).to_owned()))
-                        .unwrap_or_default();
-                    let whole: String = said.chars().take(400).collect();
-                    let said = said.lines().next().unwrap_or_default();
-                    let said = said.trim_start_matches("assertion `left == right` failed: ");
-                    let said = said.split(':').next().unwrap_or_default().to_owned();
-                    let seen = comparisons_that_panicked.entry(said).or_insert((0, whole));
-                    seen.0 += 1;
-                }
-            }
-            Err(why) => {
-                refused += 1;
-                let named = format!("{why:?}");
-                if named.contains("\"plane\", second: \"cone\"")
-                    || named.contains("\"cone\", second: \"plane\"")
-                    || named.contains("\"plane\", second: \"ring\"")
-                    || named.contains("\"ring\", second: \"plane\"")
-                {
-                    let sound = model
-                        .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                        .is_ok();
-                    a_sound_cone_cap_refused += usize::from(sound);
-                }
-                *refusals.entry(named).or_default() += 1;
-            }
-        }
-    }
-    let _ = std::panic::take_hook();
-    println!("{refused} of {draws} drawn models refused");
-    for (named, count) in &refusals {
-        println!("{count:6}  {named}");
-    }
-    for (said, (count, first)) in &comparisons_that_panicked {
-        println!("{count:6}  written, and the comparison panicked: {said}");
-        println!("        the first: {first}");
-    }
-    println!(
-        "{a_sound_cone_cap_refused} sound models refused where a flat face meets a cone or a ring"
-    );
-    assert_eq!(
-        a_sound_cone_cap_refused, 0,
-        "a sound model was refused where its flat cap meets its cone or its ring"
-    );
-    let runs_that_came_back_different: usize = comparisons_that_panicked
-        .iter()
-        .filter(|(said, _)| said.contains("with a different edge run"))
-        .map(|(_, (count, _))| count)
-        .sum();
-    assert_eq!(
-        runs_that_came_back_different, 0,
-        "a sound solid's edge came back from its own file as a different run"
-    );
-    assert!(
-        !refusals
-            .keys()
-            .any(|named| named.contains("first: \"ball\", second: \"ball\"")),
-        "a ball's seam was refused: {refusals:?}"
-    );
 }
 
 /// The frustum and the pointed cone this target draws, at each of its four
