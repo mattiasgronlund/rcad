@@ -149,6 +149,13 @@ could hand on. So for placing by a point this is a **limit**: the point does
 not exist. For the fuse it is still a **gap**, because the fuse's answer
 exists. It is deferred to a row that owns 5 or decides 6.
 
+§365 decided 6, and Q712 built it (§365.3, §365.5): each of the three
+slivers is placed by the side it shares with a piece of the other solid's
+face, so all six fuses get past `select`. None answers yet. The union and
+the ball less the block are refused `CannotNameWhichPieceOfACrossingThisIs`,
+the intersection and the block less the ball
+`ACurvedFaceGoesRightRoundWithNoSeam`.
+
 ### 346.4 The pins
 
 The row named nine more test files that name this refusal. **No pin in any of
@@ -191,7 +198,9 @@ of doubles. So it gives up for another reason, which was not traced here.
   `ACurvedFaceGoesRightRoundWithNoSeam` there are limits of meshing a ball
   `1e-14` across in a unit model or signs of a wrong answer is the next
   question. `s = 2⁻⁴⁰` shows it without this fix.
-- **The grazing block needs family 5 or 6 of 346.3.**
+- **The grazing block got family 6 of 346.3** (§365.3, built by Q712).
+  Its slivers are placed, and its six fuses are now refused after `select`,
+  while each answer is written (§365.5).
 - **Q335's refusal is a different one** (346.4), still untraced.
 - **The fold is still shown only by `arrange.rs`'s two unit tests** (§288.5).
   Neither test in `two_meets_reach_one_corner.rs` can show it through a fuse

@@ -69,9 +69,11 @@ use cones::{a_frustum, a_pointed_cone};
 /// (§282): the part of the frustum's face inside the block and the part outside
 /// it glued into one by `arrange.rs`'s sign rule, which no point can be in.
 /// Since the rule places the bottom rim by which piece goes round the axis
-/// with it, twenty-eight of them answer right. The sixteen left find no point
-/// in a piece that is one cell, and the twelve that could not order along a
-/// crossing are the same twelve as before.
+/// with it, twenty-eight of them answer right. Sixteen more found no point in
+/// a piece that is one cell; each such piece is now placed by a side it shares
+/// with a piece of the other solid's face (`docs/decisions.md` §365.3), and
+/// all sixteen answer right. The twelve that could not order along a crossing
+/// are the same twelve as before.
 ///
 /// **The family is two tests, one per lean**, so that neither sets the slow
 /// tier's wall (`docs/decisions.md` §397.4). Their tallies add up to the counts
@@ -82,8 +84,8 @@ fn a_steeper_plane_at_a_lean_of_a_quarter_across_a_frustum_answers_right_or_refu
     assert_eq!(
         tally(&steeper_planes_across_the_frustum(0.25)),
         Tally {
-            right: 32,
-            refused: [("a point inside a piece of a face", 16)].into()
+            right: 48,
+            refused: [].into()
         }
     );
 }
