@@ -69,7 +69,7 @@ use smallvec::SmallVec;
 
 use crate::holds::{
     WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart,
-    where_a_closed_crossing_is_centred,
+    the_half_space_naming_the_meridian_circle_through, where_a_closed_crossing_is_centred,
 };
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
@@ -112,7 +112,7 @@ pub(crate) fn assemble(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
-    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen)?;
+    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen, policy, log)?;
     assembly.join_up_what_is_one_face(log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
@@ -387,8 +387,16 @@ impl Assembly {
     ///
     /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's
     /// one corner is a pole of the surface it is drawn on, where nothing says
-    /// which way it runs.
-    fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Result<Self> {
+    /// which way it runs, and whatever [`name_of_the_closed_crossing_through`]
+    /// gives when it asks which of a plane's two circles round a ring a closed
+    /// side is on.
+    fn from_the_pieces(
+        model: &Model,
+        scratch: &Scratch,
+        chosen: &[Chosen],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Self> {
         let only_where_a_closed_edge_starts = vertices_that_only_start_a_closed_edge(
             model,
             chosen
@@ -410,7 +418,9 @@ impl Assembly {
             input_corners_on_exactly_three_planes(model, scratch),
             &scratch.names_of_one_point,
             kept_wires.iter().flatten().flat_map(|wire| wire.iter()),
-        );
+            policy,
+            log,
+        )?;
         let mut edges = Edges::default();
         let mut faces = Vec::new();
         for (kept, kept_wires) in chosen.iter().zip(&kept_wires) {
@@ -426,6 +436,8 @@ impl Assembly {
                         model,
                         &mut corners,
                         &mut edges,
+                        policy,
+                        log,
                     )
                 })
                 .collect::<Result<_>>()?;
@@ -3607,11 +3619,12 @@ enum CornerName {
     /// is what stops two different corners being joined into one.
     Meet([[u64; 9]; 3], u8),
     /// The one point on a closed crossing that nothing else cuts, named by the
-    /// two surfaces it runs between.
-    RoundACurve([[u64; 9]; 2]),
+    /// two surfaces it runs between and which of their closed crossings it is
+    /// ([`name_of_the_closed_crossing_through`]).
+    RoundACurve(CurveName),
     /// The point across a closed crossing from where it starts, named the same
     /// way, for a crossing that starts at a pole.
-    HalfWayRoundACurve([[u64; 9]; 2]),
+    HalfWayRoundACurve(CurveName),
     /// A pole of a closed surface, named by that surface and which of its two
     /// poles this is (§38.1).
     Pole([u64; 9], bool),
@@ -3646,16 +3659,41 @@ impl Corners {
     ///
     /// Every name an arrangement found to be one point with another goes by
     /// one name from the start, [`Corners::join_the_names_of_each_point`].
+    ///
+    /// **A curve is named by which of its two surfaces' closed crossings it
+    /// is, and not by the two surfaces alone**
+    /// ([`name_of_the_closed_crossing_through`]). A plane through a ring's
+    /// axis cuts it in two circles. Two quarter bends end to end, from `+x`
+    /// round to `+y` and on round to `−x`, keep a cap on `y = 0` at each end,
+    /// and named by the plane and the ring alone the two circles were one
+    /// curve: the vertex at `(3, 0, 0)` was handed over to the one at
+    /// `(−3, 0, 0)`, and the union was refused with four faces along one edge
+    /// (§378.3).
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`name_of_the_closed_crossing_through`] gives.
     fn with_each_closed_curve_started_once<'a>(
         model: &Model,
         on_three_planes: BTreeMap<VertexSlot, [Plane; 3]>,
         names_of_one_point: &[NamesOfOnePoint],
         kept_sides: impl Iterator<Item = &'a FaceMeet>,
-    ) -> Self {
-        let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<[[u64; 9]; 2]>>> = BTreeMap::new();
-        let mut on_curve: BTreeMap<[[u64; 9]; 2], Vec<(VertexSlot, &MeetPoint)>> = BTreeMap::new();
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Self> {
+        let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
+        let mut on_curve: BTreeMap<CurveName, Vec<(VertexSlot, &MeetPoint)>> = BTreeMap::new();
         for meet in kept_sides {
-            let curve = closes_on_itself(meet).then(|| names_of_the_two_surfaces(&meet.carried_by));
+            let curve = if closes_on_itself(meet) {
+                Some(name_of_the_closed_crossing_through(
+                    &meet.carried_by,
+                    meet.ends[0].point(),
+                    policy,
+                    log,
+                )?)
+            } else {
+                None
+            };
             for end in &meet.ends {
                 let MeetPoint::Existing { vertex, .. } = end else {
                     continue;
@@ -3671,7 +3709,7 @@ impl Corners {
             on_three_planes,
             ..Self::default()
         };
-        corners.join_the_names_of_each_point(model, names_of_one_point);
+        corners.join_the_names_of_each_point(model, names_of_one_point, policy, log)?;
         for (curve, mut candidates) in on_curve {
             let only_closes_this =
                 |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
@@ -3683,7 +3721,7 @@ impl Corners {
             });
             candidates.dedup_by_key(|(slot, _)| *slot);
             let (_, first) = candidates[0];
-            let start = corners.of(model, first);
+            let start = corners.of(model, first, policy, log)?;
             let curve = corners.goes_by(CornerName::RoundACurve(curve));
             corners.taken_over.insert(curve, start);
             for (slot, _) in &candidates[1..] {
@@ -3693,7 +3731,7 @@ impl Corners {
                 }
             }
         }
-        corners
+        Ok(corners)
     }
 
     /// Make every name of one point go by one name, and put the point where
@@ -3712,11 +3750,17 @@ impl Corners {
     /// neither the order the solids came in nor which pieces are kept moves
     /// them. The input corner wins as it wins the fold, where its point is the
     /// one the faces round it agree on.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Corners::name_of`] gives.
     fn join_the_names_of_each_point(
         &mut self,
         model: &Model,
         names_of_one_point: &[NamesOfOnePoint],
-    ) {
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
         let mut leads_to: BTreeMap<CornerName, CornerName> = BTreeMap::new();
         let leader = |leads_to: &BTreeMap<CornerName, CornerName>, mut name: CornerName| {
             while let Some(&next) = leads_to.get(&name) {
@@ -3725,7 +3769,7 @@ impl Corners {
             name
         };
         for one_point in names_of_one_point {
-            let kept = self.name_of(model, &one_point.kept);
+            let kept = self.name_of(model, &one_point.kept, policy, log)?;
             for (surfaces, which) in &one_point.folded {
                 let folded = CornerName::Meet(names_of_the_three_surfaces(surfaces), *which);
                 let (one, other) = (leader(&leads_to, kept), leader(&leads_to, folded));
@@ -3746,7 +3790,7 @@ impl Corners {
                 continue;
             };
             let point = self.where_it_goes(model, &one_point.kept);
-            let name = self.goes_by(self.name_of(model, &one_point.kept));
+            let name = self.goes_by(self.name_of(model, &one_point.kept, policy, log)?);
             let lower = match self.put_at.get(&name) {
                 None => true,
                 Some((already, theirs)) => lowest_first(point, *already)
@@ -3757,6 +3801,7 @@ impl Corners {
                 self.put_at.insert(name, (point, *vertex));
             }
         }
+        Ok(())
     }
 
     /// The corner `end` names, made the first time it is asked for.
@@ -3775,10 +3820,20 @@ impl Corners {
     /// where that corner goes**, whichever of its names arrives
     /// ([`Corners::join_the_names_of_each_point`]), and is as wide as the
     /// wider of the corner and what arrived.
-    fn of(&mut self, model: &Model, end: &MeetPoint) -> usize {
-        let name = self.goes_by(self.name_of(model, end));
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Corners::name_of`] gives.
+    fn of(
+        &mut self,
+        model: &Model,
+        end: &MeetPoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<usize> {
+        let name = self.goes_by(self.name_of(model, end, policy, log)?);
         if let Some(&chosen) = self.taken_over.get(&name) {
-            return chosen;
+            return Ok(chosen);
         }
         let (point, wobble, was) = match self.put_at.get(&name) {
             Some(&(input_corner, vertex)) => (
@@ -3801,7 +3856,7 @@ impl Corners {
         let at = middle_of(point);
         if let Some(&already) = self.named.get(&name) {
             self.settle_on_the_lower_rounding(already, at, wobble);
-            return already;
+            return Ok(already);
         }
         let index = match self.at.get(&exactly_at(at)) {
             Some(&already) => {
@@ -3820,7 +3875,7 @@ impl Corners {
             }
         };
         self.named.insert(name, index);
-        index
+        Ok(index)
     }
 
     /// The name every name of `name`'s point goes by: `name` itself unless an
@@ -3830,8 +3885,19 @@ impl Corners {
     }
 
     /// What `end` is called, before [`Corners::goes_by`] is asked.
-    fn name_of(&self, model: &Model, end: &MeetPoint) -> CornerName {
-        match end {
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`name_of_the_closed_crossing_through`] gives, for a point
+    /// named by the closed crossing it is on.
+    fn name_of(
+        &self,
+        model: &Model,
+        end: &MeetPoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<CornerName> {
+        Ok(match end {
             MeetPoint::Existing { vertex, .. } => {
                 match self.on_three_planes.get(&vertex.slot_in(model.id())) {
                     Some(planes) => CornerName::Meet(
@@ -3844,18 +3910,20 @@ impl Corners {
             MeetPoint::OfThreeSurfaces {
                 surfaces, which, ..
             } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
-            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
-                CornerName::RoundACurve(names_of_the_two_surfaces(carried_by))
-            }
-            MeetPoint::HalfWayRoundAClosedCurve { carried_by, .. } => {
-                CornerName::HalfWayRoundACurve(names_of_the_two_surfaces(carried_by))
+            MeetPoint::WhereAClosedCurveStarts { carried_by, point } => CornerName::RoundACurve(
+                name_of_the_closed_crossing_through(carried_by, *point, policy, log)?,
+            ),
+            MeetPoint::HalfWayRoundAClosedCurve { carried_by, point } => {
+                CornerName::HalfWayRoundACurve(name_of_the_closed_crossing_through(
+                    carried_by, *point, policy, log,
+                )?)
             }
             MeetPoint::APoleOfAClosedSurface {
                 surface,
                 at_the_top,
                 ..
             } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
-        }
+        })
     }
 
     /// Where `end` goes when it is the only name of its point: where its three
@@ -4048,14 +4116,6 @@ fn names_of_the_three_surfaces(surfaces: &[Surface; 3]) -> [[u64; 9]; 3] {
     named
 }
 
-/// The two surfaces a closed crossing runs between, named either way round and
-/// sorted, so both faces along it name its corners alike.
-fn names_of_the_two_surfaces(carried_by: &[Surface; 2]) -> [[u64; 9]; 2] {
-    let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
-    named.sort_unstable();
-    named
-}
-
 /// A point as three bit patterns, for finding two corners that are the same
 /// point however they were named.
 ///
@@ -4080,7 +4140,8 @@ fn exactly_at(point: Point) -> [u64; 3] {
 
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
-/// either side of it. See [`which_curve_it_is`]. The third is, for an arc of a
+/// either side of it and which of their closed crossings it is. See
+/// [`which_curve_it_is`]. The third is, for an arc of a
 /// closed crossing between a plane and a surface that curves right round — a
 /// ball's circle, or a cone's rim circle — that curved surface and that plane,
 /// and which of the crossing's two arcs between the same two corners it is; see
@@ -4096,7 +4157,7 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// the way the surfaces' own names would (see [`which_curve_it_is`]).
 type EdgeName = (
     [usize; 2],
-    Option<[[u64; 9]; 2]>,
+    Option<CurveName>,
     Option<([[u64; 9]; 2], bool)>,
     bool,
 );
@@ -4141,6 +4202,16 @@ impl Edges {
     /// `turned_round` is whether the rule turns this face's piece round, which
     /// only a closed edge starting at a ball's pole needs to know — see
     /// [`the_way_a_circle_from_a_pole_is_walked`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] as
+    /// [`Assembly::from_the_pieces`] says, and whatever [`which_curve_it_is`]
+    /// and [`which_way_a_closed_edge_is_walked`] give.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the policy and the log travel as arguments, never as fields (CLAUDE.md)"
+    )]
     fn of(
         &mut self,
         meet: &FaceMeet,
@@ -4149,6 +4220,8 @@ impl Edges {
         to: usize,
         face: FaceKey,
         turned_round: bool,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<Side> {
         let carried_by = meet.carried_by;
         let along: Vec<EdgeKey> = meet.along.iter().copied().chain(seam).collect();
@@ -4160,7 +4233,7 @@ impl Edges {
             "a piece of a flat face has a side with no length"
         );
         let at = middle_of(meet.ends[0].point());
-        let named = which_curve_it_is(from, to, carried_by);
+        let named = which_curve_it_is(from, to, meet, policy, log)?;
         let key = (
             [from.min(to), from.max(to)],
             named,
@@ -4661,13 +4734,128 @@ fn lowered_until(
 /// split it in two and leave each half with one face along it. Measured: the
 /// skew family's not-a-solid share went from under three in a hundred to three
 /// and a half.
-fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option<[[u64; 9]; 2]> {
+///
+/// **The two surfaces can cross in two closed curves**, and then which of them
+/// this is goes in the name too, [`name_of_the_closed_crossing_through`].
+///
+/// # Errors
+///
+/// Whatever [`name_of_the_closed_crossing_through`] gives.
+fn which_curve_it_is(
+    from: usize,
+    to: usize,
+    meet: &FaceMeet,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<CurveName>> {
     if from != to {
-        return None;
+        return Ok(None);
     }
+    Ok(Some(name_of_the_closed_crossing_through(
+        &meet.carried_by,
+        meet.ends[0].point(),
+        policy,
+        log,
+    )?))
+}
+
+/// What names a closed crossing: the two surfaces it runs between, each named
+/// either way round and the two sorted, and which of their closed crossings it
+/// is ([`which_meridian_circle_it_is`]) where that is known to need saying.
+type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
+
+/// The name of the closed crossing of `carried_by` through `point`, the same
+/// from both faces along it and in both argument orders.
+///
+/// **Two surfaces can cross in more than one closed curve**, so their two names
+/// do not pick one out on their own — as three surfaces can meet at more than
+/// one point, which is why [`CornerName::Meet`] carries `which` (§31.3). A
+/// plane through a ring's axis cuts the ring in two circles, one either side of
+/// the axis. Named by the plane and the ring alone, two quarter bends from `+x`
+/// round to `+y` and on round to `−x` had their two caps' circles on `y = 0`
+/// made one curve, then one corner, then one edge with four faces along it, and
+/// the union was refused (§378.3).
+///
+/// Only that pair is told apart here. Other pairs that cross in more than one
+/// closed curve — a plane square to a ring's axis, cutting an inner and an
+/// outer circle, and two rings — are still named by their surfaces alone, and
+/// no fuse of either has been run (§378.4).
+///
+/// # Errors
+///
+/// Whatever [`which_meridian_circle_it_is`] gives.
+fn name_of_the_closed_crossing_through(
+    carried_by: &[Surface; 2],
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<CurveName> {
     let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
     named.sort_unstable();
-    Some(named)
+    Ok((
+        named,
+        which_meridian_circle_it_is(carried_by, point, policy, log)?,
+    ))
+}
+
+/// Which of the two circles a plane through a ring's axis cuts the ring in
+/// passes through `point`: the four numbers of the half-space `intersect` picks
+/// that circle by, as `holds.rs` looks it up
+/// ([`the_half_space_naming_the_meridian_circle_through`]). `None` for any
+/// other pair of surfaces, and for a point that no one circle certainly keeps,
+/// which leaves the crossing named by its two surfaces alone, as it was before
+/// this was asked.
+///
+/// **Every spelling of the two gives one circle the same four numbers, once
+/// each zero is turned the right way up.** The two faces along one circle can
+/// hold two spellings of the plane — a bend's cap faces out of the bend, and
+/// the next bend's cap on the same plane faces the other way — and of the ring,
+/// its axis written either way round. `intersect` writes the circles'
+/// half-spaces from the two as stored: the normal is the axis crossed with the
+/// plane's normal, the offset is that normal read at the ring's centre, and
+/// the two circles get that half-space and that half-space turned round.
+/// Turning the plane or the axis round negates every number of both, because a
+/// product or a difference of negated numbers rounds to the negation of the
+/// same sum, so the half-space that keeps a given circle holds the same
+/// numbers either way — except that a zero may come back `-0.0`, which adding
+/// zero turns back, as in [`exactly_at`].
+/// `each_circle_a_plane_through_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled`
+/// asks all four spellings.
+///
+/// The two circles get two different half-spaces, because each one picks its
+/// own circle and leaves the other out.
+///
+/// # Errors
+///
+/// Whatever `intersect` gives for the two.
+fn which_meridian_circle_it_is(
+    carried_by: &[Surface; 2],
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<[u64; 4]>> {
+    let (flat, ring) = match carried_by {
+        [Surface::Plane(flat), Surface::Torus(ring)]
+        | [Surface::Torus(ring), Surface::Plane(flat)] => (flat, ring),
+        [_, _] => return Ok(None),
+    };
+    let Some(picker) = the_half_space_naming_the_meridian_circle_through(
+        &Surface::Plane(*flat),
+        &Surface::Torus(*ring),
+        point,
+        policy,
+        log,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Picker::InFrontOf(this_circle) = picker else {
+        unreachable!("a meridian circle is named by a flat half-space, and only that is kept")
+    };
+    let [x, y, z] = this_circle.normal().components();
+    Ok(Some(
+        [x, y, z, this_circle.offset()].map(|number| (number + 0.0).to_bits()),
+    ))
 }
 
 /// Which of the two arcs between its corners a side is of a closed crossing
@@ -4887,6 +5075,10 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// than by using the face reversed in its shell is what keeps the two coedges of
 /// every edge running opposite ways in the arena, which is the invariant a model
 /// is built on.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the policy and the log travel as arguments, never as fields (CLAUDE.md)"
+)]
 fn sides_of(
     wire: &[FaceMeet],
     turned_round: bool,
@@ -4894,13 +5086,24 @@ fn sides_of(
     model: &Model,
     corners: &mut Corners,
     edges: &mut Edges,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<Vec<Side>> {
     let mut sides = Vec::new();
     for meet in wire {
-        let from = corners.of(model, &meet.ends[0]);
-        let to = corners.of(model, &meet.ends[1]);
+        let from = corners.of(model, &meet.ends[0], policy, log)?;
+        let to = corners.of(model, &meet.ends[1], policy, log)?;
         let seam = the_seam_a_side_runs_along(model, ancestors, meet);
-        sides.push(edges.of(meet, seam, from, to, ancestors[0], turned_round)?);
+        sides.push(edges.of(
+            meet,
+            seam,
+            from,
+            to,
+            ancestors[0],
+            turned_round,
+            policy,
+            log,
+        )?);
     }
     if turned_round {
         sides.reverse();
@@ -4977,8 +5180,9 @@ mod tests {
     use super::{
         Assembly, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace, Lump,
         MeetPoint, Model, Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep,
-        Written, assemble, names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on, vertices_that_only_start_a_closed_edge,
+        Written, assemble, name_of_the_closed_crossing_through, names_of_the_three_surfaces,
+        the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
+        vertices_that_only_start_a_closed_edge,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -5006,8 +5210,19 @@ mod tests {
         };
 
         let mut corners = Corners::default();
-        let moved = corners.of(&model, &starts([across, along], [1.0, 0.0, 0.0]));
-        let again = corners.of(&model, &starts([across, along], [0.0, 0.0, 0.0]));
+        let mut corner_of = |end: MeetPoint| {
+            corners
+                .of(
+                    &model,
+                    &end,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("two planes ask no question")
+        };
+        let moved = corner_of(starts([across, along], [1.0, 0.0, 0.0]));
+        let again = corner_of(starts([across, along], [0.0, 0.0, 0.0]));
+        let other = corner_of(starts([across, upright], [1.0, 0.0, 0.0]));
         assert_eq!(again, moved, "one name is one corner");
         assert_eq!(
             corners.made[moved].point,
@@ -5015,7 +5230,6 @@ mod tests {
             "the lower of the two roundings is the one kept"
         );
 
-        let other = corners.of(&model, &starts([across, upright], [1.0, 0.0, 0.0]));
         assert_ne!(
             other, moved,
             "a corner was joined to one that had already moved off this coordinate"
@@ -5025,6 +5239,46 @@ mod tests {
             2,
             "two names on one place is two corners"
         );
+    }
+
+    /// The two circles a plane through a ring's axis cuts it in are two
+    /// names, and each is one name in all four spellings of the plane and the
+    /// ring, in either order (§378.6).
+    #[test]
+    fn each_circle_a_plane_through_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled() {
+        let flat = |facing: f64| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, facing, 0.0))
+                    .expect("a coordinate direction is a unit normal"),
+            )
+        };
+        let ring = |axis: Axis| {
+            Surface::Torus(Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring"))
+        };
+        let spellings = [
+            [flat(-1.0), ring(Axis::z())],
+            [flat(1.0), ring(Axis::z())],
+            [ring(Axis::z().reversed()), flat(-1.0)],
+            [ring(Axis::z().reversed()), flat(1.0)],
+        ];
+        let names_through = |x: f64| -> BTreeSet<_> {
+            spellings
+                .iter()
+                .map(|carried_by| {
+                    name_of_the_closed_crossing_through(
+                        carried_by,
+                        PredicatePoint::from([x, 0.0, 0.0]),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("a plane through the axis cuts two circles")
+                })
+                .collect()
+        };
+        let (round_plus_x, round_minus_x) = (names_through(3.0), names_through(-3.0));
+        assert_eq!(round_plus_x.len(), 1, "{round_plus_x:?}");
+        assert_eq!(round_minus_x.len(), 1, "{round_minus_x:?}");
+        assert_ne!(round_plus_x, round_minus_x, "two circles named as one");
     }
 
     /// Why every pair with a ball or a ring on it is answered `false`.
