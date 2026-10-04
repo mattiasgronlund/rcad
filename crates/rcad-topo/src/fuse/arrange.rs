@@ -4671,6 +4671,18 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// two places a slanted wall's circle holds on a line through its start sweep
 /// exactly zero with boxes that touch (§244.5). [`one_point_if_both_are_exact`]
 /// answers both, and leaves the rest to the policy (§17.4).
+///
+/// **Unless the start is proved to lie between the two.** A block edge grazing
+/// a ball centred at `x = 16` cuts it at `16 ± 2⁻⁵¹`, in the boxes
+/// `[15.999999999999998, 16]` and `[16, 16.000000000000004]` with `y` and `z`
+/// exactly the start's, and the walked start `(16, 1, −2⁻²⁵)` is `2⁻¹⁰³` inside
+/// the ball (§244.3). The boxes touch at the start, so the sweep is zero and
+/// the step to either place, read off its box, could be nothing. But the one
+/// point of either box at `x = 16` is the start, and the start is not on the
+/// ball, so one place is proved past it and the other short of it.
+/// [`the_one_ahead_of_the_start`] reads that, and only where it puts one place
+/// ahead and the other behind are the two ordered: two places either side of a
+/// point are two places.
 fn round_a_closed_crossing(
     pair: [&Surface; 2],
     [from, node]: [PredicatePoint; 2],
@@ -4693,6 +4705,12 @@ fn round_a_closed_crossing(
         return Ok(decided);
     }
     if boxes_overlap(one, other) {
+        let ahead = the_one_ahead_of_the_start(pair, from, one, other);
+        // Compared rather than matched, as above: only an order is taken, and
+        // every other answer leaves the pair to the policy (§40).
+        if ahead == Decision::Pos || ahead == Decision::Neg {
+            return Ok(ahead);
+        }
         return Ok(one_point_if_both_are_exact(one, other));
     }
     Ok(the_one_the_start_is(pair, from, one, other))
@@ -4782,6 +4800,12 @@ fn the_one_the_start_is(
 /// cone's ellipse the two are not one polynomial: this reads the side the
 /// curve turns to off the run, and that would read it off the centre.
 ///
+/// **A box that holds the start at one end** is read by which end it is
+/// ([`ahead_by_the_end_of_its_box_the_start_is_at`]), where the box read as a
+/// box leaves the step's sign untold. That is how the two places either side of
+/// the start at `x = 16` come to reach here from the arm where their boxes
+/// touch (§244.3).
+///
 /// Only [`Decision::Pos`] for one and [`Decision::Neg`] for the other says
 /// which. Every other pair of answers is [`Decision::Undecidable`] as wide as
 /// the wider box, as this was before it asked.
@@ -4795,7 +4819,11 @@ fn the_one_ahead_of_the_start(
     let start = from.enclosure();
     let [ahead_of_one, ahead_of_other] = [one, other].map(|place| {
         let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - start[axis]);
-        dot_of(step, runs).sign()
+        let read_off_the_box = dot_of(step, runs).sign();
+        if read_off_the_box.is_certified() {
+            return read_off_the_box;
+        }
+        ahead_by_the_end_of_its_box_the_start_is_at(pair, from, place, runs)
     });
     // Compared rather than matched: only a `Pos` against a `Neg` is read, and
     // every other answer, `Zero` and `Undecidable` among them, leaves the order
@@ -4808,6 +4836,64 @@ fn the_one_ahead_of_the_start(
     }
     Decision::Undecidable {
         enclosure: one.uncertainty().max(other.uncertainty()),
+    }
+}
+
+/// Whether `place` lies ahead of the start along the way the crossing `runs`
+/// there, read off which end of its box the start is at, for a box that is a
+/// piece of a line through the start along one axis.
+///
+/// Read as a box, the step from the start to a place whose box holds the start
+/// could be nothing, so its sign cannot be told. **But where the box agrees
+/// with the start exactly on two axes, every point of it is the start moved
+/// along the third**, and the one point of it that is not moved at all is the
+/// start itself. The place is on both surfaces, by what made it a node of this
+/// crossing, so where the start is proved off either surface the place is not
+/// the start. Then a box `[s, h]` along that axis, with the start at `s`, holds
+/// a place past the start, and `[l, s]` one short of it, and the sign of the
+/// step is that times the sign of the run along the axis.
+///
+/// A walked start off the crossing by a rounding is what this is for (§244.2):
+/// a start that is on it can be the place, and stays [`Decision::Undecidable`],
+/// as does a box that holds the start inside rather than at an end, a box off
+/// the start on more than one axis, and a run with no sign along the axis.
+fn ahead_by_the_end_of_its_box_the_start_is_at(
+    pair: [&Surface; 2],
+    from: PredicatePoint,
+    place: PredicatePoint,
+    runs: [Interval; 3],
+) -> Decision {
+    let undecided = Decision::Undecidable {
+        enclosure: place.uncertainty(),
+    };
+    let Some(start) = from.exact_coordinates() else {
+        return undecided;
+    };
+    let sides = place.enclosure();
+    let mut moved = (0..3).filter(|&axis| {
+        let side = sides[axis];
+        !(side.lo() == start[axis] && side.hi() == start[axis])
+    });
+    let (Some(axis), None) = (moved.next(), moved.next()) else {
+        return undecided;
+    };
+    let past_the_start = sides[axis].lo() == start[axis];
+    let short_of_the_start = sides[axis].hi() == start[axis];
+    if past_the_start == short_of_the_start {
+        return undecided;
+    }
+    let off_the_crossing = pair.iter().any(|surface| {
+        let side = side_of_surface(surface, from);
+        side == Decision::Pos || side == Decision::Neg
+    });
+    let along = runs[axis].sign();
+    if !off_the_crossing || !(along == Decision::Pos || along == Decision::Neg) {
+        return undecided;
+    }
+    if past_the_start == (along == Decision::Pos) {
+        Decision::Pos
+    } else {
+        Decision::Neg
     }
 }
 
@@ -7529,9 +7615,9 @@ mod curved {
 #[cfg(test)]
 mod what_the_curved_arrangement_reaches {
     use rcad_geom::{
-        Axis, Cone, Cylinder, EdgeRun, Isometry, Plane, Point, Scale, Sphere, Surface, SurfaceMeet,
-        Torus, Vector, intersect, where_a_closed_crossing_starts,
-        which_comes_first_round_a_crossing,
+        Axis, Cone, Cylinder, EdgeRun, Isometry, MeetOfThree, Plane, Point, Scale, Sphere, Surface,
+        SurfaceMeet, Torus, Vector, intersect, meet_of_three_surfaces,
+        where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
     };
     use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -7947,6 +8033,189 @@ mod what_the_curved_arrangement_reaches {
                 assert_eq!(order(first, second), Decision::Pos, "{named}");
                 assert_eq!(order(second, first), Decision::Neg, "{named}, swapped");
             }
+        }
+    }
+
+    /// §244.3's shape at `x = 16`: the edge cuts the ball at `16 ± 2⁻⁵¹`, which
+    /// are not `f64`s, so the two places are the boxes
+    /// `[15.999999999999998, 16]` and `[16, 16.000000000000004]` along `x`,
+    /// with `y` and `z` exactly the start's. **Both hold the start**, at one
+    /// end each, so the boxes touch, and the sweep from the start is exactly
+    /// zero. The one past the start along the way the circle runs comes first,
+    /// on both circles and with either surface first.
+    ///
+    /// **What says that is the right one** is the same shape at `x = 0`, which
+    /// is this one moved `16` along `x`. Both planes have no `x` in their
+    /// normals, so the move leaves them bit for bit, and the place at
+    /// `16 + 2⁻⁵¹` is the one at `2⁻⁵¹` there. There both places are exact, and
+    /// the sweep from the start to the point across each circle is decided:
+    /// it puts that point after the first of the two and before the second. A
+    /// sweep at `x = 16` cannot say it, since every box that holds the start
+    /// sweeps to anything as a range round zero. Before Q699 every order at
+    /// `x = 16` was `Undecidable`, `2⁻⁴⁸` wide, and a certified fuse refused on
+    /// it (§244.5).
+    #[test]
+    fn two_places_whose_boxes_end_at_the_start_put_the_one_past_it_first() {
+        let top = -f64::powi(2.0, -25);
+        let lid = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, top), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+        let side = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 1.0, 0.0), Vector::new(0.0, 1.0, 0.0))
+                .expect("a unit normal"),
+        );
+        let the_shape_at = |centre: f64| {
+            let ball = Surface::Sphere(
+                Sphere::new(Point::new(centre, 0.0, 0.0), 1.0 + f64::powi(2.0, -51))
+                    .expect("a positive radius"),
+            );
+            let MeetOfThree::At(places) = meet_of_three_surfaces(
+                [&ball, &lid, &side],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a ball and two planes") else {
+                panic!("the edge cuts the ball");
+            };
+            let start = Point::new(centre, 1.0, top);
+            assert_eq!(
+                side_of_surface(&ball, PredicatePoint::from(start.coordinates())),
+                Decision::Neg,
+                "the walked start is inside the ball"
+            );
+            let on_the_side = |is_it: &dyn Fn(Interval) -> bool| {
+                let found: Vec<PredicatePoint> = places
+                    .iter()
+                    .copied()
+                    .filter(|place| {
+                        let [x, y, z] = place.enclosure();
+                        is_it(x) && [y.lo(), y.hi(), z.lo(), z.hi()] == [1.0, 1.0, top, top]
+                    })
+                    .collect();
+                let [place] = found[..] else {
+                    panic!("one place on this side of the start: {places:?}");
+                };
+                place
+            };
+            let past = on_the_side(&|x: Interval| x.lo() >= centre);
+            let short = on_the_side(&|x: Interval| x.hi() <= centre);
+            (ball, start, past, short)
+        };
+        let (ball_at_0, start_at_0, past_at_0, short_at_0) = the_shape_at(0.0);
+        let (ball, start, past, short) = the_shape_at(16.0);
+        for (place, width) in [(past, f64::powi(2.0, -48)), (short, f64::powi(2.0, -49))] {
+            assert_eq!(place.enclosure()[0].width(), width, "{place:?}");
+        }
+        for (named, flat, across) in [
+            ("the lid's circle", &lid, [0.0, -1.0, top]),
+            ("the side's circle", &side, [0.0, 1.0, -top]),
+        ] {
+            for ball_first in [true, false] {
+                let ordered = |ball: &Surface, start: Point, one, other| {
+                    let pair = if ball_first {
+                        [ball, flat]
+                    } else {
+                        [flat, ball]
+                    };
+                    let from = PredicatePoint::from(start.coordinates());
+                    let node = where_the_crossing_starts(pair[0], pair[1], start);
+                    round_a_closed_crossing(pair, [from, node], one, other)
+                        .unwrap_or_else(|why| panic!("{named} is a circle: {why:?}"))
+                };
+                let at_0 = ordered(&ball_at_0, start_at_0, past_at_0, short_at_0);
+                let [first, second] = if at_0 == Decision::Pos {
+                    [past_at_0, short_at_0]
+                } else {
+                    [short_at_0, past_at_0]
+                };
+                let pair = if ball_first {
+                    [&ball_at_0, flat]
+                } else {
+                    [flat, &ball_at_0]
+                };
+                let sweep = |one, other| {
+                    which_comes_first_round_a_crossing(
+                        pair,
+                        PredicatePoint::from(start_at_0.coordinates()),
+                        one,
+                        other,
+                    )
+                    .unwrap_or_else(|why| panic!("{named} is a circle: {why:?}"))
+                };
+                let across = PredicatePoint::from(across);
+                assert_eq!(
+                    sweep(first, across),
+                    Decision::Pos,
+                    "{named}: across is after"
+                );
+                assert_eq!(sweep(across, second), Decision::Pos, "{named}: and before");
+
+                let pair = if ball_first {
+                    [&ball, flat]
+                } else {
+                    [flat, &ball]
+                };
+                let from = PredicatePoint::from(start.coordinates());
+                assert_eq!(
+                    which_comes_first_round_a_crossing(pair, from, past, short),
+                    Ok(Decision::Zero),
+                    "{named}: no area at 16"
+                );
+                assert_eq!(
+                    ordered(&ball, start, past, short),
+                    at_0,
+                    "{named}, ball first {ball_first}"
+                );
+                assert_eq!(
+                    ordered(&ball, start, short, past),
+                    if at_0 == Decision::Pos {
+                        Decision::Neg
+                    } else {
+                        Decision::Pos
+                    },
+                    "{named}, ball first {ball_first}, swapped"
+                );
+            }
+        }
+    }
+
+    /// A start **on** the circle can be the place a box ending at it holds, so
+    /// two boxes that end at it either side are not ordered: both may be the
+    /// start, and that is one point.
+    ///
+    /// The ball of radius 5 holds `(3, 4, 0)` exactly, and the line `y = 4`
+    /// through it cuts the circle `z = 0` again only at `(−3, 4, 0)`. So the
+    /// only point of the circle in `[3, 3 + 1 ulp]` or `[3 − 1 ulp, 3]` along
+    /// that line is the start. Asked as though the start were off the ball,
+    /// these two would come back in order.
+    #[test]
+    fn two_boxes_that_end_at_a_start_on_the_circle_are_left_to_the_policy() {
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a positive radius"));
+        let floor = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+        let start = Point::new(3.0, 4.0, 0.0);
+        let from = PredicatePoint::from(start.coordinates());
+        assert_eq!(side_of_surface(&ball, from), Decision::Zero, "on the ball");
+        let along_x = |lo: f64, hi: f64| {
+            PredicatePoint::Constructed([
+                Interval::new(lo, hi).expect("a low end below a high one"),
+                Interval::exactly(4.0),
+                Interval::exactly(0.0),
+            ])
+        };
+        let past = along_x(3.0, 3.0_f64.next_up());
+        let short = along_x(3.0_f64.next_down(), 3.0);
+        for pair in [[&ball, &floor], [&floor, &ball]] {
+            let node = where_the_crossing_starts(pair[0], pair[1], start);
+            let order = round_a_closed_crossing(pair, [from, node], past, short)
+                .expect("a ball and a plane cross in a circle");
+            assert!(
+                matches!(order, Decision::Undecidable { .. }),
+                "{pair:?}: {order:?}"
+            );
         }
     }
 

@@ -36,6 +36,13 @@
 //! two circles cross one way at one of the points and the other way at the
 //! other, so the turn is zero somewhere in any box that holds both, and kept as
 //! two nodes with one box each, the pair would meet that refusal next (§318.3).
+//!
+//! **Q699 does not order them.** It orders two places in a line with a start
+//! that is off the circle, where each box holds the start at one end. Here the
+//! start, `(10000000000.809, 10000000000.139208, 10000000000.25)`, is outside the
+//! box, the sweep from it is not a proved zero, and the two boxes are one box,
+//! so there is no end of either to read. Telling the two apart takes which root
+//! of the edge line's quadratic each meet is, which no box here carries.
 
 use rcad_geom::{Isometry, MeetOfThree, Scale, Surface, Vector, meet_of_three_surfaces};
 use rcad_predicates::{Level, Point as PredicatePoint, Policy, ProvenanceLog};

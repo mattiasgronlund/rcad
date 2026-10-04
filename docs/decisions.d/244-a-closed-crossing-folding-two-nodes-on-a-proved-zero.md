@@ -11,7 +11,9 @@ touch, a different line folds the pair first — the check in `place_the_meets`
 that throws away a meet already on the list. So this arm was never the one
 that did it, and nothing here reaches it.* **Since §248 it does, and since
 Q663 the arm asks the policy (244.5). Since Q449 a start between the two
-places puts the one ahead of it first (244.6).**
+places puts the one ahead of it first (244.6). Since Q699 (`a1d7c237`) two
+places whose boxes each end at a start off the crossing, as at `cx = 16`, are
+ordered by which end of its box the start is at.**
 
   244.1   Which proved zeros reach the arm
   244.2   A block edge grazing a ball puts the start between two nodes
@@ -205,7 +207,7 @@ each rule, each argument order:
 
 | shape | `Policy::certified` | `Policy::tolerant(25.0)` |
 |---|---|---|
-| 244.3's edge, `cx = 16` | refuses: `order along a crossing` on the two places, `2⁻⁴⁸` | intersection answers `2.0933739 ± 0.0062779`; union and difference `CannotMeshAFace { CornersCoincide }` |
+| 244.3's edge, `cx = 16` | until Q699: refuses `order along a crossing` on the two places, `2⁻⁴⁸`. Since Q699, ball first: refuses `orient3d`, the turn at the place below `16`, `2⁻⁴⁹` (pinned); block first: `order along a crossing` along the block edge, `5.33e-15` (Q699's probe, not pinned) | until Q699: intersection answers `2.0933739 ± 0.0062779`; union and difference `CannotMeshAFace { CornersCoincide }`. Since Q699: every rule, either solid first, `ResultIsNotManifold { count: 3 }` (Q699's probe, not pinned) |
 | the prism above, ball first | refuses: `order along a crossing` on the two places, `2.3e-14`, `Volume` | intersection answers `0.43528013 ± 0.0025147`, the cap past the first wall; union and difference `CannotMeshAFace { CornersCoincide }` |
 | the prism above, prism first | refuses: `order along a crossing` on the two places along the walls' shared edge, `4.4e-14`, `Length` | as above |
 
@@ -217,9 +219,11 @@ checks; the edge's was not compared with an exact volume here. The
 tolerant union and difference of the prism are queue row Q659's, which found
 the fuse right and the mesher at fault, and are not pinned here.
 `a_block_edge_grazing_a_ball_at_cx_16.rs`'s pin that §317.4 names as the test
-to flip is now `a_certified_fuse_refuses_on_the_order_of_the_two_places`: the
-order refuses before the turn is asked, so §317's gap no longer shows through
-that fuse under a certified policy, only in the file's measurement of the turn.
+to flip was `a_certified_fuse_refuses_on_the_order_of_the_two_places` from
+Q663 until Q699, while the order refused before the turn was asked. Q699
+decides that order, so the pin is
+`a_certified_fuse_refuses_on_the_turn_at_the_place_below_16` again, and §317's
+gap shows through that fuse under a certified policy.
 
 ### 244.6 A start between the two places puts the one ahead of it first
 
