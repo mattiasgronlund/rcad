@@ -1547,10 +1547,22 @@ impl BuildingAMesh {
             })
             .collect();
         from_the_seam.sort_by(|one, other| one.0.total_cmp(&other.0));
+        // **Two holes that touch go in one run whatever their longitudes say.**
+        // The one longitude they share is read off each from the seam on its
+        // own, the end of the one as its start plus its width and the start of
+        // the other as itself, and the two round apart by an ulp either way: a
+        // ball touching a prism's edge from `−y` put a cut through the point
+        // they share, and neither hole lay strictly inside its strip (§364).
+        let touch = |one: usize, other: usize| {
+            holes[one]
+                .points
+                .iter()
+                .any(|at| holes[other].points.contains(at))
+        };
         let mut runs: Vec<(f64, f64, Vec<usize>)> = Vec::new();
         for (start, end, at) in from_the_seam {
             match runs.last_mut() {
-                Some(run) if start <= run.1 => {
+                Some(run) if start <= run.1 || run.2.iter().any(|&member| touch(member, at)) => {
                     run.1 = run.1.max(end);
                     run.2.push(at);
                 }
