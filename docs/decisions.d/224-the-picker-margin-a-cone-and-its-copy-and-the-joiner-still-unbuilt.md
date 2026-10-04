@@ -53,6 +53,19 @@ make up exists. The lane read `assemble.rs:564-880` and reached this design:
    is an outline or a hole, by the sign of its area. A ring whose net turn is
    ±2π goes right round. For that one, keep one crossing edge as a seam (the
    lowest index, so the choice does not depend on argument order), or refuse.
+
+   > **2026-10-04 note (Q869): a seam is not always one edge.** A seam is one
+   > dissolved edge from ring to ring where there is one, and otherwise the
+   > chain of rulings from ring to ring with the fewest edges and the lowest
+   > corners (`a_seam_across_the_band` in `fuse/assemble.rs`, Q503's
+   > `f8155020`): a box standing inside a bar cuts the wall into 24 pieces, 8
+   > round by 3 up, and no one edge runs from rim to rim. Chains are kept to
+   > rulings, which keep their angle round the axis, because the mesher
+   > refused a chain of two arcs where a pointed cone or frustum is united
+   > with a cube stood on its corner round the apex
+   > (`TwoPatchesOfTheMeshDrewTheSameSide`, seven tests across four files, not
+   > traced). The corners in the middle of a chain stay corners, as every
+   > corner where pieces of one cone or pipe met does.
 3. **Corners that stop being corners.** This is the hard part. After a join, a
    corner with only the cone and one other surface round it sits in the middle
    of an arc, and §17.1 cannot re-derive it. The two arcs either side must
