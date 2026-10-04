@@ -129,7 +129,7 @@ fn a_holed_half_ball(
         [equator_on_the_skin, hole]
     };
     let skin = builder
-        .add_face(ball.clone(), &skin_wires)
+        .add_face(ball, &skin_wires)
         .expect("a face with two wires");
     let cap = builder
         .add_face(ball, &[rim_of_the_cap])
