@@ -8,8 +8,12 @@
 //! quarter of a bar — and when they are parallel and keep the strip between
 //! them, a bar with two flats, whose two walls are told apart by the half of
 //! the pipe each is in. A flat face keeping the **outside** of the pipe is
-//! refused. Each refusal comes with the shape that shows why: two points the
-//! face's own cuts cannot tell apart, one on the face and one on another face.
+//! answered when the pipe's circle crosses the edge of the face's square only
+//! at the two ends of its one arc — a block with a bar bored through the middle
+//! of one edge — and refused otherwise. Each refusal comes with the shape that
+//! shows why: two points the face's own cuts cannot tell apart, one on the face
+//! and one on another face, or a face that is one piece all the same and is
+//! pinned as a gap.
 
 use core::f64::consts::PI;
 
@@ -262,6 +266,30 @@ fn a_block_with_a_bar_bored_through_one_edge_holds_the_points_of_its_floor_and_i
         }
     }
     assert_eq!(counted, [64, 56, 100]);
+}
+
+/// A block `10 × 10 × 4` with a bar of radius 3 bored down through one corner.
+/// Its floor is **one piece**, the square less a quarter of a disc, so
+/// `(5, 5, 0)` is held and `(1, 1, 0)` is not. It is refused by name all the
+/// same: each side through the bite holds one end of the arc and crosses the
+/// pipe again outside the square, and telling that from the narrow top above,
+/// whose long sides cross it again where the other piece begins, wants where
+/// two of the block's sides meet. A gap, pinned so that answering it fails here
+/// and gets moved to a test of its answers.
+#[test]
+fn a_block_with_a_bar_bored_through_one_corner_has_its_floor_refused_though_it_is_one_piece() {
+    let mut model = a_model();
+    let block = a_block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+    let bar = a_bar(&mut model, 3.0, [0.0, 0.0, -1.0]);
+    let solid = the_one_solid(&mut model, block, bar, Rule::Difference);
+    let floor = the_only_face(&model, solid, |surface| {
+        surface
+            .as_plane()
+            .is_some_and(|flat| flat.normal().components() == [0.0, 0.0, -1.0])
+    });
+    for point in [[5.0, 5.0, 0.0], [1.0, 1.0, 0.0]] {
+        assert_eq!(holds(&model, solid, floor, point), Err(floor));
+    }
 }
 
 /// The whole block with the bar bored through one edge, asked point by point:
