@@ -4,18 +4,18 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and two of the roads back to it
+//! # Two planes and a quadric is the road, and three ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
-//! one route that is worked out here, and everything else either arrives at it
-//! or is refused.
+//! one route that is worked out here, and everything else either arrives at it,
+//! is settled by a sign without it, or is refused.
 //!
 //! One plane and two quadrics is a quartic in general — the plane crosses each
 //! quadric in a conic and two conics in one plane meet where a quartic is zero —
 //! and reaching *that* takes an algebraic solver rather than a discriminant. But
-//! **two families of it are not a quartic at all**, and both are ordinary
-//! mechanical CAD rather than curiosities:
+//! **three families of it are not a quartic at all**, and all three are
+//! ordinary mechanical CAD rather than curiosities:
 //!
 //! - **Two quadrics that bend the same way.** Write a quadric out as
 //!   `p·(M p) + 2b·p + c`. Two of them with the same `M` differ by something
@@ -25,15 +25,21 @@
 //!   cones of one slope about one direction have it. So the triple is two planes
 //!   and a quadric after all, and the road above answers it.
 //!   [`where_a_plane_and_two_quadrics_of_one_bend_meet`].
+//! - **Two surfaces turned about one axis, and a plane square to it.** A ball,
+//!   a pipe and a cone are each cut by such a plane in a circle about the point
+//!   where the axis crosses it, and two circles about one centre are one circle
+//!   or share nothing — so the answer is whether two squared radii are equal, a
+//!   bar through a ball and a cap across both.
+//!   [`what_a_plane_square_to_their_one_axis_leaves`].
 //! - **A plane that only grazes one of them.** A plane that misses a quadric
 //!   leaves the three sharing nothing, and a plane that *touches* one at a single
 //!   point leaves one candidate — so the whole question is which side of the
 //!   third surface that point is on. [`what_a_plane_that_grazes_one_of_them_leaves`].
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
-//! quadrics that bend differently and cross the plane in curves — a pipe and a
-//! ball, or two pipes leaning against each other — and any triple with a torus
-//! and fewer than two planes.
+//! quadrics that bend differently, cross the plane in curves and are not cut
+//! square about one axis — a pipe and a ball off its axis, or two pipes leaning
+//! against each other — and any triple with a torus and fewer than two planes.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -209,8 +215,8 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and neither road back to two of them runs — the two the
-/// module doc names.
+/// the three are planes and none of the three ways round that the module doc
+/// names runs.
 ///
 /// [`Error::Undecidable`] when a sign the answer depends on could not be
 /// settled, or when a product the exact arithmetic needs falls out of `f64`'s

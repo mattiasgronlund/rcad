@@ -5,13 +5,16 @@
 //! and two quadrics has no second plane to cross, and in general it is a quartic
 //! — two conics in one plane — which nothing in this milestone solves.
 //!
-//! **Two families of it are not a quartic**, and both are ordinary mechanical
-//! CAD:
+//! **Three families of it are not a quartic**, and all three are ordinary
+//! mechanical CAD:
 //!
 //! - Two quadrics that square `p` the same way differ by something *linear*, so
 //!   every point they share sits on one flat surface and the triple is two
 //!   planes and a quadric after all. Two pipes running the same way are it, and
 //!   so are two balls.
+//! - Two surfaces turned about one axis — a ball, a pipe, a cone — are cut by a
+//!   plane square to that axis in two circles about one centre, which are one
+//!   circle or share nothing. A bar through a ball and a cap across both is it.
 //! - A plane that misses one of the two settles the triple on its own, and a
 //!   plane that touches one at a single point leaves one candidate and one sign
 //!   question. A ball and a bar both resting on a block's floor are it.
