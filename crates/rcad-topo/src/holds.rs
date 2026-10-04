@@ -1241,6 +1241,12 @@ fn is_one_circle_cut_in_two(
 /// through [`where_a_closed_crossing_is_centred`]. Anything else is refused by
 /// name, as before.
 ///
+/// **One face is one of two pieces in front of every cut, and is told from the
+/// other**: a wall of a bar with two flats, where the part of the pipe between
+/// the flats is a run of rulings round each side
+/// ([`one_of_two_runs_between_two_flats`]). Step 3 then holds of each piece on
+/// its own, and the point is asked which half of the pipe it is in as well.
+///
 /// **All of that is asked of the face where it is stored, and only `point` is
 /// asked where it sits** (§168). Each step is a property a movement keeps —
 /// a plane holding two points, a plane through a centre, which way a wire runs
@@ -1293,9 +1299,12 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             }),
         }
     }
-    if !is_a_family_this_follows(&surface, &cuts) {
-        return Err(cannot());
-    }
+    let one_of_two_runs = if is_a_family_this_follows(&surface, &cuts) {
+        None
+    } else {
+        let run = one_of_two_runs_between_two_flats(face, &surface, &sides, &cuts)?;
+        Some(run.ok_or_else(cannot)?)
+    };
 
     let placed = face.surface();
     let mut at_the_apex = false;
@@ -1324,7 +1333,10 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
         }
     }
     if in_front_of_all {
-        let held = held_in_front_of_all(&cuts, point)?;
+        let held = match &one_of_two_runs {
+            Some(run) => held_in_front_of_all_on_its_own_run(run, &cuts, point)?,
+            None => held_in_front_of_all(&cuts, point)?,
+        };
         Ok(if at_the_apex && held == OnAFace::Held {
             OnAFace::OnItsBoundary
         } else {
@@ -1395,6 +1407,7 @@ enum SideRun {
 /// One surface cutting a face: which side of it the face keeps, which of the
 /// face's corners are on it because an edge along it ends there, and where it
 /// is once moved into place, which is the only thing the point is asked against.
+#[derive(Clone)]
 struct Cut {
     surface: Surface,
     placed: Surface,
@@ -1871,7 +1884,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 ///
 /// On a pipe it is planes, as [`leaves_a_pipe_in_one_piece`] sets out, or two
 /// planes along the axis meeting inside the pipe in place of its one
-/// ([`is_a_wedge_of_a_pipe`]).
+/// ([`is_a_wedge_of_a_pipe`]). Two parallel planes along the axis leave two
+/// pieces, so this says no to them, and the caller asks
+/// [`one_of_two_runs_between_two_flats`] which piece the face is.
 ///
 /// On a sphere, it is planes through the centre: each cuts the sphere into two
 /// halves, and any number of halves meet in one piece, where planes that miss
@@ -2248,12 +2263,12 @@ fn added(left: &[f64], right: &[f64]) -> Vec<f64> {
 /// keep two runs, and the face is only one of them, so "in front of every cut"
 /// would hold a point on the other. Two parallel planes are the extreme case: a
 /// bar with two flats, `|x| ≤ 3` across a bar of radius 5, keeps a run round
-/// `+y` and a run round `−y`, and each is a wall of its own
-/// (`a_bar_with_two_flats_has_each_wall_refused_by_name` in
-/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`). That refusal is this
-/// argument's and not the face's: the face's answer exists, and reading it
-/// wants something that tells the two runs apart, such as the plane through the
-/// wall's two rulings, which is not a cut of the face.
+/// `+y` and a run round `−y`, and each is a wall of its own. Those are answered
+/// by [`one_of_two_runs_between_two_flats`], which tells the two runs apart by
+/// the plane through the axis square to the flats. Two planes that are not
+/// parallel and meet outside the pipe are still refused by name. Their face's
+/// answer exists too, so that is a gap, and nothing here tells their two runs
+/// apart.
 ///
 /// A cut that is a second pipe running the same way is left to
 /// [`leaves_a_pipe_in_one_piece`], which counts it beside the plane kept here
@@ -2322,6 +2337,178 @@ fn do_two_planes_along_the_axis_meet_inside(
     let radius = Interval::exactly(pipe.radius());
     let squared = dot(meet, meet);
     (dot(off_the_axis, off_the_axis) - radius * radius * squared * squared).sign() == Decision::Neg
+}
+
+/// A pipe face that is one of the two runs of rulings two parallel flats keep
+/// between them, moved into place, with the half of the pipe it is in.
+struct OneOfTwoRuns {
+    pipe: rcad_geom::Cylinder,
+    flat: Plane,
+    half: Decision,
+}
+
+/// Whether `face`, on the pipe `surface`, is one of the two runs of rulings that
+/// two parallel planes along the axis keep between them — a wall of a bar with
+/// two flats — and if it is, which half of the pipe it is in. `None` when it is
+/// not, which the caller refuses by name.
+///
+/// **Look down the axis.** The pipe is a circle of radius `r` and each flat is a
+/// line. Take `n̂` across the flats and `t̂` along them, so the ruling at angle `φ`
+/// is at `r(cos φ n̂ + sin φ t̂)` from the axis. The flats keep the rulings with
+/// `a ≤ r cos φ ≤ b`, and when each flat is less than `r` from the axis
+/// ([`crosses_the_pipe_in_two_rulings`]) both `|a|` and `|b|` are below `r`. So
+/// `cos φ` is never `±1` there, `sin φ` is never zero, and the rulings kept are
+/// two runs: one where `sin φ > 0` and one where `sin φ < 0`. The plane through
+/// the axis square to the flats is `t̂·(x − o) = 0`, which is `sin φ = 0`, so it
+/// has one run strictly on each side of it — **the two halves of the pipe**.
+///
+/// **Each half holds one run**, and one run is all [`leaves_a_pipe_in_one_piece`]
+/// reads off one plane along the axis, so its argument for the floor and the
+/// roof carries over and it is asked with one flat left out, as
+/// [`is_a_wedge_of_a_pipe`] asks it. So the part of the pipe in front of every
+/// cut is two pieces, one in each half, and step 3 of
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] holds of each on its own: the
+/// face sits inside the part in front of every cut, it is connected so it sits
+/// inside one piece, and its boundary is on that piece's boundary, so it is all
+/// of that piece. Which piece is the half its corners are in. Every corner reads
+/// it where it is stored, and corners that do not all say one half are refused.
+///
+/// **The flats must keep the strip between them** ([`keep_the_strip_between_them`]).
+/// Two parallel planes both keeping `+x` keep the part beyond one of them, which
+/// is one run round `−x` — and that run crosses the plane through the axis, so
+/// telling halves apart would cut the face in two.
+///
+/// **This, and not the plane through the wall's own two rulings**, because the
+/// plane through the axis is built of stored numbers only: the pipe's axis and
+/// one flat's normal. The rulings' plane is only through the rulings when the
+/// corners it would be built from are exactly on the pipe — on the bar of radius
+/// 5 with flats at `|x| ≤ 3` they are, at `(±3, ±4)`, and with flats at
+/// `|x| ≤ 2` they are at `y = ±√21`, which rounds — and it touches the wall
+/// along both of them, so a point near a ruling would be asked against it where
+/// its sign is zero. The plane through the axis meets neither run anywhere, so
+/// nothing on it has to be exact.
+///
+/// The point is asked against the pipe and the flat moved into place, as every
+/// cut is (§168): a movement turns `t̂` with everything else and never mirrors,
+/// so the half a point is in does not change under one.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when a corner's half could not be settled.
+fn one_of_two_runs_between_two_flats(
+    face: FaceView<'_>,
+    surface: &Surface,
+    sides: &[Side],
+    cuts: &[Cut],
+) -> Result<Option<OneOfTwoRuns>> {
+    let Surface::Cylinder(pipe) = surface else {
+        return Ok(None);
+    };
+    let axis = pipe.axis().direction().components();
+    let along_the_axis: Vec<(usize, &Plane)> = cuts
+        .iter()
+        .enumerate()
+        .filter_map(|(at, cut)| Some((at, cut.surface.as_plane()?)))
+        .filter(|(_, flat)| {
+            let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
+                named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+                normal: flat.normal().components(),
+                along: axis,
+            });
+            leans == Decision::Zero
+        })
+        .collect();
+    let [(one, one_flat), (other, other_flat)] = along_the_axis[..] else {
+        return Ok(None);
+    };
+    let all_but_one: Vec<Cut> = cuts
+        .iter()
+        .enumerate()
+        .filter(|&(at, _)| at != other)
+        .map(|(_, cut)| cut.clone())
+        .collect();
+    if !the_normals_lie_along_one_line(one_flat, other_flat)
+        || !keep_the_strip_between_them([(&cuts[one], one_flat), (&cuts[other], other_flat)])
+        || !crosses_the_pipe_in_two_rulings(pipe, one_flat)
+        || !crosses_the_pipe_in_two_rulings(pipe, other_flat)
+        || !leaves_a_pipe_in_one_piece(pipe, &all_but_one)
+    {
+        return Ok(None);
+    }
+
+    let mut half = None;
+    for corner in sides.iter().flat_map(|side| [side.start, side.end]) {
+        let found = which_half_of_the_pipe(pipe, one_flat, exactly(corner.at.coordinates()));
+        match found {
+            Decision::Pos | Decision::Neg if half.is_none_or(|known| known == found) => {
+                half = Some(found);
+            }
+            Decision::Pos | Decision::Neg | Decision::Zero => return Ok(None),
+            Decision::Undecidable { enclosure } => {
+                let at = PredicatePoint::from(corner.at.coordinates());
+                return Err(gave_up_on_which_half(at, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    let half = half.expect("a face with two flats among its cuts has corners on them");
+    let Surface::Cylinder(placed_pipe) = face.surface() else {
+        panic!("a pipe moved into place is a pipe");
+    };
+    let Surface::Plane(placed_flat) = cuts[one].placed else {
+        panic!("a plane moved into place is a plane");
+    };
+    Ok(Some(OneOfTwoRuns {
+        pipe: placed_pipe,
+        flat: placed_flat,
+        half,
+    }))
+}
+
+/// Whether two parallel planes keep the strip between them: the ways into what
+/// each keeps point against each other. A plane keeps the way its normal points
+/// when it keeps its positive side, so that is the sign of the dot of the two
+/// normals against whether the two keep the same sign.
+fn keep_the_strip_between_them(flats: [(&Cut, &Plane); 2]) -> bool {
+    let [(one, one_flat), (other, other_flat)] = flats;
+    let normals = [one_flat, other_flat].map(|flat| exactly(flat.normal().components()));
+    match dot(normals[0], normals[1]).sign() {
+        Decision::Pos => one.kept != other.kept,
+        Decision::Neg => one.kept == other.kept,
+        Decision::Zero | Decision::Undecidable { .. } => false,
+        found => panic!("a sign came back with a decision nothing here knows: {found:?}"),
+    }
+}
+
+/// Whether a plane along `pipe`'s axis is strictly less than the radius from
+/// it, so it crosses the pipe in two rulings rather than touching it along one
+/// or missing it: `(d − n·o)² < r²|n|²`, with `n·x = d` the plane and `o` the
+/// axis origin. `false` when the sign could not be settled.
+///
+/// A plane touching the pipe along a ruling is what this keeps out, since the
+/// run it bounds then reaches round to the plane through the axis.
+/// [`which_side_of_its_neighbour_a_side_keeps`] refuses a side along a touching
+/// plane, but it reads the touch at a corner, and a corner rounded off the ruling
+/// it should be on reads as a crossing.
+fn crosses_the_pipe_in_two_rulings(pipe: &rcad_geom::Cylinder, flat: &Plane) -> bool {
+    let normal = exactly(flat.normal().components());
+    let off_the_axis =
+        Interval::exactly(flat.offset()) - dot(normal, exactly(pipe.axis().origin().coordinates()));
+    let radius = Interval::exactly(pipe.radius());
+    (off_the_axis * off_the_axis - radius * radius * dot(normal, normal)).sign() == Decision::Neg
+}
+
+/// Which side of the plane through `pipe`'s axis square to `flat` the box `at`
+/// is on: the sign of `(at − o)·(n × w)`, with `o` the axis origin, `w` its
+/// direction and `n` the flat's normal, as stored. Interval arithmetic: a sign
+/// it cannot settle reads [`Decision::Undecidable`].
+fn which_half_of_the_pipe(pipe: &rcad_geom::Cylinder, flat: &Plane, at: [Interval; 3]) -> Decision {
+    let origin = exactly(pipe.axis().origin().coordinates());
+    let across = cross(
+        exactly(flat.normal().components()),
+        exactly(pipe.axis().direction().components()),
+    );
+    dot(core::array::from_fn(|axis| at[axis] - origin[axis]), across).sign()
 }
 
 /// Whether `cuts` are exactly two pipes whose axes run the same way, each cut
@@ -2846,6 +3033,27 @@ fn held_in_front_of_all(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
     })
 }
 
+/// The face is the part of its pipe in front of every cut that is in its own
+/// half ([`one_of_two_runs_between_two_flats`]). The other half's piece is
+/// strictly in the other half, so a point on the plane between the halves is
+/// not on the face either.
+fn held_in_front_of_all_on_its_own_run(
+    run: &OneOfTwoRuns,
+    cuts: &[Cut],
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let held = held_in_front_of_all(cuts, point)?;
+    if held == OnAFace::NotHeld {
+        return Ok(held);
+    }
+    match which_half_of_the_pipe(&run.pipe, &run.flat, point.enclosure()) {
+        found if found == run.half => Ok(held),
+        Decision::Pos | Decision::Neg | Decision::Zero => Ok(OnAFace::NotHeld),
+        Decision::Undecidable { enclosure } => Err(gave_up_on_which_half(point, enclosure)),
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
 /// The face is the part of its sphere in front of any cut: the rest of the
 /// sphere is behind all of them.
 fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> {
@@ -3252,6 +3460,23 @@ fn gave_up_on_the_axis(flat: &Plane, ring: &rcad_geom::Torus, enclosure: f64) ->
 fn gave_up_turning_a_corner(point: PredicatePoint, enclosure: f64) -> Error {
     gave_up(ORIENT3D, point, Level::Exact, enclosure, Measures::Volume)
 }
+
+/// The same, for which half of a pipe between two flats a point or a corner is
+/// in ([`which_half_of_the_pipe`]): a length, the distance off the plane through
+/// the axis scaled by the lengths of the two directions.
+fn gave_up_on_which_half(point: PredicatePoint, enclosure: f64) -> Error {
+    gave_up(
+        WHICH_HALF_OF_A_PIPE,
+        point,
+        Level::Interval,
+        enclosure,
+        Measures::Length,
+    )
+}
+
+/// The name which half of a pipe between two flats a point is in goes by in
+/// provenance records.
+const WHICH_HALF_OF_A_PIPE: &str = "which_half_of_a_pipe";
 
 /// The name the ordering of a point along a side goes by in provenance records.
 const BETWEEN_TWO_CORNERS: &str = "between_two_corners";

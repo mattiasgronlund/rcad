@@ -5,10 +5,11 @@
 //! every point within its radius of the axis, which is convex, and a convex
 //! piece is what `holds.rs`'s `is_a_family_this_follows` needs. A wall cut by
 //! two planes along the axis is answered when the two meet inside the pipe — a
-//! quarter of a bar — and refused when they do not, which is a bar with two
-//! flats. A flat face keeping the **outside** of the pipe is refused. Each
-//! refusal comes with the shape that shows why: two points the face's own cuts
-//! cannot tell apart, one on the face and one on another face.
+//! quarter of a bar — and when they are parallel and keep the strip between
+//! them, a bar with two flats, whose two walls are told apart by the half of
+//! the pipe each is in. A flat face keeping the **outside** of the pipe is
+//! refused. Each refusal comes with the shape that shows why: two points the
+//! face's own cuts cannot tell apart, one on the face and one on another face.
 
 use core::f64::consts::PI;
 
@@ -107,33 +108,91 @@ fn a_cap_trimmed_by_a_pipe_holds_its_points() {
 
 /// A bar of radius 5 with two flats, `|x| ≤ 3`. Each wall is one run of the
 /// pipe's rulings, round `+y` or round `−y`, cut by both flats and both caps —
-/// and the other wall is in front of all four cuts too. "The part of the pipe
-/// in front of every cut" is both walls, so it cannot be how either is read,
-/// and both are refused by name rather than answered wrong. Each wall's answer
-/// exists, so under `docs/decisions.md` §16.10 this is a gap: one of the
-/// argument and not of the face.
+/// and the other wall is in front of all four cuts too, so "the part of the
+/// pipe in front of every cut" is both walls. Each wall holds its own points
+/// and none of the other's: those on the pipe between the flats and the caps,
+/// on its own side of `y = 0`. Most points asked are on the pipe exactly, at
+/// the corners of 3-4-5 triangles, so the rulings the flats cut at `(±3, ±4)`
+/// are asked too; the rest are on it to within rounding and well clear of every
+/// edge.
 #[test]
-fn a_bar_with_two_flats_has_each_wall_refused_by_name() {
-    let mut model = a_model();
-    let bar = a_bar(&mut model, 5.0, [0.0, 0.0, 0.0]);
-    let slab = a_block(&mut model, [-3.0, -10.0, -1.0], [6.0, 20.0, 6.0]);
-    let solid = the_one_solid(&mut model, bar, slab, Rule::Intersection);
+fn a_bar_with_two_flats_holds_the_points_of_each_wall() {
+    let (model, solid) = a_bar_with_two_flats();
     let walls = the_faces(&model, solid, |surface| {
         matches!(surface, Surface::Cylinder(_))
     });
     assert_eq!(walls.len(), 2, "one wall each side of the flats");
+    let on_the_pipe_exactly = [
+        [5.0, 0.0],
+        [4.0, 3.0],
+        [3.0, 4.0],
+        [0.0, 5.0],
+        [-3.0, 4.0],
+        [-4.0, 3.0],
+        [-5.0, 0.0],
+        [-4.0, -3.0],
+        [-3.0, -4.0],
+        [0.0, -5.0],
+        [3.0, -4.0],
+        [4.0, -3.0],
+    ];
+    let on_the_pipe_rounded = [75.0, 100.0, 260.0, 285.0].map(|degrees| {
+        let [x, y, _] = on_the_pipe(5.0, degrees, 0.0);
+        [x, y]
+    });
+    let mut counted = [0; 3];
     for wall in walls {
-        for degrees in [90.0, 270.0] {
-            assert_eq!(
-                holds(&model, solid, wall, on_the_pipe(5.0, degrees, 2.0)),
-                Err(wall)
-            );
-        }
         assert_eq!(
             sides_of_every_neighbour(&model, solid, wall, [0.0, 5.0, 2.0]),
             sides_of_every_neighbour(&model, solid, wall, [0.0, -5.0, 2.0]),
             "the two walls are on the same side of every cut of one of them"
         );
+        let round = which_way_round(&model, solid, wall);
+        for [x, y] in on_the_pipe_exactly.into_iter().chain(on_the_pipe_rounded) {
+            for z in [-0.5, 0.0, 0.5, 2.0, 3.5, 4.0, 4.5] {
+                let expected = on_a_wall_of_the_bar_with_two_flats(round, [x, y, z]);
+                counted[match expected {
+                    OnAFace::Held => 0,
+                    OnAFace::OnItsBoundary => 1,
+                    OnAFace::NotHeld => 2,
+                    other => unreachable!("the test's own answer is one of three: {other:?}"),
+                }] += 1;
+                assert_eq!(
+                    holds(&model, solid, wall, [x, y, z]),
+                    Ok(expected),
+                    "the wall round {round} times y, at ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+    assert_eq!(counted, [18, 32, 174]);
+}
+
+/// The whole bar with two flats, asked point by point: the ray caster crosses
+/// the walls, so a wall that refuses makes the solid refuse.
+#[test]
+fn a_bar_with_two_flats_says_which_points_are_inside_it() {
+    let (model, solid) = a_bar_with_two_flats();
+    let view = model.solid(solid).expect("this model made the key");
+    for (point, expected) in [
+        ([0.0, 0.0, 2.0], Containment::Inside),
+        ([2.0, 4.0, 1.0], Containment::Inside),
+        ([0.0, 4.5, 3.0], Containment::Inside),
+        ([-1.0, -4.5, 1.0], Containment::Inside),
+        ([3.5, 0.0, 2.0], Containment::Outside),
+        ([0.0, 5.5, 2.0], Containment::Outside),
+        ([2.0, -4.8, 2.0], Containment::Outside),
+        ([0.0, 0.0, 4.5], Containment::Outside),
+        ([0.0, -4.5, -0.5], Containment::Outside),
+    ] {
+        let mut log = ProvenanceLog::new();
+        let [x, y, z] = point;
+        assert_eq!(
+            view.classify_point(Point::new(x, y, z), &Policy::certified(), &mut log),
+            expected,
+            "the bar with two flats, at {point:?}"
+        );
+        assert!(log.is_empty(), "a certified answer logs nothing: {log:?}");
     }
 }
 
@@ -142,7 +201,8 @@ fn a_bar_with_two_flats_has_each_wall_refused_by_name() {
 /// at the other, so the top is two faces, each keeping the outside of the pipe
 /// — and the other piece is in front of every one of this piece's cuts.
 /// Refused by name rather than answered wrong; the answer exists, so this is a
-/// gap of the argument as the two flats are.
+/// gap of the argument, as the walls of the bar with two flats were until each
+/// was told apart by the half of the pipe it is in.
 #[test]
 fn a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name() {
     let mut model = a_model();
@@ -200,6 +260,15 @@ fn a_quarter_of_a_bar(bar_first: bool) -> (Model, SolidKey) {
         [block, bar]
     };
     let solid = the_one_solid(&mut model, one, other, Rule::Intersection);
+    (model, solid)
+}
+
+/// A bar of radius 5 from `z = 0` to `z = 4`, less the part outside `|x| ≤ 3`.
+fn a_bar_with_two_flats() -> (Model, SolidKey) {
+    let mut model = a_model();
+    let bar = a_bar(&mut model, 5.0, [0.0, 0.0, 0.0]);
+    let slab = a_block(&mut model, [-3.0, -10.0, -1.0], [6.0, 20.0, 6.0]);
+    let solid = the_one_solid(&mut model, bar, slab, Rule::Intersection);
     (model, solid)
 }
 
@@ -288,6 +357,44 @@ fn holds(
         Ok(found) => Ok(found),
         Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: named }) => Err(named),
         Err(other) => panic!("{point:?} on {face:?} is refused some other way: {other:?}"),
+    }
+}
+
+/// Which way round the axis a wall of the bar with two flats runs, read off its
+/// corners: `1.0` round `+y`, `-1.0` round `−y`.
+fn which_way_round(model: &Model, solid: SolidKey, wall: FaceKey) -> f64 {
+    let face = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .find(|used| used.key() == wall)
+        .expect("a face of this solid");
+    let ys: Vec<f64> = face
+        .wires()
+        .flat_map(|wire| wire.points().collect::<Vec<_>>())
+        .map(|corner| corner.coordinates()[1])
+        .collect();
+    let round = ys[0].signum();
+    assert!(
+        ys.iter().all(|y| y.signum() == round && y.abs() > 3.0),
+        "a wall's corners are where the flats cross the pipe, all on one side: {ys:?}"
+    );
+    round
+}
+
+/// Where a point on the pipe of radius 5 is against the wall of the bar with
+/// flats at `|x| ≤ 3` that runs `round` times `+y`, worked out from its
+/// coordinates: between the caps, between the flats and on the wall's own side
+/// of `y = 0`, and on a cap or a flat when it is on its boundary. No point on
+/// the pipe between the flats is on `y = 0`.
+fn on_a_wall_of_the_bar_with_two_flats(round: f64, point: [f64; 3]) -> OnAFace {
+    let [x, y, z] = point;
+    if !(0.0..=4.0).contains(&z) || x.abs() > 3.0 || round * y < 0.0 {
+        OnAFace::NotHeld
+    } else if z == 0.0 || z == 4.0 || x.abs() == 3.0 {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::Held
     }
 }
 
