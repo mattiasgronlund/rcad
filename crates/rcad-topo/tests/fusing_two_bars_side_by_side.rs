@@ -52,9 +52,11 @@
 //! and a union or a lens fused with a block over its top half gives what
 //! cutting each bar first gives
 //! ([`a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_first_does`]).
-//! The crescents against either block still refuse elsewhere (§331.5), and
-//! [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
-//! shows the top half's answer exists.
+//! The two crescents do both too
+//! ([`a_crescent_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`],
+//! [`a_block_over_the_top_half_of_a_crescent_cuts_it_as_cutting_each_bar_first_does`]),
+//! since a face used reversed reaches the arrangement walked the way round it
+//! reads (§331.6).
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
@@ -467,75 +469,116 @@ fn where_a_bar_started_its_cap_circle_stays_a_corner_where_the_other_circle_cros
 /// six answers refused `AFaceTrimmedByACurveThisCannotFollow` on that face,
 /// the block that touches nothing among them (`docs/decisions.md` §331).
 ///
-/// **Not here, because they still refuse** (§331.3, §331.5): the two crescents
-/// fused with this block, whose unions and whose differences with the crescent
-/// first refuse `ACurvedFaceGoesRightRoundWithNoSeam`. The answers exist, so
-/// pinning those refusals would keep gaps as if they were settled.
+/// The two crescents come back as they were too:
+/// [`a_crescent_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`].
 #[test]
 fn a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was() {
-    let policy = Policy::certified();
-    let bottom = Surface::Plane(
-        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
-            .expect("the plane of both bars' bottom caps"),
-    );
     let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
     let half_apart = APART / 2.0;
     let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
         - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
     let shared = lens * HEIGHT;
 
-    for (first_rule, first, mut model, answer) in every_first_answer() {
+    for (first_rule, first, model, answer) in every_first_answer() {
         let by_hand = match first_rule {
             Rule::Union => 2.0 * one_bar - shared,
             Rule::Intersection => shared,
             Rule::Difference => continue,
             other => panic!("{first}: a rule this test did not ask for, {other:?}"),
         };
-        let solid = model.solid(answer).expect("this model made the key");
-        let cap = solid
-            .faces()
-            .find(|face| face.surface() == bottom)
-            .unwrap_or_else(|| panic!("{first} has a face on `z = 0`"))
-            .key();
-        the_face_is_two_arcs_of_two_pipes(&model, answer, cap, &first);
+        a_block_that_touches_nothing_leaves_it_as_it_was(&first, model, answer, by_hand);
+    }
+}
 
-        let block = a_block_from(&mut model, 50.0);
-        for (rule, answer_first, expected) in [
-            (Rule::Union, true, &["the answer", "the block"][..]),
-            (Rule::Union, false, &["the answer", "the block"][..]),
-            (Rule::Intersection, true, &[][..]),
-            (Rule::Intersection, false, &[][..]),
-            (Rule::Difference, true, &["the answer"][..]),
-            (Rule::Difference, false, &["the block"][..]),
-        ] {
-            let asked =
-                format!("{first}, then {rule:?} with the block, answer first {answer_first}");
-            let [arguments, tools] = if answer_first {
-                [answer, block]
-            } else {
-                [block, answer]
-            };
-            let mut again = model.clone();
-            let fused = again
-                .fuse(
-                    &[arguments],
-                    &[tools],
-                    rule,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
-            again
-                .validate(&policy, &mut ProvenanceLog::new())
-                .unwrap_or_else(|broken| panic!("{asked} came back broken: {broken:?}"));
-            let mut came_back: Vec<&str> = fused
-                .solids()
-                .iter()
-                .map(|&solid| which_came_back(&again, solid, by_hand, &asked))
-                .collect();
-            came_back.sort_unstable();
-            assert_eq!(came_back, expected, "{asked}");
+/// **A crescent fused once more with a block that touches nothing comes back
+/// as it was**, by every rule and both ways round, with the same checks as
+/// [`a_union_or_a_lens_fused_with_a_block_it_does_not_touch_comes_back_as_it_was`]
+/// and one bar less the lens for its volume.
+///
+/// The unions and the differences with the crescent first used to refuse
+/// `ACurvedFaceGoesRightRoundWithNoSeam` (`docs/decisions.md` §331.3). It is
+/// the cause [`a_block_over_the_top_half_of_a_crescent_cuts_it_as_cutting_each_bar_first_does`]
+/// names: the crescent's inner wall is used reversed, and `bake.rs` handed the
+/// arrangement its wire walked the way it is stored, so the arrangement took
+/// the rest of the pipe for the wall (§331.6).
+#[test]
+fn a_crescent_fused_with_a_block_it_does_not_touch_comes_back_as_it_was() {
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let crescent = one_bar - lens * HEIGHT;
+
+    for (first_rule, first, model, answer) in every_first_answer() {
+        match first_rule {
+            Rule::Difference => {
+                a_block_that_touches_nothing_leaves_it_as_it_was(&first, model, answer, crescent);
+            }
+            Rule::Union | Rule::Intersection => continue,
+            other => panic!("{first}: a rule this test did not ask for, {other:?}"),
         }
+    }
+}
+
+/// Checks that `answer`'s bottom cap is two arcs of two pipes, then fuses it
+/// with a block fifty above by every rule and both ways round: the union gives
+/// the answer and the block, the intersection nothing, and the difference the
+/// answer with the answer first and the block with the block first, each one
+/// read by [`which_came_back`] against `by_hand`.
+fn a_block_that_touches_nothing_leaves_it_as_it_was(
+    first: &str,
+    mut model: Model,
+    answer: SolidKey,
+    by_hand: f64,
+) {
+    let policy = Policy::certified();
+    let bottom = Surface::Plane(
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the plane of both bars' bottom caps"),
+    );
+    let solid = model.solid(answer).expect("this model made the key");
+    let cap = solid
+        .faces()
+        .find(|face| face.surface() == bottom)
+        .unwrap_or_else(|| panic!("{first} has a face on `z = 0`"))
+        .key();
+    the_face_is_two_arcs_of_two_pipes(&model, answer, cap, first);
+
+    let block = a_block_from(&mut model, 50.0);
+    for (rule, answer_first, expected) in [
+        (Rule::Union, true, &["the answer", "the block"][..]),
+        (Rule::Union, false, &["the answer", "the block"][..]),
+        (Rule::Intersection, true, &[][..]),
+        (Rule::Intersection, false, &[][..]),
+        (Rule::Difference, true, &["the answer"][..]),
+        (Rule::Difference, false, &["the block"][..]),
+    ] {
+        let asked = format!("{first}, then {rule:?} with the block, answer first {answer_first}");
+        let [arguments, tools] = if answer_first {
+            [answer, block]
+        } else {
+            [block, answer]
+        };
+        let mut again = model.clone();
+        let fused = again
+            .fuse(
+                &[arguments],
+                &[tools],
+                rule,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+        again
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{asked} came back broken: {broken:?}"));
+        let mut came_back: Vec<&str> = fused
+            .solids()
+            .iter()
+            .map(|&solid| which_came_back(&again, solid, by_hand, &asked))
+            .collect();
+        came_back.sort_unstable();
+        assert_eq!(came_back, expected, "{asked}");
     }
 }
 
@@ -618,8 +661,8 @@ fn which_came_back(model: &Model, solid: SolidKey, by_hand: f64, asked: &str) ->
 /// `(A − B) − T = (A − T) − (B − T)`. This order never meets an arc of a pipe's
 /// circle as an input edge: each half bar's caps are whole circles again. So
 /// every second fuse of an answer less the block over its top half, which
-/// refused `Undecidable` for all six answers (§331.3) and still does for the
-/// two crescents (§331.5), has an answer this kernel builds: half of
+/// refused `Undecidable` for all six answers (§331.3), and for the two
+/// crescents until §331.6, has an answer this kernel builds: half of
 /// the first answer's volume, with the same four corners at `z = 0` and
 /// `z = 5`.
 ///
@@ -731,18 +774,79 @@ fn cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should()
 /// by one arc of each pipe, nor then its walls, each a pipe cut by the other
 /// pipe ([`every_first_answer_says_which_points_it_holds`]).
 ///
-/// **Not here, because they still refuse** (`docs/decisions.md` §331.5): the
-/// two crescents, whose twelve fuses with this block refuse "a point inside a
-/// piece of a face", on a piece of the inner wall with corners at `z = 15`,
-/// where the wall stops at `z = 10`.
+/// The two crescents are cut the same way:
+/// [`a_block_over_the_top_half_of_a_crescent_cuts_it_as_cutting_each_bar_first_does`].
 #[test]
 fn a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_first_does() {
-    let policy = Policy::certified();
     let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
     let half_apart = APART / 2.0;
     let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
         - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
     let shared = lens * HEIGHT;
+
+    for (first_rule, first, model, answer) in every_first_answer() {
+        let whole = match first_rule {
+            Rule::Union => 2.0 * one_bar - shared,
+            Rule::Intersection => shared,
+            Rule::Difference => continue,
+            other => panic!("{first}: a rule this test did not ask for, {other:?}"),
+        };
+        the_top_half_cuts_it_as_cutting_each_bar_first_does(&first, model, answer, whole);
+    }
+}
+
+/// **A block over the top half of a crescent cuts it as cutting each bar first
+/// does**, by every rule and both ways round: the same six answers as
+/// [`a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_first_does`],
+/// with `V` one bar less the lens. The difference with the crescent first is
+/// what [`cutting_the_top_half_off_each_bar_first_answers_what_the_second_fuse_should`]
+/// builds as `(A − T) − (B − T)`.
+///
+/// All twelve used to refuse `Undecidable`, "a point inside a piece of a face",
+/// on a piece of the crescent's inner wall from `z = 10` up to the block's top
+/// at `z = 15`, where the wall stops at `z = 10` (`docs/decisions.md` §331.5).
+/// The inner wall is used reversed, and a face used reversed stores its wire
+/// the way the solid uses it, with the material on its left seen from outside
+/// the solid. `bake.rs` handed that walk to the arrangement as it is stored,
+/// and the arrangement counts the face on the left of its boundary seen from
+/// the side the surface itself points to, so it cut a piece out of the part of
+/// the pipe the wall does not hold (§331.6).
+#[test]
+fn a_block_over_the_top_half_of_a_crescent_cuts_it_as_cutting_each_bar_first_does() {
+    let one_bar = std::f64::consts::PI * RADIUS * RADIUS * HEIGHT;
+    let half_apart = APART / 2.0;
+    let lens = 2.0 * RADIUS * RADIUS * (half_apart / RADIUS).acos()
+        - half_apart * (4.0 * RADIUS * RADIUS - APART * APART).sqrt();
+    let crescent = one_bar - lens * HEIGHT;
+
+    for (first_rule, first, model, answer) in every_first_answer() {
+        match first_rule {
+            Rule::Difference => {
+                the_top_half_cuts_it_as_cutting_each_bar_first_does(
+                    &first, model, answer, crescent,
+                );
+            }
+            Rule::Union | Rule::Intersection => continue,
+            other => panic!("{first}: a rule this test did not ask for, {other:?}"),
+        }
+    }
+}
+
+/// Fuses `answer`, whose volume by hand is `whole`, with a block over its top
+/// half by every rule and both ways round, and checks each against what
+/// cutting each bar first gives: the union is `whole/2 + 6000`, the
+/// intersection is the top half, `whole/2`, with corners `(3, ±4, 5)` and
+/// `(3, ±4, 10)`, the difference with the answer first is the bottom half,
+/// `whole/2`, with corners `(3, ±4, 0)` and `(3, ±4, 5)`, and the difference
+/// with the block first is `6000 − whole/2`. Every answer is one solid and
+/// validates.
+fn the_top_half_cuts_it_as_cutting_each_bar_first_does(
+    first: &str,
+    mut model: Model,
+    answer: SolidKey,
+    whole: f64,
+) {
+    let policy = Policy::certified();
     let half = HEIGHT / 2.0;
     let block = 30.0 * 20.0 * HEIGHT;
     let corners_at = |low: f64, high: f64| {
@@ -754,82 +858,74 @@ fn a_block_over_the_top_half_of_a_union_or_a_lens_cuts_it_as_cutting_each_bar_fi
         ])
     };
 
-    for (first_rule, first, mut model, answer) in every_first_answer() {
-        let whole = match first_rule {
-            Rule::Union => 2.0 * one_bar - shared,
-            Rule::Intersection => shared,
-            Rule::Difference => continue,
-            other => panic!("{first}: a rule this test did not ask for, {other:?}"),
+    let top_half = a_block_from(&mut model, half);
+    for (rule, answer_first, by_hand, corners) in [
+        (Rule::Union, true, whole / 2.0 + block, None),
+        (Rule::Union, false, whole / 2.0 + block, None),
+        (
+            Rule::Intersection,
+            true,
+            whole / 2.0,
+            corners_at(half, HEIGHT),
+        ),
+        (
+            Rule::Intersection,
+            false,
+            whole / 2.0,
+            corners_at(half, HEIGHT),
+        ),
+        (Rule::Difference, true, whole / 2.0, corners_at(0.0, half)),
+        (Rule::Difference, false, block - whole / 2.0, None),
+    ] {
+        let asked =
+            format!("{first}, then {rule:?} with the top half, answer first {answer_first}");
+        let [arguments, tools] = if answer_first {
+            [answer, top_half]
+        } else {
+            [top_half, answer]
         };
-        let top_half = a_block_from(&mut model, half);
-        for (rule, answer_first, by_hand, corners) in [
-            (Rule::Union, true, whole / 2.0 + block, None),
-            (Rule::Union, false, whole / 2.0 + block, None),
-            (
-                Rule::Intersection,
-                true,
-                whole / 2.0,
-                corners_at(half, HEIGHT),
-            ),
-            (
-                Rule::Intersection,
-                false,
-                whole / 2.0,
-                corners_at(half, HEIGHT),
-            ),
-            (Rule::Difference, true, whole / 2.0, corners_at(0.0, half)),
-            (Rule::Difference, false, block - whole / 2.0, None),
-        ] {
-            let asked =
-                format!("{first}, then {rule:?} with the top half, answer first {answer_first}");
-            let [arguments, tools] = if answer_first {
-                [answer, top_half]
-            } else {
-                [top_half, answer]
-            };
-            let mut again = model.clone();
-            let fused = again
-                .fuse(
-                    &[arguments],
-                    &[tools],
-                    rule,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
-            again
-                .validate(&policy, &mut ProvenanceLog::new())
-                .unwrap_or_else(|broken| panic!("{asked} came back broken: {broken:?}"));
-            let [solid] = fused.solids() else {
-                panic!("{asked} is one solid: {:?}", fused.solids());
-            };
-            let solid = again.solid(*solid).expect("this model made the key");
-            if let Some(corners) = corners {
-                let mut found: Vec<[f64; 3]> = solid
-                    .faces()
-                    .flat_map(|face| face.wires().collect::<Vec<_>>())
-                    .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
-                    .flat_map(|coedge| [coedge.edge().start(), coedge.edge().end()])
-                    .map(|corner| corner.point().coordinates())
-                    .collect();
-                found.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
-                found.dedup();
-                assert_eq!(found, corners, "{asked}: the corners of the answer");
-            }
-            let measured = solid
-                .measure(
-                    Deflection::of(0.01).expect("a positive length"),
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .expect("a solid measures");
-            assert!(
-                (measured.volume() - by_hand).abs() <= measured.volume_error(),
-                "{asked}: measured {} ± {} against {by_hand} by hand",
-                measured.volume(),
-                measured.volume_error()
-            );
+        let mut again = model.clone();
+        let fused = again
+            .fuse(
+                &[arguments],
+                &[tools],
+                rule,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+        again
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{asked} came back broken: {broken:?}"));
+        let [solid] = fused.solids() else {
+            panic!("{asked} is one solid: {:?}", fused.solids());
+        };
+        let solid = again.solid(*solid).expect("this model made the key");
+        if let Some(corners) = corners {
+            let mut found: Vec<[f64; 3]> = solid
+                .faces()
+                .flat_map(|face| face.wires().collect::<Vec<_>>())
+                .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+                .flat_map(|coedge| [coedge.edge().start(), coedge.edge().end()])
+                .map(|corner| corner.point().coordinates())
+                .collect();
+            found.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+            found.dedup();
+            assert_eq!(found, corners, "{asked}: the corners of the answer");
         }
+        let measured = solid
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid measures");
+        assert!(
+            (measured.volume() - by_hand).abs() <= measured.volume_error(),
+            "{asked}: measured {} ± {} against {by_hand} by hand",
+            measured.volume(),
+            measured.volume_error()
+        );
     }
 }
 
