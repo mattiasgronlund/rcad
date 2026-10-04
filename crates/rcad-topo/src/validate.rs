@@ -19,7 +19,10 @@ use slotmap::SecondaryMap;
 use crate::builder::the_ends_are_the_whole_of_it;
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
-use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on, what_trims_this_face};
+use crate::holds::{
+    Trimming, how_the_axis_lies_on, the_face_across, the_side_this_face_lies_on,
+    what_trims_this_face,
+};
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
@@ -2807,30 +2810,19 @@ fn a_circle_round_the_tube(names_it: [Surface; 2]) -> Option<RoundTheTube> {
     None
 }
 
-/// Whether the whole of `ring`'s axis lies on `flat`, both questions settled
-/// exactly as stored: the plane's normal square to the axis direction, and
-/// the ring's centre on the plane.
+/// Whether the whole of `ring`'s axis lies on `flat`, as `holds.rs` settles
+/// it: the plane's normal square to the axis direction and the ring's centre
+/// on the plane, both exactly as stored.
 ///
-/// `false` when the dot of the normal and the axis cannot be summed exactly,
-/// which leaves the edge to be read off the face's corners as every other
-/// closed edge is. `holds.rs`'s `how_the_axis_lies_on` asks the same two
-/// questions of the same numbers.
+/// `false` when the plane crosses the axis, and `false` when that cannot be
+/// settled, which leaves the edge to be read off the face's corners as every
+/// other closed edge is.
 fn holds_the_axis_of(flat: &Plane, ring: &rcad_geom::Torus) -> bool {
-    let normal = flat.normal().components();
-    let along = ring.axis().direction().components();
-    let mut total = [0.0; 6];
-    let mut used = 0;
-    for axis in 0..3 {
-        if !product_is_exact(normal[axis], along[axis]) {
-            return false;
-        }
-        let (product, roundoff) = two_product(normal[axis], along[axis]);
-        let mut sum = [0.0; 6];
-        used = expansion_sum(&total[..used], &[roundoff, product], &mut sum);
-        total = sum;
+    match how_the_axis_lies_on(flat, ring) {
+        Decision::Zero => true,
+        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
+        other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
     }
-    expansion_sign(&total[..used]) == Decision::Zero
-        && flat.side_of_point(PredicatePoint::from(ring.centre().coordinates())) == Decision::Zero
 }
 
 /// Whether `coedge` is the one coedge of `face`'s first wire, which is the

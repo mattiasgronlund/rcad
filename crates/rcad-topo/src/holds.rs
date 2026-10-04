@@ -891,7 +891,7 @@ fn point_the_same_way(one: &Plane, other: &Plane) -> bool {
 /// A sign other than zero is the true answer and not a refusal of one: that
 /// plane cuts the ring in a quartic, and [`intersect`] says so too. Which of
 /// the two signs it is says nothing more.
-fn how_the_axis_lies_on(flat: &Plane, torus: &rcad_geom::Torus) -> Decision {
+pub(crate) fn how_the_axis_lies_on(flat: &Plane, torus: &rcad_geom::Torus) -> Decision {
     let (leans, _) = rcad_predicates::decide(&SquareToTheAxis {
         named: WHERE_A_PLANE_AND_A_TORUS_CROSS,
         normal: flat.normal().components(),
