@@ -23,22 +23,28 @@
 //! ball's skin is left with a face holding both poles and two holes: that wide
 //! circle and the tiny one. The mesher had no cut for a ball face whose loops
 //! are all holes, and it now opens one into strips from pole to pole, here a
-//! hole in each (§346.6, §402.5). The other ten still find no point every solid
-//! could place.
+//! hole in each (§346.6, §402.5).
+//!
+//! Three more answer since Q668. A point in the cap is between the block's
+//! stored plane `x = 0` and the triangles of its stored corners, and the ray
+//! that counted those triangles could not settle which side of them it was.
+//! The ray now names such a face, and the block's stored plane places the
+//! point when no other face of the block is near it (§346.6). The other seven
+//! still find no point every solid could place: `select` drops every point the
+//! corners and the plane disagree about, whatever the ray then says.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Surface, SurfaceMeet, Vector, intersect};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
 
 /// What a draw's union does, whichever policy and argument order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum TheUnion {
-    /// It is refused: a point was found inside the cap, and the block could not
-    /// place it. The block's ray reads its face `x = 0` by the triangles of its
-    /// stored corners and put the point outside, where the stored plane puts
-    /// it inside, so `select` dropped it; or the ray could not say at all.
+    /// It is refused: a point was found inside the cap, and `select` dropped
+    /// it, because the block's stored plane `x = 0` and the triangles of its
+    /// stored corners put it on opposite sides of that face.
     NoPointEverySolidCouldPlace,
     /// It answers, and the answer holds ([`the_answer_holds`]).
     Answers,
@@ -46,12 +52,12 @@ enum TheUnion {
 
 /// `(off, turned, what the union does)`.
 const DRAWS: [(f64, f64, TheUnion); 14] = [
-    (-0.5, 1.0, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.5, 1.0, TheUnion::Answers),
     (-0.5, 1.5, TheUnion::NoPointEverySolidCouldPlace),
     (-0.5, 2.5, TheUnion::NoPointEverySolidCouldPlace),
     (-0.5, 3.0, TheUnion::NoPointEverySolidCouldPlace),
-    (-0.3, 0.3, TheUnion::NoPointEverySolidCouldPlace),
-    (-0.3, 0.5, TheUnion::NoPointEverySolidCouldPlace),
+    (-0.3, 0.3, TheUnion::Answers),
+    (-0.3, 0.5, TheUnion::Answers),
     (-0.3, 1.5, TheUnion::NoPointEverySolidCouldPlace),
     (-0.3, 2.0, TheUnion::Answers),
     (-0.3, 2.5, TheUnion::NoPointEverySolidCouldPlace),
@@ -102,25 +108,83 @@ fn the_turned_face_cuts_the_ball_in_every_draw() {
             .next()
             .expect("a ball has a face")
             .surface();
-        let face = model
-            .solid(block)
-            .expect("this model made the key")
-            .faces()
-            .map(|face| face.surface())
-            .find(|surface| {
-                let Surface::Plane(flat) = surface else {
-                    return false;
-                };
-                let [a, b, c, _] = flat.coefficients();
-                let (cos, sin) = (turned.cos(), turned.sin());
-                (a - cos).abs() < 1e-12 && (b - sin).abs() < 1e-12 && c == 0.0
-            })
-            .expect("the block has its face x = 0, turned");
+        let face = the_plane_of_the_turned_face_x_0(&model, block, turned);
         let meet = intersect(&face, &skin, &policy, &mut ProvenanceLog::new());
         assert!(
             matches!(meet, Ok(SurfaceMeet::Curves(ref runs)) if runs.len() == 1),
             "off {off}, turned {turned}: the face's plane meets the ball as {meet:?}"
         );
+    }
+}
+
+/// Segments `select` found up through the cap, as `(off, turned, [x, y], top)`:
+/// one double across in `x` and `y`, from `z = 1` up to `top`.
+///
+/// In the first two the ray that counted the triangles of the block's stored
+/// corners could not settle which side of them the segment was, and the block
+/// answered `Undecidable` certified and `OnBoundary` tolerant. In the third
+/// those triangles certainly put the segment outside the block, and it
+/// answered `Outside`. Printed by a throwaway `eprintln` in `select.rs`,
+/// taken out (§346.6).
+const SEGMENTS_UP_THROUGH_THE_CAP: [(f64, f64, [f64; 2], f64); 3] = [
+    (
+        -0.3,
+        0.3,
+        [0.088_656_061_998_401_81, -0.286_600_946_737_681_7],
+        1.000_000_021_073_424_3,
+    ),
+    (
+        -0.5,
+        1.0,
+        [0.420_735_492_403_948_14, -0.270_151_152_934_069_8],
+        1.000_000_007_450_580_6,
+    ),
+    (
+        -0.5,
+        1.5,
+        [0.498_747_493_302_027_2, -0.035_368_600_833_851_085],
+        1.000_000_059_604_644_8,
+    ),
+];
+
+/// Each segment up through the cap is inside the block, under both policies.
+///
+/// The block's stored plane `x = 0` puts every point of it on the block's
+/// side, a fraction of a spacing in, and that plane is the face (§17.1). The
+/// block's other faces are a long way off, so the plane alone says where the
+/// segment is (§346.6).
+#[test]
+fn a_segment_up_through_the_cap_is_inside_the_block() {
+    for (off, turned, [x, y], top) in SEGMENTS_UP_THROUGH_THE_CAP {
+        let segment = PredicatePoint::Constructed([
+            Interval::exactly(x),
+            Interval::exactly(y),
+            Interval::new(1.0, top).expect("a segment upwards"),
+        ]);
+        for (name, policy) in [
+            ("certified", Policy::certified()),
+            ("tolerant", Policy::tolerant(100.0)),
+        ] {
+            let (model, block, _) = a_block_and_a_ball_beside_it(turned, off, &policy);
+            let Surface::Plane(face) = the_plane_of_the_turned_face_x_0(&model, block, turned)
+            else {
+                unreachable!("the face x = 0 was found by its plane");
+            };
+            assert_eq!(
+                face.side_of_point(PredicatePoint::from([x, y, 1.0])),
+                Decision::Neg,
+                "off {off}, turned {turned}: the segment is on the block's side of its stored plane"
+            );
+            let placed = model
+                .solid(block)
+                .expect("this model made the key")
+                .classify_uncertain_point(segment, &policy, &mut ProvenanceLog::new());
+            assert_eq!(
+                placed,
+                Containment::Inside,
+                "off {off}, turned {turned}, {name}"
+            );
+        }
     }
 }
 
@@ -215,6 +279,25 @@ fn the_answer_holds(
         ));
     }
     Ok(())
+}
+
+/// The stored plane of the block's face `x = 0`, turned `turned` about `z`,
+/// with its normal out of the block.
+fn the_plane_of_the_turned_face_x_0(model: &Model, block: SolidKey, turned: f64) -> Surface {
+    model
+        .solid(block)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.surface())
+        .find(|surface| {
+            let Surface::Plane(flat) = surface else {
+                return false;
+            };
+            let [a, b, c, _] = flat.coefficients();
+            let (cos, sin) = (turned.cos(), turned.sin());
+            (a - cos).abs() < 1e-12 && (b - sin).abs() < 1e-12 && c == 0.0
+        })
+        .expect("the block has its face x = 0, turned")
 }
 
 /// A cube of side 2 from `(−2, −2, 0)` and a ball of radius 1 at `(1, off, 1)`,

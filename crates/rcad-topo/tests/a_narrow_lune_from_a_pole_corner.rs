@@ -62,7 +62,7 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// (see [`a_knife_through_the_axis`]). At 90 degrees that sliver was where a
 /// flat piece of `x = 0` was placed on the wrong side of the knife, which ended
 /// in `ResultIsNotManifold` (§200.1); see
-/// [`the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane`].
+/// [`the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_its_plane`].
 /// Since the fuse drops a point the ray and the stored planes disagree about,
 /// the 90 degree wedge answers at every size as an intersection and a union,
 /// and so does the 10 degree one at radii 0.001 and 1000. The union needed one
@@ -159,17 +159,19 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
 
 /// Why the 90 degree wedge was refused before it answered: the knife turned a
 /// quarter turn holds the axis by its corners and misses it by its stored
-/// plane, so a point in between is inside by the ray and outside by the plane.
+/// plane, so a point in between was inside by the corners and is outside by
+/// the plane.
 ///
 /// `(0, 1.1e-16, -0.5)` is the first point the fuse tried inside the half disk
 /// of `x = 0` that the knife does not cover. The fuse cuts along the stored
 /// plane, which puts that half disk on the outside, and the point with it. The
 /// ray fans the face's corners, `(∓6, ±8.9e-16, z)`, whose triangles hold the
-/// axis exactly, and certifies the point inside. The fuse now drops a point
-/// the two disagree about (`select.rs`'s
-/// `the_ray_and_the_stored_planes_disagree_about`).
+/// axis exactly, and it once certified the point inside by them. Since Q668
+/// the ray asks the stored plane too where the two part, and puts the point
+/// outside with it (§346). The fuse still drops a point the two disagree about
+/// (`select.rs`'s `the_ray_and_the_stored_planes_disagree_about`).
 #[test]
-fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane() {
+fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_its_plane() {
     let mut model = a_model(1.0);
     let knife = a_knife_through_the_axis(&mut model, 1.0, 90.0);
     let view = model.solid(knife).expect("this model made the key");
@@ -202,8 +204,8 @@ fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane()
     );
     assert_eq!(
         view.classify_uncertain_point(point, &Policy::certified(), &mut ProvenanceLog::new()),
-        rcad_topo::Containment::Inside,
-        "the ray puts it inside"
+        rcad_topo::Containment::Outside,
+        "the ray puts it outside, as the stored plane does"
     );
 }
 

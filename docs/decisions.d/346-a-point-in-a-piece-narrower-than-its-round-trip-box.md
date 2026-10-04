@@ -239,15 +239,16 @@ each spacing along it is another chance for a double to fall inside.
 **Measured, on the base and after.** A throwaway probe fused every draw with
 both policies and both argument orders (`crates/rcad-topo/tests/q658_probe.rs`,
 taken out). On the base all 56 refused `a point inside a piece of a face`.
-After, each draw answers alike under both policies and both orders. The last
-column is since §402 (Q904), which the second and third rows' paragraphs below
-say why:
+After, each draw answers alike under both policies and both orders. The third
+column is since §402 (Q904), and the last since Q668; the paragraphs on each
+row below say why:
 
-| draws (`off`, turned) | refused with, after Q658 | since §402 |
-|---|---|---|
-| −0.5: 1, 1.5, 2.5, 3; −0.3: 0.3, 0.5, 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` | the same |
-| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` | answers |
-| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` | answers |
+| draws (`off`, turned) | refused with, after Q658 | since §402 | since Q668 |
+|---|---|---|---|
+| −0.5: 1; −0.3: 0.3, 0.5 | `a point in a piece that every solid could place` | the same | answers |
+| −0.5: 1.5, 2.5, 3; −0.3: 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` | the same | the same |
+| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` | answers | answers |
+| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` | answers | answers |
 
 `what_each_ball_shaved_by_a_turned_blocks_face_comes_to` pins that table, its
 last column now, and was `…_is_refused_with` until Q904. Q658's pin failed on
@@ -281,6 +282,77 @@ and `OnBoundary` (tolerant). **The guard is right to drop these, and the cause
 is not in `select.rs`**: it is `classify.rs`'s reading of a flat face by its
 corner triangles rather than its stored plane (`count_a_polygon`). Why the
 other first-row draws refuse was not traced one by one.
+
+*2026-10-04, Q668: traced one by one; three of the ten answer.* *Queue row
+Q668, lane `lane-q668-a-ball-shaved-by-a-turned-blocks-face`, off
+`2c349f2b`.* An `eprintln` in `settle_against_each` (taken out) printed each
+segment's placement against the block and the guard's verdict, in all four
+runs of each draw. In seven, `off −0.5` turned 1.5, 2.5, 3, `off −0.3` turned
+1.5, 2.5, 3 and `off +0.3` turned 2.5, the ray said `Outside` and the guard
+said the two disagree. In three, `off −0.5` turned 1 and `off −0.3` turned 0.3
+and 0.5, the ray said `Undecidable` certified and `OnBoundary` tolerant, and
+the guard was silent: the segment is a box `2e-8` tall, and its sign against
+the corners' triangle is not settled, where the stored plane, asked with the
+height it cannot see narrowed away, settles it exactly. Q658's reading of
+`off −0.3` turned 0.3 is reproduced; `off −0.5` turned 1 was not among the six
+it traced. That `off +0.3` turned 2.5 refuses for the same reason as the
+first six was a guess and is wrong: its cap is beside the block, `0.3` past its
+face `y = 0`, the ray's `Outside` is right by either reading, and the guard
+drops the point because it asks the plane of every triangle of the face `x = 0`
+however far from that face the point is.
+
+**What changed, in `classify.rs`.** Where a ray's count turns on which side of
+a triangle the point is, the face's stored plane is asked too: the ray crosses
+the plane ahead when the point and the target are on opposite sides of it.
+Where the triangle's certified sign says otherwise, or cannot say and the plane
+can, no count is trusted and the ray names the face. The point's box is then
+stretched along an axis to the plane, as `select` stretches one (item 4 above,
+Q671's box). If the face holds every point of the stretched box and no other
+face holds any, the skin inside the box is that face alone, so the point is
+inside exactly when it is on the face's inner side of the plane. Otherwise the
+answer is `Undecidable`. A point exactly on a triangle's plane still goes to
+the outline as before, since every stored corner is one.
+
+**Why not let the ray cross the face by its stored plane outright.** The ray
+finds the triangle it passes through by the triangle's edges, which are the
+corners'. Reading only the side by the plane mixes the two: a point in the
+sliver within a sliver's depth of the face's edge could be counted through the
+face where the plane meets the ray beyond that edge, past a second face that
+puts the point outside. That was reasoned and not run, so it is a guess with no
+class (§360.5), and it is why the plane is asked alone only over a box no other
+face holds.
+
+**What it does to the draws.** The three answer, in all four runs each, and
+hold the test file's checks. `a_segment_up_through_the_cap_is_inside_the_block`
+pins one segment from each of three draws against the block alone: `Inside`
+under both policies, where it was `Undecidable` and `OnBoundary` in two and
+`Outside` in the third. The seven still refuse: the ray now says `Inside` for
+the six whose cap is on the block's face, the plane's answer, and `select`'s
+guard still drops them, since it reads every triangle and not the ray's answer.
+With the guard switched off by a throwaway check in `select.rs` (taken out),
+all forty runs of the ten draws came back `Ok(Answers)` against the pin that
+still had them refused, so each validated, was one solid or two as the side of
+the circle says, measured within its error of `8 + 4π/3`, and kept a face with
+two holes on the ball.
+
+**What else moved.** `mise exec -- just t --workspace --no-fail-fast`: 3006
+run, 3004 passed, 2 failed, 9 skipped. `mise exec -- just test-slow`: 40 run,
+40 passed. Each of the two is a point the ray read by corners and the plane now
+reads, and each new answer is the stored plane's exact sign, printed by a
+throwaway `eprintln` in the new rule (taken out):
+
+- `the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane`
+  in `a_narrow_lune_from_a_pole_corner.rs`: `(0, 1.1e-16, −0.5)` against the
+  knife, `Inside` before and `Outside` now. The stored plane, normal
+  `(−2.2e-16, −1, 0)` and offset `−4.4e-16`, puts it `3.3e-16` outside, which
+  that test's own second assertion says. Renamed at the merge to
+  `the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_its_plane`.
+- `which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures`
+  in `meshing_a_plane_cut_along_a_cones_other_nappe.rs`: the apex against the
+  block at lean one quarter, turn one, `Outside` before and `Inside` now. The
+  steep face's stored plane has offset `4.4e-16`, so the origin is `4.4e-16`
+  on the block's side of it. The test's claim survives the move: `(0.25, 1.0)`
+  and `(0.375, 1.0)` are both inside, and only the second measures.
 
 **The second row gets past `select`**, and the mesher refuses a face of the
 ball with a hole of radius about `1e-8`. The refusal is `cut_up`'s fallback in
@@ -404,6 +476,11 @@ It is a guess nobody has run, so it carries no class.
 
 - The first row needs `classify.rs` to read a flat face's crossing by its stored
   plane, or `select` to place a piece some other way (§346.3 family 6).
+  *Q668: done above for three of its draws. The other seven need `select.rs`'s
+  `the_ray_and_the_stored_planes_disagree_about` narrowed or dropped, now that
+  the ray names a face where the two readings part; with it off, all ten
+  answer. Two pins outside Q668's files moved to the plane's answer, and its
+  merge re-pinned both.*
 - The second row needs `mesh.rs`'s `cut_up` traced for a ball face with a
   small hole. *Q904: done above; it answers since §402.*
 - The third row needs the answer's check traced for which two faces disagree.

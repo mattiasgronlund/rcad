@@ -109,13 +109,14 @@ fn two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_t
 /// one of them measures at all.
 ///
 /// The block's placement is rounded, so its steep face misses the apex by a
-/// rounding. The block itself puts the apex inside it at three of the six,
-/// outside at two, and on its boundary at one. Since Q846's four-corner cuts
-/// (§354), only `(0.25, 1.0)` still fails to measure at every deflection; the
-/// other outside one, `(0.375, 3.0)`, measures, and so does `(0.375, 1.0)`,
-/// which the apex is inside. So the apex's own side of the face still does
-/// not say which of these caps measure: `(0.25, 1.0)` and `(0.375, 3.0)` are
-/// both outside, and only one of them does.
+/// rounding. The block itself puts the apex inside it at four of the six,
+/// outside at one, and on its boundary at one; `(0.25, 1.0)` was outside by
+/// the steep face's corners and is inside by its stored plane since Q668
+/// (§346). Since Q846's four-corner cuts (§354), only `(0.25, 1.0)` still
+/// fails to measure at every deflection; the outside one, `(0.375, 3.0)`,
+/// measures, and so does `(0.375, 1.0)`. So the apex's own side of the face
+/// still does not say which of these caps measure: `(0.25, 1.0)` and
+/// `(0.375, 1.0)` are both inside, and only one of them does.
 #[test]
 fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures() {
     let policy = Policy::certified();
@@ -139,7 +140,7 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_i
         seen,
         [
             (0.25, 0.0, Containment::OnBoundary, false),
-            (0.25, 1.0, Containment::Outside, true),
+            (0.25, 1.0, Containment::Inside, true),
             (0.25, 3.0, Containment::Inside, false),
             (0.375, 0.0, Containment::Inside, false),
             (0.375, 1.0, Containment::Inside, false),
