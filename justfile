@@ -157,11 +157,21 @@ gate_steps := "check-plugins \
 # or split test then fails the gate of the lane that renamed it, not the land
 # gate after it. A test joins only when both its cost and its catches are scored
 # again, and leaves in the commit that fixes what it caught alone (§397.4).
-slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_round_a_frustums_apex_answers_right \
-    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_round_a_pointed_cones_apex_answers_right \
-    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses \
-    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses \
-    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_steeper_plane_across_a_frustum_answers_right_or_refuses \
+slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_turned_about_the_axis_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_round_a_pointed_cones_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_turned_about_the_axis_round_a_pointed_cones_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_round_a_pointed_cones_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_pointed_cones_apex_answers_right \
+    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/a_tolerant_budget_the_size_of_the_part_reads_no_corpus_file_a_certified_policy_refuses \
+    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/a_tolerant_budget_ten_thousand_parts_wide_reads_no_corpus_file_a_certified_policy_refuses \
+    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/an_absurd_tolerant_budget_reads_no_corpus_file_a_certified_policy_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_a_quarter_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_three_eighths_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_steeper_plane_at_a_lean_of_a_quarter_across_a_frustum_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_steeper_plane_at_a_lean_of_three_eighths_across_a_frustum_answers_right_or_refuses \
     rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right \
     rcad-topo::whether_a_coarser_deflection_always_meshes/which_refusals_never_turned_into_a_mesh_anywhere_on_the_ladder \
     rcad-topo::whether_a_coarser_deflection_always_meshes/the_verdict_is_scoped_to_the_family_that_was_swept \

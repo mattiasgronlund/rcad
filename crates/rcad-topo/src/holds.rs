@@ -1807,8 +1807,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 ///   cuts, which is [`where_a_side_lies`]'s `[..] => Lies::Across` arm.
 /// - Measured, on the `Union` answer of the side-6 corner-up cube centred on the
 ///   pointed cone's apex and turned `0.7`
-///   (`a_corner_up_cube_round_a_pointed_cones_apex_answers_right`'s case, whose
-///   9 326 decided grid points are the floor §215.3 named): deleting the
+///   (the case of
+///   `a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_pointed_cones_apex_answers_right`,
+///   whose 9 326 decided grid points are the floor §215.3 named): deleting the
 ///   conjunct leaves 9 326, and deleting it *and* letting a straight side read
 ///   `Beside(Pos)` against a cone leaves 9 326 again, with all 13 187 refusals
 ///   moving from this gate to that `Lies::Across`.
