@@ -245,7 +245,7 @@ function unproven(lane, kind, check) {
       if (!mutationCaught(check.mutation_caught)) why.push('no mutation of the changed lines was seen to fail a test that reaches them')
     }
   } else if (runs) {
-    why.push(`the branch changes ${runs} lines that run and names no test that fails without them, starting with: ${check.lines_that_run.trim().split('\n')[0]}`)
+    why.push(`the branch changes ${runs} lines that run and names no test that fails without them (a row that keeps what they compute goes again marked sameBehaviour, §399), starting with: ${check.lines_that_run.trim().split('\n')[0]}`)
   }
   return why
 }
@@ -571,7 +571,7 @@ Only when the revert itself cannot fail -- a fix that just moves a floor or a bo
 function sameBehaviourProof() {
   return `This lane is marked sameBehaviour (§399): its row changes lines that run and keeps what they compute, so no test can fail without it, and the tests it names are the ones that reach the change. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says.
 With the source reverted the tests must pass, not fail: just verify-lane reverts them, runs the tests, and reports tests_pass_without_change: true only when every one ran and passed. A test that fails there says the base answered differently, so the behaviour changed, and that is a reject.
-The mutation is yours, verifier.md's same behaviour step 8: with the tree at the branch tip, change one line the branch changed so that it computes a wrong answer -- where the old and the new spelling differ, not a line both share -- run one of the lane's tests against it with mise exec -- just t <name>, put the line back, and check that git status --porcelain prints nothing. Report the change, the command and the outcome as mutation_caught. It must fail: a test that passes on the branch, with the source reverted and under the mutation too never ran the lines that changed.
+The mutation is yours, verifier.md's same behaviour step 8: with the tree at the branch tip, change one line the diff adds so that it still builds and computes a wrong answer, on the path the lane's tests take, run one of them against it with mise exec -- just t <name>, put the line back, and check that git status --porcelain prints nothing. Report the change, the command and the outcome as mutation_caught. It must fail, on an assertion or a panic and not a build error: a test that passes on the branch, with the source reverted and under the mutation too never ran the lines that changed.
 Then read the lane's argument that the old and the new give the same answer on every input, case by case, against the diff. The tests show it only for the inputs they feed; a case the argument leaves out, or one where the two differ, is a reject.`
 }
 
@@ -712,7 +712,7 @@ function verdictSchema(kind) {
     properties.tests_pass_without_change = { type: 'boolean', description: 'true when every test that reaches the change ran and passed with the source paths put back to the base; false when one failed there, which says the behaviour changed (§399)' }
     properties.mutation_caught = {
       type: 'object',
-      description: 'A small, uncommitted change to a line the branch changed, so that it computes a wrong answer, and one of the lane\'s tests run against it on the branch. It must fail: passing with and without the change holds just as well for a test that never runs the changed lines (§399). Leave it out only when lines that run is 0.',
+      description: 'A small, uncommitted change to a line the diff adds, so that it still builds and computes a wrong answer, and one of the lane\'s tests run against it on the branch. It must fail, on an assertion or a panic and not a build error: passing with and without the change holds just as well for a test that never runs the changed lines (§399). Leave it out only when lines that run is 0.',
       properties: {
         scratch_change: { type: 'string', description: 'the change, as a diff or an exact description' },
         command: { type: 'string', description: 'the exact test command, run with the change in place' },

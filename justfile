@@ -2427,8 +2427,10 @@ check-skills-selftest:
 # verifier runs, and the two lines and the helper that hold it to its tests
 # passing with the source reverted and one failing under a mutation of the
 # changed lines. Without the mutation, tests that never run the changed lines
-# would pass both. `verifier.md` carries the steps, and the nineteenth arm now
-# holds the `same-behaviour` record on both sides.
+# would pass both. It checks too that an unmarked lane's refusal names the road,
+# since that refusal is all the next dispatcher holding such a row sees.
+# `verifier.md` carries the steps, and the nineteenth arm now holds the
+# `same-behaviour` record on both sides.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2512,6 +2514,7 @@ check-lanes-workflow:
     same_mutation='      if (!mutationCaught(check.mutation_caught)) why.push('
     same_caught="  return !!m && m.outcome_on_branch === 'fail'"
     same_steps='## Same behaviour'
+    same_pointer='(a row that keeps what they compute goes again marked sameBehaviour, §399)'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -2826,6 +2829,10 @@ check-lanes-workflow:
             echo "$2/verifier.md has no '$same_steps' steps for the verifier of a sameBehaviour lane (§399)"
             return 20
         fi
+        if ! grep -F -- "$runs_refusal" "$1" | grep -qF -- "$same_pointer"; then
+            echo "$1's refusal of an unmarked lane that changes lines that run does not name the sameBehaviour road; a dispatcher holding such a row sees only that refusal, and Q854's did the row in its own tree (§399)"
+            return 20
+        fi
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
@@ -2997,7 +3004,9 @@ check-lanes-workflow:
     swap "$file" "$same_caught" '  return !!m' > "$dir/same-any-mutation/lanes.js"
     fresh same-no-steps
     grep -vxF -- "$same_steps" "$agents/verifier.md" > "$dir/same-no-steps/agents/verifier.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20)
+    fresh same-unpointed
+    swap "$file" " $same_pointer" '' > "$dir/same-unpointed/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}

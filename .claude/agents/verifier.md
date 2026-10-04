@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane marked pinsOnly (nothing in src/ to revert) that its new tests pass on the branch, or for a lane whose lines-that-run command counts no line that runs (comments and test code only) that its tests pass, or for a lane that names no test that every paragraph it moved landed once and unchanged — and that its numbers and claims hold. Use once per writing lane, when that lane reports.
+description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane marked pinsOnly (nothing in src/ to revert) that its new tests pass on the branch, or for a lane marked sameBehaviour (it changes lines that run and keeps what they compute) that its tests pass with the source reverted and one fails under a mutation of the lines it changed, or for a lane whose lines-that-run command counts no line that runs (comments and test code only) that its tests pass, or for a lane that names no test that every paragraph it moved landed once and unchanged — and that its numbers and claims hold. Use once per writing lane, when that lane reports.
 model: sonnet
 ---
 
@@ -8,8 +8,8 @@ model: sonnet
 
 `CLAUDE.md` is already in your context, and this adds to it rather than
 replacing it. Your brief names the lane, its queue row, base, branch, write set
-and worktree, the source paths to revert, which steps to run — **tests** or
-**moved text** — and the lane's report as JSON. `docs/decisions.md` §266 says
+and worktree, the source paths to revert, which steps to run — **tests**,
+**same behaviour** or **moved text** — and the lane's report as JSON. `docs/decisions.md` §266 says
 why these steps live here and not in `.claude/workflows/lanes.js`.
 
 **Every command you run stays in the foreground, this role included.**
@@ -51,6 +51,8 @@ The reading is yours whatever it printed:
   and the lane's claim, then keep it as a mismatch or drop it;
 - a revert by hand, when it says a source path holds test code the branch
   changed (step 7);
+- for a lane marked `sameBehaviour`, the mutation and the lane's argument
+  (same behaviour steps 8 and 9);
 - the rows.
 
 If `just` has no `verify-lane` recipe in your tree, do every step by hand,
@@ -143,6 +145,39 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    took out, one that did not build, or a name it could not run leaves the field
    to you, in `left_to_you`.
 
+## Same behaviour
+
+A lane your brief marks `sameBehaviour` changes lines that run and keeps what
+they compute: one of two copies dropped for the other, a body lifted into a
+function, a block moved (§399). No test can fail without such a change, so it
+names `tests_that_reach_the_change` instead: tests that run the lines it changed
+and pass before and after.
+
+6. Tests step 6, as written: step 3's gate is the proof the named tests pass,
+   and `tests_pass_on_branch` comes from it.
+7. Put the source paths back to the base and rerun the same tests, as tests
+   step 7 does, revert by hand included. Here they must **pass**: the base
+   computed what the branch does. Report `tests_pass_without_change: true`
+   only when every one ran and passed. A test that fails here says the base
+   answered differently, so the behaviour changed, and that is a `reject`.
+   When step 1's print ends `lines that run: 0`, skip this step and step 8,
+   and say in `notes` that the count of 0 is why (§375).
+   The recipe does this step, and reports `tests_pass_without_change` the way
+   it reports `tests_fail_without_fix`.
+8. With the tree at the branch tip, change one line the diff adds so that it
+   still builds and computes a wrong answer, on the path the lane's tests take.
+   Run one of them against it with `mise exec -- just t <name>`, then put the
+   line back with `git checkout -- <file>` and check that `git status
+   --porcelain` prints nothing. Report the change, the command and the outcome
+   as `mutation_caught`. It must fail, on an assertion or a panic and not a
+   build error: tests that pass on the branch and with the source reverted
+   pass just as well when they never run the lines that changed. If it passes,
+   the lane's tests do not reach its change, and that is a `reject`.
+9. Read the lane's argument, in its commit message, that the old and the new
+   give the same answer on every input, case by case, against the diff. The
+   tests show it only for the inputs they feed. A case the argument leaves
+   out, or one where the two differ, is a `reject`; name it.
+
 ## Moved text
 
 A lane that names no failing test changed only `.md` files, comments and test
@@ -183,7 +218,10 @@ change or drop in `fixes`.
 `merge` when every step holds. `fix_first` when the fix is known: name each one
 in `fixes`, with the file and the change, so the merger can judge whether it is
 small and inside the write set. `reject` when the change does not do what it
-claims, or its tests cannot be made to fail.
+claims, or its tests cannot be made to fail. For a lane marked
+`sameBehaviour`, `reject` too when a test fails with the source reverted, when
+the mutation passes, or when its argument leaves out a case or finds one where
+the old and the new differ.
 
 `notes` is at most five lines, for the merger: what it must act on and what no
 other field says. Never an account of the steps you ran: the other fields

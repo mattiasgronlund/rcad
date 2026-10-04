@@ -149,6 +149,11 @@ already says a hunt goes to a lane at its first probe. Step 4 of
   the row's text does not say. Step 4's rules move into `prep.md` rather
   than being repeated.
 
+**2026-10-04, Q837:** §399 adds a second mark beside `pinsOnly`,
+`sameBehaviour`, for a row that changes lines that run and keeps what they
+compute. Prep answers it too, said explicitly and never inferred, for the same
+reason, and never both marks on one row.
+
 ### 396.5 What it should save, what it costs, and the test
 
 **Saved.** Before the first lane, the two shares should fall from 9 642

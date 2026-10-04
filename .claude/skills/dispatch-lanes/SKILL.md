@@ -155,7 +155,7 @@ For every row the fill took:
    tree as it is when you call.
 
 The args are `{ base, lanes: [ { label, queueId, brief, writeSet, model,
-sourcePaths, pinsOnly, report, verify } ] }`. The workflow appends the base,
+sourcePaths, pinsOnly, sameBehaviour, report, verify } ] }`. The workflow appends the base,
 the `switch -c` and its refusal to the brief itself, and sends each role with
 its type, so `.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the
 standing rules and a brief carries only what is this row's:
@@ -191,6 +191,20 @@ an empty `sourcePaths`, because that emptiness is also what a tooling row shows
 when its dispatcher forgot to set `sourcePaths` by hand, and that must keep
 refusing. Give a `pinsOnly` row a `src/` path too — in `writeSet` or
 `sourcePaths` — and it is refused instead: there is something to revert then.
+A row that changes lines that run and keeps what they compute — one of two
+copies dropped for the other (Q854), a body lifted into a function (Q601), a
+block moved — needs `sameBehaviour: true`, said explicitly for
+`pinsOnly`'s reason: a lane naming no failing test is also what a lane that
+changed behaviour and found no test looks like. Its lane names the tests that
+reach the change, and its verifier shows they pass with the source reverted
+and fail under a mutation of a line the change adds (§399). Never both marks;
+the workflow throws at its start.
+
+**Never do a row in your own tree because the workflow cannot merge it.** A
+row the workflow has no road for is a missing road in `lanes.js`: file it as
+a 2.2 row and dispatch the row once it is built. Q854's dispatcher did the
+row itself, which is how §399 came to be written (§399.1).
+
 An empty `writeSet` makes a read-only lane, which is neither verified nor
 merged, and its answer comes back whole. A test-only row gets no write access
 to `src/` and reports defects instead.

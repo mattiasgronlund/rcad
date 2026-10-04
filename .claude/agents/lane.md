@@ -65,6 +65,17 @@ names it. A lane whose `lines-that-run` print ends `lines that run: 0` (`.md`
 files, comments, test code) may name none, and its verifier then traces every
 paragraph it moved instead.
 
+A lane your brief marks `sameBehaviour` changes lines that run and keeps what
+they compute — one of two copies dropped for the other, a body lifted into a
+function, a block moved — so no test fails without it (§399). Leave
+`tests_that_fail_without_the_change` empty, and name in
+`tests_that_reach_the_change` the tests that run the lines you changed and pass
+before and after; your verifier breaks one of those lines and needs one of them
+to fail. Your commit message argues, case by case, that the old and the new give
+the same answer on every input, as `30a22f66`'s does; the verifier reads it
+against the diff and rejects a case it leaves out. If the change turns out to
+alter an answer, report `blocked` and name the input.
+
 **What your own change leaves stale is yours to fix, not to file** (§352.5): a
 doc comment or a section's claim your change makes false, a test it leaves
 missing. Fix it inside your write set before you report. Only what lies outside
