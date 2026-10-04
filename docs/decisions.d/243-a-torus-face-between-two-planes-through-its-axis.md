@@ -337,7 +337,12 @@ eight. On this base it does not.
 - `Model::validate` passes the half-ring whose flat face walks its hole the
   same way round as its outline. Every corner of the flat face is on the ring,
   and every corner of the wall is on the plane, so no corner says which side
-  either face keeps. Not traced.
+  either face keeps. Not traced. *2026-10-04, Q949: answered. `validate` now
+  reads a ring face's side of a plane square to its axis off its wire at each
+  circle, the way `holds.rs` does, and refuses two circles along one stored
+  plane that keep different sides with `AClosedEdgeIsWalkedAgainstItsSurface`
+  (`b4625fa8` traced it, `16ef0214` is the check in `validate.rs`, `346f8592`
+  the pins, merged as `45593a1c`).*
 - Two different planes square to the axis, one circle each, are refused. So is
   one such plane stored twice, two ways. Where the planes cut the tube, as on a
   washer's rounded rim between `z = ±h`, the band is told from its twin by the
