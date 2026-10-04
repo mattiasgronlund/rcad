@@ -1027,13 +1027,16 @@ fn what_one_plane_and_one_curved_surface_share(
     }
 }
 
-/// One plane and two curved surfaces, by the two roads back to two planes and a
-/// quadric that the module doc names.
+/// One plane and two curved surfaces, by the three roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
 /// hands the question on, and what nothing reaches is the refusal that was here
-/// before either road was: the quartic is real, its roots are real, and reaching
+/// before any road was: the quartic is real, its roots are real, and reaching
 /// them takes a solver this file does not have.
+///
+/// The road for two surfaces turned about one axis comes before the one for a
+/// plane that grazes, because a plane through a cone's apex square to its axis
+/// is both, and the first answers it from stored numbers alone.
 fn where_one_plane_and_two_curved_surfaces_meet(
     first: &Surface,
     second: &Surface,
@@ -1048,6 +1051,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     if let Some(answer) =
         where_a_plane_and_two_quadrics_of_one_bend_meet(flat, second, third, &at, policy, log)?
     {
+        return Ok(answer);
+    }
+    if let Some(answer) = what_a_plane_square_to_their_one_axis_leaves(flat, second, third, &at)? {
         return Ok(answer);
     }
     if let Some(answer) =
@@ -1408,6 +1414,175 @@ fn cross_of_two_exact(u: &[Exact; 3], v: &[Exact; 3]) -> Option<[Exact; 3]> {
         *component = exactly_this_minus_that(&u[next], &v[after], &u[after], &v[next])?;
     }
     Some(across)
+}
+
+/// What a plane square to the one axis two curved surfaces share leaves of the
+/// three, or `None` where the three are not that.
+///
+/// A ball, a pipe and a cone each look the same from every side of their axis —
+/// and any line through a ball's centre is an axis of it — so a plane square to
+/// the axis cuts each in a circle about the point where the axis crosses the
+/// plane, or in that one point, or misses it. **Two circles about one centre
+/// are one circle or share nothing**, so the whole of the answer is whether
+/// their radii are equal: no quartic, and no point to place but the one a
+/// radius of zero names. A bar of radius three through a ball of radius five,
+/// and a cap across both at height two, is `3²` against `5² − 2²`, and they
+/// share nothing.
+///
+/// Each radius is compared squared and times `n·n`, as
+/// [`ACircleAboutAnAxis::squared_radius`] says, which keeps every one a
+/// polynomial in the stored numbers whatever length the normal is stored at.
+///
+/// **Square, and one axis, are both decided exactly**: a pipe's or a cone's
+/// stored direction crossed with the plane's normal is zero in every
+/// component, and so is the gap between the two points on the axes crossed with
+/// it. A direction a rounding off square cuts an ellipse, which is the quartic
+/// again, and is handed on. So is a triple where a product those two checks
+/// need falls out of `f64`'s range, because that is a refusal to say whether
+/// this road is the one — the same rule [`how_a_surface_is_written`] keeps.
+///
+/// Two radii of zero are the one point where the axis crosses the plane. Where
+/// one of the two is a cone, that point is its apex, which is stored and so is
+/// handed back as itself. Two balls that both touch the plane there have no
+/// stored point to hand back, and go on to
+/// [`what_a_plane_that_grazes_one_of_them_leaves`], which places a touch.
+fn what_a_plane_square_to_their_one_axis_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+) -> Result<Option<MeetOfThree>> {
+    let (Some(mine), Some(theirs)) = (
+        the_circle_a_square_plane_cuts(flat, one),
+        the_circle_a_square_plane_cuts(flat, other),
+    ) else {
+        return Ok(None);
+    };
+    let Some(off_one_axis) = Exact::cross_of(
+        &Exact::gap_between(mine.on_the_axis, theirs.on_the_axis),
+        flat.normal().components(),
+    ) else {
+        return Ok(None);
+    };
+    if !off_one_axis
+        .iter()
+        .all(|component| matches!(component.sign(), Decision::Zero))
+    {
+        return Ok(None);
+    }
+
+    // Past here the family is settled, so arithmetic that runs out is a
+    // refusal about *this* triple, which a slide along the range can retry.
+    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
+    let (Some(my_reach), Some(their_reach)) = (mine.squared_radius, theirs.squared_radius) else {
+        return Err(refused());
+    };
+    let signs = [&my_reach, &their_reach, &my_reach.minus(&their_reach)].map(Exact::sign);
+    if !signs
+        .iter()
+        .all(|sign| matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero))
+    {
+        return Err(refused());
+    }
+    let [my_way, their_way, how_they_differ] = signs;
+    if matches!(my_way, Decision::Neg)
+        || matches!(their_way, Decision::Neg)
+        || !matches!(how_they_differ, Decision::Zero)
+    {
+        return Ok(Some(MeetOfThree::Nowhere));
+    }
+    if matches!(my_way, Decision::Pos) {
+        return Ok(Some(MeetOfThree::MoreThanAPoint));
+    }
+    Ok(mine
+        .apex
+        .or(theirs.apex)
+        .map(|apex| MeetOfThree::At(smallvec![PredicatePoint::Exact(apex)])))
+}
+
+/// The circle a plane square to a ball's, a pipe's or a cone's axis cuts it in.
+struct ACircleAboutAnAxis {
+    /// A stored point on the axis: a ball's centre, a pipe's axis origin or a
+    /// cone's apex.
+    on_the_axis: [f64; 3],
+    /// The circle's radius squared and times `n·n`, exactly, or `None` where a
+    /// product it needs falls out of `f64`'s range.
+    ///
+    /// - A ball, `(n·n)R² − (n·c − d)²`, which is [`intersect`]'s own `room`
+    ///   for a plane and a ball, and below zero where the plane misses it.
+    /// - A pipe, `(n·n)r²`, because a pipe's radius is `r` whatever length its
+    ///   direction is stored at (§118.10).
+    /// - A cone, `slope²(n·a − d)²`: its radius at the plane is `slope` times
+    ///   how far the plane is from the apex along the axis, and that distance
+    ///   is `(n·a − d)/‖n‖`.
+    squared_radius: Option<Exact>,
+    /// The apex, where this is a cone: the one point a radius of zero is.
+    apex: Option<[f64; 3]>,
+}
+
+/// The circle a plane square to `surface`'s axis cuts it in, or `None` where
+/// the surface has no axis square to the plane — a pipe or a cone that leans,
+/// a torus, a plane — or where whether its axis leans could not be worked out
+/// exactly.
+///
+/// A torus about an axis square to the plane is cut in circles too, but in two
+/// of them, and is left to the refusal.
+fn the_circle_a_square_plane_cuts(flat: &Plane, surface: &Surface) -> Option<ACircleAboutAnAxis> {
+    let normal = flat.normal().components();
+    let square_to_the_plane = |along: [f64; 3]| {
+        exact_cross_of(normal, along).is_some_and(|across| {
+            across
+                .iter()
+                .all(|component| matches!(component.sign(), Decision::Zero))
+        })
+    };
+    match surface {
+        Surface::Sphere(ball) => Some(ACircleAboutAnAxis {
+            on_the_axis: ball.centre().coordinates(),
+            squared_radius: how_wide_a_plane_cuts_a_ball(flat, ball),
+            apex: None,
+        }),
+        Surface::Cylinder(pipe) => {
+            square_to_the_plane(pipe.axis().direction().components()).then(|| ACircleAboutAnAxis {
+                on_the_axis: pipe.axis().origin().coordinates(),
+                squared_radius: Exact::dot_of(normal, normal).and_then(|squared_normal| {
+                    squared_normal.times(&Exact::product_of(pipe.radius(), pipe.radius())?)
+                }),
+                apex: None,
+            })
+        }
+        Surface::Cone(cone) => {
+            square_to_the_plane(cone.axis().direction().components()).then(|| ACircleAboutAnAxis {
+                on_the_axis: cone.apex().coordinates(),
+                squared_radius: how_wide_a_square_plane_cuts_a_cone(flat, cone),
+                apex: Some(cone.apex().coordinates()),
+            })
+        }
+        Surface::Plane(_) | Surface::Torus(_) => None,
+    }
+}
+
+/// `(n·n)R² − (n·c − d)²`, exactly, or `None` where a product falls out of
+/// range.
+fn how_wide_a_plane_cuts_a_ball(flat: &Plane, ball: &Sphere) -> Option<Exact> {
+    let normal = flat.normal().components();
+    let reach = how_far_a_plane_is_from(flat, ball.centre().coordinates())?;
+    Some(
+        Exact::dot_of(normal, normal)?
+            .times(&Exact::product_of(ball.radius(), ball.radius())?)?
+            .minus(&reach.times(&reach)?),
+    )
+}
+
+/// `slope²(n·a − d)²`, exactly, or `None` where a product falls out of range.
+fn how_wide_a_square_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Option<Exact> {
+    let reach = how_far_a_plane_is_from(flat, cone.apex().coordinates())?;
+    Exact::product_of(cone.slope(), cone.slope())?.times(&reach.times(&reach)?)
+}
+
+/// `n·p − d`, exactly: how far `place` is in front of the plane, times `‖n‖`.
+fn how_far_a_plane_is_from(flat: &Plane, place: [f64; 3]) -> Option<Exact> {
+    Some(Exact::dot_of(flat.normal().components(), place)?.minus(&Exact::of(flat.offset())))
 }
 
 /// What a plane that misses one of the two curved surfaces, or touches it at a
@@ -2930,9 +3105,13 @@ mod tests {
         println!("as placed {wide:?}, narrowed {tight:?}");
     }
 
+    /// The ball sits off the bar's axis, so the floor cuts the two in circles
+    /// about two different centres, which cross at `(0, ±3, 0)`. About one
+    /// centre they would be a circle of radius five and one of three, and
+    /// [`what_a_plane_square_to_their_one_axis_leaves`] answers that.
     #[test]
     fn three_surfaces_with_only_one_flat_one_are_refused_by_name() {
-        let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(4.0, 0.0, 0.0), 5.0).expect("a radius"));
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 3.0).expect("a radius"));
         assert_eq!(
             meet([&flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]), &ball, &pipe]),
