@@ -9,8 +9,8 @@
 //! criterion 9 names `whether_a_curved_face_holds_a_point_agrees_with_a_mesh_of_the_same_face`.
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, Isometry, Plane, Point, Scale, Sphere, Surface, Vector,
-    meet_of_three_surfaces,
+    Axis, Cylinder, Deflection, Isometry, MeetOfThree, Plane, Point, Scale, Sphere, Surface,
+    Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Model, OnAFace, Rule, SolidKey};
@@ -556,6 +556,11 @@ fn where_it_is_in_a_fused_eighth([x, y, z]: [f64; 3]) -> Containment {
 ///
 /// The control is the pair the same route *can* do: put two planes in and the
 /// answer comes back, so what is refused is the degree and not the call.
+///
+/// **The ray runs along the pipe's axis and not across it.** A plane square to
+/// the pipe's axis cuts the ball and the pipe in two circles about one centre,
+/// radius three against radius one, and that is answered — it shares nothing —
+/// so that plane is not a ray this route would be stuck on.
 #[test]
 fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() {
     let ball = Surface::Sphere(Sphere::new(Point::origin(), RADIUS).expect("a ball"));
@@ -563,9 +568,9 @@ fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() 
         Cylinder::new(Axis::x(), 1.0).expect("a pipe of radius one along the x axis"),
     );
     // The ray along the ball's skin through the point (0, 3, 0), which is the
-    // ball crossed with the plane through it and the ball's own axis.
+    // ball crossed with the plane through it and the pipe's axis.
     let ray = Surface::Plane(
-        Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
             .expect("a unit normal"),
     );
 
@@ -583,12 +588,22 @@ fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() 
         "got {refusal:?}"
     );
 
-    let another = Surface::Plane(
-        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+    let across = Surface::Plane(
+        Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
             .expect("a unit normal"),
     );
+    assert_eq!(
+        meet_of_three_surfaces(
+            [&ball, &pipe, &across],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ),
+        Ok(MeetOfThree::Nowhere),
+        "a plane square to the pipe's axis cuts it and the ball in two circles about one centre"
+    );
+
     meet_of_three_surfaces(
-        [&ball, &another, &ray],
+        [&ball, &across, &ray],
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     )

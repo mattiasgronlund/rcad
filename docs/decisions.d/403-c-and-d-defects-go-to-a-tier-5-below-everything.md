@@ -147,6 +147,16 @@ known wrong page. Q284 was to teach the page tier 2.2. It is dropped and filed
 again as Q982 to cover tier 5 too, ranked where Q284 stood, and Q501, which
 waited on Q284, now waits on Q982.
 
+*Q982 taught the page all seven tiers on 2026-10-04. `rows.py`'s `TIERS` is
+gone, and the page reads `TIERS_IN_ORDER`. Its eight bands take the eight
+colours of the `dataviz` palette in that palette's own order, which passes the
+skill's validator in light and dark. Keeping each older tier's colour and
+adding violet and red for 2.2 and 5 fails it: red sits beside magenta, too
+close to tell apart even with full colour vision. So every band after tier 2
+has a new colour. The page's cache held 838 tallies taken under five tiers, and
+the new page would have raised `KeyError` on the first of them. It now tallies
+such an entry again, once: 19 s on the real history, then 1.7 s warm.*
+
 ### 403.9 The migration
 
 One `just queue apply` moved the 65 open C and D rows from tier 1 to tier 5, in
@@ -158,7 +168,12 @@ while they sit in tier 1. 50 were `todo`, 14 were `after:`, and one, Q22, was
 
 - **Guesses with no class stay in tier 1.** By §360.5's reasoning a guess
   nobody has run is less likely than C, so it may belong in tier 5 too.
-  Mattias said C and D, and widening that is his decision.
+  Mattias said C and D, and widening that is his decision. *He answered on
+  2026-10-04: they stay. "I think it is right as it is now, unless we can
+  decide that the possible failure actually is C or D, as if it is A or B we
+  need to fix it as it is equally likely that a user run into that one as that
+  it would run into the other A or B failures we have already identified." A
+  guess moves to tier 5 only when a lane shows it is C or D.*
 - **`just land` reports an old lane's C row as tier 1.** `rows_added` takes the
   tier from the `add` step (`tooling/land/land.py`, `apply_queue`). A lane that
   writes `add 1` and then `tag @1 refuses/C` lands its row in tier 5, and the
@@ -174,6 +189,11 @@ while they sit in tier 1. 50 were `todo`, 14 were `after:`, and one, Q22, was
   queue tier <id> 5`. That is intended.
 - **Tier 3's corpus refusals**, such as Q347 and Q559, are "A, seen" by §352.3
   and carry no class (§352.7). Mattias asked whether they should become tier 1
-  `refuses/A` rows. That is still open.
+  `refuses/A` rows. *He answered on 2026-10-04: they stay in tier 3. "It is my
+  way of prioritizing fuzz issues before new work, to ensure that we do not
+  just rush and fix the 'known' files first. Ideally the fuzzing should be able
+  to fix the tier 3's STEP corpus before we reach there." A corpus file that
+  fails is a tier 3 row with no class. The fuzzing is meant to find the same
+  defect first, and a defect it finds goes to tier 1 or 5 by its class.*
 - **Q500** asked for the queue file's header to name "the six tiers of §307".
   It is dropped and filed again as Q983 to name seven, ranked where Q500 stood.

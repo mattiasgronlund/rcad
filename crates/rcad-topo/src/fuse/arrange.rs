@@ -2648,11 +2648,38 @@ impl<'f> Arrangement<'f> {
     /// the two arcs either side of it become one. A node the input already had
     /// is never dropped: the faces around it still have it, and dropping it here
     /// would leave an edge with a corner on one side and none on the other.
+    ///
+    /// **Each join is at the lowest-numbered node that has two arcs to join**,
+    /// and keeps the lower-numbered arc of the two, in its own direction and
+    /// its own place among the arcs. So a run of arcs between corners comes out
+    /// as its lowest-numbered arc, and a ring of them through no corner as one
+    /// arc from its highest node back to itself.
+    ///
+    /// The arcs at each node are gathered once, and a join moves arcs at two
+    /// nodes only: the node it joins at, and the far end of the arc it drops,
+    /// which that arc's partner reaches now. Only those two can have two arcs
+    /// to join where they had none, or none where they had two, so only they
+    /// are looked at again. Searching from the first node for each join, and
+    /// gathering each node's arcs from all of them, costs joins × nodes × arcs,
+    /// and a pin header's cut has faces with thousands of each.
     fn join_arcs_that_meet_at_nothing(&mut self) {
-        loop {
-            let Some((node, first, second)) = self.a_node_that_is_no_corner() else {
-                return;
+        let mut touching: Vec<SmallVec<[usize; 4]>> = vec![SmallVec::new(); self.nodes.len()];
+        for (arc, Arc { ends, .. }) in self.arcs.iter().enumerate() {
+            touching[ends[0]].push(arc);
+            if ends[1] != ends[0] {
+                touching[ends[1]].push(arc);
+            }
+        }
+        let mut to_look_at: std::collections::BTreeSet<usize> = (0..self.nodes.len()).collect();
+        let mut dropped = vec![false; self.arcs.len()];
+        while let Some(node) = to_look_at.pop_first() {
+            let Some((first, second)) = self.the_two_arcs_to_join_at(node, &touching[node]) else {
+                continue;
             };
+            assert!(
+                !dropped[first] && !dropped[second],
+                "an arc dropped by a join is no longer at any node"
+            );
             let other_end = |arc: &Arc| {
                 if arc.ends[0] == node {
                     arc.ends[1]
@@ -2666,37 +2693,55 @@ impl<'f> Arrangement<'f> {
             } else {
                 [after, before]
             };
+            for end in self.arcs[first]
+                .ends
+                .into_iter()
+                .chain(self.arcs[second].ends)
+            {
+                touching[end].retain(|&mut arc| arc != first && arc != second);
+            }
             self.arcs[first].ends = ends;
-            self.arcs.remove(second);
+            touching[ends[0]].push(first);
+            if ends[1] != ends[0] {
+                touching[ends[1]].push(first);
+            }
+            dropped[second] = true;
+            to_look_at.extend([node, after]);
         }
+        let arcs = core::mem::take(&mut self.arcs);
+        self.arcs = arcs
+            .into_iter()
+            .zip(dropped)
+            .filter_map(|(arc, dropped)| (!dropped).then_some(arc))
+            .collect();
     }
 
-    fn a_node_that_is_no_corner(&self) -> Option<(usize, usize, usize)> {
-        for node in 0..self.nodes.len() {
-            if self.nodes[node].vertex.is_some() {
-                continue;
-            }
-            let touching: Vec<usize> = (0..self.arcs.len())
-                .filter(|&arc| self.arcs[arc].ends.contains(&node))
-                .collect();
-            if touching.len() != 2 {
-                continue;
-            }
-            let (first, second) = (&self.arcs[touching[0]], &self.arcs[touching[1]]);
-            // A closed crossing with one node is one arc that starts and ends
-            // there, and joining it to itself would leave a curve with no point
-            // on it at all. And a ruling's two arcs either side of the apex
-            // have the partner's inside on opposite sides, so one arc across
-            // the apex would have no one side (§347).
-            if first.crossing == second.crossing
-                && first.boundary == second.boundary
-                && first.against_its_gradients == second.against_its_gradients
-                && !self.crossings[first.crossing].order.closes()
-            {
-                return Some((node, touching[0], touching[1]));
-            }
+    /// The two arcs to join at `node`, lower-numbered first, given `touching`,
+    /// every arc with an end there.
+    ///
+    /// They are joined where the node is no corner of the face and is an end
+    /// of these two arcs alone, and the two are one stretch of an open
+    /// crossing: on the same crossing, along the same boundary, and running
+    /// the same way against their gradients.
+    fn the_two_arcs_to_join_at(&self, node: usize, touching: &[usize]) -> Option<(usize, usize)> {
+        if self.nodes[node].vertex.is_some() {
+            return None;
         }
-        None
+        let &[one, other] = touching else {
+            return None;
+        };
+        let (lower, higher) = (one.min(other), one.max(other));
+        let (first, second) = (&self.arcs[lower], &self.arcs[higher]);
+        // A closed crossing with one node is one arc that starts and ends
+        // there, and joining it to itself would leave a curve with no point
+        // on it at all. And a ruling's two arcs either side of the apex
+        // have the partner's inside on opposite sides, so one arc across
+        // the apex would have no one side (§347).
+        (first.crossing == second.crossing
+            && first.boundary == second.boundary
+            && first.against_its_gradients == second.against_its_gradients
+            && !self.crossings[first.crossing].order.closes())
+        .then_some((lower, higher))
     }
 
     /// Walk every arc from both sides, keeping the region on the left, and see
@@ -6422,8 +6467,9 @@ mod tests {
     };
 
     use super::{
-        Arrangement, Piece, as_exact_as_it_is, canonical_cut_surfaces, prove_the_hinted_order,
-        split_a_face, the_other_way, three_planes_faced_the_one_way, where_the_crossing_starts,
+        Arc, Arrangement, Boundary, HowItRuns, Node, Piece, as_exact_as_it_is,
+        canonical_cut_surfaces, prove_the_hinted_order, split_a_face, the_other_way,
+        three_planes_faced_the_one_way, where_the_crossing_starts,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake, what_writing_the_corner_down_cost};
     use crate::fuse::{FaceMeet, MeetPoint};
@@ -7285,6 +7331,141 @@ mod tests {
         assert!(
             !folds(from_to(room.next_up(), 1000.0 * room)),
             "a meet whose box misses the corner's room altogether is left a node"
+        );
+    }
+
+    /// Arcs that meet at a node nothing else touches are joined into the
+    /// lowest-numbered arc of each run. That arc keeps its own direction and
+    /// its place among the arcs, and every arc left alone keeps its place too.
+    ///
+    /// The nodes and arcs are written by hand on a face's real crossings, so
+    /// that every case `join_arcs_that_meet_at_nothing` tells apart is here at
+    /// once, with the arcs of each case spread through the list:
+    ///
+    /// - a run from corner 0 to corner 4 whose lowest arc is in its middle and
+    ///   whose last arc runs backwards. It comes out as that middle arc, running
+    ///   from corner 0 to corner 4.
+    /// - three arcs in a ring through no corner. The lowest node is joined
+    ///   first, so they come out as one arc from node 7, the ring's highest,
+    ///   back to node 7.
+    /// - node 8, with three arcs: two of them a pair to node 9 and one to
+    ///   corner 10. Joining node 9 makes the pair one arc from node 8 back to
+    ///   itself, node 8 then has two arcs, and that loop is joined away. Node
+    ///   8 is numbered below node 9, so it has to be looked at again after
+    ///   the join at a higher node.
+    /// - an arc from node 22 back to itself, alone there, which is left; and
+    ///   one from node 23 back to itself that comes before an arc from corner
+    ///   24 to node 23. The loop is the lower-numbered, so it is kept, and
+    ///   runs from node 23 to corner 24.
+    /// - two arcs that differ in their boundary, in their crossing, or in which
+    ///   way they run against their gradients, and two of a closed crossing.
+    ///   None of these is joined.
+    #[test]
+    fn arcs_meeting_where_nothing_else_does_are_joined_into_the_lowest_numbered_of_them() {
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let cube = model
+            .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a unit cube");
+        let ball = model
+            .add_ball(
+                0.25,
+                &Isometry::translation(Vector::new(0.5, 0.5, 0.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius");
+        let [cube, ball] = baked(&model, [cube, ball]);
+        let bottom = cut_by_the_ball(the_face_facing(&cube, [0.0, 0.0, -1.0]), &ball);
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let line = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let other_line = the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
+        let circle = the_crossing_along(&arrangement, ball.faces[0].clone());
+        // Read off a node on the circle once the meets are placed, and no step
+        // that places them has run here.
+        let on_the_circle = PredicatePoint::from([0.75, 0.5, 0.0]);
+        arrangement.crossings[circle].order = HowItRuns::RoundAClosedCurve {
+            from: on_the_circle,
+            node: on_the_circle,
+        };
+
+        let corners = [0, 4, 10, 24];
+        let vertex = bottom.wires[0][0].start.vertex;
+        arrangement.nodes = (0..25)
+            .map(|node| Node {
+                point: PredicatePoint::from([0.0; 3]),
+                boxed_tight: PredicatePoint::from([0.0; 3]),
+                vertex: corners.contains(&node).then_some(vertex),
+                made_of: None,
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: Vec::new(),
+            })
+            .collect();
+        let walked = Some(Boundary {
+            wire: 0,
+            runs_forward: true,
+            position: 0,
+        });
+        let arc = |crossing, ends, boundary, against_its_gradients| Arc {
+            crossing,
+            ends,
+            boundary,
+            against_its_gradients,
+        };
+        arrangement.arcs = vec![
+            arc(line, [2, 3], None, false),
+            arc(line, [12, 11], None, false),
+            arc(line, [0, 1], None, false),
+            arc(other_line, [6, 7], None, false),
+            arc(line, [8, 10], None, false),
+            arc(line, [1, 2], None, false),
+            arc(circle, [14, 15], None, false),
+            arc(other_line, [7, 5], None, false),
+            arc(line, [8, 9], None, false),
+            arc(line, [11, 13], walked, false),
+            arc(line, [4, 3], None, false),
+            arc(circle, [15, 14], None, false),
+            arc(other_line, [5, 6], None, false),
+            arc(line, [9, 8], None, false),
+            arc(line, [16, 17], None, false),
+            arc(other_line, [17, 18], None, false),
+            arc(line, [19, 20], None, false),
+            arc(line, [20, 21], None, true),
+            arc(line, [22, 22], None, false),
+            arc(line, [23, 23], None, false),
+            arc(line, [24, 23], None, false),
+        ];
+
+        arrangement.join_arcs_that_meet_at_nothing();
+
+        let left: Vec<(usize, [usize; 2], bool, bool)> = arrangement
+            .arcs
+            .iter()
+            .map(|arc| {
+                (
+                    arc.crossing,
+                    arc.ends,
+                    arc.boundary.is_some(),
+                    arc.against_its_gradients,
+                )
+            })
+            .collect();
+        assert_eq!(
+            left,
+            [
+                (line, [0, 4], false, false),
+                (line, [12, 11], false, false),
+                (other_line, [7, 7], false, false),
+                (line, [8, 10], false, false),
+                (circle, [14, 15], false, false),
+                (line, [11, 13], true, false),
+                (circle, [15, 14], false, false),
+                (line, [16, 17], false, false),
+                (other_line, [17, 18], false, false),
+                (line, [19, 20], false, false),
+                (line, [20, 21], false, true),
+                (line, [22, 22], false, false),
+                (line, [23, 24], false, false),
+            ],
+            "each run is its lowest-numbered arc, and nothing else moved"
         );
     }
 

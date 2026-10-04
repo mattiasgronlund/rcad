@@ -2294,7 +2294,7 @@ check-wildcards-selftest:
 # Zero is a legitimate answer, and it is where this should end up: it says the
 # last gap somebody parked behind an `#[ignore]` has been closed, and
 # `test-ignored` then has nothing to run and says so.
-ignored_tests := "9"
+ignored_tests := "8"
 
 # An `#[ignore]`d test is a gap somebody parked, and this is what stops it being
 # forgotten.
@@ -10629,6 +10629,9 @@ queue-page:
 #
 # Three commits are enough to move every count `tally()` tracks at least once:
 # an open row closing, a row parking, and a tier gaining and losing a row. The
+# last also opens a row in tiers 2.2 and 5, and the render starts from a cache
+# holding the last commit's tally as a five-tier renderer wrote it, as the real
+# page's cache did when tiers 2.2 and 5 reached the page (§403.8). The
 # renderer's `.history-cache.json` holds one tally per commit sha verbatim, so
 # reading it back is reading the render's real output, not recomputing it.
 [private]
@@ -10744,6 +10747,12 @@ check-queue-page-selftest:
     ```
     ```
 
+    ## Tier 2.2
+
+    ```
+    Q5  2.2  todo  opus  docs/e.md  a tier 2.2 row §307
+    ```
+
     ## Tier 2.5
 
     ```
@@ -10759,6 +10768,12 @@ check-queue-page-selftest:
     ```
     ```
 
+    ## Tier 5
+
+    ```
+    Q6  5  todo  opus  docs/f.md  wrong/C a tier 5 row §403
+    ```
+
     ## Closed
 
     ```
@@ -10767,8 +10782,12 @@ check-queue-page-selftest:
     ```
     MD
     g add docs/queue.md
-    g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1"
+    g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1, Q5 and Q6 open in tiers 2.2 and 5"
     sha_c=$(g rev-parse HEAD)
+
+    mkdir -p "$out"
+    jq -n --arg sha "$sha_c" '{($sha): {"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":3,"closed":2}}' \
+        > "$out/.history-cache.json" || fail "could not write the five-tier cache"
 
     RCAD_QUEUE_PAGE_DIR="$out" "$j" --justfile '{{ justfile() }}' --working-directory "$hub" queue-page \
         || fail "queue-page failed to render the scratch history"
@@ -10780,14 +10799,16 @@ check-queue-page-selftest:
         canon=$(jq -cS -n "$2")
         [ "$got" = "$canon" ] || fail "commit $1: tally is $got, expected $canon"
     }
-    expect_tally "$sha_a" '{"by_tier":{"1":2,"2":0,"2.5":0,"3":0,"4":0},"parked":0,"closed":0}'
-    expect_tally "$sha_b" '{"by_tier":{"1":1,"2":1,"2.5":0,"3":0,"4":0},"parked":0,"closed":1}'
-    expect_tally "$sha_c" '{"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":1,"closed":2}'
+    expect_tally "$sha_a" '{"by_tier":{"1":2,"2":0,"2.2":0,"2.5":0,"3":0,"4":0,"5":0},"parked":0,"closed":0}'
+    expect_tally "$sha_b" '{"by_tier":{"1":1,"2":1,"2.2":0,"2.5":0,"3":0,"4":0,"5":0},"parked":0,"closed":1}'
+    expect_tally "$sha_c" '{"by_tier":{"1":1,"2":0,"2.2":1,"2.5":0,"3":0,"4":0,"5":1},"parked":1,"closed":2}'
 
     grep -q '3 commits' "$out/index.html" || fail "the page does not say 3 commits, so it did not walk all three"
     grep -q 'id="qp-by-tier"' "$out/index.html" || fail "the by-tier chart is missing from the page"
     grep -q 'id="qp-progress"' "$out/index.html" || fail "the progress chart is missing from the page"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits"
+    grep -q '<h3>Tier 2.2</h3><ul><li><code>Q5</code>' "$out/index.html" || fail "the ready list leaves out tier 2.2's Q5"
+    grep -q '<h3>Tier 5</h3><ul><li><code>Q6</code>' "$out/index.html" || fail "the ready list leaves out tier 5's Q6"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, and the ready list holds every tier"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.

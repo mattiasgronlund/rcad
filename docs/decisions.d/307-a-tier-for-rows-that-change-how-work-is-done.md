@@ -176,7 +176,8 @@ system, so that it fails there is read, not run.
   colour checked with the `dataviz` skill's palette validator, and
   `check-queue-page-selftest`'s three expected tallies gain `"2.2":0`. Write
   set `tooling/queue/rows.py`, `tooling/queue-page/`,
-  `justfile#check-queue-page-selftest`, in one lane.
+  `justfile#check-queue-page-selftest`, in one lane. *Done by Q982 on
+  2026-10-04, with tier 5 too; §403.8 says how.*
 - **`docs/queue.md`'s own text** still says "in five tiers" and "`1`, `2`,
   `2.5`, `3` or `4` (§230.1)". No verb edits the text outside the rows, and the
   guard refuses the hand edit.

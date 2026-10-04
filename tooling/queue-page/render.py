@@ -15,9 +15,10 @@ day. `docs/decisions.md` §230, §263.
 The only state this keeps across runs is `<out>/.history-cache.json`, one
 entry per commit sha already tallied. Recomputing every commit on every write
 would make the render the queue pays for grow with the queue's own history;
-a sha's tally never changes once it is written, so the cache never goes stale.
-Measured against the real history (166 first-parent commits touching
-docs/queue.md): 2.9s cold, 0.6s warm.
+a sha's tally changes only when the list of tiers does, and `load_cache` drops
+an entry taken under another list. Measured through `just queue-page` against
+the real history (600 first-parent commits touching docs/queue.md,
+2026-10-04): 19s cold, 1.7s warm.
 
 A failure here — no `main` here, no commit ever touched the file — is said on
 stderr and returned as a nonzero exit, never raised past `main`: the caller
@@ -35,7 +36,7 @@ from collections import namedtuple
 sys.dont_write_bytecode = True
 QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
 sys.path.insert(0, QUEUE_TOOLING)
-from rows import Queue, TIERS  # noqa: E402
+from rows import Queue, TIERS_IN_ORDER  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
 CLOSED_ROWS_SHOWN = 12
@@ -96,11 +97,17 @@ Point = namedtuple("Point", "sha when counts")
 
 
 def load_cache(path):
+    """The tallies earlier runs wrote, less those taken under another list of tiers.
+
+    Such a tally has no count for a tier added since, and counted that tier's
+    rows as parked (§403.8), so its commit is tallied again.
+    """
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            cache = json.load(f)
     except (OSError, ValueError):
         return {}
+    return {sha: counts for sha, counts in cache.items() if set(counts["by_tier"]) == set(TIERS_IN_ORDER)}
 
 
 def save_cache(path, cache):
@@ -121,7 +128,7 @@ def tally(text):
     into whichever count it is not, rather than dropped, so a bad historical
     commit still balances against the total the page's own count can check.
     """
-    by_tier = {tier: 0 for tier in TIERS}
+    by_tier = {tier: 0 for tier in TIERS_IN_ORDER}
     parked = 0
     closed = 0
     for row in Queue(text).rows:
@@ -157,7 +164,7 @@ def load_queue_verbs():
 
 def ready_rows(tip):
     done_ids = {row.id for row in tip.rows if row.is_closed()}
-    by_tier = {tier: [] for tier in TIERS}
+    by_tier = {tier: [] for tier in TIERS_IN_ORDER}
     for row in tip.rows:
         if row.state == "todo":
             ready = True
@@ -252,22 +259,23 @@ def write_atomically(path, text):
 
 # --- the page itself ---------------------------------------------------
 #
-# Six categorical slots, in the fixed order `dataviz`'s palette validates for
+# Eight categorical slots, in the fixed order `dataviz`'s palette validates for
 # stacked areas (adjacent pairs only, which is all a stack needs): tier 1
-# through tier 4, then parked as its own band, in both charts' legends. The
-# open/closed chart reuses slot 1 for "open" and slot 6 (green) for "closed",
-# since that pair is unrelated to the first chart's bands and each chart
-# carries its own legend.
+# through tier 5, then parked as its own band, in both charts' legends. Keeping
+# each older tier's colour and giving 2.2 and 5 the two new ones fails that
+# check, red beside magenta, so every band after tier 2 has a new colour
+# (§403.8). The open/closed chart reuses slot 1 for "open" and slot 6 (green)
+# for "closed", since that pair is unrelated to the first chart's bands and each
+# chart carries its own legend.
 
-TIER_LABELS = {"1": "Tier 1", "2": "Tier 2", "2.5": "Tier 2.5", "3": "Tier 3", "4": "Tier 4"}
-SLOT_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
-SLOT_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"]
+SLOT_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+SLOT_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
 
 
 def render_page(points, state):
     by_tier_chart = stacked_area(
         points=points,
-        series=[(TIER_LABELS[t], lambda counts, t=t: counts["by_tier"][t]) for t in TIERS]
+        series=[(f"Tier {t}", lambda counts, t=t: counts["by_tier"][t]) for t in TIERS_IN_ORDER]
         + [("Parked", lambda counts: counts["parked"])],
         chart_id="by-tier",
         caption="The open queue, split by tier, parked rows as their own band",
@@ -312,6 +320,7 @@ def stacked_area(points, series, chart_id, caption):
     def y_of(v):
         return margin["top"] + plot_h * (1 - v / top_total)
 
+    assert len(series) <= len(SLOT_LIGHT), f"{len(series)} series and {len(SLOT_LIGHT)} colours"
     bands = []
     baseline = [0] * len(points)
     colors_light = SLOT_LIGHT[: len(series)]
@@ -394,11 +403,11 @@ def grouped_bars(deltas, chart_id, caption):
 
 def ready_section(by_tier):
     items = []
-    for tier in TIERS:
+    for tier in TIERS_IN_ORDER:
         rows = by_tier[tier]
         if not rows:
             continue
-        items.append(f"<h3>{html.escape(TIER_LABELS[tier])}</h3><ul>")
+        items.append(f"<h3>Tier {html.escape(tier)}</h3><ul>")
         items.extend(f"<li>{row_html(row)}</li>" for row in rows)
         items.append("</ul>")
     return "".join(items) if items else "<p>none ready</p>"
@@ -524,7 +533,7 @@ code {{ font-size: 12px; }}
 def series_color_css():
     """One CSS rule per chart × slot, generated once rather than hand-written per chart id."""
     rules = []
-    for chart_id, count in (("by-tier", 6), ("progress", 2), ("added-closed", 2)):
+    for chart_id, count in (("by-tier", len(TIERS_IN_ORDER) + 1), ("progress", 2), ("added-closed", 2)):
         for i in range(count):
             rules.append(
                 f'#qp-{chart_id} [data-series="{i}"] {{ fill: var(--qp-{chart_id}-{i}-light); }}\n'

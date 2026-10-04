@@ -85,6 +85,36 @@ A cut between two holes carries at least one point of its own, since its two
 ends are corners of the model and a face across both holes could draw the same
 pair (`cut_in_two`'s argument).
 
+> **2026-10-04 note (Q847, `1c63abe7`): a cut that leaves the piece is
+> replaced by one that stays in it.** `cut_in_two` cuts a piece holding no
+> pole across the middle of how far round it goes, and `where_to_cut` pulls
+> each end back to the nearer corner of the side the middle crosses. Near a
+> pole one side of a coarse walk spans most of a half turn, so the ends can
+> land far either side of the middle, and where the piece bends back past the
+> middle the chord between them runs out of it. A cube of side 2 at the origin
+> turned 1 rad about `(−1, 3, 2)` and a unit ball at `(0.7, 0.65, 0.6)` in the
+> cube's frame leave both poles outside the cube, so the ball's large face
+> holds neither pole and is shaped like a `C` in the chart: two horns at
+> longitudes `−1.37` and `−1.18` either side of the `y = 0` circle, which
+> reaches in to `−0.13`. At a deflection of `0.3` the cut across the middle,
+> `0.176`, was pulled back to the horns' tips, `(−1.183, −0.819)` and
+> `(1.614, 1.461)`, ran across that circle from `(−0.246, 0.526)` to
+> `(−0.207, −0.372)`, and the triangulator refused `BoundaryCrossesItself` at
+> `0.3`, `0.1` and `0.03`, fused either way round. A chord that meets a side of
+> the piece anywhere but its own two ends, or lies outside it
+> (`a_chord_stays_inside`), is now replaced by the chord between two of the
+> piece's corners that stays inside and leaves the wider half narrowest
+> (`the_most_even_chord_that_stays_inside`); where none does, the old chord is
+> kept and the triangulator refuses as before, so no other answer moves.
+> `a_ball_face_shaped_like_a_c_in_its_chart_meshes_as_it_does_turned`
+> (`crates/rcad-topo/tests/a_cap_whose_rim_bends_back_past_its_own_meridian.rs`)
+> pins it at all three deflections, fused either way round, against the
+> upright pair. The row's other nine turns already answered, on `bca8ffa3`,
+> pinned by `the_turns_that_folded_after_the_cut_from_a_clear_corner_mesh_as_
+> they_do_upright` in the same file. §16.10: the skin exists at every one of
+> these shapes and the mesher's own machinery reaches it, so this is a gap
+> closed rather than a limit.
+
 ### 402.4 What is still refused, and why it is a gap
 
 A strip whose holes neither lie one above the other nor clear each other's

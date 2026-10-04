@@ -81,7 +81,9 @@ The tagging of the open rows (§352.7) moved thirteen rows from `wrong` to
 
 How likely, as buckets tied to evidence rather than a guessed percentage:
 
-- **A, seen**: a real input met it, such as a file of the STEP corpus.
+- **A, seen**: a real input met it, such as a file of the STEP corpus. *A
+  corpus file that fails is still a tier 3 row and gets no class, so that the
+  fuzzing has a chance to find its defect first (Mattias, 2026-10-04, §403.10).*
 - **B, typical**: a shape designers make on purpose (tangent, flush, coaxial,
   a fillet), or one that a turn or a file written to 11–13 digits rounds apart.
 - **C, possible**: inside §3.5's scale envelope, but only a probe builds it. A
