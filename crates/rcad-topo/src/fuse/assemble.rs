@@ -499,6 +499,7 @@ impl Assembly {
                     sides.push(Side {
                         edge,
                         forward: edges[edge].ends[0] == from,
+                        read_against: None,
                     });
                 }
                 wires.push(sides);
@@ -2014,6 +2015,7 @@ impl Assembly {
                 } else {
                     self.walks_a_closed_up_run_the_way_it_is_stored(dart)?
                 },
+                read_against: None,
             });
         }
         // Three sides, **or one that closes on itself**, which is the rule
@@ -2998,6 +3000,14 @@ impl Face {
 struct Side {
     edge: usize,
     forward: bool,
+    /// For a side of a **closed** edge made in [`Edges::of`], the curved
+    /// surface whose winding `forward` was read against: the curved one of the
+    /// piece's own crossing pair, which need not be a surface of either face the
+    /// answer keeps along the edge. A disc cut from one bar is read against
+    /// that bar's pipe, and the edge is stored by the other bar's wall.
+    /// [`every_closed_edge_read_off_one_spelling`] reads it. `None` for every
+    /// other side.
+    read_against: Option<Surface>,
 }
 
 /// Where one face walks along one edge: the face, the ring, and how far round
@@ -3136,29 +3146,49 @@ pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
     name_of_the_surface_either_way_round(one) == name_of_the_surface_either_way_round(other)
 }
 
-/// Turn round each side of a closed edge that was read off the other spelling
-/// of the surface the mesher reads it off.
+/// Turn round each side of a closed edge that was read off another spelling of
+/// the surface the answer stores the edge by.
 ///
-/// [`Edges::of`] reads which way a side walks a closed edge off that side's own
-/// pair of surfaces, and a pipe, a cone or a bend written with its axis the
-/// other way round is wound about the other way. Where the two faces either
-/// side are two spellings of one surface, the two sides are then each read
-/// against their own winding, and a union of two bars stacked on one pipe came
-/// back with both walls walking the circle between them "backwards" —
-/// `CoedgesRunTheSameWay`.
+/// [`Edges::of`] reads which way a side walks a closed edge off the curved
+/// surface of that side's own crossing pair ([`Side::read_against`]), and a
+/// pipe, a cone or a bend written with its axis the other way round is wound
+/// about the other way. Two places that goes wrong, both `CoedgesRunTheSameWay`:
 ///
-/// **The spelling that counts is the one the mesher reads**, which is the lower
-/// of the two faces' surfaces by their bits
-/// (`the_way_a_closed_edge_where_its_faces_touch_runs` in `mesh.rs`: the two
-/// gradients are parallel, so the crossing gives no direction and the winding
-/// of that one surface is all there is). That is a property of the two faces
-/// and not of which was handed over first, so the answer does not depend on
-/// argument order.
+/// - **Two curved faces on two spellings of one surface**: each side is read
+///   against its own face's winding, and a union of two bars stacked on one
+///   pipe came back with both walls walking the circle between them
+///   "backwards" (`docs/decisions.md` §231.3).
+/// - **A flat face against a wall on another spelling**: a disc cut from one
+///   bar is read against that bar's pipe while the wall across it, from the
+///   other bar, is what the edge is stored by. Two bars overlapping on one pipe
+///   written opposite ways, intersected or differenced, have that rim (§359).
+///
+/// So the surface compared is the one each side was read against, not its
+/// face's.
+///
+/// **The spelling that counts is the curved one of the two faces' surfaces**,
+/// the lower by bits where both are curved ([`the_curved_one_of`]). It is what
+/// `Model::validate` reads the edge's way back off, and with two curved faces it
+/// is what the mesher reads too (`the_way_a_closed_edge_where_its_faces_touch_runs`
+/// in `mesh.rs`: the two gradients are parallel, so the crossing gives no
+/// direction and the winding of that one surface is all there is). That is a
+/// property of the two faces and not of which was handed over first, so the
+/// answer does not depend on argument order.
+///
+/// **Only a side read against another spelling of that surface is turned.** A
+/// dot of two windings compares two spellings of one surface and nothing else,
+/// so a side read against a different surface altogether is left as it was
+/// read, as it was before §359; no shape has been measured reaching that.
 ///
 /// **Whether a spelling winds the other way is exact**: turning an axis round
 /// negates every product [`the_way_it_is_parametrised_about`] is made of, so
 /// the two windings are exact negatives of each other and their dot product is
 /// never a rounding away from zero.
+///
+/// # Panics
+///
+/// If a side of a closed edge does not say what it was read against. Every
+/// side here was made by [`Edges::of`], which says it for each closed side.
 fn every_closed_edge_read_off_one_spelling(edges: &[Edge], corners: &[Corner], faces: &mut [Face]) {
     let mut claimants: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); edges.len()];
     for (face, walked) in faces.iter().enumerate() {
@@ -3175,22 +3205,24 @@ fn every_closed_edge_read_off_one_spelling(edges: &[Edge], corners: &[Corner], f
         if edge.ends[0] != edge.ends[1] {
             continue;
         }
-        let surfaces = [one, other].map(|(face, _, _)| faces[face].surface);
-        if surfaces.iter().any(|surface| surface.as_plane().is_some())
-            || surfaces[0] == surfaces[1]
-            || !one_surface(&surfaces[0], &surfaces[1])
-        {
+        let Some(reference) =
+            the_curved_one_of(&[one, other].map(|(face, _, _)| faces[face].surface))
+        else {
             continue;
-        }
+        };
         let at = corners[edge.ends[0]].point;
-        let reference = *surfaces
-            .iter()
-            .min_by_key(|surface| name_of_surface_bits(surface))
-            .expect("two surfaces");
         let wound = the_way_it_is_parametrised_about(&reference, at);
-        for ((face, wire, position), surface) in [one, other].into_iter().zip(surfaces) {
-            if the_way_it_is_parametrised_about(&surface, at).dot(wound) < 0.0 {
-                let side = &mut faces[face].wires[wire][position];
+        for (face, wire, position) in [one, other] {
+            let side = &mut faces[face].wires[wire][position];
+            let read = side
+                .read_against
+                .expect("Edges::of says what each closed side was read against");
+            if name_of_surface_bits(&read) == name_of_surface_bits(&reference)
+                || !one_surface(&read, &reference)
+            {
+                continue;
+            }
+            if the_way_it_is_parametrised_about(&read, at).dot(wound) < 0.0 {
                 side.forward = !side.forward;
             }
         }
@@ -3846,6 +3878,12 @@ impl Edges {
     /// solids were handed over, and the history of the edge would depend on it.
     /// `seam` is [`the_seam_a_side_runs_along`], which `meet` cannot carry.
     ///
+    /// **A closed side is read against the curved surface of `meet`'s own
+    /// pair**, which the side carries as [`Side::read_against`], because the
+    /// answer may keep another spelling of that surface along the edge and
+    /// [`every_closed_edge_read_off_one_spelling`] has to know which one this
+    /// was.
+    ///
     /// # Panics
     ///
     /// If a straight side has no length. §17.4 prevents one rather than
@@ -3909,13 +3947,18 @@ impl Edges {
                 self.made.len() - 1
             }
         };
-        let forward = if from == to {
-            which_way_a_closed_edge_is_walked(meet, at, turned_round)?
-                .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
+        let (forward, read_against) = if from == to {
+            let forward = which_way_a_closed_edge_is_walked(meet, at, turned_round)?
+                .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?;
+            (forward, the_curved_one_of(&carried_by))
         } else {
-            self.made[edge].ends[0] == from
+            (self.made[edge].ends[0] == from, None)
         };
-        Ok(Side { edge, forward })
+        Ok(Side {
+            edge,
+            forward,
+            read_against,
+        })
     }
 }
 
@@ -3936,6 +3979,16 @@ impl Edges {
 /// as the used gradients are the stored ones. Where the rule turns the piece
 /// round, `sides_of` turns every side of it round with it and the face's use
 /// says so — which is what the sweep reads.
+///
+/// **The answer is against the curved one of `meet`'s pair**, and
+/// [`every_closed_edge_read_off_one_spelling`] turns it round afterwards where
+/// the answer keeps another spelling of that surface along the edge. The path
+/// for a circle from a ball's pole reads against the lid's normal and not
+/// against a winding, and needs nothing from that pass: the surface it is read
+/// against is a ball, a ball has no second spelling
+/// (`name_of_the_surface_either_way_round` folds nothing for it), so the only
+/// ball that is one surface with it is itself bit for bit, and the pass leaves
+/// such a side alone.
 ///
 /// # Errors
 ///
@@ -5550,6 +5603,7 @@ mod tests {
                 wires: vec![vec![Side {
                     edge: 0,
                     forward: true,
+                    read_against: None,
                 }]],
                 is_a_whole_closed_surface: false,
             }],
@@ -5607,7 +5661,11 @@ mod tests {
                 ancestors: Vec::new(),
                 surface,
                 used: Orientation::Forward,
-                wires: vec![vec![Side { edge: 0, forward }]],
+                wires: vec![vec![Side {
+                    edge: 0,
+                    forward,
+                    read_against: None,
+                }]],
                 is_a_whole_closed_surface: false,
             };
             let mut assembly = Assembly {
@@ -5685,7 +5743,15 @@ mod tests {
             ancestors: Vec::new(),
             surface: Surface::Plane(surface),
             used: Orientation::Forward,
-            wires: vec![(0..3).map(|edge| Side { edge, forward }).collect()],
+            wires: vec![
+                (0..3)
+                    .map(|edge| Side {
+                        edge,
+                        forward,
+                        read_against: None,
+                    })
+                    .collect(),
+            ],
             is_a_whole_closed_surface: false,
         };
 

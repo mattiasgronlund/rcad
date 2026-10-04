@@ -83,6 +83,8 @@ round bars of radius 3 on one axis, `z` 0 to 4 and 2 to 6, read from one file
 with their pipe axes written opposite ways: one solid, validates, and measures
 `54π` within its error. It passes on the base and with this change. It is there
 because Q15 reported Q41's change alone breaking it. The same pair's
-intersection and difference refuse `TheFuseWroteABrokenAnswer
+intersection and difference refused `TheFuseWroteABrokenAnswer
 { CoedgesRunTheSameWay }` on the base and with this change, measured by Q15's
-probe run on this lane's tree both ways; that is row Q385.
+probe run on this lane's tree both ways; that was row Q385, then Q595. Since
+§359 they answer, and the same file pins them beside the union, all four
+spellings and both orders, each measured against `18π` or `54π`.
