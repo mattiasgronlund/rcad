@@ -1161,7 +1161,7 @@ impl BuildingAMesh {
                 return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
             };
             let mut pieces = Vec::with_capacity(2 * strips.len());
-            for (strip, holes) in strips {
+            for AStripAndItsHoles { strip, holes } in strips {
                 let Some(cut) =
                     self.cut_holes_up_to_both_poles(face, stored, &strip, &holes, room)?
                 else {
@@ -1453,7 +1453,7 @@ impl BuildingAMesh {
         stored: &Surface,
         holes: &[WalkedLoop],
         room: f64,
-    ) -> Result<Option<Vec<(WalkedLoop, Vec<WalkedLoop>)>>> {
+    ) -> Result<Option<Vec<AStripAndItsHoles>>> {
         let (Some(whole), Some(pole)) = (
             how_far_the_longitude_wraps(stored),
             where_this_surface_pinches(stored),
@@ -1545,7 +1545,7 @@ impl BuildingAMesh {
                 }
                 held.push(moved);
             }
-            strips.push((strip, held));
+            strips.push(AStripAndItsHoles { strip, holes: held });
         }
         Ok(Some(strips))
     }
@@ -2184,14 +2184,13 @@ impl BuildingAMesh {
         holes: &[WalkedLoop],
         room: f64,
     ) -> Result<Option<Vec<WalkedLoop>>> {
-        let mut cut: Vec<(&WalkedLoop, [usize; 2], [(usize, f64); 2])> =
-            Vec::with_capacity(holes.len());
+        let mut cut: Vec<AHoleCutStraightUpAndDown<'_>> = Vec::with_capacity(holes.len());
         for (at, hole) in holes.iter().enumerate() {
-            let ends = [
+            let (highest, lowest) = (
                 the_corner_furthest(hole, 1.0),
                 the_corner_furthest(hole, -1.0),
-            ];
-            let reaches = [(ends[0], 1.0), (ends[1], -1.0)].map(|(corner, way)| {
+            );
+            let reaches = [(highest, 1.0), (lowest, -1.0)].map(|(corner, way)| {
                 let [longitude, latitude] = hole.corners[corner];
                 let (side, pole) =
                     the_pole_side_a_line_from_a_hole_reaches(outer, longitude, latitude, way)?;
@@ -2203,14 +2202,19 @@ impl BuildingAMesh {
             let [Some(up), Some(down)] = reaches else {
                 return Ok(None);
             };
-            cut.push((hole, ends, [up, down]));
+            cut.push(AHoleCutStraightUpAndDown {
+                hole,
+                highest,
+                lowest,
+                up,
+                down,
+            });
         }
-        let longitude_of =
-            |(hole, ends, _): &(&WalkedLoop, [usize; 2], _), end: usize| hole.corners[ends[end]][0];
-        cut.sort_by(|one, other| longitude_of(one, 0).total_cmp(&longitude_of(other, 0)));
-        let (top, bottom) = (cut[0].2[0].0, cut[0].2[1].0);
+        cut.sort_by(|one, other| one.longitude_up().total_cmp(&other.longitude_up()));
+        let (top, bottom) = (cut[0].up.0, cut[0].down.0);
         let in_order = cut.windows(2).all(|pair| {
-            (0..2).all(|end| longitude_of(&pair[0], end) < longitude_of(&pair[1], end))
+            pair[0].longitude_up() < pair[1].longitude_up()
+                && pair[0].longitude_down() < pair[1].longitude_down()
         });
         let sides =
             |end: usize| outer.corners[end][0] - outer.corners[(end + 1) % outer.corners.len()][0];
@@ -2220,7 +2224,7 @@ impl BuildingAMesh {
             || sides(bottom) >= 0.0
             || cut
                 .iter()
-                .any(|(_, _, [up, down])| up.0 != top || down.0 != bottom)
+                .any(|each| each.up.0 != top || each.down.0 != bottom)
         {
             return Ok(None);
         }
@@ -2232,28 +2236,28 @@ impl BuildingAMesh {
             opened.corners.push(outer.corners[at]);
             opened.points.push(outer.points[at]);
             if at == top {
-                for (each, (hole, ends, [(_, pole), _])) in cut.iter().enumerate().rev() {
+                for (each, hole) in cut.iter().enumerate().rev() {
                     top_at[each] = opened.corners.len();
-                    opened.corners.push([hole.corners[ends[0]][0], *pole]);
+                    opened.corners.push([hole.longitude_up(), hole.up.1]);
                     opened.points.push(outer.points[top]);
                 }
             }
             if at == bottom {
-                for (each, (hole, ends, [_, (_, pole)])) in cut.iter().enumerate() {
+                for (each, hole) in cut.iter().enumerate() {
                     bottom_at[each] = opened.corners.len();
-                    opened.corners.push([hole.corners[ends[1]][0], *pole]);
+                    opened.corners.push([hole.longitude_down(), hole.down.1]);
                     opened.points.push(outer.points[bottom]);
                 }
             }
         }
         let mut to_the_top = Vec::with_capacity(cut.len());
         let mut from_the_bottom = Vec::with_capacity(cut.len());
-        for (each, (hole, [highest, lowest], _)) in cut.iter().enumerate() {
+        for (each, hole) in cut.iter().enumerate() {
             to_the_top.push(self.points_along_a_cut(
                 face,
                 stored,
                 Chart::Upright,
-                hole.corners[*highest],
+                hole.hole.corners[hole.highest],
                 opened.corners[top_at[each]],
                 room,
             )?);
@@ -2262,41 +2266,33 @@ impl BuildingAMesh {
                 stored,
                 Chart::Upright,
                 opened.corners[bottom_at[each]],
-                hole.corners[*lowest],
+                hole.hole.corners[hole.lowest],
                 room,
             )?);
         }
 
         let last = cut.len() - 1;
-        let left_half = |each: usize| {
-            let (hole, [highest, lowest], _) = cut[each];
-            hole.between(lowest, highest)
-        };
-        let right_half = |each: usize| {
-            let (hole, [highest, lowest], _) = cut[each];
-            hole.between(highest, lowest)
-        };
         let mut pieces = Vec::with_capacity(cut.len() + 1);
         let mut first = opened.between(top_at[0], bottom_at[0]);
         first.take_in(&from_the_bottom[0]);
-        first.take_in(&left_half(0));
+        first.take_in(&cut[0].left_half());
         first.take_in(&to_the_top[0]);
         pieces.push(first);
         for each in 0..last {
             let next = each + 1;
             let mut piece = opened.between(top_at[next], top_at[each]);
             piece.take_in(&to_the_top[each].the_other_way());
-            piece.take_in(&right_half(each));
+            piece.take_in(&cut[each].right_half());
             piece.take_in(&from_the_bottom[each].the_other_way());
             piece.take_in(&opened.between(bottom_at[each], bottom_at[next]));
             piece.take_in(&from_the_bottom[next]);
-            piece.take_in(&left_half(next));
+            piece.take_in(&cut[next].left_half());
             piece.take_in(&to_the_top[next]);
             pieces.push(piece);
         }
         let mut after = opened.between(bottom_at[last], top_at[last]);
         after.take_in(&to_the_top[last].the_other_way());
-        after.take_in(&right_half(last));
+        after.take_in(&cut[last].right_half());
         after.take_in(&from_the_bottom[last].the_other_way());
         pieces.push(after);
 
@@ -2306,9 +2302,11 @@ impl BuildingAMesh {
         {
             return Ok(None);
         }
-        for (hole, [highest, lowest], _) in &cut {
-            self.on_a_cut
-                .extend([hole.points[*highest], hole.points[*lowest]]);
+        for each in &cut {
+            self.on_a_cut.extend([
+                each.hole.points[each.highest],
+                each.hole.points[each.lowest],
+            ]);
         }
         self.on_a_cut
             .extend([outer.points[top], outer.points[bottom]]);
@@ -2946,6 +2944,45 @@ impl WalkedLoop {
             goes_right_round_the_second_way: self.goes_right_round_the_second_way,
             climbed_the_second_way: -self.climbed_the_second_way,
         }
+    }
+}
+
+/// One strip of a ball from pole to pole and the holes inside it, moved into
+/// the strip's own turn of longitude
+/// ([`BuildingAMesh::open_the_ball_into_strips`]).
+struct AStripAndItsHoles {
+    strip: WalkedLoop,
+    holes: Vec<WalkedLoop>,
+}
+
+/// A hole cut straight up from its highest corner and straight down from its
+/// lowest ([`BuildingAMesh::cut_holes_side_by_side_up_to_both_poles`]): which
+/// side of the outer loop each cut reaches, and the latitude it reaches it at.
+struct AHoleCutStraightUpAndDown<'a> {
+    hole: &'a WalkedLoop,
+    highest: usize,
+    lowest: usize,
+    up: (usize, f64),
+    down: (usize, f64),
+}
+
+impl AHoleCutStraightUpAndDown<'_> {
+    fn longitude_up(&self) -> f64 {
+        self.hole.corners[self.highest][0]
+    }
+
+    fn longitude_down(&self) -> f64 {
+        self.hole.corners[self.lowest][0]
+    }
+
+    /// The hole from its lowest corner up to its highest: the half on the
+    /// left, since a hole runs clockwise.
+    fn left_half(&self) -> WalkedLoop {
+        self.hole.between(self.lowest, self.highest)
+    }
+
+    fn right_half(&self) -> WalkedLoop {
+        self.hole.between(self.highest, self.lowest)
     }
 }
 
