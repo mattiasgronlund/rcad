@@ -54,16 +54,20 @@ The diagnosis lane's two legs held, and both are fixed (`68b81daf`):
    already names corners and cut surfaces by. That is exact, has no tolerance,
    and covers a pipe, a cone and a bend turned round, and a pipe's origin slid
    along its axis where that folds exactly.
-2. `Edges::of` reads each side's way round a closed edge against that side's own
+2. `Edges::of` reads each side's way round a closed edge against the curved
+   surface of that side's own crossing pair, which for a curved piece is its own
    surface, and a surface turned round is wound about the other way. The side
    that counts is the one the **mesher** reads: with two parallel gradients the
    crossing gives no direction, and
    `the_way_a_closed_edge_where_its_faces_touch_runs` falls back to the winding
    of the lower of the two faces' surfaces by bits. So
-   `every_closed_edge_read_off_one_spelling` turns round each side whose own
+   `every_closed_edge_read_off_one_spelling` turns round each side whose
    winding is opposite that one's. That is a property of the two faces and not
    of which solid was handed over first. The two windings are exact negatives,
-   so their dot product has no rounding to be near zero with.
+   so their dot product has no rounding to be near zero with. **A flat piece is
+   read against a curved surface too**, its own bar's pipe, and this pass
+   skipped every edge with a flat face along it; §359 has the pass compare what
+   each side was read against rather than its face's surface.
 
 Shown needed: with the second pass switched off, the reversed-axis unit test
 refuses `TheFuseWroteABrokenAnswer { broken: CoedgesRunTheSameWay }`. The

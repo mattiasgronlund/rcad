@@ -16,18 +16,21 @@
 //!
 //! # Where such a circle is
 //!
-//! **Not in the answer of any fuse of two such bars that this file's lane
-//! tried**: stacked (`z` 0 to 2 and 2 to 4) or overlapping (0 to 4 and 2 to 6),
-//! either spelling for each, united, intersected and differenced, the overlapping
-//! intersection and difference being refused (row Q385). Two bars stacked on one
-//! pipe written opposite ways, united, come back with one wall on the lower
+//! **Not in the answer of any fuse of two such bars that has been tried**:
+//! stacked (`z` 0 to 2 and 2 to 4) or overlapping (0 to 4 and 2 to 6), either
+//! spelling for each, united, intersected and differenced. Two bars stacked on
+//! one pipe written opposite ways, united, come back with one wall on the lower
 //! spelling and no circle between the bars
 //! (`two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written` in
 //! `fuse/assemble.rs`), so what is left to check there is the two cap circles,
-//! and the first test does. **Through the builder, yes**: a bar in two bands, one on
-//! each spelling, with the circle between them naming its plane — the run the
-//! STEP reader writes for a closed circle between two curved faces that are not
-//! one surface bit for bit (§222.2). The second test builds that.
+//! and the first test does. Overlapping and intersected or differenced, the
+//! answer is a bar with one wall and a rim where one bar's disc meets the other
+//! bar's wall: a circle between a flat face and a curved one, which the second
+//! test checks (`docs/decisions.md` §359). **Through the builder, yes**: a bar
+//! in two bands, one on each spelling, with the circle between them naming its
+//! plane — the run the STEP reader writes for a closed circle between two
+//! curved faces that are not one surface bit for bit (§222.2). The third test
+//! builds that.
 //!
 //! # The oracle
 //!
@@ -113,6 +116,113 @@ fn two_bars_stacked_on_one_pipe_mesh_each_face_where_it_is_however_the_pipe_is_w
                     1,
                     "{what}: the two walls are joined into one face"
                 );
+                wrong.extend(what_is_wrong_with_each_face(&model, *solid, &turn, &what));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Two bars overlapping on one pipe, `z` 0 to 4 and 2 to 6, each wall on
+/// either spelling, united, intersected and differenced either way round and
+/// turned as the first test turns them.
+///
+/// United they are a bar six high, and every other answer is a bar two high:
+/// `z` 2 to 4 for the intersection, 0 to 2 for the lower less the upper and 4
+/// to 6 for the upper less the lower. Each of those has a rim where one bar's
+/// disc meets the other bar's wall, and with the two walls on opposite
+/// spellings the disc's side of it was read against its own bar's pipe while
+/// the edge is stored by the wall across it (`docs/decisions.md` §359).
+///
+/// Fails on the base for the 24 intersections and differences of opposite
+/// spellings, refused `TheFuseWroteABrokenAnswer { CoedgesRunTheSameWay }`.
+///
+/// **The bars are `RADIUS`, `1`, and not the `3` of the file the STEP test
+/// reads**: at radius `3`, turned by `1` about `x`, every one of these fuses is
+/// refused `Undecidable` on "a point in a piece that every solid could place",
+/// on one spelling as on two, which is a refusal of its own and not this one.
+#[test]
+fn two_overlapping_bars_on_one_pipe_fuse_into_one_bar_however_the_pipe_is_written() {
+    let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
+    let down = Cylinder::new(Axis::z().reversed(), RADIUS).expect("a radius");
+    let mut wrong = Vec::new();
+    for (turn_name, turn) in the_turns(&[], &[(&Axis::x(), 1.0), (&Axis::x(), -1.0)]) {
+        for (lower, upper) in [(up, up), (up, down), (down, up), (down, down)] {
+            for (rule, lower_first, rule_name, height) in [
+                (Rule::Union, true, "united, the lower first", 6.0),
+                (Rule::Union, false, "united, the upper first", 6.0),
+                (
+                    Rule::Intersection,
+                    true,
+                    "intersected, the lower first",
+                    2.0,
+                ),
+                (
+                    Rule::Intersection,
+                    false,
+                    "intersected, the upper first",
+                    2.0,
+                ),
+                (Rule::Difference, true, "the lower less the upper", 2.0),
+                (Rule::Difference, false, "the upper less the lower", 2.0),
+            ] {
+                let closed_form = core::f64::consts::PI * RADIUS * RADIUS * height;
+                let what = format!(
+                    "the bars on {} and {}, {rule_name}, turned {turn_name}",
+                    which_way(lower),
+                    which_way(upper)
+                );
+                let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                let policy = Policy::certified();
+                let bars = [(0.0, 4.0, lower), (2.0, 6.0, upper)].map(|(from, to, wall)| {
+                    let bar = a_bar_between(&mut model, from, to, wall);
+                    model
+                        .place_solid(bar, &turn)
+                        .expect("this model made the key");
+                    bar
+                });
+                let [arguments, tools] = if lower_first {
+                    bars
+                } else {
+                    [bars[1], bars[0]]
+                };
+                let fused = match model.fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                ) {
+                    Ok(fused) => fused,
+                    Err(why) => {
+                        wrong.push(format!("{what}: refused {why:?}"));
+                        continue;
+                    }
+                };
+                if let Err(why) = model.validate(&policy, &mut ProvenanceLog::new()) {
+                    wrong.push(format!("{what}: the answer does not validate: {why:?}"));
+                    continue;
+                }
+                let [solid] = fused.solids() else {
+                    wrong.push(format!("{what}: {} solids", fused.solids().len()));
+                    continue;
+                };
+                let measured = model
+                    .solid(*solid)
+                    .expect("this model made the key")
+                    .measure(
+                        Deflection::of(DEFLECTION).expect("a positive length"),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what}: the answer measures: {why:?}"));
+                if (measured.volume() - closed_form).abs() > measured.volume_error() {
+                    wrong.push(format!(
+                        "{what}: measured {} ± {}, and by hand it is {closed_form}",
+                        measured.volume(),
+                        measured.volume_error()
+                    ));
+                }
                 wrong.extend(what_is_wrong_with_each_face(&model, *solid, &turn, &what));
             }
         }
