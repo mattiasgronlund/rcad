@@ -109,7 +109,9 @@ fn a_cap_trimmed_by_a_pipe_holds_its_points() {
 /// pipe's rulings, round `+y` or round `−y`, cut by both flats and both caps —
 /// and the other wall is in front of all four cuts too. "The part of the pipe
 /// in front of every cut" is both walls, so it cannot be how either is read,
-/// and both are refused by name rather than answered wrong.
+/// and both are refused by name rather than answered wrong. Each wall's answer
+/// exists, so under `docs/decisions.md` §16.10 this is a gap: one of the
+/// argument and not of the face.
 #[test]
 fn a_bar_with_two_flats_has_each_wall_refused_by_name() {
     let mut model = a_model();
@@ -139,7 +141,8 @@ fn a_bar_with_two_flats_has_each_wall_refused_by_name() {
 /// far as `z = 2`. The bar's circle runs into the top at one long side and out
 /// at the other, so the top is two faces, each keeping the outside of the pipe
 /// — and the other piece is in front of every one of this piece's cuts.
-/// Refused by name.
+/// Refused by name rather than answered wrong; the answer exists, so this is a
+/// gap of the argument as the two flats are.
 #[test]
 fn a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name() {
     let mut model = a_model();
