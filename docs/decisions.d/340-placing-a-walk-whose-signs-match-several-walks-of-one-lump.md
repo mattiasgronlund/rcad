@@ -287,3 +287,69 @@ and `uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first`.
 The whole workspace, `mise exec -- just t --workspace --no-fail-fast`: 2905
 run, 2905 passed, so no test outside these files fails on top of the mesher's
 new changes. A floor that a count only rose past would not show there.
+
+### 340.10 A face's box grown by what writing a corner down costs
+
+*Queue row Q694, lane `lane-q694-a-faces-box-grown-by-what-a-corner-cost`, off
+`5d28a70c`. The four refusals §340.4 left "not looked into" are the first of
+the thirty below.*
+
+`bake.rs`'s box round a face was the box round the face as the model stores
+it. The fuse meets the face where the baked surfaces cross, and a stored corner
+is that place rounded, so the box could stop a rounding short of the face, and
+`arrange.rs`'s `work_out_how_each_crossing_runs` then dropped a cut whose nodes
+were all outside it. **The box is grown on every side by
+`what_writing_the_corner_down_cost` at its farthest corner now**, on both
+paths: the box `view.rs` reads off a face, and the joiner's box round its
+derived corners. The doc of `Bounds` says what it allows for, and that it is
+still plain `f64` and not grown by the room `Model::validate_solid` grants a
+corner off its plane.
+
+**Thirty refusals, one cause, instrumented.** A probe in `provably_misses`,
+since removed, printed every point the ungrown and the grown box disagreed
+about, with its caller. On the base all thirty fuses below printed, every print
+was at `arrange.rs`'s `work_out_how_each_crossing_runs`, and with the growth
+applied in `provably_misses` alone the same thirty answered as with it applied
+to the boxes themselves. No other fuse of the three tests printed.
+
+- `a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right`:
+  the four rules of the block leaned 2 from −3 to 1, turned 0. The ridge's two
+  meets with the cone at `x` from `1.341640786499873` to `1.3416407864998736`,
+  the box from `1.341640786499874`. All four answer right and measure; the
+  family goes from 64 right to 68. The union decides 6986 grid points and
+  measures `529.0849648866143` with an error of `0.20056639955312652`, so it
+  is held to the 5 500 floor of an answer that measures and not the 7 000 of
+  one that does not; no floor moved. The intersection decides 17954, the cone
+  less the block 16361, the block less the cone 8579. Q422's trial had three
+  of them not measuring; Q423 landed between.
+- `no_sliver_chopped_by_the_blocks_own_sides_folds_at_any_deflection`: eight
+  chopped slivers, leans 1.35 and 1.5 turned 0. 270 answered to 278, 2700
+  meshes to 2780, none folded.
+- `a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_by_name`:
+  eighteen cases, (90, 0.001), (90, 3), (45, 0.001), (170, 0.001),
+  (170, 1000) and (170, 3) by every rule. At radius 0.001 a prism face's box
+  began at `y = 0` and both poles came out at `y = −1.78e−35`. All 48 cases
+  answer, validate and measure against the closed form now.
+
+**The checked-in fuzz corpus moved too**, in a file that is not this lane's.
+`every_seed_in_the_checked_in_corpus_is_fused_without_panicking` reaches
+`ok: 378, refused: 312` with the growth off and `ok: 426, refused: 264` with it
+on, so its floor of 300 refusals fails. Fifty-four seeds changed. Most went from
+`ResultIsNotManifold` to an answer, and every answer passes the sweep under its
+own policy. One went the other way: seed `f117319f6357` answered and now
+refuses `order along a crossing`. The same probe, put on `Bounds::overlap` too
+and run on that seed alone, printed once and not in `provably_misses`: at
+`cuts.rs`'s whole-solid test, whose two boxes missed in `z` by `1.344974619049452e-284`, one starting at that height
+and the other stopping at `2.78e-308`. Grown, they overlap, and the pair is no
+longer passed over as apart. That one is not the dropped cut; it is the growth
+reaching the box test §400.3 asked for.
+
+### 340.11 What this leaves
+
+- `every_model_the_fuse_fuzzer_kept_is_fused_again.rs`'s floor of 300
+  refusals, at 264.
+- `cuts.rs`'s doc of `two_faces_provably_apart` and §400.3 say `bake`'s boxes
+  can be short by a rounding and that growing them would close that; they are
+  grown now.
+- The box is not grown by the room `Model::validate_solid` grants a corner off
+  its plane, nor rounded outward round a curved side (Q873).

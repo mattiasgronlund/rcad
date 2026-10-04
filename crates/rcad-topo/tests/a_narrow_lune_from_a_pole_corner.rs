@@ -319,24 +319,40 @@ fn a_quarter_wedge_stops_after_a_point_is_found_inside_the_piece_and_not_before(
 ///
 /// This is not the lune §195.1 is about: the poles sit on the knife's edge
 /// rather than on its face, which the fuse sees before it sees any lune. The
-/// intersections in `answered` answer and measure since §200; the rest are
-/// refused by name. The quarter wedge of the ball of radius 1000 answers since
+/// intersections in `answered` answer and measure since §200; a case left out
+/// of it would have to be refused by name. The quarter wedge of the ball of radius 1000 answers since
 /// the triangulator takes a corner under spade's floor as zero (§321.6). The
 /// difference and union answer wherever the intersection does since §330,
 /// which names an arc of the ball's crossing with a prism face by that face's
 /// plane as well.
+///
+/// **Every case answers since §340.10.** Eighteen refused
+/// `ResultIsNotManifold`: the ball meets the prism's edge at its poles, and the
+/// box round a prism face stopped a rounding short of those two meets — at
+/// radius `0.001` the face's box began at `y = 0` and both poles came out at
+/// `y = −1.78e−35` — so the ball's cut across that face was dropped as missing
+/// it.
 #[test]
 fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
         (90.0, 1.0, "Intersection"),
         (90.0, 1.0, "Difference"),
         (90.0, 1.0, "Union"),
+        (90.0, 0.001, "Intersection"),
+        (90.0, 0.001, "Difference"),
+        (90.0, 0.001, "Union"),
         (90.0, 1000.0, "Intersection"),
         (90.0, 1000.0, "Difference"),
         (90.0, 1000.0, "Union"),
+        (90.0, 3.0, "Intersection"),
+        (90.0, 3.0, "Difference"),
+        (90.0, 3.0, "Union"),
         (45.0, 1.0, "Intersection"),
         (45.0, 1.0, "Difference"),
         (45.0, 1.0, "Union"),
+        (45.0, 0.001, "Intersection"),
+        (45.0, 0.001, "Difference"),
+        (45.0, 0.001, "Union"),
         (45.0, 1000.0, "Intersection"),
         (45.0, 1000.0, "Difference"),
         (45.0, 1000.0, "Union"),
@@ -358,6 +374,15 @@ fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_
         (170.0, 1.0, "Intersection"),
         (170.0, 1.0, "Difference"),
         (170.0, 1.0, "Union"),
+        (170.0, 0.001, "Intersection"),
+        (170.0, 0.001, "Difference"),
+        (170.0, 0.001, "Union"),
+        (170.0, 1000.0, "Intersection"),
+        (170.0, 1000.0, "Difference"),
+        (170.0, 1000.0, "Union"),
+        (170.0, 3.0, "Intersection"),
+        (170.0, 3.0, "Difference"),
+        (170.0, 3.0, "Union"),
     ];
     let mut moved = Vec::new();
     let rules: [(Rule, ClosedForm); 3] = [
