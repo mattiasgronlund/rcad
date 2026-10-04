@@ -209,6 +209,40 @@ fn a_half_bar_whose_corner_is_the_lens_corner_is_refused_by_every_rule() {
     }
 }
 
+/// The first union of the third route above: the bar at `(−3, 0)` with the
+/// half bar rising out of its cap, on its own, before the second fuse that
+/// refuses. `101π`, by the same count as
+/// `a_half_bar_rising_out_of_a_bars_cap_is_fused_by_every_rule_either_way_round`'s
+/// union. Q503 joins a wall cut into a grid into one face, but this wall is
+/// cut by the half bar's flat side as well as its cap, and Q503's own lane
+/// counted six faces here in a probe it did not commit, two of them on the
+/// bar's pipe rather than one — still not the single wall of the route's own
+/// first bullet. Not traced further; re-files what is left of Q626.
+#[test]
+fn the_first_union_of_the_third_route_answers_with_two_wall_pieces() {
+    let mut model = a_model();
+    let bar = a_bar_at(&mut model, -3.0);
+    let half = a_half_bar_bulging_left(&mut model, 1.0, 0.0);
+    let solid = the_one_solid(&mut model, bar, half, Rule::Union);
+    assert_holds(
+        &model,
+        solid,
+        101.0 * PI,
+        "the first union of the third route",
+    );
+    let faces: Vec<_> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .collect();
+    assert_eq!(faces.len(), 6, "the first union's face count");
+    let on_the_pipe = faces
+        .iter()
+        .filter(|face| matches!(face.surface(), rcad_geom::Surface::Cylinder(_)))
+        .count();
+    assert_eq!(on_the_pipe, 2, "faces on the bar's pipe");
+}
+
 fn the_three_surfaces_need_two_flat(why: &Error) -> bool {
     matches!(
         why,

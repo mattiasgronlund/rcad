@@ -1796,7 +1796,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// thing this test exists to refuse. `Some(false)` and `None` are both refused,
 /// so an undecided sign costs a refusal and never a wrong answer.
 ///
-/// **A face keeping the cone's *outside* is refused, and that is a limit and not
+/// **A face keeping the cone's *outside* is refused, and that is a gap and not
 /// a conjunct in the way.** `cut.kept == Decision::Neg` is what says so, and
 /// deleting it moves nothing. Read this before reaching for it again
 /// (`docs/decisions.md` §215.3 asked, and this is the answer):
@@ -1945,7 +1945,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// axis that cut it in half (`docs/decisions.md` §389).
 ///
 /// **Two or more others not side by side with it is where it stops, and that is
-/// a limit even when every cut closes.** Each such cut gives its own arc and two
+/// a gap even when every cut closes.** Each such cut gives its own arc and two
 /// arcs can meet in two:
 /// `one_plane_behind_the_apex_and_two_in_front_leave_a_nappe_in_two_pieces`
 /// below is a floor that cuts a circle and two roofs that each cut an ellipse,
@@ -1954,8 +1954,8 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// which is where two roofs meet on the cone — a part with no named consumer
 /// (§13); the lens, the one face that asked, has two cuts.
 ///
-/// **Two cuts the apex is behind are refused, and that is a limit and not a
-/// gap.** There the region really can be two pieces. On the cone of slope one
+/// **Two cuts the apex is behind are refused, and that is a gap and not a
+/// limit.** There the region really can be two pieces. On the cone of slope one
 /// about `+z`, keep `x + z/√2 ≥ 1` and `−x + z/√2 ≥ 1`; the apex is a whole unit
 /// behind each. Along the ruling at angle `φ` the first grows at
 /// `cos φ + 1/√2` and the second at `−cos φ + 1/√2`, and a cut the apex is behind

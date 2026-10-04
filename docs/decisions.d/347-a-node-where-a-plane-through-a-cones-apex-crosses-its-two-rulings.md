@@ -142,9 +142,9 @@ node.
   has the partner's inside on both sides, and `runs_against_its_gradients`
   refuses it `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`. No test builds
   one.
-- **A plane resting along a cone**, one ruling touched all along, is left as
-  it was: `∇S × ∇Q` is nothing along the whole line, it carries no picker to
-  read a line off, and `how_a_crossing_runs` still refuses it.
+- **A plane resting along a cone**, one ruling touched all along, no longer
+  refuses by `how_a_crossing_runs`: §39.4's 2026-10-04 note (Q473) reads the
+  ruling instead.
 
 ### 347.5 Which pairs still get no node where their two curves meet
 
