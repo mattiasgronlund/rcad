@@ -25,10 +25,34 @@
 //! node per nappe, since the rulings run on through it into the nappe the
 //! solid does not have.
 //!
-//! **What still refuses is the mesher.** Every fuse that keeps a piece of the
-//! block's face `x = 0` with the apex on its edge, or the cone's skin cut down
-//! to the apex, is refused by the check a fuse makes by meshing a curved answer
-//! before it writes it. That is `mesh.rs`, and §347 says what it meets there.
+//! **What still refuses is the mesher, and the mesher is right to.** Every
+//! fuse that keeps a piece of the block's face `x = 0` with the apex on its
+//! edge, or the cone's skin cut down to the apex, is refused by the check a
+//! fuse makes by meshing a curved answer before it writes it — `nest_the_shells`
+//! in `fuse/assemble.rs`, measuring each shell. What it is handed is broken.
+//! Where only the two rulings leave the apex, `Assembly::what_is_left` reads
+//! the apex as a point walked straight through, because two edges leave it,
+//! and folds the two rulings into one `Straight` edge between their far ends.
+//! With the floor at `z = −2` that edge runs from `(0, 4, 8)` to
+//! `(0, −4, 8)`, beside the cap's chord between the same two corners. The
+//! face `x = 0` then has a hole of two sides (`TooFewCorners { count: 2 }`
+//! when it is meshed first), and the cone's skin is an arc and a straight side
+//! that the mesher reads as a loop right round the cone, cuts up to the apex
+//! as a cap, and gets one piece with the apex twice at one point of its chart
+//! (`CornersCoincide { position: 2 }` when the skin is meshed first). With the
+//! floor at `z = 1` it is the tip below the block, cut along the rulings into
+//! two pieces of one cone that are kept as two faces. No change to `mesh.rs`
+//! answers these: meshing that answer would be measuring a solid that is not
+//! the one asked for.
+//!
+//! **A probe of the fix.** Keeping, in `what_is_left`, every corner that is
+//! the apex of a cone an edge there is carried by — not committed, since
+//! `fuse/assemble.rs` was outside this row's write set — answered all twelve
+//! fuses of the two tests below, one solid each, and the model validated: the
+//! unions `931.0165 ± 0.0374` (floor `z = −2`, `864 + 64π/3 ≈ 931.0206`) and
+//! `715.1469 ± 0.0571` (floor `z = 1`, `648 + 128π/3 − 511π/24 ≈ 715.1519`),
+//! and the block less the cone `796.9835 ± 0.0374` (`864 − 64π/3 ≈ 796.9794`);
+//! the other eight as in the tables of §347.3.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_mesh::{CannotTriangulate, NotALoop};
@@ -47,9 +71,12 @@ enum Today {
     /// One solid of this volume, which is the right one.
     Answers(f64),
     /// The mesher cannot triangulate a face of the answer: two of its corners
-    /// land on one point of the face's chart.
+    /// land on one point of the face's chart. The face is a piece of the
+    /// cone's skin whose two rulings were folded into one straight side.
     TwoCornersOnOnePointOfTheChart,
-    /// A wire of a face of the answer fans into two corners, which is no loop.
+    /// A wire of a face of the answer fans into two corners, which is no loop:
+    /// the hole in the face `x = 0`, the cap's chord and the two rulings
+    /// folded into one straight side between the same two corners.
     AWireOfTwoCorners,
 }
 
