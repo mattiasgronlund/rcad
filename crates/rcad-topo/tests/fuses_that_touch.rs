@@ -92,7 +92,8 @@
 //!   circle round it: known, §39.4's coincident-face row and §38.9.
 //! - `ResultIsNotManifold` and `NotFinite` on a ball resting on a block:
 //!   **new**, unclassified before this file, and demonstrated a gap by
-//!   [`a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_solids`].
+//!   [`a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand`],
+//!   whose hand-written rows all answer since Q508.
 //!   A `NotFinite` out of whole-number input is also a coordinate the kernel
 //!   worked out as infinity, which is worth a look on its own.
 //! - `CannotNameWhichPieceOfACrossingThisIs` on a cone's apex: a plane through a
@@ -611,18 +612,20 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
     }
 }
 
-/// A ball of radius two resting on a block it hangs over the edge of is
-/// refused, though its answer is the two solids as they stand — a **gap**
-/// (§16.10), and this is the demonstration.
+/// A ball of radius two resting on a block it hangs over the edge of unites
+/// into the two solids as they stand, measured against the cube's volume and
+/// the ball's.
 ///
 /// A cube of side two and a ball of radius two whose south pole rests on the
 /// middle of the cube's top, at `(1, 1, 2)`. Every number is whole and the touch
-/// is exact. The union is refused `ACurvedFaceGoesRightRoundWithNoSeam`. It has
-/// been refused all along and the name has moved twice: `ResultIsNotManifold`
-/// first, in assembly, where the two arcs of one ball-and-plane circle between
-/// the same two corners were given one edge name, until §198 told them apart;
-/// then `AWireWillNotLieFlatOnItsFace`, out of the mesher, until §208.4 let a
-/// ring of arcs be walked.
+/// is exact. The union was refused all along until Q508, a **gap** (§16.10)
+/// whose name moved three times: `ResultIsNotManifold` first, in assembly,
+/// where the two arcs of one ball-and-plane circle between the same two corners
+/// were given one edge name, until §198 told them apart; then
+/// `AWireWillNotLieFlatOnItsFace`, out of the mesher, until §208.4 let a ring of
+/// arcs be walked; then `ACurvedFaceGoesRightRoundWithNoSeam`, until Q508
+/// changed how the mesher reads which pole a cap of the ball reaches
+/// (`which_pole_this_cap_reaches` in `mesh.rs`, the one function Q508 changed).
 ///
 /// **The ball moved over to `(1, 2)` on a cube of side four was refused too, and
 /// answers since §217.** It was `Geometry(NotFinite)` — a coordinate worked out
@@ -631,26 +634,20 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
 /// understood. What moved it is the only thing §217 changed here: the fuse now
 /// writes the surface that cut a closed rim. That block's wall plane cuts the
 /// ball in a circle whose two faces are the one sphere, and a rim whose two
-/// faces name one surface is exactly what the new run exists for.
+/// faces name one surface is exactly what the new run exists for. **Why that
+/// makes this particular coordinate finite was not chased.**
 ///
-/// **Why that makes this particular coordinate finite was not chased**, so the
-/// row is kept and asserts the two solids rather than being deleted: a row that
-/// refused once and answers now is the cheapest guard there is against it
-/// refusing again, and the mechanism is a question for whoever wants it.
-///
-/// Three rows say the answer exists and this kernel can hold it:
-///
-/// - the same ball **one unit higher** unites into two solids;
-/// - a ball of **radius one** resting on the same point unites into two solids;
-/// - the same ball resting on a cube of **side four**, where it no longer hangs
-///   over an edge, unites into two solids.
-///
-/// So what refuses is not the touch alone and not the overhang alone: a side
-/// wall's plane crossing the ball while the top touches it. A fuse crosses
-/// planes and not faces, so a wall nowhere near the ball still cuts it.
+/// Rows that refused once and answer now are the cheapest guard there is
+/// against their refusing again, so they are kept beside the rows that always
+/// answered: the same ball **one unit higher**, a ball of **radius one** resting
+/// on the same point, and the ball resting on a cube of **side four** where it
+/// no longer hangs over an edge. In each a side wall's plane crosses the ball
+/// or not while the top touches it; a fuse crosses planes and not faces, so a
+/// wall nowhere near the ball still cuts it.
 #[test]
-fn a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_solids() {
-    let refused = |side: f64, centre: [f64; 3], radius: f64| {
+fn a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand() {
+    let unites_into_both = |side: f64, centre: [f64; 3], radius: f64| {
+        let case = format!("a ball of {radius} at {centre:?} on a cube of {side}");
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let cube = model
             .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
@@ -662,38 +659,36 @@ fn a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_s
                 &Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift"),
             )
             .expect("a whole-number ball");
-        match model.fuse(
-            &[cube],
-            &[ball],
-            Rule::Union,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Ok(united) => {
-                assert_eq!(united.solids().len(), 2, "two solids that touch at a point");
-                None
-            }
-            Err(why) => {
-                println!("a ball of {radius} at {centre:?} on a cube of {side}: {why:?}");
-                Some(named(&why))
-            }
-        }
+        let united = model
+            .fuse(
+                &[cube],
+                &[ball],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{case}: refused {}", named(&why)));
+        let solids = united.solids().to_vec();
+        assert_eq!(solids.len(), 2, "{case}: two solids that touch at a point");
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{case}: the union does not validate: {why}"));
+        let (volume, error) = volume_and_error(&model, &solids);
+        let both = side.powi(3) + 4.0 / 3.0 * std::f64::consts::PI * radius.powi(3);
+        assert!(
+            (volume - both).abs() <= error,
+            "{case}: the union measures {volume} against {both}, out by more than the {error} \
+             its measurements declare"
+        );
     };
 
-    assert_eq!(
-        refused(2.0, [1.0, 1.0, 4.0], 2.0).as_deref(),
-        Some("ACurvedFaceGoesRightRoundWithNoSeam")
-    );
-    assert_eq!(
-        refused(4.0, [1.0, 2.0, 6.0], 2.0),
-        None,
-        "refused Geometry(NotFinite) until §217 named the plane that cut the rim"
-    );
-    assert_eq!(refused(2.0, [1.0, 1.0, 5.0], 2.0), None, "one unit higher");
-    assert_eq!(refused(4.0, [1.0, 2.0, 7.0], 2.0), None, "one unit higher");
-    assert_eq!(refused(2.0, [1.0, 1.0, 3.0], 1.0), None, "radius one");
-    assert_eq!(refused(4.0, [1.0, 2.0, 5.0], 1.0), None, "radius one");
-    assert_eq!(refused(4.0, [2.0, 2.0, 6.0], 2.0), None, "over the middle");
+    unites_into_both(2.0, [1.0, 1.0, 4.0], 2.0);
+    unites_into_both(4.0, [1.0, 2.0, 6.0], 2.0);
+    unites_into_both(2.0, [1.0, 1.0, 5.0], 2.0);
+    unites_into_both(4.0, [1.0, 2.0, 7.0], 2.0);
+    unites_into_both(2.0, [1.0, 1.0, 3.0], 1.0);
+    unites_into_both(4.0, [1.0, 2.0, 5.0], 1.0);
+    unites_into_both(4.0, [2.0, 2.0, 6.0], 2.0);
 }
 
 /// What a cell's rows must have done for the run to have measured anything.

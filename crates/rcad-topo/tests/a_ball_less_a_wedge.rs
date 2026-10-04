@@ -33,7 +33,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 5.0;
 
@@ -46,42 +46,59 @@ const THE_PIECE: f64 = 26.0 * PI / 3.0;
 /// The area of the piece's curved skin.
 const THE_PIECES_SKIN: f64 = 10.0 * PI;
 
-/// The ball less the block gets past naming its edges, and stops one step on,
-/// in the mesher.
+/// The ball's volume and its whole skin.
+const THE_BALL: f64 = 4.0 * PI * RADIUS * RADIUS * RADIUS / 3.0;
+const THE_BALLS_SKIN: f64 = 4.0 * PI * RADIUS * RADIUS;
+
+/// The block, `7 × 20 × 10`.
+const THE_BLOCK: f64 = 7.0 * 20.0 * 10.0;
+
+/// The ball less the block is the ball less the piece, `500π/3 − 26π/3 = 158π`,
+/// bounded by all of the ball's skin but the piece's and under it by no more
+/// than `90π` times the deflection. The two united, either named first, are
+/// that and the block, `158π + 1400`, bounded by the same skin.
 ///
-/// It used to refuse `ResultIsNotManifold { count: 4 }` on the one edge both
-/// arcs were named as. With the plane in an arc's name `assemble` builds the
-/// answer, and the sweep of it refuses the skin (§330). What is left of the
-/// skin is three pieces of the ball, which the joiner never joins: the part
-/// above the equator beyond `x = −3`, and the two parts below it either side of
-/// `x = −3`. The first goes right round the ball and holds the north pole, so
-/// the mesher cuts it as a cap, and it reads which pole the cap reaches off the
-/// surface across the cap's **first** edge. That edge is the equator's long arc,
-/// with the ball on both sides of it, so there is no other surface to read, and
-/// the cap is refused as one with no seam.
-///
-/// **When this answers**, what is left is `500π/3 − 26π/3 = 158π`, bounded by
-/// all of the ball's skin but the piece's, under it by no more than `90π` times
-/// the deflection.
+/// The difference used to refuse `ResultIsNotManifold { count: 4 }` on the one
+/// edge both arcs were named as. With the plane in an arc's name `assemble`
+/// built the answer, and the sweep of it refused the skin (§330). What is left
+/// of the skin is three pieces of the ball, which the joiner never joins: the
+/// part above the equator beyond `x = −3`, and the two parts below it either
+/// side of `x = −3`. The first goes right round the ball and holds the north
+/// pole, so the mesher cuts it as a cap, and it read which pole the cap reaches
+/// off a surface across the cap's rim. Its rim has two edges: the equator's
+/// long arc, with the ball on both sides, and the arc on `x = −3`, with both
+/// poles on the same side of that plane. So neither could say, and the
+/// difference and both unions were refused `ACurvedFaceGoesRightRoundWithNoSeam`.
+/// The mesher now reads the pole off the walk round the rim instead
+/// (`a_cap_whose_pole_no_partner_separates.rs`).
 #[test]
-fn a_ball_less_a_block_over_one_corner_of_it_stops_in_the_mesher_on_a_cap_with_the_ball_both_sides_of_its_first_edge()
- {
+fn a_ball_less_or_united_with_a_block_over_one_corner_of_it_is_measured_against_the_piece() {
     let mut model = a_model();
     let (ball, block) = the_pair(&mut model);
-    let refused = model
-        .fuse(
-            &[ball],
-            &[block],
-            Rule::Difference,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .map(|fused| fused.solids().len())
-        .expect_err("the skin above the equator cannot yet be meshed");
-    assert!(
-        matches!(refused, Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }),
-        "the ball less the block names its edges and stops in the mesher: {refused:?}"
+    let answer = fused(&mut model, &[ball], &[block], Rule::Difference);
+    assert_eq!(answer.len(), 1);
+    measures(
+        volume_of(&model, &answer),
+        THE_BALL - THE_PIECE,
+        Wall::Outside(THE_BALLS_SKIN - THE_PIECES_SKIN),
     );
+
+    for ball_first in [true, false] {
+        let mut model = a_model();
+        let (ball, block) = the_pair(&mut model);
+        let (argument, tool) = if ball_first {
+            (ball, block)
+        } else {
+            (block, ball)
+        };
+        let answer = fused(&mut model, &[argument], &[tool], Rule::Union);
+        assert_eq!(answer.len(), 1);
+        measures(
+            volume_of(&model, &answer),
+            THE_BALL + THE_BLOCK - THE_PIECE,
+            Wall::Outside(THE_BALLS_SKIN - THE_PIECES_SKIN),
+        );
+    }
 }
 
 /// The other three fuses of the pair, which answered before the plane was in an
@@ -114,7 +131,7 @@ fn the_ball_and_the_block_share_the_piece_the_difference_takes_away() {
     assert_eq!(answer.len(), 1);
     measures(
         volume_of(&model, &answer),
-        7.0 * 20.0 * 10.0 - THE_PIECE,
+        THE_BLOCK - THE_PIECE,
         Wall::AHole(THE_PIECES_SKIN),
     );
 }
