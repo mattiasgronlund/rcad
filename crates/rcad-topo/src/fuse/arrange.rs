@@ -90,8 +90,8 @@ use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 use super::bake::BakedFace;
 use super::select::InPlane;
 use super::{
-    FaceMeet, MeetPoint, Sameness, as_exact_as_it_is, gave_up, middle_of, must_decide,
-    the_other_way,
+    FaceMeet, MeetPoint, NamesOfOnePoint, Sameness, as_exact_as_it_is, gave_up, middle_of,
+    must_decide, the_other_way,
 };
 
 /// Cut one face into the pieces its cut surfaces leave behind.
@@ -117,10 +117,21 @@ pub(crate) fn split_a_face(
     face: &BakedFace,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Vec<Piece>> {
+) -> Result<Split> {
     let cuts = canonical_cut_surfaces(face);
     let arrangement = Arrangement::of(face, &cuts, policy, log)?;
-    arrangement.pieces()
+    Ok(Split {
+        pieces: arrangement.pieces()?,
+        names_of_one_point: arrangement.names_of_one_point(),
+    })
+}
+
+/// What cutting one face leaves.
+pub(crate) struct Split {
+    pub(crate) pieces: Vec<Piece>,
+    /// Every point of the face's arrangement that stands for more than one
+    /// name, so that `assemble` can make each of them one corner.
+    pub(crate) names_of_one_point: Vec<NamesOfOnePoint>,
 }
 
 /// The stretches of the crossing `face.surface ∩ partner` that run through the
@@ -850,12 +861,33 @@ struct Node {
     /// fixed order, and which of their meeting points this is. `None` for a
     /// corner the input already had.
     made_of: Option<([Surface; 3], u8)>,
+    /// Every other meet of three surfaces this node stands for, named the way
+    /// `made_of` is: each one folded into it by
+    /// [`Arrangement::fold_the_nodes`], or never made a node because
+    /// [`Arrangement::the_corner_that_is_this_place`] found this corner
+    /// already is it.
+    ///
+    /// A face without this corner, or without the fold, keeps the meet as a
+    /// node of its own and names it by its three surfaces, so dropping the name
+    /// here left one point two corners in the answer and an edge with one face
+    /// along it (§284.7). [`Arrangement::names_of_one_point`] hands these on.
+    also: Vec<([Surface; 3], u8)>,
     /// Whether this is the second place a closed crossing is cut, across the
     /// circle from where it starts, because it starts at a ball's pole — see
     /// [`across_a_circle_that_starts_at_a_pole`].
     half_way_round: bool,
     /// The crossings running through it, in increasing order.
     crossings: Vec<usize>,
+}
+
+impl Node {
+    /// Take on one more name of a meet this node now stands for, unless it
+    /// has it already.
+    fn stands_for_too(&mut self, name: ([Surface; 3], u8)) {
+        if self.made_of != Some(name) && !self.also.contains(&name) {
+            self.also.push(name);
+        }
+    }
 }
 
 /// A piece of one crossing between two neighbouring nodes on it.
@@ -951,6 +983,22 @@ impl<'f> Arrangement<'f> {
         (0..self.cells.len())
             .filter(|&cell| self.winding[cell] == Some(1))
             .map(|cell| self.piece_from(cell))
+            .collect()
+    }
+
+    /// Every node that stands for a meet besides its own name, as the end it
+    /// is handed on as and the meets it took in ([`Node::also`]).
+    ///
+    /// Taken over every node and not only those a piece ends at: the face that
+    /// names the point by a folded meet may keep a piece there when this one
+    /// keeps none.
+    fn names_of_one_point(&self) -> Vec<NamesOfOnePoint> {
+        (0..self.nodes.len())
+            .filter(|&node| !self.nodes[node].also.is_empty())
+            .map(|node| NamesOfOnePoint {
+                kept: self.meet_point(node),
+                folded: self.nodes[node].also.clone(),
+            })
             .collect()
     }
 
@@ -1242,6 +1290,7 @@ impl<'f> Arrangement<'f> {
                     boxed_tight: at,
                     vertex: Some(self.face.wires[wire][position].start.vertex),
                     made_of: None,
+                    also: Vec::new(),
                     half_way_round: false,
                     crossings: through,
                 });
@@ -1351,7 +1400,19 @@ impl<'f> Arrangement<'f> {
                     {
                         continue;
                     }
-                    if self.a_corner_is_this_place(first, second, place, boxed_tight, &places) {
+                    let mut sorted = surfaces;
+                    sorted.sort_by(|one, other| {
+                        name_of_surface_bits(one).cmp(&name_of_surface_bits(other))
+                    });
+                    let which = u8::try_from(which).expect("three surfaces meet at most twice");
+                    if let Some(corner) = self.the_corner_that_is_this_place(
+                        first,
+                        second,
+                        place,
+                        boxed_tight,
+                        &places,
+                    ) {
+                        self.nodes[corner].stands_for_too((sorted, which));
                         continue;
                     }
                     let ordered_by = if surfaces.iter().all(|surface| surface.as_plane().is_some())
@@ -1360,16 +1421,12 @@ impl<'f> Arrangement<'f> {
                     } else {
                         boxed_tight
                     };
-                    let mut sorted = surfaces;
-                    sorted.sort_by(|one, other| {
-                        name_of_surface_bits(one).cmp(&name_of_surface_bits(other))
-                    });
-                    let which = u8::try_from(which).expect("three surfaces meet at most twice");
                     self.nodes.push(Node {
                         point: place,
                         boxed_tight: ordered_by,
                         vertex: None,
                         made_of: Some((sorted, which)),
+                        also: Vec::new(),
                         half_way_round: false,
                         crossings: vec![first, second],
                     });
@@ -1414,20 +1471,23 @@ impl<'f> Arrangement<'f> {
                 && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
             "each of the two rulings a plane cuts through a cone's apex holds the apex"
         );
-        if self.a_corner_is_this_place(first, second, apex, apex, &[apex]) {
-            return;
-        }
         let mut named = [
             Surface::Plane(*flat),
             Surface::Cone(*cone),
             Surface::Cone(*cone),
         ];
         named.sort_by_key(name_of_surface_bits);
+        if let Some(corner) = self.the_corner_that_is_this_place(first, second, apex, apex, &[apex])
+        {
+            self.nodes[corner].stands_for_too((named, 0));
+            return;
+        }
         self.nodes.push(Node {
             point: apex,
             boxed_tight: apex,
             vertex: None,
             made_of: Some((named, 0)),
+            also: Vec::new(),
             half_way_round: false,
             crossings: vec![first, second],
         });
@@ -1469,8 +1529,13 @@ impl<'f> Arrangement<'f> {
         )
     }
 
-    /// Whether a corner of the face already is `place`, one of the `places`
-    /// where the face's surface and the partners of `first` and `second` meet.
+    /// The node of the corner of the face that already is `place`, one of the
+    /// `places` where the face's surface and the partners of `first` and
+    /// `second` meet, if one is.
+    ///
+    /// The place then makes no node of its own, and the corner stands for it
+    /// ([`Node::also`]): the face on the third surface has no such corner and
+    /// names the place by its three surfaces (§284.7).
     ///
     /// **It is, when the model says so and `place` is no further from the
     /// corner than writing the corner down cost.** The model says so when the
@@ -1553,15 +1618,15 @@ impl<'f> Arrangement<'f> {
     /// (§244.3, §248). This, and not the touch, is what keeps them apart: of a
     /// ball's two places grazing a block's corner, the one that misses the
     /// corner's box lies inside its room too (§395.3).
-    fn a_corner_is_this_place(
+    fn the_corner_that_is_this_place(
         &self,
         first: usize,
         second: usize,
         place: PredicatePoint,
         boxed_tight: PredicatePoint,
         places: &[PredicatePoint],
-    ) -> bool {
-        self.nodes.iter().any(|node| {
+    ) -> Option<usize> {
+        self.nodes.iter().position(|node| {
             if !(node.vertex.is_some()
                 && node.crossings.contains(&first)
                 && node.crossings.contains(&second))
@@ -1586,6 +1651,21 @@ impl<'f> Arrangement<'f> {
                 && (inside_the_room
                     || self.bake_placed_the_corner_on_the_three_planes(node, first, second))
         })
+    }
+
+    /// Whether [`Arrangement::the_corner_that_is_this_place`] finds a corner,
+    /// which is all the tests of the fold ask.
+    #[cfg(test)]
+    fn a_corner_is_this_place(
+        &self,
+        first: usize,
+        second: usize,
+        place: PredicatePoint,
+        boxed_tight: PredicatePoint,
+        places: &[PredicatePoint],
+    ) -> bool {
+        self.the_corner_that_is_this_place(first, second, place, boxed_tight, places)
+            .is_some()
     }
 
     /// Whether the face's surface and the partners of `first` and `second` are
@@ -1673,6 +1753,7 @@ impl<'f> Arrangement<'f> {
                     boxed_tight: pole,
                     vertex: None,
                     made_of: None,
+                    also: Vec::new(),
                     half_way_round: false,
                     crossings: vec![crossing],
                 });
@@ -1698,6 +1779,7 @@ impl<'f> Arrangement<'f> {
                 boxed_tight: point,
                 vertex: None,
                 made_of: None,
+                also: Vec::new(),
                 half_way_round: false,
                 crossings: vec![crossing],
             });
@@ -1711,6 +1793,7 @@ impl<'f> Arrangement<'f> {
                     boxed_tight: across,
                     vertex: None,
                     made_of: None,
+                    also: Vec::new(),
                     half_way_round: true,
                     crossings: vec![crossing],
                 });
@@ -1850,6 +1933,7 @@ impl<'f> Arrangement<'f> {
                         boxed_tight: self.nodes[index].boxed_tight,
                         vertex: self.nodes[index].vertex,
                         made_of: self.nodes[index].made_of,
+                        also: self.nodes[index].also.clone(),
                         half_way_round: self.nodes[index].half_way_round,
                         crossings: self.nodes[index].crossings.clone(),
                     });
@@ -1869,11 +1953,19 @@ impl<'f> Arrangement<'f> {
                         (None, Some(_)) => false,
                         (None, None) => mine.point.uncertainty() < nodes[into].point.uncertainty(),
                     };
+                    let loses_its_name = if takes_over {
+                        nodes[into].made_of
+                    } else {
+                        mine.made_of
+                    };
                     if takes_over {
                         nodes[into].vertex = mine.vertex;
                         nodes[into].point = mine.point;
                         nodes[into].boxed_tight = mine.boxed_tight;
                         nodes[into].made_of = mine.made_of;
+                    }
+                    for name in loses_its_name.into_iter().chain(mine.also.iter().copied()) {
+                        nodes[into].stands_for_too(name);
                     }
                     let crossings = mine.crossings.clone();
                     nodes[into].crossings.extend(crossings);
@@ -2243,6 +2335,7 @@ impl<'f> Arrangement<'f> {
             boxed_tight: self.nodes[node].boxed_tight,
             vertex: None,
             made_of: self.nodes[node].made_of,
+            also: self.nodes[node].also.clone(),
             half_way_round: false,
             crossings: self.nodes[node].crossings.clone(),
         });
@@ -6503,7 +6596,8 @@ mod tests {
     fn split(face: &BakedFace) -> Vec<Piece> {
         let mut log = ProvenanceLog::new();
         let pieces = split_a_face(face, &Policy::certified(), &mut log)
-            .expect("a lattice-aligned face splits with nothing left undecided");
+            .expect("a lattice-aligned face splits with nothing left undecided")
+            .pieces;
         assert!(
             log.is_empty(),
             "every decision here is exactly representable, so none needed a policy"
@@ -7406,7 +7500,8 @@ mod curved {
     fn split(face: &BakedFace) -> Vec<Piece> {
         let mut log = ProvenanceLog::new();
         let pieces = split_a_face(face, &Policy::certified(), &mut log)
-            .expect("a lattice-aligned pair splits with nothing left undecided");
+            .expect("a lattice-aligned pair splits with nothing left undecided")
+            .pieces;
         assert!(log.is_empty(), "nothing here had to be approximated");
         pieces
     }
@@ -7624,7 +7719,7 @@ mod what_the_curved_arrangement_reaches {
     use super::super::bake::bake;
     use super::super::cuts;
     use super::{
-        HowItRuns, a_line_one_surface_rests_on_another_along,
+        HowItRuns, Split, a_line_one_surface_rests_on_another_along,
         a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
@@ -7661,7 +7756,7 @@ mod what_the_curved_arrangement_reaches {
                     other => panic!("no {other:?} here"),
                 };
                 said.push(match split_a_face(face, &policy, &mut log) {
-                    Ok(pieces) => format!(
+                    Ok(Split { pieces, .. }) => format!(
                         "{sits_on} cut by {} -> {:?}",
                         face.cuts.len(),
                         pieces
@@ -7832,7 +7927,8 @@ mod what_the_curved_arrangement_reaches {
             .expect("the bar has a wall");
 
         let pieces = split_a_face(wall, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a wall with nothing cutting it is itself");
+            .expect("a wall with nothing cutting it is itself")
+            .pieces;
 
         assert_eq!(pieces.len(), 1, "nothing cuts it, so it is one piece");
         assert_eq!(

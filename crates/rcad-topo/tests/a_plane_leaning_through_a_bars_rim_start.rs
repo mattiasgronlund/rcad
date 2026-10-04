@@ -27,6 +27,14 @@
 //! came out as one edge with four faces along it, and those four fuses refused
 //! `ResultIsNotManifold { count: 4 }`. All six are measured now.
 //!
+//! **A cube stood on its corner with a face through the bar's top rim start
+//! reaches the fold the turned block no longer does.** On the faces that have
+//! the rim start, the meet of that face, the cap plane and the wall is the
+//! rim start, within what writing it down cost, and makes no node; the cube's
+//! face has no rim start and keeps the meet. Until the arrangements handed on
+//! the names they folded (§284.8), the answer got two corners there and all
+//! six fuses refused `ResultIsNotManifold { count: 1 }`.
+//!
 //! Every fuse here has its volume worked out by hand: measured against it where
 //! the fuse answers, and carried in the message where it refuses. The bar is
 //! `π·5²·10`. The plane cuts it into a wedge, the part with `0 ≤ z ≤ y`, whose
@@ -101,9 +109,11 @@ fn a_block_turned_to_lean_through_a_bars_rim_start_answers_all_six_fuses_with_on
 /// refused `ResultIsNotManifold { count: 1 }`. With the order proved, the meet
 /// is a node on all three faces and they agree.
 ///
-/// What §284.7 found is still so of a fold in general: a meet folded into an
-/// input corner hands on the corner and drops its own name. This pair no
-/// longer reaches it.
+/// This pair no longer reaches the fold §284.7 found. Since §284.8 a meet
+/// folded into an input corner is handed on with the corner, so the faces
+/// would agree even if it did, and
+/// `a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses`
+/// is a shape that does reach it, under a certified policy.
 #[test]
 fn under_a_tolerant_policy_the_turned_block_answers_all_six_fuses_with_one_solid_each_too() {
     let (model, bar, block) = a_bar_and(a_block_turned_to_lean_along_z_equals_y);
@@ -144,6 +154,80 @@ fn a_plane_exactly_through_a_bars_rim_start_answers_all_six_fuses_right_under_bo
     }
 }
 
+/// **A cube stood on its corner, with a face leaning through the top rim start
+/// of a bar, answers all six fuses under `Policy::certified()`.**
+///
+/// The bar has radius 4 and stands from `z = 3` to `z = 8`, so its top cap
+/// circle starts at `(4, 0, 8)`. The cube is eight on a side, stood on its
+/// corner at `(0, 0, 4)`, and one of its faces passes through the rim start
+/// to within rounding: the meet of that face, the top cap plane and the wall
+/// comes out at `(4 + 1 ulp, −3.8e-16, 8)`. That is inside what writing the
+/// rim start down cost, so on the cap and on the wall the meet is the rim
+/// start and makes no node of its own. The cube's face has no rim start, keeps
+/// the meet as a node, and names it by its three surfaces.
+///
+/// Until the arrangements handed on what they folded (§284.8), the answer got
+/// both, the rim start by its vertex and the meet by its three surfaces, a few
+/// ulps apart, and all six fuses refused `ResultIsNotManifold { count: 1 }`.
+/// It is the fifteenth draw of the corner-up cubes that
+/// `a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike`
+/// stands against a bar, and those six were the only refusals there that were
+/// not an undecided order.
+///
+/// Nothing here is worked out by hand. The volumes are held to one another:
+/// union and intersection make up the two solids, and each difference is its
+/// solid less the intersection, within the measured errors.
+#[test]
+fn a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses() {
+    let policy = Policy::certified();
+    let (model, bar, cube) = a_bar_and_a_cube_on_its_corner();
+    let one_bar = PI * 4.0 * 4.0 * 5.0;
+    let one_cube = 8.0 * 8.0 * 8.0;
+
+    let measured = |rule, arguments, tools| {
+        let (volume, error, log) = one_solid_measured(&model, rule, arguments, tools, &policy);
+        assert!(
+            log.records().is_empty(),
+            "{rule:?}: a certified fuse logs nothing, not {log:?}"
+        );
+        (volume, error)
+    };
+    let bar_less = measured(Rule::Difference, bar, cube);
+    let cube_less = measured(Rule::Difference, cube, bar);
+    let within = |what: &str, sum: f64, error: f64, of: f64| {
+        assert!(
+            (sum - of).abs() <= error,
+            "{what}: {sum} ± {error} against {of}"
+        );
+    };
+    for (one, other) in [(bar, cube), (cube, bar)] {
+        let union = measured(Rule::Union, one, other);
+        let both = measured(Rule::Intersection, one, other);
+        within(
+            "union and intersection make up the bar and the cube",
+            union.0 + both.0,
+            union.1 + both.1,
+            one_bar + one_cube,
+        );
+        within(
+            "the bar less the cube, and the intersection, make up the bar",
+            bar_less.0 + both.0,
+            bar_less.1 + both.1,
+            one_bar,
+        );
+        within(
+            "the cube less the bar, and the intersection, make up the cube",
+            cube_less.0 + both.0,
+            cube_less.1 + both.1,
+            one_cube,
+        );
+        assert!(
+            both.0 > both.1,
+            "the two overlap, or this measures nothing: {both:?}"
+        );
+    }
+}
+
 /// One of the six fuses on a copy of `model`, held to one solid that
 /// validates and measures within its own `volume_error` of the volume by hand.
 /// Hands back what the fuse logged.
@@ -152,13 +236,29 @@ fn one_solid_measured_right(
     (rule, arguments, tools, by_hand): (Rule, SolidKey, SolidKey, f64),
     policy: &Policy,
 ) -> ProvenanceLog {
+    let (volume, error, log) = one_solid_measured(model, rule, arguments, tools, policy);
+    println!("{rule:?} under {policy:?}: measured {volume} ± {error} against {by_hand} by hand");
+    assert!(
+        (volume - by_hand).abs() <= error,
+        "{rule:?}: measured {volume} ± {error} against {by_hand} by hand (§284.4)"
+    );
+    log
+}
+
+/// One fuse on a copy of `model`, held to one solid that validates, with its
+/// volume, its `volume_error` and what the fuse logged.
+fn one_solid_measured(
+    model: &Model,
+    rule: Rule,
+    arguments: SolidKey,
+    tools: SolidKey,
+    policy: &Policy,
+) -> (f64, f64, ProvenanceLog) {
     let mut model = model.clone();
     let mut log = ProvenanceLog::new();
     let fused = model
         .fuse(&[arguments], &[tools], rule, policy, &mut log)
-        .unwrap_or_else(|refused| {
-            panic!("{rule:?} is one solid of volume {by_hand} (§284.4): {refused:?}")
-        });
+        .unwrap_or_else(|refused| panic!("{rule:?} is one solid: {refused:?}"));
     model
         .validate(policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
@@ -174,18 +274,42 @@ fn one_solid_measured_right(
             &mut ProvenanceLog::new(),
         )
         .expect("a solid measures");
-    println!(
-        "{rule:?} under {policy:?}: measured {} ± {} against {by_hand} by hand",
-        measured.volume(),
-        measured.volume_error()
-    );
-    assert!(
-        (measured.volume() - by_hand).abs() <= measured.volume_error(),
-        "{rule:?}: measured {} ± {} against {by_hand} by hand",
-        measured.volume(),
-        measured.volume_error()
-    );
-    log
+    (measured.volume(), measured.volume_error(), log)
+}
+
+/// A bar of radius 4 from `z = 3` to `z = 8`, and a cube eight on a side stood
+/// on its corner at `(0, 0, 4)`: turned about the line through the origin
+/// along `(1, −1, 0)` until its long diagonal stands upright, as
+/// `how_often_a_fuse_with_a_cone_refuses.rs` stands its cubes.
+fn a_bar_and_a_cube_on_its_corner() -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar = model
+        .add_round_bar(
+            4.0,
+            5.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a finite shift"),
+        )
+        .expect("a bar of radius four, five tall");
+    let square = ProfileBuilder::new(vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    let cube = model
+        .add_extrusion(&square, 8.0, &Isometry::identity())
+        .expect("a cube");
+    let diagonal_up = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(1.0, -1.0, 0.0)).expect("a direction"),
+        (1.0f64 / 3.0).sqrt().acos(),
+    )
+    .expect("a finite turn");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(0.0, 0.0, 4.0))
+                .expect("a finite shift")
+                .compose(&diagonal_up),
+        )
+        .expect("this model made the key");
+    (model, bar, cube)
 }
 
 fn a_bar_and(knife: fn(&mut Model) -> SolidKey) -> (Model, SolidKey, SolidKey) {
