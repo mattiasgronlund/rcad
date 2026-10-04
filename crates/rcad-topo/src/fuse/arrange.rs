@@ -1131,14 +1131,20 @@ impl<'f> Arrangement<'f> {
     ///
     /// [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`] when the two are one
     /// surface. Two faces on one surface with an edge between them carry no
-    /// curve for that edge to run along, and are one face. The joiner,
-    /// `join_up_what_is_one_face` in [`assemble`](super::assemble), removes
-    /// such an edge from every answer a fuse gives and from a wholly flat input
-    /// before it is baked, and joins pieces of one pipe however it is written.
-    /// A pair it leaves apart — a pipe spelled twice where the spelling does
-    /// not fold, a cone turned round, a piece of a ball or a ring, which it
-    /// never joins, or two faces of a caller's own solid on one curved surface —
-    /// is refused here rather than arranged wrongly.
+    /// curve for that edge to run along, and are one face. Two places take
+    /// such an edge out before it gets here. The joiner,
+    /// `join_up_what_is_one_face` in [`assemble`](super::assemble), removes it
+    /// from every answer a fuse gives and from a wholly flat input before it is
+    /// baked, and joins pieces of one pipe however it is written. The bake,
+    /// `faces_baked_as_one` in [`bake`](super::bake), bakes as one face the
+    /// faces of an input on one ball, pipe, cone or ring used one way round,
+    /// whether the joiner left them apart or a caller built them so (rows Q575
+    /// and Q898). What is left reaches here and is refused rather than arranged
+    /// wrongly: two faces on one curved surface used opposite ways round, a
+    /// pipe spelled twice where [`name_of_the_surface_either_way_round`] does
+    /// not fold the spellings together, and two faces of a curved solid on one
+    /// plane, which the bake leaves to the joiner and the joiner joins only on
+    /// a wholly flat solid.
     fn crossing_for(
         &mut self,
         partner: Surface,

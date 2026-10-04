@@ -217,10 +217,12 @@ pub(crate) struct BakedCorner {
     /// that the number tagged on the committed vertex and the number the
     /// arrangement decided with cannot drift apart.
     pub(crate) point: PredicatePoint,
-    /// Every face surface that meets here, in a fixed order. Which crossings run
-    /// through a corner is then a question about the model rather than about
-    /// arithmetic, which is what keeps the arrangement from having to prove a
-    /// corner is on a curve it is on by construction.
+    /// Every face surface that meets here, in a fixed order, then the surface
+    /// each edge left out here ran along when it is none of those
+    /// ([`what_each_edge_left_out_ran_along`]). Which crossings run through a
+    /// corner is then a question about the model rather than about arithmetic,
+    /// which is what keeps the arrangement from having to prove a corner is on
+    /// a curve it is on by construction.
     ///
     /// **Three or more, and every one of them was asked about the corner.**
     /// [`derive_a_corner`] solves such a corner from one triple and then asks
@@ -348,14 +350,16 @@ impl Bounds {
 /// planes and wires of the joined faces and drops every corner a lump of faces
 /// runs straight through, so that each corner left has three planes round it.
 ///
-/// **Any other solid is joined here, at the bake, and only on a ball, a pipe
-/// or a ring** ([`faces_baked_as_one`]). A curved solid can carry two faces on
-/// one ball or one pipe: a caller builds one, and a union whose pieces the
-/// joiner leaves apart writes one (row Q575, `docs/decisions.md` §231.5,
-/// §325.5). Those faces are baked as one face, and an edge between two of them
-/// is left out the way a seam is. Nothing has to be re-derived, because a
-/// corner with fewer than three surfaces round it is read out of the model
-/// rather than solved (§31.3), and every corner left keeps the surfaces it had.
+/// **Any other solid is joined here, at the bake, and only on a ball, a pipe,
+/// a cone or a ring** ([`faces_baked_as_one`]). A curved solid can carry two
+/// faces on one ball, pipe or cone: a caller builds one, and a union whose
+/// pieces the joiner leaves apart writes one (rows Q575 and Q898,
+/// `docs/decisions.md` §231.5, §325.5). Those faces are baked as one face, and
+/// an edge between two of them is left out the way a seam is. Nothing has to be
+/// re-derived, because a corner with fewer than three surfaces round it is read
+/// out of the model rather than solved (§31.3), and every corner left keeps the
+/// surfaces it had — and gains the one each edge left out at it ran along
+/// ([`what_each_edge_left_out_ran_along`]).
 fn bake_one_solid(
     model: &Model,
     key: SolidKey,
@@ -374,7 +378,16 @@ fn bake_one_solid(
     let mut surfaces = surface_of_every_face(model, solid);
     let groups = faces_baked_as_one(model, solid, &surfaces);
     spell_each_group_one_way(model, &groups, &mut surfaces);
-    let corners = corner_of_every_vertex(model, solid, &surfaces, validate_allows, policy, log)?;
+    let left_out = what_each_edge_left_out_ran_along(model, &groups);
+    let corners = corner_of_every_vertex(
+        model,
+        solid,
+        &surfaces,
+        &left_out,
+        validate_allows,
+        policy,
+        log,
+    )?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
@@ -390,7 +403,8 @@ fn bake_one_solid(
 /// order the model stores the first face of each group.
 ///
 /// Two faces are in one group when an edge runs between them and they are one
-/// ball, pipe or ring used one way round ([`one_curved_surface_used_one_way`]).
+/// ball, pipe, cone or ring used one way round
+/// ([`one_curved_surface_used_one_way`]).
 /// Then the edge is not where the solid's skin stops but only where two faces
 /// of it were written apart, which is what a seam is too. Every other face is a
 /// group of one.
@@ -431,30 +445,30 @@ fn faces_baked_as_one<'model>(
     groups
 }
 
-/// Whether two faces are one ball, one pipe or one ring, however each is
-/// written, and the solid uses both the same way round.
+/// Whether two faces are one ball, one pipe, one cone or one ring, however
+/// each is written, and the solid uses both the same way round.
 ///
-/// `used` means the same thing for every spelling of these: a pipe or a ring
-/// written with its axis turned round has the same gradient everywhere, and a
-/// ball has one spelling. So the two faces face the same way exactly when the
-/// solid uses them the same way.
+/// `used` means the same thing for every spelling of these: a pipe, a cone or
+/// a ring written with its axis turned round has the same gradient everywhere,
+/// and a ball has one spelling. A cone's is even in how far along the axis a
+/// point sits, because its surface is both nappes (`rcad_geom::Cone`), so
+/// turning the axis round changes no sign. So the two faces face the same way
+/// exactly when the solid uses them the same way.
 ///
 /// **A plane is left to the joiner**, which runs on a wholly flat solid before
 /// this does. Two faces on one plane of a curved solid are not joined here: a
 /// plane does have two spellings that face opposite ways, and nothing here
 /// builds such a solid to try it on.
 ///
-/// **A cone is left apart, and refused as before.** Joined here, the pieces of
-/// the cone `tests/pieces_of_one_curved_surface.rs` takes back in get past
-/// `AFaceMeetsItsNeighbourOnItsOwnSurface` and are refused `Undecidable` on
-/// "order along a crossing" instead, at all five of
-/// `a_frustum_and_a_wall_near_its_axis_taken_back_in_reach_the_unjoined_cone_pieces`'s
-/// walls, on two points of one crossing a few ulps apart: one read out of the
-/// model and one solved. That is a row of its own (Q575's lane).
+/// **A cone was left apart until its corners were read whole** (row Q898).
+/// Joined without [`what_each_edge_left_out_ran_along`], the pieces of the cone
+/// `tests/pieces_of_one_curved_surface.rs` takes back in got past
+/// `AFaceMeetsItsNeighbourOnItsOwnSurface` only to be refused `Undecidable` on
+/// "order along a crossing", at all five of that file's walls.
 fn one_curved_surface_used_one_way(one: PlacedSurface, other: PlacedSurface) -> bool {
     matches!(
         one.placed,
-        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_)
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_)
     ) && one_surface(&one.placed, &other.placed)
         && one.used == other.used
 }
@@ -494,6 +508,63 @@ fn spell_each_group_one_way(
                 .baked_as = spelling;
         }
     }
+}
+
+/// The surface each edge between two faces of one group ran along, beside the
+/// group's own, written down against the corners at both its ends.
+///
+/// Such an edge is left out of the face the group is baked as
+/// ([`bake_one_face`]), and with it the one place that said its corners are on
+/// that surface. The corner at the end of a cut a fuse ran down a cone to its
+/// rim has the rim's plane and the cone round it as faces, and the cut's plane
+/// only as the run of the edge left out. Yet the cut's plane can still be a
+/// crossing of the baked face, where another stretch of the same cut is kept
+/// as boundary, and the arrangement then meets it at the rim as a solved point
+/// a few ulps from the corner as stored. Two points of one crossing that close
+/// cannot be put in order, so the next fuse refused `Undecidable` on "order
+/// along a crossing" (`tests/pieces_of_one_curved_surface.rs`, row Q898).
+/// Knowing the surface, the corner is solved from the three, and the
+/// arrangement names that meet the corner rather than a point beside it.
+///
+/// An edge whose run names no third surface, [`EdgeRun::Straight`] or
+/// [`EdgeRun::RightRoundWhereItsFacesCross`], has none to add.
+fn what_each_edge_left_out_ran_along(
+    model: &Model,
+    groups: &[Vec<FaceView<'_>>],
+) -> BTreeMap<VertexSlot, Vec<Surface>> {
+    let mut ran_along: BTreeMap<VertexSlot, Vec<Surface>> = BTreeMap::new();
+    for members in groups {
+        let in_the_group: BTreeSet<FaceSlot> = members
+            .iter()
+            .map(|face| face.key().slot_in(model.id()))
+            .collect();
+        for face in members {
+            let mine = face.key().slot_in(model.id());
+            for wire in model.face_at(mine).wires() {
+                for coedge in wire.coedges() {
+                    let edge = coedge.edge();
+                    if !face_across(model, mine, edge.key())
+                        .is_some_and(|across| in_the_group.contains(&across))
+                    {
+                        continue;
+                    }
+                    let (EdgeRun::PartOfWhereItCrosses { and, .. }
+                    | EdgeRun::RightRoundWhereItCrosses { and }) = edge.stored_run()
+                    else {
+                        continue;
+                    };
+                    let and = and.transformed(&face.location());
+                    for end in [coedge.start().key(), coedge.end().key()] {
+                        let surfaces = ran_along.entry(end.slot_in(model.id())).or_default();
+                        if !surfaces.contains(&and) {
+                            surfaces.push(and);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ran_along
 }
 
 /// The same, for a solid whose coplanar faces have just been joined.
@@ -654,10 +725,13 @@ struct PlacedSurface {
     used: Orientation,
 }
 
+/// Every corner of the solid, placed from the surfaces of its faces and of the
+/// edges left out at it ([`what_each_edge_left_out_ran_along`]).
 fn corner_of_every_vertex(
     model: &Model,
     solid: SolidView<'_>,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+    left_out: &BTreeMap<VertexSlot, Vec<Surface>>,
     validate_allows: CornerRoom,
     policy: &Policy,
     log: &mut ProvenanceLog,
@@ -672,9 +746,19 @@ fn corner_of_every_vertex(
                         continue;
                     }
                     let around = faces_around_a_vertex(model, slot, surfaces);
+                    let also_on = left_out.get(&slot).map_or(&[][..], Vec::as_slice);
                     corners.insert(
                         slot,
-                        place_a_corner(model, vertex, slot, &around, validate_allows, policy, log)?,
+                        place_a_corner(
+                            model,
+                            vertex,
+                            slot,
+                            &around,
+                            also_on,
+                            validate_allows,
+                            policy,
+                            log,
+                        )?,
                     );
                 }
             }
@@ -719,25 +803,39 @@ fn faces_around_a_vertex(
 /// the model and moved. **Its surfaces are not asked about it**, and this
 /// module's header says why (§286).
 ///
+/// The surfaces round it are its faces', and then `also_on`: what an edge left
+/// out at it ran along, unless that is one of its faces' surfaces however
+/// written ([`what_each_edge_left_out_ran_along`]).
+///
 /// # Panics
 ///
 /// If the faces round one corner are at different placements. Then the corner
 /// has two places at once, and a solid like that is broken rather than awkward.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the corner, where it is stored, what is round it, and how strictly to place it"
+)]
 fn place_a_corner(
     model: &Model,
     vertex: VertexKey,
     slot: VertexSlot,
     around: &[PlacedSurface],
+    also_on: &[Surface],
     validate_allows: CornerRoom,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
     let where_the_model_puts_it = where_the_model_puts_a_corner(model, slot, around)?;
 
-    let mut distinct: Vec<Surface> = Vec::with_capacity(around.len());
+    let mut distinct: Vec<Surface> = Vec::with_capacity(around.len() + also_on.len());
     for face in around {
         if !distinct.contains(&face.baked_as) {
             distinct.push(face.baked_as);
+        }
+    }
+    for surface in also_on {
+        if !distinct.iter().any(|known| one_surface(known, surface)) {
+            distinct.push(*surface);
         }
     }
     if distinct.len() >= 3 {
