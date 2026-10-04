@@ -15,6 +15,7 @@ throwaway probe that is taken out (365.2); everything else in 365.2 was read.*
   365.2   Which other refusals each one reaches
   365.3   The choice: a piece placed from a side it shares with another solid's face
   365.4   What this leaves
+  365.5   What building the rule ran
 
 ### 365.1 What each family has to change
 
@@ -226,3 +227,130 @@ this pins whatever the six fuses give, without assuming they answer.
   its outline and its hole, all six fuses, both reproduced above. Q637's row
   asked for that to be said there.
 - **Q621 reproduces now**, without Q602, with the corners above.
+
+### 365.5 What building the rule ran
+
+*Queue row Q712. Lane `lane-q712-a-piece-placed-by-a-side-it-shares`, off
+`9599c4d0`. Everything here was run, with a throwaway probe test that is taken
+out, unless it says otherwise.*
+
+**Built as 365.3 says, in one place.** `SidesItShares` in `fuse/select.rs` is
+tried only where `place_the_piece` found no point inside the piece, which now
+answers `None` there instead of refusing. Which sides are one is
+`the_edge_each_side_of_every_piece_is` in `fuse/assemble.rs`: the kept
+pieces' own naming (`Corners::with_each_closed_curve_started_once`,
+`Corners::of`, `Edges::of`, so `which_arc_this_is`), run over every piece,
+once per fuse, and only for a fuse that reaches the rule. Inside one solid of
+the group is inside, outside every one is outside, and anything else leaves the
+refusal as it was. A naming that gives up, a plane agreement that cannot be
+told, or two shared sides that disagree leave the piece unplaced, so the rule
+adds no refusal. What the naming asked the policy goes into the log only when a
+piece is placed by it.
+
+**One assumption was wrong and cost a panic.** `Edges::of` asserts a straight
+side has two different corners, and that holds for the kept pieces. Over every
+piece it does not: `Corners::of` makes two corners of two names on one `f64`
+triple one corner, and a piece no rule keeps can have a straight side between
+two such. A seed of the fuse fuzzer's corpus and the draw of
+`a_fused_draw_hands_its_provenance_back_through_the_door.rs` panicked there.
+The naming now gives up at such a side, before `Edges::of` is asked.
+
+**Before the rule**, on `9599c4d0`, all thirty fuses below (three rules, both
+policies) refused `a point inside a piece of a face` on `(−1, 2⁻²⁵, ±2⁻⁵¹)`.
+
+**The grazing block at `h = 0`, ball first and block first.** All three
+slivers are placed, in all six fuses and under both policies: the ball's
+sliver inside the block, the block's slivers on `x = −1` and `y = 2⁻²⁵` inside
+the ball. A temporary print of each placement showed it, and
+`the_three_slivers_of_a_block_edge_grazing_a_ball_are_placed_by_the_sides_they_share`
+in `select.rs` pins which pieces each rule then keeps. None of the six
+answers, so there is no volume to check:
+
+| fuse | refused with |
+|---|---|
+| union, either order | `Geometry(CannotNameWhichPieceOfACrossingThisIs)` |
+| ball less block | `Geometry(CannotNameWhichPieceOfACrossingThisIs)` |
+| intersection, either order | `ACurvedFaceGoesRightRoundWithNoSeam` |
+| block less ball | `ACurvedFaceGoesRightRoundWithNoSeam` |
+
+Each logs two `side of a half-space` records, under either policy; neither
+was traced. The first refusal is raised only in `rcad-geom`'s `walk.rs`, and
+it is the two answers whose ball face keeps the hole 365.3 named that meet it;
+that the hole is why was not traced. The second is raised only in `mesh.rs`,
+as §346.2's small ball's was. Which of them are limits is not settled here.
+
+**The block-first corner forms of `two_meets_reach_one_corner.rs`.** With the
+block above the top place, the ball's sliver is still refused: it lies below
+the block's floor and touches the block only at the corner, so no side of it
+is a side of a piece of the block's faces. This is the first piece the rule
+cannot reach, and it is the shape of the second form 365.3 left (a corner on
+the solid). With the block reaching the other place, the slivers are placed and
+the refusal moves to the ball's lens beyond `x = −1` on the far side of the
+block's roof or floor, between `(−1, ±2⁻²⁵, ±2⁻⁵¹)`: both its corners are on
+the plane of that face, so every candidate blended from them is on that plane
+and none is in the lens. Whether the lens holds a double point was read, not
+run.
+
+**Pins that moved.** In the row's files: `a_block_edge_grazing_a_ball.rs`,
+`two_meets_reach_one_corner.rs` (above), and
+`a_plane_cut_along_a_cones_other_nappe.rs`, whose quarter-lean family went from
+`right: 32` and sixteen `a point inside a piece of a face` to `right: 48`, held
+by that file's own checks against the shapes' volume. Also moved, and not
+repinned by that run (the second run, below, did):
+
+- `a_joined_flat_face_whose_rings_enclose_no_area.rs`,
+  `a_cone_cut_by_a_block_wall_off_its_axis_is_refused_while_a_piece_is_placed`:
+  the union, not swapped, answers one solid. Its volume was not checked.
+- Outside the row's files, so not touched:
+  `a_block_edge_grazing_a_ball_at_cx_0.rs` (the first case it checks, the
+  union, ball first, certified, is now
+  `CannotNameWhichPieceOfACrossingThisIs` where `a point inside a piece of a
+  face` was pinned; the rest were not reached);
+  `a_broken_two_surface_corner_read_back_from_bytes.rs` (the frustum with its
+  corner off the cap, less the block over its top, now gives the sound
+  frustum's answer, and the intersection blames itself
+  `VertexOffItsFacePlane { distance: 1.0 }`; the sound frustum less the block
+  over its rim by the seam now answers one solid, unchecked); and
+  `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs` (four of ten
+  `Undecidable` rungs now answer and mesh, 278 to 282 answered). Each is its
+  own row, with its volume to check. The gate was not green, so `test-slow`
+  was not run.
+
+**The second run** (lane `lane-q712-a-piece-placed-by-a-side-it-shares-2`)
+merged the first run's branch at `30f8b67c` onto `45593a1c` and ran the whole
+suite there before changing anything: 3041 run, 4 failed, the four pins above
+and no other. Each was repinned from a run under both policies where the file
+has two, and each new answer checked against a volume worked out apart from
+the fuse. To tell what the rule moved from what `main` moved, the same probe
+was run again with the rule switched off by hand: every case below refused `a
+point inside a piece of a face` that way, so the rule is what moved each one.
+
+- **The cone and the block wall** (Q635's shape): all six fuses answer, not
+  only the union. Each validates and measures what the cone up to `z = 18`,
+  `1944π`, less the part past the wall, `1944 acos(2/3) − 144√180 + 576
+  ln((18 + √180)/12)`, gives; the intersection measures `5849.749 ± 1.281`
+  against `5849.825`. Q635's search for a point in that piece is still
+  unmended. The rule just answers first.
+- **The edge along `x` at `cx = 0`**: two slivers, not three. The ball's skin
+  past `y = 1` is outside the block, and the block's side is inside the ball. A
+  print of each placement showed both placed by their sides in all twelve
+  fuses, and the right way round. All twelve then refuse
+  `CannotNameWhichPieceOfACrossingThisIs`, each with one `side of a
+  half-space` record. That includes the intersection and the block less the
+  ball, which along `z` refuse `ACurvedFaceGoesRightRoundWithNoSeam`.
+- **The frustum read back from bytes**, under both policies: the corner off
+  the cap less the block over the top gives the sound answer, and the two
+  intersected blame themselves with `VertexOffItsFacePlane { distance: 1.0 }`.
+  Against the block over the rim by the seam, the sound frustum and every
+  moved corner give the sound answer. The sound frustum's two answers measure
+  `39π/4` and `52π/3 − 1.98370` within their errors, held by a new test.
+- **The chopped slivers**: 282 answer and 6 refuse, where 278 answered and 10
+  refused. The four the rule answers are at lean `0.9`, chopped at `0.3` of
+  the rim, turned 2, 4, 8 and 10 twelfths. A Simpson sum over slices matched
+  all 282 answers, measured at `0.001`, within their declared error, and a
+  new test holds the four to it. Four more, at lean `0.9` turned 2, 4 and 10
+  twelfths and at `1.2` turned 4, all chopped at `0.5`, now refuse `side of a
+  half-space`. That was not traced.
+
+`just pre-gate gate-lane` then passed with 3003 tests run, and `just
+test-slow` with 40 run and 40 passed.

@@ -66,7 +66,7 @@
 //! `piece.closes_on_one_curve`, which a loop of several arcs fails without any
 //! second closed curve — a sliver chopped by further planes. 288 of those are
 //! built here by narrowing the block that cuts the ball until its own side faces
-//! do the chopping, and of the 270 that answer **not one of their 2 700 meshes
+//! do the chopping, and of the 282 that answer **not one of their 2 820 meshes
 //! folds**; the chop puts the rim's own arc off the plane of the cut, so none of
 //! them comes back flat either. The bare cut is reached — 93 cuts of the 2 798
 //! that sweep takes are `steps = 1` — it just meets nothing.
@@ -197,14 +197,20 @@ fn no_sliver_cut_through_a_balls_pole_folds_at_any_deflection() {
 ///
 /// Swept at four leans, twelve turns and six widths, the widths given as a
 /// fraction of the rim's own radius so the chop lands in the same place on every
-/// rim. **288 solids, 278 of which answer, and not one of their 2 780 meshes
+/// rim. **288 solids, 282 of which answer, and not one of their 2 820 meshes
 /// folds.** The bare cut is real — instrumenting `cut_in_two` over this sweep
 /// showed 93 cuts of 2 798 taken with `steps = 1` — but the chop also puts the
 /// rim's own arc off the plane of the cut, so no coarse mesh here comes back
 /// flat and none of them reaches the rescue's ladder at all.
 ///
-/// The ten that refuse are named rather than dropped: a chop that grazes the rim
-/// leaves the fuse a point it cannot place. Eight more refused
+/// The six that refuse are named rather than dropped. All are chopped at half
+/// the rim: at lean `0.9` turned 2, 4 and 10 twelfths and at `1.2` turned 4
+/// twelfths, `Undecidable` on `side of a half-space`, not traced; at `1.35`
+/// and `1.5` turned 4 twelfths, on `a point inside a piece of a face`. There
+/// were ten, all on that last name, until a piece no point was found in was
+/// placed by a side it shares (§365.3, Q712): that answers the four chopped at
+/// three tenths of the rim at lean `0.9`, which the next test holds to their
+/// volume, and moves the four above on to the other name. Eight more refused
 /// `ResultIsNotManifold`, at leans `1.35` and `1.5` turned `0`, until §340.10:
 /// the box round one of the block's faces stopped a rounding short of the nodes
 /// on the ball's cut across it, and the cut was dropped as missing the face.
@@ -243,14 +249,66 @@ fn no_sliver_chopped_by_the_blocks_own_sides_folds_at_any_deflection() {
     assert_eq!(
         tally,
         BTreeMap::from([
-            ("answered", 278),
-            ("Undecidable", 10),
-            ("meshed", 2780),
+            ("answered", 282),
+            ("Undecidable", 6),
+            ("meshed", 2820),
             ("folds a later rung cured", 0),
             ("folds no later rung cured", 0),
         ]),
         "every rung of every chopped sliver's ladder"
     );
+}
+
+/// The four chopped slivers that only a side they share places: lean `0.9`,
+/// chopped at three tenths of the rim, turned 2, 4, 8 and 10 twelfths. Each
+/// validates and holds the volume a sum over its slices gives, so the rule
+/// that placed them (§365.3) wrote the right answer.
+#[test]
+fn the_four_chopped_slivers_placed_by_a_side_they_share_hold_their_volume() {
+    let (radius, lean, across) = (1.0, 0.9, 0.3);
+    for step in [2, 4, 8, 10] {
+        let turn = f64::from(step) * PI / 6.0;
+        let what =
+            format!("the sliver at lean {lean}, turn {turn}, chopped at {across} of its rim");
+        let (model, answer) = chopped_sliver(radius, lean, turn, across);
+        let answer = answer.unwrap_or_else(|why| panic!("{what}: refused {why:?}"));
+        measures_within_what_it_declares(
+            &model,
+            &answer,
+            0.001,
+            a_chopped_slivers_volume(lean, turn, across * lean.sin()),
+            &what,
+        );
+    }
+}
+
+/// What [`chopped_sliver`] keeps of a unit ball, summed over slices square to
+/// the two chopping planes by Simpson's rule.
+///
+/// The sliver is the ball past a plane `cos(lean)` from its centre, and its
+/// rim has radius `sin(lean)` and its centre `sin(lean) · cos(turn)` from the
+/// middle of the two planes, which are `half` either side of it. The slice
+/// `x` from the rim's centre is a segment of a circle of radius `√(1 − x²)`,
+/// cut `cos(lean)` from that circle's centre.
+fn a_chopped_slivers_volume(lean: f64, turn: f64, half: f64) -> f64 {
+    const SLICES: u32 = 200_000;
+    let (rim, apart) = (lean.sin(), lean.cos());
+    let off = rim * turn.cos();
+    let from = (-half - off).max(-rim);
+    let to = (half - off).min(rim);
+    let segment = |x: f64| {
+        let squared = 1.0 - x * x;
+        let circle = squared.sqrt();
+        if circle <= apart {
+            return 0.0;
+        }
+        squared * (apart / circle).acos() - apart * (squared - apart * apart).sqrt()
+    };
+    let step = (to - from) / f64::from(SLICES);
+    let inner: f64 = (1..SLICES)
+        .map(|i| segment(from + f64::from(i) * step) * if i % 2 == 1 { 4.0 } else { 2.0 })
+        .sum();
+    (segment(from) + segment(to) + inner) * step / 3.0
 }
 
 /// The sliver of §206.3 chopped by the two side faces of its own block, which

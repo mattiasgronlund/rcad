@@ -26,48 +26,74 @@
 //!
 //! # What refuses now
 //!
-//! With the two places in order, the fuse goes on to place a point inside each
-//! piece of a face, and the sliver between the two places holds no point with
-//! `f64` coordinates. That is §346's limit, the same one the edge along `z`
-//! meets at `h = 0` in `a_block_edge_grazing_a_ball.rs`.
+//! With the two places in order, the fuse goes on to place each piece of a
+//! face, and the slivers between the two places hold no point with `f64`
+//! coordinates. That is §346's limit, the same one the edge along `z` meets at
+//! `h = 0` in `a_block_edge_grazing_a_ball.rs`, and every fuse refused on it
+//! until §365.3's rule placed those slivers by the sides they share (Q712).
+//! Every fuse now gets past `select` and is refused while its answer is
+//! written, with `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`.
 
-use rcad_geom::{Isometry, Point, Scale, Vector};
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog, Record};
+use rcad_geom::{Error as GeometryError, Isometry, Point, Scale, Vector};
+use rcad_predicates::{Level, Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule};
 
 /// The name `order_along` records a refusal under.
 const ALONG_A_CROSSING: &str = "order along a crossing";
 
-/// The name the fuse records a piece it cannot place a point in under.
-const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
-
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
-/// The pin: under either policy, every rule with either solid first refuses
-/// on placing a point in the sliver between the two places, and on nothing
-/// else.
+/// The pin: under either policy, every rule with either solid first gets past
+/// placing the pieces and is refused `CannotNameWhichPieceOfACrossingThisIs`,
+/// with one `side of a half-space` record and nothing about the order along a
+/// crossing.
+///
+/// Here the two places fence off two slivers, not three: the ball's skin past
+/// `y = 1` below the top, which is outside the block, and the block's side
+/// inside the ball. The block's top inside the ball is the whole disk less a
+/// notch, which holds doubles. A print of each placement, taken out, showed
+/// both slivers placed by their sides in all twelve fuses, the ball's outside
+/// the block and the block's inside the ball, and `select` finishing.
+///
+/// The intersection and the block less the ball are refused the same way here,
+/// where along `z` at `h = 0` they are refused `ACurvedFaceGoesRightRoundWithNoSeam`
+/// instead. Neither refusal has been traced.
 ///
 /// Before Q449 a certified fuse refused on which of the two places comes
 /// first round a circle, and a tolerant one with `CannotTellTheCellsOfAFaceApart`.
+/// From Q449 to Q712 every fuse refused `a point inside a piece of a face` on
+/// the two places, and with §365.3's rule switched off by hand they still do.
 #[test]
-fn the_order_of_the_two_places_is_decided_and_the_sliver_between_them_is_what_refuses() {
+fn the_order_of_the_two_places_is_decided_and_the_slivers_between_them_are_placed_by_their_sides() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
         for rule in EVERY_RULE {
             for ball_first in [true, false] {
                 let case = format!("{policy:?} {rule:?}, ball first {ball_first}");
-                let refused = match fuse_a_block_edge_grazing_a_ball(rule, ball_first, &policy) {
-                    Err(Error::Undecidable { records }) => records.records().to_vec(),
-                    other => panic!("{case}: {other:?}"),
-                };
+                let mut log = ProvenanceLog::new();
+                match fuse_a_block_edge_grazing_a_ball(rule, ball_first, &policy, &mut log) {
+                    Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs)) => {}
+                    Ok(fused) => panic!(
+                        "{case}: the fuse answered with {} solids; check each against its \
+                         volume and pin it",
+                        fused.solids().len()
+                    ),
+                    Err(other) => panic!("{case}: {other:?}"),
+                }
+                let records = log.records();
                 assert!(
-                    refused
+                    records
                         .iter()
                         .all(|record| record.predicate() != ALONG_A_CROSSING),
-                    "{case}: {refused:#?}"
+                    "{case}: {records:#?}"
                 );
-                assert_eq!(refused.len(), 1, "{case}: {refused:#?}");
-                assert_eq!(refused[0].predicate(), INSIDE_A_PIECE, "{case}");
-                assert!(is_the_two_places(&refused[0]), "{case}: {:#?}", refused[0]);
+                assert_eq!(
+                    records
+                        .iter()
+                        .map(|record| (record.predicate(), record.level()))
+                        .collect::<Vec<_>>(),
+                    [("side of a half-space", Level::Interval)],
+                    "{case}: {records:#?}"
+                );
             }
         }
     }
@@ -124,22 +150,11 @@ fn no_point_with_f64_coordinates_is_inside_the_sliver_between_the_two_places() {
     }
 }
 
-/// Whether a record's two inputs are the two places, exact, in either order.
-fn is_the_two_places(record: &Record) -> bool {
-    let place = f64::powi(2.0, -51);
-    let top = -f64::powi(2.0, -25);
-    let places = [
-        PredicatePoint::from([-place, 1.0, top]),
-        PredicatePoint::from([place, 1.0, top]),
-    ];
-    let inputs = record.inputs();
-    inputs == places || inputs == [places[1], places[0]]
-}
-
 fn fuse_a_block_edge_grazing_a_ball(
     rule: Rule,
     ball_first: bool,
     policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> rcad_topo::Result<Fused> {
     let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
     let ball = model
@@ -156,10 +171,9 @@ fn fuse_a_block_edge_grazing_a_ball(
             &Isometry::translation(Vector::new(0.0, 0.0, top - 2.0)).expect("a finite shift"),
         )
         .expect("a positive height");
-    let mut log = ProvenanceLog::new();
     if ball_first {
-        model.fuse(&[ball], &[block], rule, policy, &mut log)
+        model.fuse(&[ball], &[block], rule, policy, log)
     } else {
-        model.fuse(&[block], &[ball], rule, policy, &mut log)
+        model.fuse(&[block], &[ball], rule, policy, log)
     }
 }

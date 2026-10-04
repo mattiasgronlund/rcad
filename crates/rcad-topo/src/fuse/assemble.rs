@@ -170,6 +170,94 @@ pub(crate) struct InputSide {
     pub(crate) across: Plane,
 }
 
+/// Every side of every piece, each with the edge of an answer it would be,
+/// named the way [`Assembly::from_the_pieces`] names the sides of the pieces it
+/// keeps. Two sides of two pieces that come back with one edge are one side,
+/// which is what `select` places a piece by when no point inside it can be
+/// found (`docs/decisions.md` §365.3).
+///
+/// **The same naming, over every piece and not only the kept ones.** The
+/// corners are [`Corners::of`], the edges [`Edges::of`] and so
+/// [`which_arc_this_is`], and the vertices that only start a closed edge are
+/// read through as they are for the kept pieces. A second matcher would be a
+/// second answer to which sides are one, and the two could disagree.
+///
+/// **`None` where a straight side's two ends come out one corner.** Of the
+/// kept pieces that is a splitter bug, and [`Edges::of`] panics on it. Over
+/// every piece it is not: two corners of two names that land on one `f64`
+/// triple are one corner ([`Corners::of`]), and a piece no rule keeps can have
+/// a straight side between two such. Two fuses in the suite reach one, a seed
+/// of the fuse fuzzer's corpus and the draw of
+/// `a_fused_draw_hands_its_provenance_back_through_the_door.rs`, and asserting
+/// it panicked both. Nothing is named then, and no piece is placed by a side.
+///
+/// # Errors
+///
+/// Whatever [`Corners::with_each_closed_curve_started_once`],
+/// [`Corners::of`] and [`Edges::of`] give.
+pub(crate) fn the_edge_each_side_of_every_piece_is(
+    model: &Model,
+    scratch: &Scratch,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Vec<Vec<NamedSide>>>> {
+    let only_where_a_closed_edge_starts = vertices_that_only_start_a_closed_edge(
+        model,
+        scratch.pieces.iter().flat_map(|piece| &piece.wires),
+    );
+    let wires: Vec<Vec<Cow<'_, [FaceMeet]>>> = scratch
+        .pieces
+        .iter()
+        .map(|piece| {
+            piece
+                .wires
+                .iter()
+                .map(|wire| read_through(wire, &only_where_a_closed_edge_starts, model))
+                .collect()
+        })
+        .collect();
+    let mut corners = Corners::with_each_closed_curve_started_once(
+        model,
+        input_corners_on_exactly_three_planes(model, scratch),
+        &scratch.names_of_one_point,
+        wires.iter().flatten().flat_map(|wire| wire.iter()),
+        policy,
+        log,
+    )?;
+    let mut edges = Edges::default();
+    let mut named = Vec::with_capacity(scratch.pieces.len());
+    for (piece, wires) in scratch.pieces.iter().zip(&wires) {
+        let mut of_this_piece = Vec::new();
+        for meet in wires.iter().flat_map(|wire| wire.iter()) {
+            let from = corners.of(model, &meet.ends[0], policy, log)?;
+            let to = corners.of(model, &meet.ends[1], policy, log)?;
+            if from == to
+                && meet
+                    .carried_by
+                    .iter()
+                    .all(|surface| surface.as_plane().is_some())
+            {
+                return Ok(None);
+            }
+            let seam = the_seam_a_side_runs_along(model, &piece.ancestors, meet);
+            let side = edges.of(meet, seam, from, to, piece.ancestors[0], false, policy, log)?;
+            of_this_piece.push(NamedSide {
+                side: meet.clone(),
+                edge: side.edge,
+            });
+        }
+        named.push(of_this_piece);
+    }
+    Ok(Some(named))
+}
+
+/// One side of a piece, and the edge of an answer it would be.
+pub(crate) struct NamedSide {
+    pub(crate) side: FaceMeet,
+    /// Two sides of two pieces with the same number here are one side.
+    pub(crate) edge: usize,
+}
+
 /// The whole result, in scratch.
 pub(crate) struct Assembly {
     corners: Vec<Corner>,
