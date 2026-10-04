@@ -67,15 +67,20 @@
 //!   reaches.
 //! - **A frustum's top corner** `(3, 0, 6)`, from `cones::a_frustum(model,
 //!   0.5, 2, 6)`, moved off the wall, off the cap and a quarter turn round:
-//!   the bar's outcomes, and one refusal more. Moved off the cap to
-//!   `(3.5, 0, 7)`, the corner sits inside a block over the top, `z` from 5
-//!   to 8, and both rules tried with that block are `Undecidable` on
-//!   `a point inside a piece of a face`. The sound frustum is `Undecidable` on
-//!   that predicate against a block over the rim by its seam, and so is every
-//!   moved corner there. The same under both policies.
+//!   the bar's outcomes. Moved off the cap to `(3.5, 0, 7)`, the corner sits
+//!   inside a block over the top, `z` from 5 to 8; the frustum less that block
+//!   is the sound frustum's answer, and the two together blame themselves with
+//!   `validate`'s own refusal. Against a block over the rim by the seam, the
+//!   sound frustum and every moved corner give the sound frustum's answer. The
+//!   same under both policies. All of these were `Undecidable` on `a point
+//!   inside a piece of a face` until a piece no point was found in was placed
+//!   by a side it shares (§365.3, Q712); the sound frustum's two answers that
+//!   moved measure what the frustum and the block say.
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
+
+use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -637,7 +642,6 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
         CannotTellTheCellsOfAFaceApart as CannotTell, ItBlamesItself as Blamed,
         TheSoundAnswer as Sound,
     };
-    let inside_a_piece = Outcome::Undecidable("a point inside a piece of a face");
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for (partner, rule, sound, [off_the_wall, off_the_cap, a_quarter_turn_round]) in [
             (FAR_AWAY, Rule::Union, Sound, [Blamed, Blamed, Blamed]),
@@ -651,19 +655,19 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
                 OVER_THE_FRUSTUMS_TOP,
                 Rule::Difference,
                 Sound,
-                [Sound, inside_a_piece, Sound],
+                [Sound, Sound, Sound],
             ),
             (
                 OVER_THE_FRUSTUMS_TOP,
                 Rule::Intersection,
                 Sound,
-                [Blamed, inside_a_piece, Blamed],
+                [Blamed, Blamed, Blamed],
             ),
             (
                 OVER_THE_FRUSTUMS_RIM_BY_THE_SEAM,
                 Rule::Difference,
-                inside_a_piece,
-                [inside_a_piece, inside_a_piece, inside_a_piece],
+                Sound,
+                [Sound, Sound, Sound],
             ),
             (
                 OVER_THE_FRUSTUMS_RIM_AWAY_FROM_THE_SEAM,
@@ -693,6 +697,68 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
             frustum(
                 THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
                 a_quarter_turn_round,
+            );
+        }
+    }
+}
+
+/// The sound frustum less a block over its top, and less a block over its rim
+/// by the seam, each hold what the frustum and the block say. The first is
+/// what the corner moved off the cap gives, and the second what every corner
+/// gives, so this is what `TheSoundAnswer` holds those to.
+///
+/// The frustum is `π/12 · (6³ − 2³) = 52π/3`, and below `z = 5` it is
+/// `π/12 · (5³ − 2³) = 39π/4`. The block over the rim takes `∫₅⁶ seg(z/2) dz`, `seg(r)` being the
+/// part of a circle of radius `r` past `x = 2`, `r² acos(2/r) − 2√(r² − 4)`;
+/// with `F(r) = r³/3 · acos(2/r) − 4r/3 · √(r² − 4) + 8/3 · ln(r + √(r² − 4))`
+/// that is `2 (F(3) − F(2.5))`.
+#[test]
+fn the_sound_frustum_less_a_block_over_its_top_or_its_rim_holds_what_the_two_say() {
+    let f = |r: f64| {
+        let leg = (r * r - 4.0).sqrt();
+        r.powi(3) / 3.0 * (2.0 / r).acos() - 4.0 * r / 3.0 * leg + 8.0 / 3.0 * (r + leg).ln()
+    };
+    let frustum = 52.0 * PI / 3.0;
+    for (partner, volume) in [
+        (OVER_THE_FRUSTUMS_TOP, 39.0 * PI / 4.0),
+        (
+            OVER_THE_FRUSTUMS_RIM_BY_THE_SEAM,
+            frustum - 2.0 * (f(3.0) - f(2.5)),
+        ),
+    ] {
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            let (mut model, solid) = read_back(Shape::Frustum, WHERE_THE_FRUSTUM_PUTS_IT);
+            let block = a_block(&mut model, partner, &Isometry::identity());
+            let what = format!("{partner:?} under {policy:?}");
+            let answer = model
+                .fuse(
+                    &[solid],
+                    &[block],
+                    Rule::Difference,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+            let [solid] = answer.solids() else {
+                panic!("{what}: {:?}", answer.solids());
+            };
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what} does not validate: {why:?}"));
+            let measured = model
+                .solid(*solid)
+                .expect("the fuse made this key")
+                .measure(
+                    Deflection::of(0.001).expect("a fine mesh"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} does not measure: {why:?}"));
+            assert!(
+                (measured.volume() - volume).abs() <= measured.volume_error(),
+                "{what} holds {volume} and measures {} give or take {}",
+                measured.volume(),
+                measured.volume_error()
             );
         }
     }
