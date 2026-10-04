@@ -35,7 +35,7 @@ use cones::{a_frustum, a_pointed_cone};
 
 /// Every fuse of the family's two apex-near families that refuses in the
 /// mesher, recounted on this tree: the 96 fuses of
-/// `a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses`
+/// the two `a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_…` tests
 /// and the 32 of `a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses`.
 ///
 /// There were eighteen (§285.1). Sixteen were caps of the pointed cone refused

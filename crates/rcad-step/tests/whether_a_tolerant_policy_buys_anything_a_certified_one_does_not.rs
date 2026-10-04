@@ -63,9 +63,9 @@
 //! difference in the records would have been seen, and neither may be deleted
 //! on the grounds that the corpus does not exercise it.
 //!
-//! Three tolerant budgets, the widest a ten-thousand-millionfold more slack
-//! than any caller would set, so a null result is not a null result about one
-//! budget.
+//! Three tolerant budgets, each in a test of its own, the widest a
+//! ten-thousand-millionfold more slack than any caller would set, so a null
+//! result is not a null result about one budget.
 //!
 //! Neither corpus is in the tree; point `RCAD_STEP_CORPUS` at a directory
 //! holding `nist/` and `kicad/` and this runs. Without it this **fails** rather
@@ -252,8 +252,25 @@ fn a_shape_whose_corners_f64_cannot_place() {
     println!("control, a corner f64 cannot place: {difference}");
 }
 
+#[test]
+fn a_tolerant_budget_the_size_of_the_part_reads_no_corpus_file_a_certified_policy_refuses() {
+    no_corpus_file_a_certified_policy_refuses_is_read_under(BUDGETS[0]);
+}
+
+#[test]
+fn a_tolerant_budget_ten_thousand_parts_wide_reads_no_corpus_file_a_certified_policy_refuses() {
+    no_corpus_file_a_certified_policy_refuses_is_read_under(BUDGETS[1]);
+}
+
+#[test]
+fn an_absurd_tolerant_budget_reads_no_corpus_file_a_certified_policy_refuses() {
+    no_corpus_file_a_certified_policy_refuses_is_read_under(BUDGETS[2]);
+}
+
 /// The measurement: every file in both corpora, under a certified policy and
-/// under three tolerant budgets, compared whole.
+/// under one tolerant budget, compared whole. Each budget is a test of its own
+/// so that no one test of the three sets the slow tier's wall
+/// (`docs/decisions.md` §397.4).
 ///
 /// Two lists come out of it and they say different things. A run whose
 /// **outcome** moved is a file a tolerant policy read that a certified one
@@ -261,8 +278,7 @@ fn a_shape_whose_corners_f64_cannot_place() {
 /// on. Both are asserted empty, because on this corpus a tolerant policy is
 /// told exactly what a certified one is told; the two controls above are what
 /// stop either emptiness being the comparison having gone blind.
-#[test]
-fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
+fn no_corpus_file_a_certified_policy_refuses_is_read_under((what, working_size): (&str, f64)) {
     let root = corpus();
     let mut outcomes_that_moved: Vec<String> = Vec::new();
     let mut records_that_moved: Vec<String> = Vec::new();
@@ -275,43 +291,35 @@ fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
             "{source} holds no STEP files, so this test would pass by doing nothing"
         );
         let mut certified = WhatACorpusCameTo::default();
-        let mut tolerant: BTreeMap<&str, WhatACorpusCameTo> = BTreeMap::new();
+        let mut tolerant = WhatACorpusCameTo::default();
 
         for path in &files {
             let bytes = fs::read(path).expect("a file the walk just listed");
-            for (what, working_size) in BUDGETS {
-                let strict = import_sweep_and_mesh(&bytes, &Policy::certified(), working_size);
-                let loose =
-                    import_sweep_and_mesh(&bytes, &Policy::tolerant(working_size), working_size);
-                if what == BUDGETS[0].0 {
-                    certified.add(&strict);
+            let strict = import_sweep_and_mesh(&bytes, &Policy::certified(), working_size);
+            let loose =
+                import_sweep_and_mesh(&bytes, &Policy::tolerant(working_size), working_size);
+            certified.add(&strict);
+            tolerant.add(&loose);
+            if let Some(said) = how_they_differ(&strict, &loose) {
+                let said = format!(
+                    "{source}/{} under tolerant({working_size}, {what}): {said}",
+                    name_of(path)
+                );
+                if strict.outcome == loose.outcome {
+                    records_that_moved.push(format!("{said}; both came to {:?}", strict.outcome));
+                } else {
+                    outcomes_that_moved.push(said);
                 }
-                tolerant.entry(what).or_default().add(&loose);
-                if let Some(said) = how_they_differ(&strict, &loose) {
-                    let said = format!(
-                        "{source}/{} under tolerant({working_size}, {what}): {said}",
-                        name_of(path)
-                    );
-                    if strict.outcome == loose.outcome {
-                        records_that_moved
-                            .push(format!("{said}; both came to {:?}", strict.outcome));
-                    } else {
-                        outcomes_that_moved.push(said);
-                    }
-                }
-                compared += 1;
             }
+            compared += 1;
         }
 
         println!("=== {source}: {} files", files.len());
         println!("    certified:                    {certified}");
-        for (what, working_size) in BUDGETS {
-            println!(
-                "    tolerant({working_size:e}, {what}), budget {:e} mm: {}",
-                Policy::tolerant(working_size).max_wobble(),
-                tolerant[what]
-            );
-        }
+        println!(
+            "    tolerant({working_size:e}, {what}), budget {:e} mm: {tolerant}",
+            Policy::tolerant(working_size).max_wobble(),
+        );
         assert!(
             certified.accepted > 0 && certified.accepted < files.len(),
             "{} of {} {source} files came all the way through under a certified policy, and \
@@ -330,9 +338,9 @@ fn no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses() {
     }
 
     assert!(
-        compared >= 3 * 367,
-        "only {compared} pairs of runs were compared, which is too few for 367 files at three \
-         budgets"
+        compared >= 367,
+        "only {compared} pairs of runs were compared under tolerant({working_size}, {what}), \
+         which is too few for 367 files"
     );
     println!(
         "{compared} pairs of runs compared, {} whose outcome moved, {} whose records moved",

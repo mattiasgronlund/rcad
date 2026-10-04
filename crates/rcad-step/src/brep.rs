@@ -2149,7 +2149,7 @@ fn the_faces_along_it_name_no_crossing(faces: &[Surface]) -> bool {
 /// added. Without that room, `Relay_DPST_Fujitsu_FTR-F1A`,
 /// `Relay_DPDT_Fujitsu_FTR-F1C` and `nist_ftc_08_asme1_ap242-e2` logged 18, 18
 /// and 56 sides of a pipe the certified policy gave up on and the tolerant one
-/// answered (`no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses`).
+/// answered (`whether_a_tolerant_policy_buys_anything_a_certified_one_does_not.rs`).
 /// All three files are refused either way, and which arcs those were was not
 /// traced.
 fn which_of_a_rings_two_circles(
