@@ -5361,17 +5361,17 @@ fn the_side_of_a_resting_plane_a_cone_face_lies_on(
         return Err(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.keys[0] });
     };
     let normal = flat.normal().components();
-    let up_side = match dot_of(normal.map(Interval::exactly), up.map(Interval::exactly)).sign() {
-        side @ (Decision::Pos | Decision::Neg) => side,
-        Decision::Zero | Decision::Undecidable { .. } | _ => {
-            return Err(gave_up(
-                A_PLANE_AGAINST_A_CONE,
-                &[PredicatePoint::from(normal), PredicatePoint::from(up)],
-                Measures::Length,
-                log,
-            ));
-        }
-    };
+    // Asked rather than matched, so that `Decision`'s wildcard arm is not
+    // written once more (§40).
+    let up_side = dot_of(normal.map(Interval::exactly), up.map(Interval::exactly)).sign();
+    if !matches!(up_side, Decision::Pos | Decision::Neg) {
+        return Err(gave_up(
+            A_PLANE_AGAINST_A_CONE,
+            &[PredicatePoint::from(normal), PredicatePoint::from(up)],
+            Measures::Length,
+            log,
+        ));
+    }
     Ok(if nappe == Decision::Pos {
         up_side
     } else {
