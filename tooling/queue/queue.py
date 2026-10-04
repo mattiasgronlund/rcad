@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rows import CLASS, SMALL, TIERS_IN_ORDER, Queue, highest_q  # noqa: E402
+from rows import CLASS, SMALL, TIERS_IN_ORDER, Queue, highest_q, tier_of_class  # noqa: E402
 
 ID = re.compile(r"^[TDQ][0-9]+$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -54,9 +54,11 @@ just queue running                         what holds a slot on this machine, on
 just queue show <id>                       one row, its hold, and its state in other worktrees
 just queue take <id> <branch>              dispatch a ready row to <branch>: state lane:<branch>, held until done/drop/park
 just queue add <tier> <model> <write set> <what ending in §N>    a new todo row at the foot of its tier; prints the id
-just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing
-just queue tag <id> <class>|small|-        tag an open row: a class (wrong, crash or refuses, then /A to /D) ranks
-                                            a tier 1 row; small lets a lane take it with other small rows; - removes it
+just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing;
+                                            a row with a class goes only to the tier its class names
+just queue tag <id> <class>|small|-        tag an open row: a class (wrong, crash or refuses, then /A to /D) ranks a tier 1
+                                            or tier 5 row and moves it to tier 1 for A and B, tier 5 for C and D; small lets
+                                            a lane take it with other small rows; - removes it
 just queue done <id> <merge sha>           state done:<sha>, moved under ## Closed
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
@@ -494,7 +496,8 @@ def tier_step(queue, claims, here, args, batch):
     The write guard refuses the hand edit, and a heading a hand edit would have
     added is refused with it, so this is how a row reaches a tier nobody has
     filed in yet. The row keeps its state and its hold; only its tier field and
-    its place change, and `rank` then places it within the tier.
+    its place change, and `rank` then places it within the tier. A row with a
+    class goes only to the tier its class names (§403).
     """
     need(args, 2, "tier <id> <tier>")
     row_id, to = args
@@ -505,14 +508,10 @@ def tier_step(queue, claims, here, args, batch):
         raise Refused(f"{row_id} is closed: {row.state}, and a closed row sits under ## Closed in no tier")
     if row.tier == to:
         raise Refused(f"{row_id} is tier {to} already")
-    if row.tag is not None and CLASS.match(row.tag):
-        raise Refused(f"{row_id} carries the class {row.tag}, which ranks tier 1 rows only; "
+    if row.tag is not None and CLASS.match(row.tag) and to != tier_of_class(row.tag):
+        raise Refused(f"{row_id} carries the class {row.tag}, which puts it in tier {tier_of_class(row.tag)}; "
                       f"remove it first with `tag {row_id} -`")
-    block = queue.block_for_tier(to)
-    if block is None:
-        raise Refused(f"there is no '## Tier {to}' block, and no later heading to write one above")
-    queue.remove(row)
-    queue.append_to_block(block, row.with_tier(to))
+    move_to_tier(queue, row, to)
     message = f"{row_id}: tier {row.tier} -> {to}, at the foot of ## Tier {to}"
     return queue, message, None
 
@@ -526,9 +525,11 @@ def tag_step(queue, claims, here, args, batch):
     """Set, replace or remove the tag an open row's description starts with (§352).
 
     A class says how bad a defect is and how likely a user's model meets it,
-    and the fill takes tier 1 in class order. `small` lets the fill hand a lane
-    several such rows at once. A row carries one tag at most, since a defect
-    needs a trace first and so is never small.
+    and the fill takes tiers 1 and 5 in class order. The class also names the
+    row's tier, A and B tier 1 and C and D tier 5, so setting one moves the row
+    there (§403.4). `small` lets the fill hand a lane several such rows at once.
+    A row carries one tag at most, since a defect needs a trace first and so is
+    never small.
     """
     need(args, 2, "tag <id> <class>|small|-")
     row_id, tag = args
@@ -540,13 +541,32 @@ def tag_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}")
-    if tag is not None and CLASS.match(tag) and row.tier != "1":
-        raise Refused(f"{row_id} is tier {row.tier}, and a class ranks tier 1 rows only")
+    is_class = tag is not None and CLASS.match(tag) is not None
+    if is_class and row.tier not in ("1", "5"):
+        raise Refused(f"{row_id} is tier {row.tier}, and a class ranks tier 1 and tier 5 rows only")
     if tag == row.tag:
         raise Refused(f"{row_id} is tagged {tag or 'nothing'} already")
     queue.replace(row, row.with_tag(tag))
     message = f"{row_id}: tag {row.tag or '-'} -> {tag or '-'}"
+    if is_class and tier_of_class(tag) != row.tier:
+        to = tier_of_class(tag)
+        move_to_tier(queue, queue.find(row_id), to)
+        message += f", tier {row.tier} -> {to}, at the foot of ## Tier {to}"
     return queue, message, None
+
+
+def move_to_tier(queue, row, to):
+    """`row` at the foot of `## Tier <to>`, its tier field set to `to`.
+
+    Writing a missing heading can put five lines above the row, so the row is
+    found again by its id before it is taken out.
+    """
+    block = queue.block_for_tier(to)
+    if block is None:
+        raise Refused(f"there is no '## Tier {to}' block, and no later heading to write one above")
+    moved = queue.find(row.id)
+    queue.remove(moved)
+    queue.append_to_block(block, moved.with_tier(to))
 
 
 def pick_step(queue, claims, here, args, batch):

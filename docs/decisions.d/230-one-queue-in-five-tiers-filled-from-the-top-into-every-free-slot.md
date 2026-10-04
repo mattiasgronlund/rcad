@@ -33,7 +33,9 @@ no row above it can use that slot.
 
 *§311 swapped tiers 1 and 2 on 2026-09-27, at Mattias's word: new defects are
 tier 1 and finding defects better is tier 2. §307 amends this table again: tier
-2.2, for rows that change how the work is done, sits between tiers 2 and 2.5.*
+2.2, for rows that change how the work is done, sits between tiers 2 and 2.5.
+§403 added tier 5 on 2026-10-04, below tier 4: every open defect of class C or
+D (§352.3) goes there, and tier 1 keeps A, B and the defects with no class.*
 
 This amends two sections. §171.5 kept C out of every dispatch list, because C
 frees no file and so loses any ranking by what a lane frees. §226.2 answered that

@@ -42,7 +42,8 @@ like this:
 A tag is one of:
 
 - **a class**, `wrong/A` to `refuses/D` (§352.3). Only a tier 1 row may carry
-  one.
+  one. *§403.2, 2026-10-04: a tier 1 or tier 5 row, and the class decides an
+  open row's tier, A and B tier 1 and C and D tier 5.*
 - **`small`** (§352.4). A row of any tier may carry it.
 
 A row carries one tag at most. A defect needs a trace before anyone knows where
@@ -101,6 +102,10 @@ The fill walks tier 1 in this order:
 - **Rows with no class go just above D.** That is where `add` puts a new row
   today, at the foot of its tier, so a merger that knows nothing of classes
   changes nothing in the order.
+
+*§403.3 split this walk on 2026-10-04. C and D rows moved to a new tier 5
+below tier 4, so tier 1 walks only A, B and the rows with no class, and tier 5
+walks `wrong/C, crash/C, refuses/C, wrong/D, crash/D, refuses/D`.*
 
 *§360.5 changed the C bucket on 2026-09-29. It said "a hypothesis nobody has
 run is C at most", and every guess came in as C, so the walk took guesses
@@ -209,6 +214,9 @@ tier 1, open and not parked: 68 in A or B (4 wrong, 1 crash, 63 refuses), 23 in 
 
 "No class" counts the `small` rows of tier 1 and the rows in `lane:`, which
 were left untagged, as well as the rows that carry no tag at all.
+
+*§403.6, 2026-10-04: the line now counts C and D under tier 5, `tier 1, open
+and not parked: N in A or B (…), N with no class; tier 5: N in C, N in D; …`.*
 
 ### 352.7 What this leaves
 
