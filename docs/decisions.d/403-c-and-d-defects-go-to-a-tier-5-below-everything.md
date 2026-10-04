@@ -189,6 +189,11 @@ while they sit in tier 1. 50 were `todo`, 14 were `after:`, and one, Q22, was
   queue tier <id> 5`. That is intended.
 - **Tier 3's corpus refusals**, such as Q347 and Q559, are "A, seen" by §352.3
   and carry no class (§352.7). Mattias asked whether they should become tier 1
-  `refuses/A` rows. That is still open.
+  `refuses/A` rows. *He answered on 2026-10-04: they stay in tier 3. "It is my
+  way of prioritizing fuzz issues before new work, to ensure that we do not
+  just rush and fix the 'known' files first. Ideally the fuzzing should be able
+  to fix the tier 3's STEP corpus before we reach there." A corpus file that
+  fails is a tier 3 row with no class. The fuzzing is meant to find the same
+  defect first, and a defect it finds goes to tier 1 or 5 by its class.*
 - **Q500** asked for the queue file's header to name "the six tiers of §307".
   It is dropped and filed again as Q983 to name seven, ranked where Q500 stood.
