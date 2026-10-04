@@ -7348,9 +7348,15 @@ mod tests {
     /// - three arcs in a ring through no corner. The lowest node is joined
     ///   first, so they come out as one arc from node 7, the ring's highest,
     ///   back to node 7.
-    /// - node 9, with three arcs: two of them a pair to node 8 and one to
-    ///   corner 10. Joining node 8 makes the pair one arc from node 9 back to
-    ///   itself, node 9 then has two arcs, and that loop is joined away.
+    /// - node 8, with three arcs: two of them a pair to node 9 and one to
+    ///   corner 10. Joining node 9 makes the pair one arc from node 8 back to
+    ///   itself, node 8 then has two arcs, and that loop is joined away. Node
+    ///   8 is numbered below node 9, so it has to be looked at again after
+    ///   the join at a higher node.
+    /// - an arc from node 22 back to itself, alone there, which is left; and
+    ///   one from node 23 back to itself that comes before an arc from corner
+    ///   24 to node 23. The loop is the lower-numbered, so it is kept, and
+    ///   runs from node 23 to corner 24.
     /// - two arcs that differ in their boundary, in their crossing, or in which
     ///   way they run against their gradients, and two of a closed crossing.
     ///   None of these is joined.
@@ -7380,9 +7386,9 @@ mod tests {
             node: on_the_circle,
         };
 
-        let corners = [0, 4, 10];
+        let corners = [0, 4, 10, 24];
         let vertex = bottom.wires[0][0].start.vertex;
-        arrangement.nodes = (0..22)
+        arrangement.nodes = (0..25)
             .map(|node| Node {
                 point: PredicatePoint::from([0.0; 3]),
                 boxed_tight: PredicatePoint::from([0.0; 3]),
@@ -7409,7 +7415,7 @@ mod tests {
             arc(line, [12, 11], None, false),
             arc(line, [0, 1], None, false),
             arc(other_line, [6, 7], None, false),
-            arc(line, [9, 10], None, false),
+            arc(line, [8, 10], None, false),
             arc(line, [1, 2], None, false),
             arc(circle, [14, 15], None, false),
             arc(other_line, [7, 5], None, false),
@@ -7423,6 +7429,9 @@ mod tests {
             arc(other_line, [17, 18], None, false),
             arc(line, [19, 20], None, false),
             arc(line, [20, 21], None, true),
+            arc(line, [22, 22], None, false),
+            arc(line, [23, 23], None, false),
+            arc(line, [24, 23], None, false),
         ];
 
         arrangement.join_arcs_that_meet_at_nothing();
@@ -7445,7 +7454,7 @@ mod tests {
                 (line, [0, 4], false, false),
                 (line, [12, 11], false, false),
                 (other_line, [7, 7], false, false),
-                (line, [9, 10], false, false),
+                (line, [8, 10], false, false),
                 (circle, [14, 15], false, false),
                 (line, [11, 13], true, false),
                 (circle, [15, 14], false, false),
@@ -7453,6 +7462,8 @@ mod tests {
                 (other_line, [17, 18], false, false),
                 (line, [19, 20], false, false),
                 (line, [20, 21], false, true),
+                (line, [22, 22], false, false),
+                (line, [23, 24], false, false),
             ],
             "each run is its lowest-numbered arc, and nothing else moved"
         );
