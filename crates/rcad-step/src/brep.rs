@@ -1393,6 +1393,10 @@ impl Walk {
     ///
     /// When `EDGE_CURVE.same_sense` is false the edge runs the other way round
     /// the curve, which is the other arc, and the half-space is reversed.
+    ///
+    /// Where the half-space stands, along `(B − A) × w`, is
+    /// [`a_half_space_naming_the_arc`]'s: an arc longer than half its curve
+    /// needs one a fuse can read that a shorter arc does not.
     fn the_arc_between(
         &self,
         edge_curve: EntityId,
@@ -1406,7 +1410,7 @@ impl Walk {
         }
         let across = (corners[1] - corners[0]).cross(place.axis);
         let facing = if along_the_curve { across } else { -across };
-        let picking = a_half_space_holding_both(corners, facing)
+        let picking = a_half_space_naming_the_arc(corners, facing, place.origin)
             .ok_or(Refusal::AnArcThisReaderCouldNotName { edge: edge_curve })?;
         Ok(EdgeRun::PartOfWhereItCrosses {
             and,
@@ -2478,6 +2482,44 @@ fn how_far_off_the_ellipse_can_be(surface: &Surface, ellipse: &Ellipse) -> Optio
     ))
 }
 
+/// The half-space that picks the arc between `corners` lying the way `facing`
+/// points, in a shape a fuse reads, with `centre` the centre of the arc's curve.
+///
+/// A fuse tells the two arcs between one pair of ends apart in exactly two ways
+/// (`a_picker_that_tells_the_two_arcs_apart` in `rcad-topo`): by a plane that
+/// holds **both ends exactly**, or by one with both ends on or in front and the
+/// **curve's centre on or behind**. [`a_half_space_holding_both`] stands its
+/// plane a few roundings below both ends, so it is the second kind exactly
+/// where the centre stays on or behind it.
+///
+/// **An arc longer than half its curve never has that.** Its centre is on the
+/// arc's own side of the chord, so in front of the plane through the chord and
+/// further in front of one lowered below it. Such an arc takes a plane through
+/// both ends instead, where the numbers hold both ends on one plane exactly
+/// ([`a_half_space_through_both`]); the side of it the arc is on is then the
+/// side `facing` points to, which is what the lowered plane said too, and
+/// nothing about how near the plane came to an end is read. Where no such plane
+/// can be found it keeps the lowered one, which names the arc for this model
+/// and the next `Model::validate` but which a fuse still does not read
+/// (`a_long_arc_with_no_plane_through_both_its_ends_keeps_the_lowered_one`).
+///
+/// **An arc whose centre is on or behind the lowered plane keeps it** even
+/// where a plane through both ends exists, so every arc that read back before
+/// reads back with the very picker it had.
+fn a_half_space_naming_the_arc(
+    corners: [Point; 2],
+    facing: Vector,
+    centre: Point,
+) -> Option<HalfSpace> {
+    let lowered = a_half_space_holding_both(corners, facing)?;
+    match lowered.side_of_point(PredicatePoint::from(centre.coordinates())) {
+        Decision::Neg | Decision::Zero => Some(lowered),
+        Decision::Pos | Decision::Undecidable { .. } | _ => {
+            Some(a_half_space_through_both(corners, facing).unwrap_or(lowered))
+        }
+    }
+}
+
 fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<HalfSpace> {
     let below = |corner: Point| {
         let terms = facing.components().into_iter().zip(corner.coordinates());
@@ -2493,6 +2535,32 @@ fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<Half
             picking.side_of_point(PredicatePoint::from(corner.coordinates())) != Decision::Neg
         })
         .then_some(picking)
+}
+
+/// A half-space facing `facing`, or `facing` scaled to length one, whose plane
+/// both `corners` are exactly on — `None` when neither is.
+///
+/// The test is the exact predicate, so the plane holds both ends or is not
+/// handed back; nothing is near enough. Whether one exists is a question about
+/// the numbers: `facing · corner` has to round to the same offset at both
+/// corners with nothing lost. The length-one normal is what lets a slice
+/// square to an axis at any offset qualify: there `facing` is `(0, −2x, 0)` or
+/// the like, `2x·y` need not be a number `f64` holds, and `(0, −1, 0)` makes
+/// the offset `y` itself (`a_long_arc_is_named_by_a_plane_through_both_its_ends`).
+fn a_half_space_through_both(corners: [Point; 2], facing: Vector) -> Option<HalfSpace> {
+    [Some(facing), facing.normalized().ok()]
+        .into_iter()
+        .flatten()
+        .find_map(|normal| {
+            let through = HalfSpace::through_a_point_facing(corners[0], normal).ok()?;
+            corners
+                .iter()
+                .all(|corner| {
+                    through.side_of_point(PredicatePoint::from(corner.coordinates()))
+                        == Decision::Zero
+                })
+                .then_some(through)
+        })
 }
 
 /// Which side of a surface a point is on, through the same certified predicates
@@ -2565,8 +2633,8 @@ mod tests {
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, Ellipse, a_half_space_holding_both,
-        a_surface_holds_the_circle, a_surface_holds_the_ellipse, how_far_off,
-        how_far_off_the_circle_can_be, how_far_off_the_ellipse_can_be,
+        a_half_space_naming_the_arc, a_surface_holds_the_circle, a_surface_holds_the_ellipse,
+        how_far_off, how_far_off_the_circle_can_be, how_far_off_the_ellipse_can_be,
     };
 
     /// The LED body's circle, written as the file writes it: on its dome
@@ -3386,6 +3454,88 @@ mod tests {
             coin_tosses_lost > 0,
             "with no slack at all an end has to land behind the surface somewhere, or \
              the eight epsilons are paying for nothing"
+        );
+    }
+
+    /// A circle of radius `5s` about `z` sliced by `y = −3s`, with the
+    /// corners at `(±4s, −3s, 0)`: the long arc is named by a plane both ends
+    /// are exactly on, and the short arc keeps the lowered plane it always had.
+    ///
+    /// `s = 1` is the plane `facing` itself, offset `−24`. `s = 1 + 2⁻³⁰` is the
+    /// one where `facing · corner = −24s²` needs 62 bits, so only the
+    /// length-one normal `(0, 1, 0)` holds both ends — the control checks that
+    /// `facing` itself does not.
+    #[test]
+    fn a_long_arc_is_named_by_a_plane_through_both_its_ends() {
+        let side = |half: &rcad_geom::HalfSpace, at: Point| {
+            half.side_of_point(PredicatePoint::from(at.coordinates()))
+        };
+        for (s, facing_itself_holds_both) in [(1.0, true), (1.0 + 2f64.powi(-30), false)] {
+            let corners = [
+                Point::new(4.0 * s, -3.0 * s, 0.0),
+                Point::new(-4.0 * s, -3.0 * s, 0.0),
+            ];
+            let into_the_long_arc = (corners[1] - corners[0]).cross(Vector::new(0.0, 0.0, 1.0));
+            let centre = Point::origin();
+
+            let long = a_half_space_naming_the_arc(corners, into_the_long_arc, centre)
+                .expect("a plane through both ends of the long arc");
+            assert_eq!(
+                corners.map(|corner| side(&long, corner)),
+                [Decision::Zero; 2],
+                "s = {s}: the long arc's plane holds both its ends"
+            );
+            assert_eq!(side(&long, centre), Decision::Pos, "s = {s}: centre");
+            let lowered =
+                a_half_space_holding_both(corners, into_the_long_arc).expect("a lowered plane");
+            assert_eq!(
+                side(&lowered, centre),
+                Decision::Pos,
+                "s = {s}: the lowered plane has the long arc's centre in front, which is \
+                 what a fuse does not read"
+            );
+            let through_facing_itself =
+                rcad_geom::HalfSpace::through_a_point_facing(corners[0], into_the_long_arc)
+                    .expect("a normal with length");
+            assert_eq!(
+                corners
+                    .iter()
+                    .all(|corner| side(&through_facing_itself, *corner) == Decision::Zero),
+                facing_itself_holds_both,
+                "s = {s}: whether `facing` itself holds both ends"
+            );
+
+            let into_the_short_arc = -into_the_long_arc;
+            let short = a_half_space_naming_the_arc(corners, into_the_short_arc, centre)
+                .expect("a plane for the short arc");
+            assert_eq!(
+                Some(short),
+                a_half_space_holding_both(corners, into_the_short_arc),
+                "s = {s}: the short arc keeps the lowered plane"
+            );
+            assert_eq!(
+                corners.map(|corner| side(&short, corner)),
+                [Decision::Pos; 2],
+                "s = {s}: the short arc's ends are in front of its lowered plane"
+            );
+            assert_eq!(side(&short, centre), Decision::Neg, "s = {s}: centre");
+        }
+    }
+
+    /// A long arc whose ends no plane facing `facing`, or `facing` scaled to
+    /// length one, holds exactly keeps the lowered plane, with its centre in
+    /// front — the picker a fuse refuses. This is the gap left after Q771, kept
+    /// here so that a fix for it starts from a shape that is known to reach it.
+    #[test]
+    fn a_long_arc_with_no_plane_through_both_its_ends_keeps_the_lowered_one() {
+        let corners = [Point::new(0.1, 0.7, 0.0), Point::new(-0.3, 0.2, 0.0)];
+        let facing = (corners[1] - corners[0]).cross(Vector::new(0.0, 0.0, 1.0));
+        let centre = Point::new(-1.0, 1.2, 0.0);
+        let named = a_half_space_naming_the_arc(corners, facing, centre).expect("a picker");
+        assert_eq!(Some(named), a_half_space_holding_both(corners, facing));
+        assert_eq!(
+            named.side_of_point(PredicatePoint::from(centre.coordinates())),
+            Decision::Pos
         );
     }
 }
