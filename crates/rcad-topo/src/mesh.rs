@@ -1107,9 +1107,19 @@ impl BuildingAMesh {
         // go right round it bounds a patch one way and an **unbounded** region
         // the other. A solid is bounded, so its faces are, so the material is
         // the patch — there is no second case for a sign to tell apart.
+        //
+        // **The rim need not be one closed curve.** A turned cube's corner
+        // poking into a ball cuts it in three arcs that meet at three corners,
+        // and the ball's skin inside the cube is the ball less that triangle.
+        // Asked only of one closed curve, it fell through to be filled inside
+        // out, and the intersection was refused
+        // `Invalid(FacesDoNotAgreeWhichWayTheyFace)` (`docs/decisions.md`
+        // §402). Any wire that passes each of its points once is an island in
+        // the rectangle the same way; one that passes a point twice, a pole
+        // side or a slit, is not, and is left to the paths below as before.
         let widest = whole_turn / 4.0;
         if walked.len() == 1
-            && walked[0].closes_on_one_curve
+            && (walked[0].closes_on_one_curve || it_passes_each_of_its_points_once(&walked[0]))
             && !walked[0].goes_right_round
             && where_this_surface_pinches(stored).is_some()
             && how_much_of_the_chart_this_loop_encloses(&walked[0]) <= 0.0
@@ -1131,6 +1141,35 @@ impl BuildingAMesh {
                 widest,
                 room,
             );
+        }
+        // **Several holes, each with the material outside it, are the same
+        // shape cut into strips.** Handed over whole, the first loop was taken
+        // for the outer one and the triangulator filled the discs, not the
+        // ball less the discs. So the ball is opened along a meridian in every
+        // stretch of longitude no hole reaches, each strip from pole to pole
+        // holds the holes between its two meridians, and each strip is cut up
+        // to both poles the way a ball less one disc is.
+        if walked.len() > 1
+            && where_this_surface_pinches(stored) == Some(core::f64::consts::FRAC_PI_2)
+            && walked.iter().all(|around| {
+                !around.goes_right_round
+                    && it_passes_each_of_its_points_once(around)
+                    && how_much_of_the_chart_this_loop_encloses(around) <= 0.0
+            })
+        {
+            let Some(strips) = self.open_the_ball_into_strips(face, stored, &walked, room)? else {
+                return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+            };
+            let mut pieces = Vec::with_capacity(2 * strips.len());
+            for (strip, holes) in strips {
+                let Some(cut) =
+                    self.cut_holes_up_to_both_poles(face, stored, &strip, &holes, room)?
+                else {
+                    return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+                };
+                pieces.extend(cut);
+            }
+            return self.cut_each_narrow_enough(face, stored, Chart::Upright, pieces, widest, room);
         }
         if walked.len() == 1
             && let Some((one, other)) = self.open_a_slit(face, stored, &walked[0], room)?
@@ -1169,7 +1208,8 @@ impl BuildingAMesh {
         // refuses a curved solid outright"*. The other face with a hole this
         // cuts is a ball's skin whose outer loop reaches both poles and whose
         // hole reaches neither, which a half ball cut again leaves: it is cut
-        // from the hole up to each pole instead. A face with one loop right
+        // from the hole up to each pole instead. A ball's skin with only holes
+        // was opened into strips above. A face with one loop right
         // round and another that is not has already been refused in
         // [`BuildingAMesh::cut_up`], because nothing says which side of the
         // winding loop the other sits. `Model` is `Deserialize` and `validate`
@@ -1382,20 +1422,132 @@ impl BuildingAMesh {
             [seam, pole],
             room,
         )?;
+        Ok(Some(a_strip_from_pole_to_pole(
+            [seam, seam + whole],
+            [&up, &up],
+            [south, north],
+            pole,
+        )))
+    }
 
-        let mut outer = WalkedLoop {
-            corners: vec![[seam, -pole], [seam + whole, -pole]],
-            points: vec![south, south],
-            ..WalkedLoop::a_stretch(0)
+    /// A ball face whose every loop is a hole opened into strips from pole to
+    /// pole, each with the holes it holds moved into its own turn of
+    /// longitude, or `None` when no meridian misses every hole or a hole does
+    /// not lie strictly between its strip's two meridians.
+    ///
+    /// **One meridian in every stretch of longitude no hole reaches**, at its
+    /// middle, so each strip holds one run of holes whose longitudes overlap
+    /// one another and nothing else does. The first is in the widest stretch,
+    /// and it is the seam the strips are counted from; the rest are cuts like
+    /// any other. Each meridian's points are made here once and used by the
+    /// strips either side of it, which is what makes their two sides one line
+    /// in space, and the two poles are one point each that every strip shares.
+    ///
+    /// **Holes in one strip are not refused here for overlapping in
+    /// longitude.** [`BuildingAMesh::cut_holes_up_to_both_poles`] chains them
+    /// from the top down, and refuses them only where one does not lie wholly
+    /// above the next.
+    fn open_the_ball_into_strips(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        holes: &[WalkedLoop],
+        room: f64,
+    ) -> Result<Option<Vec<(WalkedLoop, Vec<WalkedLoop>)>>> {
+        let (Some(whole), Some(pole)) = (
+            how_far_the_longitude_wraps(stored),
+            where_this_surface_pinches(stored),
+        ) else {
+            return Ok(None);
         };
-        for (corner, &point) in up.corners.iter().zip(&up.points) {
-            outer.corners.push([corner[0] + whole, corner[1]]);
-            outer.points.push(point);
+        let spans: Vec<(f64, f64)> = holes.iter().map(longitudes_of).collect();
+        if spans.iter().any(|&(least, most)| most - least >= whole) {
+            return Ok(None);
         }
-        outer.corners.extend([[seam + whole, pole], [seam, pole]]);
-        outer.points.extend([north, north]);
-        outer.take_in(&up.the_other_way());
-        Ok(Some(outer))
+        let Some(seam) = the_middle_of_the_widest_stretch_no_hole_reaches(&spans, whole) else {
+            return Ok(None);
+        };
+
+        let mut from_the_seam: Vec<(f64, f64, usize)> = spans
+            .iter()
+            .enumerate()
+            .map(|(at, &(least, most))| {
+                let start = (least - seam).rem_euclid(whole);
+                (start, start + (most - least), at)
+            })
+            .collect();
+        from_the_seam.sort_by(|one, other| one.0.total_cmp(&other.0));
+        let mut runs: Vec<(f64, f64, Vec<usize>)> = Vec::new();
+        for (start, end, at) in from_the_seam {
+            match runs.last_mut() {
+                Some(run) if start <= run.1 => {
+                    run.1 = run.1.max(end);
+                    run.2.push(at);
+                }
+                _ => runs.push((start, end, vec![at])),
+            }
+        }
+        let mut cuts = Vec::with_capacity(runs.len() + 1);
+        cuts.push(seam);
+        cuts.extend(
+            runs.windows(2)
+                .map(|pair| seam + (pair[0].1 + pair[1].0) / 2.0),
+        );
+
+        let there = back_out_of_the_frame_this_face_is_meshed_in(face);
+        let [south, north] = [-pole, pole].map(|latitude| {
+            let at = self.remember_made_on(face, &there, stored.point_at(seam, latitude));
+            self.on_a_cut.insert(at);
+            at
+        });
+        let mut meridians = Vec::with_capacity(cuts.len());
+        for &longitude in &cuts {
+            meridians.push(self.points_along_a_cut(
+                face,
+                stored,
+                Chart::Upright,
+                [longitude, -pole],
+                [longitude, pole],
+                room,
+            )?);
+        }
+        cuts.push(seam + whole);
+
+        let mut strips = Vec::with_capacity(runs.len());
+        for (at, (_, _, members)) in runs.into_iter().enumerate() {
+            let (first, then) = (&meridians[at], &meridians[(at + 1) % meridians.len()]);
+            let (least, most) = spans[members[0]];
+            let [left, right] = [cuts[at], cuts[at + 1]].map(|cut| {
+                cut - whole_turns_between(
+                    (cuts[at] + cuts[at + 1]) / 2.0,
+                    (least + most) / 2.0,
+                    whole,
+                )
+            });
+            let strip =
+                a_strip_from_pole_to_pole([left, right], [first, then], [south, north], pole);
+            let mut held = Vec::with_capacity(members.len());
+            for member in members {
+                let hole = &holes[member];
+                let (least, most) = spans[member];
+                let by = whole_turns_between((least + most) / 2.0, (left + right) / 2.0, whole);
+                let moved = WalkedLoop {
+                    corners: hole
+                        .corners
+                        .iter()
+                        .map(|corner| [corner[0] - by, corner[1]])
+                        .collect(),
+                    ..hole.clone()
+                };
+                let (least, most) = longitudes_of(&moved);
+                if !(left < least && most < right) {
+                    return Ok(None);
+                }
+                held.push(moved);
+            }
+            strips.push((strip, held));
+        }
+        Ok(Some(strips))
     }
 
     /// Cut each piece in two until none of them goes further round than
@@ -1817,28 +1969,100 @@ impl BuildingAMesh {
         let [first, second] = walked else {
             return Ok(None);
         };
-        if where_this_surface_pinches(stored) != Some(core::f64::consts::FRAC_PI_2)
-            || first.goes_right_round
-            || second.goes_right_round
-        {
-            return Ok(None);
-        }
         let (outer, hole) = match [first, second].map(how_much_of_the_chart_this_loop_encloses) {
             [one, other] if one > 0.0 && other < 0.0 => (first, second),
             [one, other] if one < 0.0 && other > 0.0 => (second, first),
             _ => return Ok(None),
         };
-        if (0..hole.points.len())
-            .any(|at| hole.points[at] == hole.points[(at + 1) % hole.points.len()])
+        let Some(pieces) = self.cut_holes_up_to_both_poles(
+            face,
+            stored,
+            outer,
+            core::slice::from_ref(hole),
+            room,
+        )?
+        else {
+            return Ok(None);
+        };
+        let [one, other] = <[WalkedLoop; 2]>::try_from(pieces)
+            .unwrap_or_else(|pieces| panic!("one hole cuts a face in two, not {}", pieces.len()));
+        Ok(Some((one, other)))
+    }
+
+    /// [`BuildingAMesh::cut_a_hole_up_to_both_poles`] for an outer loop with
+    /// any number of holes in it, one above the other: the cut up to the top
+    /// pole leaves from the highest corner of the highest hole, the cut down
+    /// to the bottom one from the lowest corner of the lowest, and a cut
+    /// between each hole and the next joins the lowest corner of the one to
+    /// the highest corner of the other. One hole is cut exactly as that one
+    /// is, into two pieces.
+    ///
+    /// **A cut between two holes stays inside the face when each hole lies
+    /// wholly above the next.** A side is a straight line between two corners
+    /// in these coordinates, so a hole lies within the latitudes of its highest
+    /// and lowest corners, and the cut runs strictly between the latitudes of
+    /// the two holes it joins, where no hole reaches. The outer loop is only
+    /// ever a strip from pole to pole when there is more than one hole
+    /// ([`BuildingAMesh::open_the_ball_into_strips`]), which holds every
+    /// straight line between two points inside it. The cuts up to the poles
+    /// are the ones the one-hole case already shows stay inside. Holes that do
+    /// not lie one above the other are cut side by side instead
+    /// ([`BuildingAMesh::cut_holes_side_by_side_up_to_both_poles`]).
+    ///
+    /// **A cut between two holes carries a point of its own.** Its two ends
+    /// are corners of the model, and a face across both holes would be free to
+    /// draw the same pair, which is the fold
+    /// [`BuildingAMesh::cut_in_two`] gives the same answer to.
+    fn cut_holes_up_to_both_poles(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        outer: &WalkedLoop,
+        holes: &[WalkedLoop],
+        room: f64,
+    ) -> Result<Option<Vec<WalkedLoop>>> {
+        if where_this_surface_pinches(stored) != Some(core::f64::consts::FRAC_PI_2)
+            || outer.goes_right_round
+            || holes.iter().any(|hole| hole.goes_right_round)
         {
             return Ok(None);
         }
-        let highest = the_corner_furthest(hole, 1.0);
-        let lowest = the_corner_furthest(hole, -1.0);
-        let [up_at, down_at] = [(highest, 1.0), (lowest, -1.0)].map(|(corner, way)| {
-            let [longitude, latitude] = hole.corners[corner];
-            the_pole_side_a_line_from_a_hole_reaches(outer, longitude, latitude, way)
+        if holes.iter().any(|hole| {
+            (0..hole.points.len())
+                .any(|at| hole.points[at] == hole.points[(at + 1) % hole.points.len()])
+        }) {
+            return Ok(None);
+        }
+        let mut from_the_top: Vec<(&WalkedLoop, [usize; 2])> = holes
+            .iter()
+            .map(|hole| {
+                (
+                    hole,
+                    [
+                        the_corner_furthest(hole, 1.0),
+                        the_corner_furthest(hole, -1.0),
+                    ],
+                )
+            })
+            .collect();
+        from_the_top.sort_by(|(one, [one_highest, _]), (other, [other_highest, _])| {
+            other.corners[*other_highest][1].total_cmp(&one.corners[*one_highest][1])
         });
+        if from_the_top.windows(2).any(|pair| {
+            let [(upper, [_, its_lowest]), (lower, [its_highest, _])] = pair else {
+                unreachable!("windows of two");
+            };
+            lower.corners[*its_highest][1] >= upper.corners[*its_lowest][1]
+        }) {
+            return self.cut_holes_side_by_side_up_to_both_poles(face, stored, outer, holes, room);
+        }
+        let (top_hole, [highest, _]) = from_the_top[0];
+        let (bottom_hole, [_, lowest]) = from_the_top[from_the_top.len() - 1];
+        let [up_at, down_at] =
+            [(top_hole, highest, 1.0), (bottom_hole, lowest, -1.0)].map(|(hole, corner, way)| {
+                let [longitude, latitude] = hole.corners[corner];
+                the_pole_side_a_line_from_a_hole_reaches(outer, longitude, latitude, way)
+            });
         let (Some(up_at), Some(down_at)) = (up_at, down_at) else {
             return Ok(None);
         };
@@ -1847,8 +2071,8 @@ impl BuildingAMesh {
         }
 
         let mut opened = outer.clone();
-        let top_corner = [hole.corners[highest][0], up_at.1];
-        let bottom_corner = [hole.corners[lowest][0], down_at.1];
+        let top_corner = [top_hole.corners[highest][0], up_at.1];
+        let bottom_corner = [bottom_hole.corners[lowest][0], down_at.1];
         let (top, bottom) = if up_at.0 > down_at.0 {
             opened.corners.insert(up_at.0 + 1, top_corner);
             opened.points.insert(up_at.0 + 1, outer.points[up_at.0]);
@@ -1869,7 +2093,7 @@ impl BuildingAMesh {
             face,
             stored,
             Chart::Upright,
-            hole.corners[highest],
+            top_hole.corners[highest],
             top_corner,
             room,
         )?;
@@ -1878,15 +2102,41 @@ impl BuildingAMesh {
             stored,
             Chart::Upright,
             bottom_corner,
-            hole.corners[lowest],
+            bottom_hole.corners[lowest],
             room,
         )?;
+        let mut up_from_each_hole_below = Vec::with_capacity(from_the_top.len() - 1);
+        for pair in from_the_top.windows(2) {
+            let [(upper, [_, its_lowest]), (lower, [its_highest, _])] = pair else {
+                unreachable!("windows of two");
+            };
+            let leaving = lower.corners[*its_highest];
+            let arriving = upper.corners[*its_lowest];
+            let steps = how_many_steps(stored, leaving, arriving, room).max(2);
+            up_from_each_hole_below.push(self.points_along_a_cut_in(
+                face,
+                stored,
+                Chart::Upright,
+                [leaving, arriving],
+                steps,
+            )?);
+        }
 
         one.take_in(&from_the_bottom);
-        one.take_in(&hole.between(lowest, highest));
+        for (at, &(hole, [highest, lowest])) in from_the_top.iter().enumerate().rev() {
+            one.take_in(&hole.between(lowest, highest));
+            if at > 0 {
+                one.take_in(&up_from_each_hole_below[at - 1]);
+            }
+        }
         one.take_in(&to_the_top);
         other.take_in(&to_the_top.the_other_way());
-        other.take_in(&hole.between(highest, lowest));
+        for (at, &(hole, [highest, lowest])) in from_the_top.iter().enumerate() {
+            other.take_in(&hole.between(highest, lowest));
+            if let Some(cut) = up_from_each_hole_below.get(at) {
+                other.take_in(&cut.the_other_way());
+            }
+        }
         other.take_in(&from_the_bottom.the_other_way());
 
         if [&one, &other]
@@ -1895,15 +2145,174 @@ impl BuildingAMesh {
         {
             return Ok(None);
         }
-        for at in [
-            hole.points[highest],
-            hole.points[lowest],
-            outer.points[up_at.0],
-            outer.points[down_at.0],
-        ] {
-            self.on_a_cut.insert(at);
+        for &(hole, [highest, lowest]) in &from_the_top {
+            self.on_a_cut
+                .extend([hole.points[highest], hole.points[lowest]]);
         }
-        Ok(Some((one, other)))
+        self.on_a_cut
+            .extend([outer.points[up_at.0], outer.points[down_at.0]]);
+        Ok(Some(vec![one, other]))
+    }
+
+    /// Cut a strip of a ball holding several holes, none wholly above
+    /// another, into one more piece than it has holes: each hole is cut from
+    /// its highest corner straight up to the top pole and from its lowest
+    /// straight down to the bottom one, and each piece runs between two holes'
+    /// cuts, or between the strip's own side and the first or last hole's.
+    /// `None` when a cut cannot be shown to stay inside the face.
+    ///
+    /// **A cut stays inside the face when the first thing it meets is a pole
+    /// side.** No side of a hole reaches above its highest corner or below its
+    /// lowest, so the cut leaves its own hole straight into the face, and it is
+    /// refused when it meets a side of another hole, or of the strip, before
+    /// the pole. Two cuts along one longitude would lie on each other, and are
+    /// refused too, so every cut runs along a longitude of its own. Then no
+    /// two cuts cross, and no cut crosses a hole, so the cuts of two holes
+    /// cannot swap order between the top pole and the bottom one: holes put in
+    /// order along the one are in order along the other, and a strip where
+    /// they are not is refused, not cut.
+    ///
+    /// The holes found here overlap in longitude: a turned cube's corner and
+    /// one of its faces both poking into a ball leave two holes side by side,
+    /// the one's end a few hundredths of a radian past the other's start, and
+    /// no meridian between them (`docs/decisions.md` §402).
+    fn cut_holes_side_by_side_up_to_both_poles(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        outer: &WalkedLoop,
+        holes: &[WalkedLoop],
+        room: f64,
+    ) -> Result<Option<Vec<WalkedLoop>>> {
+        let mut cut: Vec<(&WalkedLoop, [usize; 2], [(usize, f64); 2])> =
+            Vec::with_capacity(holes.len());
+        for (at, hole) in holes.iter().enumerate() {
+            let ends = [
+                the_corner_furthest(hole, 1.0),
+                the_corner_furthest(hole, -1.0),
+            ];
+            let reaches = [(ends[0], 1.0), (ends[1], -1.0)].map(|(corner, way)| {
+                let [longitude, latitude] = hole.corners[corner];
+                let (side, pole) =
+                    the_pole_side_a_line_from_a_hole_reaches(outer, longitude, latitude, way)?;
+                let another_is_in_the_way = holes.iter().enumerate().any(|(other, around)| {
+                    other != at && a_line_meets(around, longitude, [latitude, pole])
+                });
+                (!another_is_in_the_way).then_some((side, pole))
+            });
+            let [Some(up), Some(down)] = reaches else {
+                return Ok(None);
+            };
+            cut.push((hole, ends, [up, down]));
+        }
+        let longitude_of =
+            |(hole, ends, _): &(&WalkedLoop, [usize; 2], _), end: usize| hole.corners[ends[end]][0];
+        cut.sort_by(|one, other| longitude_of(one, 0).total_cmp(&longitude_of(other, 0)));
+        let (top, bottom) = (cut[0].2[0].0, cut[0].2[1].0);
+        let in_order = cut.windows(2).all(|pair| {
+            (0..2).all(|end| longitude_of(&pair[0], end) < longitude_of(&pair[1], end))
+        });
+        let sides =
+            |end: usize| outer.corners[end][0] - outer.corners[(end + 1) % outer.corners.len()][0];
+        if !in_order
+            || top == bottom
+            || sides(top) <= 0.0
+            || sides(bottom) >= 0.0
+            || cut
+                .iter()
+                .any(|(_, _, [up, down])| up.0 != top || down.0 != bottom)
+        {
+            return Ok(None);
+        }
+
+        let mut opened = WalkedLoop::a_stretch(outer.corners.len() + 2 * cut.len());
+        let mut top_at = vec![0; cut.len()];
+        let mut bottom_at = vec![0; cut.len()];
+        for at in 0..outer.corners.len() {
+            opened.corners.push(outer.corners[at]);
+            opened.points.push(outer.points[at]);
+            if at == top {
+                for (each, (hole, ends, [(_, pole), _])) in cut.iter().enumerate().rev() {
+                    top_at[each] = opened.corners.len();
+                    opened.corners.push([hole.corners[ends[0]][0], *pole]);
+                    opened.points.push(outer.points[top]);
+                }
+            }
+            if at == bottom {
+                for (each, (hole, ends, [_, (_, pole)])) in cut.iter().enumerate() {
+                    bottom_at[each] = opened.corners.len();
+                    opened.corners.push([hole.corners[ends[1]][0], *pole]);
+                    opened.points.push(outer.points[bottom]);
+                }
+            }
+        }
+        let mut to_the_top = Vec::with_capacity(cut.len());
+        let mut from_the_bottom = Vec::with_capacity(cut.len());
+        for (each, (hole, [highest, lowest], _)) in cut.iter().enumerate() {
+            to_the_top.push(self.points_along_a_cut(
+                face,
+                stored,
+                Chart::Upright,
+                hole.corners[*highest],
+                opened.corners[top_at[each]],
+                room,
+            )?);
+            from_the_bottom.push(self.points_along_a_cut(
+                face,
+                stored,
+                Chart::Upright,
+                opened.corners[bottom_at[each]],
+                hole.corners[*lowest],
+                room,
+            )?);
+        }
+
+        let last = cut.len() - 1;
+        let left_half = |each: usize| {
+            let (hole, [highest, lowest], _) = cut[each];
+            hole.between(lowest, highest)
+        };
+        let right_half = |each: usize| {
+            let (hole, [highest, lowest], _) = cut[each];
+            hole.between(highest, lowest)
+        };
+        let mut pieces = Vec::with_capacity(cut.len() + 1);
+        let mut first = opened.between(top_at[0], bottom_at[0]);
+        first.take_in(&from_the_bottom[0]);
+        first.take_in(&left_half(0));
+        first.take_in(&to_the_top[0]);
+        pieces.push(first);
+        for each in 0..last {
+            let next = each + 1;
+            let mut piece = opened.between(top_at[next], top_at[each]);
+            piece.take_in(&to_the_top[each].the_other_way());
+            piece.take_in(&right_half(each));
+            piece.take_in(&from_the_bottom[each].the_other_way());
+            piece.take_in(&opened.between(bottom_at[each], bottom_at[next]));
+            piece.take_in(&from_the_bottom[next]);
+            piece.take_in(&left_half(next));
+            piece.take_in(&to_the_top[next]);
+            pieces.push(piece);
+        }
+        let mut after = opened.between(bottom_at[last], top_at[last]);
+        after.take_in(&to_the_top[last].the_other_way());
+        after.take_in(&right_half(last));
+        after.take_in(&from_the_bottom[last].the_other_way());
+        pieces.push(after);
+
+        if pieces
+            .iter()
+            .any(|piece| how_much_of_the_chart_this_loop_encloses(piece) <= 0.0)
+        {
+            return Ok(None);
+        }
+        for (hole, [highest, lowest], _) in &cut {
+            self.on_a_cut
+                .extend([hole.points[*highest], hole.points[*lowest]]);
+        }
+        self.on_a_cut
+            .extend([outer.points[top], outer.points[bottom]]);
+        Ok(Some(pieces))
     }
 
     /// The points strictly between two corners of one face, walked along the
@@ -3121,6 +3530,72 @@ fn longitudes_of(around: &WalkedLoop) -> (f64, f64) {
     )
 }
 
+/// Whether no point of a loop stands at two of its corners: no pole side, no
+/// seam and no slit, so that it is a curve drawn once round in the chart.
+fn it_passes_each_of_its_points_once(around: &WalkedLoop) -> bool {
+    let mut seen = HashSet::with_capacity(around.points.len());
+    around.points.iter().all(|&at| seen.insert(at))
+}
+
+/// The longitude halfway across the widest stretch of longitude that none of
+/// `spans` reaches, each span the least and most longitude of one hole in the
+/// hole's own turn, or `None` when they reach every longitude between them.
+///
+/// A stretch starts where a hole ends and no other hole goes on, and runs to
+/// the nearest place a hole starts, its own included a whole turn on. Two holes
+/// that touch at one longitude leave no stretch between them there.
+fn the_middle_of_the_widest_stretch_no_hole_reaches(
+    spans: &[(f64, f64)],
+    whole: f64,
+) -> Option<f64> {
+    let mut widest: Option<(f64, f64)> = None;
+    for (at, &(_, ends)) in spans.iter().enumerate() {
+        let another_goes_on = spans.iter().enumerate().any(|(other, &(least, most))| {
+            other != at && (ends - least).rem_euclid(whole) < most - least
+        });
+        if another_goes_on {
+            continue;
+        }
+        let across = spans
+            .iter()
+            .map(|&(least, _)| (least - ends).rem_euclid(whole))
+            .fold(whole, f64::min);
+        if across > 0.0 && widest.is_none_or(|(most, _)| across > most) {
+            widest = Some((across, ends + across / 2.0));
+        }
+    }
+    widest.map(|(_, middle)| middle)
+}
+
+/// A strip of a ball from pole to pole between the meridians at `left` and
+/// `right`, walked anticlockwise because the material is inside it: along the
+/// bottom pole side, up the right meridian, back along the top pole side and
+/// down the left one. Each meridian is the points strictly between its two
+/// poles, walked upwards, and its corners take the strip's own longitude.
+fn a_strip_from_pole_to_pole(
+    [left, right]: [f64; 2],
+    [left_side, right_side]: [&WalkedLoop; 2],
+    [south, north]: [u32; 2],
+    pole: f64,
+) -> WalkedLoop {
+    let mut strip = WalkedLoop {
+        corners: vec![[left, -pole], [right, -pole]],
+        points: vec![south, south],
+        ..WalkedLoop::a_stretch(0)
+    };
+    for (corner, &point) in right_side.corners.iter().zip(&right_side.points) {
+        strip.corners.push([right, corner[1]]);
+        strip.points.push(point);
+    }
+    strip.corners.extend([[right, pole], [left, pole]]);
+    strip.points.extend([north, north]);
+    for (corner, &point) in left_side.corners.iter().zip(&left_side.points).rev() {
+        strip.corners.push([left, corner[1]]);
+        strip.points.push(point);
+    }
+    strip
+}
+
 /// How far round the surface one loop reaches.
 fn how_far_round(around: &WalkedLoop) -> f64 {
     let (least, most) = longitudes_of(around);
@@ -3375,6 +3850,24 @@ fn the_pole_side_a_line_from_a_hole_reaches(
     }
     let (_, at, crossing) = nearest?;
     (around.points[at] == around.points[(at + 1) % count]).then_some((at, crossing))
+}
+
+/// Whether a side of `around` meets the line along `longitude` between two
+/// latitudes, both ends included, or lies along any of it.
+fn a_line_meets(around: &WalkedLoop, longitude: f64, [from, to]: [f64; 2]) -> bool {
+    let (low, high) = (from.min(to), from.max(to));
+    let count = around.corners.len();
+    (0..count).any(|at| {
+        let (here, next) = (around.corners[at], around.corners[(at + 1) % count]);
+        if !passes(longitude, here[0], next[0]) {
+            return false;
+        }
+        if here[0] == next[0] {
+            return here[1].max(next[1]) >= low && here[1].min(next[1]) <= high;
+        }
+        let crossing = here[1] + (longitude - here[0]) / (next[0] - here[0]) * (next[1] - here[1]);
+        (low..=high).contains(&crossing)
+    })
 }
 
 /// The running state of a walk round one wire.
