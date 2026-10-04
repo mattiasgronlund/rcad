@@ -26,6 +26,14 @@
 //! them, because a round wire is counted by its place in the face's list and
 //! not by its direction.
 //!
+//! Only one of the eight is a solid, the half-ring. `Model::validate` passes
+//! it and refuses the other seven
+//! ([`validate_refuses_every_wall_walking_its_two_circles_the_same_way_round`]).
+//! It used to pass one more, which walks the flat face's hole the same way
+//! round as its outline and uses the wall `Forward`, and the answer pins were
+//! asked of that one as though it were a solid. They leave it out now
+//! ([`is_the_hole_walked_the_way_its_outline_runs`]).
+//!
 //! On `c564dec5` every one of the six was refused
 //! `AFaceTrimmedByACurveThisCannotFollow`, and both points given to
 //! `classify_point` were refused `CannotFollowAFacesTrimming` naming the flat
@@ -43,13 +51,51 @@
 
 use rcad_geom::{Axis, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, FORMAT_VERSION, FaceKey, Model, OnAFace, SolidKey};
+use rcad_topo::{Containment, Error, FORMAT_VERSION, FaceKey, Invalid, Model, OnAFace, SolidKey};
 
 mod rings;
 
 const RING: f64 = 4.0;
 const TUBE: f64 = 1.0;
 
+/// A wall that walks its two circles the same way round keeps one side of
+/// `z = 0` at one circle and the other side at the other, so it is neither
+/// half of the ring, and `Model::validate` refuses it by reading that side off
+/// the wire at each circle. Every corner of the flat face is on the ring and
+/// every corner of the wall on the plane, so no corner could say it, and the
+/// mesh draws the hole-walked-wrong choice as the half-ring's own triangles.
+///
+/// The half-ring validates. The three other choices are refused as they were
+/// before the wire was read: walking the outer circle `Reversed`,
+/// `FacesDoNotAgreeWhichWayTheyFace`, and the half-ring's walk with the wall
+/// used `Reversed`, `VolumeIsNotPositive`.
+#[test]
+fn validate_refuses_every_wall_walking_its_two_circles_the_same_way_round() {
+    for choice in every_choice() {
+        let half_ring = read_back(choice);
+        let swept = half_ring
+            .model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new());
+        if the_side_of_z_0_the_wall_keeps(choice).is_none() {
+            assert!(
+                matches!(
+                    swept,
+                    Err(Error::Invalid(
+                        Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                    ))
+                ),
+                "{choice:?}: {swept:?}"
+            );
+        } else if is_the_half_ring(choice) {
+            assert!(swept.is_ok(), "{choice:?}: {swept:?}");
+        } else {
+            assert!(swept.is_err(), "{choice:?}");
+        }
+    }
+}
+
+/// Answers about the flat face, asked of every choice but
+/// [`is_the_hole_walked_the_way_its_outline_runs`].
 #[test]
 fn the_flat_face_holds_the_annulus_between_its_two_circles() {
     let expected = [
@@ -60,7 +106,9 @@ fn the_flat_face_holds_the_annulus_between_its_two_circles() {
         ([5.0, 0.0, 0.0], OnAFace::OnItsBoundary),
         ([3.0, 0.0, 0.0], OnAFace::OnItsBoundary),
     ];
-    for choice in every_choice() {
+    for choice in
+        every_choice().filter(|&choice| !is_the_hole_walked_the_way_its_outline_runs(choice))
+    {
         let half_ring = read_back(choice);
         let view = half_ring.model.solid(half_ring.solid).expect("its own key");
         for (point, answer) in expected {
@@ -82,9 +130,13 @@ fn the_flat_face_holds_the_annulus_between_its_two_circles() {
 /// face is on its skin. The ray from that point meets the wall, so the wall is
 /// asked too, and where its wire keeps one side of `z = 0` at one circle and
 /// the other side at the other it is refused, naming the wall (§243.8).
+///
+/// Asked of every choice but [`is_the_hole_walked_the_way_its_outline_runs`].
 #[test]
 fn classify_point_finds_the_hole_outside_and_the_flat_face_on_the_skin() {
-    for choice in every_choice() {
+    for choice in
+        every_choice().filter(|&choice| !is_the_hole_walked_the_way_its_outline_runs(choice))
+    {
         let half_ring = read_back(choice);
         let view = half_ring.model.solid(half_ring.solid).expect("its own key");
         let policy = Policy::certified();
@@ -176,8 +228,7 @@ fn the_wall_holds_the_half_of_the_ring_its_wire_keeps() {
 /// only when it walks the two opposite ways round, outline one way and hole
 /// the other, and the wall walks each the other way from the flat face. The
 /// half-ring walks its outer circle `Forward` on the flat face — `Model::validate`
-/// refuses every choice that walks it `Reversed`,
-/// `FacesDoNotAgreeWhichWayTheyFace` — and uses its wall `Forward`, and then
+/// refuses every choice that walks it `Reversed` — and uses its wall `Forward`, and then
 /// the wall keeps `z ≥ 0`. Turning the walk over, or the use round, turns
 /// that over.
 fn the_side_of_z_0_the_wall_keeps(choice: Choice) -> Option<f64> {
@@ -191,6 +242,25 @@ fn the_side_of_z_0_the_wall_keeps(choice: Choice) -> Option<f64> {
     } else {
         -1.0
     })
+}
+
+/// The one choice that is a solid: the outer circle walked `Forward` on the
+/// flat face, the hole `Reversed`, and the wall used `Forward`.
+fn is_the_half_ring(choice: Choice) -> bool {
+    choice.outer_on_the_flat_face == Orientation::Forward
+        && choice.inner_on_the_flat_face == Orientation::Reversed
+        && choice.wall_in_the_shell == Orientation::Forward
+}
+
+/// The half-ring with its flat face's hole walked `Forward`, the same way round
+/// as its outline. It is no solid, and it is the one choice besides the
+/// half-ring that `Model::validate` passed before it read the wall's side off
+/// its wire, so its answers were pinned as a solid's. The answer pins leave it
+/// out.
+fn is_the_hole_walked_the_way_its_outline_runs(choice: Choice) -> bool {
+    choice.outer_on_the_flat_face == Orientation::Forward
+        && choice.inner_on_the_flat_face == Orientation::Forward
+        && choice.wall_in_the_shell == Orientation::Forward
 }
 
 /// The mirror decodes a model the kernel built and writes it out again to the

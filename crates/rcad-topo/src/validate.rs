@@ -948,6 +948,26 @@ impl Model {
     ///   holds the cap's walk to the way it faces, and the two coedges of the
     ///   edge running opposite ways carry that onto the ring's face.
     ///
+    /// # Nor does a ring's face say at its circles round the axis
+    ///
+    /// A plane square to a ring's axis cuts it in two circles round the axis,
+    /// and the ring less those two is two pieces, one each side of the plane,
+    /// each with both circles as its whole edge (`docs/decisions.md` §243.8). A
+    /// half-ring's flat face has every corner on the ring and its wall every
+    /// corner on the plane, so no corner says which side either keeps, and the
+    /// sweep asked nothing of a half-ring whose flat face walks its hole the
+    /// same way round as its outline. Nor did the mesh notice: it drew the flat
+    /// face by its plane and its wires' places in the face, and the wall as the
+    /// half its outer circle's walk gives, which are the half-ring's own
+    /// triangles.
+    ///
+    /// So at a circle round the axis ([`a_circle_round_the_axis`]), the side of
+    /// the plane the ring's face keeps is read off the way its wire walks the
+    /// circle ([`the_side_its_wire_keeps`]), and it must be the side read at
+    /// every other circle along the same stored plane. Two that differ say the
+    /// face lies on both sides of the plane, which neither piece does: the wire
+    /// walks its two circles the same way round the axis.
+    ///
     /// **Both gradients are the ones the solid uses**, which is the clause §36.6
     /// got wrong: it says the face's orientation does not come into it, and for a
     /// curved face a fuse turned round it is the whole of what carries the turn —
@@ -1046,6 +1066,7 @@ impl Model {
     ) -> Result<()> {
         let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
         for face in solid.faces() {
+            let mut sides_kept: Vec<SideKept> = Vec::new();
             for coedge in face.wires().flat_map(WireView::coedges) {
                 let edge = coedge.edge();
                 match edge.stored_run() {
@@ -1076,6 +1097,22 @@ impl Model {
                     [&face.stored_surface(), &across.stored_surface()],
                 );
                 let partner = names_it[1];
+                let (partner_outward, partner_turn) = if partner == across.stored_surface() {
+                    (outward(across), across.orientation())
+                } else {
+                    (gradient_of(&partner, at), Orientation::Forward)
+                };
+                if a_circle_round_the_axis(names_it)
+                    && let Some(kept) = the_side_its_wire_keeps(
+                        names_it,
+                        [outward(face), partner_outward],
+                        at,
+                        coedge.orientation_on_its_edge(),
+                        partner_turn,
+                    )?
+                {
+                    the_same_side_as_at_its_other_circles(&mut sides_kept, partner, kept)?;
+                }
                 let read = match a_circle_round_the_tube(names_it) {
                     Some(RoundTheTube::OnTheRing) => {
                         the_other_circles_round_the_tube_are_walked_the_other_way(
@@ -1098,16 +1135,11 @@ impl Model {
                 let Some(material) = read else {
                     continue;
                 };
-                let (partner_outward, material) = if partner == across.stored_surface() {
-                    (outward(across), turned_by(material, across.orientation()))
-                } else {
-                    (gradient_of(&partner, at), material)
-                };
                 let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
                     [&names_it[0], &names_it[1]],
                     [outward(face), partner_outward],
                     at,
-                    material,
+                    turned_by(material, partner_turn),
                 )?
                 else {
                     continue;
@@ -2653,10 +2685,11 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// # Panics
 ///
 /// If `material_side` is neither [`Decision::Pos`] nor [`Decision::Neg`].
-/// This one *is* a broken internal invariant and not caller input: the only
-/// caller, [`Model::validate`](crate::Model::validate)'s own
-/// `check_closed_edges_are_walked_the_way_their_surfaces_wind`, only ever
-/// passes a value [`which_side_of_it_this_face_lies_on`] or
+/// This one *is* a broken internal invariant and not caller input:
+/// [`Model::validate`](crate::Model::validate)'s own
+/// `check_closed_edges_are_walked_the_way_their_surfaces_wind` passes
+/// [`Decision::Neg`] when it reads a side off a wire or knows a cap's, and
+/// otherwise a value [`which_side_of_it_this_face_lies_on`] or
 /// [`which_side_of_a_surface_a_run_names_this_face_lies_on`] read off a real
 /// corner, and both hand back [`the_side_this_face_lies_on`], whose own
 /// `Ok(Some(_))` is never anything but
@@ -2887,6 +2920,94 @@ fn the_other_circles_round_the_tube_are_walked_the_other_way(
         }
     }
     Ok(())
+}
+
+/// The side of one stored plane a ring's face keeps at one of its circles
+/// round the axis, as its wire says.
+struct SideKept {
+    plane: Surface,
+    kept: Decision,
+}
+
+/// Whether `names_it`, the face's own surface and the one across a closed
+/// edge, are a ring and a plane square to its axis: the edge is then one of the
+/// two circles round the axis that the plane cuts the ring in.
+///
+/// Asked as the mesher's walk asks it, of the stored normal crossed into the
+/// stored axis direction (`rcad_geom::walk`'s `where_a_plane_cuts_a_torus`).
+/// A plane whose normal rounds to a different direction from the axis is not
+/// asked about, and its edges are read off the corners as before.
+fn a_circle_round_the_axis(names_it: [Surface; 2]) -> bool {
+    matches!(
+        names_it,
+        [Surface::Torus(ring), Surface::Plane(flat)]
+            if flat.normal().cross(ring.axis().direction()) == Vector::zero()
+    )
+}
+
+/// Which side of `names_it[1]` a face keeps next to a closed edge, read off
+/// the way its wire walks the edge.
+///
+/// This is the closed-edge rule [`a_closed_crossing_is_walked_the_way_it_is_stored`]
+/// run backwards, as `holds.rs` reads which side of a plane a ring's face keeps
+/// (`docs/decisions.md` §243.3, §243.8). `outward` and `partner_turn` are what
+/// the sweep hands the rule going forwards, and the side comes back turned
+/// round when the partner's face is used reversed, because the sweep turns a
+/// side round before handing it in.
+///
+/// Handed back into the rule at the same edge, this side gives back the walk it
+/// was read from, so it checks nothing there (§392.2). What it is for is
+/// comparing two edges.
+///
+/// `None` where the rule finds no way round to read, which is the two surfaces
+/// touching rather than crossing.
+fn the_side_its_wire_keeps(
+    names_it: [Surface; 2],
+    outward: [Vector; 2],
+    at: Point,
+    walked: Orientation,
+    partner_turn: Orientation,
+) -> Result<Option<Decision>> {
+    let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
+        [&names_it[0], &names_it[1]],
+        outward,
+        at,
+        Decision::Neg,
+    )?
+    else {
+        return Ok(None);
+    };
+    let keeps_the_back = (walked == Orientation::Forward) == forward_if_it_keeps_the_back;
+    let handed = if keeps_the_back {
+        Decision::Neg
+    } else {
+        Decision::Pos
+    };
+    Ok(Some(turned_by(handed, partner_turn)))
+}
+
+/// The side of `plane` a ring's face keeps at one circle round the axis is the
+/// side it keeps at every other circle along the same stored plane.
+///
+/// # Errors
+///
+/// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] when an earlier circle
+/// along `plane` kept the other side.
+fn the_same_side_as_at_its_other_circles(
+    sides_kept: &mut Vec<SideKept>,
+    plane: Surface,
+    kept: Decision,
+) -> Result<()> {
+    match sides_kept.iter().find(|read| read.plane == plane) {
+        Some(read) if read.kept != kept => {
+            Err(Invalid::AClosedEdgeIsWalkedAgainstItsSurface.into())
+        }
+        Some(_) => Ok(()),
+        None => {
+            sides_kept.push(SideKept { plane, kept });
+            Ok(())
+        }
+    }
 }
 
 /// Which of the two surfaces either side of an edge names which way it runs.
