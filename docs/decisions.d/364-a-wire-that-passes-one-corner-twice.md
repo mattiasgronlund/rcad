@@ -1,9 +1,10 @@
 ## 364. A wire that passes one corner twice is cut into the loops that touch there — 2026-10-04
 
 *Queue row Q686, which replaced Q411 and Q659. Lane
-`lane-q686-a-wire-through-one-corner-twice-split-in-two`, off `de799a3b`.
-Every figure below was run in this lane, on that base or on the branch, by
-the test or probe named beside it.*
+`lane-q686-a-wire-through-one-corner-twice-split-in-two`, off `de799a3b`, and
+its second run with queue row Q884, named in 364.5. Every figure below was run
+in one of the two, on its base or on its branch, by the test or probe named
+beside it.*
 
   364.1   What refused, and why the triangulator was right to
   364.2   The cut, on a flat face and on a ball
@@ -135,16 +136,32 @@ the chart.
 the one failure is a pin outside this lane's write set.
 `degenerate_curved_fuses.rs`'s
 `a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand`
-pins `CornersCoincide` for the wedge and frustum's union both ways round and
+pinned `CornersCoincide` for the wedge and frustum's union both ways round and
 for the wedge less the frustum, under `certified` and `tolerant(100)`. Its own
-doc names the union's cause as this one: the wedge's floor less the frustum's
-top disc, which touches the floor's edge at `(1, 0, 8)`. A probe on the branch,
-under both policies: the union, either way round, answers one solid that
-validates and measures `403.3953495976202 ± 4.982689802626174` against the
-hand-worked `403.7412532358421`, under it as an inscribed mesh is; the wedge
-less the frustum is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2,
-used: 4 }` instead, its two slivers of cone skin meeting along a ruling. That
-pin has to move before this branch passes a gate.
+doc named the union's cause as this one: the wedge's floor less the circle the
+frustum cuts in it at `z = 8`, which touches the floor's edge at `(1, 0, 8)`. A
+probe on the branch, under both policies: the union, either way round, answers
+one solid that validates and measures `403.3953495976202 ± 4.982689802626174`
+against the hand-worked `403.7412532358421`, under it as an inscribed mesh is;
+the wedge less the frustum is refused `TwoPatchesOfTheMeshDrewTheSameSide {
+drawn: 2, used: 4 }` instead, its two slivers of cone skin meeting along a
+ruling.
+
+**That pin moved in a second run of the row**, `lane-q686-a-wire-through-one-corner-twice-split-in-two-2`,
+off `c11bf21f` with this branch merged in, which took queue row Q884's union
+along with it. The test now holds the union, either way round and under both
+policies, to `frustum + 96 − shared` within the file's half a per cent and
+under it (`Side::Under`, the file's side for a mesh inscribed in a round wall
+that bounds the solid), with the certified fuse recording nothing and the model
+validating; and it pins the wedge less the frustum
+`TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }` by name under both.
+Measured there, at the file's deflection of `0.02`: `403.3953495976202` with
+the frustum first and `403.39534959761846` with it second, under either policy,
+against `403.7412532358421`, 0.086 % under. A probe walking the union's faces
+found one wire that starts two coedges at a corner and is not a seam: the
+floor's, five coedges on the plane `z = 8`, through `(1, 0, 8)` twice. The two
+cone faces' wires pass a corner twice only at their seams, `(0.5, 0, 4)` and
+`(1, 0, 8)` below, `(2.5, 0, 20)` and `(3.5, 0, 28)` above.
 
 The five `CornersCoincide` pins the row named —
 `a_block_face_through_a_cones_apex.rs`, `a_face_bounded_by_two_steps.rs`,
@@ -155,8 +172,15 @@ The five `CornersCoincide` pins the row named —
 
 ### 364.6 What this leaves
 
-- **The wedge pin** in `degenerate_curved_fuses.rs`, 364.5: the union is an
-  answer now, and the wedge less the frustum a different refusal.
+- **The wedge less the frustum** in `degenerate_curved_fuses.rs`, 364.5: the
+  union is pinned as an answer now, and the difference by its new refusal,
+  `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }`. Which mesher step
+  draws that side twice, and whether that answer is a manifold at all, with a
+  demonstration, is the other half of queue row Q884 and is filed as a row of
+  its own.
 - **Q679** is answered by 364.3's `−y` pin.
+- **Q74's ball under `certified`**, refused on *order along a crossing* in
+  364.3, is open queue row Q908's shape, which names its cause; no row is filed
+  for it here.
 - **Queue row Q698's** block edge grazing a ball at `cx = 16`, read by Q663's
   lane as this figure eight, was not run here.
