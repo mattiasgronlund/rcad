@@ -1714,7 +1714,8 @@ impl BuildingAMesh {
     }
 
     /// Cut a **cap** — one loop right round a surface that pinches to a point,
-    /// with nothing else bounding it — into four patches with one loop each.
+    /// with nothing else bounding it but islands — into four patches with one
+    /// loop each, or more where cuts through one island split a strip.
     ///
     /// A ball cut by a plane square to its polar axis leaves one, and it is
     /// about the simplest curved boolean there is. A plane at any other angle
@@ -1751,11 +1752,21 @@ impl BuildingAMesh {
     /// half the island into its one loop
     /// ([`BuildingAMesh::a_cut_through_an_island`]).
     ///
+    /// **Two cuts can meet one island whichever way the quarters are turned**:
+    /// every cut leaves from a rim corner, and the cube of side 2 turned 2 about
+    /// `(2, −1, 1)` with a unit ball at `(0.8, 0.7, 0.65)` leaves a rim of four
+    /// corners and an island reaching `3.24` radians round, over two of them.
+    /// Each such cut goes through the island, and the strip between two of
+    /// them is two patches, one under the island and one over it
+    /// ([`BuildingAMesh::cuts_through_one_island`]), so a cap may come back in
+    /// more than four.
+    ///
     /// `None` when the surface does not pinch to a point. A cylindrical face
     /// bounded by one curve right round it is half an endless tube, which is not
     /// a face, and refusing it is right. `None` as well when one cut meets two
-    /// islands, two cuts meet one island, a cut through an island cannot be
-    /// shown to stay inside the face, or an island lies in no patch.
+    /// islands, a cut through an island cannot be shown to stay inside the
+    /// face, the cuts through one island cannot be put in an order that leaves
+    /// each patch one loop, or an island lies in no patch.
     fn cut_a_cap_up_to_its_pole(
         &mut self,
         face: FaceView<'_>,
@@ -1793,25 +1804,32 @@ impl BuildingAMesh {
         let at_the_pole = self.remember_made_on(face, &there, at_the_pole);
         self.on_a_cut.insert(at_the_pole);
 
-        let mut cuts: Vec<ACutUpToThePole> = Vec::with_capacity(4);
-        let mut cut_through = vec![false; islands.len()];
-        for (at, &corner) in along.iter().enumerate() {
-            self.on_a_cut.insert(cap.points[corner]);
-            let leaving = cap.corners[corner];
-            let met: Vec<usize> = (0..islands.len())
+        let mut met: Vec<Option<usize>> = Vec::with_capacity(4);
+        for &corner in &along {
+            let meets: Vec<usize> = (0..islands.len())
                 .filter(|&island| {
                     its_meridian_meets_an_island(
-                        leaving,
+                        cap.corners[corner],
                         towards,
                         core::slice::from_ref(&islands[island]),
                         whole_turn,
                     )
                 })
                 .collect();
-            let [island] = met[..] else {
-                if !met.is_empty() {
-                    return Ok(None);
-                }
+            match meets[..] {
+                [] => met.push(None),
+                [island] => met.push(Some(island)),
+                _ => return Ok(None),
+            }
+        }
+
+        let mut cuts: Vec<Option<ACutUpToThePole>> = (0..4).map(|_| None).collect();
+        let mut split: Vec<Option<AStripAnIslandSplits>> = (0..4).map(|_| None).collect();
+        let mut cut_through = vec![false; islands.len()];
+        for (at, &corner) in along.iter().enumerate() {
+            self.on_a_cut.insert(cap.points[corner]);
+            let leaving = cap.corners[corner];
+            let Some(island) = met[at] else {
                 let up = self.points_along_a_cut(
                     face,
                     stored,
@@ -1820,16 +1838,42 @@ impl BuildingAMesh {
                     [leaving[0], towards],
                     room,
                 )?;
-                cuts.push(ACutUpToThePole {
+                cuts[at] = Some(ACutUpToThePole {
                     down: up.the_other_way(),
                     up,
                 });
                 continue;
             };
             if cut_through[island] {
-                return Ok(None);
+                continue;
             }
             cut_through[island] = true;
+            let meeting: Vec<usize> = (0..4).filter(|&cut| met[cut] == Some(island)).collect();
+            if meeting.len() > 1 {
+                let Some(through) = self.cuts_through_one_island(
+                    face,
+                    stored,
+                    CutsThroughOneIsland {
+                        cap,
+                        along,
+                        meeting: &meeting,
+                        islands,
+                        which: island,
+                        way,
+                        towards,
+                        whole: whole_turn,
+                    },
+                    room,
+                )?
+                else {
+                    return Ok(None);
+                };
+                for OneOfTheCutsThroughAnIsland { place, cut, strip } in through {
+                    cuts[place] = Some(cut);
+                    split[place] = strip;
+                }
+                continue;
+            }
             let others: Vec<[f64; 2]> = along
                 .iter()
                 .enumerate()
@@ -1853,34 +1897,33 @@ impl BuildingAMesh {
             else {
                 return Ok(None);
             };
-            cuts.push(through);
+            cuts[at] = Some(through);
         }
+        let cuts: Vec<ACutUpToThePole> = cuts
+            .into_iter()
+            .map(|cut| cut.expect("every one of the four cuts up to the pole was made"))
+            .collect();
 
-        let mut patches = Vec::with_capacity(4);
+        let mut patches = Vec::with_capacity(5);
         for step in 0..4 {
             let next = (step + 1) % 4;
             let mut one = unwrapped(&cap.between(along[step], along[next]), whole_turn);
+            if let Some(strip) = &split[step] {
+                one.take_in_unwrapped(&strip.under, whole_turn);
+                let mut over = unwrapped(&strip.over, whole_turn);
+                with_the_pole_side(&mut over, towards, at_the_pole);
+                over.take_in_unwrapped(&strip.down_from_the_pole, whole_turn);
+                if how_much_of_the_chart_this_loop_encloses(&one) <= 0.0
+                    || how_much_of_the_chart_this_loop_encloses(&over) <= 0.0
+                {
+                    return Ok(None);
+                }
+                patches.push(vec![one]);
+                patches.push(vec![over]);
+                continue;
+            }
             one.take_in_unwrapped(&cuts[next].up, whole_turn);
-            // The pole twice, at the two longitudes the meridians arrive at. It
-            // is one point in space and a whole side of the patch in the
-            // surface's coordinates, which is what a `WireStep::Pole` says about
-            // a ball this kernel builds.
-            //
-            // **The side ends at the meridian the cut down leaves by, which is
-            // the patch's own first corner, and not a quarter turn back.** The
-            // cuts leave from the rim corners nearest the quarters, and on a
-            // coarse rim those are not a quarter apart: the dome of §191's
-            // turned ball and block has four of them `2.74`, `0.40`, `2.74` and
-            // `0.40` radians apart, so a quarter turn back ran `1.17` past the
-            // next cut's meridian in two patches, the side folded back on
-            // itself, and the mesher refused it as a boundary that crosses
-            // itself. `a_turned_ball_united_with_a_block_holds_what_the_upright_one_does`.
-            let corner = one.corners.last().map_or(0.0, |corner| corner[0]);
-            one.corners.push([corner, towards]);
-            one.points.push(at_the_pole);
-            let back = one.corners[0][0];
-            one.corners.push([back, towards]);
-            one.points.push(at_the_pole);
+            with_the_pole_side(&mut one, towards, at_the_pole);
             one.take_in_unwrapped(&cuts[step].down, whole_turn);
             patches.push(vec![one]);
         }
@@ -1914,99 +1957,247 @@ impl BuildingAMesh {
         cut: ACutThroughAnIsland<'_>,
         room: f64,
     ) -> Result<Option<ACutUpToThePole>> {
-        let ACutThroughAnIsland {
-            cap,
-            leaving,
-            islands,
-            which,
-            others,
-            towards,
-            whole,
-        } = cut;
-        let other_islands = || {
-            islands
-                .iter()
-                .enumerate()
-                .filter(move |&(at, _)| at != which)
-                .map(|(_, other)| other)
-        };
-        let (least, most) = longitudes_of(&islands[which]);
-        let by = whole_turns_between((least + most) / 2.0, leaving[0], whole);
-        let island = &WalkedLoop {
-            corners: islands[which]
-                .corners
-                .iter()
-                .map(|corner| [corner[0] - by, corner[1]])
-                .collect(),
-            ..islands[which].clone()
-        };
-        let top = the_corner_furthest(island, towards.signum());
-        let up_from = island.corners[top];
-        let others_in_the_way = other_islands().any(|other| {
-            its_meridian_meets_an_island(up_from, towards, core::slice::from_ref(other), whole)
-        });
-        let its_own_in_the_way = (0..island.corners.len()).any(|at| {
-            let next = (at + 1) % island.corners.len();
-            at != top
-                && next != top
-                && a_side_meets_a_cut(
-                    [island.corners[at], island.corners[next]],
-                    up_from[0],
-                    [up_from[1], towards],
-                )
-        });
-        if others_in_the_way
-            || its_own_in_the_way
-            || a_cut_up_meets_the_rim(cap, up_from, towards, whole)
-        {
+        let island = &cut.the_island_in_its_turn();
+        let top = the_corner_furthest(island, cut.towards.signum());
+        if !cut.leaves_up_from(island, top) {
             return Ok(None);
         }
         let mut by_distance: Vec<usize> =
             (0..island.corners.len()).filter(|&at| at != top).collect();
-        by_distance.sort_by(|&one, &other| {
-            let away = |at: usize| {
-                let [x, y] = island.corners[at];
-                (x - leaving[0]).hypot(y - leaving[1])
-            };
-            away(one).total_cmp(&away(other))
-        });
-        let Some(bottom) = by_distance.into_iter().find(|&at| {
-            let leg = [leaving, island.corners[at]];
-            !a_leg_meets_the_rim(cap, leg, whole)
-                && !a_leg_meets_an_island(island, leg, Some(at), whole)
-                && other_islands().all(|other| !a_leg_meets_an_island(other, leg, None, whole))
-                && others
-                    .iter()
-                    .all(|&[longitude, from]| !a_side_meets_a_cut(leg, longitude, [from, towards]))
-        }) else {
+        cut.nearest_first(island, &mut by_distance);
+        let Some(bottom) = by_distance.into_iter().find(|&at| cut.reaches(island, at)) else {
             return Ok(None);
         };
+        let [to_the_island, to_the_pole] =
+            self.the_two_legs_of(face, stored, &cut, island, [bottom, top], room)?;
+        Ok(Some(ACutUpToThePole::round_an_island(
+            island,
+            [bottom, top],
+            &to_the_island,
+            &to_the_pole,
+        )))
+    }
 
+    /// Two or more of a cap's cuts up to the pole whose meridians all meet one
+    /// island, each cut through it: each with its place among the four, and
+    /// each but the last along the island with the strip between it and the
+    /// next.
+    ///
+    /// **A strip between two cuts through one island is two patches, each of
+    /// one loop**: under the island, from the rim up the cut ahead to the
+    /// island, back along its underside and down the cut behind; and over it,
+    /// along its top from the cut behind to the cut ahead, up to the pole and
+    /// down the cut behind. A single cut through an island leaves it at its
+    /// highest corner, so two of them would leave up one meridian; here each
+    /// cut reaches the island at a corner of its own and leaves it at another.
+    /// Round the island the way it is walked, they have to come in the order
+    /// the patches take the island's sides in: the first cut's bottom, every
+    /// top from the first cut's to the last's, then every bottom from the
+    /// last cut's back to the second's. The patch behind the first cut and the
+    /// patch ahead of the last take the island's two ends, as the patches
+    /// either side of a single cut take its two halves.
+    ///
+    /// The cuts are put in the order they meet the island, the way the rim
+    /// runs, which on a rim of four corners that the island reaches most of the
+    /// way round is not the order of the four. A top is the corner, among
+    /// those whose meridian up to the pole is clear
+    /// ([`ACutThroughAnIsland::leaves_up_from`]), nearest its cut's own
+    /// meridian; a bottom is the corner under the tops nearest the cut's rim
+    /// corner that a leg from it reaches ([`ACutThroughAnIsland::reaches`]).
+    /// No leg of one cut meets a leg of another.
+    ///
+    /// `None` when the cuts are not next to each other along the rim, a cut has
+    /// no such top or bottom, or they do not come in that order.
+    fn cuts_through_one_island(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        through: CutsThroughOneIsland<'_>,
+        room: f64,
+    ) -> Result<Option<Vec<OneOfTheCutsThroughAnIsland>>> {
+        let CutsThroughOneIsland {
+            cap,
+            along,
+            meeting,
+            islands,
+            which,
+            way,
+            towards,
+            whole,
+        } = through;
+        let others: Vec<Vec<[f64; 2]>> = meeting
+            .iter()
+            .map(|&place| {
+                (0..4)
+                    .filter(|&other| other != place)
+                    .map(|other| cap.corners[along[other]])
+                    .collect()
+            })
+            .collect();
+        let mut run: Vec<(usize, ACutThroughAnIsland<'_>)> = meeting
+            .iter()
+            .zip(&others)
+            .map(|(&place, others)| {
+                let cut = ACutThroughAnIsland {
+                    cap,
+                    leaving: cap.corners[along[place]],
+                    islands,
+                    which,
+                    others,
+                    towards,
+                    whole,
+                };
+                (place, cut)
+            })
+            .collect();
+        let (least, most) = longitudes_of(&islands[which]);
+        let middle = (least + most) / 2.0;
+        let where_it_meets = |cut: &ACutThroughAnIsland<'_>| {
+            way * (cut.leaving[0] + whole_turns_between(middle, cut.leaving[0], whole))
+        };
+        run.sort_by(|(_, one), (_, other)| where_it_meets(one).total_cmp(&where_it_meets(other)));
+        if run.windows(2).any(|pair| pair[1].0 != (pair[0].0 + 1) % 4) {
+            return Ok(None);
+        }
+        let moved: Vec<WalkedLoop> = run
+            .iter()
+            .map(|(_, cut)| cut.the_island_in_its_turn())
+            .collect();
+
+        let count = islands[which].corners.len();
+        let mut tops = Vec::with_capacity(run.len());
+        for ((_, cut), island) in run.iter().zip(&moved) {
+            let Some(top) = (0..count)
+                .filter(|&top| cut.leaves_up_from(island, top))
+                .min_by(|&one, &other| {
+                    let away = |at: usize| (island.corners[at][0] - cut.leaving[0]).abs();
+                    away(one).total_cmp(&away(other))
+                })
+            else {
+                return Ok(None);
+            };
+            tops.push(top);
+        }
+        let (first_top, last_top) = (tops[0], tops[tops.len() - 1]);
+        let past = |from: usize, at: usize| (at + count - from) % count;
+        let underneath: Vec<usize> = (1..count)
+            .map(|step| (last_top + step) % count)
+            .take_while(|&at| at != first_top)
+            .collect();
+        let mut bottoms = Vec::with_capacity(run.len());
+        for ((_, cut), island) in run.iter().zip(&moved) {
+            let mut by_distance = underneath.clone();
+            cut.nearest_first(island, &mut by_distance);
+            let Some(bottom) = by_distance.into_iter().find(|&at| cut.reaches(island, at)) else {
+                return Ok(None);
+            };
+            bottoms.push(bottom);
+        }
+        let in_order = tops
+            .windows(2)
+            .all(|pair| past(first_top, pair[0]) < past(first_top, pair[1]))
+            && bottoms
+                .windows(2)
+                .all(|pair| past(last_top, pair[0]) > past(last_top, pair[1]));
+        if !in_order {
+            return Ok(None);
+        }
+        let low: Vec<[[f64; 2]; 2]> = run
+            .iter()
+            .zip(&moved)
+            .zip(&bottoms)
+            .map(|(((_, cut), island), &bottom)| [cut.leaving, island.corners[bottom]])
+            .collect();
+        let high: Vec<[f64; 2]> = moved
+            .iter()
+            .zip(&tops)
+            .map(|(island, &top)| island.corners[top])
+            .collect();
+        let legs_meet = low.iter().enumerate().any(|(one, &leg)| {
+            [-whole, 0.0, whole].into_iter().any(|by| {
+                let moved_by = |[longitude, latitude]: [f64; 2]| [longitude + by, latitude];
+                low.iter().enumerate().any(|(other, &[from, to])| {
+                    other != one && two_sides_meet(leg, [moved_by(from), moved_by(to)])
+                }) || high.iter().any(|&[longitude, from]| {
+                    a_side_meets_a_cut(leg, longitude + by, [from, towards])
+                })
+            })
+        });
+        if legs_meet {
+            return Ok(None);
+        }
+
+        let mut legs = Vec::with_capacity(run.len());
+        for (((_, cut), island), (&bottom, &top)) in
+            run.iter().zip(&moved).zip(bottoms.iter().zip(&tops))
+        {
+            legs.push(self.the_two_legs_of(face, stored, cut, island, [bottom, top], room)?);
+        }
+        let mut made = Vec::with_capacity(run.len());
+        for (at, (place, _)) in run.iter().enumerate() {
+            let [to_the_island, to_the_pole] = &legs[at];
+            let cut = ACutUpToThePole::round_an_island(
+                &moved[at],
+                [bottoms[at], tops[at]],
+                to_the_island,
+                to_the_pole,
+            );
+            let strip = legs
+                .get(at + 1)
+                .map(|[ahead_to_the_island, ahead_to_the_pole]| {
+                    let mut under = ahead_to_the_island.clone();
+                    under.take_in(&moved[at + 1].between(bottoms[at + 1], bottoms[at]));
+                    under.take_in(&to_the_island.the_other_way());
+                    let mut over = moved[at].between(tops[at], tops[at + 1]);
+                    over.take_in(ahead_to_the_pole);
+                    AStripAnIslandSplits {
+                        under,
+                        over,
+                        down_from_the_pole: to_the_pole.the_other_way(),
+                    }
+                });
+            made.push(OneOfTheCutsThroughAnIsland {
+                place: *place,
+                cut,
+                strip,
+            });
+        }
+        Ok(Some(made))
+    }
+
+    /// The points strictly along a cut's two straight legs through an island:
+    /// from its rim corner to the island's corner `bottom`, and from the
+    /// island's corner `top` up its meridian to the pole. Both corners are on a
+    /// cut from now on.
+    fn the_two_legs_of(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        cut: &ACutThroughAnIsland<'_>,
+        island: &WalkedLoop,
+        [bottom, top]: [usize; 2],
+        room: f64,
+    ) -> Result<[WalkedLoop; 2]> {
         let to_the_island = self.points_along_a_cut(
             face,
             stored,
             Chart::Upright,
-            leaving,
+            cut.leaving,
             island.corners[bottom],
             room,
         )?;
+        let up_from = island.corners[top];
         let to_the_pole = self.points_along_a_cut(
             face,
             stored,
             Chart::Upright,
             up_from,
-            [up_from[0], towards],
+            [up_from[0], cut.towards],
             room,
         )?;
         self.on_a_cut
             .extend([island.points[bottom], island.points[top]]);
-        let mut up = to_the_island.clone();
-        up.take_in(&island.between(bottom, top));
-        up.take_in(&to_the_pole);
-        let mut down = to_the_pole.the_other_way();
-        down.take_in(&island.between(top, bottom));
-        down.take_in(&to_the_island.the_other_way());
-        Ok(Some(ACutUpToThePole { up, down }))
+        Ok([to_the_island, to_the_pole])
     }
 
     /// Which of a surface's two poles a cap reaches, as the latitude of it:
@@ -3258,6 +3449,27 @@ struct ACutUpToThePole {
     down: WalkedLoop,
 }
 
+impl ACutUpToThePole {
+    /// A cut that reaches `island` at its corner `bottom` and leaves it up
+    /// from its corner `top`: up takes the island's side from `bottom` round
+    /// to `top` the way the island is walked, and down the side from `top`
+    /// round to `bottom`.
+    fn round_an_island(
+        island: &WalkedLoop,
+        [bottom, top]: [usize; 2],
+        to_the_island: &WalkedLoop,
+        to_the_pole: &WalkedLoop,
+    ) -> Self {
+        let mut up = to_the_island.clone();
+        up.take_in(&island.between(bottom, top));
+        up.take_in(to_the_pole);
+        let mut down = to_the_pole.the_other_way();
+        down.take_in(&island.between(top, bottom));
+        down.take_in(&to_the_island.the_other_way());
+        Self { up, down }
+    }
+}
+
 /// What [`BuildingAMesh::a_cut_through_an_island`] needs to find a cut that
 /// stays inside the face: the cap, the rim corner the cut leaves from, the
 /// cap's islands and which of them the cut goes through, the corners the other
@@ -3270,6 +3482,124 @@ struct ACutThroughAnIsland<'a> {
     others: &'a [[f64; 2]],
     towards: f64,
     whole: f64,
+}
+
+impl ACutThroughAnIsland<'_> {
+    /// The island the cut goes through, moved by whole turns of longitude so
+    /// that its middle is within half a turn of the rim corner the cut leaves
+    /// from.
+    fn the_island_in_its_turn(&self) -> WalkedLoop {
+        let island = &self.islands[self.which];
+        let (least, most) = longitudes_of(island);
+        let by = whole_turns_between((least + most) / 2.0, self.leaving[0], self.whole);
+        WalkedLoop {
+            corners: island
+                .corners
+                .iter()
+                .map(|corner| [corner[0] - by, corner[1]])
+                .collect(),
+            ..island.clone()
+        }
+    }
+
+    /// Whether the meridian up from the island's corner `top` to the pole
+    /// meets no other island, no side of its own island but the two at `top`,
+    /// and not the rim.
+    fn leaves_up_from(&self, island: &WalkedLoop, top: usize) -> bool {
+        let up_from = island.corners[top];
+        let others_in_the_way = self.other_islands().any(|other| {
+            its_meridian_meets_an_island(
+                up_from,
+                self.towards,
+                core::slice::from_ref(other),
+                self.whole,
+            )
+        });
+        let its_own_in_the_way = (0..island.corners.len()).any(|at| {
+            let next = (at + 1) % island.corners.len();
+            at != top
+                && next != top
+                && a_side_meets_a_cut(
+                    [island.corners[at], island.corners[next]],
+                    up_from[0],
+                    [up_from[1], self.towards],
+                )
+        });
+        !(others_in_the_way
+            || its_own_in_the_way
+            || a_cut_up_meets_the_rim(self.cap, up_from, self.towards, self.whole))
+    }
+
+    /// Whether a straight leg from the rim corner to the island's corner
+    /// `bottom` meets no side of the rim, no side of its island but the two at
+    /// `bottom`, no other island, and the meridian of no other cut.
+    fn reaches(&self, island: &WalkedLoop, bottom: usize) -> bool {
+        let leg = [self.leaving, island.corners[bottom]];
+        !a_leg_meets_the_rim(self.cap, leg, self.whole)
+            && !a_leg_meets_an_island(island, leg, Some(bottom), self.whole)
+            && self
+                .other_islands()
+                .all(|other| !a_leg_meets_an_island(other, leg, None, self.whole))
+            && self
+                .others
+                .iter()
+                .all(|&[longitude, from]| !a_side_meets_a_cut(leg, longitude, [from, self.towards]))
+    }
+
+    /// The island's corners `corners` names, nearest the rim corner first.
+    fn nearest_first(&self, island: &WalkedLoop, corners: &mut [usize]) {
+        corners.sort_by(|&one, &other| {
+            let away = |at: usize| {
+                let [x, y] = island.corners[at];
+                (x - self.leaving[0]).hypot(y - self.leaving[1])
+            };
+            away(one).total_cmp(&away(other))
+        });
+    }
+
+    fn other_islands(&self) -> impl Iterator<Item = &WalkedLoop> {
+        self.islands
+            .iter()
+            .enumerate()
+            .filter(move |&(at, _)| at != self.which)
+            .map(|(_, other)| other)
+    }
+}
+
+/// What [`BuildingAMesh::cuts_through_one_island`] needs: the cap, the rim
+/// corners the four cuts leave from, which of the four meet the island, the
+/// cap's islands and which one it is, the way the rim runs, the pole and how
+/// far round a whole turn is.
+struct CutsThroughOneIsland<'a> {
+    cap: &'a WalkedLoop,
+    along: [usize; 4],
+    meeting: &'a [usize],
+    islands: &'a [WalkedLoop],
+    which: usize,
+    way: f64,
+    towards: f64,
+    whole: f64,
+}
+
+/// One of the cuts [`BuildingAMesh::cuts_through_one_island`] makes: its place
+/// among the four, the cut, and the strip between it and the next cut, when
+/// that one goes through the same island.
+struct OneOfTheCutsThroughAnIsland {
+    place: usize,
+    cut: ACutUpToThePole,
+    strip: Option<AStripAnIslandSplits>,
+}
+
+/// The strip between two cuts through one island, which the island splits in
+/// two patches. `under` runs on from the rim corner of the cut ahead: up its
+/// leg to the island, back along the island's underside and down the leg of the
+/// cut behind. `over` starts at the top of the cut behind and runs along the
+/// island's top to the top of the cut ahead and up its meridian, and
+/// `down_from_the_pole` comes back down the meridian of the cut behind.
+struct AStripAnIslandSplits {
+    under: WalkedLoop,
+    over: WalkedLoop,
+    down_from_the_pole: WalkedLoop,
 }
 
 /// One strip of a ball from pole to pole and the holes inside it, moved into
@@ -3568,6 +3898,28 @@ fn with_a_corner_where_a_pole_side_passes(
 /// Whether `at` lies strictly between `one` and `other`, whichever is larger.
 fn passes_strictly(at: f64, one: f64, other: f64) -> bool {
     one.min(other) < at && at < one.max(other)
+}
+
+/// One of a cap's patches with its side along the pole put on: the pole twice,
+/// at the two longitudes the meridians arrive at. It is one point in space and
+/// a whole side of the patch in the surface's coordinates, which is what a
+/// `WireStep::Pole` says about a ball this kernel builds.
+///
+/// **The side ends at the meridian the cut down leaves by, which is the
+/// patch's own first corner, and not a quarter turn back.** The cuts leave from
+/// the rim corners nearest the quarters, and on a coarse rim those are not a
+/// quarter apart: the dome of §191's turned ball and block has four of them
+/// `2.74`, `0.40`, `2.74` and `0.40` radians apart, so a quarter turn back ran
+/// `1.17` past the next cut's meridian in two patches, the side folded back on
+/// itself, and the mesher refused it as a boundary that crosses itself.
+/// `a_turned_ball_united_with_a_block_holds_what_the_upright_one_does`.
+fn with_the_pole_side(patch: &mut WalkedLoop, towards: f64, at_the_pole: u32) {
+    let corner = patch.corners.last().map_or(0.0, |corner| corner[0]);
+    patch.corners.push([corner, towards]);
+    patch.points.push(at_the_pole);
+    let back = patch.corners[0][0];
+    patch.corners.push([back, towards]);
+    patch.points.push(at_the_pole);
 }
 
 /// The corners of a cap the four quarter cuts leave from: each the corner
