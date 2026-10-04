@@ -48,7 +48,13 @@
 // `sourcePaths` for a tooling lane still gets stopped, not waved through. Set
 // `pinsOnly` and also declare a `src/` path, in `writeSet` or `sourcePaths`,
 // and the lane is refused instead: there is something to revert, so it is not
-// pins-only), `report`
+// pins-only), `sameBehaviour` (true for a lane whose row changes code that runs
+// and keeps what it computes -- one of two copies dropped for the other, a body
+// lifted into a function, a block moved. No test can fail without such a
+// change, so the lane names the tests that reach it instead, and the verifier
+// shows they pass with the source reverted and fail under a mutation of the
+// changed lines (§399). Never inferred, for `pinsOnly`'s reason, and never set
+// beside it), `report`
 // ({properties, required} merged into the lane's schema for findings that are
 // this lane's own), and `verify: false` to skip the check, which leaves the
 // merger's gate as the only one.
@@ -91,6 +97,9 @@ for (const lane of LANES) {
   if (!lane || !lane.label || !lane.brief) throw new Error('lanes: every lane needs a label and a brief')
   if (writes(lane) && !/^[TDQ][0-9]+(,[TDQ][0-9]+)*$/.test(lane.queueId || '')) {
     throw new Error(`lanes: ${lane.label} writes, so it needs the queueId of its docs/queue.md row, or Q1,Q2,... for a bundle; its merger closes them`)
+  }
+  if (lane.pinsOnly === true && lane.sameBehaviour === true) {
+    throw new Error(`lanes: ${lane.label} is marked both pinsOnly and sameBehaviour; a pins-only lane has nothing in src/ whose behaviour it keeps (§399)`)
   }
 }
 
@@ -142,7 +151,11 @@ function verified(report, lane) {
   if (!writes(lane)) return out
   if (report.outcome === 'blocked') return stopped(lane, out, 'the lane is blocked')
   if (lane.verify === false) return out
-  out.kind = namesTests(report) ? 'tests' : 'moved_text'
+  out.kind = lane.sameBehaviour === true ? 'same_behaviour' : namesTests(report) ? 'tests' : 'moved_text'
+  if (out.kind === 'same_behaviour') {
+    if (namesTests(report)) return stopped(lane, out, 'the lane is marked sameBehaviour and names a test that fails without its change, which says the behaviour changed')
+    if (!reachesTests(report).length) return stopped(lane, out, 'the lane is marked sameBehaviour and names no test that reaches its change')
+  }
   return agent(VERIFY(lane, report, out.kind), {
     label: `verify:${lane.label}`,
     phase: 'Verify',
@@ -168,6 +181,10 @@ function stopped(lane, out, why) {
 
 function namesTests(report) {
   return Array.isArray(report.tests_that_fail_without_the_change) && report.tests_that_fail_without_the_change.length > 0
+}
+
+function reachesTests(report) {
+  return Array.isArray(report.tests_that_reach_the_change) ? report.tests_that_reach_the_change : []
 }
 
 // A `merge` that did not watch the tests fail is a `merge` on the verifier's
@@ -196,6 +213,15 @@ function namesTests(report) {
 // passing, and one that names no test merges on that print alone. The print is
 // the evidence, never the verifier's reading of the diff: a count it did not
 // get from the command it was given is refused like a missing one.
+//
+// A fifth changes what runs and keeps what it computes: one of two copies
+// dropped for the other, a body lifted into a function (Q601, Q854). No test
+// can fail without it, so it names none and got the moved-text steps, which
+// refuse any line that runs; Q854's dispatcher did that row in its own tree.
+// `lane.sameBehaviour` is the row's claim, set by the dispatcher and never
+// inferred, for `pinsOnly`'s reason. The tests the lane names reach the change:
+// they pass on the branch, pass with the source reverted, and one fails under
+// a mutation of the changed lines (§399).
 function unproven(lane, kind, check) {
   const why = []
   if (check.files_outside_write_set && check.files_outside_write_set.length) why.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
@@ -210,6 +236,13 @@ function unproven(lane, kind, check) {
     if (!pinsOnly && runs !== 0) {
       if (check.tests_fail_without_fix !== true && !mutationProven(check.reproduced_mutation)) why.push('the tests were never seen to fail with the source reverted, and no reproduced mutation stands in for it')
       if (!sources.length) why.push('the lane declared no source directory to revert')
+    }
+  } else if (kind === 'same_behaviour') {
+    if (check.tests_pass_on_branch !== true) why.push('the tests do not pass on the branch')
+    if (runs !== 0) {
+      if (!sourcePathsOf(lane).length) why.push('the lane is marked sameBehaviour and declared no source directory to revert')
+      if (check.tests_pass_without_change !== true) why.push('the tests that reach the change were never seen to pass with the source reverted')
+      if (!mutationCaught(check.mutation_caught)) why.push('no mutation of the changed lines was seen to fail a test that reaches them')
     }
   } else if (runs) {
     why.push(`the branch changes ${runs} lines that run and names no test that fails without them, starting with: ${check.lines_that_run.trim().split('\n')[0]}`)
@@ -233,6 +266,13 @@ function squeezed(s) {
 
 function mutationProven(m) {
   return !!m && m.outcome_on_base === 'pass' && m.outcome_on_branch === 'fail'
+}
+
+// Passing on the branch and passing with the source reverted hold just as well
+// for tests that never run the changed lines. A mutation of those lines that
+// one of them catches is what shows they do (§399).
+function mutationCaught(m) {
+  return !!m && m.outcome_on_branch === 'fail'
 }
 
 // Defaulted rather than asked for, because the verifier's revert step only
@@ -460,6 +500,10 @@ function reportSchema(lane) {
       description: 'the just queue apply steps that add the rows your work leaves, each a list of words: ["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"], ["tag", "@1", "<class>|small"], ["after", "@1", "<id>[,<id>]"]; @1, @2 are this list\'s own adds, since ids come from a shared counter; empty when you leave nothing to add (§383.4, lane.md)',
     }
     required.push('landed_sha', 'files_changed', 'tests_that_fail_without_the_change', 'rows')
+    if (lane.sameBehaviour === true) {
+      core.tests_that_reach_the_change = { type: 'array', items: { type: 'string' }, description: 'the tests that run the lines you changed and pass before and after; your row keeps the behaviour, so no test fails without it and tests_that_fail_without_the_change stays empty (§399)' }
+      required.push('tests_that_reach_the_change')
+    }
   } else {
     core.outcome = { type: 'string', enum: ['answered', 'partial', 'blocked'] }
   }
@@ -491,7 +535,8 @@ function VERIFY(lane, r, kind) {
   const unsent = input.unsent.length
     ? `\nThese could not go in the file, since a word of each is empty, a lone +, or more than one line, so check them by hand: ${JSON.stringify(input.unsent)}`
     : ''
-  return `Check lane ${lane.label}, queue ${rowsOf(lane)}, by the ${kind === 'tests' ? 'tests' : 'moved text'} steps.
+  const steps = { tests: 'tests', same_behaviour: 'same behaviour', moved_text: 'moved text' }[kind]
+  return `Check lane ${lane.label}, queue ${rowsOf(lane)}, by the ${steps} steps.
 Base: ${BASE}
 Branch: ${branchOf(lane)}
 Write set: ${lane.writeSet.join(', ')}
@@ -511,12 +556,23 @@ If your tree's just has no verify-lane recipe, do verifier.md's steps by hand.
 
 Lines that run -- just verify-lane runs this once, before it checks the branch out, and its JSON holds the command as lines_that_run_command and all it prints as lines_that_run. By hand, in step 1, before you check the branch out, run it once in your own tree, exactly as written, and report it the same way. It prints at most eleven lines, and the last is always lines that run: N:
   ${linesThatRunCommand(lane)}
-When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones.
-Revert them and watch the tests fail, then restore them -- that is the default proof for the fail half, and report it as tests_fail_without_fix. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says.
-Only when the revert itself cannot fail -- a fix that just moves a floor or a bound, where a value on the wrong side of the old one can still pass a proptest run at most seeds -- report a reproduced_mutation instead: make a small, uncommitted change to the source that reintroduces the kind of bug the fix is meant to catch, run one command unchanged against the base commit and against this branch, and give the exact scratch change, the command, and both outcomes ('pass' or 'fail'). Say in notes why the revert could not fail here. Do not reach for a mutation when a revert would do.
+When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones, or no tests_pass_without_change and no mutation_caught if they are the same behaviour ones.
+${kind === 'same_behaviour' ? sameBehaviourProof() : revertProof()}
 Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
 
 The lane claims (JSON): ${JSON.stringify(r)}`
+}
+
+function revertProof() {
+  return `Revert them and watch the tests fail, then restore them -- that is the default proof for the fail half, and report it as tests_fail_without_fix. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says.
+Only when the revert itself cannot fail -- a fix that just moves a floor or a bound, where a value on the wrong side of the old one can still pass a proptest run at most seeds -- report a reproduced_mutation instead: make a small, uncommitted change to the source that reintroduces the kind of bug the fix is meant to catch, run one command unchanged against the base commit and against this branch, and give the exact scratch change, the command, and both outcomes ('pass' or 'fail'). Say in notes why the revert could not fail here. Do not reach for a mutation when a revert would do.`
+}
+
+function sameBehaviourProof() {
+  return `This lane is marked sameBehaviour (§399): its row changes lines that run and keeps what they compute, so no test can fail without it, and the tests it names are the ones that reach the change. Step 3 already proved the tests pass; do not run them again to watch that (§370) -- take tests_pass_on_branch from its gate summary the way step 6 says.
+With the source reverted the tests must pass, not fail: just verify-lane reverts them, runs the tests, and reports tests_pass_without_change: true only when every one ran and passed. A test that fails there says the base answered differently, so the behaviour changed, and that is a reject.
+The mutation is yours, verifier.md's same behaviour step 8: with the tree at the branch tip, change one line the branch changed so that it computes a wrong answer -- where the old and the new spelling differ, not a line both share -- run one of the lane's tests against it with mise exec -- just t <name>, put the line back, and check that git status --porcelain prints nothing. Report the change, the command and the outcome as mutation_caught. It must fail: a test that passes on the branch, with the source reverted and under the mutation too never ran the lines that changed.
+Then read the lane's argument that the old and the new give the same answer on every input, case by case, against the diff. The tests show it only for the inputs they feed; a case the argument leaves out, or one where the two differ, is a reject.`
 }
 
 // The records `tooling/verify-lane/verify_lane.py` reads, each its name and
@@ -531,12 +587,11 @@ function verifyInput(lane, r, kind) {
     ['source-paths'].concat(sourcePathsOf(lane)),
   ]
   if (lane.pinsOnly === true) records.push(['pins-only'])
+  if (lane.sameBehaviour === true) records.push(['same-behaviour'])
   const unsent = []
-  if (kind === 'tests') {
-    const tests = r.tests_that_fail_without_the_change
-    if (tests.some(oneLine)) records.push(['tests'].concat(tests.filter(oneLine)))
-    unsent.push(...tests.filter((t) => !oneLine(t)).map((t) => ({ test: t })))
-  }
+  const tests = kind === 'tests' ? r.tests_that_fail_without_the_change : kind === 'same_behaviour' ? reachesTests(r) : []
+  if (tests.some(oneLine)) records.push(['tests'].concat(tests.filter(oneLine)))
+  unsent.push(...tests.filter((t) => !oneLine(t)).map((t) => ({ test: t })))
   for (const n of r.numbers || []) {
     const words = [n.what, n.value, n.command]
     if (words.every(oneLine)) records.push(['number'].concat(words))
@@ -652,6 +707,20 @@ function verdictSchema(kind) {
       required: ['scratch_change', 'command', 'outcome_on_base', 'outcome_on_branch'],
     }
     required.push('tests_pass_on_branch', 'tests_fail_without_fix')
+  } else if (kind === 'same_behaviour') {
+    properties.tests_pass_on_branch = { type: 'boolean', description: "from step 3's gate summary (served or fresh), not a separate run -- §370" }
+    properties.tests_pass_without_change = { type: 'boolean', description: 'true when every test that reaches the change ran and passed with the source paths put back to the base; false when one failed there, which says the behaviour changed (§399)' }
+    properties.mutation_caught = {
+      type: 'object',
+      description: 'A small, uncommitted change to a line the branch changed, so that it computes a wrong answer, and one of the lane\'s tests run against it on the branch. It must fail: passing with and without the change holds just as well for a test that never runs the changed lines (§399). Leave it out only when lines that run is 0.',
+      properties: {
+        scratch_change: { type: 'string', description: 'the change, as a diff or an exact description' },
+        command: { type: 'string', description: 'the exact test command, run with the change in place' },
+        outcome_on_branch: { type: 'string', enum: ['pass', 'fail'], description: 'what the command produced on this branch with the change in place -- expected \'fail\'' },
+      },
+      required: ['scratch_change', 'command', 'outcome_on_branch'],
+    }
+    required.push('tests_pass_on_branch')
   } else {
     properties.paragraphs_checked = { type: 'integer', description: 'how many removed or moved paragraphs you traced' }
     properties.moved_text_problems = { type: 'array', items: { type: 'string' }, description: 'a paragraph that landed nowhere, twice, or with its meaning changed' }

@@ -2417,6 +2417,18 @@ check-skills-selftest:
 # `numberSchema` and `lane.md` both say the value is that text. And each record
 # the prompt writes into the recipe's input is one the script reads, so a
 # rename on one side cannot leave the other refusing every input.
+#
+# **A twentieth arm holds the road for a change that keeps the behaviour
+# (§399).** Q854 dropped one of two spellings of one question for the other, so
+# no test could fail without it, and its 25 lines that run met the moved-text
+# refusal; its dispatcher did the row in its own tree. `lane.sameBehaviour` is
+# that road, and only that field opens it: the arm checks the line that picks
+# the steps from the field, the three refusals a marked lane can meet before its
+# verifier runs, and the two lines and the helper that hold it to its tests
+# passing with the source reverted and one failing under a mutation of the
+# changed lines. Without the mutation, tests that never run the changed lines
+# would pass both. `verifier.md` carries the steps, and the nineteenth arm now
+# holds the `same-behaviour` record on both sides.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2491,7 +2503,15 @@ check-lanes-workflow:
     verify_wait="  $verify_wait_command"
     verify_value="      value: { type: 'string', description: 'text the command prints, exactly as it prints it"
     lane_value='Its `value` is text that command prints,'
-    verify_records=(base branch lane-tree write-set source-paths pins-only tests number)
+    verify_records=(base branch lane-tree write-set source-paths pins-only same-behaviour tests number)
+    same_kind="  out.kind = lane.sameBehaviour === true ? 'same_behaviour' : namesTests(report) ? 'tests' : 'moved_text'"
+    same_both='is marked both pinsOnly and sameBehaviour'
+    same_named='the lane is marked sameBehaviour and names a test that fails without its change'
+    same_unnamed='the lane is marked sameBehaviour and names no test that reaches its change'
+    same_reverted='      if (check.tests_pass_without_change !== true) why.push('
+    same_mutation='      if (!mutationCaught(check.mutation_caught)) why.push('
+    same_caught="  return !!m && m.outcome_on_branch === 'fail'"
+    same_steps='## Same behaviour'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -2788,6 +2808,24 @@ check-lanes-workflow:
                 return 19
             fi
         done
+        if ! grep -qxF -- "$same_kind" "$1"; then
+            echo "$1 does not give the same-behaviour steps to a lane marked sameBehaviour, and only to one ('$same_kind'); inferred from a lane naming no failing test, it would open to a lane that changed behaviour and found no test (§399)"
+            return 20
+        fi
+        for t in "$same_both" "$same_named" "$same_unnamed"; do
+            if ! grep -qF -- "$t" "$1"; then
+                echo "$1 no longer refuses with '$t' (§399)"
+                return 20
+            fi
+        done
+        if ! grep -qF -- "$same_reverted" "$1" || ! grep -qF -- "$same_mutation" "$1" || ! grep -qxF -- "$same_caught" "$1"; then
+            echo "$1 does not hold a sameBehaviour lane to its tests passing with the source reverted and one failing under a mutation of the changed lines; without both, tests that never run the change would merge it (§399)"
+            return 20
+        fi
+        if ! grep -qxF -- "$same_steps" "$2/verifier.md"; then
+            echo "$2/verifier.md has no '$same_steps' steps for the verifier of a sameBehaviour lane (§399)"
+            return 20
+        fi
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
@@ -2941,7 +2979,25 @@ check-lanes-workflow:
     grep -vF -- "$verify_command" "$agents/verifier.md" > "$dir/verifier-by-hand/agents/verifier.md"
     fresh record-renamed
     swap "$script" '"lane-tree": (' '"lane_tree": (' > "$dir/record-renamed/verify_lane.py"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19)
+    fresh same-record-unread
+    swap "$script" '"same-behaviour": (' '"same_behaviour": (' > "$dir/same-record-unread/verify_lane.py"
+    fresh same-inferred
+    swap "$file" "lane.sameBehaviour === true ? 'same_behaviour'" "reachesTests(report).length ? 'same_behaviour'" > "$dir/same-inferred/lanes.js"
+    fresh same-with-pins
+    grep -vF -- "$same_both" "$file" > "$dir/same-with-pins/lanes.js"
+    fresh same-names-a-failing-test
+    grep -vF -- "$same_named" "$file" > "$dir/same-names-a-failing-test/lanes.js"
+    fresh same-names-nothing
+    grep -vF -- "$same_unnamed" "$file" > "$dir/same-names-nothing/lanes.js"
+    fresh same-no-revert
+    grep -vF -- "$same_reverted" "$file" > "$dir/same-no-revert/lanes.js"
+    fresh same-no-mutation
+    grep -vF -- "$same_mutation" "$file" > "$dir/same-no-mutation/lanes.js"
+    fresh same-any-mutation
+    swap "$file" "$same_caught" '  return !!m' > "$dir/same-any-mutation/lanes.js"
+    fresh same-no-steps
+    grep -vxF -- "$same_steps" "$agents/verifier.md" > "$dir/same-no-steps/agents/verifier.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -12506,10 +12562,12 @@ verify-lane *args:
 # The arms: a test that fails with the source reverted, beside a number whose
 # value is in its command's print, one whose value is not, and one whose command
 # writes; a revert that takes the new test out, which is no failure (Q231); tests
-# that pass with the source reverted; a `pinsOnly` lane; a lines-that-run count
-# of 0; a source path holding test code the branch changed; a lane that names no
-# test; a run longer than one call, which a second call follows to its end; and
-# an input file it cannot read.
+# that pass with the source reverted; a `pinsOnly` lane; a `sameBehaviour` lane
+# whose tests pass with the source reverted, and one whose test fails there,
+# which says the behaviour changed (§399); a lines-that-run count of 0; a source
+# path holding test code the branch changed; a lane that names no test; a run
+# longer than one call, which a second call follows to its end; and an input
+# file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -12710,6 +12768,28 @@ check-verify-lane-selftest:
     says skipped 'pinsOnly'
     no_test_ran
 
+    fixture same-behaviour
+    printf 'broken, said again\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + same-behaviour \
+        + tests always_passes check-always
+    run
+    [ "$(field tests_pass_on_branch) $(field tests_pass_without_change) $(field tests_fail_without_fix)" = "true true (absent)" ] \
+        || fail "a sameBehaviour lane whose tests pass with the source reverted gave tests_pass_on_branch $(field tests_pass_on_branch), tests_pass_without_change $(field tests_pass_without_change) and tests_fail_without_fix $(field tests_fail_without_fix)"
+    [ "$(grep -cxF 'just check-always' "$at/stub/log")" = 2 ] \
+        || fail "a named recipe the gate does not run should run once on the branch and once reverted"
+    back_at_the_tip
+
+    fixture same-behaviour-changed
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + same-behaviour + tests is_fixed
+    run
+    [ "$(field tests_pass_without_change)" = false ] \
+        || fail "a sameBehaviour lane whose test fails with the source reverted gave tests_pass_without_change $(field tests_pass_without_change)"
+    says left_to_you 'the behaviour changed'
+    back_at_the_tip
+
     fixture zero
     code '// The answer, which is right.' 41 41 >"$at/lane/src/code.rs"
     printf '# Notes, and more\n' >"$at/lane/docs/notes.md"
@@ -12765,7 +12845,11 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF "is 'colour'" <<<"$got" || fail "an input with an unknown record did not refuse by name"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input it could not read"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 10 arms"
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + pins-only + same-behaviour
+    call target/verify-lane.txt
+    [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
+    [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 12 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #

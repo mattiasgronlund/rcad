@@ -5,9 +5,10 @@
 the lane's tree, `git log` from the base to the branch, the files outside the
 write set, `lines-that-run` before the checkout, the checkout, `gate quiet`,
 then `verifier.md` step 7's revert of the source paths, the test run and the
-restore, and last the lane's numbers. It ends with one line of JSON holding
-every `verdictSchema` field it could fill, `skipped` for what it skipped and
-why, and `left_to_you` for what it could not decide.
+restore, and last the lane's numbers. For a lane marked `sameBehaviour` the
+revert's tests must pass rather than fail (§399). It ends with one line of
+JSON holding every `verdictSchema` field it could fill, `skipped` for what it
+skipped and why, and `left_to_you` for what it could not decide.
 
 **One run, detached, that the verifier waits on** (§385.2). The harness ends a
 Bash call at 600 s, and a cold gate alone can take nine minutes, before the
@@ -58,6 +59,7 @@ RECORDS = {
     "write-set": (1, None),
     "source-paths": (0, None),
     "pins-only": (0, 0),
+    "same-behaviour": (0, 0),
     "tests": (1, None),
     "number": (3, 3),
 }
@@ -354,7 +356,8 @@ def revert(run, lane, kinds, count, tip, report):
         return
     if count == 0:
         skip(report, "the revert: lines that run: 0, so a revert takes out nothing a test could see (§375)")
-        report["tests_fail_without_fix"] = False
+        if not lane["same-behaviour"]:
+            report["tests_fail_without_fix"] = False
         return
     if not sources:
         left(report, "the lane declared no source paths and is not pinsOnly, so there was nothing to revert; "
@@ -380,6 +383,9 @@ def revert(run, lane, kinds, count, tip, report):
             outcomes[name] = reverted_outcome(run, name, kinds[name])
     finally:
         put_back(run, sources, tip, report)
+    if lane["same-behaviour"]:
+        same_answers(kinds, outcomes, report)
+        return
     if len(runnable) == len(kinds) and all(o == "failed" for o in outcomes.values()):
         report["tests_fail_without_fix"] = True
     elif all(o == "passed" for o in outcomes.values()):
@@ -388,6 +394,20 @@ def revert(run, lane, kinds, count, tip, report):
         left(report, "the tests with the source reverted were not all seen to fail: "
                      + "; ".join(f"{name} {outcome}" for name, outcome in outcomes.items())
                      + ". A test the revert took out, or one that did not build, is not a failure")
+
+
+def same_answers(kinds, outcomes, report):
+    """A `sameBehaviour` lane's revert: the base computed what the branch does, so every test must pass on it (§399)."""
+    if len(outcomes) == len(kinds) and all(o == "passed" for o in outcomes.values()):
+        report["tests_pass_without_change"] = True
+        return
+    failed = any(o == "failed" for o in outcomes.values())
+    if failed:
+        report["tests_pass_without_change"] = False
+    left(report, "the tests with the source reverted were not all seen to pass: "
+                 + "; ".join(f"{name} {outcome}" for name, outcome in outcomes.items())
+                 + (". One that failed says the base answered differently, so the behaviour changed" if failed
+                    else ". A test the revert took out, or one that did not build, is not a pass"))
 
 
 def reverted_outcome(run, name, kind):
@@ -575,7 +595,7 @@ def read_input(path):
             records.append([])
         else:
             records[-1].append(line)
-    lane = {"source-paths": [], "pins-only": False, "tests": [], "numbers": []}
+    lane = {"source-paths": [], "pins-only": False, "same-behaviour": False, "tests": [], "numbers": []}
     seen = set()
     for number, record in enumerate(records, start=1):
         if not record or "" in record:
@@ -594,7 +614,7 @@ def read_input(path):
         if name in seen:
             raise Refusal(f"{path} has the record {name} twice")
         seen.add(name)
-        if name == "pins-only":
+        if name in ("pins-only", "same-behaviour"):
             lane[name] = True
         elif most == 1:
             lane[name] = words[0]
@@ -603,6 +623,8 @@ def read_input(path):
     missing = [name for name in REQUIRED if name not in seen]
     if missing:
         raise Refusal(f"{path} has no {', '.join(missing)} record. {USAGE}")
+    if lane["pins-only"] and lane["same-behaviour"]:
+        raise Refusal(f"{path} marks the lane both pinsOnly and sameBehaviour, and lanes.js refuses that (§399)")
     if not SHA.match(lane["base"]):
         raise Refusal(f"the base '{lane['base']}' in {path} is not a sha: 7 to 40 lowercase hex digits")
     return lane
