@@ -339,15 +339,41 @@ on, so its floor of 300 refusals fails. Fifty-four seeds changed. Most went from
 own policy. One went the other way: seed `f117319f6357` answered and now
 refuses `order along a crossing`. The same probe, put on `Bounds::overlap` too
 and run on that seed alone, printed once and not in `provably_misses`: at
-`cuts.rs`'s whole-solid test, whose two boxes missed in `z` by `1.344974619049452e-284`, one starting at that height
-and the other stopping at `2.78e-308`. Grown, they overlap, and the pair is no
-longer passed over as apart. That one is not the dropped cut; it is the growth
-reaching the box test §400.3 asked for.
+`cuts.rs`'s whole-solid test, whose two boxes missed in `z` by
+`1.344974619049452e-284`, one starting at that height and the other stopping at
+`2.78e-308`. Grown, they overlap, and the pair is no longer passed over as
+apart. That one is not the dropped cut; it is the growth reaching the box test
+§400.3 asked for.
+
+**Landed by Q933 on `707a8956`, on top of Q920 and Q925, and the replay's
+refusal floor set again.** On the merged tree the three tests above pass on the
+same pins: 68 right; 278 answered and 2780 meshes; all 48 wedge cases. The
+replay reads `ok: 428, refused: 262`, and with the growth switched off by a
+probe, since removed, `ok: 380, refused: 310`. So the growth moves the same 48
+fuses here as on `5d28a70c`, and the two between the branch's `426, 264` and
+these came with what landed between, grown or not. The file's rule is a floor
+at roughly three quarters of what a run measured, so the refusal floor is 195,
+three quarters of 262. Every other floor of the replay is still at most three
+quarters of its count: `ok` 428 against 190, `solids_made` 447 against 190,
+`ok_that_wrote_something` 411 against 180, `asked_both_ways_round` 108 against
+80, `the_same_both_ways_round` 40 against 14.
+
+**Seed `f117319f6357` refusing is the safe outcome, and no row is filed for
+it.** On the merged tree it refuses `Undecidable` at `order along a crossing`.
+A probe in `cuts.rs`'s `solids_within_reach_of_each_other`, since removed,
+printed the two whole-solid boxes. Ungrown, one runs in `z` from
+`1.344974619049452e-284` to 10 and the other from −10.08 to
+`2.7813423231340017e-308`, so the boxes miss, the pair is passed over and the
+fuse answers. Grown, they run from `−1.42e−13` and to `2.13e−13`, so they
+overlap. Either way `no_face_of_one_meets_the_other` could not prove the two
+solids apart, so the base's answer rested on the plain-`f64` box test alone,
+which is not a proof (§400.3). The gap between the two solids is about
+`1e−285` of their largest coordinate, 15: a spread of about `1e285`, far past
+the cliff §3.5 measures at `2^49` for a constructed point, where §3.5 says a
+refusal is the safe outcome and a confident answer is not.
 
 ### 340.11 What this leaves
 
-- `every_model_the_fuse_fuzzer_kept_is_fused_again.rs`'s floor of 300
-  refusals, at 264.
 - `cuts.rs`'s doc of `two_faces_provably_apart` and §400.3 say `bake`'s boxes
   can be short by a rounding and that growing them would close that; they are
   grown now.
