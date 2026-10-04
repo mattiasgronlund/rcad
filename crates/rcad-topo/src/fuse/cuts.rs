@@ -188,15 +188,15 @@ fn no_face_of_one_meets_the_other(one: &BakedSolid, other: &BakedSolid) -> bool 
 /// misses the part of space both boxes hold; the surfaces do not meet at all;
 /// or they touch at one point outside that part of space.
 ///
-/// **`bake`'s own boxes are asked first, and only whether they miss.** They are
-/// read off stored corners in plain `f64` (§35.4), so a miss between them is
-/// not a proof — but it is exactly the test the two whole solids' boxes,
-/// which are those same boxes taken together, have always passed as one
-/// (§400.3). Asking it face by face keeps a solid uncut against another
-/// whatever grouping of a fuse brought the two together: a face on a cone has
-/// no box here that is a proof, and without this a block holding a cube clear
-/// of a frustum through its floor cut the frustum along the cube's planes in
-/// one grouping and not in the other.
+/// **Where one of the two has no box here, `bake`'s own boxes are asked
+/// whether they miss.** Those are read off stored corners in plain `f64`
+/// (§35.4) and can be short of the face by a rounding (Q694 measured one), so
+/// a miss between them is not a proof. It is the test the two whole solids'
+/// boxes, those same boxes taken together, have always passed as one, and it
+/// is asked only of a face on a pipe, a cone or a torus, or a flat face with a
+/// side on one, which nothing here bounds (§400.3). Without it a block holding
+/// a cube clear of a frustum through its floor cut the frustum along the
+/// cube's planes in one grouping of a fuse and not in the other.
 ///
 /// **Asked under a certified policy whatever the fuse runs under, and its
 /// records dropped.** A tolerant policy settling a close call one way would
@@ -204,10 +204,11 @@ fn no_face_of_one_meets_the_other(one: &BakedSolid, other: &BakedSolid) -> bool 
 /// joined, and the cutting that follows asks the same surfaces again under the
 /// fuse's own policy and log, as it did before there was a proof.
 fn two_faces_provably_apart(face: &BakedFace, against: &BakedFace) -> bool {
-    if !face.bounds.overlap(against.bounds) {
+    let (mine, theirs) = (box_a_face_is_inside(face), box_a_face_is_inside(against));
+    if (mine.is_none() || theirs.is_none()) && !face.bounds.overlap(against.bounds) {
         return true;
     }
-    let both = match (box_a_face_is_inside(face), box_a_face_is_inside(against)) {
+    let both = match (mine, theirs) {
         (Some(mine), Some(theirs)) => match where_two_boxes_overlap(mine, theirs) {
             Some(both) => Some(both),
             None => return true,

@@ -75,12 +75,18 @@ all. Both pass here; a touch is never a proof of anything above.
 
 ### 400.3 The one test that is not a proof
 
-Before the four, `bake`'s own face boxes are asked whether they miss. Those are
-read off stored corners in plain `f64` (§35.4), so a miss between them is not a
-proof — but the whole-solid boxes are those same boxes taken together, and a
-miss between those has always been taken as two solids apart. Asking it face by
-face holds the proof to the standard the solid-level test already held, and no
-weaker.
+Where one of the two faces has no box of 400.2's — a face on a pipe, a cone or
+a torus, or a flat face with a side on one — `bake`'s own face boxes are asked
+whether they miss, before the four. Those are read off stored corners in plain
+`f64` (§35.4), and Q694 measured one short of its face by a rounding, so a miss
+between them is not a proof. The whole-solid boxes are those same boxes taken
+together, and a miss between those has always been taken as two solids apart.
+Face by face it is a little weaker than that: two solids whose whole boxes
+overlap but which touch only where both faces' boxes are short by a rounding
+were joined, and are now left uncut. Asked only where no proof is to be had, it
+is weaker only for those faces; growing `bake`'s boxes by what writing a corner
+down costs, as Q694 proposes, would close it, and bounding those faces soundly
+would retire it.
 
 It is there because without it an associativity pin moved.
 `fuse_laws_over_a_cone.rs`'s
@@ -92,7 +98,7 @@ against `block ∪ frustum`, whose frustum wall is a cone with no box of its own
 in 400.2, so it could not be proved apart, was cut by the cube's plane `x =
 3.5`, and the two answers' corners differed: `[[3.0, 3.5, 0.0], [4.0, 5.0,
 -1.0]]` against `[[3.5, 3.586, 0.0], [3.5, 4.134, -1.0], …]`. With the face
-boxes asked first it passes, and no other test moved either way.
+boxes asked for those faces it passes, and no other test moved either way.
 
 ### 400.4 What moved, and the tests
 
@@ -174,10 +180,10 @@ it moves here.
   chain of overlapping boxes joins them, and `bake.rs`'s `Bounds` says a box
   test changes no answer. Both are outside this lane's write set.
 - A face on a pipe or a cone has no box in 400.2, so a pipe or a cone clear of
-  a block whose boxes miss face by face only in `bake`'s boxes is proved apart
-  by 400.3's standard and not by a proof, and one whose `bake` boxes touch is
+  a block whose boxes miss face by face only in `bake`'s boxes is left uncut by
+  400.3's standard and not by a proof, and one whose `bake` boxes touch is
   joined and cut as before. Bounding those faces soundly would extend the proof
-  to them.
+  to them and retire 400.3.
 - A draw where two solids meet that reaches the §345 fold.
 - Q451 and Q453 wait on this row and were written around Q316's four draws,
   which no longer reach the mesher.
