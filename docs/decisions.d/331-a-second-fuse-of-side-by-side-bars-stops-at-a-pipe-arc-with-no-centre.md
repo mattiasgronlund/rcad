@@ -297,4 +297,8 @@ and `mise exec -- just t -p rcad-topo --no-fail-fast` ran 1333 tests and all
 
 **What this leaves.** Nothing in this shape. A reversed face that a first fuse
 writes and a second fuse cuts is not rare (a bore through a block, then a
-second cut across it), and why no test met this before was not looked into.
+second cut across it), and why no test met this before was not looked into;
+a row pins such a bore. Q772's slab with a round scoop, its scoop a pipe face
+used reversed and built face by face, still refuses its cut on this branch,
+`could not settle 1 decisions the answer depends on`, so this is not its
+cause.
