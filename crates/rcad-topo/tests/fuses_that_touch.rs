@@ -127,7 +127,7 @@
 //!   bar beside a wall is the same touch turned, and is built instead.
 //! - **A plane lying along a cone's ruling** needs a slanted face, which no
 //!   whole-number block has; `degenerate_curved_fuses.rs` builds it by hand as
-//!   `a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction`.
+//!   `a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand`.
 //! - **A cone against a ball or a bar**: not built yet, and nothing here says
 //!   whether they would reach their touch. A cone's side against another cone
 //!   *is* built now, as one hand-written pair rather than a cell —
