@@ -1,22 +1,25 @@
 //! A meet of three surfaces is folded into a corner of the face only when its
-//! box is no further from the corner than writing the corner down cost (§253).
+//! box is no further from the corner than writing the corner down cost (§253),
+//! and a meet of three planes is asked that with its box narrowed by one
+//! checked step (§281.2, §345).
 //!
 //! `place_the_meets` used to fold a meet into any corner on both of its
 //! crossings whose box it touched, without asking the policy, however wide the
 //! meet's box was. Across every test in the workspace, one fold's box reached
 //! further than the allowance `bake.rs` grants a stored corner: a draw in the
 //! fuse target's corpus, a tolerant union of two blocks that do not meet. Two
-//! of the meet's three planes are about `1.5e-6` off parallel, so its box is
-//! `±1.43e-10` wide, 2 012 times the allowance, while the point it holds is
-//! `4.1e-16` from the corner (§253.7, worked in exact rationals). The old fold
-//! gave two solids, and that answer was right. With the meet kept as a node
-//! the fuse refuses on "order along a crossing", so this pins a right answer
-//! refused, not a wrong one prevented.
+//! of the meet's three planes are about `1.5e-6` off parallel, so Cramer's box
+//! round it is `2.9e-10` wide, while the point it holds is `1.1e-33` from the
+//! corner (§281.1, worked in exact rationals). The old fold gave two solids,
+//! and that answer was right. From §253 until §345 the meet was kept as a node
+//! and the fuse refused on "order along a crossing": a right answer refused,
+//! not a wrong one prevented.
 //!
-//! **When the meet's box is tightened, this pin should move to `ok: 1` with
-//! two solids made**, which is the answer the old fold gave. A fold that
-//! comes back past the allowance moves it the same way, so check which of
-//! the two happened before moving it.
+//! **The fold now asks whether the narrowed box lies inside the corner's
+//! room**, and the narrowed box is `8.9e-16` wide and holds the meet. So the
+//! meet folds for the reason §253 gives, every point of its box within the
+//! rounding of the corner, and not because a box was let past the allowance.
+//! The node the fuse keeps when it does not fold still has Cramer's box.
 //!
 //! The draw is a copy of `fuzz/corpus/two_solids_fused_by_a_stranger/a45aa71b…`
 //! beside this file, so that minimising the corpus cannot drop it. It is named
@@ -30,37 +33,18 @@
 mod fuzzing;
 
 use fuzzing::fuse::two_models_split_and_fused_noting_refusals;
-use rcad_topo::Error;
+use rcad_geom::Deflection;
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{Model, Rule, SolidKey};
 
 const THE_DRAW: &[u8] =
     include_bytes!("a_meet_folds_into_a_corner_only_as_far_as_rounding_reaches.draw");
 
-/// What §253.3 could not say without digging the refusal out by hand: the
-/// predicate that gave up (§253.7).
-const ALONG_A_CROSSING: &str = "order along a crossing";
-
-/// The predicate an `Undecidable` refusal names, read the way
-/// `Error::Undecidable`'s doc comment says to: the last record in its log.
-///
-/// # Panics
-///
-/// If `why` is not `Error::Undecidable`, or if its log is empty.
-fn which_predicate_the_refusal_names(why: &Error) -> &'static str {
-    let Error::Undecidable { records } = why else {
-        panic!("expected `Undecidable`, got {why:?}");
-    };
-    records
-        .records()
-        .last()
-        .expect("a refusal names at least one decision")
-        .predicate()
-}
-
 #[test]
-fn a_meet_further_from_a_corner_than_rounding_reaches_is_not_folded_into_it() {
-    let mut refused_on: Option<&'static str> = None;
+fn a_tolerant_union_of_two_blocks_apart_answers_with_the_two_of_them() {
+    let mut refusals = Vec::new();
     let reached = two_models_split_and_fused_noting_refusals(THE_DRAW, &mut |why| {
-        refused_on = Some(which_predicate_the_refusal_names(why));
+        refusals.push(why.to_string());
     });
     assert_eq!(
         (reached.fused, reached.one_sided),
@@ -68,15 +52,98 @@ fn a_meet_further_from_a_corner_than_rounding_reaches_is_not_folded_into_it() {
         "the draw no longer reaches the one fuse it is kept for: {reached:?}"
     );
     assert_eq!(
-        (reached.ok, reached.refused),
-        (0, 1),
-        "the fuse answered: either the meet's box was tightened, and two solids is \
-         the right answer, or a meet whose box is 2 012 times the allowance was folded \
-         into its corner again without the policy being asked: {reached:?}"
+        (reached.ok, reached.refused, reached.solids_made),
+        (1, 0, 2),
+        "two blocks that do not meet unite as the two of them: {reached:?}, refused with \
+         {refusals:?}"
     );
+}
+
+/// The same fuse, asked here rather than through the fuzz harness, so that the
+/// answer can be read: two solids whose volumes add up to the two blocks', and
+/// a sweep of the model under `Policy::certified()` that passes, though the
+/// fuse ran under a tolerant one.
+#[test]
+fn the_two_blocks_unite_with_their_volumes_and_pass_a_certified_sweep() {
+    let (mut model, policy, arguments, tools, rule) = the_fuse_the_draw_asks_for();
+    assert_eq!(rule, Rule::Union, "the draw is kept for a union");
+    assert!(
+        policy.max_wobble() > 0.0,
+        "the draw is kept for a tolerant fuse"
+    );
+    let blocks: Vec<SolidKey> = arguments.iter().chain(&tools).copied().collect();
+    assert_eq!(blocks.len(), 2, "the draw unites two blocks");
+    let before = volume_of(&model, &blocks);
+
+    let fused = model
+        .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("two blocks that do not meet were refused: {why}"));
     assert_eq!(
-        refused_on,
-        Some(ALONG_A_CROSSING),
-        "the refusal names a different predicate than \"{ALONG_A_CROSSING}\": {refused_on:?}"
+        fused.solids().len(),
+        2,
+        "two blocks that do not meet unite as the two of them"
     );
+    let after = volume_of(&model, fused.solids());
+    assert!(
+        (after - before).abs() <= 1e-9 * before,
+        "two blocks of {before} in all united to {after}"
+    );
+    let mut swept = ProvenanceLog::new();
+    model
+        .validate(&Policy::certified(), &mut swept)
+        .unwrap_or_else(|why| panic!("the union fails a certified sweep: {why}"));
+    assert!(swept.is_empty(), "a certified sweep recorded {swept:?}");
+}
+
+/// The model, policy, two sides and rule that
+/// `fuzzing::fuse::two_models_split_and_fused` reads out of [`THE_DRAW`] for
+/// the one half that decodes and validates, read the same way.
+fn the_fuse_the_draw_asks_for() -> (Model, Policy, Vec<SolidKey>, Vec<SolidKey>, Rule) {
+    let (&header, rest) = THE_DRAW.split_first().expect("the draw is not empty");
+    let (first_half, second_half) = rest.split_at(rest.len() / 2);
+    let mut fusing = [(first_half, header), (second_half, header.rotate_left(4))]
+        .into_iter()
+        .filter_map(|(bytes, header)| {
+            let model = postcard::from_bytes::<Model>(bytes).ok()?;
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .ok()?;
+            Some((model, header))
+        });
+    let (model, header) = fusing
+        .next()
+        .expect("one half of the draw is a valid model");
+    assert!(fusing.next().is_none(), "only one half of the draw fuses");
+
+    let solids: Vec<SolidKey> = model.solids().map(|solid| solid.key()).collect();
+    let (arguments, tools) = solids.split_at(usize::from(header) % (solids.len() + 1));
+    let rule = match (header >> 4) % 3 {
+        0 => Rule::Union,
+        1 => Rule::Intersection,
+        _ => Rule::Difference,
+    };
+    let policy = if header & 0x80 == 0 {
+        Policy::certified()
+    } else {
+        Policy::tolerant(model.scale().nominal_size())
+    };
+    (model, policy, arguments.to_vec(), tools.to_vec(), rule)
+}
+
+fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
+    solids
+        .iter()
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.1).expect("a tenth of a millimetre is a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a flat solid measures")
+                .volume()
+        })
+        .sum()
 }
