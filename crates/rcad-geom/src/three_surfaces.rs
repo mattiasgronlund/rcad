@@ -115,8 +115,9 @@ pub enum MeetOfThree {
 }
 
 impl MeetOfThree {
-    /// Where three surfaces meet, as [`meet_of_three_surfaces`] says, with the
-    /// box round a meet of **three planes** narrowed by one checked step.
+    /// This meet, which [`meet_of_three_surfaces`] handed back for `surfaces`,
+    /// with the box round a meet of **three planes** narrowed by one checked
+    /// step. Any other meet comes back as it is.
     ///
     /// Cramer's rule sums its numerators in intervals, and each numerator is a
     /// small number built out of products near one that all round. Where two of
@@ -151,32 +152,30 @@ impl MeetOfThree {
     /// order, so the box that comes back depends on which three they are and
     /// not on the order they were asked in (§31.3).
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// As [`meet_of_three_surfaces`].
-    pub fn boxed_tight(
-        surfaces: [&Surface; 3],
-        policy: &Policy,
-        log: &mut ProvenanceLog,
-    ) -> Result<MeetOfThree> {
-        let meet = meet_of_three_surfaces(surfaces, policy, log)?;
+    /// Where `self` was not worked out from `surfaces` and the stepped box
+    /// misses it altogether: the two are then boxes round two different
+    /// points, and a corner placed from where they overlap would be nowhere.
+    #[must_use]
+    pub fn boxed_tight(&self, surfaces: [&Surface; 3]) -> MeetOfThree {
         let [
             Surface::Plane(one),
             Surface::Plane(other),
             Surface::Plane(last),
         ] = in_a_fixed_order(surfaces)
         else {
-            return Ok(meet);
+            return self.clone();
         };
-        let MeetOfThree::At(places) = meet else {
-            return Ok(meet);
+        let MeetOfThree::At(places) = self else {
+            return self.clone();
         };
-        Ok(MeetOfThree::At(
+        MeetOfThree::At(
             places
-                .into_iter()
-                .map(|place| narrowed_by_one_checked_step([&one, &other, &last], place))
+                .iter()
+                .map(|&place| narrowed_by_one_checked_step([&one, &other, &last], place))
                 .collect(),
-        ))
+        )
     }
 }
 
@@ -2630,13 +2629,11 @@ mod tests {
             let wall = flat([0.6, 0.0, 0.8], [5.0, 0.0, 0.0]);
             let leaning = flat([0.6, lean, 0.8], [5.0, 0.0, 0.0]);
             let three = [&floor, &wall, &leaning];
-            let MeetOfThree::At(by_cramer) = meet(three).expect("three planes meet") else {
+            let by_cramer = meet(three).expect("three planes meet");
+            let MeetOfThree::At(narrowed) = by_cramer.boxed_tight(three) else {
                 panic!("three planes a millionth off parallel meet at a point");
             };
-            let MeetOfThree::At(narrowed) =
-                MeetOfThree::boxed_tight(three, &Policy::certified(), &mut ProvenanceLog::new())
-                    .expect("three planes meet")
-            else {
+            let MeetOfThree::At(by_cramer) = by_cramer else {
                 panic!("three planes a millionth off parallel meet at a point");
             };
             let (wide, tight) = (by_cramer[0].enclosure(), narrowed[0].enclosure());

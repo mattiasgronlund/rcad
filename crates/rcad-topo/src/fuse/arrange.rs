@@ -14,9 +14,8 @@
 //! surface of a face cutting it. §17.4 said "pair of planes" and §31.3 changes
 //! the one word. So:
 //!
-//! - every node of the arrangement is [`MeetOfThree::boxed_tight`], which for
-//!   three planes is the Cramer solve that used to be here (§34.9) narrowed by
-//!   one checked step (§345);
+//! - every node of the arrangement is [`meet_of_three_surfaces`], which for
+//!   three planes is bit-for-bit the Cramer solve that used to be here (§34.9);
 //! - the anticlockwise order of two curves round a node is one exact
 //!   determinant of the three surfaces' **gradients** there — §17.4's
 //!   determinant of three normals, with `∇S` in each normal's place, which is
@@ -73,8 +72,8 @@ use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
-    intersect, where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
-    which_comes_first_round_a_crossing,
+    intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
+    where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
@@ -564,8 +563,7 @@ fn written_the_one_way<const N: usize>(written: [f64; N]) -> [f64; N] {
 /// §48, W5. Two solids flush against each other work the plane they share out
 /// separately and one of them holds it reversed, so a corner on that plane is
 /// asked for as `P, Q, R` by a face of one and as `−P, Q, R` by a face of the
-/// other. [`meet_of_three_surfaces`](rcad_geom::meet_of_three_surfaces) sorts
-/// its three on the numbers they store,
+/// other. [`meet_of_three_surfaces`] sorts its three on the numbers they store,
 /// a reversed plane sorts to a different row, and a solve with its rows
 /// permuted rounds a bit or two elsewhere. Which face happened to ask then
 /// decided where the corner went, and a `fuse(A, B)` and a `fuse(B, A)` that
@@ -826,9 +824,8 @@ struct Node {
     point: PredicatePoint,
     /// The input corner this is, when it is one.
     vertex: Option<VertexKey>,
-    /// The three surfaces that placed it, in
-    /// [`meet_of_three_surfaces`](rcad_geom::meet_of_three_surfaces)'s own fixed
-    /// order, and which of their meeting points this is. `None` for a
+    /// The three surfaces that placed it, in [`meet_of_three_surfaces`]'s own
+    /// fixed order, and which of their meeting points this is. `None` for a
     /// corner the input already had.
     made_of: Option<([Surface; 3], u8)>,
     /// Whether this is the second place a closed crossing is cut, across the
@@ -1283,7 +1280,7 @@ impl<'f> Arrangement<'f> {
     /// # Not every pair is worth asking about
     ///
     /// A pair of crossings whose two partners share no point at all has no node
-    /// between them, and [`MeetOfThree::boxed_tight`] is not the way to find that
+    /// between them, and [`meet_of_three_surfaces`] is not the way to find that
     /// out: a plane cut by a ball and by a pipe is one plane short of what it can
     /// solve, so it refuses by name whether or not the ball and the pipe are
     /// anywhere near each other. So when it gives up, ask the cheaper question
@@ -1302,11 +1299,8 @@ impl<'f> Arrangement<'f> {
                     self.crossings[second].partner,
                 ];
                 let asked = three_planes_faced_the_one_way(surfaces);
-                let meet = match MeetOfThree::boxed_tight(
-                    [&asked[0], &asked[1], &asked[2]],
-                    policy,
-                    log,
-                ) {
+                let asked = [&asked[0], &asked[1], &asked[2]];
+                let meet = match meet_of_three_surfaces(asked, policy, log) {
                     Ok(meet) => meet,
                     Err(gave_up_on_it) => {
                         if self.two_crossings_provably_share_nothing(first, second, policy, log) {
@@ -1315,12 +1309,16 @@ impl<'f> Arrangement<'f> {
                         return Err(gave_up_on_it.into());
                     }
                 };
+                let tight = meet.boxed_tight(asked);
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
+                let MeetOfThree::At(tight) = tight else {
+                    unreachable!("a meet at points boxed tighter is still a meet at those points")
+                };
                 let places: SmallVec<[PredicatePoint; 2]> =
                     places.into_iter().map(as_exact_as_it_is).collect();
-                for (which, &place) in places.iter().enumerate() {
+                for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
                     // Being *on* both surfaces is what the meet just worked out,
                     // and asking a predicate to confirm it would be a second
                     // opinion about a fact this line already holds — one that a
@@ -1332,7 +1330,7 @@ impl<'f> Arrangement<'f> {
                     {
                         continue;
                     }
-                    if self.a_corner_is_this_place(first, second, place, &places) {
+                    if self.a_corner_is_this_place(first, second, place, boxed_tight, &places) {
                         continue;
                     }
                     let mut sorted = surfaces;
@@ -1358,7 +1356,7 @@ impl<'f> Arrangement<'f> {
     /// a cone's apex, whose two rulings cross there (§347).
     ///
     /// No third surface passes through that point, so
-    /// [`MeetOfThree::boxed_tight`] has nothing to solve, and none is needed: the
+    /// [`meet_of_three_surfaces`] has nothing to solve, and none is needed: the
     /// apex is [`Cone::apex`], stored, and [`a_plane_cuts_a_cone_in_rulings`]
     /// has proved it on the plane. Every other pair that names two curves is
     /// left without a node here, and §347 says which of them can have two
@@ -1388,7 +1386,7 @@ impl<'f> Arrangement<'f> {
                 && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
             "each of the two rulings a plane cuts through a cone's apex holds the apex"
         );
-        if self.a_corner_is_this_place(first, second, apex, &[apex]) {
+        if self.a_corner_is_this_place(first, second, apex, apex, &[apex]) {
             return;
         }
         let mut named = [
@@ -1518,6 +1516,7 @@ impl<'f> Arrangement<'f> {
         first: usize,
         second: usize,
         place: PredicatePoint,
+        boxed_tight: PredicatePoint,
         places: &[PredicatePoint],
     ) -> bool {
         self.nodes.iter().any(|node| {
@@ -1532,7 +1531,7 @@ impl<'f> Arrangement<'f> {
                 super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
             );
             let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
-            let (meet, room) = (place.enclosure(), allowed.enclosure());
+            let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
             let inside_the_room = (0..3).all(|axis| {
                 room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
             });
@@ -6704,8 +6703,9 @@ mod tests {
             f64::powi(2.0, -46),
             "the room at a corner no bigger than one"
         );
-        let folds =
-            |place: PredicatePoint| arrangement.a_corner_is_this_place(wall, cut, place, &[place]);
+        let folds = |place: PredicatePoint| {
+            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place])
+        };
         assert!(
             folds(reaching(room)),
             "a place reaching the room's edge on every side is the corner written down another way"
@@ -6745,11 +6745,11 @@ mod tests {
         let far = 1000.0 * what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = reaching(far);
         assert!(
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, &[place]),
+            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place]),
             "the bottom and the two walls meet at the corner `bake` placed among them"
         );
         assert!(
-            !arrangement.a_corner_is_this_place(one_wall, cut, place, &[place]),
+            !arrangement.a_corner_is_this_place(one_wall, cut, place, place, &[place]),
             "a meet with a cut in it is folded only as far as the room reaches"
         );
     }
@@ -6778,7 +6778,7 @@ mod tests {
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = from_to(room / 2.0, room);
         assert!(
-            arrangement.a_corner_is_this_place(wall, cut, place, &[place]),
+            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place]),
             "a place inside the corner's room is the corner written down another way, \
              whether or not its box touches the corner's"
         );
@@ -6809,7 +6809,7 @@ mod tests {
 
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let folds = |place: PredicatePoint| {
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, &[place])
+            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place])
         };
         assert!(
             folds(from_to(room, 1000.0 * room)),
@@ -6988,7 +6988,7 @@ mod tests {
                     place
                         .exact_coordinates()
                         .expect("every place here lands on an f64"),
-                    arrangement.a_corner_is_this_place(first, second, place, &places),
+                    arrangement.a_corner_is_this_place(first, second, place, place, &places),
                 )
             })
             .collect();
