@@ -57,17 +57,27 @@
 //! | `two_cubes_that_fuse` | `0x01` | two cubes of side 2 overlapping at `(1, 1, 1)`, unioned then intersected, both `Ok` |
 //! | `two_cubes_touching_along_one_edge` | `0x02` | two cubes meeting along one edge at `(2, 2, 0)`, refused `ResultIsNotManifold { count: 4 }` |
 //! | `two_cubes_one_taken_out_of_the_other` | `0x22` | the overlapping cubes again, a **two-sided difference** both halves, both `Ok` |
-//! | `a_curved_face_with_a_hole_that_goes_too_far_round` | `0xa0` | a **two-sided intersection** refused `CurvedFaceWithAHoleGoesTooFarRound` |
+//! | `a_curved_face_with_a_hole_that_goes_too_far_round` | `0xa0` | a cube and a ball nearly inside it, a **two-sided intersection** then a union, both `Ok` |
 //!
 //! One either side of the fuse, named, so the floors below cannot be met by a
 //! corpus that has quietly stopped doing one of them. The last two are the
 //! rule's move: the difference seed holds up the thinnest floor here, and the
-//! curved-face seed is the **one branch the move would otherwise have dropped**
-//! — exactly one half in the corpus reached
+//! curved-face seed was the **one branch the move would otherwise have
+//! dropped** — exactly one half in the corpus reached
 //! `CurvedFaceWithAHoleGoesTooFarRound`, at header `0xf4`, and under the new
 //! layout that half draws a union instead. `0xa0` draws the same tolerant
-//! two-sided intersection on the same model, so the branch is kept by name
+//! two-sided intersection on the same model, so the branch was kept by name
 //! rather than by luck.
+//!
+//! **That branch is no longer what the seed reaches, and its name is now
+//! wrong.** The ball's skin inside the cube is one face of two wires, a circle
+//! round its top pole and an island at its equator. Since `951c28a7` refused a
+//! wire that winds beside one that does not in `cut_up`, the first half was
+//! refused `AWireWillNotLieFlatOnItsFace` there; the pin counted refusals and
+//! not their names, so nothing said so. Since Q920 that face is cut up to its
+//! pole with the island in it (`docs/decisions.md` §95.4), and the first half
+//! answers. One half of the corpus, `29bf58fc…`'s first, still reaches
+//! `CurvedFaceWithAHoleGoesTooFarRound`, by luck again.
 //!
 //! # Where the floors below come from
 //!
@@ -145,12 +155,14 @@
 
 mod fuzzing;
 
+use core::f64::consts::PI;
 use std::path::PathBuf;
 
 use fuzzing::fuse::{
     Agreed, Reached, WhatCameBack, both_ways_round, the_answer_written_out,
     two_models_split_and_fused,
 };
+use rcad_geom::{Deflection, Point, Surface};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, Rule};
 
@@ -433,9 +445,89 @@ fn the_named_control_seeds_still_land_either_side_of_the_fuse() {
         "both halves cut between the solids: {reached:?}"
     );
     assert_eq!(
-        reached.refused, 1,
-        "the first half is the tolerant two-sided intersection that refuses \
-         `CurvedFaceWithAHoleGoesTooFarRound`, the only branch moving the rule \
-         off the split would otherwise have dropped: {reached:?}"
+        (reached.ok, reached.refused),
+        (2, 0),
+        "the first half, the tolerant two-sided intersection, was refused until \
+         a cap on a ball took islands (§95.4), and the second half's union \
+         answered already: {reached:?}"
+    );
+    assert_eq!(
+        reached.the_same_both_ways_round, 2,
+        "both halves are two-sided, so both were asked the other way round: {reached:?}"
+    );
+}
+
+/// **The curved-face seed's first half is the ball, nearly whole.**
+///
+/// It draws a cube `[0, 2]³` and a unit ball round `(1 + 2.4e-7, 1, 1 +
+/// 2.3e-13)`, so the ball pokes through `x = 2` and `z = 2` by those two
+/// amounts and touches `y = 0` and `y = 2`. Their intersection is the ball less
+/// two slivers of `1.8e-13` between them, far under what the measure can see,
+/// and the ball's skin in it is one face of two wires: the `z = 2` circle round
+/// its top pole and the `x = 2` circle as an island at its equator. That face
+/// was refused until a cap on a ball took islands (`docs/decisions.md` §95.4).
+#[test]
+fn the_curved_seeds_intersection_measures_as_the_ball() {
+    let bytes = std::fs::read(corpus().join("a_curved_face_with_a_hole_that_goes_too_far_round"))
+        .expect("the control seed is checked in");
+    let rest = &bytes[1..];
+    let mut model: Model =
+        postcard::from_bytes(&rest[..rest.len() / 2]).expect("the first half decodes");
+    let solids: Vec<_> = model.solids().map(|solid| solid.key()).collect();
+    let &[cube, ball] = &solids[..] else {
+        panic!("a cube and a ball, not {} solids", solids.len());
+    };
+    let skins: Vec<_> = model
+        .solid(ball)
+        .expect("the seed's own key")
+        .faces()
+        .map(|face| face.surface())
+        .collect();
+    let [Surface::Sphere(skin)] = &skins[..] else {
+        panic!("the second solid is a ball: {skins:?}");
+    };
+    assert!(
+        (skin.centre() - Point::new(1.0, 1.0, 1.0)).length() < 1e-6 && skin.radius() == 1.0,
+        "a unit ball nearly in the middle of the cube: {skin:?}"
+    );
+
+    let answer = model
+        .fuse(
+            &[cube],
+            &[ball],
+            Rule::Intersection,
+            &Policy::tolerant(model.scale().nominal_size()),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the seed's own draw answers")
+        .solids()
+        .to_vec();
+    let [only] = answer[..] else {
+        panic!("one solid, not {}", answer.len());
+    };
+    let answered = model.solid(only).expect("the fuse's own key");
+    let wires_on_the_ball: Vec<usize> = answered
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+        .map(|face| face.wire_count())
+        .collect();
+    assert_eq!(
+        wires_on_the_ball,
+        [2],
+        "one face on the ball, a ring round its pole and an island"
+    );
+    let measured = answered
+        .measure(
+            Deflection::of(0.002).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the answer measures");
+    let ball = 4.0 * PI / 3.0;
+    assert!(
+        (measured.volume() - ball).abs() <= measured.volume_error(),
+        "{} measured, {} off at most, against {ball}",
+        measured.volume(),
+        measured.volume_error()
     );
 }

@@ -169,6 +169,11 @@ The candidate before its trip is off the surface, and the box only has to hold
 the true point at the two coordinates the trip came back with, so it is not
 one of the numbers the bound is about. `3e0abbe7` takes it out.
 
+*Since Q920 that seed's first half answers too (§95.4), so the pin now reads
+both halves `Ok` and none refused. The mistake above would still fail it: the
+half it refused was the second, the union, since the first was refused
+already.*
+
 **Q335 does not move, and it is not this piece.**
 `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` in `fusing_solids.rs`
 passes on `3e0abbe7` as it did on the base (`mise exec -- just t -p rcad-topo

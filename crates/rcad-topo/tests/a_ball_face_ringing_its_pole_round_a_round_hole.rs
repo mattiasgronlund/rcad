@@ -51,10 +51,11 @@ fn the_turned_cube_and_ball_measure_under_every_rule() {
     }
 }
 
-/// The limit of the cut: turned 2 about `(2, −1, 1)`, the island reaches more
-/// than half a turn round the ball and its rim is walked at four corners, so
-/// two of the four cuts up to the pole meet the island and a cut through it
-/// leaves only two pieces of it. The intersection is refused by name.
+/// A gap the cut leaves, which Q921 takes up: turned 2 about `(2, −1, 1)`, the
+/// island reaches more than half a turn round the ball and its rim is walked at
+/// four corners, so two of the four cuts up to the pole meet the island and a
+/// cut through it leaves only two pieces of it. The intersection exists, the
+/// closed form above, and is refused by name.
 #[test]
 fn an_island_two_cuts_meet_is_refused_by_name() {
     let (mut model, cube, ball) = a_cube_and_a_ball(Some(([2.0, -1.0, 1.0], 2.0)));
