@@ -2107,8 +2107,11 @@ impl Assembly {
     /// # Errors
     ///
     /// [`Error::Invalid`] when a shell encloses nothing at all, or when a void
-    /// has no shell around it. [`Error::Undecidable`] when no point on a shell
-    /// could be placed inside or outside another.
+    /// has no shell around it. [`Error::AFaceTrimmedByACurveThisCannotFollow`]
+    /// naming the input face, when no point on a shell could be placed and one
+    /// met a face of another shell that nobody can follow.
+    /// [`Error::Undecidable`] when no point on a shell could be placed inside or
+    /// outside another for any other reason.
     fn nest_the_shells(
         &self,
         model: &Model,
@@ -2178,9 +2181,39 @@ impl Assembly {
     /// nothing can place, is abandoned for the next one — choosing which corner
     /// to look at decides nothing (§5).
     ///
+    /// **Running out of corners is a refusal, and it says which one.** A corner
+    /// whose ray met a face of `outer` that [`SolidView::face_holds_the_point`]
+    /// cannot follow was never asked at all, and that is
+    /// [`Containment::CannotFollowAFacesTrimming`], deliberately not
+    /// `Undecidable` (`docs/decisions.md` §4.2, §35.6). This used to fold it
+    /// into [`Error::Undecidable`] with a record of a point it never asked —
+    /// the first corner of the whole answer — so a caller read "loosen the
+    /// policy" off a refusal no policy moves. A box hollowed out of a block
+    /// with a bar through the block's edge was refused that way:
+    /// `tests/a_shell_inside_another_names_its_refusal.rs`.
+    ///
+    /// **A face nobody can follow wins over a corner left undecided**, when
+    /// both happen. Either refusal is true, and only one can be returned;
+    /// naming the face folds an undecided corner into "never asked", which
+    /// costs a caller a policy that might have helped, where the other way
+    /// round folds "never asked" into "undecided", which is the mistake §35.6
+    /// keeps the two apart to stop. The face named is the caller's: `apart` is
+    /// thrown away when the fuse returns, so a key into it names nothing.
+    ///
+    /// **What is left is not yet right, and nothing is known to reach it.** A
+    /// corner whose ray could not be fired at a ring's surface stays with the
+    /// undecided ones, because this crate's [`Error`] has nothing yet that says
+    /// so; and the record an undecided corner leaves still names the first
+    /// corner of the whole answer rather than one that was asked. Neither has a
+    /// shape behind it: a block less an octahedron touching its six faces with
+    /// its six corners, the one tried, is refused before it gets here.
+    ///
     /// # Errors
     ///
-    /// [`Error::Undecidable`] when no corner of `hollow` could be placed.
+    /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the input face
+    /// a face of `outer` was cut from, when a corner of `hollow` met that face
+    /// and none was placed. [`Error::Undecidable`] when no corner of `hollow`
+    /// could be placed for any other reason.
     fn one_shell_is_inside_another(
         &self,
         apart: &Model,
@@ -2191,12 +2224,12 @@ impl Assembly {
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         let solid = apart.solid_at(written.solids[outer]);
+        let mut unfollowed = None;
         for &face in &self.shells[hollow] {
             for side in self.faces[face].wires.iter().flatten() {
                 let at = self.corners[self.edges[side.edge].ends[0]].point;
                 let mut trial = ProvenanceLog::new();
-                let placed = solid.classify_point(at, policy, &mut trial);
-                match placed {
+                match solid.classify_point(at, policy, &mut trial) {
                     Containment::Inside => {
                         trial.drain_into(log);
                         return Ok(true);
@@ -2205,18 +2238,19 @@ impl Assembly {
                         trial.drain_into(log);
                         return Ok(false);
                     }
-                    // A corner nothing could place is abandoned for the next one,
-                    // and a face nobody can follow is the same kind of silence:
-                    // running out of corners is already a refusal, so nothing
-                    // here has to be a panic. This was `unreachable!` on the
-                    // grounds that the fuse refuses curved solids at entry —
-                    // `docs/decisions.md` §35 records why that stops holding.
+                    Containment::CannotFollowAFacesTrimming { face } => {
+                        unfollowed.get_or_insert(face);
+                    }
                     Containment::OnBoundary
                     | Containment::Undecidable { .. }
-                    | Containment::CannotFollowAFacesTrimming { .. }
                     | Containment::CannotFireARayAtAFacesSurface { .. } => (),
                 }
             }
+        }
+        if let Some(face) = unfollowed {
+            return Err(Error::AFaceTrimmedByACurveThisCannotFollow {
+                face: self.the_input_face_it_was_cut_from(apart, written, face),
+            });
         }
         Err(gave_up(
             ONE_SHELL_INSIDE_ANOTHER,
@@ -2224,6 +2258,32 @@ impl Assembly {
             Measures::Length,
             log,
         ))
+    }
+
+    /// The caller's face that `face`, written into `apart`, was cut out of.
+    ///
+    /// The first of its ancestors, where coplanar pieces were joined: any of
+    /// them is a face the piece is part of, and the first is the one a fuse
+    /// names elsewhere too.
+    ///
+    /// # Panics
+    ///
+    /// If `face` is not one [`Assembly::write_into`] wrote into `apart`, or the
+    /// face it was written from has no ancestor. Both are this crate's own
+    /// bookkeeping.
+    fn the_input_face_it_was_cut_from(
+        &self,
+        apart: &Model,
+        written: &Written,
+        face: FaceKey,
+    ) -> FaceKey {
+        let slot = face.slot_in(apart.id());
+        let index = written
+            .faces
+            .iter()
+            .position(|&each| each == slot)
+            .expect("every face of `apart` was written from a face of the answer");
+        self.faces[index].ancestors[0]
     }
 
     /// What each edge of the result runs along, by §31.3's table.

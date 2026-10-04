@@ -254,6 +254,16 @@ reaches them is a face of a *caller's* solid:
 Both are edited here rather than left broken, because the branch has to compile;
 they are lane 5's files and lane 5 should read them.
 
+> **2026-10-04 note (Q504): running out of corners is no longer always
+> `Undecidable`.** Folding a corner nobody can follow into the undecided ones made
+> `one_shell_is_inside_another` report "undecided" for a question it never put,
+> which is the mixing this section keeps apart. Since Q504 (316286ba), when no
+> corner of a hollow was placed and one met a face nobody can follow, it is
+> refused `Error::AFaceTrimmedByACurveThisCannotFollow` naming the caller's face
+> that face was cut from; `Error::Undecidable` is left for the corners that were
+> asked and not answered.
+> `crates/rcad-topo/tests/a_shell_inside_another_names_its_refusal.rs` pins it.
+
 ### 35.7 §31.10 item 5, scored: nothing this lane builds reaches `mesh.rs`'s two claims
 
 §31.10 item 5 says a fused curved face is the first with a hole in it and that
