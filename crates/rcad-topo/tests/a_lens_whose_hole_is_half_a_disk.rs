@@ -30,11 +30,10 @@
 //! along the vertical line through a corner of the lens, which is where the two
 //! walls meet. Every route tried is refused in the arrangement, before any face
 //! is joined and so before `rings_round`: `TwoCurvesTouchWithoutCrossing` on a
-//! wall bounded by those lines, which is §38.2's two curves along one ruling,
-//! or `AFaceMeetsItsNeighbourOnItsOwnSurface` where a first fuse cut a wall
-//! along them and did not join it back. A half bar whose corner is the lens's
-//! corner, four surfaces round one vertical line, is refused the same way or
-//! with `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Under the same breakpoint
+//! wall bounded by those lines, which is §38.2's two curves along one ruling.
+//! A half bar whose corner is the lens's corner, four surfaces round one
+//! vertical line, is refused the same way or with
+//! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Under the same breakpoint
 //! the two tests of those routes stop twelve times and none: six times two,
 //! the one-bar-and-half-bar union one route builds on the way.
 //!
@@ -114,9 +113,10 @@ fn a_half_bar_rising_out_of_a_bars_cap_is_fused_by_every_rule_either_way_round()
 /// - Where the two bars overlap, fused with the half bar: the same rulings are
 ///   the lens's two edges up its side.
 /// - The bar at `(−3, 0)` united with the half bar first, then fused with the
-///   bar at `(3, 0)`: the first union answers, but leaves the bar's wall in
-///   four pieces cut along `x = 0` and `z = 1`, and the second fuse meets the
-///   edge between two of them.
+///   bar at `(3, 0)`: the first union answers, and the second fuse is refused
+///   as the first two routes are. Before Q503 joined a wall cut into a grid,
+///   the first union left the bar's wall in four pieces cut along `x = 0` and
+///   `z = 1`, and the second was refused `AFaceMeetsItsNeighbourOnItsOwnSurface`.
 /// - The bars cut down to the D on each side of `x = 0`, the left one with
 ///   the half disk taken out of its flat side: the two flat sides meet along
 ///   the same rulings.
@@ -151,7 +151,7 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_is_refused_by_every_rule() {
                 };
                 [both, a_bar_at(model, 3.0)]
             },
-            |why| matches!(why, Error::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }),
+            |why| matches!(why, Error::TwoCurvesTouchWithoutCrossing { .. }),
         ),
         (
             "the D on each side, the left one bitten",
