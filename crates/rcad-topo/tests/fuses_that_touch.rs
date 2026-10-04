@@ -43,7 +43,7 @@
 //! | a bar inside a bar, touching | panics on its control | — | see below |
 //! | two balls touching at a point | 54 of 54 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 54 of 54 | 96 of 96 | — |
-//! | the dome on a shaft of its radius | 0 of 66 | 12 of 84 | `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` 66 |
+//! | the dome on a shaft of its radius | 0 of 66 | 90 of 90 | `TwoCurvesTouchWithoutCrossing` 66 |
 //! | a ball against a bar's wall | 54 of 54 | 96 of 96 | — |
 //! | a ball inside a bar, touching | 54 of 54 | 96 of 96 | — |
 //! | a cone's apex on a block | 33 of 90 | 66 of 66 | `CannotNameWhichPieceOfACrossingThisIs` 21, *a point inside a piece of a face* 36 |
@@ -107,8 +107,13 @@
 //! widens the bar by one, where the ball sits wholly inside the pipe and crosses
 //! nothing but the cap. **Of every cell here it is the only one with that
 //! property**: every other touch has a crossing twin one unit the other way.
-//! Its control still refuses 72 of 84, on *a point inside a piece of a face*;
-//! what in it refuses is not worked out here.
+//! Its control answers all 90. The touching row used to stop where the cap
+//! plane, the ball and the bar meet, refused
+//! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`; the cap is square to the axis
+//! the two share and cuts both in one circle, which `three_surfaces.rs`
+//! answers as `MoreThanAPoint` since Q981. The fuse then goes on and refuses
+//! every rule `TwoCurvesTouchWithoutCrossing`, measured with that road
+//! switched off and on; which two curves touch is not worked out here.
 //!
 //! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
 //! refused as a quartic, touching or one unit clear, so that cell is pinned at

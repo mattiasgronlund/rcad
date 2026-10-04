@@ -298,9 +298,13 @@ fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
         Plane::from_point_and_normal(corner, Vector::new(0.0, 0.0, 1.0))
             .expect("the z axis is a unit normal"),
     );
+    let wall = Surface::Plane(
+        Plane::from_point_and_normal(corner, Vector::new(0.0, 1.0, 0.0))
+            .expect("the y axis is a unit normal"),
+    );
 
-    // The corner is exactly on all four, with no rounding anywhere.
-    for surface in [&pipe, &ball, &second_ball, &cap] {
+    // The corner is exactly on all five, with no rounding anywhere.
+    for surface in [&pipe, &ball, &second_ball, &cap, &wall] {
         assert_eq!(
             which_side_of(surface, PredicatePoint::from(corner.coordinates())),
             Decision::Zero,
@@ -308,20 +312,30 @@ fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
         );
     }
 
-    // One plane and two quadrics, and three quadrics. Both refuse by name.
-    for triple in [[&cap, &ball, &pipe], [&second_ball, &ball, &pipe]] {
+    // One plane and two quadrics, and three quadrics. Both refuse by name. The
+    // wall runs along the axis the ball and the pipe share and cuts the pipe in
+    // two lines and the ball in a circle.
+    for triple in [[&wall, &ball, &pipe], [&second_ball, &ball, &pipe]] {
         assert_eq!(
             meet_of_three_surfaces(triple, &Policy::certified(), &mut ProvenanceLog::new()),
             Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
         );
     }
 
+    // The cap is square to that axis and cuts both in one circle of radius
+    // three, so it is not the demonstration: two circles about one centre are
+    // answered.
+    assert_eq!(
+        meet_of_three_surfaces(
+            [&cap, &ball, &pipe],
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Ok(MeetOfThree::MoreThanAPoint)
+    );
+
     // Two planes and one of them is answered, so the refusal is about how many
     // curved surfaces there are and not about this corner.
-    let wall = Surface::Plane(
-        Plane::from_point_and_normal(corner, Vector::new(0.0, 1.0, 0.0))
-            .expect("the y axis is a unit normal"),
-    );
     assert_eq!(
         meet_of_three_surfaces(
             [&cap, &wall, &pipe],
