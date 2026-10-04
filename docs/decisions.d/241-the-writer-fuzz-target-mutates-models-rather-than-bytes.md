@@ -273,3 +273,38 @@ in write.rs). The writer now looks that far for a ring's seam
 rule (`a_surface_holds_the_circle` in brep.rs, shared rather than copied
 since Q957), and how_often_a_turned_bend_comes_back_from_its_own_file
 writes all 372; the reader still refuses 28 (Q842).*
+
+*Since Q842 (2026-10-04) the 28 are traced, and the gap is Q497's. The
+reader builds a `TOROIDAL_SURFACE`'s axis with `Axis::new`, which scales the
+written direction to length one again, and keeps a seam's `PLANE` normal as
+written (§313.3). The writer writes both as one direction, so where the
+scaling moves a bit the seam's plane and the ring's axis are two spellings of
+it: turned about x by 2.5, `(0, -0.5984721441039565, -0.8011436155469336)`
+against `(…, -0.8011436155469337)`, crossing to `(5.55e-17, 0, 0)` and not
+exactly nothing. `rcad_geom`'s walk tells a plane square to a ring's axis from
+one holding it by that exact zero (`where_a_plane_cuts_a_torus`), so it takes
+the seam's plane for one holding the axis, and neither of
+`the_two_meridian_circles` in walk.rs holds the seam's two ends:
+`which_of_these_circles_this_run_is` refuses. The reader's own
+`which_of_a_rings_two_circles` asks the same zero and adds no picker, which is
+why the row saw the same count with it and without. Q489's
+`two_meridian_circles` in intersect.rs is not reached: a file's run is never
+named by `intersect`.*
+
+*Of the 372, the bends whose placed ring axis keeps its bits under
+`Axis::new` number 296, and every one comes back the same; of the 76 whose
+axis moves, 28 are refused and 48 are read back with the axis moved, so none
+comes back the same (`how_often_a_turned_bend_comes_back_from_its_own_file`
+now pins all five counts). With the reader's torus arm keeping a direction
+whose `|d·d − 1|` comes out within 64ε in plain f64, the reach
+`Plane::NORMAL_LENGTH_ROUNDOFF` gives a plane's normal, made by hand in
+geometry.rs and point.rs, measured and taken out again, all 372
+came back the same, every located number bit for bit, and of
+`how_often_a_model_the_mutator_draws_is_refused`'s 400 draws the 3 the reader
+refused went to none and the 29 that came back with a different surface went
+to 24, the rest being pipes and cones. So the answer exists in the file and
+the reader loses it: a gap, and its fix is Q497's write set, not this row's.
+The walk's own zero test is not the gap — a plane that is not exactly square
+to a ring's axis does not cross it in circles round the axis, and drawing them
+there would need a bound on the lean charged to the walk's deviation that
+nothing names.*
