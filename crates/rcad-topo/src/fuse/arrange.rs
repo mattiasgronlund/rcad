@@ -1299,23 +1299,26 @@ impl<'f> Arrangement<'f> {
                     self.crossings[second].partner,
                 ];
                 let asked = three_planes_faced_the_one_way(surfaces);
-                let meet =
-                    match meet_of_three_surfaces([&asked[0], &asked[1], &asked[2]], policy, log) {
-                        Ok(meet) => meet,
-                        Err(gave_up_on_it) => {
-                            if self.two_crossings_provably_share_nothing(first, second, policy, log)
-                            {
-                                continue;
-                            }
-                            return Err(gave_up_on_it.into());
+                let asked = [&asked[0], &asked[1], &asked[2]];
+                let meet = match meet_of_three_surfaces(asked, policy, log) {
+                    Ok(meet) => meet,
+                    Err(gave_up_on_it) => {
+                        if self.two_crossings_provably_share_nothing(first, second, policy, log) {
+                            continue;
                         }
-                    };
+                        return Err(gave_up_on_it.into());
+                    }
+                };
+                let tight = meet.boxed_tight(asked);
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
+                let MeetOfThree::At(tight) = tight else {
+                    unreachable!("a meet at points boxed tighter is still a meet at those points")
+                };
                 let places: SmallVec<[PredicatePoint; 2]> =
                     places.into_iter().map(as_exact_as_it_is).collect();
-                for (which, &place) in places.iter().enumerate() {
+                for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
                     // Being *on* both surfaces is what the meet just worked out,
                     // and asking a predicate to confirm it would be a second
                     // opinion about a fact this line already holds — one that a
@@ -1327,7 +1330,7 @@ impl<'f> Arrangement<'f> {
                     {
                         continue;
                     }
-                    if self.a_corner_is_this_place(first, second, place, &places) {
+                    if self.a_corner_is_this_place(first, second, place, boxed_tight, &places) {
                         continue;
                     }
                     let mut sorted = surfaces;
@@ -1383,7 +1386,7 @@ impl<'f> Arrangement<'f> {
                 && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
             "each of the two rulings a plane cuts through a cone's apex holds the apex"
         );
-        if self.a_corner_is_this_place(first, second, apex, &[apex]) {
+        if self.a_corner_is_this_place(first, second, apex, apex, &[apex]) {
             return;
         }
         let mut named = [
@@ -1450,7 +1453,8 @@ impl<'f> Arrangement<'f> {
     /// off one of the three surfaces (§248.6).
     ///
     /// **So the fold takes the model's word only as far as rounding reaches.**
-    /// Every point `place`'s box holds has to lie inside the corner's box grown
+    /// Every point of `boxed_tight`, the tightest box known to hold `place`,
+    /// has to lie inside the corner's box grown
     /// by [`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost).
     /// That is the half of `bake.rs`'s room that follows the corner, from the
     /// same function. `bake.rs` lets a meet stand in for a stored corner within
@@ -1462,6 +1466,15 @@ impl<'f> Arrangement<'f> {
     /// suites make under `Policy::certified` lies within a quarter of that
     /// allowance, and the 224 into corners proved off a surface lie within
     /// under one percent of it (§253.2).
+    ///
+    /// **For a meet of three planes `boxed_tight` is Cramer's box narrowed by
+    /// one checked step** ([`MeetOfThree::boxed_tight`]); for anything else it
+    /// is `place`. Only this one question reads it. The node a meet becomes
+    /// when it does not fold keeps Cramer's box, and every other question here
+    /// reads Cramer's box too, the reach below included: wired in as the
+    /// node's own box, the narrowed one moved 13 tests, most of them to a
+    /// refusal or to no solid, where asked only here it moves one, to the
+    /// right answer (§345).
     ///
     /// **Or when the three are planes `bake` solved the corner among**, however
     /// far past the corner's grown box the meet's box reaches, as long as it
@@ -1492,15 +1505,14 @@ impl<'f> Arrangement<'f> {
     /// overlapping nodes are one point is left to
     /// [`Arrangement::merge_points_that_are_one_point`], which asks the policy
     /// (§17.4). Before §253 the fold was taken whenever the boxes touched,
-    /// however wide the meet's box was. One corpus draw folded a meet whose box
-    /// reached `1.4e-10` from its corner, 2 012 times the allowance, and
-    /// answered under a tolerant policy. The point in that box is `4.1e-16`
-    /// from the corner and the answer was right; the box is wide because two
-    /// of the three planes are nearly parallel. With the meet kept as a node,
-    /// that fuse refuses, which is a right answer lost to a loose box and not a
-    /// wrong one prevented (§253.3, §253.7). That corner reached one of its two
-    /// crossings through a tolerant [`Arrangement::passes_through`], not as a
-    /// plane `bake` asked, so the rule above leaves it refused.
+    /// however wide the meet's box was. One corpus draw folded a meet whose
+    /// Cramer box reached `1.4e-10` from its corner, 2 012 times the
+    /// allowance, and answered under a tolerant policy; the box is wide
+    /// because two of the three planes are nearly parallel. From §253 that
+    /// meet was kept as a node and the fuse refused, a right answer lost to a
+    /// loose box (§253.3, §253.7). Its narrowed box is `8.9e-16` wide and lies
+    /// inside the room, so it folds again, for §253's reason this time, and
+    /// the union answers with the two blocks (§345).
     ///
     /// **A second place within the allowance** means nothing here says which
     /// of the two the corner is, and both stay nodes. The places of one meet
@@ -1513,6 +1525,7 @@ impl<'f> Arrangement<'f> {
         first: usize,
         second: usize,
         place: PredicatePoint,
+        boxed_tight: PredicatePoint,
         places: &[PredicatePoint],
     ) -> bool {
         self.nodes.iter().any(|node| {
@@ -1527,7 +1540,7 @@ impl<'f> Arrangement<'f> {
                 super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
             );
             let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
-            let (meet, room) = (place.enclosure(), allowed.enclosure());
+            let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
             let inside_the_room = (0..3).all(|axis| {
                 room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
             });
@@ -6699,8 +6712,9 @@ mod tests {
             f64::powi(2.0, -46),
             "the room at a corner no bigger than one"
         );
-        let folds =
-            |place: PredicatePoint| arrangement.a_corner_is_this_place(wall, cut, place, &[place]);
+        let folds = |place: PredicatePoint| {
+            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place])
+        };
         assert!(
             folds(reaching(room)),
             "a place reaching the room's edge on every side is the corner written down another way"
@@ -6740,11 +6754,11 @@ mod tests {
         let far = 1000.0 * what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = reaching(far);
         assert!(
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, &[place]),
+            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place]),
             "the bottom and the two walls meet at the corner `bake` placed among them"
         );
         assert!(
-            !arrangement.a_corner_is_this_place(one_wall, cut, place, &[place]),
+            !arrangement.a_corner_is_this_place(one_wall, cut, place, place, &[place]),
             "a meet with a cut in it is folded only as far as the room reaches"
         );
     }
@@ -6773,9 +6787,47 @@ mod tests {
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = from_to(room / 2.0, room);
         assert!(
-            arrangement.a_corner_is_this_place(wall, cut, place, &[place]),
+            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place]),
             "a place inside the corner's room is the corner written down another way, \
              whether or not its box touches the corner's"
+        );
+    }
+
+    /// A meet whose Cramer box reaches a thousand rooms round the unit cube's
+    /// corner is folded into it when a tighter box that also holds the meet
+    /// lies inside the room, and is not when the tighter box reaches one step
+    /// past it. Asked on the cut `x = y`, so the room is the whole of what the
+    /// fold allows. The room test reads the tighter box and the rest of the
+    /// fold reads Cramer's (§345).
+    #[test]
+    fn a_meet_is_folded_when_its_tighter_box_lies_inside_the_corners_room_however_far_cramers_reaches()
+     {
+        let (cube, cut) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let bottom = cut_by(&the_face_facing(&cube, [0.0, 0.0, -1.0]), &[cut]);
+        let arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let cut = the_crossing_of_the_cut(&arrangement, cut);
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], wall, cut),
+            "the fold is only asked about a corner on both crossings"
+        );
+
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        let by_cramer = reaching(1000.0 * room);
+        let folds = |boxed_tight: PredicatePoint| {
+            arrangement.a_corner_is_this_place(wall, cut, by_cramer, boxed_tight, &[by_cramer])
+        };
+        assert!(
+            !folds(by_cramer),
+            "Cramer's box alone reaches past the room, so the fold leaves it to the policy"
+        );
+        assert!(
+            folds(reaching(room)),
+            "every point of the tighter box is within the room of the corner"
+        );
+        assert!(
+            !folds(reaching(room.next_up())),
+            "a tighter box reaching one step past the room is not the model's to fold"
         );
     }
 
@@ -6804,7 +6856,7 @@ mod tests {
 
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let folds = |place: PredicatePoint| {
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, &[place])
+            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place])
         };
         assert!(
             folds(from_to(room, 1000.0 * room)),
@@ -6983,7 +7035,7 @@ mod tests {
                     place
                         .exact_coordinates()
                         .expect("every place here lands on an f64"),
-                    arrangement.a_corner_is_this_place(first, second, place, &places),
+                    arrangement.a_corner_is_this_place(first, second, place, place, &places),
                 )
             })
             .collect();

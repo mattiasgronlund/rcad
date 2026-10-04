@@ -114,6 +114,73 @@ pub enum MeetOfThree {
     MoreThanAPoint,
 }
 
+impl MeetOfThree {
+    /// This meet, which [`meet_of_three_surfaces`] handed back for `surfaces`,
+    /// with the box round a meet of **three planes** narrowed by one checked
+    /// step. Any other meet comes back as it is.
+    ///
+    /// Cramer's rule sums its numerators in intervals, and each numerator is a
+    /// small number built out of products near one that all round. Where two of
+    /// the three planes are nearly parallel the determinant is small too, so the
+    /// box is those roundings divided by a small number: `±1.43e-10` round a meet
+    /// that is `1e-33` from `(5, 0, 0)`, on a draw where two walls lean
+    /// `1.5e-6` off parallel (§281.1). The width says how badly the rounding
+    /// could have gone and nothing about where in the box the meet is.
+    ///
+    /// **The step.** Take the middle of that box as a guess. For each plane work
+    /// out how far the guess misses it, `offset − normal · guess`, from the
+    /// stored numbers with nothing rounded. Then the meet is the guess plus
+    /// `(r₁ (n₂ × n₃) + r₂ (n₃ × n₁) + r₃ (n₁ × n₂)) / det`, with the cross
+    /// products and `det` worked out the same way and read as enclosures. Every
+    /// term of that numerator carries a factor of how far the guess misses, so
+    /// what rounds there is a rounding of something small. The answer is where
+    /// the stepped box and Cramer's box overlap. Both hold the meet, so the
+    /// overlap is sound: it is a proof and not a threshold (§17), and on that
+    /// draw it is `8.9e-16` wide (§281.2).
+    ///
+    /// **Why this is not what [`meet_of_three_surfaces`] hands back to everyone.**
+    /// A narrower box round a meet is not a narrower box round a stored corner:
+    /// `rcad-topo`'s `bake.rs` derives a face's corners through
+    /// [`meet_of_three_surfaces`] and holds its stored corners to that box, and a
+    /// stored corner sits ulps off the planes it is on. Cramer's slack covers
+    /// that; the narrowed box does not. Narrowed for every caller, nine tests
+    /// failed and the draw above refused on another face (§281.3). The one
+    /// caller is `rcad-topo`'s fold of a meet into a corner of a face, which
+    /// asks the narrowed box only whether every point of the meet lies within
+    /// the corner's rounding, and keeps Cramer's box for the node it places
+    /// (§345).
+    ///
+    /// The three planes are narrowed in [`meet_of_three_surfaces`]'s own fixed
+    /// order, so the box that comes back depends on which three they are and
+    /// not on the order they were asked in (§31.3).
+    ///
+    /// # Panics
+    ///
+    /// Where `self` was not worked out from `surfaces` and the stepped box
+    /// misses it altogether: the two are then boxes round two different
+    /// points, and a corner placed from where they overlap would be nowhere.
+    #[must_use]
+    pub fn boxed_tight(&self, surfaces: [&Surface; 3]) -> MeetOfThree {
+        let [
+            Surface::Plane(one),
+            Surface::Plane(other),
+            Surface::Plane(last),
+        ] = in_a_fixed_order(surfaces)
+        else {
+            return self.clone();
+        };
+        let MeetOfThree::At(places) = self else {
+            return self.clone();
+        };
+        MeetOfThree::At(
+            places
+                .iter()
+                .map(|&place| narrowed_by_one_checked_step([&one, &other, &last], place))
+                .collect(),
+        )
+    }
+}
+
 /// Where three surfaces meet.
 ///
 /// # Errors
@@ -694,6 +761,100 @@ fn where_three_planes_meet(
         log,
         || refused,
     )
+}
+
+/// `place`, a box round where three planes meet, narrowed by one checked step
+/// from its middle ([`MeetOfThree::boxed_tight`] says what the step is).
+///
+/// **The box is handed back as it was where the step cannot be taken**: a
+/// product that overflows, or a determinant whose enclosure reaches zero. It
+/// holds the meet either way, so nothing is lost but the narrowing. A product
+/// that falls off the bottom of the range is kept, as [`Nearly`] keeps it,
+/// because the floor of a draw can store its offset as a subnormal (§281.2).
+///
+/// # Panics
+///
+/// If the stepped box and `place` do not overlap. Both hold the one point the
+/// three planes meet at, so an empty overlap is arithmetic that lost its
+/// soundness somewhere, and a corner placed from it would be nowhere.
+fn narrowed_by_one_checked_step(planes: [&Plane; 3], place: PredicatePoint) -> PredicatePoint {
+    let PredicatePoint::Constructed(boxed) = place else {
+        return place;
+    };
+    let guess = boxed.map(|side| 0.5 * side.lo() + 0.5 * side.hi());
+    let Some(step) = the_step_to_the_meet(planes, guess) else {
+        return place;
+    };
+    PredicatePoint::Constructed(core::array::from_fn(|axis| {
+        where_two_boxes_of_one_number_overlap(
+            Interval::exactly(guess[axis]) + step[axis],
+            boxed[axis],
+        )
+    }))
+}
+
+/// How far the meet of three planes is from `guess`, as an enclosure, or
+/// `None` where a product it needs overflows.
+///
+/// A determinant whose enclosure reaches zero comes back as a step that is
+/// everything, which leaves the caller's box as it was.
+fn the_step_to_the_meet(planes: [&Plane; 3], guess: [f64; 3]) -> Option<[Interval; 3]> {
+    let normals = planes.map(|plane| plane.normal().components());
+    let misses: [Interval; 3] = [
+        how_far_a_guess_misses(planes[0], guess)?,
+        how_far_a_guess_misses(planes[1], guess)?,
+        how_far_a_guess_misses(planes[2], guess)?,
+    ];
+    let across = [
+        nearly_cross_of(normals[1], normals[2])?,
+        nearly_cross_of(normals[2], normals[0])?,
+        nearly_cross_of(normals[0], normals[1])?,
+    ];
+    let mut determinant = Nearly::of(0.0);
+    for axis in 0..3 {
+        determinant = determinant.plus(&Nearly::of(normals[0][axis]).times(&across[0][axis])?);
+    }
+    let determinant = determinant.enclosure();
+    Some(core::array::from_fn(|axis| {
+        let over = (0..3).fold(Interval::exactly(0.0), |so_far, row| {
+            so_far + misses[row] * across[row][axis].enclosure()
+        });
+        quotient_or_everything(over, determinant)
+    }))
+}
+
+/// `offset − normal · guess` for one plane, from the stored numbers with
+/// nothing rounded but what falls off the bottom of the range.
+///
+/// The offset enters as an entry of the sum and never as a factor, which is
+/// what lets a subnormal offset through where an exact product of it would be
+/// refused (§281.2).
+fn how_far_a_guess_misses(plane: &Plane, guess: [f64; 3]) -> Option<Interval> {
+    let along = Nearly::dot_of(plane.normal().components(), guess)?;
+    Some(Nearly::of(plane.offset()).minus(&along).enclosure())
+}
+
+/// `u × v` for two triples of stored numbers, keeping what falls off the
+/// bottom of the range as [`Nearly`] does.
+fn nearly_cross_of(u: [f64; 3], v: [f64; 3]) -> Option<[Nearly; 3]> {
+    let component = |axis: usize| {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        Some(Nearly::product_of(u[next], v[after])?.minus(&Nearly::product_of(u[after], v[next])?))
+    };
+    Some([component(0)?, component(1)?, component(2)?])
+}
+
+/// Where two enclosures of one number overlap.
+///
+/// # Panics
+///
+/// If they do not. Two boxes that each hold the same number share at least that
+/// number, so an empty overlap is a broken enclosure.
+fn where_two_boxes_of_one_number_overlap(one: Interval, other: Interval) -> Interval {
+    let (lo, hi) = (one.lo().max(other.lo()), one.hi().min(other.hi()));
+    Interval::new(lo, hi).unwrap_or_else(|_| {
+        panic!("two boxes that each hold the same number do not overlap: {one:?} and {other:?}")
+    })
 }
 
 /// What a third surface leaves of two planes that never cross in a line.
@@ -2455,6 +2616,96 @@ mod tests {
         };
         assert_eq!(points.len(), 1);
         assert!(points[0].uncertainty().is_finite());
+    }
+
+    /// A floor and two walls a millionth off parallel: Cramer's box round
+    /// where they meet is about `1e-10` wide, and one checked step boxes the
+    /// same meet to a few ulps (§281.2, §345). The narrowed box is checked to
+    /// hold the meet with nothing rounded, from the stored numbers: along each
+    /// axis the meet is `D / det`, so it is inside `[lo, hi]` when
+    /// `D − lo·det` and `hi·det − D` both have the sign of `det`.
+    #[test]
+    fn a_meet_of_two_walls_nearly_parallel_is_boxed_to_a_few_ulps_and_still_holds_it() {
+        for lean in [1e-6, 1.5e-6, 3e-6] {
+            let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+            let wall = flat([0.6, 0.0, 0.8], [5.0, 0.0, 0.0]);
+            let leaning = flat([0.6, lean, 0.8], [5.0, 0.0, 0.0]);
+            let three = [&floor, &wall, &leaning];
+            let by_cramer = meet(three).expect("three planes meet");
+            let MeetOfThree::At(narrowed) = by_cramer.boxed_tight(three) else {
+                panic!("three planes a millionth off parallel meet at a point");
+            };
+            let MeetOfThree::At(by_cramer) = by_cramer else {
+                panic!("three planes a millionth off parallel meet at a point");
+            };
+            let (wide, tight) = (by_cramer[0].enclosure(), narrowed[0].enclosure());
+            for axis in 0..3 {
+                assert!(
+                    wide[axis].lo() <= tight[axis].lo() && tight[axis].hi() <= wide[axis].hi(),
+                    "leaning {lean}: the narrowed box {tight:?} is not inside Cramer's {wide:?}"
+                );
+            }
+            assert!(
+                by_cramer[0].uncertainty() > 1e-12,
+                "leaning {lean}: Cramer's box is already narrow, {wide:?}"
+            );
+            assert!(
+                narrowed[0].uncertainty() < 1e-14,
+                "leaning {lean}: one step left the box {tight:?}"
+            );
+            let planes = in_a_fixed_order(three).map(|surface| {
+                let Surface::Plane(flat) = surface else {
+                    unreachable!("all three are planes")
+                };
+                flat
+            });
+            assert!(
+                (0..3).all(|axis| the_meet_is_inside(&planes, axis, tight[axis])),
+                "leaning {lean}: the narrowed box {tight:?} does not hold the meet"
+            );
+            let just_past = Interval::new(tight[0].hi() + 1e-12, tight[0].hi() + 2e-12)
+                .expect("a box past the narrowed one");
+            assert!(
+                !the_meet_is_inside(&planes, 0, just_past),
+                "leaning {lean}: the exact check holds the meet in a box past it, {just_past:?}"
+            );
+        }
+    }
+
+    /// Whether the one point three planes meet at lies inside `side` along
+    /// `axis`, decided exactly.
+    fn the_meet_is_inside(planes: &[Plane; 3], axis: usize, side: Interval) -> bool {
+        let normals = planes.map(|plane| plane.normal().components());
+        let across = [
+            exact_cross_of(normals[1], normals[2]).expect("an exact cross product"),
+            exact_cross_of(normals[2], normals[0]).expect("an exact cross product"),
+            exact_cross_of(normals[0], normals[1]).expect("an exact cross product"),
+        ];
+        let determinant = Exact::dot_of_two_exact(&Exact::of_each(normals[0]), &across[0])
+            .expect("an exact determinant");
+        let numerator = (0..3).fold(Exact::of(0.0), |so_far, row| {
+            so_far.plus(
+                &Exact::of(planes[row].offset())
+                    .times(&across[row][axis])
+                    .expect("an exact product"),
+            )
+        });
+        let above_the_bottom = numerator.minus(
+            &Exact::of(side.lo())
+                .times(&determinant)
+                .expect("an exact product"),
+        );
+        let below_the_top = Exact::of(side.hi())
+            .times(&determinant)
+            .expect("an exact product")
+            .minus(&numerator);
+        let agrees = |value: &Exact| match (value.sign(), determinant.sign()) {
+            (Decision::Zero, _) => true,
+            (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => true,
+            (Decision::Pos | Decision::Neg, Decision::Pos | Decision::Neg) => false,
+            other => panic!("an exact sign that is not a sign: {other:?}"),
+        };
+        agrees(&above_the_bottom) && agrees(&below_the_top)
     }
 
     #[test]
