@@ -1733,9 +1733,9 @@ impl Assembly {
                 _ => still_a_corner[corner] = true,
             }
         }
-        let kept = self.a_corner_to_keep_on_each_closed_run(&leaving, &straight_through);
-        let closed_a_curve_up = !kept.is_empty();
-        for (lump, corner) in kept {
+        let kept = self.the_corners_each_closed_run_keeps(&leaving, &straight_through);
+        let closed_a_curve_up = !kept.closed_up.is_empty();
+        for (lump, corner) in kept.closed_up.into_iter().chain(kept.left_in_pieces) {
             straight_through.remove(&(lump, corner));
             still_a_corner[corner] = true;
         }
@@ -1756,36 +1756,47 @@ impl Assembly {
         }
     }
 
-    /// One corner to keep on each run of edges that closes on itself with every
-    /// corner along it walked straight through.
+    /// The corners to keep on each run of edges that closes on itself with
+    /// every corner along it walked straight through: one corner where the run
+    /// is closed up, and every corner where it is left in pieces. Folding all
+    /// of them would leave a joined edge with no ends at all.
     ///
     /// **A closed curve cut into pieces and joined back up** is such a run: a
     /// pointed cone's rim, cut where a block's walls are tangent to it and
     /// holding its own one corner, keeps two edges at every one of those
-    /// corners once the pieces are joined. Folding them all leaves a joined edge
-    /// with no ends at all (`fuses_that_touch.rs`,
+    /// corners once the pieces are joined (`fuses_that_touch.rs`,
     /// `a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule`).
     /// The run becomes one closed edge with one corner, as the input had.
-    ///
-    /// **Only a run that is all pieces of one input edge**, which is then a
-    /// closed input edge given back whole. A ball's meridian circle cut at both
-    /// poles is a closed run too, of pieces of two different edges, and closing
-    /// it up puts a closed edge's one corner on a pole, where nothing says which
-    /// way it runs: 22 tests across the ball-and-block files failed when every
-    /// closed run was closed up.
-    ///
-    /// Keeping every corner instead leaves a ring of arcs going right round a
-    /// cone with no seam, which the writer refuses
+    /// Keeping every corner there instead leaves a ring of arcs going right
+    /// round a cone with no seam, which the writer refuses
     /// (`AWireWillNotLieFlatOnItsFace`) — measured on that same pair.
     ///
-    /// Which corner is chosen off what the corner *is* and never off its index
-    /// here, which depends on the order the solids were handed over: an input
-    /// vertex first, then the lowest point.
-    fn a_corner_to_keep_on_each_closed_run(
+    /// **Only a run that is all pieces of one input edge is closed up**, which
+    /// is then a closed input edge given back whole. A ball's meridian circle
+    /// cut at both poles is a closed run too, of pieces of two different edges,
+    /// and closing it up puts a closed edge's one corner on a pole, where
+    /// nothing says which way it runs: 22 tests across the ball-and-block files
+    /// failed when every closed run was closed up.
+    ///
+    /// **Any other closed run is left in the pieces it was cut into**, every
+    /// corner kept, which is what the answer is when nothing else in the fuse
+    /// is joined and the joining is skipped altogether. A unit ball united with
+    /// a block that a second block's plane `x = 0` reaches through a chain is
+    /// cut by that plane through both poles, into two arcs from pole to pole
+    /// that are pieces of no input edge, and the poles have nothing else along
+    /// them. Folded, the two arcs were one edge with no ends, and that fuse
+    /// panicked here wherever another face of it was joined
+    /// (`a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs`,
+    /// `docs/decisions.md` §400.5).
+    ///
+    /// Which corner a closed-up run keeps is chosen off what the corner *is*
+    /// and never off its index here, which depends on the order the solids
+    /// were handed over: an input vertex first, then the lowest point.
+    fn the_corners_each_closed_run_keeps(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
         straight_through: &BTreeSet<(usize, usize)>,
-    ) -> Vec<(usize, usize)> {
+    ) -> ClosedRuns {
         let runs = runs_through(self.edges.len(), leaving, straight_through);
         let mut corners_of_run: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
         let mut run_keeps_a_corner: BTreeSet<usize> = BTreeSet::new();
@@ -1806,17 +1817,26 @@ impl Assembly {
                     .push(&self.edges[edge].from);
             }
         }
-        corners_of_run
-            .into_iter()
-            .filter(|(run, _)| !run_keeps_a_corner.contains(run))
-            .filter(|(run, _)| is_one_input_edge(&pieces_of[run]))
-            .map(|(_, corners)| {
-                corners
-                    .into_iter()
-                    .min_by(|&(_, one), &(_, other)| self.which_to_keep_first(one, other))
-                    .expect("a run is listed with the corners it walks through")
-            })
-            .collect()
+        let mut kept = ClosedRuns {
+            closed_up: Vec::new(),
+            left_in_pieces: Vec::new(),
+        };
+        for (run, corners) in corners_of_run {
+            if run_keeps_a_corner.contains(&run) {
+                continue;
+            }
+            if is_one_input_edge(&pieces_of[&run]) {
+                kept.closed_up.push(
+                    corners
+                        .into_iter()
+                        .min_by(|&(_, one), &(_, other)| self.which_to_keep_first(one, other))
+                        .expect("a run is listed with the corners it walks through"),
+                );
+            } else {
+                kept.left_in_pieces.extend(corners);
+            }
+        }
+        kept
     }
 
     fn which_to_keep_first(&self, one: usize, other: usize) -> core::cmp::Ordering {
@@ -3012,6 +3032,15 @@ struct Renumbered {
     edge_now: Vec<Option<usize>>,
     /// Whether some closed curve cut into pieces is joined back into one edge.
     closed_a_curve_up: bool,
+}
+
+/// The corners kept on the runs of edges that close on themselves with every
+/// corner walked straight through, as lump and corner.
+struct ClosedRuns {
+    /// One corner of each run that becomes one closed edge again.
+    closed_up: Vec<(usize, usize)>,
+    /// Every corner of each run that stays in the pieces it was cut into.
+    left_in_pieces: Vec<(usize, usize)>,
 }
 
 /// One face of the result while it is being put back together out of the pieces

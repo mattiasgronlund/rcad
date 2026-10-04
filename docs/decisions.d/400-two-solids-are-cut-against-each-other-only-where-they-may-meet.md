@@ -167,6 +167,27 @@ probe on this branch:
   base's box test put the three in one group as this does; it was not run on
   the base. It is left as a row.
 
+**Note, 2026-10-04, Q871: the panic is closed, and it was not the rim's.** On
+`656b9f09` the union panicked both ways round, at line 1860 by then; the
+intersection and both differences answered. The plane `x = 0` cuts the ball
+into two arcs from pole to pole, cuts that are pieces of no input edge, and
+each pole has those two arcs along it and nothing else. The union joins the
+pieces the link's planes cut the slab's faces into, so the joining runs, and
+it folds every corner with two different edges along it: both poles went, and
+the two arcs became one run with no ends. §204.1 keeps one corner of a closed
+run only when it is cut from one input edge, and left any other with none.
+Where nothing in a fuse is joined, the joining is skipped and such a run stays
+in its pieces, which is why the other three rules answered.
+`the_corners_each_closed_run_keeps` in `fuse/assemble.rs` now keeps every
+corner of such a run, the answer a fuse with nothing to join already gives.
+The union is one solid of `4π/3 + 410 + 1.5 − 1.05` less the cap past
+`x = 0.9`, inside its measured bound in both orders, and
+`tests/a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs` pins it with
+the other four. The union keeps the ball in two faces either side of `x = 0`,
+and fused again with a far cube it is refused
+`AFaceMeetsItsNeighbourOnItsOwnSurface` on one of them, at `crossing_for`,
+Q584's site; that file pins the refusal too.
+
 ### 400.6 Q452
 
 Q452 was dropped under §330.2 before this landed, and
@@ -175,7 +196,7 @@ it moves here.
 
 ### 400.7 What this leaves
 
-- The `assemble.rs` panic of 400.5.
+- The `assemble.rs` panic of 400.5, closed by Q871 (the note there).
 - `cuts.rs`'s module header still says two solids are skipped only when no
   chain of overlapping boxes joins them, and `bake.rs`'s `Bounds` says a box
   test changes no answer. Both are outside this lane's write set.
