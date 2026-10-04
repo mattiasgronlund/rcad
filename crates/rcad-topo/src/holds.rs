@@ -3777,7 +3777,8 @@ mod tests {
         assert_eq!(runs_of_rulings_that_carry_a_point(&two), 1);
     }
 
-    /// Why a cone face is followed beside at most **one** cut through its apex.
+    /// Why a cone face beside **two** cuts through its apex is followed only when
+    /// the two meet inside the cone.
     ///
     /// On the cone of slope a half about `+z`, keep `x ≤ z/10` and `−x ≤ z/10`,
     /// both through the apex, and `z ≤ 8`, which the apex is in front of. Along
@@ -3786,13 +3787,15 @@ mod tests {
     /// than the apex exactly where `|cos φ| < 1/5`: **two** runs of rulings, round
     /// `+y` and round `−y`, two sheets of one nappe meeting only at the apex. The
     /// part in front of every cut is connected through the apex and is still not
-    /// one face, and before this refused it `[] => true` followed it.
+    /// one face, and it is refused: the two planes meet along `y`, outside the
+    /// cone.
     ///
     /// One plane through the apex keeps one run, and that is followed.
     ///
-    /// **Two are refused even where they keep one run**, which is the gap
-    /// `docs/decisions.md` §389 files: `x ≥ 0` and `y ≥ 0`, a quarter of a pointed
-    /// cone, meet along the axis, inside the cone, and keep `0 < φ < 90°`.
+    /// So are two that meet along the axis, inside the cone: `x = 0` and `y = 0`
+    /// keep one run whichever quarter they keep — `0 < φ < 90°` for `x ≥ 0` and
+    /// `y ≥ 0`, a quarter of a pointed cone, and one quarter turn of rulings for
+    /// each of the others.
     #[test]
     fn two_planes_through_the_apex_leave_a_nappe_in_two_sheets() {
         let cone = rcad_geom::Cone::new(Axis::z(), 0.5).expect("a positive slope");
@@ -3822,7 +3825,7 @@ mod tests {
         assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&strip), 2);
         assert!(
             !is_a_family_this_follows(&Surface::Cone(cone), &strip),
-            "two cuts through the apex are refused"
+            "two cuts through the apex meeting outside the cone are refused"
         );
 
         let half = [one_side(), roof()];
@@ -3832,17 +3835,23 @@ mod tests {
             "one cut through the apex, and any the apex is in front of, are followed"
         );
 
-        let quarter = [
-            cut([0.0; 3], [1.0, 0.0, 0.0]),
-            cut([0.0; 3], [0.0, 1.0, 0.0]),
-            roof(),
-        ];
-        assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&quarter), 1);
-        assert!(
-            !is_a_family_this_follows(&Surface::Cone(cone), &quarter),
-            "two cuts through the apex meeting inside the cone keep one run, and are refused \
-             all the same"
-        );
+        for (x_kept, y_kept) in [(1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
+            let quarter = [
+                cut([0.0; 3], [x_kept, 0.0, 0.0]),
+                cut([0.0; 3], [0.0, y_kept, 0.0]),
+                roof(),
+            ];
+            assert_eq!(
+                runs_of_rulings_carrying_more_than_the_apex(&quarter),
+                1,
+                "the quarter facing {x_kept}, {y_kept}"
+            );
+            assert!(
+                is_a_family_this_follows(&Surface::Cone(cone), &quarter),
+                "two cuts through the apex meeting inside the cone keep one run, and are \
+                 followed: the quarter facing {x_kept}, {y_kept}"
+            );
+        }
     }
 
     /// How many runs of the rulings of the slope-one-half cone about `+z` carry a
