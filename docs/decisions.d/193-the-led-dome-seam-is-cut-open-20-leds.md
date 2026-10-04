@@ -74,6 +74,10 @@ import, so it cannot be re-run as stated. No builder-made solid makes
 `CornersCoincide` happen. The "cannot be cured" claim therefore rests on the
 argument plus that rebuilt measurement, not on a standing test.
 
+*A fuse-made solid did (§364): a ball touching the edge between two of a
+prism's walls leaves a wire that sets off from one corner twice. The mesher
+cuts such a wire apart now, so that case no longer reaches the triangulator.*
+
 ### 193.3 What is left
 
 - **A dome whose rim crosses a plane**, the §192.4 item "a rim through a pole

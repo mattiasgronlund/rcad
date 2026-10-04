@@ -2367,7 +2367,12 @@ fn how_close_two_corners_come(view: SolidView<'_>) -> Option<f64> {
 /// cure it. Every corner of a loop sits on that loop's own edges, so two of them
 /// on one point of the chart means the wire meets itself there, or the chart
 /// sends two places to one — a seam used twice, two poles rounding onto the
-/// centre. Both are fixed by the solid, not by where the chords fall. The third
+/// centre. A wire that sets off from one corner of the model twice, and is two
+/// loops touching there, no longer gets this far: the mesher cuts it apart
+/// first (`docs/decisions.md` §364). What meets itself here and is still
+/// refused is a slit, a loop that passes a pole, or one whose two visits are
+/// not one point of the chart. All of it is fixed by the solid, not by where
+/// the chords fall. The third
 /// way, two chord points of different edges landing on the same double by
 /// accident, needs those edges within a rounding of each other, far below the
 /// halving's floor of half the closest corner pair, so the halving could only
