@@ -121,10 +121,6 @@ fn a_bar_whose_wall_is_two_bands_fuses_with_a_cube_that_touches_nothing() {
 fn a_round_bar_on_the_bars_own_pipe_is_refused_at_its_floor_inside_the_bar() {
     let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
     let down = Cylinder::new(Axis::z().reversed(), RADIUS).expect("a radius");
-    let round_bars: [(fn(&mut Model) -> SolidKey, f64); 2] = [
-        (a_round_bar_from_1_to_5, 1.0),
-        (a_round_bar_from_2_and_a_half_to_3_and_a_half, 2.5),
-    ];
     let mut wrong = Vec::new();
     for (lower, upper) in [(up, up), (up, down), (down, up), (down, down)] {
         for lower_first in [true, false] {
@@ -134,11 +130,13 @@ fn a_round_bar_on_the_bars_own_pipe_is_refused_at_its_floor_inside_the_bar() {
                 which_way(upper)
             );
             let (model, bar) = the_bar(lower, upper, lower_first, &bar_is);
-            for (round_bar, floor) in round_bars {
+            // The long round bar from `z = 1` to `z = 5`, and the short one
+            // from `z = 2.5` to `z = 3.5` on the upper band alone.
+            for (floor, height) in [(1.0, 4.0), (2.5, 1.0)] {
                 for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
                     for bar_first in [true, false] {
                         let mut model = model.clone();
-                        let other = round_bar(&mut model);
+                        let other = a_round_bar_on_the_pipe(&mut model, floor, height);
                         let (arguments, tools) = if bar_first {
                             ([bar], [other])
                         } else {
@@ -381,17 +379,7 @@ fn a_far_cube(model: &mut Model) -> SolidKey {
     cube
 }
 
-/// A round bar on the bar's own pipe from `z = 1` to `z = 5`.
-fn a_round_bar_from_1_to_5(model: &mut Model) -> SolidKey {
-    a_round_bar_on_the_pipe(model, 1.0, 4.0)
-}
-
-/// A round bar on the bar's own pipe from `z = 2.5` to `z = 3.5`, which lies
-/// on the upper band alone.
-fn a_round_bar_from_2_and_a_half_to_3_and_a_half(model: &mut Model) -> SolidKey {
-    a_round_bar_on_the_pipe(model, 2.5, 1.0)
-}
-
+/// A round bar on the bar's own pipe, `height` tall, standing on `z = floor`.
 fn a_round_bar_on_the_pipe(model: &mut Model, floor: f64, height: f64) -> SolidKey {
     model
         .add_round_bar(
