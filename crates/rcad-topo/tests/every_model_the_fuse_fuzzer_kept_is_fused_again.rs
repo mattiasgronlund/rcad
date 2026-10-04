@@ -57,7 +57,7 @@
 //! | `two_cubes_that_fuse` | `0x01` | two cubes of side 2 overlapping at `(1, 1, 1)`, unioned then intersected, both `Ok` |
 //! | `two_cubes_touching_along_one_edge` | `0x02` | two cubes meeting along one edge at `(2, 2, 0)`, refused `ResultIsNotManifold { count: 4 }` |
 //! | `two_cubes_one_taken_out_of_the_other` | `0x22` | the overlapping cubes again, a **two-sided difference** both halves, both `Ok` |
-//! | `a_curved_face_with_a_hole_that_goes_too_far_round` | `0xa0` | a cube and a ball nearly inside it, a **two-sided intersection** then a union, both `Ok` |
+//! | `a_cube_with_a_unit_ball_nearly_inside_it` | `0xa0` | a cube and a ball nearly inside it, a **two-sided intersection** then a union, both `Ok` |
 //!
 //! One either side of the fuse, named, so the floors below cannot be met by a
 //! corpus that has quietly stopped doing one of them. The last two are the
@@ -438,7 +438,7 @@ fn the_named_control_seeds_still_land_either_side_of_the_fuse() {
     );
     assert_eq!(reached.ok, 2, "{reached:?}");
 
-    let reached = control_seed("a_curved_face_with_a_hole_that_goes_too_far_round");
+    let reached = control_seed("a_cube_with_a_unit_ball_nearly_inside_it");
     assert_eq!(reached.fused, 2, "{reached:?}");
     assert_eq!(
         reached.one_sided, 0,
@@ -468,7 +468,7 @@ fn the_named_control_seeds_still_land_either_side_of_the_fuse() {
 /// was refused until a cap on a ball took islands (`docs/decisions.md` §95.4).
 #[test]
 fn the_curved_seeds_intersection_measures_as_the_ball() {
-    let bytes = std::fs::read(corpus().join("a_curved_face_with_a_hole_that_goes_too_far_round"))
+    let bytes = std::fs::read(corpus().join("a_cube_with_a_unit_ball_nearly_inside_it"))
         .expect("the control seed is checked in");
     let rest = &bytes[1..];
     let mut model: Model =

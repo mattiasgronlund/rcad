@@ -160,8 +160,9 @@ version sized the box by the candidate before its trip as well as by the point
 after it. On `52eb56fb` the same command ran 1129 and failed one:
 `the_named_control_seeds_still_land_either_side_of_the_fuse` in
 `every_model_the_fuse_fuzzer_kept_is_fused_again.rs`, where the seed
-`a_curved_face_with_a_hole_that_goes_too_far_round` refused on both halves
-instead of one. A probe showed why. A candidate is a step of one radius from
+`a_curved_face_with_a_hole_that_goes_too_far_round` — since Q932,
+`a_cube_with_a_unit_ball_nearly_inside_it` — refused on both halves instead of
+one. A probe showed why. A candidate is a step of one radius from
 the middle of the corners, so before its trip it can be three units out where
 the point it comes back as is two. That grew one ball's box from `1.14e-13` to
 `1.71e-13`, and it lost the only candidate inside a cap near the ball's top.
