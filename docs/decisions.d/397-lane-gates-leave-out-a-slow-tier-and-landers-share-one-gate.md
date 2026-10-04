@@ -254,6 +254,36 @@ and the times measured.
   list. `_slow-tests-filter` now takes the list as an argument. The stub-cargo
   arm of `check-gate-docs-selftest` caught it and now holds it.
 
+**2026-10-04, since Q850 (7022e4a7).** The five tests are cut as the split row
+says. On a busy machine `test-slow` did not come down to 21 s.
+
+- **The cut.** rcad-step's corpus sweep is three tests, one per tolerant
+  budget, and each compares 367 pairs. Each cone family is two tests, one per
+  lean, or four, one per side and turn. Each family's counts add up to its old
+  pin. `slow_tests` names 40 tests where it named 30.
+- **Each piece alone.** rcad-step's three took 13.2, 13.2 and 19.1 s of CPU
+  (`/usr/bin/time` on the test binary). Run one case at a time, the cone
+  families took 54.8 s (frustum cube), 51.2 s (pointed cube), 22.4 s (pointed
+  cone, steeper face) and 15.3 s (frustum, steeper plane) in all. The cone
+  file's 19 tests run together at a load of about 13 took 20.2 s, and that was
+  its longest piece.
+- **In the gate.** A whole gate on 7022e4a7, starting at a load of about 14 on
+  24 cores: `test` 48.2 s, then `test-slow` 55.6 s (nextest's wall 54.5 s).
+  The 40 tests added up to 939 test-seconds, against the 503 the arithmetic
+  above used, and 22 of them took over 20 s. Pieces that take 13 to 20 s alone
+  took 40 to 44 s. `just test-slow` on its own at a load of 25 to 31 took
+  43.9 s.
+- **What that says.** `test` runs the same tests it ran on b80f5e88 and took
+  48.2 s against 27.8 s, so the whole machine was slower, not the slow tier
+  alone. With no piece over about 20 s alone, the longest test no longer sets
+  `test-slow`'s wall; the free cores do. "About 21 s (503 s over 24 cores)"
+  holds only when the slow tier has the 24 cores to itself, and here it had
+  about ten. Nobody has measured it on a quiet machine. How often the machine
+  is not quiet is §397.7's first bar, which Q853 measures.
+- **Three comments outside the write set** named an old test and now name a
+  new one: `rcad-step/src/brep.rs`, `rcad-topo/src/holds.rs` and
+  `meshing_a_plane_cut_along_a_cones_other_nappe.rs`.
+
 ### 397.5 Landers share one gate (amends §266.4)
 
 What `origin/main` shows, from 09-29 12:00 to 10-03 21:00 UTC (104.9 h at
