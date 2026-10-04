@@ -112,6 +112,10 @@ either name for a torus face, and `SolidBuilder` refuses both forms of the top
 half of a ring before any face is asked
 (`building_a_solid_out_of_faces.rs`).
 
+*Since 2026-10-04 (§243.8) this shape is answered rather than refused: a
+plane square to a ring's axis is read the same way as one holding it, and the
+flat half of a ring on `z = 0` is the piece its wire keeps.*
+
 ### 377.4 The answers now, pinned
 
 Every answer that comes back is one solid or none, passes `Model::validate`,
