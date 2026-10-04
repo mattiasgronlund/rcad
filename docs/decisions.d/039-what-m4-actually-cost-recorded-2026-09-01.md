@@ -345,7 +345,8 @@ moved them.
 > `TwoCurvesTouchWithoutCrossing` again, under every rule, and why is not traced
 > (`a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch`). A plane
 > lying along a cone's ruling still refuses on *which way a crossing runs*,
-> unchanged: a ruling has no stored direction, and it is queue row Q473's.
+> unchanged: a ruling has no stored direction, and it is queue row Q473's
+> (closed by Q473, in the note below).
 
 > **2026-10-03 note (Q760): the union of a bar lying along a plane or a bar is
 > answered.** Traced on the bar beside a cube's wall, with a print of the
@@ -369,6 +370,26 @@ moved them.
 > its corner, and two quarter bends end to end still refuse
 > `ResultIsNotManifold { count: 4 }`, and §80.9's decision that two solids
 > touching along an edge of both are not built is untouched.
+
+> **2026-10-04 note (Q473): a plane lying along a cone's ruling runs along the
+> ruling.** The gap above, closed: `AlongATouch` carries the ruling,
+> `(n·n)w − (n·w)n` for the plane's normal and the cone's axis, read only once
+> `rcad-geom`'s two proved doors say the apex is on the plane and the lean is
+> nothing, so a tolerant `intersect`'s touch is refused rather than read. A
+> face on the cone lies on the side of the plane its nappe is on, read off its
+> corners. Each other face of the solid meets the resting plane in an edge
+> that touches its conic of the cone on the ruling, at a meet no box narrows;
+> `turns_anticlockwise` reads that turn as the touch it is proved to be.
+> `degenerate_curved_fuses.rs`'s wedge, its back corner moved to `(−5, 1, 8)`,
+> answers the intersection both ways round and the frustum less the wedge, held
+> to volumes worked out level by level. Left: the union both ways round and the
+> wedge less the frustum refuse in the mesher, `CornersCoincide`; the union's
+> answer exists (its floor less the frustum's disc touches its own edge at one
+> point), so that is a gap, and whether the wedge less the frustum is a
+> manifold at all is not demonstrated. The wedge's first back corner,
+> `(−5, 0, 8)`, refuses *order along a crossing* under every certified rule: one
+> face's ellipse starts inside the box of the node where the wedge's edge
+> touches it. The order exists, so that is a gap too.
 
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot

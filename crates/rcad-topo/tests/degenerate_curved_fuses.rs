@@ -48,8 +48,9 @@ use core::f64::consts::PI;
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
-    SurfaceMeet, Vector, intersect,
+    SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
 };
+use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
     Containment, DraftStep, Error, Fused, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
@@ -629,29 +630,73 @@ fn a_plane_resting_on_a_cones_side() -> Plane {
 /// numbers, it comes to
 ///
 /// ```text
-/// (8, 0, −1)      1 − 64/64   = 0     the tangency: one ruling, touched
-/// (0, 0, −1)      1 − 0       = 1     a circle
-/// (−8, 16, 3)     9 − 320/64  = 4     an ellipse
-/// (−8, −16, 5)   25 − 320/64  = 20    an ellipse
+/// (8, 0, −1)      1 − 64/64   = 0      the tangency: one ruling, touched
+/// (0, 0, −1)      1 − 0       = 1      a circle
+/// (−2, 6, 1)      1 − 40/64   = 24/64  an ellipse
+/// (−2, −3, 1)     1 − 13/64   = 51/64  an ellipse
 /// ```
 ///
-/// Every one of those is a whole number of a sum of whole numbers, so the four
-/// signs are what they read.
+/// Every one of those is a whole number over 64 of a sum of whole numbers, so
+/// the four signs are what they read.
 ///
 /// The wedge really does overlap the cone: the axis point `(0, 0, 9)` is inside
 /// all four of its half-spaces and inside the cone, whose radius there is
 /// `9/8`.
+///
+/// **Its back corner is at `(−5, 1, 8)` and not `(−5, 0, 8)`**, and
+/// [`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`] says what the other one meets.
 fn a_wedge_resting_on_a_cones_side(model: &mut Model) -> SolidKey {
+    a_wedge_resting_on_a_cones_side_with_its_back_at(model, THE_WEDGES_BACK)
+}
+
+/// The wedge's back corner and the normals of the two faces through it, as
+/// [`a_wedge_resting_on_a_cones_side`] writes them.
+const THE_WEDGES_BACK: Back = Back {
+    at: [-5.0, 1.0, 8.0],
+    one_side: [-2.0, 6.0, 1.0],
+    other_side: [-2.0, -3.0, 1.0],
+};
+
+/// The back corner this entry was first written with, `(−5, 0, 8)`, where the
+/// face `(−8, −16, 5)` through it cuts the cone in an ellipse that **starts**
+/// on the ruling the slanted face rests on.
+///
+/// Every closed crossing starts at one place the two surfaces alone pick
+/// (`where_a_closed_crossing_starts`), and this ellipse's is `(2.5, 0, 20)`,
+/// which is also where the wedge's edge on the slanted face touches the
+/// ellipse. That node is a meet of two planes and a cone at a double root, a
+/// box and not a point, so sweeping round the ellipse from its start cannot
+/// tell the node from the start, and the order round it is refused.
+/// [`a_wedge_whose_ellipse_starts_where_its_edge_touches_it_is_refused_on_the_order_round_it`]
+/// pins it.
+const A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING: Back = Back {
+    at: [-5.0, 0.0, 8.0],
+    one_side: [-8.0, 16.0, 3.0],
+    other_side: [-8.0, -16.0, 5.0],
+};
+
+/// Where a wedge resting on the cone's side has its back corner, and the normals
+/// of the two faces that meet there, pointing out of the wedge.
+#[derive(Clone, Copy)]
+struct Back {
+    at: [f64; 3],
+    one_side: [f64; 3],
+    other_side: [f64; 3],
+}
+
+/// [`a_wedge_resting_on_a_cones_side`] with its back corner somewhere else on
+/// the floor `z = 8`. The slanted face and the floor are the same planes.
+fn a_wedge_resting_on_a_cones_side_with_its_back_at(model: &mut Model, back_at: Back) -> SolidKey {
     let mut builder = SolidBuilder::new();
-    let corner = |builder: &mut SolidBuilder, x: f64, y: f64, z: f64| {
+    let corner = |builder: &mut SolidBuilder, [x, y, z]: [f64; 3]| {
         builder
             .add_vertex(Point::new(x, y, z))
             .expect("a finite point")
     };
-    let left = corner(&mut builder, 1.0, -3.0, 8.0);
-    let right = corner(&mut builder, 1.0, 3.0, 8.0);
-    let back = corner(&mut builder, -5.0, 0.0, 8.0);
-    let up = corner(&mut builder, 3.0, 1.0, 24.0);
+    let left = corner(&mut builder, [1.0, -3.0, 8.0]);
+    let right = corner(&mut builder, [1.0, 3.0, 8.0]);
+    let back = corner(&mut builder, back_at.at);
+    let up = corner(&mut builder, [3.0, 1.0, 24.0]);
 
     let mut edge = |from, to| {
         builder
@@ -668,10 +713,10 @@ fn a_wedge_resting_on_a_cones_side(model: &mut Model) -> SolidKey {
     let mut face = |normal: Vector, through: Point, round: [(_, Orientation); 3]| {
         let steps: Vec<DraftStep> = round
             .into_iter()
-            .map(|(edge, turn)| {
+            .map(|(edge, way)| {
                 DraftStep::Along(
                     builder
-                        .add_coedge(edge, turn)
+                        .add_coedge(edge, way)
                         .expect("an edge of this build"),
                 )
             })
@@ -700,8 +745,11 @@ fn a_wedge_resting_on_a_cones_side(model: &mut Model) -> SolidKey {
             (left_to_right, Orientation::Reversed),
         ],
     );
+    let [ax, ay, az] = back_at.at;
+    let [ox, oy, oz] = back_at.one_side;
+    let [tx, ty, tz] = back_at.other_side;
     let one_side = face(
-        Vector::new(-8.0, 16.0, 3.0),
+        Vector::new(ox, oy, oz),
         Point::new(1.0, 3.0, 8.0),
         [
             (right_to_back, Orientation::Forward),
@@ -710,8 +758,8 @@ fn a_wedge_resting_on_a_cones_side(model: &mut Model) -> SolidKey {
         ],
     );
     let other_side = face(
-        Vector::new(-8.0, -16.0, 5.0),
-        Point::new(-5.0, 0.0, 8.0),
+        Vector::new(tx, ty, tz),
+        Point::new(ax, ay, az),
         [
             (left_to_back, Orientation::Reversed),
             (left_to_up, Orientation::Forward),
@@ -849,81 +897,79 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
     }
 }
 
-/// The tangency is refused, and what it gives up on is the tangency: the wedge's
-/// slanted face lies **on** the cone's side, so that one crossing has no
-/// direction.
+/// **A wall lying on a cone's side runs along the ruling it rests on, and what
+/// the wedge and the frustum share, and the frustum less the wedge, are
+/// answered** and held to the volumes worked out level by level without the
+/// kernel.
 ///
 /// This is [`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`]
-/// asked of a cone, and the gap that row used to be. Along a ruling a plane
-/// rests on, the plane's normal and the cone's gradient are parallel at every
-/// point of it, so `∇S × ∇Q` is exactly the zero vector. A bar's touch reads its
-/// stored axis instead (`arrange.rs`'s `AlongATouch`, queue row Q649); a cone's
-/// ruling has no stored direction, and is queue row Q473's.
+/// asked of a cone. Along a ruling a plane rests on, the plane's normal and the
+/// cone's gradient are parallel at every point of it, so `∇S × ∇Q` is exactly
+/// the zero vector, and every fuse here used to refuse *which way a crossing
+/// runs* on it. That was a gap (§16.10): the direction is the ruling's own,
+/// `(1, 0, 8)` up to length, and `arrange.rs` now reads it off the plane's
+/// normal and the cone's axis once the touch is proved (`AlongATouch`, queue row
+/// Q473). Each of the wedge's other faces meets the slanted one in an edge that
+/// touches that face's conic of the cone where it crosses the ruling, and the
+/// turn there is read as the touch it is proved to be.
 ///
-/// **A gap and not a limit** (§16.10). The direction is there to be had — it is
-/// the ruling's own, `(1, 0, 8)` up to length — and what runs out is that no
-/// stored triple names it.
-///
-/// **The unit test next to that note is not this test.** `arrange.rs`'s
-/// `the_two_rulings_a_plane_through_a_cones_apex_cuts_are_ordered_along_an_axis`
-/// hands `how_a_crossing_runs` a tangent plane and a cone directly. It says
-/// nothing about a *fuse* — whether a solid carrying such a plane ever reaches
-/// that line, or gives up somewhere else first on the way. This is the end to
-/// end demonstration that it does reach it, and reaches it under every rule and
-/// under a tolerant policy too.
-///
-/// **The name of the predicate is not the whole of the evidence.** The refusal's
-/// own record carries the direction that was handed to
-/// `dominant_axis_of_a_direction`, and the assertion below reads it back and
-/// finds the box `(0, 0, 0)` — not a narrow one, the zero vector. Nothing else
-/// in this fuse hands that predicate anything: it is reached from one line of
-/// `how_a_crossing_runs`, the line under the straight gate.
-///
-/// **And the pair that gives up has to be the tangent one.** The control below
-/// changes the cone's slope and leaves the wedge alone, so the two runs share
-/// every plane-against-plane pair they have, right down to the stored normals.
-/// The control does not give up on a direction, so no plane-against-plane pair
-/// here does. What is left is the four planes against the cone, and only the
-/// slanted one cuts it in a straight run at all.
+/// **Three fuses are refused by the mesher**, `CannotMeshAFace` with
+/// `CornersCoincide`, under either policy: the union both ways round, and the
+/// wedge less the frustum. Each keeps a face that comes back to one point
+/// twice. The union keeps the wedge's floor less the frustum's top disc, which
+/// touches the floor's edge at `(1, 0, 8)`; the wedge less the frustum keeps the
+/// slanted face and the cone's skin either side of the ruling, two slivers that
+/// meet along it.
 ///
 /// **The control halves the cone's slope and nothing else.** The same wedge
 /// against a cone of slope a sixteenth: the slanted face no longer rests on the
 /// side, it leans across it and meets the cone at the apex alone, and the union
-/// is answered. A refusal on one side of one number and an answer on the other
-/// is what says this row is about what it claims.
-///
-/// **The control answers since §330**, and what stood in its way on the road
-/// had nothing to do with tangency either. It was `Undecidable` over a point
-/// inside a piece of a face, §36.28's chord-and-arc gap, until §251: the wedge's
-/// two faces `(−8, ±16, ·)` each cut the cone in an ellipse, both ellipses pass
-/// through the two points where the edge those faces share pierces the cone, and
-/// each face's piece inside the cone is one ellipse arc and that edge as its
-/// chord. Then it was `ResultIsNotManifold { count: 4 }`, because the arc on one
-/// plane and the arc on the other run between the same two corners along the
-/// same cone and were named as one edge. An arc's name holds its plane now, and
-/// the answer is held to the frustum, the wedge's 96, and what the two share
-/// worked out level by level without the kernel.
-///
-/// A tolerant policy makes no difference, which is the other half: this is a
-/// statement about the shape and not about a budget.
+/// is answered.
 #[test]
-fn a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction() {
+fn a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand() {
+    let frustum =
+        PI * A_CONES_SLOPE * A_CONES_SLOPE * (A_CONES_FAR_END.powi(3) - A_CONES_NEAR_END.powi(3))
+            / 3.0;
+    let shared = what_the_wedge_shares_with_a_cone_of_slope(A_CONES_SLOPE, THE_WEDGES_BACK);
+    for turned in [false, true] {
+        let mut model = a_model();
+        let pair = either_way_round(a_wedge_lying_on_a_cones_side(&mut model), turned);
+        let both = fused(&mut model, &pair, Rule::Intersection);
+        assert_eq!(both.solids().len(), 1);
+        measures(volume_of(&model, both.solids()), shared, Side::Under);
+    }
+    let mut model = a_model();
+    let pair = a_wedge_lying_on_a_cones_side(&mut model);
+    let left = fused(&mut model, &pair, Rule::Difference);
+    assert_eq!(
+        left.solids().len(),
+        2,
+        "the wedge's floor holds the frustum's whole disc at z = 8, so the frustum below it is cut off"
+    );
+    measures(
+        volume_of(&model, left.solids()),
+        frustum - shared,
+        Side::Under,
+    );
+
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for (rule, turned) in [
+            (Rule::Union, false),
+            (Rule::Union, true),
+            (Rule::Difference, true),
+        ] {
             let mut model = a_model();
-            let pair = a_wedge_lying_on_a_cones_side(&mut model);
-            // Both readers below panic on anything but `Undecidable`, so the
-            // shape of the refusal is asked as firmly as its contents.
+            let pair = either_way_round(a_wedge_lying_on_a_cones_side(&mut model), turned);
             let why = refusal(&mut model, &pair, rule, &policy);
-            assert_eq!(
-                what_it_gave_up_on(&why),
-                "which way a crossing runs",
-                "a wall lying on a cone's side gives that crossing no direction"
-            );
-            assert_eq!(
-                the_direction_it_could_not_name(&why),
-                [[0.0, 0.0]; 3],
-                "and the direction it could not name is the zero vector itself"
+            assert!(
+                matches!(
+                    why,
+                    Error::CannotMeshAFace {
+                        why: CannotTriangulate::CornersCoincide { .. },
+                        ..
+                    }
+                ),
+                "{rule:?}, turned {turned}: {why:?}"
             );
         }
     }
@@ -942,9 +988,89 @@ fn a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction() {
     let frustum = PI * halved * halved * (A_CONES_FAR_END.powi(3) - A_CONES_NEAR_END.powi(3)) / 3.0;
     measures(
         volume_of(&model, united.solids()),
-        frustum + 96.0 - what_the_wedge_shares_with_a_cone_of_slope(halved),
+        frustum + 96.0 - what_the_wedge_shares_with_a_cone_of_slope(halved, THE_WEDGES_BACK),
         Side::Under,
     );
+}
+
+/// The pair as built, or with its two solids swapped.
+fn either_way_round(pair: Pair, turned: bool) -> Pair {
+    if turned {
+        Pair::of(pair.tools[0], pair.arguments[0])
+    } else {
+        pair
+    }
+}
+
+/// **With its back corner at `(−5, 0, 8)` the same wedge is refused on the
+/// order round one ellipse**, and what stops it is where that ellipse starts,
+/// not the touch.
+///
+/// [`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`] has the geometry. Every
+/// certified fuse, either way round, gives up on *order along a crossing* with
+/// the node at `(2.5, 0, 20)` in its record, and the ellipse's start is inside
+/// that node's box: sweeping round from a point in the box cannot say where in
+/// the box the node is. A tolerant policy settles that sweep its own way and
+/// then cannot tell the cells of a face apart.
+///
+/// **A gap and not a limit** (§16.10). The order round the ellipse exists, and
+/// the node is a box only because a meet of two planes and a cone at a double
+/// root is not one point in `f64`; the wedge one unit along `y` at its back,
+/// [`a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand`],
+/// has its ellipses start elsewhere and answers.
+#[test]
+fn a_wedge_whose_ellipse_starts_where_its_edge_touches_it_is_refused_on_the_order_round_it() {
+    let flat = Surface::Plane(
+        Plane::from_point_and_normal(Point::new(-5.0, 0.0, 8.0), Vector::new(-8.0, -16.0, 5.0))
+            .expect("a normal with length"),
+    );
+    let cone = Surface::Cone(a_cone_of_slope(A_CONES_SLOPE));
+    let SurfaceMeet::Curves(runs) = intersect(
+        &flat,
+        &cone,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a plane across a cone is named") else {
+        panic!("a plane steeper than the cone's side cuts it in a curve");
+    };
+    let start = where_a_closed_crossing_starts(&runs[0], [&flat, &cone], &mut ProvenanceLog::new())
+        .expect("an ellipse has a start")
+        .coordinates();
+    let holds = |node: [[f64; 2]; 3], point: [f64; 3]| {
+        (0..3).all(|axis| node[axis][0] <= point[axis] && point[axis] <= node[axis][1])
+    };
+
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            for turned in [false, true] {
+                let mut model = a_model();
+                let cone =
+                    cones::a_frustum(&mut model, A_CONES_SLOPE, A_CONES_NEAR_END, A_CONES_FAR_END);
+                let wedge = a_wedge_resting_on_a_cones_side_with_its_back_at(
+                    &mut model,
+                    A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING,
+                );
+                let pair = either_way_round(Pair::of(cone, wedge), turned);
+                let why = refusal(&mut model, &pair, rule, &policy);
+                if policy.max_wobble() > 0.0 {
+                    assert!(
+                        matches!(why, Error::CannotTellTheCellsOfAFaceApart { .. }),
+                        "{rule:?}, turned {turned}: {why:?}"
+                    );
+                    continue;
+                }
+                assert_eq!(what_it_gave_up_on(&why), "order along a crossing");
+                let nodes = the_points_it_could_not_order(&why);
+                assert!(
+                    nodes
+                        .iter()
+                        .any(|&node| holds(node, start) && holds(node, [2.5, 0.0, 20.0])),
+                    "{rule:?}, turned {turned}: one node is the touch and holds the start, {nodes:?}"
+                );
+            }
+        }
+    }
 }
 
 /// How much space the wedge shares with the cone of `slope` about `+z`, worked
@@ -956,15 +1082,15 @@ fn a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction() {
 /// disc by a share of `(2π/SIDES)²/6`, under a millionth; the levels are added
 /// by Simpson's rule. Neither comes near what a mesh at [`A_DEFLECTION`] is
 /// allowed.
-fn what_the_wedge_shares_with_a_cone_of_slope(slope: f64) -> f64 {
+fn what_the_wedge_shares_with_a_cone_of_slope(slope: f64, back: Back) -> f64 {
     const SIDES: u32 = 4096;
     const LEVELS: u32 = 4000;
     // Each slanted face as `n` and a point on it, with `n` pointing out of the
-    // wedge, as `a_wedge_resting_on_a_cones_side` writes them.
+    // wedge, as `a_wedge_resting_on_a_cones_side_with_its_back_at` writes them.
     let faces = [
         ([1.0, 0.0, -A_CONES_SLOPE], [0.0, 0.0, 0.0]),
-        ([-8.0, 16.0, 3.0], [1.0, 3.0, 8.0]),
-        ([-8.0, -16.0, 5.0], [-5.0, 0.0, 8.0]),
+        (back.one_side, [1.0, 3.0, 8.0]),
+        (back.other_side, back.at),
     ];
     let area_at = |z: f64| {
         let radius = slope * z;
@@ -1025,14 +1151,9 @@ fn inside_of_a_line(ring: &[[f64; 2]], past: impl Fn([f64; 2]) -> f64) -> Vec<[f
     kept
 }
 
-/// The direction `dominant_axis_of_a_direction` was handed and could not name,
-/// read straight out of the refusal's own record.
-///
-/// That record's one input is the cross product itself, as a box. Reading it is
-/// what turns "the predicate was called *which way a crossing runs*" into "the
-/// number it was given was `(0, 0, 0)`", which is the claim the entry actually
-/// makes.
-fn the_direction_it_could_not_name(why: &Error) -> [[f64; 2]; 3] {
+/// The two nodes an order along a crossing could not tell apart, read straight
+/// out of the refusal's own record, each as its box.
+fn the_points_it_could_not_order(why: &Error) -> Vec<[[f64; 2]; 3]> {
     let Error::Undecidable { records } = why else {
         panic!("expected `Undecidable`, got {why:?}");
     };
@@ -1040,10 +1161,15 @@ fn the_direction_it_could_not_name(why: &Error) -> [[f64; 2]; 3] {
         .records()
         .last()
         .expect("a refusal names a decision");
-    match last.inputs() {
-        [PredicatePoint::Constructed(box_)] => box_.map(|along| [along.lo(), along.hi()]),
-        other => panic!("this refusal logs one worked-out direction, got {other:?}"),
-    }
+    last.inputs()
+        .iter()
+        .map(|node| {
+            let PredicatePoint::Constructed(box_) = node else {
+                panic!("a node this refusal names is worked out, got {node:?}");
+            };
+            box_.map(|along| [along.lo(), along.hi()])
+        })
+        .collect()
 }
 
 // 3. Seam-crossing intersections — criterion 14's third entry.
@@ -2187,7 +2313,7 @@ fn criterion_fourteens_four() -> Vec<Entry> {
             case: Case::Fused {
                 build: a_wedge_lying_on_a_cones_side,
                 rule: Rule::Difference,
-                outcome: Outcome::GaveUp("which way a crossing runs"),
+                outcome: Outcome::Answered,
             },
         },
         Entry {
