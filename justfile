@@ -8772,21 +8772,12 @@ check-systemd-units-selftest:
 # the house shape. `tooling/fuzz-yield/log_stats.py` holds the arithmetic for
 # one log — runs, coverage at start/30m/end, the hour it last rose — kept in
 # its own file because that half a plain Python test can cover without a
-# fixture night on disk. This recipe holds the shell around it: which nights,
-# which files, and how Q147's verdicts fold in.
-#
-# **`$night/artifacts/<target>/` is a cumulative copy, not that night's own
-# finds.** `fuzz-overnight`'s `cp -Rn` stamps every file's mtime with whenever
-# that night's copy-out ran, carry-over and new find alike, so mtime cannot
-# tell them apart. A night's "new files" here is instead a filename diff
-# against the nearest earlier night on disk that has any artifacts at all —
-# the one thing about a find that survives being copied forward every night
-# since.
-#
-# **A night with no `fuzz-triage-verdicts.tsv` says "not triaged", never
-# `0`.** `just fuzz-triage` (Q147) is what writes that file, and a night it has
-# not reached yet has told this recipe nothing, which is a different answer
-# from "nothing here is still failing".
+# fixture night on disk. `tooling/fuzz-yield/nights.py` holds which artifact
+# files are new on a night and how Q147's verdicts fold in, and says why each
+# rule is the one it is; the queue page reads a night through the same two
+# files, so the page and this report cannot disagree about it. This recipe
+# holds the shell around them: which nights, which files, and whether the code
+# changed.
 #
 # **Whether a target's code changed since the night before** (Q232,
 # `docs/decisions.md` §298.2) is answered from the *build* worktree, not the
@@ -8816,6 +8807,7 @@ fuzz-yield from="" to="":
     from='{{ from }}'
     to='{{ to }}'
     stats='{{ justfile_directory() }}/tooling/fuzz-yield/log_stats.py'
+    nights_py='{{ justfile_directory() }}/tooling/fuzz-yield/nights.py'
     nightly_worktree="${RCAD_NIGHTLY_FUZZ_WORKTREE:-/home/mattias/git/mattiasgronlund/rcad-nightly-fuzz}"
 
     # `docs/decisions.md` §298.1's table, copied by hand: add a target or a new
@@ -8918,28 +8910,6 @@ fuzz-yield from="" to="":
         exit 0
     fi
 
-    artifacts_dir() {
-        local night="$1" target="$2" candidate
-        candidate="$root/$night/artifacts/$target"
-        [ -d "$candidate" ] && { echo "$candidate"; return 0; }
-        candidate="$root/artifacts-rescued-$night/$target"
-        [ -d "$candidate" ] && { echo "$candidate"; return 0; }
-        return 1
-    }
-
-    # Walks the whole list on disk, not just `[from, to]`: the nearest earlier
-    # night with anything to diff against can sit outside the range asked for.
-    nearest_earlier() {
-        local night="$1" target="$2" i idx=-1
-        for i in "${!nights[@]}"; do
-            [ "${nights[$i]}" = "$night" ] && { idx=$i; break; }
-        done
-        for ((i = idx - 1; i >= 0; i--)); do
-            artifacts_dir "${nights[$i]}" "$target" >/dev/null && { echo "${nights[$i]}"; return 0; }
-        done
-        return 1
-    }
-
     for night in "${nights[@]}"; do
         [ -n "$from" ] && [[ "$night" < "$from" ]] && continue
         [ -n "$to" ] && [[ "$night" > "$to" ]] && continue
@@ -8954,17 +8924,15 @@ fuzz-yield from="" to="":
             continue
         fi
 
-        verdicts="$night_dir/fuzz-triage-verdicts.tsv"
         for log in "${logs[@]}"; do
-            if grep -q ': skipped,' "$log"; then
-                echo "  $(basename "$log" .log)"
-                echo "    status: skipped — no time left in the window"
-                continue
-            fi
-
             line=$(python3 "$stats" "$log")
             IFS=$'\t' read -r status target fork window_s runs cov_start cov_30 cov_end rise_s <<<"$line"
             case "$status" in
+                SKIPPED)
+                    echo "  $(basename "$log" .log)"
+                    echo "    status: skipped — no time left in the window"
+                    continue
+                    ;;
                 NOLAUNCH)
                     echo "  $(basename "$log" .log)"
                     echo "    status: never launched, no 'Running \`...\`' line in this log"
@@ -8991,31 +8959,8 @@ fuzz-yield from="" to="":
             echo "    coverage: $cov_start at start, $cov_30 at 30m, $cov_end at end"
             awk -v r="$rise_s" 'BEGIN { printf "    last rose: hour %.1f\n", r / 3600 }'
             echo "    code changed since the previous night: $(changed_status "$night" "$target")"
-
-            if artifacts=$(artifacts_dir "$night" "$target"); then
-                if prev=$(nearest_earlier "$night" "$target"); then
-                    prev_dir=$(artifacts_dir "$prev" "$target")
-                    new=$(comm -13 <(ls "$prev_dir" | sort) <(ls "$artifacts" | sort) \
-                        | sed -E 's/-[0-9a-f]{40}$//' | sort | uniq -c)
-                    if [ -z "$new" ]; then
-                        echo "    new files: none since $prev"
-                    else
-                        echo "    new files since $prev: $(awk '{printf "%s%s %s", sep, $1, $2; sep=", "}' <<<"$new")"
-                    fi
-                else
-                    n=$(find "$artifacts" -maxdepth 1 -type f | wc -l)
-                    echo "    new files: no earlier night on disk to diff against — counting all $n as new, not tonight's own find"
-                fi
-            else
-                echo "    new files: no artifacts directory for $target under $night"
-            fi
-
-            if [ -f "$verdicts" ]; then
-                faults=$(awk -F'\t' -v t="$target" 'NR > 1 && $1 == t && $3 == "yes"' "$verdicts" | wc -l)
-                echo "    faults: $faults distinct, still failing on main"
-            else
-                echo "    faults: night not triaged"
-            fi
+            new_files_and_faults=$(python3 "$nights_py" "$root" "$night" "$target") || exit 1
+            sed 's/^/    /' <<<"$new_files_and_faults"
         done
     done
 
@@ -10276,7 +10221,9 @@ queue_running := ""
 # Where `queue-page` writes, so a selftest can point it at a scratch directory
 # instead of Mattias's real page (§230, §263). `check-queue-page-selftest` and
 # `check-queue-api-selftest` both set `RCAD_QUEUE_PAGE_DIR`, and the gate must
-# never write `~/rcad-queue-page` — the two facts are the same one.
+# never write `~/rcad-queue-page` — the two facts are the same one. Both set
+# `RCAD_FUZZ_LOGS` too, so the page they render reads a fixture night or none,
+# never whatever `~/rcad-fuzz-logs` holds on the machine running the gate.
 queue_page_dir := env_var_or_default("RCAD_QUEUE_PAGE_DIR", env_var("HOME") / "rcad-queue-page")
 
 # **One parse, and both readers use it.** `queue` decides what to dispatch and
@@ -10614,12 +10561,16 @@ queue mode="" *args:
 # that writes, and so does `ff-main`; run by hand, it just re-renders now.
 #
 # The logic is `tooling/queue-page/render.py`; this only hands it the
-# directory to write. The renderer writes through a temporary file and a
-# rename on its own — see `write_atomically` there — so this recipe does not
-# repeat that.
-[doc("Render docs/queue.md's history and current state as one page, to RCAD_QUEUE_PAGE_DIR or ~/rcad-queue-page.")]
+# directory to write and `{{ fuzz_log_root }}`, which the page's fuzzing
+# section reads the overnight fuzz job's nights from. The renderer writes
+# through a temporary file and a rename on its own — see `write_atomically`
+# there — so this recipe does not repeat that.
+#
+# The fuzzing section is only as fresh as the last render: the page re-renders
+# on a queue write, `ff-main` or this recipe, not when a fuzz night ends.
+[doc("Render docs/queue.md's history, current state and fuzz nights as one page, to RCAD_QUEUE_PAGE_DIR or ~/rcad-queue-page.")]
 queue-page:
-    @python3 '{{ justfile_directory() }}/tooling/queue-page/render.py' '{{ queue_page_dir }}'
+    @python3 '{{ justfile_directory() }}/tooling/queue-page/render.py' '{{ queue_page_dir }}' '{{ fuzz_log_root }}'
 
 # Renders a scratch repository's `docs/queue.md` history into a scratch
 # directory and checks both charts' counts, by commit, against a count taken
@@ -10634,8 +10585,17 @@ queue-page:
 # page's cache did when tiers 2.2 and 5 reached the page (§403.8). The
 # renderer's `.history-cache.json` holds one tally per commit sha verbatim, so
 # reading it back is reading the render's real output, not recomputing it.
+#
+# The fuzzing section reads a fixture log root with one night of each kind the
+# table tells apart: a finished night with its first artifacts (09-10), a build
+# that failed (09-11), no directory at all (09-12), a triaged night with new
+# finds, carried-over ones and a skipped log (09-13), and an unfinished newest
+# night that `latest` does not name yet (09-14). Every expected cell is worked
+# out by hand from the fixture logs. A second render then checks the fuzz
+# cache both ways: a log left alone is served from it, a log that grew is read
+# again.
 [private]
-[doc("queue-page's two charts, checked against a hand count of a scratch repository's own commits.")]
+[doc("queue-page's two charts and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
 check-queue-page-selftest:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -10789,8 +10749,43 @@ check-queue-page-selftest:
     jq -n --arg sha "$sha_c" '{($sha): {"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":3,"closed":2}}' \
         > "$out/.history-cache.json" || fail "could not write the five-tier cache"
 
-    RCAD_QUEUE_PAGE_DIR="$out" "$j" --justfile '{{ justfile() }}' --working-directory "$hub" queue-page \
-        || fail "queue-page failed to render the scratch history"
+    fuzz="$root/fuzz-logs"
+    running() {
+        printf '     Running `target/release/%s -artifact_prefix=/x/ -max_total_time=%s -fork=%s /corpus`\n' "$1" "$3" "$2"
+    }
+    run_line() {
+        printf '#%s: cov: %s ft: 1 corp: 1 exec/s: 1 oom/timeout/crash: 0/0/0 time: %ss\n' "$1" "$2" "$3"
+    }
+    mkdir -p "$fuzz/2026-09-10/artifacts/demo_target" "$fuzz/2026-09-11" \
+        "$fuzz/2026-09-13/artifacts/demo_target" "$fuzz/2026-09-14"
+    { running demo_target 4 28800; run_line 1000 500 0; run_line 2000 600 1800; run_line 5000 900 28800; } \
+        > "$fuzz/2026-09-10/fuzz-demo.log"
+    printf 'error: the build failed\n' > "$fuzz/2026-09-11/build.log"
+    { running demo_target 2 3600; run_line 100 900 0; run_line 200 950 1800; run_line 1234567 1000 3600; } \
+        > "$fuzz/2026-09-13/fuzz-demo.log"
+    printf 'fuzz-skip: skipped, -42 s left in the window\n' > "$fuzz/2026-09-13/fuzz-skip.log"
+    { running demo_target 1 60; run_line 10 1000 0; run_line 20 1100 60; } > "$fuzz/2026-09-14/fuzz-demo.log"
+    running ghost_target 1 60 > "$fuzz/2026-09-14/fuzz-nodata.log"
+    for name in crash-deadbeefdeadbeefdeadbeefdeadbeefdeadbeef timeout-cafebabecafebabecafebabecafebabecafebabe; do
+        printf x > "$fuzz/2026-09-10/artifacts/demo_target/$name"
+        printf x > "$fuzz/2026-09-13/artifacts/demo_target/$name"
+    done
+    printf x > "$fuzz/2026-09-13/artifacts/demo_target/crash-beadfeedbeadfeedbeadfeedbeadfeedbeadfeed"
+    printf x > "$fuzz/2026-09-13/artifacts/demo_target/slow-unit-c0ffeec0c0ffeec0c0ffeec0c0ffeec0c0ffeec0"
+    {
+        printf 'target\tfiles\tstill_fails\tsample\tgroup\n'
+        printf 'demo_target\t2\tyes\tsample-a\tpanic-a\n'
+        printf 'demo_target\t1\tyes\tsample-d\tpanic-d\n'
+        printf 'demo_target\t1\tno\tsample-b\tpanic-b\n'
+        printf 'ghost_target\t1\tyes\tsample-c\tpanic-c\n'
+    } > "$fuzz/2026-09-13/fuzz-triage-verdicts.tsv"
+    printf '2026-09-13 08:15  abc1234 (0 days old, 0 behind main)  2 targets, nothing found  %s/2026-09-13\n' "$fuzz" \
+        > "$fuzz/latest"
+
+    render() {
+        RCAD_QUEUE_PAGE_DIR="$out" RCAD_FUZZ_LOGS="$fuzz" "$j" --justfile '{{ justfile() }}' --working-directory "$hub" queue-page
+    }
+    render || fail "queue-page failed to render the scratch history"
     [ -f "$out/index.html" ] || fail "queue-page did not write index.html"
     [ -f "$out/.history-cache.json" ] || fail "queue-page did not write .history-cache.json"
 
@@ -10808,7 +10803,41 @@ check-queue-page-selftest:
     grep -q 'id="qp-progress"' "$out/index.html" || fail "the progress chart is missing from the page"
     grep -q '<h3>Tier 2.2</h3><ul><li><code>Q5</code>' "$out/index.html" || fail "the ready list leaves out tier 2.2's Q5"
     grep -q '<h3>Tier 5</h3><ul><li><code>Q6</code>' "$out/index.html" || fail "the ready list leaves out tier 5's Q6"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, and the ready list holds every tier"
+
+    has() { grep -qF -- "$1" "$out/index.html" || fail "$2"; }
+    has 'abc1234 (0 days old, 0 behind main)  2 targets, nothing found' "the latest line is not on the page"
+    has '<tr><th rowspan="2">2026-09-14<div class="qp-note">not in <code>latest</code> yet: still running, or ended without writing it</div></th><td><code>demo_target</code></td><td class="n">0.0</td><td class="n" title="20">20</td><td class="n">1000</td><td class="n">1100</td><td class="n">1100</td><td class="n">0.0</td><td>no artifacts directory</td><td class="faults">not triaged</td></tr><tr><td><code>ghost_target</code></td><td colspan="8">launched, but no coverage line was ever printed</td></tr>' \
+        "09-14 is newest and latest names 09-13, so it should be marked unfinished, with a covered target and one that never printed coverage"
+    has '<tr><th rowspan="2">2026-09-13</th><td><code>demo_target</code></td><td class="n">2.0</td><td class="n" title="1234567">1.2M</td><td class="n">900</td><td class="n">950</td><td class="n">1000</td><td class="n">1.0</td><td>1 crash, 1 slow-unit (since 2026-09-10)</td><td class="faults">2</td></tr><tr><td><code>fuzz-skip</code></td><td colspan="8">skipped: no time left in the window</td></tr>' \
+        "09-13's row: 2 x 1 h, 1234567 runs, a crash and a slow unit new against 09-10 (the two carried over are not), two faults still failing, and a skipped log"
+    has '<tr><th>2026-09-12</th><td colspan="9">no directory for this night</td></tr>' "09-12 has no directory and should say so"
+    has "<tr><th>2026-09-11</th><td colspan=\"9\">fuzzed nothing: no fuzz logs. The build's own log is <code>$fuzz/2026-09-11/build.log</code></td></tr>" \
+        "09-11 has a build log and no fuzz logs, and should say it fuzzed nothing"
+    has '<tr><th rowspan="1">2026-09-10</th><td><code>demo_target</code></td><td class="n">32.0</td><td class="n" title="5000">5.0K</td><td class="n">500</td><td class="n">600</td><td class="n">900</td><td class="n">8.0</td><td>first night on disk: all 2 counted</td><td class="faults">not triaged</td></tr>' \
+        "09-10's row: 4 x 8 h, its two artifacts counted as the first night on disk, and no verdicts file"
+    has '<tr><th>2026-09-08</th><td colspan="9">no directory for this night</td></tr>' \
+        "the table should run seven calendar nights back from 09-14, to 09-08"
+    ! grep -qF '2026-09-07' "$out/index.html" || fail "the table runs past seven nights, to 09-07"
+    [ "$(grep -oF 'not in <code>latest</code> yet' "$out/index.html" | wc -l)" -eq 1 ] \
+        || fail "only the newest night can be unfinished"
+    has '<title>2026-09-10: 900 at the end of the night</title>' "the chart has no point for 09-10"
+    has '<title>2026-09-13: 1000 at the end of the night</title>' "the chart has no point for 09-13"
+    has '<title>2026-09-14: 1100 at the end of the night</title>' "the chart has no point for 09-14"
+    # 09-13 and 09-14 are one line; 09-10 stands alone, because 09-11 and 09-12
+    # have no coverage and a line across them would draw nights that never ran.
+    lines=$(grep -oE '<polyline class="qp-cov-line" points="[^"]*"' "$out/index.html")
+    [ "$(wc -l <<<"$lines")" -eq 1 ] && [ "$(grep -oE '[0-9.]+,[0-9.]+' <<<"$lines" | wc -l)" -eq 2 ] \
+        || fail "the coverage chart should draw one line of two points, 09-13 to 09-14, and none across the gap from 09-10: $lines"
+
+    # The cache: a log whose size and mtime are unchanged is not read again, so
+    # a value planted in its entry shows on the page; a log that grew is.
+    jq --arg log "$fuzz/2026-09-10/fuzz-demo.log" '.logs[$log].summary[7] = 4242' "$out/.fuzz-cache.json" \
+        > "$out/planted.json" && mv "$out/planted.json" "$out/.fuzz-cache.json" || fail "could not plant a value in the fuzz cache"
+    run_line 1300000 1050 3700 >> "$fuzz/2026-09-13/fuzz-demo.log"
+    render || fail "queue-page failed to render a second time"
+    has '<title>2026-09-10: 4242 at the end of the night</title>' "an unchanged log was read again rather than served from the cache"
+    has '<title>2026-09-13: 1050 at the end of the night</title>' "a log that grew was served stale from the cache"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, the ready list holds every tier, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
@@ -11409,6 +11438,7 @@ check-queue-api-selftest:
     j='{{ just_executable() }}'
     page_dir="$root/queue-page"
     export RCAD_QUEUE_PAGE_DIR="$page_dir"
+    export RCAD_FUZZ_LOGS="$root/no-fuzz-logs"
     got=""
     fail() {
         echo "just queue drifted from its selftest: $1"
