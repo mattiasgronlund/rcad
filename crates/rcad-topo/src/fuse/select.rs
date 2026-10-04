@@ -1563,6 +1563,12 @@ impl InPlane {
 /// pipe that cut it has its axis, which is a point of the plane provably inside
 /// that ball or pipe.
 ///
+/// **A ring between two such curves has neither**, and the middles of both can
+/// be in its hole. What reaches it is a point between the two curves along a
+/// line through one of their middles ([`between_the_round_wires`]), offered
+/// after every other candidate here, so a piece one of those placed is placed
+/// as it was.
+///
 /// **A curved piece's corners are not on its surface once they are blended**,
 /// and a point off the surface says nothing about a region drawn on it. Every
 /// blend is therefore put back onto the surface through its own two coordinates.
@@ -1596,6 +1602,7 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         for side in piece.wires.iter().flatten() {
             candidates.extend(half_way_across_the_chord_to_a_cone(flat, side));
         }
+        candidates.extend(between_the_round_wires(flat, piece));
         return candidates;
     }
     // **A piece bounded by one closed curve has one corner**, and every blend of
@@ -1771,6 +1778,71 @@ fn half_way_across_the_chord_to_a_cone(flat: &Plane, side: &FaceMeet) -> Vec<Pre
         .filter(Point::is_finite)
         .map(|point| PredicatePoint::from(point.coordinates()))
         .collect()
+}
+
+/// Points between the round wires of a flat piece: along the line from each
+/// round wire's middle through its corner, the middle of every stretch between
+/// two places, one after the other, where that line crosses a round wire.
+///
+/// **A ring has no blend of corners inside it, and its middles can all be in
+/// its hole.** The ring a hole leaves in a round cap is bounded by two whole
+/// circles with one corner each, so its corner blends are its two corners and
+/// the one point half way between them, and the middle of each circle is
+/// inside the hole wherever the hole covers the cap's middle. A plate of radius
+/// 10 round `(−6, 0, 0)` with a hole of radius 5 round `(−3, 0, 0)` had that
+/// one blend, `(0.5, −2.5, 0)`, in the hole too, and every fuse of the two
+/// refused (`tests/a_plate_with_an_off_centre_hole.rs`, `docs/decisions.md`
+/// §365.2).
+///
+/// A line through a hole's middle leaves the hole and then the outline, once
+/// each way along it, since a disk is convex and the hole is inside the
+/// outline, so the stretch between the two is the ring. Each round wire is read
+/// as the circle round its middle through its corner, which is exactly what a
+/// ball or a pipe square to the plane cuts and only near what a leaning pipe or
+/// a cone does; nothing about a candidate is trusted, so a wire read wrongly
+/// only costs candidates. Nothing for a piece with fewer than two round wires,
+/// whose one middle is already offered.
+fn between_the_round_wires(flat: &Plane, piece: &Piece) -> Vec<PredicatePoint> {
+    let mut through_its_corner = Vec::new();
+    for wire in &piece.wires {
+        let Some(partner) = round_wire_of(wire) else {
+            continue;
+        };
+        let corner = middle_of(wire[0].ends[0].point());
+        for middle in the_middles_of_a_round_wire(flat, &partner) {
+            through_its_corner.push((middle_of(middle), corner));
+        }
+    }
+    if through_its_corner.len() < 2 {
+        return Vec::new();
+    }
+    let mut candidates = Vec::new();
+    for &(from, corner) in &through_its_corner {
+        let Ok(along) = (corner - from).normalized() else {
+            continue;
+        };
+        let mut crossings: Vec<f64> = through_its_corner
+            .iter()
+            .flat_map(|&(middle, on_it)| {
+                let off = from - middle;
+                let half_way = along.dot(off);
+                let below =
+                    half_way * half_way - off.length_squared() + (on_it - middle).length_squared();
+                let reach = below.sqrt();
+                [-half_way - reach, -half_way + reach]
+            })
+            .filter(|step| step.is_finite())
+            .collect();
+        crossings.sort_by(f64::total_cmp);
+        candidates.extend(
+            crossings
+                .windows(2)
+                .map(|both| from + along * ((both[0] + both[1]) / 2.0))
+                .filter(Point::is_finite)
+                .map(|point| PredicatePoint::from(point.coordinates())),
+        );
+    }
+    candidates
 }
 
 /// The middle of a piece's corners, which is somewhere near it and nowhere in
