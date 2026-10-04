@@ -181,10 +181,11 @@ impl Surface {
     /// **This is meant to be the one spelling of it.** `rcad-topo` works the
     /// same direction out for itself in `validate.rs`, as
     /// `the_way_it_is_parametrised_about` crossed into `gradient_of`, and keeps
-    /// a second `gradient_of` in `mesh.rs` besides. Two spellings of one
-    /// question is how two answers come to disagree (`docs/decisions.md`
-    /// §23.8), so those are to call this. Rewiring them is not this method's
-    /// own change.
+    /// a second `gradient_of` in `mesh.rs` besides. `rcad-step`'s `brep.rs`
+    /// keeps a third, torus-only and spelled as `validate.rs`'s is
+    /// (`docs/decisions.md` §390, Q824). Three spellings of one question is
+    /// how two answers come to disagree (`docs/decisions.md` §23.8), so those
+    /// are to call this. Rewiring them is not this method's own change.
     ///
     /// # Where there is no answer
     ///
