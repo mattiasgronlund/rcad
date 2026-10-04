@@ -214,6 +214,43 @@ model and reaches the same refusal, so the branch is kept by name:
 fuzzing found, to a layout change, is the cost §29 declined its repack over; here
 it is one seed to avoid.
 
+**The seed kept that branch for ten days, and then it answered** (Q920,
+2026-10-04). Its first half is a cube `[0, 2]³` and a unit ball round
+`(1 + 2.4e-7, 1, 1 + 2.3e-13)`: the ball pokes through `x = 2` and `z = 2` by
+those amounts, so its skin inside the cube is one face of two wires, the `z = 2`
+circle round its top pole and the `x = 2` circle as an island at its equator.
+
+- **From 2026-09-23 it reached another refusal, and nothing said so.**
+  `951c28a7` refused a wire that winds beside one that does not in `cut_up`,
+  ahead of the cut that used to give up, and named it
+  `AWireWillNotLieFlatOnItsFace`. On `5d28a70c` the first half was refused that,
+  both ways round; with that one check switched off the same tree refuses it
+  `CurvedFaceWithAHoleGoesTooFarRound` again, from `cut_a_hole_up_to_both_poles`.
+  The pin counted refusals and not their names, so it held.
+- **Since Q453's cut it answers.** A cap on a ball now takes its islands
+  (§212.6), and the tolerant intersection is one solid that measures
+  4.18470 within 0.0252 at deflection `0.002` and 4.16855 within 0.1262 at
+  `0.01`, against `4π/3` less the two slivers, 4.188790 — off by 0.0041 and
+  0.0202, each inside the measure's own error, and five times closer at the
+  finer step. The same answer comes back both ways round.
+  `the_curved_seeds_intersection_measures_as_the_ball` holds it.
+- **The corpus answers one more pair the same way.** `2f1c1aaf…`'s second
+  half, a certified intersection of a cube with a unit ball round
+  `(1, 1, 0.2421875)` that pokes out through its floor and touches four of its
+  walls, was refused `AWireWillNotLieFlatOnItsFace` both ways round and now
+  measures 2.83784 within 0.0156 against the ball less its cap below `z = 0`,
+  2.840374. Those figures are from Q920's throwaway probe, which was not
+  committed, and no test pins this half's answer.
+- **One half still reaches `CurvedFaceWithAHoleGoesTooFarRound`, by luck.**
+  `29bf58fc…`'s first half, a certified difference of a slightly turned cube
+  less a ball nearly inside it, was refused `AWireWillNotLieFlatOnItsFace` and
+  is now refused by the cut's own name. Over the whole corpus the replay's
+  refusals by name moved only there: `AWireWillNotLieFlatOnItsFace` 5 to 0,
+  `CurvedFaceWithAHoleGoesTooFarRound` 0 to 1.
+
+The seed's name is now wrong; renaming it moves a file under `fuzz/corpus/`
+and the three places that name it.
+
 `two_cubes_one_taken_out_of_the_other`, header `0x22` — its own nibble swap, so
 both halves draw the same — is the second seed added, and it holds up the
 thinnest floor in the replay: two-sided differences number 7, and 5 of those are

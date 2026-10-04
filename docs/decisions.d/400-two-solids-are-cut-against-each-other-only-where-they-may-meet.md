@@ -153,7 +153,10 @@ probe on this branch:
   `AWireWillNotLieFlatOnItsFace`, Q453's site. With an axis-aligned box this
   is forced: the piece on the block's side holds the block's cut and the rim
   both, and holds a pole whenever the rim's plane leaves the centre on the
-  block's side.
+  block's side. *Since Q920 (Q453's cut) this draw answers: a cap on a ball
+  is cut up to its pole with the island in it (§212.6), and
+  `tests/a_block_poking_into_a_ball_whose_top_plane_cuts_the_rest.rs` measures
+  every rule both ways round against the closed forms.*
 - Through a chain of three, so that the rim's piece is not the one the block
   crosses: a horizontal rim leaves a cap holding a pole between two pieces of
   one ball, `ACurvedFaceGoesRightRoundWithNoSeam` (Q452's case (B), dropped
