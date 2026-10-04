@@ -296,7 +296,7 @@ run.
 `a_plane_cut_along_a_cones_other_nappe.rs`, whose quarter-lean family went from
 `right: 32` and sixteen `a point inside a piece of a face` to `right: 48`, held
 by that file's own checks against the shapes' volume. Also moved, and not
-repinned:
+repinned by that run (the second run, below, did):
 
 - `a_joined_flat_face_whose_rings_enclose_no_area.rs`,
   `a_cone_cut_by_a_block_wall_off_its_axis_is_refused_while_a_piece_is_placed`:
@@ -315,3 +315,42 @@ repinned:
   `Undecidable` rungs now answer and mesh, 278 to 282 answered). Each is its
   own row, with its volume to check. The gate was not green, so `test-slow`
   was not run.
+
+**The second run** (lane `lane-q712-a-piece-placed-by-a-side-it-shares-2`)
+merged the first run's branch at `30f8b67c` onto `45593a1c` and ran the whole
+suite there before changing anything: 3041 run, 4 failed, the four pins above
+and no other. Each was repinned from a run under both policies where the file
+has two, and each new answer checked against a volume worked out apart from
+the fuse. To tell what the rule moved from what `main` moved, the same probe
+was run again with the rule switched off by hand: every case below refused `a
+point inside a piece of a face` that way, so the rule is what moved each one.
+
+- **The cone and the block wall** (Q635's shape): all six fuses answer, not
+  only the union. Each validates and measures what the cone up to `z = 18`,
+  `1944π`, less the part past the wall, `1944 acos(2/3) − 144√180 + 576
+  ln((18 + √180)/12)`, gives; the intersection measures `5849.749 ± 1.281`
+  against `5849.825`. Q635's search for a point in that piece is still
+  unmended. The rule just answers first.
+- **The edge along `x` at `cx = 0`**: two slivers, not three. The ball's skin
+  past `y = 1` is outside the block, and the block's side is inside the ball. A
+  print of each placement showed both placed by their sides in all twelve
+  fuses, and the right way round. All twelve then refuse
+  `CannotNameWhichPieceOfACrossingThisIs`, each with one `side of a
+  half-space` record. That includes the intersection and the block less the
+  ball, which along `z` refuse `ACurvedFaceGoesRightRoundWithNoSeam`.
+- **The frustum read back from bytes**, under both policies: the corner off
+  the cap less the block over the top gives the sound answer, and the two
+  intersected blame themselves with `VertexOffItsFacePlane { distance: 1.0 }`.
+  Against the block over the rim by the seam, the sound frustum and every
+  moved corner give the sound answer. The sound frustum's two answers measure
+  `39π/4` and `52π/3 − 1.98370` within their errors, held by a new test.
+- **The chopped slivers**: 282 answer and 6 refuse, where 278 answered and 10
+  refused. The four the rule answers are at lean `0.9`, chopped at `0.3` of
+  the rim, turned 2, 4, 8 and 10 twelfths. A Simpson sum over slices matched
+  all 282 answers, measured at `0.001`, within their declared error, and a
+  new test holds the four to it. Four more, at lean `0.9` turned 2, 4 and 10
+  twelfths and at `1.2` turned 4, all chopped at `0.5`, now refuse `side of a
+  half-space`. That was not traced.
+
+`just pre-gate gate-lane` then passed with 3003 tests run, and `just
+test-slow` with 40 run and 40 passed.
