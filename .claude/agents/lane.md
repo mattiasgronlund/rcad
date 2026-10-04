@@ -110,9 +110,10 @@ what is not a row.
   there: Q574, Q604 and Q605 were each dropped and filed again for want of it
   (§360.6).
 - `["tag", "@1", "<class>"]` or `["tag", "@1", "small"]`, one tag at most per
-  row. A tier 1 row takes its class from `remaining`: `wrong`, `crash` or
-  `refuses`, then `/A` to `/D` as above. A row in any tier is `small` by the
-  rule above.
+  row. A defect's row takes its class from `remaining`: `wrong`, `crash` or
+  `refuses`, then `/A` to `/D` as above. The class names the tier (§403): a row
+  of class A or B is `add 1`, and one of class C or D is `add 5`. A row in any
+  tier is `small` by the rule above.
 - `["after", "@1", "<id>[,<id>]"]` for a row that waits on another.
 
 `@1`, `@2` are the first and second `add` of your own list. Ids come from a
@@ -121,9 +122,10 @@ look for it among the open rows of `docs/queue.md` in your tree, which is the
 base's copy; `grep -n` a word of it. A row already there is not added again;
 name it in `remaining` instead. An empty list means nothing to add.
 
-Tiers are §230.1's in §311's order: 1 a new defect, 2 a follow-up that measures
-or improves what the tests and the nights search, with §307's 2.2 between 2 and
-2.5. A row that changes how the work is done — the queue and its verbs, the
+Tiers are §230.1's in §311's order: 1 a new defect of class A or B, or one with
+no class, 2 a follow-up that measures or improves what the tests and the nights
+search, with §307's 2.2 between 2 and 2.5, and §403's 5, below 4, for every
+defect of class C or D. A row that changes how the work is done — the queue and its verbs, the
 lanes workflow and its roles, hooks, skills, `CLAUDE.md`, a recipe that is
 neither a test nor a fuzz night — goes in 2.2, never in 1 or 2. Opus for a
 numerical refusal, a published bound or a claim of impossibility; Sonnet for a

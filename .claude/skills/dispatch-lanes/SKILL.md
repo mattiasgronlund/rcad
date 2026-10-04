@@ -15,9 +15,10 @@ left out the slow tier; §230.8 had six).
 
 **`just queue` is what to dispatch next, and `just queue next` is what the free
 slots take.** Every open item is a row of `docs/queue.md` — id, tier, state,
-model, write set, and a line ending in the section behind it — in six tiers:
-1 defects, 2 finding defects better, 2.2 how the work is done, 2.5 slow runs,
-3 corpus files, 4 new functionality (§311 put defects first). A row about the
+model, write set, and a line ending in the section behind it — in seven tiers:
+1 defects of class A or B or with no class, 2 finding defects better, 2.2 how
+the work is done, 2.5 slow runs, 3 corpus files, 4 new functionality, 5 defects
+of class C or D (§311 put defects first, §403 the unlikely ones last). A row about the
 queue and its verbs, the lanes workflow and its roles, hooks, skills,
 `CLAUDE.md`, or a recipe that is neither a test nor a fuzz night is tier 2.2,
 not tier 1 or 2 (§307.1); `just queue
@@ -92,7 +93,7 @@ It takes the first ready row of the highest tier whose write set meets no
 running `lane:` row and no row taken above it, and names what each skipped row
 met. N defaults to the free slots, counted from the trees agents hold on this
 machine — lanes, verifiers and mergers alike, whoever sent them (§263.4).
-Tier 1 goes in class order, not file order (§352.3).
+Tiers 1 and 5 go in class order, not file order (§352.3, §403.3).
 
 A line `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)` is **one
 lane** doing all of those rows (§352.4), with each row's text indented under
