@@ -220,18 +220,25 @@ empty log that validates: the four unions and the two differences that should
 be the half bend measure `39.412… ± 0.7843`, two quarters, and the four unions
 that should be three quarters measure `59.118… ± 1.1764` against
 `6π² = 59.2176`. So `tests/a_half_bend_fused_with_a_quarter_bend_on_one_torus.rs`
-fails on this branch, in its two tests that pin `NotManifold`, and nothing else
-in `rcad-topo` does. That file is not in this row's write set; 378.7 says what
-it needs.
+failed on the first run's branch, in its two tests that pin `NotManifold`, and
+nothing else in `rcad-topo` did. That file was not in the first run's write
+set, and the branch could not merge.
+
+**The second run moved those pins**
+(`lane-q756-two-quarter-bends-end-to-end-on-one-ring-2`, which merges the first
+run's `a5cd7d68` onto `c11bf21f` and takes Q788's write set with it). The ten
+are pinned to what they answer, each checked to validate and to measure inside
+its bound; §377.4 and §377.5 have the table and the volumes.
 
 ### 378.7 What this leaves
 
-- **§377's pins.** In `a_quarter_bend_inside_a_half_bend_fuses_to_the_quarters_it_should`
-  the two unions become `Quarters(2)`, and in
+- **§377's pins**, done in the second run. In
+  `a_quarter_bend_inside_a_half_bend_fuses_to_the_quarters_it_should` the two
+  unions are now `Quarters(2)`, and in
   `a_quarter_bend_against_a_half_bends_cap_fuses_to_the_quarters_it_should`
-  the difference with the half first becomes `Quarters(2)` and the two unions
-  `Quarters(3)`. §377.4 and §377.5, which call those ten refused, move with
-  them. Until that lands this branch's gate fails on those two tests.
+  the difference with the half first is `Quarters(2)` and the two unions
+  `Quarters(3)`. §377.4 and §377.5 moved with them, and Q788, filed to trace
+  those ten, is answered by this fix.
 - **Q513**, the pair with the second bend's axis turned round, still refuses
   `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, before any of this is reached.
 - **Other pairs that cross in more than one closed curve** are still named by
