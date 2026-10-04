@@ -20,8 +20,8 @@ use crate::builder::the_ends_are_the_whole_of_it;
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{
-    Trimming, how_the_axis_lies_on, the_face_across, the_side_this_face_lies_on,
-    what_trims_this_face,
+    Trimming, how_the_axis_lies_on, lie_along_one_line, the_face_across,
+    the_side_this_face_lies_on, what_trims_this_face,
 };
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over;
@@ -2933,15 +2933,16 @@ struct SideKept {
 /// edge, are a ring and a plane square to its axis: the edge is then one of the
 /// two circles round the axis that the plane cuts the ring in.
 ///
-/// Asked as the mesher's walk asks it, of the stored normal crossed into the
-/// stored axis direction (`rcad_geom::walk`'s `where_a_plane_cuts_a_torus`).
-/// A plane whose normal rounds to a different direction from the axis is not
-/// asked about, and its edges are read off the corners as before.
+/// Asked exactly, the way `holds.rs`'s `what_a_ring_face_between_two_planes_holds`
+/// reads the same pair, through [`lie_along_one_line`]: every component of the
+/// stored normal crossed into the stored axis direction is exactly zero. A
+/// plane whose normal is not exactly along the axis is not asked about, and
+/// its edges are read off the corners as before.
 fn a_circle_round_the_axis(names_it: [Surface; 2]) -> bool {
     matches!(
         names_it,
         [Surface::Torus(ring), Surface::Plane(flat)]
-            if flat.normal().cross(ring.axis().direction()) == Vector::zero()
+            if lie_along_one_line(flat.normal().components(), ring.axis().direction().components())
     )
 }
 
@@ -3886,13 +3887,13 @@ fn magnitude_of(tag: Option<Approximation>) -> f64 {
 mod tests {
     use rcad_geom::{
         Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
-        Vector,
+        Torus, Vector,
     };
     use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
     use super::{
-        Decision, Scope, a_closed_crossing_is_walked_the_way_it_is_stored,
+        Decision, Scope, a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
         as_coarse_as_a_mesh_gets, gradient_of, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
@@ -5847,6 +5848,41 @@ mod tests {
         assert_eq!(
             winding_round(&square, [0.0, 0.0, 1.0]).expect("a flat square winds"),
             Decision::Pos
+        );
+    }
+
+    /// A plane whose normal is one `f64` ulp off a torus axis direction: the
+    /// naive `f64` cross product of the two still rounds to the zero vector,
+    /// but the exact cross [`lie_along_one_line`](crate::holds::lie_along_one_line)
+    /// reads is not zero, so the plane is not really square to the axis.
+    ///
+    /// Found by taking a direction off the unit circle,
+    /// `(0.3742512179995787, 0.9273273563450136)`, and moving its `x` one
+    /// `f64::next_up` to `0.3742512179995788`. Before this row,
+    /// `a_circle_round_the_axis` read the naive cross and answered `true` for
+    /// this pair, the same wrong answer `holds.rs`'s exact
+    /// `what_a_ring_face_between_two_planes_holds` would never give.
+    #[test]
+    fn a_plane_one_ulp_off_square_to_a_torus_axis_is_not_square_to_it_exactly() {
+        let flat = Plane::from_point_and_normal(
+            Point::origin(),
+            Vector::new(0.3742512179995787, 0.9273273563450136, 0.0),
+        )
+        .expect("a unit normal");
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(0.3742512179995788, 0.9273273563450136, 0.0),
+        )
+        .expect("a unit direction");
+        let ring = Torus::new(axis, 5.0, 1.0).expect("a ring wider than its tube");
+        assert_eq!(
+            flat.normal().cross(ring.axis().direction()),
+            Vector::zero(),
+            "the naive f64 cross still rounds to the zero vector at one ulp"
+        );
+        assert!(
+            !a_circle_round_the_axis([Surface::Torus(ring), Surface::Plane(flat)]),
+            "the exact cross is not zero, so this is not a circle round the axis"
         );
     }
 }
