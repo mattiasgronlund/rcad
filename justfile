@@ -12983,9 +12983,10 @@ verify-lane *args:
 # where `gate quiet` ran it; a `pinsOnly` lane; a `sameBehaviour` lane whose
 # tests pass with the source reverted, and one whose test fails there, which
 # says the behaviour changed (§399); a lines-that-run count of 0; a source path
-# holding test code the branch changed; a lane that names no test; a run longer
-# than one call, which a second call follows to its end; and an input file it
-# cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
+# holding test code the branch changed; a lane that names no test; a write-set
+# entry naming one item of a file, matched against the file it is in; a run
+# longer than one call, which a second call follows to its end; and an input
+# file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -13271,6 +13272,16 @@ check-verify-lane-selftest:
     [ "$(field lines_that_run | tail -n 1)" = "lines that run: 0" ] || fail "a note counted as lines that run"
     no_test_ran
 
+    fixture one-item-write-set
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/lib.txt#something
+    run
+    [ "$(field files_outside_write_set)" = "[]" ] \
+        || fail "a write-set entry naming one item of a file did not match a change to that file: $(field files_outside_write_set)"
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "(absent) (absent)" ] || fail "a lane naming no test got a test field"
+    no_test_ran
+
     fixture resume
     printf 'fixed\n' >"$at/lane/src/lib.txt"
     lane_commit
@@ -13300,7 +13311,7 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 14 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 15 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #

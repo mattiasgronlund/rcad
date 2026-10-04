@@ -265,11 +265,18 @@ def files_outside(run, lane, tip, report):
 
 
 def in_write_set(path, entries):
+    """Whether `path` sits under one of `entries`.
+
+    An entry can name one item of a file, `crates/x.rs#some_fn`; only the
+    part before `#` is a path, so that is what is matched. Whether the diff
+    actually stays inside `some_fn` is not this function's to see — it reads
+    paths, not items — so that reading is left to the verifier.
+    """
     for entry in entries:
-        trimmed = entry.rstrip("/")
+        trimmed = entry.split("#", 1)[0].rstrip("/")
         if path == trimmed or path.startswith(trimmed + "/"):
             return True
-        if any(c in entry for c in "*?[") and (fnmatch.fnmatch(path, entry) or fnmatch.fnmatch(path, trimmed + "/*")):
+        if any(c in trimmed for c in "*?[") and (fnmatch.fnmatch(path, trimmed) or fnmatch.fnmatch(path, trimmed + "/*")):
             return True
     return False
 
