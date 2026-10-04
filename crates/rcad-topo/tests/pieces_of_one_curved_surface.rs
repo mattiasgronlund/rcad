@@ -87,12 +87,13 @@ fn a_block_and_bar_united_keep_the_wall_as_one_face() {
 
 /// `(block ∪ bar) ∪ cube`, with a cube that touches nothing, answers.
 ///
-/// Refused with [`Error::AFaceTrimmedByACurveThisCannotFollow`] once the wall
-/// is one face. Nobody has traced which arc it is yet; a gap until shown
-/// otherwise, since the union it is asked about is sound and measures right
-/// (`a_block_and_bar_united_keep_the_wall_as_one_face`).
+/// This used to refuse with [`Error::AFaceTrimmedByACurveThisCannotFollow`]
+/// once the wall is one face. Q876's change reaches only a pipe wall cut
+/// along the axis by two *parallel* planes, and this wall's two cuts,
+/// `x = 1` and `y = 1`, are square to each other rather than parallel, so
+/// Q876 is not what answers this: run on Q876's own base (`81d9526f`), the
+/// test already passed. Un-ignored rather than traced further.
 #[test]
-#[ignore = "AFaceTrimmedByACurveThisCannotFollow on the joined bar wall, not traced yet"]
 fn a_block_and_bar_united_can_be_united_again() {
     let (model, united) = a_block_and_bar_united();
     the_union_again_with_a_far_cube(&model, &united)

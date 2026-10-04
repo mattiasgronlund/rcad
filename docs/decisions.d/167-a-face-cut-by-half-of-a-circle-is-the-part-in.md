@@ -155,3 +155,23 @@ pointer at the end of §166.4.
 broke under a movement, and both are now asked where the face is stored. A
 turned or moved wedge says which points are inside it.
 
+> **2026-10-04 note (Q877, `b518782d`): a flat face that keeps the outside of a
+> pipe is followed where it is a polygon less one bite.** The same family of
+> question as this section's, now asked of a pipe rather than a ball.
+> `is_a_polygon_less_one_bite_of_a_pipe` (`crates/rcad-topo/src/holds.rs`) tells
+> a face answered from one refused by name: it reads, from stored numbers and
+> topology, whether the pipe's circle crosses the edge of the polygon the
+> face's straight cuts leave only at the two ends of one arc, with every other
+> plane cut either holding both of those ends or missing the pipe altogether.
+> Where it does, the arc cuts the polygon in two and the part outside the pipe
+> is one piece; its doc comment carries the four steps. The floor and the top
+> of a block `10 × 10 × 4` less a bar of radius 3 bored through the middle of
+> one edge answer this way
+> (`a_block_with_a_bar_bored_through_one_edge_holds_the_points_of_its_floor_and_its_top`,
+> `crates/rcad-topo/tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`), while
+> the top of a block 2 wide with the same bore, which is two pieces, stays
+> refused by name, and a block bored through one corner, one piece but refused
+> because each side through the bite crosses the pipe again outside the
+> square, is pinned refused as the gap it still is
+> (`a_block_with_a_bar_bored_through_one_corner_has_its_floor_refused_though_it_is_one_piece`).
+

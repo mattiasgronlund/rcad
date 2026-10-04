@@ -2825,7 +2825,11 @@ fn are_pipes_running_the_same_way(one: &Surface, other: &Surface) -> bool {
 /// Each component is `u_i·v_j − u_j·v_i`, the dot of `(u_i, −u_j)` with
 /// `(v_j, v_i)`, and turning a stored number round is exact, so each is the
 /// same sum of stored products [`SquareToTheAxis`] settles.
-fn lie_along_one_line(u: [f64; 3], v: [f64; 3]) -> bool {
+///
+/// `pub(crate)` so `validate.rs`'s `a_circle_round_the_axis` can compare sides
+/// at exactly the circles this file reads, rather than at a naive `f64` cross
+/// product that can round to zero where this does not, or the reverse.
+pub(crate) fn lie_along_one_line(u: [f64; 3], v: [f64; 3]) -> bool {
     [(1, 2), (2, 0), (0, 1)].into_iter().all(|(i, j)| {
         let (component, _) = rcad_predicates::decide(&SquareToTheAxis {
             named: WHETHER_TWO_DIRECTIONS_LIE_ALONG_ONE_LINE,
