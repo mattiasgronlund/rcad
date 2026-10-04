@@ -1882,9 +1882,13 @@ fn text(string: &str) -> String {
 mod plane_round_trip_tests {
     use core::f64::consts::TAU;
 
-    use rcad_geom::{Axis, Isometry, Plane, Point, Vector};
+    use rcad_geom::{
+        Axis, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Surface, Torus, Vector,
+    };
 
-    use super::{CannotWrite, a_point_this_reader_reads_back_as};
+    use super::{
+        CannotWrite, a_centre_its_plane_reads_back_from, a_point_this_reader_reads_back_as, stepped,
+    };
     use crate::geometry::plane_through;
 
     /// The point `Writing::surface` used to write, the foot of the
@@ -1914,6 +1918,80 @@ mod plane_round_trip_tests {
              what the point this writer chooses is for",
             planes.len()
         );
+    }
+
+    /// The seam of the writer target's quarter bend (ring seven, tube one),
+    /// turned about `y` by `5.0` and moved by `(3, 5, 10)`: one representable
+    /// centre reads back as its plane and lies on the ring as the reader asks
+    /// it, and the writer's search does not reach it (Q843).
+    ///
+    /// **The plane is the seam's own, not a rounding off square.** Its normal
+    /// and the ring's axis are the same turn of `z`, bit for bit, so the two
+    /// cross to exactly nothing. Its offset is the turned normal dotted with
+    /// `(3, 5, 10)` in plain `f64` (`Plane::transformed`), which is `32` ulps
+    /// from the reader's dot of the ring's centre, rounded once.
+    ///
+    /// **Every centre the reader could hold is searched.** A file can carry
+    /// any `f64` point as a `CIRCLE`'s centre, and the reader holds a circle
+    /// about a ring's axis when its centre is within `16·ε` of the largest
+    /// number of the axis (`how_far_off_the_circle_can_be` in `brep.rs`). The
+    /// normal has no `y`, so moving `y` leaves the dot alone and only moves
+    /// the centre off the axis; every centre the reader could hold then has
+    /// `x` and `z` within twice that of the ring's centre, and those are all
+    /// tried. Of them exactly one reads back as the plane and is held: `23`
+    /// steps down in `x` and `19` in `z`, at `15.88` of the sixteen units the
+    /// reader allows. So this is a gap and not a limit (`docs/decisions.md`
+    /// §16.10): the answer exists, and four steps each way of two coordinates
+    /// is where the search stopped.
+    #[test]
+    fn a_turned_bends_seam_has_one_centre_its_plane_reads_back_from() {
+        let turned = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+            .and_then(|moved| Isometry::rotation(&Axis::y(), 5.0).map(|turn| moved.compose(&turn)))
+            .expect("a finite move and turn");
+        let through_the_middle =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        let Surface::Plane(cut) = Surface::Plane(through_the_middle).transformed(&turned) else {
+            unreachable!("a plane moves as a plane");
+        };
+        let Surface::Torus(ring) =
+            Surface::Torus(Torus::new(Axis::z(), 7.0, 1.0).expect("a tube narrower than its ring"))
+                .transformed(&turned)
+        else {
+            unreachable!("a ring moves as a ring");
+        };
+        let normal = cut.normal();
+        assert_eq!(normal.cross(ring.axis().direction()), Vector::zero());
+        let centre = ring.centre();
+        let read_back = plane_through(centre, normal)
+            .expect("a finite point")
+            .offset();
+        assert_eq!(read_back.to_bits() - cut.offset().to_bits(), 32);
+
+        let held = |at: Point| {
+            let line = ring.axis();
+            let along = (at - centre).dot(line.direction());
+            let off = ((6.0 - ring.ring_radius()).hypot(along) - ring.tube_radius()).abs()
+                + line.distance_to_point(at);
+            let largest = at.largest_coordinate_magnitude().max(10.0);
+            off <= 16.0 * NEAREST_F64_POINT_ROUNDOFF * largest
+        };
+        let [x, y, z] = centre.coordinates();
+        let reach = 2.0 * 16.0 * NEAREST_F64_POINT_ROUNDOFF * 10.0;
+        let steps = |of: f64| (reach / (of.next_up() - of)).ceil() as i32;
+        let mut found = Vec::new();
+        for along_x in -steps(x)..=steps(x) {
+            for along_z in -steps(z)..=steps(z) {
+                let at = Point::new(stepped(x, along_x), y, stepped(z, along_z));
+                let reads_back = plane_through(at, normal)
+                    .is_ok_and(|back| back.offset().to_bits() == cut.offset().to_bits());
+                if reads_back && held(at) {
+                    found.push((along_x, along_z));
+                }
+            }
+        }
+        assert_eq!(found, [(-23, -19)]);
+        assert_eq!(a_centre_its_plane_reads_back_from(&cut, centre), None);
     }
 
     /// Every plane on which the foot of the perpendicular misses, and every
