@@ -144,9 +144,11 @@ impl MeetOfThree {
     /// [`meet_of_three_surfaces`] and holds its stored corners to that box, and a
     /// stored corner sits ulps off the planes it is on. Cramer's slack covers
     /// that; the narrowed box does not. Narrowed for every caller, nine tests
-    /// failed and the draw above refused on another face (§281.3). The caller
-    /// that wants the narrower box is the one that places the meets of two
-    /// crossings on a face (§345).
+    /// failed and the draw above refused on another face (§281.3). The one
+    /// caller is `rcad-topo`'s fold of a meet into a corner of a face, which
+    /// asks the narrowed box only whether every point of the meet lies within
+    /// the corner's rounding, and keeps Cramer's box for the node it places
+    /// (§345).
     ///
     /// The three planes are narrowed in [`meet_of_three_surfaces`]'s own fixed
     /// order, so the box that comes back depends on which three they are and
