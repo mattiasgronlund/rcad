@@ -50,7 +50,6 @@ use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
     SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
 };
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
     Containment, DraftStep, Error, Fused, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
@@ -898,9 +897,9 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 }
 
 /// **A wall lying on a cone's side runs along the ruling it rests on, and what
-/// the wedge and the frustum share, and the frustum less the wedge, are
-/// answered** and held to the volumes worked out level by level without the
-/// kernel.
+/// the wedge and the frustum share, the frustum less the wedge and the two of
+/// them together are answered** and held to the volumes worked out level by
+/// level without the kernel.
 ///
 /// This is [`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`]
 /// asked of a cone. Along a ruling a plane rests on, the plane's normal and the
@@ -913,13 +912,19 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 /// touches that face's conic of the cone where it crosses the ruling, and the
 /// turn there is read as the touch it is proved to be.
 ///
-/// **Three fuses are refused by the mesher**, `CannotMeshAFace` with
-/// `CornersCoincide`, under either policy: the union both ways round, and the
-/// wedge less the frustum. Each keeps a face that comes back to one point
-/// twice. The union keeps the wedge's floor less the frustum's top disc, which
-/// touches the floor's edge at `(1, 0, 8)`; the wedge less the frustum keeps the
-/// slanted face and the cone's skin either side of the ruling, two slivers that
-/// meet along it.
+/// **The union is answered, either way round and under either policy**, one
+/// solid that validates and measures `403.3953` against the hand-worked
+/// `403.7413`, under it as an inscribed mesh is. It keeps the wedge's floor less
+/// the circle the frustum cuts in it at `z = 8`, and that circle touches the
+/// floor's edge at `(1, 0, 8)`, so the floor's wire passes that corner twice.
+/// The mesher refused it `CornersCoincide` until it learned to cut such a wire
+/// there into an outline and a hole touching it (§364).
+///
+/// **The wedge less the frustum is refused by the mesher**, under either
+/// policy, `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }`: it keeps
+/// the slanted face and the cone's skin either side of the ruling, two slivers
+/// that meet along it. Before §364 it was refused `CornersCoincide` like the
+/// union. Whether that answer is a manifold at all is not settled here.
 ///
 /// **The control halves the cone's slope and nothing else.** The same wedge
 /// against a cone of slope a sixteenth: the slanted face no longer rests on the
@@ -952,26 +957,54 @@ fn a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand() 
         Side::Under,
     );
 
+    for turned in [false, true] {
+        let mut model = a_model();
+        let pair = either_way_round(a_wedge_lying_on_a_cones_side(&mut model), turned);
+        let united = fused(&mut model, &pair, Rule::Union);
+        assert_eq!(united.solids().len(), 1, "turned {turned}");
+        measures(
+            volume_of(&model, united.solids()),
+            frustum + 96.0 - shared,
+            Side::Under,
+        );
+
+        let mut model = a_model();
+        let pair = either_way_round(a_wedge_lying_on_a_cones_side(&mut model), turned);
+        let united = model
+            .fuse(
+                &pair.arguments,
+                &pair.tools,
+                Rule::Union,
+                &Policy::tolerant(100.0),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("a tolerant union, turned {turned}, refused: {why}"));
+        assert_eq!(
+            united.solids().len(),
+            1,
+            "a tolerant union, turned {turned}"
+        );
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a fuse writes a sound model or writes nothing");
+        measures(
+            volume_of(&model, united.solids()),
+            frustum + 96.0 - shared,
+            Side::Under,
+        );
+    }
+
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for (rule, turned) in [
-            (Rule::Union, false),
-            (Rule::Union, true),
-            (Rule::Difference, true),
-        ] {
-            let mut model = a_model();
-            let pair = either_way_round(a_wedge_lying_on_a_cones_side(&mut model), turned);
-            let why = refusal(&mut model, &pair, rule, &policy);
-            assert!(
-                matches!(
-                    why,
-                    Error::CannotMeshAFace {
-                        why: CannotTriangulate::CornersCoincide { .. },
-                        ..
-                    }
-                ),
-                "{rule:?}, turned {turned}: {why:?}"
-            );
-        }
+        let mut model = a_model();
+        let pair = either_way_round(a_wedge_lying_on_a_cones_side(&mut model), true);
+        let why = refusal(&mut model, &pair, Rule::Difference, &policy);
+        assert!(
+            matches!(
+                why,
+                Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }
+            ),
+            "the wedge less the frustum under {policy:?}: {why:?}"
+        );
     }
 
     let mut model = a_model();
