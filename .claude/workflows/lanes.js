@@ -293,6 +293,8 @@ function sourcePathsOf(lane) {
 // Merges inside one run wait for one another, so they never race each other;
 // they race only other runs and other sessions, and `ff-main` and the ancestor
 // check before the push settle that without a lock of their own (§266.4).
+// Landers in different runs take one, and share one gate (§397.5); the Opus
+// merger takes none.
 function mergeAfterTheLast(lane, prior) {
   const run = lastMerge.then(() => merging(lane, prior))
   lastMerge = run.catch(() => null)
@@ -660,9 +662,11 @@ ${r.rows.map((step) => step.join('\n')).join('\n+\n')}
 `
     : 'The lane left no rows to add, so there is no steps file to write.\n'
   return `Land queue ${rowsOf(lane)}, lane ${lane.label}, with just land, and hand back the JSON it ends with.
-${write}Then run this, once, as one plain Bash call in the foreground with timeout 600000, and nothing else:
+${write}Then run this, once, as one plain Bash call in the foreground with timeout 600000:
   ${landCommand(lane, prior)}
-Its last line is one line of JSON. Report every field of it exactly as it stands.`
+While its last line says land: still running, run this the same way, as often as it takes, and nothing else:
+  mise exec -- just land wait
+Its last line is then one line of JSON. Report every field of it exactly as it stands.`
 }
 
 function landCommand(lane, prior) {
