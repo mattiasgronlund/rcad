@@ -26,7 +26,10 @@
 //! starts on: every candidate came back undecided, which a probe of
 //! `settle_against_each` showed at 1.1. The answer is the inputs as they stand
 //! — the union two solids of eight faces, `A \ B` is `A`, `B \ A` is `B`, and
-//! the intersection nothing — so this is still a gap.
+//! the intersection nothing — so this is still a gap, and
+//! [`every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_apart`]
+//! is the demonstration that the answer exists: the cubes' own planes, asked
+//! exactly, put them apart.
 //!
 //! **0.3 is a limit.** The faces overlap by `2^-52`, so the union and the
 //! intersection keep a sliver whose edges are about `2.2e-16` long at a
@@ -34,8 +37,8 @@
 //! supports. It is pinned by name here and is to be refused whatever the
 //! later stages learn.
 
-use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Vector};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 /// The turns at which the two touching faces leave a gap, and what their
@@ -74,6 +77,40 @@ fn a_corner_and_the_point_a_rounding_past_it_no_longer_stop_the_fuse() {
                 "{angle} {what} refused at {refused_at}"
             );
         }
+    }
+}
+
+/// **At 1.1 and 2.5 every answer exists, so the refusal there is a gap.** A
+/// cube is where all six of its planes have it behind them, so it lies in the
+/// hull of its eight corners, each the meet of three of its planes. Asked of
+/// those planes exactly
+/// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)),
+/// every corner of each cube is in front of the other cube's touching face, so
+/// the two share no point: the union is the two as they stand, each less the
+/// other is itself, and the intersection is nothing. At 0.3 the four corners
+/// on each touching face are behind the other's, which is the sliver.
+///
+/// The fuse places the touching face by a point picked inside it, which lies
+/// on its plane and so only `2^-51` from the other face, and the ray from it
+/// could not say which side it starts on (the module doc). Here the question
+/// is put to the planes instead, and they answer it.
+#[test]
+fn every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_apart() {
+    let in_front = [Decision::Pos; 8];
+    for (angle, _) in A_ROUNDING_APART {
+        assert_eq!(
+            sides_of_the_corners_against_the_other_touching_face(angle),
+            [in_front, in_front],
+            "{angle}"
+        );
+    }
+    for corners in sides_of_the_corners_against_the_other_touching_face(A_ROUNDING_INTO_EACH_OTHER)
+    {
+        let behind = corners
+            .iter()
+            .filter(|side| **side == Decision::Neg)
+            .count();
+        assert_eq!(behind, 4, "{corners:?}");
     }
 }
 
@@ -169,4 +206,58 @@ fn what_the_touching_offsets_add_to(angle: f64) -> f64 {
         panic!("{angle}: one pair of faces nearly touches, and {sums:?} do");
     };
     only
+}
+
+/// For each cube, which side of the other cube's touching face each of its
+/// eight corners lies on, worked out from the planes the corner is the meet
+/// of. [`Decision::Pos`] is in front of that face, outside the other cube.
+///
+/// A corner is any three of the cube's six planes that meet in a point: one
+/// of each pair of opposite faces. Three that take both of one pair are
+/// refused as meeting nowhere, which leaves eight.
+fn sides_of_the_corners_against_the_other_touching_face(angle: f64) -> [[Decision; 8]; 2] {
+    let (model, a, b) = two_turned_cubes(angle);
+    let planes_of = |solid: SolidKey| -> Vec<Plane> {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| face.plane())
+            .collect()
+    };
+    let (mine, theirs) = (planes_of(a), planes_of(b));
+    let touching = |one: &[Plane], other: &[Plane]| -> Plane {
+        let mut found = other.iter().filter(|plane| {
+            one.iter().any(|mine| {
+                mine.normal().components() == (-plane.normal()).components()
+                    && (mine.offset() + plane.offset()).abs() < 1e-12
+            })
+        });
+        let (Some(only), None) = (found.next(), found.next()) else {
+            panic!("{angle}: one face of the other cube touches");
+        };
+        *only
+    };
+    [
+        (&mine, touching(&mine, &theirs)),
+        (&theirs, touching(&theirs, &mine)),
+    ]
+    .map(|(planes, face)| {
+        let mut sides = Vec::new();
+        for first in 0..planes.len() {
+            for second in first + 1..planes.len() {
+                for third in second + 1..planes.len() {
+                    let three = [first, second, third].map(|at| planes[at].coefficients());
+                    if let Ok(side) =
+                        side_of_a_plane_where_three_planes_meet(three, face.coefficients())
+                    {
+                        sides.push(side);
+                    }
+                }
+            }
+        }
+        sides
+            .try_into()
+            .unwrap_or_else(|sides| panic!("{angle}: a cube has eight corners, not {sides:?}"))
+    })
 }
