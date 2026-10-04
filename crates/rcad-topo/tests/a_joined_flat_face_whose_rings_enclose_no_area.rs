@@ -460,28 +460,47 @@ fn two_holed_bars_turned_a_quarter_are_answered_with_the_hole_placed_by_the_outl
 /// block flush with it to join its pieces, were the probe; a ball's pocket
 /// in place of the second cone was the other.
 ///
-/// **Neither gets that far**, because this pair, the first fuse each needs,
-/// is refused under every rule, both ways round, in `select::choose` while a
-/// point is found inside a piece of the block's top: the record names the two
-/// corners where the top's chord meets the cone. Moving the wall to `x = −11`
-/// or the top above the cone's base is refused the same way (Q616).
+/// **This pair, the first fuse each needs, is answered under every rule, both
+/// ways round**, and each answer holds what the cone and the block say. It
+/// used to be refused in `select::choose` on `a point inside a piece of a
+/// face`, its record naming the two corners where the block's top meets the
+/// cone, `(−12, ±√180, 18)` (Q616). No point the search builds is found inside
+/// one piece with those corners, though each such piece holds a double
+/// (§365.2, Q635), and that piece is now placed by the side it shares with a
+/// piece of the other solid's face instead (§365.3, Q712). Moving the wall to
+/// `x = −11` or the top above the cone's base was refused the same way, and
+/// has not been run since. Neither has either probe, so whether one now
+/// reaches `holds_the_other_rings` is not known.
+///
+/// The part of the cone the block holds is the cone up to `z = 18`, `1944π`,
+/// less what lies past the wall, `∫₁₂¹⁸ (z² acos(12/z) − 12√(z² − 144)) dz`,
+/// which is `1944 acos(2/3) − 144√180 + 576 ln((18 + √180)/12)`.
 #[test]
-fn a_cone_cut_by_a_block_wall_off_its_axis_is_refused_while_a_piece_is_placed() {
+fn a_cone_cut_by_a_block_wall_off_its_axis_is_answered_under_every_rule() {
+    let cone = 8000.0 * PI / 3.0;
+    let block = 36.0 * 48.0 * 19.0;
+    let past_the_wall = 1944.0 * (2.0_f64 / 3.0).acos() - 144.0 * 180.0_f64.sqrt()
+        + 576.0 * ((18.0 + 180.0_f64.sqrt()) / 12.0).ln();
+    let shared = 1944.0 * PI - past_the_wall;
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let cone = cones::a_pointed_cone(&mut model, 1.0, 20.0);
-        let block = a_block(
+        let the_cone = cones::a_pointed_cone(&mut model, 1.0, 20.0);
+        let the_block = a_block(
             &mut model,
             &[[-12.0, -24.0], [24.0, -24.0], [24.0, 24.0], [-12.0, 24.0]],
             -1.0,
             19.0,
         );
-        let refused = fused_in_order(&mut model, [cone, block], rule, swapped);
-        assert_undecidable_on(
-            &refused,
-            "a point inside a piece of a face",
-            &format!("{rule:?}, swapped {swapped}"),
-        );
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, [the_cone, the_block], rule, swapped);
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => cone + block - shared,
+            (Rule::Intersection, _) => shared,
+            (Rule::Difference, false) => cone - shared,
+            (Rule::Difference, true) => block - shared,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, the_only(answer, &what), volume, &what);
     }
 }
 
