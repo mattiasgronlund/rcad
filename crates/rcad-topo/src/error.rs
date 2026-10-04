@@ -543,14 +543,16 @@ pub enum Error {
     /// endless tube round a cylinder — not a face at all, so the model's
     /// topology and its geometry disagree. **A limit** for the same reason.
     ///
-    /// **One curve on a ball with the material outside it**, which is the whole
+    /// **One wire on a ball with the material outside it**, which is the whole
     /// ball less a disc: a ball with a cap taken off, or either half of a
     /// two-ball union. The mesher answers that now by opening the ball along a
     /// seam half a turn from the rim and cutting from the rim up to both poles
-    /// (§202.1). What still reaches this name is a rim that cut cannot be shown to
-    /// stay inside, and that is **a gap**. What tells the two sides of a curve
-    /// apart is the sign of the area the wire encloses in the surface's own two
-    /// coordinates, because a wire keeps its face's material on its left.
+    /// (§202.1), whether the rim is one closed curve or several arcs that
+    /// between them pass every point of the wire once (§402.3). What still
+    /// reaches this name is a rim that cut cannot be shown to stay inside, and
+    /// that is **a gap**. What tells the two sides of a curve apart is the sign
+    /// of the area the wire encloses in the surface's own two coordinates,
+    /// because a wire keeps its face's material on its left.
     #[error("a curved face is bounded by one curve right round it and has no seam to open at")]
     ACurvedFaceGoesRightRoundWithNoSeam {
         /// Which face.
@@ -583,12 +585,26 @@ pub enum Error {
     /// or every triangle in it would be stretched from one side of the seam to
     /// the other and have no area at all.
     ///
-    /// **A face with a hole is cut only where it is a ring** — two curves that
-    /// each go right round and nothing else — because then there is somewhere to
-    /// cut *across* to and the answer is four patches with one loop each. That
-    /// is the one the fuse makes: a tube of a bar's wall between two planes. A
-    /// hole that does not go right round has nothing to cut across to, and
-    /// nothing says which piece it would end up in.
+    /// **A ring — two curves that each go right round and nothing else** — is
+    /// cut across into four patches with one loop each. That is the one the
+    /// fuse makes on a pipe: a tube of a bar's wall between two planes.
+    ///
+    /// **A ball's skin with only holes** is opened into strips instead, one
+    /// meridian for each stretch of longitude no hole reaches, and each strip
+    /// cut up to both poles past its own run of holes (§402.3). What still
+    /// reaches this name there is a strip whose holes neither lie one above
+    /// the other nor clear each other's straight cuts, and that is **a gap**:
+    /// the skin exists, and a cut that ends on another hole, which this cut
+    /// family does not try, would reach it (§402.4).
+    ///
+    /// **A ball's cap cut up to its pole, with an island beside it**, reaches
+    /// this name too when the island goes far enough round that two of the
+    /// rim's cuts up to the pole land on it instead of missing it, and a cut
+    /// through the island leaves only two pieces of it rather than passing it
+    /// by whole (§212.6). The same shape without the ball under it — one wire
+    /// right round beside one that is not — is refused the same way on a
+    /// cone, where no fuse is known to build it; only arena surgery reaches it
+    /// there (§212.6).
     ///
     /// **A refusal about the solid and not about the request**, and no deflection
     /// avoids it. §31.10 item 5 filed this doc as a claim about today's builders

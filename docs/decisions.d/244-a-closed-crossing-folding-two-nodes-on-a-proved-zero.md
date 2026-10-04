@@ -21,6 +21,7 @@ ordered by which end of its box the start is at.**
   244.4   What is not shown
   244.5   The premise lapsed with §248, and the arm now asks the policy
   244.6   A start between the two places puts the one ahead of it first
+  244.7   Two boxes that end at the start are put in order by which end it is at
 
 ### 244.1 Which proved zeros reach the arm
 
@@ -279,3 +280,52 @@ points are the moved corner and a new one at `(3, 0, 10)`, one straight above
 the other. The start `(0, 3, 10)` is not between them, so both steps point the
 same way and the arm still refuses. `OFF_THE_CAP` is still `Undecidable` on
 `order along a crossing`.
+
+### 244.7 Two boxes that end at the start are put in order by which end it is at
+
+*Queue row Q699, from §244.5's open table row. Lane
+`lane-q699-two-places-on-a-grazed-ball-ordered`, merged at `a6450f53`; its own
+commit is `a1d7c237`.*
+
+**The overlap arm now orders a pair whose boxes end at an off-crossing start,
+one at each end, instead of leaving it to the policy.** §244.5's `cx = 16`
+shape cuts the ball at `16 ± 2⁻⁵¹`, not an `f64`, so the two places are the
+boxes `[15.999999999999998, 16]` and `[16, 16.000000000000004]` along `x`,
+with `y` and `z` exactly the walked start's. Both boxes hold the start, one at
+each end, so they touch and the sweep from the start reads exactly zero — the
+case `boxes_overlap` hands to `one_point_if_both_are_exact` since §248.
+
+Read as a box, the step from the start to either place could be nothing, so
+its sign was untold there and the pair fell to the policy. But where a box
+agrees with the start exactly on two axes, every point of it but one is the
+start moved along the third, and that one point is the start itself. A place
+is on both surfaces of the crossing by construction, so where the start is
+proved off either surface — `side_of_surface` answering `Pos` or `Neg` — the
+place cannot be the start. A box `[s, h]` along that third axis, with the
+start at `s`, then holds a place past the start; `[l, s]` holds one short of
+it. `ahead_by_the_end_of_its_box_the_start_is_at` reads which end the start is
+at and combines it with the sign of the crossing's run along that axis to
+answer which way the place lies, and `the_one_ahead_of_the_start` asks it only
+where the step read off the box itself left the sign untold. The overlap arm
+takes an order only when this reads `Pos` for one place and `Neg` for the
+other — **which also proves the two are two places**, since two places either
+side of one point cannot be that one point twice.
+
+**What each fuse answers now**, from §244.5's table: Q699's own probe except
+where marked pinned. `cx = 16` under `Policy::certified`: ball first, every
+rule refuses `orient3d`, the turn at the place below `16` (§317's gap, pinned
+as `a_certified_fuse_refuses_on_the_turn_at_the_place_below_16`); block first,
+every rule refuses `order along a crossing` along the block edge, `5.33e-15`.
+Under `Policy::tolerant(25.0)`, either solid first, every rule now answers
+`ResultIsNotManifold { count: 3 }`, in all six combinations of rule and
+argument order.
+
+**The tilted wall (Q74) and §318.3's far block are not reached, and why.** On
+the tilted wall both `z` boxes hold `16` inside them rather than at an end,
+and each holds both of the crossing's two true places, so no box says which
+place the start is nearest to; `ahead_by_the_end_of_its_box_the_start_is_at`
+answers `Undecidable` there the same as before. On the far block the
+crossing's two places are one box used twice, with the start outside it on
+more than one axis, so no single axis is left moved by exactly one and the
+function answers `Undecidable` again. Queue row Q908 takes up ordering those
+two by another method.

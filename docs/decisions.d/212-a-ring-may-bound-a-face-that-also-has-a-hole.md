@@ -105,3 +105,17 @@ is refused by name in `cut_up` and demonstrated by `mesh.rs`'s own
 `a_curved_face_with_a_hole_is_refused_rather_than_asserted_against`. No test in
 the tree reaches it except that one, which builds the shape through
 `Deserialize`-shaped arena surgery, and nothing in this batch needs it.
+
+**2026-10-04, Q923: a fuse reaches it on a ball.** Since Q453 the cube of side
+2 and the unit ball at `(0.8, 0.7, 0.65)` (§400.5) puts a ball's cap, cut up to
+its pole, beside an island — no arena surgery needed. On a ball the shape now
+answers: an island no cut meets goes whole into its patch as a hole, and a cut
+whose meridian meets one goes through it, each patch beside it taking half the
+island (pinned in `a_ball_face_ringing_its_pole_round_a_round_hole.rs` and
+`a_block_poking_into_a_ball_whose_top_plane_cuts_the_rest.rs`). It stays
+refused when the island is large enough that two of the rim's cuts up to the
+pole land on it, leaving only two pieces of it
+(`an_island_two_cuts_meet_is_refused_by_name`,
+`a_ball_face_ringing_its_pole_round_a_round_hole.rs`). On a cone this section's
+shape is still refused, and no solid is known to reach it there — this
+paragraph does not change that.

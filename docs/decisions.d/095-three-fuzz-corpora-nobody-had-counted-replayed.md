@@ -210,9 +210,10 @@ corpus — seed `4217bc51fd9dd4955482c024121a1b0b54b50762`, half 1, header `0xf4
 a tolerant two-sided intersection — and `0xf4`'s high nibble draws a union
 instead. Header `0xa0` draws the same tolerant two-sided intersection on the same
 model and reaches the same refusal, so the branch is kept by name:
-`a_curved_face_with_a_hole_that_goes_too_far_round`. Losing a branch a night's
-fuzzing found, to a layout change, is the cost §29 declined its repack over; here
-it is one seed to avoid.
+`a_curved_face_with_a_hole_that_goes_too_far_round`, its name then (Q932
+renamed it below, once that was no longer true). Losing a branch a night's
+fuzzing found, to a layout change, is the cost §29 declined its repack over;
+here it is one seed to avoid.
 
 **The seed kept that branch for ten days, and then it answered** (Q920,
 2026-10-04). Its first half is a cube `[0, 2]³` and a unit ball round
@@ -248,8 +249,11 @@ circle round its top pole and the `x = 2` circle as an island at its equator.
   refusals by name moved only there: `AWireWillNotLieFlatOnItsFace` 5 to 0,
   `CurvedFaceWithAHoleGoesTooFarRound` 0 to 1.
 
-The seed's name is now wrong; renaming it moves a file under `fuzz/corpus/`
-and the three places that name it.
+The seed's name was now wrong; **Q932 renamed it**,
+`fuzz/corpus/two_solids_fused_by_a_stranger/a_cube_with_a_unit_ball_nearly_inside_it`
+for what it draws, with `git mv`, and moved the three places that named it:
+this file, §346.4 and `every_model_the_fuse_fuzzer_kept_is_fused_again.rs`'s
+module table, `control_seed` call and `std::fs::read`.
 
 `two_cubes_one_taken_out_of_the_other`, header `0x22` — its own nibble swap, so
 both halves draw the same — is the second seed added, and it holds up the
