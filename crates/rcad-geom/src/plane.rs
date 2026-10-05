@@ -525,6 +525,16 @@ impl Plane {
     ///   is the second scaling of an already-scaled vector, which the note on
     ///   [`Plane`] says moves the last bit or two. A stored normal whose computed
     ///   length is `0.9999999999999999` — an ordinary one — grew on every read.
+    ///
+    /// **So one plane can come out of two turns as two spellings in a ratio
+    /// other than `±1`.** Two blocks turned about `z` by `0.29` then
+    /// `0.495 398 163 397 448 4`, and by `0.45` then `0.335 398 163 397 448 05`,
+    /// put a face on `x = y` as `(−c, c, 0, 0)` with `c` an ulp apart: exactly
+    /// proportional, so one surface to [`Plane::agreement_with`] and to
+    /// `intersect`, and neither the same bits nor their negation. A key over
+    /// planes that has to call them one folds the ratio, as `rcad-topo`'s
+    /// `name_of_the_plane_at_any_scale` does
+    /// (`crates/rcad-topo/tests/a_turned_plane_exactly_proportional_to_another.rs`).
     #[must_use]
     pub fn transformed(&self, movement: &Isometry) -> Self {
         let normal = movement.apply_to_vector(self.normal);
