@@ -1347,16 +1347,19 @@ impl<'f> Arrangement<'f> {
     ///
     /// Which crossings run through a corner is mostly a question about the
     /// model: the two edges either side of it, and, where more faces meet there,
-    /// every other surface the corner already knows about. Only a cut has to be
-    /// *asked*, and asking is [`Arrangement::passes_through`].
+    /// every other surface the corner already knows about, and a round bar's
+    /// seam plane at a corner on its seam
+    /// ([`BakedCorner::is_on_by_construction`](super::bake::BakedCorner::is_on_by_construction)).
+    /// Only a cut has to be *asked*, and asking is
+    /// [`Arrangement::passes_through`].
     fn place_the_corners(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         for wire in 0..self.face.wires.len() {
             let mut corners = Vec::new();
             let count = self.face.wires[wire].len();
             for position in 0..count {
                 let mut through = vec![self.crossing_of_edge[wire][position]];
-                let at = self.face.wires[wire][position].start.point;
-                let around = self.face.wires[wire][position].start.around.clone();
+                let corner = self.face.wires[wire][position].start.clone();
+                let at = corner.point;
                 for index in 0..self.crossings.len() {
                     if through.contains(&index) {
                         continue;
@@ -1368,10 +1371,10 @@ impl<'f> Arrangement<'f> {
                     // cone at a node, and the turn between them is undecided
                     // (§224.2's joined cone, taken back in).
                     let crossing = &self.crossings[index];
-                    let on_it = if around.contains(&crossing.partner) {
+                    let on_it = if corner.is_on_by_construction(&crossing.partner) {
                         nothing_rules_the_point_out(crossing.picked_by(), at)
                     } else {
-                        self.passes_through(index, at, &around, policy, log)?
+                        self.passes_through(index, at, &corner.around, policy, log)?
                     };
                     if on_it {
                         through.push(index);
@@ -1383,7 +1386,7 @@ impl<'f> Arrangement<'f> {
                 self.nodes.push(Node {
                     point: at,
                     boxed_tight: at,
-                    vertex: Some(self.face.wires[wire][position].start.vertex),
+                    vertex: Some(corner.vertex),
                     made_of: None,
                     also: Vec::new(),
                     half_way_round: false,

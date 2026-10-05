@@ -38,17 +38,20 @@
 //!   `x`, and turned then shifted, each block placed the same way. The corner
 //!   is moved in the stored frame, and `validate` refuses it just as it
 //!   refuses the bar at no placement. Every fuse gives what the bar at no
-//!   placement gives, with two differences. Turned and shifted, the fuse's
+//!   placement gives, with three differences. Turned and shifted, the fuse's
 //!   refusal of the corner moved off the cap carries a distance of
 //!   `0.9999999999999982` where `validate`'s carries `1.0`: the same refusal,
-//!   the distance only to rounding. And turned, the sound bar cut along its
-//!   seam is `Undecidable` on `side of plane`, so every corner moved there is
-//!   too. The point it asks about is a box round where the bottom seam corner
-//!   `(3, 0, 0)` lands, which is on the block's face: `8.5e-14` either way
-//!   turned, `2.8e-13` turned and shifted. That is the sound bar's refusal,
-//!   not an answer about the moved corner. Only
-//!   shifted, the sound bar answers, because a corner moved by a shift that
-//!   rounds nothing is handed on exact (Q509). Before Q509 it refused
+//!   the distance only to rounding. Turned and shifted, the sound bar cut
+//!   along its seam is `Undecidable` on `side of plane`, so every corner
+//!   moved there is too. The point it asks about is a box `2.8e-13` either
+//!   way round where the bottom seam corner `(3, 0, 0)` lands, on the block's
+//!   face give or take an ulp. That is the sound bar's refusal, not an answer
+//!   about the moved corner. Turned alone, the same cut answers, because the
+//!   block's face is the bar's seam plane turned to the bit and the corner is
+//!   taken as on it by construction (§294.9); the corner moved a quarter turn
+//!   round then gives the sound answer to a rounding rather than to the bit.
+//!   Shifted alone, the sound bar answers, because a corner moved by a shift
+//!   that rounds nothing is handed on exact (Q509). Before Q509 it refused
 //!   `side of plane` there as well.
 //! - **A tolerant policy**, `Policy::tolerant(100.0)`, on the bar at no
 //!   placement: every fuse as under `certified`, except the corner moved off
@@ -201,6 +204,15 @@ const A_NOTCH_A_QUARTER_TURN_ROUND: Block = Block {
 const THE_HALF_PAST_THE_SEAM: Block = Block {
     low: [-5.0, 0.0],
     high: [5.0, 5.0],
+    floor: -1.0,
+    tall: 12.0,
+};
+
+/// The whole `y < 0` half of the bar, so one face of the block runs along the
+/// seam the other way round from [`THE_HALF_PAST_THE_SEAM`]'s.
+const THE_HALF_SHORT_OF_THE_SEAM: Block = Block {
+    low: [-5.0, -5.0],
+    high: [5.0, 0.0],
     floor: -1.0,
     tall: 12.0,
 };
@@ -455,6 +467,8 @@ fn a_fuse_that_cuts_the_moved_corner_away_gives_the_answer_the_sound_bar_gives()
 /// round, it is inside the half the block takes, and the answer is the sound
 /// bar's. **None of the three refusals names the file**, and neither is wrong
 /// about what it could not do. Shifted, bar and block alike, it is the same.
+/// Turned it is the same but for the last bit or two of a corner
+/// (`a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned`).
 #[test]
 fn a_cut_along_the_seam_refuses_a_corner_moved_in_the_cut_and_answers_one_moved_out_of_it() {
     let policy = Policy::certified();
@@ -508,34 +522,107 @@ fn under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_to
     }
 }
 
+/// Turned 0.4 about `x`, the bar cut along its seam gives what the unturned bar
+/// gives, turned.
+///
+/// The sound bar less the half past its seam, and with it, is half the bar,
+/// `45π`, and its corners are the unturned answer's corners turned. Its bottom
+/// seam corner `(3, 0, 0)` lands on the block's face, handed on as a box
+/// `8.5e-14` either way, and the face is the bar's seam plane moved the same way
+/// to the bit. Asked which side of it the box is, the fuse refused `side of
+/// plane`; the corner is on that plane by construction, and is taken so
+/// (§294.9).
+///
+/// The top corner moved in the file then gives the unturned bar's outcomes:
+/// off the wall and off the cap the same refusals, and a quarter turn round
+/// the sound answer — but the sound answer to a rounding, not to the bit. Cut
+/// away, the moved corner leaves the top seam corner of the answer to be
+/// placed where the block's face crosses the top circle, two ulps from where
+/// the sound bar's own corner is written.
+#[test]
+fn a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned() {
+    let policy = Policy::certified();
+    let half_the_bar = PI * RADIUS * RADIUS * HEIGHT / 2.0;
+    let turned = Shape::Bar(the_turn());
+    for rule in [Rule::Difference, Rule::Intersection] {
+        let answer_of = |shape: Shape, moved_to, partner| {
+            fuse(shape, moved_to, partner, rule, &policy).unwrap_or_else(|why| {
+                panic!(
+                    "{shape:?} with its corner at {moved_to:?}, {partner:?} {rule:?}, refused: \
+                     {why:?}"
+                )
+            })
+        };
+        for partner in [THE_HALF_PAST_THE_SEAM, THE_HALF_SHORT_OF_THE_SEAM] {
+            let sound = answer_of(turned, WHERE_THE_BAR_PUTS_IT, partner);
+            let unturned = answer_of(
+                Shape::Bar(Isometry::identity()),
+                WHERE_THE_BAR_PUTS_IT,
+                partner,
+            );
+            holds(&sound, half_the_bar, rule, &policy);
+            holds(&unturned, half_the_bar, rule, &policy);
+            the_same_corners_to_a_rounding(&sound, &unturned, &the_turn(), rule);
+        }
+
+        let sound = answer_of(turned, WHERE_THE_BAR_PUTS_IT, THE_HALF_PAST_THE_SEAM);
+        let cut_away = answer_of(
+            turned,
+            A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
+            THE_HALF_PAST_THE_SEAM,
+        );
+        holds(&cut_away, half_the_bar, rule, &policy);
+        the_same_corners_to_a_rounding(&cut_away, &sound, &Isometry::identity(), rule);
+
+        check(
+            turned,
+            OFF_THE_WALL,
+            THE_HALF_PAST_THE_SEAM,
+            rule,
+            &policy,
+            Outcome::CannotTellTheCellsOfAFaceApart,
+        );
+        check(
+            turned,
+            OFF_THE_CAP,
+            THE_HALF_PAST_THE_SEAM,
+            rule,
+            &policy,
+            Outcome::Undecidable("order along a crossing"),
+        );
+    }
+}
+
 /// **This is the sound bar's refusal, not an answer about a moved corner.**
-/// Turned, the bar's bottom seam corner `(3, 0, 0)` lands on the block's face
-/// and is handed on as a box `8.5e-14` either way round where it lands
-/// (`2.8e-13` when shifted as well), so which
-/// side of that face it is on comes out `Undecidable`. The sound bar refuses
-/// that way, and every moved corner with it, turned alone or turned and then
-/// shifted. Shifted alone it answers, which is Q509's exact corner.
+/// Turned and then shifted, the bar's bottom seam corner `(3, 0, 0)` lands on
+/// the block's face give or take a rounding and is handed on as a box
+/// `2.8e-13` either way round where it lands, so which side of that face it is
+/// on comes out `Undecidable`. The face is not the bar's seam plane moved: the
+/// shift rounds the two offsets apart by an ulp, so the face crosses the
+/// bottom circle an ulp from the corner, and nothing says the two are one
+/// point (§294.9). The sound bar refuses that way, and every moved corner with
+/// it. Turned alone it answers
+/// (`a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned`),
+/// and shifted alone, which is Q509's exact corner.
 #[test]
 fn a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is() {
     let policy = Policy::certified();
-    for placement in [the_turn(), the_turn_then_the_shift()] {
-        let bar = Shape::Bar(placement);
-        for rule in [Rule::Difference, Rule::Intersection] {
-            for moved_to in [
-                WHERE_THE_BAR_PUTS_IT,
-                OFF_THE_WALL,
-                OFF_THE_CAP,
-                A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
-            ] {
-                check(
-                    bar,
-                    moved_to,
-                    THE_HALF_PAST_THE_SEAM,
-                    rule,
-                    &policy,
-                    Outcome::Undecidable("side of plane"),
-                );
-            }
+    let bar = Shape::Bar(the_turn_then_the_shift());
+    for rule in [Rule::Difference, Rule::Intersection] {
+        for moved_to in [
+            WHERE_THE_BAR_PUTS_IT,
+            OFF_THE_WALL,
+            OFF_THE_CAP,
+            A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
+        ] {
+            check(
+                bar,
+                moved_to,
+                THE_HALF_PAST_THE_SEAM,
+                rule,
+                &policy,
+                Outcome::Undecidable("side of plane"),
+            );
         }
     }
 }
@@ -957,6 +1044,59 @@ fn the_same_answer_as_the_sound_solid(
             .model
             .validate_solid(solid, policy, &mut ProvenanceLog::new())
             .unwrap_or_else(|error| panic!("{case}: the answer on its own is sound: {error:?}"));
+    }
+}
+
+/// The answer is one solid, `validate_solid` accepts it, and it measures
+/// `volume` to within what a fine mesh can say.
+fn holds(answer: &Answer, volume: f64, rule: Rule, policy: &Policy) {
+    let [solid] = answer.solids[..] else {
+        panic!("{rule:?}: {} solids", answer.solids.len());
+    };
+    answer
+        .model
+        .validate_solid(solid, policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why:?}"));
+    let measured = answer
+        .model
+        .solid(solid)
+        .expect("the fuse made this key")
+        .measure(
+            Deflection::of(0.001).expect("a fine mesh"),
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{rule:?} does not measure: {why:?}"));
+    assert!(
+        (measured.volume() - volume).abs() <= measured.volume_error(),
+        "{rule:?} holds {volume} and measures {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+/// Further than a corner of the turned bar can land from where the turn puts
+/// it: the widest box the turn moves one into is `2.8e-13` either way, round
+/// the top seam corner.
+const A_ROUNDING_OF_THE_TURN: f64 = 1e-12;
+
+/// Each corner of `theirs`, moved by `movement`, is within
+/// [`A_ROUNDING_OF_THE_TURN`] of exactly one corner of `mine`, and the two have
+/// as many corners.
+fn the_same_corners_to_a_rounding(mine: &Answer, theirs: &Answer, movement: &Isometry, rule: Rule) {
+    let point = |bits: &[u64; 3]| {
+        let [x, y, z] = bits.map(f64::from_bits);
+        Point::new(x, y, z)
+    };
+    assert_eq!(mine.corners.len(), theirs.corners.len(), "{rule:?}");
+    for corner in &theirs.corners {
+        let there = movement.apply_to_point(point(corner));
+        let near = mine
+            .corners
+            .iter()
+            .filter(|other| (point(other) - there).length() <= A_ROUNDING_OF_THE_TURN)
+            .count();
+        assert_eq!(near, 1, "{rule:?}: the corner {there:?}");
     }
 }
 
