@@ -980,9 +980,11 @@ impl<'f> Arrangement<'f> {
         if self.arcs.is_empty() {
             return Ok(vec![self.the_whole_surface()?]);
         }
+        let lump = self.lump_of_each_cycle();
+        let outer = self.a_lump_of_the_faces_first_wire();
         (0..self.cells.len())
             .filter(|&cell| self.winding[cell] == Some(1))
-            .map(|cell| self.piece_from(cell))
+            .map(|cell| self.piece_from(cell, &lump, outer))
             .collect()
     }
 
@@ -1426,7 +1428,17 @@ impl<'f> Arrangement<'f> {
                         return Err(gave_up_on_it.into());
                     }
                 };
-                let tight = meet.boxed_tight(asked);
+                // The tighter box is read by a fold into a corner on both
+                // crossings, and by the order along a crossing with a curved
+                // surface in it, and by nothing else. Working it out for every
+                // meet of three planes was 11 of 22 samples taken in placing
+                // the meets of a cut through the 1x39 pin header (§200.1).
+                let all_planes = surfaces.iter().all(|surface| surface.as_plane().is_some());
+                let tight = if all_planes && !self.a_corner_is_on_both(first, second) {
+                    meet.clone()
+                } else {
+                    meet.boxed_tight(asked)
+                };
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
@@ -1464,12 +1476,7 @@ impl<'f> Arrangement<'f> {
                         self.nodes[corner].stands_for_too((sorted, which));
                         continue;
                     }
-                    let ordered_by = if surfaces.iter().all(|surface| surface.as_plane().is_some())
-                    {
-                        place
-                    } else {
-                        boxed_tight
-                    };
+                    let ordered_by = if all_planes { place } else { boxed_tight };
                     self.nodes.push(Node {
                         point: place,
                         boxed_tight: ordered_by,
@@ -1483,6 +1490,15 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(())
+    }
+
+    /// Whether some corner of the face is on both crossings, which is where
+    /// [`Arrangement::the_corner_that_is_this_place`] looks.
+    fn a_corner_is_on_both(&self, first: usize, second: usize) -> bool {
+        self.node_of_corner.iter().flatten().any(|&corner| {
+            let through = &self.nodes[corner].crossings;
+            through.contains(&first) && through.contains(&second)
+        })
     }
 
     /// The node where two curves of one pair cross, for the one pair here that
@@ -1667,6 +1683,14 @@ impl<'f> Arrangement<'f> {
     /// (§244.3, §248). This, and not the touch, is what keeps them apart: of a
     /// ball's two places grazing a block's corner, the one that misses the
     /// corner's box lies inside its room too (§395.3).
+    ///
+    /// **Only the face's corners are looked through, not every node.** They
+    /// are the first nodes, one per side of each wire
+    /// ([`Arrangement::place_the_corners`]), and every meet placed after them
+    /// is no corner. Looking through every node cost a meet as many steps as
+    /// there were meets placed before it: a face of the 1x39 pin header's body
+    /// cut by its 332 planes placed 38 116 meets, and looking each one up among
+    /// the others was 12 of 31 samples of a cut through that header (§200.1).
     fn the_corner_that_is_this_place(
         &self,
         first: usize,
@@ -1675,31 +1699,33 @@ impl<'f> Arrangement<'f> {
         boxed_tight: PredicatePoint,
         places: &[PredicatePoint],
     ) -> Option<usize> {
-        self.nodes.iter().position(|node| {
-            if !(node.vertex.is_some()
-                && node.crossings.contains(&first)
-                && node.crossings.contains(&second))
-            {
-                return false;
-            }
-            let allowed = super::bake::grown_by(
-                node.point,
-                super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
-            );
-            let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
-            let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
-            let inside_the_room = (0..3).all(|axis| {
-                room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
-            });
-            reaches_the_room(&place)
-                && places
-                    .iter()
-                    .filter(|other| reaches_the_room(other))
-                    .count()
-                    == 1
-                && (inside_the_room
-                    || self.bake_placed_the_corner_on_the_three_planes(node, first, second))
-        })
+        self.node_of_corner
+            .iter()
+            .flatten()
+            .copied()
+            .find(|&corner| {
+                let node = &self.nodes[corner];
+                if !(node.crossings.contains(&first) && node.crossings.contains(&second)) {
+                    return false;
+                }
+                let allowed = super::bake::grown_by(
+                    node.point,
+                    super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
+                );
+                let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
+                let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
+                let inside_the_room = (0..3).all(|axis| {
+                    room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+                });
+                reaches_the_room(&place)
+                    && places
+                        .iter()
+                        .filter(|other| reaches_the_room(other))
+                        .count()
+                        == 1
+                    && (inside_the_room
+                        || self.bake_placed_the_corner_on_the_three_planes(node, first, second))
+            })
     }
 
     /// Whether [`Arrangement::the_corner_that_is_this_place`] finds a corner,
@@ -3903,20 +3929,14 @@ impl<'f> Arrangement<'f> {
         let mut found: Vec<usize> = self
             .arcs
             .iter()
-            .filter(|arc| !self.crossings[arc.crossing].order.closes())
-            .map(|arc| lump[self.cycle_of[2 * self.position_of(arc)]])
+            .enumerate()
+            .filter(|(_, arc)| !self.crossings[arc.crossing].order.closes())
+            .map(|(position, _)| lump[self.cycle_of[2 * position]])
             .filter(|&which| Some(which) != home)
             .collect();
         found.sort_unstable();
         found.dedup();
         found
-    }
-
-    fn position_of(&self, arc: &Arc) -> usize {
-        self.arcs
-            .iter()
-            .position(|other| core::ptr::eq(other, arc))
-            .expect("the only caller borrows the arc straight out of this same list")
     }
 
     /// Which walk elsewhere in the drawing a lump of endless curves sits inside,
@@ -4378,6 +4398,9 @@ impl<'f> Arrangement<'f> {
         Stretches { axis, spans }
     }
 
+    /// The piece one cell is, given which `lump` of the drawing each walk is
+    /// in and which of them, `outer`, holds the face's first wire.
+    ///
     /// # Errors
     ///
     /// Whatever [`Arrangement::wire_from`] makes of each of the piece's walks.
@@ -4385,15 +4408,13 @@ impl<'f> Arrangement<'f> {
     /// # Panics
     ///
     /// If the piece has no wires.
-    fn piece_from(&self, cell: usize) -> Result<Piece> {
+    fn piece_from(&self, cell: usize, lump: &[usize], outer: Option<usize>) -> Result<Piece> {
         let mut cycles = self.cells[cell].clone();
         // A flat piece has an outer wire and holes, and `Model::validate` reads
         // the first as the outer one. The outer wire is the walk that keeps the
         // face's own outer boundary, which is the lump the face's first wire is
         // in. On a closed surface neither is outer (§31.3) and this leaves the
         // order the walks were found in.
-        let outer = self.a_lump_of_the_faces_first_wire();
-        let lump = self.lump_of_each_cycle();
         cycles.sort_by_key(|&cycle| usize::from(Some(lump[cycle]) != outer));
 
         let wires: Vec<Vec<FaceMeet>> = cycles
