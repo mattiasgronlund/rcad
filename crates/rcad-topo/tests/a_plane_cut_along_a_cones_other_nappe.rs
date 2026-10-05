@@ -285,8 +285,7 @@ fn steeper_faces_near_the_pointed_cones_apex(lean: f64) -> Vec<Case> {
 /// That box is grown by what writing a corner down costs now. All four measure:
 /// the union decides 6986 grid points, the intersection 17954, the cone less the
 /// block 16361 and the block less the cone 8579. Turned `1`, the same block
-/// refuses `order along a crossing` instead, and those four are among the eight
-/// counted below.
+/// refused `order along a crossing` instead, until §406.
 ///
 /// **Twelve fewer stop at `order along a crossing` since Q901**, which orders
 /// two meets of three planes that share two by the planes when their boxes
@@ -294,7 +293,23 @@ fn steeper_faces_near_the_pointed_cones_apex(lean: f64) -> Vec<Case> {
 /// at the top of this file, and refusals for want of a point inside a piece
 /// from 8 to 16. The sixteen are the blocks from `−3` up to `1` and up to
 /// `1.5`, leaned at a quarter, both turns and every rule, and the eight left at
-/// the order are the same two blocks leaned at `2` and turned `1`.
+/// the order were the same two blocks leaned at `2` and turned `1`.
+///
+/// **None of the eight stops at the order since §406.** Turned `1`, the
+/// block's top and bottom and their side edges are a rounding off parallel to
+/// a ruling, so the top and the bottom cut the cone in ellipses `4.5e16` long
+/// and the side edges meet it again `2.26e16` and `4.48e16` out. Two meets by
+/// the frustum are put in order round the top's ellipse from its start
+/// `2.2e16` out, two far meets on it are left out because nothing drawn
+/// crosses there, and the two far meets of the bottom's side edges are boxed
+/// to an ulp and ordered round the bottom's ellipse, and how the edge leaves
+/// the ellipse there is read off the root. The block up to `1.5` answers right
+/// for the intersection and for the block less the cone, held to the four
+/// checks and deciding 30172 grid points each; its other two rules refuse
+/// `AWireWillNotLieFlatOnItsFace`, and the block up to `1` refuses
+/// `TwoPatchesOfTheMeshDrewTheSameSide` for the union and the cone less the
+/// block and `CannotMeshAFace` for the other two. All six are raised inside the
+/// fuse, meshing what it built.
 #[test]
 fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right() {
     let mut cases = Vec::new();
@@ -323,10 +338,12 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 72,
+            right: 74,
             refused: [
                 ("a point inside a piece of a face", 16),
-                ("order along a crossing", 8),
+                ("TwoPatchesOfTheMeshDrewTheSameSide", 2),
+                ("CannotMeshAFace", 2),
+                ("AWireWillNotLieFlatOnItsFace", 2),
             ]
             .into()
         }
@@ -831,12 +848,14 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 /// Every way a fuse in this file refuses today, and the two ways an answer
 /// that holds every grid point it is asked about can still not be checked:
 /// a mesh finer than the mesher reaches, and a face it cannot mesh.
-const REFUSALS: [&str; 5] = [
+const REFUSALS: [&str; 7] = [
     "a point inside a piece of a face",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
     "the answer does not measure: CannotMeshAFace",
-    "order along a crossing",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
+    "TwoPatchesOfTheMeshDrewTheSameSide",
+    "CannotMeshAFace",
+    "AWireWillNotLieFlatOnItsFace",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the

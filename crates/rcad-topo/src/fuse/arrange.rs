@@ -2159,11 +2159,51 @@ impl<'f> Arrangement<'f> {
     /// Looking through every node for each crossing cost crossings × nodes,
     /// and a face of a pin header's body has about four hundred crossings and
     /// sixty thousand nodes (§200.1).
+    ///
+    /// **A node where nothing else drawn crosses is left off**, as long as
+    /// one node stays on the crossing. Such a node is no corner of the face and
+    /// was placed where this crossing met others that
+    /// [`Arrangement::work_out_how_each_crossing_runs`] dropped since, because
+    /// every node on them is clear of the box round the face. So it is clear
+    /// of the face too, and so are the two arcs of this crossing either side
+    /// of it: no drawn curve crosses this one between two neighbouring nodes,
+    /// so neither arc reaches the face's boundary to get in. The cells either
+    /// side of those arcs are outside the face, and the node is a bend in one
+    /// side of each, with no way out of its own. Left off, the cells are the
+    /// same and only that bend is gone, so no piece of the face changes, and
+    /// nothing has to put it in order. A block leaned along a cone's ruling
+    /// and turned `1` meets the cone `4.5e16` out along each edge of its top
+    /// face, and two of those meets, with overlapping boxes, could not be put
+    /// in order round the ellipse the top face cuts (§406.2).
+    ///
+    /// **A crossing whose every node is such a one keeps them all**, so that it
+    /// is still drawn and still asked as before.
     fn the_nodes_on_each_crossing(&self) -> Vec<Vec<usize>> {
         let mut on_each = vec![Vec::new(); self.crossings.len()];
-        for (node, Node { crossings, .. }) in self.nodes.iter().enumerate() {
+        let mut set_aside = vec![Vec::new(); self.crossings.len()];
+        for (
+            node,
+            Node {
+                crossings, vertex, ..
+            },
+        ) in self.nodes.iter().enumerate()
+        {
             for &crossing in crossings {
-                on_each[crossing].push(node);
+                let crossed_by_nothing_drawn = vertex.is_none()
+                    && crossings.len() > 1
+                    && crossings
+                        .iter()
+                        .all(|&other| other == crossing || !self.crossings[other].reaches_the_face);
+                if crossed_by_nothing_drawn {
+                    set_aside[crossing].push(node);
+                } else {
+                    on_each[crossing].push(node);
+                }
+            }
+        }
+        for (on_it, set_aside) in on_each.iter_mut().zip(set_aside) {
+            if on_it.is_empty() {
+                *on_it = set_aside;
             }
         }
         on_each
@@ -2424,8 +2464,8 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// The node's own box narrowed by one checked step, where the node is a
-    /// meet of three planes, or of two planes and a ball, a pipe or a cone
+    /// The node's own box narrowed, where the node is a meet of three planes,
+    /// or of two planes and a ball, a pipe or a cone
     /// ([`MeetOfThree::boxed_tight`]), and its own box for every other node.
     ///
     /// **Worked out when the order asks, and not kept on the node.** Kept on
@@ -3297,6 +3337,17 @@ impl<'f> Arrangement<'f> {
     /// box narrows to one point. Read off that box the determinant straddles
     /// nothing; the touch is proved by [`a_plane_rests_along_a_cone`], so it is
     /// read as nothing and the order of the two is left to how they bend.
+    ///
+    /// **Where two of the three are planes and the third is curved**, a
+    /// determinant the box cannot settle is read off which way the planes' line
+    /// runs through the curved one at the node
+    /// ([`the_turn_where_two_planes_cross_a_quadric`]), which two exact signs
+    /// prove without working out a gradient at all. **Only at a node that
+    /// stands for one meet**: one a tolerant policy folded two meets into
+    /// keeps one of their boxes, and the sign at that one is not the fold's.
+    /// The block edge grazing a ball of `a_block_edge_grazing_a_ball.rs`
+    /// folds its two meets `2⁻⁵¹` apart under a tolerant policy, and read off
+    /// one of them the turn there gave `CannotTellTheCellsOfAFaceApart`.
     fn turns_anticlockwise(
         &self,
         node: usize,
@@ -3317,13 +3368,22 @@ impl<'f> Arrangement<'f> {
         if self.has_a_way_of_its_own(first.crossing) || self.has_a_way_of_its_own(second.crossing) {
             return self.turn_between_two_ways_out(node, first, second, policy, log);
         }
-        let at = self.nodes[node].point;
         let [first_partner, second_partner] =
             [first, second].map(|way| self.crossings[way.crossing].partner);
+        let at = self.nodes[node].point;
         let mine = gradient_at(&self.surface, at);
         let one = gradient_at(&first_partner, at);
         let other = gradient_at(&second_partner, at);
-        let turn = orient3d_of_points(mine, one, other, PredicatePoint::from([0.0; 3]));
+        let mut turn = orient3d_of_points(mine, one, other, PredicatePoint::from([0.0; 3]));
+        if matches!(turn, Decision::Undecidable { .. })
+            && self.nodes[node].also.is_empty()
+            && let Some(proved) = the_turn_where_two_planes_cross_a_quadric(
+                [&self.surface, &first_partner, &second_partner],
+                at,
+            )
+        {
+            turn = proved;
+        }
         if matches!(turn, Decision::Undecidable { .. })
             && a_plane_rests_along_a_cone(&first_partner, &second_partner)
         {
@@ -5566,6 +5626,51 @@ fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
         }
         other => panic!("a surface whose gradient nothing here knows: {other:?}"),
     }
+}
+
+/// The sign of `det(∇S, ∇Q₁, ∇Q₂)` at `at` for three surfaces two of which are
+/// planes and one a ball, a pipe or a cone, proved from which way the line the
+/// two planes cross in runs through the curved one there
+/// ([`MeetOfThree::which_way_a_line_runs_through_a_quadric`]), or `None`.
+///
+/// **The determinant is that sign, up to which row the curved one is in.**
+/// With `a` and `b` the planes' normals in the order their rows come and `g`
+/// the curved surface's gradient, `det(g, a, b) = det(a, b, g) = g · (a × b)`
+/// and `det(a, g, b) = −g · (a × b)`. [`gradient_at`] is half the gradient of
+/// the expression that function reads, for a ball, a pipe and a cone alike,
+/// and half is a factor above nothing.
+///
+/// A block leaned along a cone's ruling and turned `1` has side edges that meet
+/// the cone `2.26e16` out at a graze. The turn there between the edge and the
+/// ellipse the block's bottom cuts is a few units, out of terms near `1e16`:
+/// over the corner's box it straddles nothing by `104`, and over a box an ulp
+/// wide by `17` (§406.3).
+///
+/// **Only on a flat face, with the curved surface a partner.** On a curved
+/// face it decides the turn §317 found undecided at the ball of
+/// `a_block_edge_grazing_a_ball_at_cx_16.rs`, and every certified fuse there
+/// then refuses one step on, on the order of the two places along the block's
+/// edge, whose boxes touch at `16`. That file pins the turn, and it is not
+/// this lane's to move (§406.5).
+fn the_turn_where_two_planes_cross_a_quadric(
+    rows: [&Surface; 3],
+    at: PredicatePoint,
+) -> Option<Decision> {
+    let curved = rows.iter().position(|surface| {
+        matches!(
+            surface,
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+        )
+    })?;
+    if curved == 0 {
+        return None;
+    }
+    let mut planes = rows.iter().filter_map(|surface| surface.as_plane());
+    let (Some(a), Some(b), None) = (planes.next(), planes.next(), planes.next()) else {
+        return None;
+    };
+    let way = MeetOfThree::which_way_a_line_runs_through_a_quadric([a, b], rows[curved], at)?;
+    Some(if curved == 1 { the_other_way(way) } else { way })
 }
 
 /// How fast a surface's gradient turns along a direction: `d·H·d` for the very
