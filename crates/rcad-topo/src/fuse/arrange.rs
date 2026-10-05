@@ -2655,7 +2655,7 @@ impl<'f> Arrangement<'f> {
                 .filter(|surface| **surface != self.surface && **surface != partner)
                 .any(|quadric| {
                     MeetOfThree::the_line_is_off_the_quadric_at(
-                        [&flat, &across],
+                        [flat, across],
                         quadric,
                         axis,
                         shared,
