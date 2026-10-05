@@ -1,5 +1,5 @@
-//! A ball in two faces on its one sphere, fused again with a cube (row Q903,
-//! `docs/decisions.md` §220.1, §400.5).
+//! A ball in two faces on its one sphere, fused again with a cube (rows Q903,
+//! Q1024, `docs/decisions.md` §220.1, §400.5).
 //!
 //! Three solids here carry such a ball. One is §220.1's: a ball of radius 5
 //! split down its polar axis into two lunes, built through `SolidBuilder`, the
@@ -22,43 +22,44 @@
 //! `(1, 0.5, 1)`, half a unit clear of the block: since §400 that ball is not
 //! cut at all, and comes back whole.
 //!
-//! # Where a point has to be placed against the ball, they do not
+//! # Where a point has to be placed against the ball, they answer too
 //!
-//! Neither ball in two faces can say whether a point is inside it.
-//! `classify_point` comes back `CannotFollowAFacesTrimming` at the ball's own
-//! centre, because `face_holds_the_point` takes the face across the rim, on the
-//! same sphere, for what trims each face, and refuses
-//! `AFaceMissesPartOfWhereItsSurfacesCross` at every point asked: row Q977's bar
-//! in two bands, on a ball. So a fuse that has to place a piece against the ball
-//! is refused `AFaceTrimmedByACurveThisCannotFollow`, naming a face of the ball:
-//! a point inside the piece was found, and the ray that was to place it met
-//! that face. The union of the touching draw is refused fused again even with a
-//! far cube, because its block's face `x = 0` still touches the ball and has to
-//! be placed against it; and the lunes are refused with a cube across their top.
+//! A fuse that has to place a piece against the ball asks `holds.rs` whether a
+//! face of the ball holds a point. The union of the touching draw asks it fused
+//! again even with a far cube, because its block's face `x = 0` still touches
+//! the ball and has to be placed against it; the lunes and the capped half ball
+//! ask it with a cube of side 12 across their top. All of those are refused on
+//! row Q1024's base and answer the closed form here.
 //!
-//! Until row Q882's change landed (row Q1008), both were `Undecidable` at "a
-//! point in a piece that every solid could place", which a caller reads as
-//! "loosen the policy" and no policy moves (`docs/decisions.md` §35.6). Every
-//! one of those answers exists, so under §16.10 it is a gap, and it is pinned
-//! here by name, and by the face it names, until `holds.rs` reads the rim by the
-//! plane its run names, as the mesher and `validate` already do.
+//! What trims each face is the rim's plane, which the rim's run names (row
+//! Q977): the face across the rim is on the same sphere and trims nothing. But
+//! each face's only corner is on that plane, so no corner says which side of it
+//! the face keeps, and the face was refused
+//! `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`. Since row Q1024 the side is
+//! read off the way the face's wire walks the rim, by the closed-edge rule the
+//! fuse writes a rim with and `validate` reads one back with — which is the
+//! side the mesher draws the face on. Before Q977 the refusal was
+//! `AFaceMissesPartOfWhereItsSurfacesCross`, and before row Q882 (row Q1008)
+//! the fuse called it `Undecidable` at "a point in a piece that every solid
+//! could place", which no policy moves (`docs/decisions.md` §35.6).
 
 use core::f64::consts::PI;
 
 use rcad_geom::{
     Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{
-    Containment, DraftStep, Error, FaceKey, FaceView, Model, Rule, SolidBuilder, SolidKey,
-};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{Containment, DraftStep, FaceKey, Model, OnAFace, Rule, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 5.0;
 const LUNES: f64 = 4.0 * PI * RADIUS * RADIUS * RADIUS / 3.0;
 const SMALL_BALL: f64 = 4.0 * PI / 3.0;
 const BLOCK: f64 = 8.0;
 const CUBE: f64 = 8.0;
-const RULES: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
+/// The cube of side 12 from `(-6, -6, 3)`.
+const BIG_CUBE: f64 = 1728.0;
+/// The part of the ball of `RADIUS` past `z = 3`: `πh²(3r − h)/3` with `h = 2`.
+const CAP: f64 = 52.0 * PI / 3.0;
 
 /// §220.1's lunes beside a cube of side 2 at `(20, 20, 20)`: under every rule,
 /// with the lunes as the argument and as the tool, and with their rim walked
@@ -145,30 +146,22 @@ fn a_ball_clear_of_a_block_united_and_fused_again_with_a_far_cube_comes_back_as_
 
 /// The same draw with the ball moved to touch the block's face `x = 0`. The
 /// union keeps the ball in two faces either side of `y = 0`, and fused again
-/// with a far cube every rule both ways round is refused where the block's face
-/// `x = 0` is placed against the ball, naming the ball's face below `y = 0`:
-/// the larger of the two, which holds `(0, -0.5, 1)`, where the ball touches
-/// the block.
-///
-/// The answers are the block, the ball and the cube as they stand under a
-/// union, nothing under an intersection, the block and the ball less the cube,
-/// and the cube less them.
+/// with a far cube every rule both ways round is the block, the ball and the
+/// cube as they stand under a union, nothing under an intersection, the block
+/// and the ball less the cube, and the cube less them. Where the block's face
+/// `x = 0` is placed against the ball, it is placed against both faces of it.
 #[test]
-fn a_ball_touching_a_block_united_and_fused_again_with_a_far_cube_is_refused_naming_the_face_that_touches()
- {
-    let (model, first) = a_block_and_a_ball_united([1.0, -0.5, 1.0], false);
-    assert_the_solids_measure(&model, &first, &[BLOCK, SMALL_BALL], "the union");
-    let [_, ball] = first[..] else {
-        panic!("the block and the ball apart, got {first:?}");
-    };
-    assert_eq!(
-        faces_on_a_ball(&model, &[ball]),
-        2,
-        "the union keeps the ball in two faces"
-    );
-    for rule in RULES {
-        for union_first in [true, false] {
-            let what = format!("{rule:?}, union first {union_first}");
+fn a_ball_touching_a_block_united_and_fused_again_with_a_far_cube_comes_back_as_it_stands() {
+    for ball_first in [true, false] {
+        let (model, first) = a_block_and_a_ball_united([1.0, -0.5, 1.0], ball_first);
+        assert_the_solids_measure(&model, &first, &[BLOCK, SMALL_BALL], "the union");
+        assert_eq!(
+            faces_on_a_ball(&model, &first),
+            2,
+            "ball first {ball_first}: the union keeps the ball in two faces"
+        );
+        for (rule, union_first, truths) in every_fuse_of_two_apart(&[BLOCK, SMALL_BALL], &[CUBE]) {
+            let what = format!("ball first {ball_first}, {rule:?}, union first {union_first}");
             let mut model = model.clone();
             let cube = a_cube(&mut model, 2.0, [20.0, 20.0, 20.0]);
             let (arguments, tools) = if union_first {
@@ -176,90 +169,114 @@ fn a_ball_touching_a_block_united_and_fused_again_with_a_far_cube_is_refused_nam
             } else {
                 (vec![cube], first.clone())
             };
-            let outcome = model.fuse(
-                &arguments,
-                &tools,
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-            let face = the_face_it_names(&model, ball, outcome, &what);
-            let middle = the_middle_of(&model, ball, face.key());
-            assert!(
-                middle.y() < 0.0,
-                "{what}: names the ball's face above y = 0, its middle at {middle:?}"
-            );
+            let answer = fused(&mut model, &arguments, &tools, rule, &what);
+            assert_the_solids_measure(&model, &answer, &truths, &what);
         }
     }
 }
 
 /// The lunes with a cube of side 12 across their top, from `(-6, -6, 3)`, which
 /// takes the cap past `z = 3` off both of them and reaches the ball nowhere
-/// else. Every rule both ways round, with the rim walked either way, is refused
-/// where a piece is placed against the lunes, naming the lune that walks the
-/// rim `way`: the one on `x ≥ 0` when that is `Forward`, and the one on `x ≤ 0`
-/// when it is `Reversed`.
+/// else. Every rule both ways round, with the rim walked either way, is the
+/// closed form.
 ///
 /// The cap is `πh²(3r − h)/3` with `h = 2`, `52π/3`. The answers are the
 /// lunes and the cube less the cap, `448π/3 + 1728`; the cap; the lunes less it,
 /// `448π/3`; and the cube less it, `1728 − 52π/3`.
 #[test]
-fn two_lunes_with_a_cube_across_their_top_are_refused_naming_the_lune_that_walks_the_rim_their_way()
-{
+fn two_lunes_with_a_cube_across_their_top_lose_the_cap_above_z_3() {
     for way in [Orientation::Forward, Orientation::Reversed] {
-        for rule in RULES {
-            for lunes_first in [true, false] {
-                let what = format!("{rule:?}, rim walked {way:?}, lunes first {lunes_first}");
-                let (mut model, lunes) = two_lunes(way);
-                let cube = a_cube(&mut model, 12.0, [-6.0, -6.0, 3.0]);
-                let (arguments, tools) = if lunes_first {
-                    ([lunes], [cube])
-                } else {
-                    ([cube], [lunes])
-                };
-                let outcome = model.fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                let face = the_face_it_names(&model, lunes, outcome, &what);
-                let walks: Vec<_> = face
-                    .outer_wire()
-                    .coedges()
-                    .map(|coedge| coedge.orientation_on_its_edge())
-                    .collect();
-                assert_eq!(walks, [way], "{what}: names the lune that walks the rim");
-                let middle = the_middle_of(&model, lunes, face.key());
-                assert_eq!(
-                    middle.x() > 0.0,
-                    way == Orientation::Forward,
-                    "{what}: names the lune whose middle is at {middle:?}"
-                );
+        for (rule, lunes_first, truths) in every_fuse_of_two_crossing(LUNES, BIG_CUBE, CAP) {
+            let what = format!("{rule:?}, rim walked {way:?}, lunes first {lunes_first}");
+            let (mut model, lunes) = two_lunes(way);
+            let cube = a_cube(&mut model, 12.0, [-6.0, -6.0, 3.0]);
+            let (arguments, tools) = if lunes_first {
+                ([lunes], [cube])
+            } else {
+                ([cube], [lunes])
+            };
+            let answer = fused(&mut model, &arguments, &tools, rule, &what);
+            assert_the_solids_measure(&model, &answer, &truths, &what);
+        }
+    }
+}
+
+/// Row Q374's half ball with the same cube across its top, in each of the
+/// eight spellings that build. The cube takes the same cap past `z = 3` off it,
+/// whichever of the two faces on the ball holds that part of the skin, so the
+/// answers are the half ball and the cube less the cap, `66π + 1728`; the cap,
+/// `52π/3`; the half ball less it, `66π`; and the cube less it,
+/// `1728 − 52π/3`.
+#[test]
+fn a_half_ball_capped_on_itself_with_a_cube_across_its_top_loses_the_cap_above_z_3() {
+    let plane =
+        Plane::from_point_and_normal(Point::new(0.0, 3.0, 4.0), Vector::new(0.0, -1.0, 7.0))
+            .expect("a plane");
+    for corner in [Point::new(0.0, 3.0, 4.0), Point::new(0.0, -4.0, 3.0)] {
+        for and in [plane, plane.reversed()] {
+            for hole_first in [false, true] {
+                for (rule, half_first, truths) in
+                    every_fuse_of_two_crossing(LUNES / 2.0, BIG_CUBE, CAP)
+                {
+                    let what = format!(
+                        "{rule:?}, corner {corner:?}, plane facing {:?}, hole first {hole_first}, \
+                         half ball first {half_first}",
+                        and.normal()
+                    );
+                    let (mut model, half) = a_half_ball_capped_on_itself(corner, and, hole_first);
+                    let cube = a_cube(&mut model, 12.0, [-6.0, -6.0, 3.0]);
+                    let (arguments, tools) = if half_first {
+                        ([half], [cube])
+                    } else {
+                        ([cube], [half])
+                    };
+                    let answer = fused(&mut model, &arguments, &tools, rule, &what);
+                    assert_the_solids_measure(&model, &answer, &truths, &what);
+                }
             }
         }
     }
 }
 
-/// What stops both refusals above: a ball in two faces cannot say its own
-/// centre is inside it, though nothing about the point is close to anything.
+/// What both fuses above place a point by: a ball in two faces says its own
+/// centre is inside it and a point past its top is not, and each face holds
+/// the points of the sphere on the side of the rim its wire keeps and none on
+/// the other.
+///
+/// The lune that walks the rim `Forward` is the one on `x ≥ 0`, which is where
+/// the mesher draws it; the ball the union wrote holds its point of touching,
+/// `(0, -0.5, 1)`, in its face below `y = 0`, the larger of the two.
 #[test]
-fn a_ball_in_two_faces_cannot_say_its_own_centre_is_inside() {
+fn a_ball_in_two_faces_says_its_own_centre_is_inside() {
     for way in [Orientation::Forward, Orientation::Reversed] {
+        let what = format!("the lunes, rim walked {way:?}");
         let (model, lunes) = two_lunes(way);
-        let found = model
-            .solid(lunes)
-            .expect("this model made the key")
-            .classify_point(
-                Point::origin(),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-        assert!(
-            matches!(found, Containment::CannotFollowAFacesTrimming { .. }),
-            "the lunes, rim walked {way:?}: {found:?}"
+        assert_it_places(
+            &model,
+            lunes,
+            Point::origin(),
+            Point::new(0.0, 0.0, 6.0),
+            &what,
         );
+        for face in model.solid(lunes).expect("this model made the key").faces() {
+            let walks: Vec<_> = face
+                .outer_wire()
+                .coedges()
+                .map(|coedge| coedge.orientation_on_its_edge())
+                .collect();
+            let east = walks == [Orientation::Forward];
+            assert_eq!(
+                (the_middle_of(&model, lunes, face.key()).x() > 0.0),
+                east,
+                "{what}: the mesher draws the lune walking the rim {walks:?}"
+            );
+            let [held, not_held] = if east {
+                [Point::new(RADIUS, 0.0, 0.0), Point::new(-RADIUS, 0.0, 0.0)]
+            } else {
+                [Point::new(-RADIUS, 0.0, 0.0), Point::new(RADIUS, 0.0, 0.0)]
+            };
+            assert_it_holds(&model, lunes, face.key(), held, not_held, &what);
+        }
     }
 
     let (model, first) = a_block_and_a_ball_united([1.0, -0.5, 1.0], false);
@@ -271,18 +288,64 @@ fn a_ball_in_two_faces_cannot_say_its_own_centre_is_inside() {
         2,
         "the second solid is the ball"
     );
-    let found = model
-        .solid(ball)
-        .expect("this model made the key")
-        .classify_point(
-            Point::new(1.0, -0.5, 1.0),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-    assert!(
-        matches!(found, Containment::CannotFollowAFacesTrimming { .. }),
-        "the ball the union wrote: {found:?}"
+    let what = "the ball the union wrote";
+    assert_it_places(
+        &model,
+        ball,
+        Point::new(1.0, -0.5, 1.0),
+        Point::new(1.0, -0.5, 2.5),
+        what,
     );
+    let (below, above) = (Point::new(0.0, -0.5, 1.0), Point::new(1.0, 0.5, 1.0));
+    for face in model.solid(ball).expect("this model made the key").faces() {
+        let [held, not_held] = if the_middle_of(&model, ball, face.key()).y() < 0.0 {
+            [below, above]
+        } else {
+            [above, below]
+        };
+        assert_it_holds(&model, ball, face.key(), held, not_held, what);
+    }
+}
+
+/// `solid` puts `inside` inside it and `outside` outside it.
+fn assert_it_places(model: &Model, solid: SolidKey, inside: Point, outside: Point, what: &str) {
+    for (point, truth) in [
+        (inside, Containment::Inside),
+        (outside, Containment::Outside),
+    ] {
+        let found = model
+            .solid(solid)
+            .expect("this model made the key")
+            .classify_point(point, &Policy::certified(), &mut ProvenanceLog::new());
+        assert_eq!(found, truth, "{what}: at {point:?}");
+    }
+}
+
+/// `face` of `solid` holds `held` and does not hold `not_held`, both on its
+/// surface.
+fn assert_it_holds(
+    model: &Model,
+    solid: SolidKey,
+    face: FaceKey,
+    held: Point,
+    not_held: Point,
+    what: &str,
+) {
+    for (point, truth) in [(held, OnAFace::Held), (not_held, OnAFace::NotHeld)] {
+        let found = model
+            .solid(solid)
+            .expect("this model made the key")
+            .face_holds_the_point(
+                face,
+                PredicatePoint::from(point.coordinates()),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+        assert!(
+            matches!(found, Ok(on) if on == truth),
+            "{what}: {face:?} at {point:?}: {found:?}"
+        );
+    }
 }
 
 /// Every rule, with `one` as the argument and as the tool, and the volumes of
@@ -298,6 +361,21 @@ fn every_fuse_of_two_apart(one: &[f64], other: &[f64]) -> [(Rule, bool, Vec<f64>
         (Rule::Intersection, false, Vec::new()),
         (Rule::Difference, true, one.to_vec()),
         (Rule::Difference, false, other.to_vec()),
+    ]
+}
+
+/// Every rule, with a solid of volume `one` as the argument and as the tool,
+/// and the volumes of the one solid each answer is when it shares `both` with
+/// one of volume `other`.
+fn every_fuse_of_two_crossing(one: f64, other: f64, both: f64) -> [(Rule, bool, Vec<f64>); 6] {
+    let union = one + other - both;
+    [
+        (Rule::Union, true, vec![union]),
+        (Rule::Union, false, vec![union]),
+        (Rule::Intersection, true, vec![both]),
+        (Rule::Intersection, false, vec![both]),
+        (Rule::Difference, true, vec![one - both]),
+        (Rule::Difference, false, vec![other - both]),
     ]
 }
 
@@ -532,26 +610,6 @@ fn assert_the_solids_measure(model: &Model, answer: &[SolidKey], truths: &[f64],
             });
         left.remove(at);
     }
-}
-
-/// The face of `solid` that `outcome` names, refused for a face whose trimming
-/// nothing here follows. The key is the caller's, a face of a solid it handed
-/// in, and not one of the fuse's own working copy.
-fn the_face_it_names<'m, T: core::fmt::Debug>(
-    model: &'m Model,
-    solid: SolidKey,
-    outcome: Result<T, Error>,
-    what: &str,
-) -> FaceView<'m> {
-    let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = outcome else {
-        panic!("{what}: refused for a face nobody follows, and came back {outcome:?}");
-    };
-    model
-        .solid(solid)
-        .expect("this model made the key")
-        .faces()
-        .find(|each| each.key() == face)
-        .unwrap_or_else(|| panic!("{what}: names {face:?}, which is not a face of {solid:?}"))
 }
 
 /// The middle of the points the mesher draws `face` of `solid` through: enough
