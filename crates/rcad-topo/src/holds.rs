@@ -522,6 +522,15 @@ fn the_picker_naming_the_circle_through(
 /// ask whether its point is on the face, so it can be handed one; a refusal
 /// here would be a check for that made in this one place and nowhere else.
 ///
+/// Q418 ran this with the `Zero` arm made a panic, over the whole workspace
+/// and 159 points on and beside a bend's axis in
+/// `a_bends_cap_holds_nothing_on_or_beside_the_rings_axis` and
+/// `a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it`
+/// (`a_bends_cap_holds_one_of_the_two_disks.rs`): none of the 159 reached it.
+/// The two workspace tests that did reach it hand it `(0, 4, 0)`, which is on
+/// the plane *between* the two disks and off the cap's plane, so they test
+/// the bullet above this one, not this one.
+///
 /// # Errors
 ///
 /// [`Error::Undecidable`], naming the half-space, when it cannot say.
