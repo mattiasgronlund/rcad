@@ -1008,6 +1008,7 @@ impl<'f> Arrangement<'f> {
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
         arrangement.merge_points_that_are_one_point(policy, log)?;
+        arrangement.fold_the_straight_cuts_along_one_line();
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
         arrangement.walk_the_cycles(policy, log)?;
         arrangement.count_the_windings_inside_each_lump();
@@ -2672,6 +2673,106 @@ impl<'f> Arrangement<'f> {
         })
     }
 
+    /// Fold each cut that runs straight along a straight crossing drawn before
+    /// it into that crossing, so that one line is one crossing.
+    ///
+    /// [`Arrangement::crossing_like`] folds two partners that cut the face in
+    /// one curve by asking about the partners alone: two planes through one
+    /// line, or one surface written twice. **A plane and a pipe it never
+    /// folds**, and the two can cut one face in one line. The plane `x = 2`
+    /// rests on a bar of radius two along `(2, 0, z)`, and the plane `y = 0`
+    /// cuts the bar's skin along that same line; on the plane `y = 0`, the
+    /// edge with `x = 2` and the bar's line `x = 2` are one line too. Left as
+    /// two crossings, each node on the line has two ways out leaving it the
+    /// same way and bending alike, which no turn parts, and
+    /// [`Arrangement::sorted_anticlockwise`] refused the block sitting on a
+    /// bar's cap with [`Error::TwoCurvesTouchWithoutCrossing`] for it.
+    ///
+    /// **Two straight lines through one point are one line when their ways out
+    /// of it are parallel**, so one shared node is the whole of the proof.
+    /// Proved and never settled by the policy: a tolerant policy that read two
+    /// lines a hair apart in angle as parallel would draw one where the face
+    /// has two.
+    ///
+    /// **After the nodes that are one point are one node, and not before.**
+    /// Where the line ends on a corner of the face, the corner already lies on
+    /// both, but a quarter turn round the bar from its seam the line ends on
+    /// the cap circle at two meets, one per crossing, and they become one node
+    /// only in [`Arrangement::merge_points_that_are_one_point`].
+    ///
+    /// Only a cut goes, and into a crossing drawn before it, so the crossing
+    /// of a boundary edge always stays: every one of them is drawn before the
+    /// first cut ([`Arrangement::draw_the_crossings`]). The cut's nodes move
+    /// onto the crossing it is folded into, and a cut surface that turned into
+    /// it now turns into that one.
+    fn fold_the_straight_cuts_along_one_line(&mut self) {
+        for cut in 0..self.crossings.len() {
+            if !self.crossings[cut].reaches_the_face
+                || !self.crossings[cut].order.runs_straight()
+                || self
+                    .crossing_of_edge
+                    .iter()
+                    .flatten()
+                    .any(|&along| along == cut)
+            {
+                continue;
+            }
+            let Some(kept) = (0..cut).find(|&earlier| self.one_straight_line(earlier, cut)) else {
+                continue;
+            };
+            for node in &mut self.nodes {
+                if let Some(at) = node.crossings.iter().position(|&through| through == cut) {
+                    node.crossings.remove(at);
+                    if let Err(place) = node.crossings.binary_search(&kept) {
+                        node.crossings.insert(place, kept);
+                    }
+                }
+            }
+            for turned_into in self.cut_crossings.iter_mut().flatten() {
+                if *turned_into == cut {
+                    *turned_into = kept;
+                }
+            }
+            self.crossings[kept].cuts = true;
+            self.crossings[cut].reaches_the_face = false;
+        }
+    }
+
+    /// Whether two crossings are straight and share a node whose two ways out
+    /// are proved to lie along one line: their cross product exactly nothing,
+    /// and their dot product not.
+    ///
+    /// The dot product is what tells a line from a crossing with no direction
+    /// at the node, whose way out is the zero vector and is parallel to
+    /// everything.
+    fn one_straight_line(&self, earlier: usize, later: usize) -> bool {
+        if !self.crossings[earlier].reaches_the_face
+            || !self.crossings[earlier].order.runs_straight()
+        {
+            return false;
+        }
+        (0..self.nodes.len()).any(|node| {
+            let through = &self.nodes[node].crossings;
+            if !(through.contains(&earlier) && through.contains(&later)) {
+                return false;
+            }
+            let [one, other] = [earlier, later].map(|crossing| {
+                self.way_out_of(
+                    node,
+                    Direction {
+                        crossing,
+                        forward: true,
+                    },
+                )
+            });
+            let along = dot_of(one, other).sign();
+            cross_of_intervals(one, other)
+                .iter()
+                .all(|component| component.sign() == Decision::Zero)
+                && (along == Decision::Pos || along == Decision::Neg)
+        })
+    }
+
     /// Cut every crossing into the arcs between neighbouring nodes on it, and
     /// throw away the ones that carry nothing.
     ///
@@ -3322,11 +3423,14 @@ impl<'f> Arrangement<'f> {
                         )?;
                         // Two curves that share their whole tangent *and* bend
                         // the same way. Telling them apart takes a derivative
-                        // above the ones taken here. A `3 × 4` block corner on a
-                        // bar of radius five reaches it: the block's two walls
-                        // cut the bar's along the one ruling `(3, 4, z)`, so the
-                        // two arcs are the same line and no derivative ever
-                        // parts them (§38.2).
+                        // above the ones taken here. Two straight lines that are
+                        // one line no derivative ever parts, and those are one
+                        // crossing by now
+                        // (`Arrangement::fold_the_straight_cuts_along_one_line`):
+                        // a `3 × 4` block corner on a bar of radius five, whose
+                        // two walls cut the bar's along the one ruling
+                        // `(3, 4, z)`, reached this until queue row Q930
+                        // (§38.2, §39.4).
                         if turn == Decision::Zero {
                             return Err(Error::TwoCurvesTouchWithoutCrossing {
                                 face: self.face.keys[0],
@@ -4834,7 +4938,9 @@ impl<'f> Arrangement<'f> {
     ///
     /// **A refusal and not an assert, because the input decides it and not this
     /// crate.** Two crossings that are the same line are folded into one before
-    /// the walk ([`Arrangement::crossing_like`]), so two straight sides between
+    /// the walk ([`Arrangement::crossing_like`], and
+    /// [`Arrangement::fold_the_straight_cuts_along_one_line`] where they share
+    /// a node), so two straight sides between
     /// one pair of nodes means two lines that are *not* the same and yet share
     /// both ends — which is what a solid whose walls carry each other's planes
     /// bakes into, and what the corner-folding does to two lines closer together
