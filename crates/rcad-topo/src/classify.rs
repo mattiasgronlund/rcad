@@ -50,7 +50,7 @@ use rcad_predicates::{
 };
 
 use crate::validate::side_of_surface;
-use crate::{Error, FaceKey, FaceView, OnAFace, SolidView};
+use crate::{Error, FaceKey, FaceView, OnAFace, SolidView, WireView};
 
 /// Where a point sits relative to a solid.
 ///
@@ -406,9 +406,10 @@ impl SolidView<'_> {
     /// A face is kept clear of the box by the same description the ray counts
     /// it by. A flat face with straight sides is its fanned triangles, and the
     /// fan covers the face, so the box has to miss every one of them
-    /// ([`misses_the_triangle`]). Every other face is the part of its surface
-    /// it holds, so the box has to be off the surface, or the face has to hold
-    /// none of the box.
+    /// ([`misses_the_triangle`]), or the ones it meets have to add up to
+    /// nothing there ([`SolidView::its_fan_adds_up_to_nothing_over`]). Every
+    /// other face is the part of its surface it holds, so the box has to be off
+    /// the surface, or the face has to hold none of the box.
     fn no_face_meets(
         self,
         point: PredicatePoint,
@@ -421,7 +422,7 @@ impl SolidView<'_> {
                 face.for_each_triangle(|corners| {
                     clear &= misses_the_triangle(corners, point, policy, log);
                 });
-                return clear;
+                return clear || self.its_fan_adds_up_to_nothing_over(face, point, policy, log);
             }
             match side_of_surface(&face.surface(), point) {
                 Decision::Pos | Decision::Neg => true,
@@ -431,6 +432,56 @@ impl SolidView<'_> {
                 ),
             }
         })
+    }
+
+    /// Whether the triangles of `face`'s fan that meet `point`'s box add up to
+    /// nothing anywhere in it, for a flat face whose every corner is on its
+    /// stored plane.
+    ///
+    /// **The fan of a face that is not convex reaches outside it.** Every wire
+    /// is fanned from one corner ([`FaceView::for_each_triangle`]), so an
+    /// L-shaped face fanned from the end of one arm puts triangles over the
+    /// notch between the arms, and they come in pairs wound opposite ways. The
+    /// ray counts each with its sign, so a ray through the notch is counted in
+    /// and out again; a box in the notch meets those triangles and still meets
+    /// nothing the ray counts, and no direction keeps it apart from a triangle
+    /// it really is in.
+    ///
+    /// **Where every corner is on the stored plane, what the fan adds up to at a
+    /// place on the plane is the winding of the wires round it**, the same for
+    /// whichever corner it is fanned from, and that winding is what
+    /// [`SolidView::what_this_face_holds`] counts. So where it says
+    /// [`OnAFace::NotHeld`] of the box — a sign decided about every point of
+    /// it, §323.3's contract — the fan adds up to nothing at every place where
+    /// the box meets the plane, and a segment inside the box crosses the face
+    /// as often one way as the other. Every corner is asked by the plane's own
+    /// predicate, which is exact for a stored corner.
+    ///
+    /// **A face whose corners are off its stored plane is not answered.** A
+    /// turn leaves them a rounding off it (§75.6), and then the two triangles
+    /// of a pair are not in one plane: between them is a sliver a rounding
+    /// thick that one of them counts and the other does not, and a box that
+    /// straddles the plane takes it in.
+    fn its_fan_adds_up_to_nothing_over(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let flat = face
+            .surface()
+            .as_plane()
+            .copied()
+            .expect("only a flat face is fanned");
+        let every_corner_on_the_plane = face.wires().flat_map(WireView::points).all(|corner| {
+            flat.side_of_point(PredicatePoint::from(corner.coordinates())) == Decision::Zero
+        });
+        every_corner_on_the_plane
+            && matches!(
+                self.what_this_face_holds(face, point, policy, log),
+                Ok(OnAFace::NotHeld)
+            )
     }
 
     /// One ray's tally, or which face's trimming stopped it being counted.
@@ -902,12 +953,19 @@ fn as_exact_as_it_is(boxed: [Interval; 3]) -> PredicatePoint {
 /// the contract §323.3 rests on. It goes first because it is exact and cheap,
 /// and a box it settles leaves nothing in `log`.
 ///
-/// Two boxes off the face are still refused. One sits inside a triangle's own
-/// bounding box and off the triangle, which only a face not lined up with the
-/// axes has room for; the axes across the triangle's sides would settle it,
-/// and they are not tried. The other is covered by a triangle of the fan and
-/// not by the face, because the fan of a face that is not convex reaches
-/// outside it and no axis settles that. No test builds either yet.
+/// **A box inside a triangle's own bounding box can still be off it**, where
+/// the triangle's sides are not lined up with the axes: beside the top of a
+/// block turned about the upright, in a corner of the square round it. So the
+/// two are held up next against the nine directions square to a side of the
+/// triangle and to a coordinate axis ([`apart_across_a_side`]). With the three
+/// axes and the plane's own normal those are the thirteen directions along one
+/// of which a box and a triangle that do not touch are always apart. The nine
+/// here are rounded and their projections widened, so a box still refused
+/// touches the triangle or is within a rounding of touching it.
+///
+/// A box a triangle touches can still miss the face, where the face is not
+/// convex and its fan reaches outside it; that is the whole outline's
+/// question, and [`SolidView::its_fan_adds_up_to_nothing_over`] asks it.
 fn misses_the_triangle(
     [a, b, c]: [Point; 3],
     point: PredicatePoint,
@@ -921,10 +979,56 @@ fn misses_the_triangle(
             || corners.iter().all(|corner| corner[axis] > reach[axis].hi())
     };
     (0..3).any(apart_along)
+        || apart_across_a_side(corners, reach)
         || matches!(
             decide(a, b, c, point, policy, log),
             Decision::Pos | Decision::Neg
         )
+}
+
+/// Whether, along a direction square to a side of the triangle `corners` and
+/// to one coordinate axis, every corner is below every point of the box
+/// `reach`, or every corner above.
+///
+/// **The direction does not have to be the exact one, and is not.** Any vector
+/// `v` at all keeps the two apart when every corner's `v · x` is below the
+/// least `v · x` of the box: the triangle is the corners' convex hull, so each
+/// of its points is below that too, and a point in both would have to be
+/// below itself. So the side is a rounded `f64` difference and each direction
+/// is that side crossed with an axis, which is a swap and a sign; only the
+/// two projections have to hold for every point, and they are worked out in
+/// [`Interval`] arithmetic, which rounds every step outward. A direction whose
+/// projections overlap decides nothing and the next is asked; one with a part
+/// that is not finite is not a direction and is passed over.
+fn apart_across_a_side(corners: [[f64; 3]; 3], reach: [Interval; 3]) -> bool {
+    (0..3).any(|side| {
+        let [from, to] = [corners[side], corners[(side + 1) % 3]];
+        let [x, y, z]: [f64; 3] = core::array::from_fn(|axis| to[axis] - from[axis]);
+        [[0.0, z, -y], [-z, 0.0, x], [y, -x, 0.0]]
+            .into_iter()
+            .any(|across| apart_along_the_direction(across, corners, reach))
+    })
+}
+
+/// Whether the corners of a triangle all project below the box `reach` along
+/// `across`, or all above it, by projections that hold for every point.
+fn apart_along_the_direction(
+    across: [f64; 3],
+    corners: [[f64; 3]; 3],
+    reach: [Interval; 3],
+) -> bool {
+    if !across.iter().all(|part| part.is_finite()) {
+        return false;
+    }
+    let across = exactly(across);
+    let of_the_box = dot_enclosing(across, reach);
+    let of_the_corners = corners.map(|corner| dot_enclosing(across, exactly(corner)));
+    of_the_corners
+        .iter()
+        .all(|shadow| shadow.hi() < of_the_box.lo())
+        || of_the_corners
+            .iter()
+            .all(|shadow| shadow.lo() > of_the_box.hi())
 }
 
 /// What one triangle had to say about the ray.
@@ -1239,7 +1343,10 @@ pub(crate) fn decide(
 }
 
 /// A box on the plane of a block's side and off the side itself, against a
-/// solid that also has a torus face (`docs/decisions.md` §323.3).
+/// solid that also has a torus face (`docs/decisions.md` §323.3) — beside the
+/// sides of a block square to the axes, beside the top of a turned block where
+/// only the directions across a triangle's sides keep the two apart, and in the
+/// notch of an L, which triangles of its top's fan cover and the top does not.
 ///
 /// These were written here because no public call built such a solid: the
 /// solid is written the way a fuse writes an answer of two pieces that do not
@@ -1253,10 +1360,13 @@ mod a_box_beside_a_blocks_side {
         Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
         Surface, Torus, Vector,
     };
-    use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
     use smallvec::smallvec;
 
-    use crate::{Containment, DraftStep, Model, ProfileBuilder, SolidBuilder, SolidKey};
+    use crate::{
+        Containment, DraftStep, FaceView, Model, ProfileBuilder, SolidBuilder, SolidKey, SolidView,
+        WireView,
+    };
 
     /// Boxes on the planes of the block's sides, none on a side, and what
     /// every point of each is against the bend and the block together.
@@ -1286,6 +1396,184 @@ mod a_box_beside_a_blocks_side {
         }
         let on_the_top = a_box_round([4.0, -1.0, 0.0]);
         assert!(!block.no_face_meets(on_the_top, &policy, &mut ProvenanceLog::new()));
+    }
+
+    /// A box on the plane of the L's top, in the notch between its arms.
+    const IN_THE_NOTCH: [f64; 3] = [-7.75, -7.0, 1.0];
+
+    /// The block's top turned with it, its corners a rounding off its stored
+    /// plane, so that only the directions across a triangle's sides settle a
+    /// box beside it and the outline is not asked.
+    #[test]
+    fn a_box_off_a_turned_blocks_top_inside_a_triangles_bounds_meets_no_face() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_turned_block(&mut model);
+        let block = model.solid(block).expect("this model made the key");
+        assert!(
+            !every_corner_is_on_its_plane(the_turned_top(block)),
+            "the turn left every corner of the top on its plane"
+        );
+        let at = off_the_turned_top();
+        let mut bounds_round_it = 0;
+        for face in block.faces() {
+            face.for_each_triangle(|corners| {
+                let corners = corners.map(|corner| corner.coordinates());
+                let inside = (0..3).all(|axis| {
+                    let (low, high) = corners
+                        .iter()
+                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), corner| {
+                            (low.min(corner[axis]), high.max(corner[axis]))
+                        });
+                    (low..=high).contains(&at[axis])
+                });
+                bounds_round_it += usize::from(inside);
+            });
+        }
+        assert!(
+            bounds_round_it > 0,
+            "no triangle's bounding box holds the box, so the coordinate axes alone settle it"
+        );
+        let mut log = ProvenanceLog::new();
+        assert!(block.no_face_meets(a_box_round(at), &policy, &mut log));
+        assert!(log.is_empty(), "it was settled exactly: {log:?}");
+    }
+
+    #[test]
+    fn a_box_in_the_notch_of_an_l_meets_no_face() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let l = an_l_beside_the_bend(&mut model);
+        let l = model.solid(l).expect("this model made the key");
+        let mut covered = [0; 2];
+        for face in l.faces() {
+            face.for_each_triangle(|corners| {
+                if let Some(counter_clockwise) = which_way_it_covers(corners, IN_THE_NOTCH) {
+                    covered[usize::from(counter_clockwise)] += 1;
+                }
+            });
+        }
+        assert!(
+            covered[0] > 0 && covered[1] > 0,
+            "the top's fan should cover the notch both ways round: {covered:?}"
+        );
+        assert!(l.no_face_meets(
+            a_box_round(IN_THE_NOTCH),
+            &policy,
+            &mut ProvenanceLog::new()
+        ));
+        let on_an_arm = a_box_round([-9.0, -7.0, 1.0]);
+        assert!(!l.no_face_meets(on_an_arm, &policy, &mut ProvenanceLog::new()));
+    }
+
+    /// The L turned the way the block is leaves its top's corners a rounding
+    /// off its stored plane, and then the two triangles over the notch are not
+    /// in one plane. Every point of the box in the notch is still outside the
+    /// L, a quarter from the nearest wall, so the answer exists and this is a
+    /// gap: `its_fan_adds_up_to_nothing_over` does not answer for a fan that
+    /// is not flat.
+    #[test]
+    fn a_box_in_the_notch_of_a_turned_l_is_still_refused() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let l = an_l(&mut model, &the_turn());
+        let l = model.solid(l).expect("this model made the key");
+        assert!(
+            !every_corner_is_on_its_plane(the_turned_top(l)),
+            "the turn left every corner of the top on its plane"
+        );
+        let in_the_notch = the_turn().apply_to_point(Point::new(2.25, 3.0, 2.0));
+        let boxed = a_box_round(in_the_notch.coordinates());
+        assert!(!l.no_face_meets(boxed, &policy, &mut ProvenanceLog::new()));
+    }
+
+    #[test]
+    fn a_box_off_a_turned_blocks_top_is_answered_beside_a_bend() {
+        assert_outside_beside_a_bend(a_turned_block, off_the_turned_top());
+    }
+
+    #[test]
+    fn a_box_in_the_notch_of_an_l_is_answered_beside_a_bend() {
+        assert_outside_beside_a_bend(an_l_beside_the_bend, IN_THE_NOTCH);
+    }
+
+    /// That `at` is outside the bend and outside what `build` makes, each on
+    /// its own, and that a box round it is answered outside the two together.
+    fn assert_outside_beside_a_bend(build: impl FnOnce(&mut Model) -> SolidKey, at: [f64; 3]) {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bend = a_quarter_bend(&mut model);
+        let other = build(&mut model);
+        let both = both_in_one_solid(&mut model, bend, other);
+        let [both, bend, other] =
+            [both, bend, other].map(|key| model.solid(key).expect("this model made the key"));
+        for alone in [bend, other] {
+            let placed = alone.classify_point(Point::from(at), &policy, &mut ProvenanceLog::new());
+            assert_eq!(
+                placed,
+                Containment::Outside,
+                "{at:?} against one on its own"
+            );
+        }
+        let placed =
+            both.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
+        assert_eq!(placed, Containment::Outside, "{at:?}");
+    }
+
+    /// Where [`the_turn`] puts `(1, 2.25, 2)`: on the plane of the block's top
+    /// and a quarter off the top, beside the middle of one of its sides.
+    fn off_the_turned_top() -> [f64; 3] {
+        the_turn()
+            .apply_to_point(Point::new(1.0, 2.25, 2.0))
+            .coordinates()
+    }
+
+    /// The face of `solid` whose plane faces most nearly the way [`the_turn`]
+    /// turns straight up.
+    fn the_turned_top(solid: SolidView<'_>) -> FaceView<'_> {
+        let up = the_turn()
+            .apply_to_vector(Vector::new(0.0, 0.0, 1.0))
+            .components();
+        let facing_up = |face: &FaceView<'_>| {
+            let normal = face
+                .surface()
+                .as_plane()
+                .expect("every face here is flat")
+                .normal()
+                .components();
+            (0..3).map(|axis| normal[axis] * up[axis]).sum::<f64>()
+        };
+        solid
+            .faces()
+            .max_by(|one, other| facing_up(one).total_cmp(&facing_up(other)))
+            .expect("a solid with faces")
+    }
+
+    fn every_corner_is_on_its_plane(face: FaceView<'_>) -> bool {
+        let flat = *face.surface().as_plane().expect("a flat face");
+        face.wires().flat_map(WireView::points).all(|corner| {
+            flat.side_of_point(PredicatePoint::from(corner.coordinates())) == Decision::Zero
+        })
+    }
+
+    /// Whether the triangle `corners`, lying in the plane `z = at[2]`, covers
+    /// `at` strictly inside it: `Some(true)` wound counter-clockwise seen from
+    /// above, `Some(false)` clockwise. Small whole numbers and quarters, so
+    /// every product here is exact.
+    fn which_way_it_covers(corners: [Point; 3], at: [f64; 3]) -> Option<bool> {
+        let corners = corners.map(|corner| corner.coordinates());
+        if corners.iter().any(|corner| corner[2] != at[2]) {
+            return None;
+        }
+        let turn = |from: [f64; 3], to: [f64; 3], there: [f64; 3]| {
+            (to[0] - from[0]) * (there[1] - from[1]) - (to[1] - from[1]) * (there[0] - from[0])
+        };
+        let [a, b, c] = corners;
+        let whole = turn(a, b, c);
+        let inside = [turn(a, b, at), turn(b, c, at), turn(c, a, at)]
+            .iter()
+            .all(|part| part * whole > 0.0);
+        inside.then_some(whole > 0.0)
     }
 
     #[test]
@@ -1336,6 +1624,53 @@ mod a_box_beside_a_blocks_side {
                 &Isometry::translation(Vector::new(2.0, -3.0, -2.0)).expect("a finite shift"),
             )
             .expect("a block")
+    }
+
+    /// The cube `[0, 2]³` placed by [`the_turn`], so that no face of it is
+    /// lined up with the axes.
+    fn a_turned_block(model: &mut Model) -> SolidKey {
+        let square = ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a square");
+        model
+            .add_extrusion(&square, 2.0, &the_turn())
+            .expect("a turned block")
+    }
+
+    /// `0.7` about `(1, 2, 3)` through the origin, then out to `(−8, −8, 0)`:
+    /// what `[0, 2]³` turns into is then within four of that and well clear of
+    /// the bend.
+    fn the_turn() -> Isometry {
+        let slant = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+        Isometry::translation(Vector::new(-8.0, -8.0, 0.0))
+            .expect("a finite shift")
+            .compose(&Isometry::rotation(&slant, 0.7).expect("a turn"))
+    }
+
+    /// The L moved down one and out to `(−10, −10)`, well clear of the bend,
+    /// so that its top is on `z = 1` and its notch is `[−8, −6] × [−8, −6]`.
+    fn an_l_beside_the_bend(model: &mut Model) -> SolidKey {
+        let shift = Isometry::translation(Vector::new(-10.0, -10.0, -1.0)).expect("a finite shift");
+        an_l(model, &shift)
+    }
+
+    /// An L of arms two wide, `[0, 4] × [0, 2]` and `[0, 2] × [0, 4]`, two
+    /// tall, placed by `placement`. Its outline starts at the end of the first
+    /// arm, so the fan of its top reaches over the notch between the arms.
+    fn an_l(model: &mut Model, placement: &Isometry) -> SolidKey {
+        let outline = ProfileBuilder::new(vec![
+            [4.0, 0.0],
+            [4.0, 2.0],
+            [2.0, 2.0],
+            [2.0, 4.0],
+            [0.0, 4.0],
+            [0.0, 0.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("an L");
+        model
+            .add_extrusion(&outline, 2.0, placement)
+            .expect("an L-shaped block")
     }
 
     fn both_in_one_solid(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {

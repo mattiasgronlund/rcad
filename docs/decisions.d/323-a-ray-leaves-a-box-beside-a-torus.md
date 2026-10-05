@@ -84,8 +84,10 @@ point of it, and the box the caller handed over is inside the grown one.
 
 `no_face_meets` asks each face by the description the ray counts it by. A flat
 face with straight sides is its fanned triangles, so the box has to miss every
-one of them: apart from it along a coordinate axis, or off the plane through it
-by a decided `orient3d` (Q342, below). Every other face
+one of them: apart from it along a coordinate axis or across one of its sides,
+or off the plane through it by a decided `orient3d` (Q342, Q523, below) — or,
+where the fan of a face that is not convex reaches outside it, the face's
+outline has to say `NotHeld` of the box. Every other face
 is the part of its surface it holds, so either the surface's sign is decided
 over the box, or `what_this_face_holds` says `NotHeld` of the box.
 
@@ -108,11 +110,16 @@ against each coordinate axis, and corners all below the box's lower end, or
 all above its upper end, is a sign decided about the whole box with nothing
 rounded. `classify.rs`'s tests `a_box_beside_a_blocks_side` pin seven boxes on
 the planes of a block's sides, beside a quarter bend: on the base,
-`(6, 1, 0)` was `CannotFireARayAtAFacesSurface`. Two boxes off such a face are
-still refused and no test builds either: one inside a triangle's own bounding
-box and off it, which the axes across the triangle's sides would settle, and
-one that a fan triangle of a face that is not convex covers although the face
-does not.
+`(6, 1, 0)` was `CannotFireARayAtAFacesSurface`. Two more boxes off such a face
+are answered since row Q523, and the same tests pin both. A box inside a
+triangle's own bounding box and off it, on a turned block's top, is settled by
+the nine directions across the triangle's sides (`apart_across_a_side`). A box
+in the notch of an L, which a fan triangle covers though the face does not, is
+settled by the face's outline where every corner is on the stored plane
+(`its_fan_adds_up_to_nothing_over`). The same L turned about a slanted axis is
+still refused, since its corners are then a rounding off the plane, and
+`a_box_in_the_notch_of_a_turned_l_is_still_refused` pins it: every point of
+that box is outside the L, so it is a gap (§16.10).
 
 **No public call builds a solid that asks it yet**, and that is demonstrated,
 not argued: `tests/a_ray_from_beside_a_box.rs` pins the three ways there are.
