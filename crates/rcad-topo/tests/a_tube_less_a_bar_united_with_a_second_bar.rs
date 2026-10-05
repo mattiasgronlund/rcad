@@ -58,6 +58,7 @@ fn a_bar_a_unit_below_the_whole_tube_fuses_every_way() {
 fn a_bar_poking_a_tenth_out_of_a_wider_tubes_wall_fuses_every_way() {
     let lens = Shape {
         tube: 7.0,
+        hole: 1.0,
         bar: 3.6,
         apart: -3.5,
         bottom: 0.0,
@@ -66,10 +67,30 @@ fn a_bar_poking_a_tenth_out_of_a_wider_tubes_wall_fuses_every_way() {
     fuse_every_way(&lens, 2);
 }
 
-/// A tube of height 4 from `z = 0`, radius `tube` less radius 1, and a bar of
-/// radius `bar` standing at `(apart, 0)` from `bottom` to `top`.
+/// Q715's replay: a bigger tube, radius 29 less 13, with a bar of radius 20
+/// at `(21, 0)`, every rule both ways round, at the same three heights as the
+/// C above. Nothing pinned this before; Q714 ran it in a scratch test, since
+/// deleted (§365.2).
+#[test]
+fn a_bar_flush_with_a_bigger_tubes_caps_fuses_every_way() {
+    fuse_every_way(&Shape::the_bigger_tube(0.0, 4.0), 2);
+}
+
+#[test]
+fn a_bar_a_unit_below_a_bigger_tubes_foot_fuses_every_way() {
+    fuse_every_way(&Shape::the_bigger_tube(-1.0, 4.0), 1);
+}
+
+#[test]
+fn a_bar_a_unit_below_a_bigger_whole_tube_fuses_every_way() {
+    fuse_every_way(&Shape::the_bigger_tube(-1.0, 3.0), 1);
+}
+
+/// A tube of height 4 from `z = 0`, radius `tube` less radius `hole`, and a
+/// bar of radius `bar` standing at `(apart, 0)` from `bottom` to `top`.
 struct Shape {
     tube: f64,
+    hole: f64,
     bar: f64,
     apart: f64,
     bottom: f64,
@@ -80,8 +101,22 @@ impl Shape {
     fn the_c(bottom: f64, top: f64) -> Self {
         Self {
             tube: 3.0,
+            hole: 1.0,
             bar: 1.5,
             apart: 2.0,
+            bottom,
+            top,
+        }
+    }
+
+    /// Q715's replay of Q576's tube: a tube of radius 29 less 13 and a bar of
+    /// radius 20 at `(21, 0)` (§365.2).
+    fn the_bigger_tube(bottom: f64, top: f64) -> Self {
+        Self {
+            tube: 29.0,
+            hole: 13.0,
+            bar: 20.0,
+            apart: 21.0,
             bottom,
             top,
         }
@@ -108,8 +143,8 @@ impl Shape {
             .add_round_bar(self.tube, 4.0, &Isometry::identity())
             .expect("the tube's outside");
         let through = model
-            .add_round_bar(1.0, 6.0, &at(0.0, 0.0, -1.0))
-            .expect("a bar of radius one");
+            .add_round_bar(self.hole, 6.0, &at(0.0, 0.0, -1.0))
+            .expect("the tube's hole");
         let [tube] = fused(&mut model, outer, through, Rule::Difference, "the tube")[..] else {
             panic!("the tube is one solid");
         };
@@ -127,10 +162,10 @@ impl Shape {
 /// Every rule both ways round, each held to its volume. The bar less the tube
 /// is `bar_less_tube` solids, and every other answer is one.
 fn fuse_every_way(shape: &Shape, bar_less_tube: usize) {
-    let tube = PI * (shape.tube * shape.tube - 1.0) * 4.0;
+    let tube = PI * (shape.tube * shape.tube - shape.hole * shape.hole) * 4.0;
     let bar = PI * shape.bar * shape.bar * (shape.top - shape.bottom);
     let shared = (shape.top.min(4.0) - shape.bottom.max(0.0))
-        * (shape.bar_shares_with(shape.tube) - shape.bar_shares_with(1.0));
+        * (shape.bar_shares_with(shape.tube) - shape.bar_shares_with(shape.hole));
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for bar_first in [false, true] {
             let what = format!(
