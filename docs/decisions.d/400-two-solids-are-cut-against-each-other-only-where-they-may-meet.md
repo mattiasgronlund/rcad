@@ -45,7 +45,9 @@ Two faces share no point when any of these holds, each a proof:
    it or holds it wholly inside;
 3. the two surfaces do not meet at all (`intersect` answers `Nothing`);
 4. they touch at one point (`TouchAtOnePoint`) and that point is outside the
-   part of space both boxes hold.
+   part of space both boxes hold;
+5. one surface misses the band round an axis the other face lies in — how far
+   up that axis and how far out from it.
 
 The boxes for these are built here and rounded outward: a ball's face is inside
 the box round the ball, and a flat face whose sides are straight, or on a ball,
@@ -57,6 +59,18 @@ other face's box is asked about. All of it runs in interval arithmetic and
 records dropped: a tolerant policy settling a close call would skip a cut on a
 guess. A pair this cannot settle is joined, and the cutting that follows asks
 the same surfaces again under the fuse's own policy and log.
+
+**Since Q896, item 5.** A face on a pipe or a cone whose every side is a circle
+where a plane square to its axis crosses it, or a flat face square to an axis
+whose every side is straight or such a circle, lies in a band: how far up the
+axis, `(p − origin)·w`, and how far out from it, `|(p − origin) × w|²`, both
+worked in interval arithmetic on the stored numbers
+(`ABandRoundAnAxis`/`band_a_face_is_inside` in `cuts.rs`). A pipe or cone on
+that axis's line, a ball centred on it, or a plane square to it, is then one
+expression in up and out, and a proved sign of that expression over the band is
+proof 5. This is what joins a frustum inside a bar, a pointed cone inside a
+bar, and a bar inside a ball apart without a box test on the round faces, none
+of which proof 2's boxes reach.
 
 **No face pair sharing a point is enough to leave two solids uncut against each
 other**, whether they stand apart or one is wholly inside the other: no edge of
@@ -199,14 +213,23 @@ it moves here.
 ### 400.7 What this leaves
 
 - The `assemble.rs` panic of 400.5, closed by Q871 (the note there).
-- `cuts.rs`'s module header still says two solids are skipped only when no
+- `cuts.rs`'s module header still said two solids are skipped only when no
   chain of overlapping boxes joins them, and `bake.rs`'s `Bounds` says a box
-  test changes no answer. Both are outside this lane's write set.
+  test changes no answer. **Since Q896, the `cuts.rs` half is fixed**: the
+  header now says two solids are skipped only when no chain of solids that may
+  meet joins them, which is what the code does. `bake.rs`'s `Bounds` sentence
+  is still stale and is outside this lane's write set.
 - A face on a pipe or a cone has no box in 400.2, so a pipe or a cone clear of
   a block whose boxes miss face by face only in `bake`'s boxes is left uncut by
   400.3's standard and not by a proof, and one whose `bake` boxes touch is
   joined and cut as before. Bounding those faces soundly would extend the proof
-  to them and retire 400.3.
+  to them and retire 400.3. **Since Q896, answered for a pipe or a cone face
+  whose every side is a circle square to its axis**, and for a flat face square
+  to an axis whose sides are straight or such a circle: item 5's band bounds
+  them, and `two_faces_provably_apart` proves them apart by it without
+  `bake`'s boxes. A pipe or a cone face with a side running some other way —
+  slanted, or with no side at all — is still left to 400.3, and 400.3 still
+  stands for it.
 - A draw where two solids meet that reaches the §345 fold.
 - Q451 and Q453 wait on this row and were written around Q316's four draws,
   which no longer reach the mesher.
