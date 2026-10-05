@@ -182,14 +182,15 @@ pub(crate) struct InputSide {
 /// read through as they are for the kept pieces. A second matcher would be a
 /// second answer to which sides are one, and the two could disagree.
 ///
-/// **`None` where a straight side's two ends come out one corner.** Of the
-/// kept pieces that is a splitter bug, and [`Edges::of`] panics on it. Over
-/// every piece it is not: two corners of two names that land on one `f64`
-/// triple are one corner ([`Corners::of`]), and a piece no rule keeps can have
-/// a straight side between two such. Two fuses in the suite reach one, a seed
-/// of the fuse fuzzer's corpus and the draw of
+/// **`None` where a straight side's two ends come out one corner.** Two
+/// corners of two names that land on one `f64` triple are one corner
+/// ([`Corners::of`]), and a piece can have a straight side between two such.
+/// Two fuses in the suite reach one in a piece no rule keeps, a seed of the
+/// fuse fuzzer's corpus and the draw of
 /// `a_fused_draw_hands_its_provenance_back_through_the_door.rs`, and asserting
-/// it panicked both. Nothing is named then, and no piece is placed by a side.
+/// it panicked both; a KiCad pin header reaches one in pieces the rule keeps,
+/// where [`sides_of`] now leaves the side out (§365.7). Here nothing is named
+/// then, and no piece is placed by a side.
 ///
 /// # Errors
 ///
@@ -514,7 +515,7 @@ impl Assembly {
         for (kept, kept_wires) in chosen.iter().zip(&kept_wires) {
             let piece = &scratch.pieces[kept.piece];
             let turned_round = piece.orientation.is_reversed() != kept.reversed;
-            let wires = kept_wires
+            let wires: Vec<Vec<Side>> = kept_wires
                 .iter()
                 .map(|wire| {
                     sides_of(
@@ -528,7 +529,16 @@ impl Assembly {
                         log,
                     )
                 })
+                .filter(|sides| {
+                    piece.surface.as_plane().is_none()
+                        || sides
+                            .as_ref()
+                            .map_or(true, |sides| encloses_something(sides))
+                })
                 .collect::<Result<_>>()?;
+            if wires.is_empty() {
+                continue;
+            }
             let (surface, used) = match (piece.surface.as_plane(), turned_round) {
                 (Some(flat), true) => (Surface::Plane(flat.reversed()), Orientation::Forward),
                 (Some(_) | None, false) => (piece.surface, Orientation::Forward),
@@ -4353,10 +4363,12 @@ impl Edges {
     ///
     /// # Panics
     ///
-    /// If a straight side has no length. §17.4 prevents one rather than
-    /// filtering it out afterwards, so one reaching here means the splitter is
-    /// wrong — and a *closed* side is not one, which is why the two ends being
-    /// the same corner is checked against what carries it.
+    /// If a straight side has no length. Every caller leaves such a side out
+    /// before asking — [`sides_of`] drops it and
+    /// [`the_edge_each_side_of_every_piece_is`] gives up at it — so one
+    /// reaching here means a caller stopped doing that. A *closed* side is not
+    /// one, which is why the two ends being the same corner is checked against
+    /// what carries it.
     ///
     /// `turned_round` is whether the rule turns this face's piece round, which
     /// only a closed edge starting at a ball's pole needs to know — see
@@ -5234,6 +5246,16 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// than by using the face reversed in its shell is what keeps the two coedges of
 /// every edge running opposite ways in the arena, which is the invariant a model
 /// is built on.
+///
+/// **A straight side whose two ends are one corner is left out.** The
+/// arrangement keeps two meets apart wherever it can order them along a
+/// crossing, and over a KiCad pin header's stored planes it orders three meets
+/// of planes that by design meet at one notch corner, `8e-18` to `1.6e-17`
+/// apart. All three round to the corner's own `f64` triple, so [`Corners::of`]
+/// makes them one corner, and a side between two of them has no length as the
+/// answer's corners are written (`docs/decisions.md` §365.7). Every face that
+/// has the side names its two ends through the same [`Corners`], so every one
+/// of them leaves it out, and no edge is left with one face along it.
 #[expect(
     clippy::too_many_arguments,
     reason = "the policy and the log travel as arguments, never as fields (CLAUDE.md)"
@@ -5252,6 +5274,14 @@ fn sides_of(
     for meet in wire {
         let from = corners.of(model, &meet.ends[0], policy, log)?;
         let to = corners.of(model, &meet.ends[1], policy, log)?;
+        if from == to
+            && meet
+                .carried_by
+                .iter()
+                .all(|surface| surface.as_plane().is_some())
+        {
+            continue;
+        }
         let seam = the_seam_a_side_runs_along(model, ancestors, meet);
         sides.push(edges.of(
             meet,
@@ -5271,6 +5301,31 @@ fn sides_of(
         }
     }
     Ok(sides)
+}
+
+/// Whether a wire of a flat piece of the answer bounds anything: whether some
+/// edge of it is walked more often one way than the other.
+///
+/// A wire on a plane that walks every edge of it as often each way goes out
+/// along lines and back along the same lines, and encloses nothing as its
+/// corners are written. Only a flat piece is asked: the one wire of a whole
+/// closed surface is a seam walked out and back, and bounds the whole surface. A KiCad pin header's wall keeps such a wire: the strip between a
+/// notch's chamfer and the plane of another notch's chamfer, which by design
+/// meet the wall at one line, is `9.5e-17` wide over the stored planes, and its
+/// four corners round to two `f64` triples, which [`Corners::of`] makes two
+/// corners (`docs/decisions.md` §365.7). Its two short sides are then
+/// [`sides_of`]'s sides with no length and are left out, and its two long ones
+/// are one edge walked out and back.
+///
+/// **Leaving such a wire out keeps every edge's faces paired.** It walks each
+/// of its edges once each way, so it takes one face's use off each side of every
+/// one of them and leaves the uses the other faces make as they were.
+fn encloses_something(sides: &[Side]) -> bool {
+    let mut how_often: BTreeMap<usize, i64> = BTreeMap::new();
+    for side in sides {
+        *how_often.entry(side.edge).or_default() += if side.forward { 1 } else { -1 };
+    }
+    how_often.values().any(|&walked| walked != 0)
 }
 
 /// The seam of a piece's input face that `side` runs the whole of, where it

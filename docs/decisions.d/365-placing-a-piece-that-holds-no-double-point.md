@@ -17,6 +17,7 @@ throwaway probe that is taken out (365.2); everything else in 365.2 was read.*
   365.4   What this leaves
   365.5   What building the rule ran
   365.6   Rungs nearer each crossing, after every other point
+  365.7   A piece placed by a corner, and a strip whose corners round to two
 
 ### 365.1 What each family has to change
 
@@ -235,7 +236,14 @@ no surface of `S` carries (a flood through the solid's own edges), and a piece
 whose corner sits on a convex edge of `S` with a side along each of its two
 faces. The grazing block needs neither, since the rule above places all three
 slivers, so §13 leaves both until a piece that the rule cannot reach asks for
-one; Q621's lens may be that piece. And **the rule runs only where no point
+one; Q621's lens may be that piece.
+
+> **2026-10-05 note (Q1019): the piece this waited for is a strip of a KiCad
+> pin header's wall**, which holds no `f64` point and shares no side with a
+> piece of the other solid. Neither form above places it; a third does, a
+> corner the other solid's ray puts strictly inside or outside it (365.7).
+
+And **the rule runs only where no point
 inside the piece was found** (the `INSIDE_A_PIECE` exit of `place_the_piece`),
 or, since 365.6, where only a rung was found and none could be placed.
 A fuse that answers today reached a point for every piece, never gets to the
@@ -472,3 +480,130 @@ not read.
 shorter steps from the corners' middle is the curved branch's version of this
 one; whether it reaches Q635's piece was not run. Q714's closed circles are
 still the job of `between_the_round_wires`.
+
+### 365.7 A piece placed by a corner, and a strip whose corners round to two
+
+*Queue row Q1019. Lane `lane-q1019-a-kicad-strip-placed-by-its-corner`, off
+`d5023489`. Everything here was run, with a scratch copy of Q690's
+`q690_one_fuse` that is taken out, unless it says otherwise. Q985 traced the
+stop and probed the rule first, on `84b34d0f`.*
+
+**The piece.** Q690's cut of the first solid of KiCad's
+`PinHeader_1x11_P2.54mm_Vertical.step`, and of `1x39`, less the box over the
+middle half of its own box (`Rule::Difference`, certified). The body's walls
+have a V notch between each pair of pins, every chamfer at 45°, so the plane
+of a notch's chamfer on one wall, carried across the body, meets the other
+wall at a notch corner by design: `x + y = −0.254` reaches `x = −1.27` at
+`y = 1.016`, where that wall meets the chamfer `−x + y = 2.286`. Every face is
+cut by every plane of its own solid too, so the wall is cut there, and over the
+planes the file stores the two lines are `9.48e-17` apart, under the `2.2e-16`
+between doubles at `y = 1.016` (Q985's exact arithmetic). The strip between
+them, `z` from 0 to `0.064`, holds no `f64` point. On `d5023489` both cuts
+still refused `a point inside a piece of a face` naming its four corners; the
+rungs of 365.6 do not reach a piece no double is in. It shares no side with a
+piece of the box, so 365.3's rule cannot place it either. It is outside the
+box, which runs from `x = −0.635` to `0.635`, so the refusal is a gap.
+
+**The rule, after 365.3's.** `by_a_corner` in `fuse/select.rs`: a piece that
+neither a point nor a side it shares placed is placed against each solid by
+the first of its corners that solid's ray calls `Inside` or `Outside`; inside
+one solid of the group is inside, outside every one is outside, anything else
+refuses by the old name. It follows the side rule wherever that rule runs, so
+after the rungs too.
+
+**Why it holds.** `P` was cut by every surface of `S`, so its inside lies all
+inside `S`, all outside it or all on its skin (§17.4). A corner `c` is on
+`P`'s outline, so every open neighbourhood of `c` meets `P`'s inside. If `c` is
+strictly inside `S`, some neighbourhood of it is too, so part of `P`'s inside
+is inside `S`, and so all of it is; that neighbourhood touches no skin, so `P`
+is not on the skin either. Strictly outside is the same the other way. The
+ray's signs are decided over the corner's whole box, and the true corner is in
+that box.
+**`OnBoundary` is never read**: a piece on either side of a face, or on it, can
+have its corner there. **Nor is a corner on any stored surface of `S`**, which
+`is_off_every_surface_of` asks first: the ray reads a flat face by its stored
+corners, and of a point on the stored plane it can certify a side the plane
+does not have (§316.3, §351). The point search keeps such points off the ray
+with `coincident_face`, which a corner has no face of its own to ask.
+
+**Then the answer panicked, as Q985 found**: `Edges::of`'s "a piece of a flat
+face has a side with no length", on the bottom face `z = 0`, a side along
+`x = 1.27` from the vertex at `(1.27, −1.524, 0)` to the meet of `x = 1.27`,
+`z = 0` and `−x + y = −2.794`. **Where the two were made one**: `Corners::of`,
+by coordinate. A print there showed the meet joined into corner 68, the
+vertex's, twice, through `Corners::at`, which makes two corners on one `f64`
+triple one: both round to `(1.27, −1.524, 0)` bit for bit. That join is only
+reached when the two go by different names, so no arrangement had folded one
+into the other through `names_of_one_point`. **The arrangement keeps them
+apart**: a side of a piece runs between two nodes it ordered along a crossing,
+here `x = 1.27`.
+
+**Naming them apart was weighed and not built.** Two corners on one `f64`
+triple, with an edge between them, is an edge of no length as the answer is
+written, which `Invalid::EdgeHasNoLength` names; whether `Model::validate`
+would raise it here was not run. And the three meets of `x = 1.27`,
+`x + y = −0.254` and `−x + y = −2.794` on `z = 0` are `8e-18` to `1.6e-17`
+apart (Q985's `corner.py`): there is no `f64` triple to put each one at.
+
+**What was built: a side with no length is left out, in `assemble.rs`.**
+`sides_of` leaves out a straight side whose ends `Corners::of` made one
+corner. Sound because the corners are named through one table for the whole
+answer, so every face that has that side leaves it out, and no edge is left
+with one face along it. The strip on the wall then keeps two sides, along its
+two long lines, and both name one edge, between the same two corners: a wire
+that walks out and back along it. **A flat piece's wire that walks every edge
+of it as often each way is left out** (`encloses_something`), and a piece with
+no wire left is not written. Sound because such a wire encloses nothing as its
+corners are written, and it takes one use off each side of every edge it
+walks, so the other faces along each edge stay paired: the wall beside the
+strip and the notch's chamfer meet along that edge, as the design has them.
+Both are needed, each one alone was run against the new test: without the
+first it panics as above, without the second it refuses
+`ResultIsNotManifold { count: 4 }`.
+
+**What it answers.** Q690's four cuts, through the scratch copy, under each
+rule:
+
+| file | rule | pieces | volume | validates |
+|---|---|---|---|---|
+| 1x11 | difference | 11 | `164.922737253333` | yes |
+| 1x11 | intersection | 1 | `51.6794660000000` | yes |
+| 1x39 | difference | 39 | `583.042240079997` | yes |
+| 1x39 | intersection | 1 | `184.911025999999` | yes |
+
+Each pair sums to its solid's own measure, `216.602203253333` and
+`767.953266079999`. The intersections were also worked by hand: the box's
+block of the body, `1.27 × 13.97 × 2.54` (and `× 49.53` for 1x39), plus each
+pin the box holds, `0.64 × 0.64 × 3.23` above and below the body, five pins
+and nineteen: `51.679466` and `184.911026`.
+
+`a_pin_header_body_less_a_box.rs` builds the 1x11 body without its pins as an
+extrusion of the notched outline, in the file's own decimals, and cuts it by
+the same box. Its planes are the extrusion's and not the file's, so its stop is
+a different piece: on the bottom face, between the top right chamfer, the line
+of a left notch's chamfer `x − y = 0.254` and the box's plane `x = 0.635`,
+with two corners a rounding apart at `(1.27, 1.016)`, which the refusal named.
+Why no candidate was proved inside it, when it is `0.6` wide, was not traced. Its corner `(1.016, 1.27)`
+is outside the box and places it, and both answers then validate and add up to
+the body. With the corner rule off the difference refuses `a point inside a
+piece of a face`.
+
+**Pins that moved.** In `a_narrow_lune_from_a_pole_corner.rs`, ten of the
+twelve 45° wedges answer, each one solid that validates and measures its closed
+form; with the corner rule off all ten refuse `a point inside a piece of a
+face`, so the rule is what moved them. The difference at radius `0.001`
+refuses `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` and at `1000`
+`CannotNameWhichPieceOfACrossingThisIs`. Every other test of `rcad-topo`
+passed with its pins as they were, and every test of `rcad-step`.
+
+**`every_kicad_file_that_imports_round_trips_to_the_same_solid` accepts a
+refusal and fails on a panic.** It cuts each solid by the same box before and
+after the round trip, counts the same refusal on both sides as nothing to
+compare, and catches no panic. So landing the rule without the change to
+`assemble.rs` would have failed it, on the panic.
+
+**What this leaves.** `the_edge_each_side_of_every_piece_is`, the naming
+365.3's rule reads, still gives up at a side with no length rather than
+leaving it out as `sides_of` now does, so a fuse that has one places no piece
+by a side. Leaving it out there too was not tried. Q993 traces the families
+that may stop on the same kind of strip.
