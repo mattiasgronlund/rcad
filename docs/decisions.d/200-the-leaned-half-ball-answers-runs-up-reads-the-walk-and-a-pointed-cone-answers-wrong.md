@@ -47,6 +47,43 @@ rounding. **That is a flat piece placed on the wrong side.** Here it ends in
 `ResultIsNotManifold`, not in a wrong answer. It is an older fault in how flat
 pieces are placed, reached for the first time.
 
+**2026-10-05, Q990: what Q901 moved.** Q901
+(`lane-q901-land-two-meets-of-three-planes`, tip `75adb1f8`) has `order_along`
+ask the planes (`as_the_planes_say`) where the boxes cannot say, and
+`passes_through` ask a corner's three planes. Its commits record six pins
+moved. In `a_narrow_lune_from_a_pole_corner.rs` the two pins above now see the
+45° wedges stop at *a point inside a piece of a face* and not at *order along a
+crossing*; no case newly answers (`fdef5ce3`). In
+`a_plane_cut_along_a_cones_other_nappe.rs` two tallies grow: three eighths
+from 36 right to 48, and the block below the frustum from 68 to 72
+(`45fbcfaf`). Two walls a hair apart now stop, under the tolerant policy, at
+the sliver between `y = 5` and the wall leaned by `1e-100`, about `1e-99`
+wide, where no `f64` point lies: a limit (`44f231d6`). The skew family's 39
+refusals in 441 now all name *a point inside a piece of a face*, where they
+named *order along a crossing* (`6e70b96a`). Two turned cubes a rounding
+apart now refuse in selection; the cubes share no point, so that refusal is a
+gap, shown by
+`every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_apart`
+(`75adb1f8`).
+
+**Q901 has not landed, and Q990 did not land it either.** On `main` the cut through
+`PinHeader_1x39_P2.54mm_Vertical` refuses early. With Q901 it runs through
+every face of the header's body. `cuts.rs` cuts each face by every plane of the
+body, 332 to 409 of them, and `place_the_meets` places a meet for every pair:
+38 116 nodes on a face with four corners, of which 54 arcs are left. Q990
+removed four costs that grew faster than that: the corner fold looked through
+every node for every meet, the tighter box was worked out for every meet of
+three planes, `lumps_with_a_curve_that_runs_on` looked each arc up by address,
+and every piece worked out every walk's lump again. The 1x39 cut still did
+not finish in 300 s. A probe, not kept, left out every cut whose partner keeps
+the face's whole box on one side of it, before any meet is placed. With that,
+the cut finished in 91.67 s (on a machine with a load average over 30), and
+refused *a point inside a piece of a face*, as the 1x11 cut does. That rule
+needs the face's box, which `bake.rs` keeps private to `Bounds`. The next cost
+after it is `crossing_like` in `draw_the_crossings`, which compares every new
+crossing with every one already drawn by exact determinants: 7 of 15 samples
+of the probed cut.
+
 ### 200.2 A cap whose rim runs through the other pole is cut the way its walk ran
 
 `lane-runs-up-other-pole` (`d1f7eab9`, `76204dff`) closes the `runs_up` item
