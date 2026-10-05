@@ -246,3 +246,84 @@ its bound; §377.4 and §377.5 have the table and the volumes.
   inner and an outer circle, and two rings. Nobody has fused either.
   `holds.rs`'s `the_picker_naming_the_circle_through` already picks the inner
   and the outer circle by a pipe, and is private.
+
+### 378.8 The three pairs 378.4 did not run, run
+
+*Queue row Q757, off `d0eb84cc`. It changed no source: it adds
+`crates/rcad-topo/tests/a_ring_crossed_in_two_closed_curves.rs` and this
+subsection.*
+
+**The pairs.** Each crosses a whole ring in two closed curves that no edge or
+corner of either solid lies on, so both would start at a corner the two
+surfaces alone name. A whole ring is two faces on the one torus, each closed
+edge a rim naming the plane that cut it (`EdgeRun::RightRoundWhereItCrosses`);
+all three rings validate and measure `8π²` or `10π²` inside their bound.
+
+1. The ring of four round a tube of one, cut along its equators, and the block
+   `[−6, 6] × [−6, 6] × [−2, ½]`, whose top cuts it in circles of radius
+   `4 ± √3/2` at `z = ½`.
+2. That ring and the ring of five cut the same way, both about `+z`, crossing in
+   circles of radius `4½` at `z = ±√3/2`.
+3. The ring of four cut along the two circles `y = 0` cuts it in, and the block
+   `[−6, 0] × [−6, 6] × [−2, 2]`, whose side `x = 0` cuts it in the circles round
+   `(0, ±4, 0)`.
+
+The test file's doc has each rule's closed form by Pappus.
+
+**What each gives**, `mise exec -- just t -p rcad-topo --test
+a_ring_crossed_in_two_closed_curves`, five tests passing: all eighteen fuses
+are refused, and each model is sound afterwards. Pairs 1 and 3 are refused
+`Geometry(ACrossingBetweenAPlaneAndATorusThatIsAQuartic)` under every rule both
+ways round, and pair 2 `Geometry(ACrossingBetweenATorusAndAnotherCurvedSurface)`.
+So none of them reaches the naming this section is about.
+
+**Where pairs 1 and 3 are refused.** `cuts::gather` asks `intersect` of every
+pair of faces of two solids it cannot prove apart, through `cuts_between` and
+`how_two_faces_meet`. `where_a_plane_and_a_torus_cross` in `rcad-geom`'s
+`intersect.rs` refuses every plane parallel to the axis and off it, at its
+`holds_the_centre` question, though the block's sides are 6 from the axis
+against the ring's reach of 5 and cross nothing.
+`only_the_sides_of_each_block_that_miss_the_ring_are_refused_against_it` asks
+`intersect` of each block face against the ring: the face that cuts it gives
+two curves, the faces square to the axis beyond the tube give nothing, and
+only the sides are refused. **A gap**, and **Q618** is already its row: the
+answer is nothing, one sign question away.
+
+**Past Q618, in a scratch copy only.** With that question answered nothing for
+a plane further off than `1.01 (R + r)`, in a copy of the base exported with
+`git archive`, the same eighteen fuses gave:
+
+| pair | union | intersection | ring less block | block less ring |
+|---|---|---|---|---|
+| 1 | `ACurvedFaceGoesRightRoundWithNoSeam`, both ways | panic in `rings_round`, both ways | panic in `rings_round` | `ACurvedFaceGoesRightRoundWithNoSeam` |
+| 3 | panic in `holds.rs`, both ways | the same | the same | the same |
+| 2 | unchanged | | | |
+
+The `rings_round` panic is `assemble.rs:1448`, "every face joined here brought
+an outline of its own", from `rings_of_each_joined_face` and
+`join_up_what_is_one_face` under `assemble`. Whether it is the inner and the
+outer circle sharing one name, as 378.3's two circles did, was not run. The
+refusal was not traced.
+
+**The `holds.rs` panic is on the base, without any fuse.**
+`SolidView::classify_point` asked of a point inside the tube, `(0, 4, 0)` or
+`(4, 0, ½)`, panics for both whole rings at `holds.rs:830`, in
+`what_a_ring_face_between_two_planes_holds` under `what_a_curved_face_holds`,
+`what_this_face_holds` and `classify::count_where_the_ray_meets_it`: "a face
+this was sent is trimmed by planes only, and this one by Torus". The rim's
+`and` is a plane, so `is_a_ring_face_between_two_planes` sends the face there,
+and the face across the rim is the other half of the ring. Points outside the
+ring, `(0, 0, 0)` and `(10, 1, 0)`, answer `Outside`. The test file does not pin
+it: a panic is not a result.
+
+**Where pair 2 is refused.** `intersect` itself, `intersect.rs:223`, for every
+pair of a torus and another curved surface that is not the same ring. **A
+gap**: `ACrossingBetweenATorusAndAnotherCurvedSurface`'s own doc in
+`rcad-geom`'s `error.rs` names the coaxial pairs as two circles each and one
+sign question apiece, and this pair is one of them.
+
+**What this leaves.** Q618's write set does not hold the new test file, whose
+pairs 1 and 3 its fix moves onto the two panics above. The `holds.rs` panic,
+the `rings_round` panic and the refusal past Q618, and the coaxial rings, are
+each a row of their own. The naming 378.4 asked about is still not reached by
+any of the three.
