@@ -309,8 +309,8 @@ moved them.
 | `Undecidable`, *a point inside a piece of a face* | two coincident curved faces | **gap** | `a_bar_and_a_copy_of_it_in_the_same_place_are_refused_for_want_of_a_point_inside_a_piece`. The answer is the bar. Tolerant too. **This is what criterion 15's second name runs into** |
 | `Undecidable`, *a point inside a piece of a face* | two tools meeting on one plane that cuts a round wall | **gap** | `two_tools_meeting_on_a_plane_that_cuts_a_round_wall_are_refused_by_name`; one tool making the same cut is answered |
 | `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` | **an arc whose chord rounds onto its own tangent** | **gap** | `an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`. The half-space exists; `f64` cannot reach it at that separation. §36.24, §36.26 |
-| `TwoCurvesTouchWithoutCrossing` | a plane tangent to a bar's wall, or a block sitting exactly on a bar's cap | **limit** | `a_wall_that_touches_a_bar_without_crossing_it_is_refused_by_name`, `a_block_sitting_on_a_bars_cap_is_refused_by_name`. The two arcs meet and there is nothing between them |
-| `TwoCurvesTouchWithoutCrossing` | **a corner exactly on a curved face** — a `3 × 4` block corner on a bar or a ball of radius five | **gap** | `a_block_corner_exactly_on_a_bars_wall_is_refused_by_name`, `..._on_a_balls_skin_...`. The answer is the bar; the determinant is exactly zero and tolerant refuses it too. §38.2 |
+| ~~`TwoCurvesTouchWithoutCrossing`~~ | ~~a plane tangent to a bar's wall, or a block sitting exactly on a bar's cap~~ | **closed** | the wall answers since Q649 (`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`) and the block on the cap since Q930, both ways round and turned by quarters (`a_block_sitting_on_a_bars_cap_meets_it_at_one_point_under_every_rule`); the Q649 and Q930 notes below |
+| ~~`TwoCurvesTouchWithoutCrossing`~~ | ~~**a corner exactly on a curved face** — a `3 × 4` block corner on a bar or a ball of radius five~~ | **closed** | the ball's answers (`a_block_corner_exactly_on_a_balls_skin_is_answered`), and since Q930 the bar's, under every rule and a tolerant policy too: two straight crossings on one line are folded into one (`a_block_corner_exactly_on_a_bars_wall_is_answered`, §38.2, the Q930 note below) |
 | `AClosedEdgeOfTheAnswerWouldStartAtAPole` | **a ball cut by a plane through its polar axis** | **gap** | `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`, with the equator and a leaning plane answered as controls. §38.3 |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | a cut meets a ball's seam twice | **gap** | `a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name`. The answer is two caps of a ball |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | **a cut leaving a piece of a ball that holds no pole, or both** | **gap, and a §19 violation** | four public calls: `add_ball(4)` intersected with `add_cube(20)` whose face sits at `y = 1`. The answer is a spherical cap of volume 84.823 — the same solid `a_ball_cut_by_a_plane_meshes_into_a_closed_surface` certifies when the plane is `z = 1`. **Turning the whole arrangement flips it**: answered from 1.00 to 1.30 radians about `x` and refused from 1.40, either side of `acos(1/4)`, which is where the kept cap stops holding a pole. §38.6 filed the family a limit; a closed curve on a sphere leaves three kinds of piece and only the one-pole cap is handled |
@@ -342,8 +342,8 @@ moved them.
 > stand, so it is a gap too, and queue row Q371 traces and fixes it
 > (`a_bar_lying_along_a_plane_or_a_bar.rs`; traced and fixed by Q760, in the
 > note below). The block on a bar's cap refuses
-> `TwoCurvesTouchWithoutCrossing` again, under every rule, and why is not traced
-> (`a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch`). A plane
+> `TwoCurvesTouchWithoutCrossing` again, under every rule (traced and answered
+> by Q930, in the note below). A plane
 > lying along a cone's ruling still refuses on *which way a crossing runs*,
 > unchanged: a ruling has no stored direction, and it is queue row Q473's
 > (closed by Q473, in the note below).
@@ -390,6 +390,39 @@ moved them.
 > `(−5, 0, 8)`, refuses *order along a crossing* under every certified rule: one
 > face's ellipse starts inside the box of the node where the wedge's edge
 > touches it. The order exists, so that is a gap too.
+
+> **2026-10-05 note (Q930): one line drawn as two crossings is one crossing.**
+> Traced with a print where `sorted_anticlockwise` refuses. The bar first, it
+> refused on the bar's wall at `(2, 0, 0)`: the plane `x = 2` rests on the wall
+> along `(2, 0, z)`, and the plane `y = 0` cuts the wall along the same ruling,
+> the one of its two picked by `x ≥ 0`, so two ways out leave up the ruling,
+> one along each, and bend alike. The block first, it refused on the block's
+> wall `y = 0` at `(2, 0, 8)`, where the wall's edge with `x = 2` and the
+> bar's line `x = 2` are the one line. The pin's guess, the wall `x = 2`, was
+> not where it refused. `crossing_like` folds two partners only when they are
+> one surface or, all three flat, cut one line; a plane and a pipe, or two
+> planes on a pipe, it never folds. `fuse/arrange.rs`'s
+> `fold_the_straight_cuts_along_one_line` now folds a straight cut into a
+> straight crossing drawn before it when the two share a node whose ways out
+> are proved parallel and not nothing, never settled by the policy. It runs
+> **after** `merge_points_that_are_one_point`, not before: a quarter turn round
+> the bar from its seam, the ruling ends on the cap circle at two meets, one per
+> crossing, which are one node only once merged, and run before the merge the
+> fold missed them and those placements still refused. The block on the cap
+> answers every rule both ways round, with its corner on the rim at the seam, a
+> quarter, a half and three quarters round, and mirrored across `y = 0`, and
+> slid a tenth clear or a tenth along the touch: the union is the two solids,
+> `32π + 8`, the intersection empty, and each less the other itself
+> (`a_block_sitting_on_a_bars_cap_meets_it_at_one_point_under_every_rule`).
+> **This is §38.2's family of fixes, for straight lines**, and it closes
+> §38.2's own shape: the `3 × 4` block corner on a bar of radius five answers
+> all three rules under a certified and a tolerant policy, the bar, the block
+> and the bar with the block's room left empty in it
+> (`a_block_corner_exactly_on_a_bars_wall_is_answered`). Turned by 0.4 or 1.0
+> radians about the bar's axis instead of a quarter, the block on the cap is
+> refused `Undecidable` on *side of plane* or *side of cylinder*, at a corner
+> the turn rounds a hair off the touch. The fold asks nothing under the
+> policy, so that refusal is not its.
 
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot

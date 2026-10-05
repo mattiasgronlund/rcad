@@ -1626,8 +1626,8 @@ fn a_block_corner_on_a_bars_wall(model: &mut Model, depth: f64) -> Pair {
     Pair::of(bar, standing)
 }
 
-/// A corner exactly on a bar's wall is refused by name, which is §38.2's fix of
-/// the panic §37.4 pinned here.
+/// A corner exactly on a bar's wall is answered: the union is the bar and the
+/// intersection the block.
 ///
 /// Two arcs leave that corner with no turn between them, and they are not merely
 /// tangent — they are the **same line**. The plane `x = 3` cuts the bar of radius
@@ -1635,27 +1635,54 @@ fn a_block_corner_on_a_bars_wall(model: &mut Model, depth: f64) -> Pair {
 /// `(±3, 4, z)`, so `(3, 4, z)` is on both, and the block touches the bar's wall
 /// along that one ruling without cutting it anywhere.
 ///
-/// The arrangement holds one crossing per curve and here it has two for one, so
-/// there is no anticlockwise order round the corner and no way round the cell.
-/// That is exactly what [`Error::TwoCurvesTouchWithoutCrossing`] already says,
-/// and the same geometry one function away already refused with it; the walk
-/// asserted instead because it thought the first comparison had ruled it out.
+/// The arrangement holds one crossing per curve, and here it had two for one,
+/// so there was no anticlockwise order round the corner: §38.2 turned the
+/// panic §37.4 pinned here into [`Error::TwoCurvesTouchWithoutCrossing`], and
+/// every policy refused with it. Since queue row Q930 `arrange.rs` folds a
+/// straight cut into a straight crossing drawn before it when the two leave a
+/// node along one line, which is §38.2's family of fixes for straight lines.
 ///
-/// **A gap and not a limit** (§16.10): the answer is the bar, since a `3 × 4`
-/// rectangle from the axis is inside a circle of radius five. §38.2 records the
-/// family of fixes and why none of them is a line of code.
-///
-/// A tolerant policy makes no difference, which says this is about the shape and
-/// not a budget: the determinant is exactly zero, not nearly.
+/// A `3 × 4` rectangle measured from the axis is inside a circle of radius
+/// five, so the block is wholly inside the bar, touching its wall along the
+/// ruling: the union is the bar, the intersection is the block,
+/// `3 · 4 · 2 = 24`, and the bar less the block is the bar with the block's
+/// room left empty inside it, one solid of `200π − 24` whose hollow's edge
+/// `(3, 4, z)` lies on the bar's wall. A tolerant policy gives the same: the
+/// fold is proved and spends no budget.
 #[test]
-fn a_block_corner_exactly_on_a_bars_wall_is_refused_by_name() {
-    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+fn a_block_corner_exactly_on_a_bars_wall_is_answered() {
+    let bar = PI * 25.0 * 8.0;
+    for (rule, closed_form) in [
+        (Rule::Union, bar),
+        (Rule::Intersection, 24.0),
+        (Rule::Difference, bar - 24.0),
+    ] {
         let mut model = a_model();
         let pair = a_block_corner_on_a_bars_wall(&mut model, 4.0);
-        match refusal(&mut model, &pair, Rule::Union, &policy) {
-            Error::TwoCurvesTouchWithoutCrossing { .. } => (),
-            other => panic!("a corner on a bar's wall refused with {other:?}"),
+        let answer = fused(&mut model, &pair, rule);
+        assert_eq!(answer.solids().len(), 1, "{rule:?}");
+        let found = volume_of(&model, answer.solids());
+        if rule == Rule::Intersection {
+            assert!(
+                (found - closed_form).abs() < 1e-12,
+                "a block is flat and meshes exactly, got {found}"
+            );
+        } else {
+            measures(found, closed_form, Side::Under);
         }
+
+        let mut model = a_model();
+        let pair = a_block_corner_on_a_bars_wall(&mut model, 4.0);
+        let tolerant = model
+            .fuse(
+                &pair.arguments,
+                &pair.tools,
+                rule,
+                &Policy::tolerant(100.0),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("a tolerant {rule:?} refused: {why}"));
+        assert_eq!(tolerant.solids().len(), 1, "a tolerant {rule:?}");
     }
 }
 
@@ -2138,37 +2165,91 @@ fn a_ball_touching_a_wall_at_the_one_point_that_can_place_it_keeps_both() {
     );
 }
 
-/// A block sitting on a bar's cap with its corner on the rim gets past the
-/// touch [`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`]
-/// gets past, and is refused one stage on, as two curves that touch.
+/// A block of side two standing on the bar's cap with its low corner at
+/// `(x, y, 8)`, and which of the two is the argument.
+fn a_block_on_a_bars_cap(model: &mut Model, [x, y]: [f64; 2], block_first: bool) -> Pair {
+    let bar = a_bar(model);
+    let sitting = block(model, [2.0, 2.0, 2.0], Vector::new(x, y, 8.0));
+    if block_first {
+        Pair::of(sitting, bar)
+    } else {
+        Pair::of(bar, sitting)
+    }
+}
+
+/// A block sitting on a bar's cap with its corner on the rim meets the bar at
+/// that one point, under every rule and both ways round.
 ///
-/// The block covers `2 ≤ x ≤ 4`, so the plane its near wall lies in, `x = 2`,
-/// rests on the bar of radius two along the ruling `(2, 0, z)` — the bar's own
-/// seam. A cut is by a plane and not by the face carrying it (`cuts.rs` says
-/// why), so it does not matter that the wall itself sits above the bar. There
-/// the plane's normal `(-1, 0, 0)` and the pipe's gradient `(2, 0, 0)` are
-/// parallel. Until queue row Q649 that refused `Undecidable` on *which way a
-/// crossing runs*; the line runs up the bar's axis now.
+/// The block covers `2 ≤ x ≤ 4` and `0 ≤ y ≤ 2` and stands on `z = 8`, so it
+/// meets the bar at `(2, 0, 8)` and nowhere else. The union is the two solids
+/// as they stand, `32π + 8`; they share no space, so the intersection is
+/// empty; and each less the other is itself, the bar or the block.
 ///
-/// **What refuses now is `TwoCurvesTouchWithoutCrossing`, and its cause is not
-/// traced.** The ruling is also the line the block's two walls `x = 2` and
-/// `y = 0` meet along, so on the wall `x = 2` the touch and that edge are two
-/// crossings on one line, and a plane and a pipe are never folded into one
-/// crossing. That is a guess at the cause and nothing has run it.
+/// **What refused it until queue row Q930 was one line drawn as two
+/// crossings.** A cut is by a plane and not by the face carrying it (`cuts.rs`
+/// says why), so the plane `x = 2` rests on the bar's wall along the ruling
+/// `(2, 0, z)`, and the plane `y = 0` cuts the wall along that same ruling,
+/// the one of its two picked by `x ≥ 0`. `crossing_like` folds two partners
+/// only where they are one surface, or are planes cutting a flat face in one
+/// line, and these are two planes cutting a pipe; so at `(2, 0, 0)` two ways
+/// out left up the ruling, one along each, bending alike, and no turn parted
+/// them: `TwoCurvesTouchWithoutCrossing`, under every rule. The block first,
+/// it refused the same way on the block's wall `y = 0` at `(2, 0, 8)`, where
+/// the wall's edge with `x = 2` and the bar's line `x = 2` are the one line.
+/// A print where the sort refused named those two faces; this test's earlier
+/// doc guessed the wall `x = 2`, and nothing refused there. `arrange.rs` now
+/// folds a straight cut into a straight crossing drawn before it when the two
+/// leave a node along one line (§39.4).
+///
+/// **The controls.** Turned a quarter, a half and three quarters round the
+/// bar's axis, and mirrored across `y = 0`, the block puts its corner on the
+/// rim away from the bar's seam and on the seam's other side: the same shape,
+/// held to the same answers. A quarter turn from the seam is what needs the
+/// fold after the nodes that are one point are merged, since there the ruling
+/// ends on the cap circle at two meets, one per crossing, and no corner of the
+/// face holds both. Slid a tenth clear along `x`, the block touches nothing;
+/// slid a tenth along `−y`, its corner leaves the rim while the plane `x = 2`
+/// still rests on the bar, so the touch stays and the second line goes. Both
+/// give the same three answers too.
 #[test]
-fn a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch() {
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-        let mut model = a_model();
-        let bar = a_bar(&mut model);
-        let sitting = block(&mut model, [2.0, 2.0, 2.0], Vector::new(2.0, 0.0, 8.0));
-        match refusal(
-            &mut model,
-            &Pair::of(bar, sitting),
-            rule,
-            &Policy::certified(),
-        ) {
-            Error::TwoCurvesTouchWithoutCrossing { .. } => (),
-            other => panic!("a block on a bar's cap, {rule:?}, refused with {other:?}"),
+fn a_block_sitting_on_a_bars_cap_meets_it_at_one_point_under_every_rule() {
+    for (placed, at) in [
+        ("on the rim at the bar's seam", [2.0, 0.0]),
+        ("turned a quarter round", [-2.0, 2.0]),
+        ("turned half round", [-4.0, -2.0]),
+        ("turned three quarters round", [0.0, -4.0]),
+        ("mirrored across y = 0", [2.0, -2.0]),
+        ("slid a tenth clear", [2.1, 0.0]),
+        ("slid a tenth along the touch", [2.0, -0.1]),
+    ] {
+        for block_first in [false, true] {
+            let asked = |rule: Rule| format!("{placed}, the block first {block_first}, {rule:?}");
+
+            let mut model = a_model();
+            let pair = a_block_on_a_bars_cap(&mut model, at, block_first);
+            let united = fused(&mut model, &pair, Rule::Union);
+            assert_eq!(united.solids().len(), 2, "{}", asked(Rule::Union));
+            measures(volume_of(&model, united.solids()), A_BAR + 8.0, Side::Under);
+
+            let mut model = a_model();
+            let pair = a_block_on_a_bars_cap(&mut model, at, block_first);
+            let shared = fused(&mut model, &pair, Rule::Intersection);
+            assert!(shared.solids().is_empty(), "{}", asked(Rule::Intersection));
+
+            let mut model = a_model();
+            let pair = a_block_on_a_bars_cap(&mut model, at, block_first);
+            let left = fused(&mut model, &pair, Rule::Difference);
+            assert_eq!(left.solids().len(), 1, "{}", asked(Rule::Difference));
+            let found = volume_of(&model, left.solids());
+            if block_first {
+                assert!(
+                    (found - 8.0).abs() < 1e-12,
+                    "{}: a block is flat and meshes exactly, got {found}",
+                    asked(Rule::Difference)
+                );
+            } else {
+                measures(found, A_BAR, Side::Under);
+            }
         }
     }
 }
@@ -2487,7 +2568,7 @@ fn the_rest() -> Vec<Entry> {
             case: Case::Fused {
                 build: |model| a_block_corner_on_a_bars_wall(model, 4.0),
                 rule: Rule::Union,
-                outcome: Outcome::Refused("TwoCurvesTouchWithoutCrossing"),
+                outcome: Outcome::Answered,
             },
         },
         Entry {
@@ -2555,7 +2636,7 @@ fn the_rest() -> Vec<Entry> {
             pair: "a block sitting on a bar's cap",
             case: Case::Elsewhere {
                 rule: Rule::Union,
-                test: "a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch",
+                test: "a_block_sitting_on_a_bars_cap_meets_it_at_one_point_under_every_rule",
             },
         },
         Entry {
