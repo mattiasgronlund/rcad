@@ -566,12 +566,13 @@ const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 2] = [
             third_at: [5.0, 0.5, -2.5],
         },
         // The first union stopped on *side of plane* until a corner moved by a
-        // shift that rounds nothing was handed on exact (Q509).
+        // shift that rounds nothing was handed on exact (Q509). The second was
+        // `Undecidable` on *a point in a piece that every solid could place*
+        // until a point whose ray met a face nobody follows named that face
+        // (Q882).
         [
             None,
-            Some(
-                "the second union: Undecidable on a point in a piece that every solid could place",
-            ),
+            Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
         ],
     ),
     (

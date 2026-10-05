@@ -237,88 +237,66 @@ fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_
 /// The same two knives, the turned one first.
 ///
 /// For a wedge of 90 degrees the turned knife lies along the seam. The first
-/// cut is answered everywhere here but once — the 10 degree wedge's knife,
-/// turned 170, at radius 1 (see
-/// [`a_ball_cut_down_its_polar_axis_off_its_seam_is_answered_or_refused_by_name`]).
-/// Whenever it is answered, cutting that half ball again by `x >= 0` is
-/// refused by name, on one of three refusals that depend on the angle and the
-/// size.
+/// cut answers at every angle and size here, as
+/// [`a_ball_cut_down_its_polar_axis_off_its_seam_is_answered_or_refused_by_name`]
+/// pins, and cutting that half ball again by `x >= 0` is refused at every one.
 ///
-/// **None stops at `order along a crossing` since Q901**, which orders two
-/// meets of three planes that share two by the planes when their boxes cannot
-/// say. The 45 degree wedge, at every size, is refused at *a point inside a
-/// piece of a face* instead; every other wedge that gets this far at *a point
-/// in a piece that every solid could place*.
+/// **Every one is refused naming the half ball's skin**, a face whose trimming
+/// nothing here follows: a point inside a piece of the second knife was found,
+/// and the ray that was to place it against the half ball met that skin. Until
+/// row Q882's change landed, the fuse folded that into `Undecidable` at *a
+/// point in a piece that every solid could place*, which a caller reads as
+/// "loosen the policy" and no policy moves (`docs/decisions.md` §35.6). None
+/// has stopped at `order along a crossing` since Q901.
 #[test]
 fn a_wedge_cut_with_the_turned_knife_first_is_refused_by_name() {
     for degrees in WEDGES {
         for radius in RADII {
-            let mut model = a_model(radius);
-            let ball = model
-                .add_ball(radius, &Isometry::identity())
-                .expect("a ball");
-            let turned = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
-            let half = match model.fuse(
-                &[ball],
-                &[turned],
-                Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            ) {
-                Ok(fused) => fused.solids().to_vec(),
-                Err(why) => {
-                    assert_eq!(
-                        (degrees, radius, which_refusal(&why)),
-                        (10.0, 1.0, "ACurvedFaceGoesRightRoundWithNoSeam"),
-                        "only one first cut here is refused"
-                    );
-                    continue;
-                }
-            };
-            let second = a_knife_through_the_axis(&mut model, radius, 0.0);
-            let why = match model.fuse(
-                &half,
-                &[second],
-                Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            ) {
-                Err(why) => why,
-                Ok(fused) => panic!(
-                    "a {degrees} degree wedge of a ball of radius {radius} was answered \
-                     with {} solids; this test records a refusal, so move it to the \
-                     answered test",
-                    fused.solids().len()
-                ),
-            };
-            assert!(
-                matches!(
-                    which_refusal(&why),
-                    "a point in a piece that every solid could place"
-                        | "a point inside a piece of a face"
-                        | "CannotTellTheCellsOfAFaceApart"
-                ),
-                "a {degrees} degree wedge of a ball of radius {radius}: {why:?}"
-            );
+            let what = format!("a {degrees} degree wedge of a ball of radius {radius}");
+            let (model, half, why) = the_turned_knife_first(radius, degrees);
+            names_the_half_balls_skin(&model, &half, &why, &what);
         }
     }
 }
 
 /// The quarter wedge names the second of `place_the_piece`'s two searches.
 ///
-/// The test above lets three names through, so it cannot say which of the two
-/// searches gave up. This one says it for one case: a point **was** found
-/// inside the piece, and what ran out is somewhere to stand that every solid
-/// could place. Until §216.4 both searches wrote *a point inside a piece of a
-/// face*, so this fuse wrote down the name of the search that had worked.
+/// A point **was** found inside the piece, and what ran out is a ray that
+/// could place it. Until §216.4 both searches wrote *a point inside a piece of
+/// a face*, so this fuse wrote down the name of the search that had worked.
+/// The refusal it gives now is given only where a point was found, and the
+/// ball's own skin is what the ray from such a point cannot read: the half ball
+/// cannot place a point inside the second knife's face `x = 0` either.
 #[test]
 fn a_quarter_wedge_stops_after_a_point_is_found_inside_the_piece_and_not_before() {
-    let radius = 1.0;
+    let (model, half, why) = the_turned_knife_first(1.0, 90.0);
+    names_the_half_balls_skin(&model, &half, &why, "the quarter wedge");
+    let [half] = half[..] else {
+        panic!("the first cut is one solid, not {half:?}");
+    };
+    let point = rcad_predicates::Point::from([0.0, 0.5, 0.25]);
+    let found = model
+        .solid(half)
+        .expect("this model made the key")
+        .classify_uncertain_point(point, &Policy::certified(), &mut ProvenanceLog::new());
+    assert_eq!(
+        found,
+        rcad_topo::Containment::CannotFollowAFacesTrimming {
+            face: the_named_face(&why)
+        },
+        "the half ball places a point on the second knife's face x = 0"
+    );
+}
+
+/// The ball of `radius` less the knife turned `180 − degrees`, then that half
+/// ball cut by the knife `x >= 0`: the model, the half ball, and why the second
+/// cut is refused.
+fn the_turned_knife_first(radius: f64, degrees: f64) -> (Model, Vec<SolidKey>, Error) {
     let mut model = a_model(radius);
     let ball = model
         .add_ball(radius, &Isometry::identity())
         .expect("a ball");
-    let turned = a_knife_through_the_axis(&mut model, radius, 90.0);
+    let turned = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
     let half = model
         .fuse(
             &[ball],
@@ -331,19 +309,54 @@ fn a_quarter_wedge_stops_after_a_point_is_found_inside_the_piece_and_not_before(
         .solids()
         .to_vec();
     let second = a_knife_through_the_axis(&mut model, radius, 0.0);
-    let why = model
-        .fuse(
-            &half,
-            &[second],
-            Rule::Intersection,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .expect_err("a 90 degree wedge of a ball of radius 1 is refused");
-    assert_eq!(
-        which_refusal(&why),
-        "a point in a piece that every solid could place"
+    let mut log = ProvenanceLog::new();
+    let why = match model.fuse(
+        &half,
+        &[second],
+        Rule::Intersection,
+        &Policy::certified(),
+        &mut log,
+    ) {
+        Err(why) => why,
+        Ok(fused) => panic!(
+            "a {degrees} degree wedge of a ball of radius {radius} was answered with {} \
+             solids; this test records a refusal, so move it to the answered test",
+            fused.solids().len()
+        ),
+    };
+    assert!(
+        log.is_empty(),
+        "a refusal leaves the caller's log as it was"
     );
+    (model, half, why)
+}
+
+/// The refusal names a face of `half` on the ball: a key into the caller's
+/// model, which the fuse's scratch model is not.
+fn names_the_half_balls_skin(model: &Model, half: &[SolidKey], why: &Error, what: &str) {
+    assert_eq!(
+        which_refusal(why),
+        "AFaceTrimmedByACurveThisCannotFollow",
+        "{what}: {why:?}"
+    );
+    let face = the_named_face(why);
+    let named = half
+        .iter()
+        .flat_map(|&solid| model.solid(solid).expect("this model made the key").faces())
+        .find(|each| each.key() == face)
+        .unwrap_or_else(|| panic!("{what} names {face:?}, which is not a face of the half ball"));
+    assert!(
+        matches!(named.surface(), rcad_geom::Surface::Sphere(_)),
+        "{what} names a face on {:?}",
+        named.surface()
+    );
+}
+
+fn the_named_face(why: &Error) -> rcad_topo::FaceKey {
+    let Error::AFaceTrimmedByACurveThisCannotFollow { face } = *why else {
+        panic!("refused for a face nobody follows, not {why:?}");
+    };
+    face
 }
 
 /// A wedge cut in one fuse, by a prism whose edge **is** the polar axis.
@@ -759,6 +772,9 @@ fn which_refusal(why: &Error) -> &str {
     }
     if let Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs) = why {
         return "CannotNameWhichPieceOfACrossingThisIs";
+    }
+    if let Error::AFaceTrimmedByACurveThisCannotFollow { .. } = why {
+        return "AFaceTrimmedByACurveThisCannotFollow";
     }
     panic!("expected a refusal by name, got {why:?}")
 }
