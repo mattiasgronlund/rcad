@@ -1082,7 +1082,9 @@ impl BuildingAMesh {
     /// points: the lid of `a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures`
     /// was refused as two patches drawing one side, and 68 of the 1440 meshes
     /// of `no_sliver_cut_through_a_balls_pole_folds_at_any_deflection` folded
-    /// where 38 do (`docs/decisions.md` §379.5). A ball reads a tilted rim at
+    /// where 38 did then (`docs/decisions.md` §379.5), and 2 have since Q1027
+    /// kept a ball's rim point beside its pole from being cut off from either
+    /// end of the pole side. A ball reads a tilted rim at
     /// many latitudes, so its lids stay with the Delaunay cut.
     ///
     /// The points strictly along the edge are on no other face, so only the

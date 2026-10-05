@@ -282,8 +282,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 /// corners left, and so on, so the triangles stay about as wide as they are
 /// long where a fan from one corner would draw slivers. Done to every flat disc
 /// with nobody asking, this made 68 of 1440 meshes of a ball cut through its
-/// pole fold, and the fan 96, against the Delaunay cut's 38: a lid's corners
-/// are joined by the ball's own triangles too (`docs/decisions.md` §379.5).
+/// pole fold, and the fan 96, against the Delaunay cut's 38 then: a lid's
+/// corners are joined by the ball's own triangles too (`docs/decisions.md`
+/// §379.5). The Delaunay cut's are 2 since Q1027 ([`corners_inside_one_edge`]).
 /// That is what the caller's asking is for.
 ///
 /// **Why it needs an outline that turns one way, once round:** then the patch
