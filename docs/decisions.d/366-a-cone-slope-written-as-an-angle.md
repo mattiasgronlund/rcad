@@ -304,6 +304,26 @@ turned from decided to `Undecidable`. Each has a row.
 the slope is what moved. 366.7 has the fix, after which every file at all
 three digit counts is read back and all 144 fuses of each are decided.
 
+**2026-10-05, Q828.** The three 13-digit `Undecidable` fuses were traced to
+`FrustumAndBlock { side: 11, narrow: 1, wide: 3, up_per_unit_wider: 2, at: [7,
+4] }`: the frustum's apex sits at `(7, 4, −3)`, slope one half, so the cone it
+is cut from, swept to `z = 11` — the block's own roof — has radius exactly
+seven, tangent to both `x = 0` and `y = 11`. Reading the file rounded to
+thirteen digits and then written out again at seventeen — what an importer
+that re-exports a file it read does — defeats 366.7's corner recovery: the
+angle now carries seventeen digits of its own, so
+`its_angle_is_written_as`'s half-unit bracket no longer holds the true angle,
+and the reader takes the tangent of the thirteen-digit angle instead, a slope
+`0.49999999999999234`, `7.66e-15` short of one half. At `z = 11` that is a
+radius `1.07e-13` short of seven, and the sliver where the swept circle falls
+short of the two walls is a C-shaped piece with two necks that thin. Since
+Q897 (`a7e263e9`) the rungs of `rungs_towards_each_crossing` reach into a
+piece this thin, and all three rules answer within
+`how_far_rounding_can_move_a_volume` of the exact reading; before, at
+`b00d9291`, the same piece was `Undecidable` for every rule. Pinned in
+`a_frustum_tangent_to_two_walls_at_its_blocks_roof_is_read_back_rounded_and_reexported`,
+in `crates/rcad-step/tests/a_fuse_read_back_from_rounded_text.rs`.
+
 ### 366.7 A cone's slope put back from its corners
 
 *2026-10-05, Q955, lane `lane-q955-a-cone-slope-read-back-from-its-corners`,
