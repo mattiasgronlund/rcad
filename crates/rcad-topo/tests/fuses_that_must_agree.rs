@@ -2355,18 +2355,20 @@ fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
     tally.the_cause_named_most_often_is(A_POINT_EVERY_SOLID_COULD_PLACE);
 }
 
-/// `A \ (A \ B)` is `A ∩ B`, over a round solid — **and it cannot run today**
-/// either.
+/// `A \ (A \ B)` is `A ∩ B`, over a round solid — asserted, and it compares on
+/// 67 of 67.
 ///
 /// Two ways to the same half ball: cut the dent and then cut the dent's
 /// complement back out of the block, against sharing the block with the ball
-/// once. The second cut is handed the dent, whose skin is the ball's own, so it
-/// refuses on [`A_FACE_NOBODY_FOLLOWS`] on 67 of 67: a point in a piece was
-/// found, and the ray that was to place it met a face of the dent whose
-/// trimming nothing follows. It was [`A_POINT_EVERY_SOLID_COULD_PLACE`] until
-/// row Q882 named the face. Pinned, with
+/// once. The second cut is handed the dent, whose skin is the ball's own: a
+/// dome whose only corner is on the rim where the block's floor cuts it, so no
+/// corner says which side of the floor the dome keeps. Until row Q1024 that
+/// cut refused on [`A_FACE_NOBODY_FOLLOWS`] on 67 of 67: a point in a piece was
+/// found, and the ray that was to place it met the dome. `holds.rs` now reads
+/// the dome's side off the way its wire walks the rim, and every draw gets
+/// both sides and agrees.
 /// [`taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`]
-/// as the flat control.
+/// is the flat control.
 #[test]
 fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
@@ -2417,26 +2419,26 @@ fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share
         );
         Ok(())
     });
-    tally.nothing_was_compared_because_it_all_refused(
-        "A \\ (A \\ B) = A ∩ B over a ball, which refuses",
-        A_FACE_NOBODY_FOLLOWS,
-    );
+    tally.report_what_it_compared("A \\ (A \\ B) = A ∩ B over a ball");
 }
 
-/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, over a round solid — **and it stops at a
-/// different refusal from the other two**, which is why it is worth having
-/// separately.
+/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, over a round solid — **and it cannot run
+/// today**.
 ///
 /// The deepest chain any curved family has been asked for. The middle fuse takes
-/// the ball back out of the answer the first one built, and what stops it is not
-/// two coincident faces but [`WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON`] — the
-/// dome the union left is a face whose every corner sits on the ball's skin, so
-/// nothing in the model says which side of it the face is on. §30.8 item 10, on
-/// 61 of 61.
+/// the ball back out of the answer the first one built, and it refuses on 67 of
+/// 67, naming [`A_POINT_EVERY_SOLID_COULD_PLACE`]: a point in a piece was found
+/// and could not be placed against every solid.
 ///
-/// Two laws blocked by one refusal and a third blocked by another is a sharper
-/// statement than *"the laws do not run over a ball"*, and it says the ball
-/// needs both closed and not either.
+/// **It stopped earlier until row Q1024**, at
+/// [`WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON`]: the dome the union left is a
+/// face on the ball's sphere whose only corner is on the rim where the block's
+/// floor cuts it, so no corner said which side of the floor the dome keeps
+/// (§30.8 item 10). `holds.rs` now reads that side off the way the dome's wire
+/// walks the rim, and the fuse gets one step further. What stops it there has
+/// not been traced. The dome lies on `B`'s own sphere, two curved faces on one
+/// surface, which is what that name was first counted for; that this is the
+/// cause here is a guess.
 #[test]
 fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_union_again() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
@@ -2483,7 +2485,7 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
     });
     tally.nothing_was_compared_because_it_all_refused(
         "((A ∪ B) \\ B) ∪ B = A ∪ B over a ball, which refuses",
-        WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON,
+        A_POINT_EVERY_SOLID_COULD_PLACE,
     );
 }
 
