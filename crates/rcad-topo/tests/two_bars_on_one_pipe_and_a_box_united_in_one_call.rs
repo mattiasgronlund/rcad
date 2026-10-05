@@ -55,11 +55,18 @@
 //! - **The lower bar and a box through its wall, then the upper bar**
 //!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_two_boxes`]).
 //!   The first union answers and validates. The second is refused
-//!   `AFaceTrimmedByACurveThisCannotFollow` on that union's wall, where
-//!   `select.rs` asks the wall, through `SolidView::face_holds_the_point` in
-//!   `holds.rs`, whether it holds a point of the upper bar's wall on the same
-//!   pipe. A window cut opposite the seam is refused the same, so the seam is
-//!   not what stops it
+//!   `AFaceTrimmedByACurveThisCannotFollow` on that union's wall, and no face
+//!   is asked whether it holds a point first: the arrangement cutting the wall
+//!   (`which_way_an_edge_runs_round` in `fuse/arrange.rs`) cannot say which of
+//!   the two arcs of its circle the bottom edge of the window or notch is, on
+//!   `z = 0.5`, or `z = 1` for the box across the meeting. The first union
+//!   named that arc by a half-space through both its stored ends, which sit
+//!   exactly on its plane at `x = ±1.9364916731037085`. The second fuse solves
+//!   each end again from the pipe and two planes, into a box from
+//!   `1.9364916731037083` to `1.9364916731037085` across that plane, and
+//!   `a_picker_that_tells_the_two_arcs_apart` in `holds.rs`, which asks each
+//!   end to be on or in front, cannot tell (Q1063). A window cut opposite the
+//!   seam is refused the same, so the seam is not what stops it
 //!   ([`a_window_cut_opposite_the_seam_is_refused_the_same`]).
 
 use core::f64::consts::PI;
@@ -190,7 +197,7 @@ fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_two_boxes(
 
 /// **A window cut through the lower bar's wall opposite its seam is refused
 /// the same** as the box on the lower wall, which cuts one through the seam:
-/// so the seam running through the window is not what `holds.rs` cannot
+/// so the seam running through the window is not what the second fuse cannot
 /// follow. The same three united in one call, or with the bars first, are the
 /// mirror image of the box on the lower wall's union, and hold as much.
 #[test]
