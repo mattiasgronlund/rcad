@@ -146,3 +146,12 @@ lengths.
 - `select.rs` and `holds.rs` each keep their own copy of the meridian-circle
   lookup (§250.5), which names a circle from a corner and does not go through
   this function. Whether their margins have the same shape was not checked.
+  **Answered, Q305 (2026-10-05): there is no second margin.** The two copies
+  were one by Q117 (250.8), `the_picker_naming_the_circle_through` in
+  `holds.rs`, and that lookup asked `intersect` for its pickers from its first
+  commit (`6c9ab819`, in `select.rs`). For a plane through the axis,
+  `intersect` reaches `two_meridian_circles`, so the lookup gets this
+  section's pickers. Its only arithmetic of its own is
+  `Picker::side_of_point(corner)`, which for `InFrontOf` is
+  `HalfSpace::side_of_point`, exact about the four numbers the half-space
+  holds. The sentence above was wrong when it was written.
