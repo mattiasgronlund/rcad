@@ -28,7 +28,9 @@
 //! holed bars turned a quarter are answered and reach `holds_the_other_rings`
 //! too, but not by the family they were built for (Q616). The same two bars
 //! unturned, the probe for that family, were refused before `rings_round`
-//! until Q897 and are answered now.
+//! until Q897 and are answered now. The probe for an arc along a cone's
+//! parabola, a tube and a cone cut by one leaning plane, is refused before
+//! `rings_round` under every rule (Q634).
 
 use std::f64::consts::PI;
 
@@ -514,6 +516,241 @@ fn a_cone_cut_by_a_block_wall_off_its_axis_is_answered_under_every_rule() {
             (other, _) => panic!("not a rule this probes: {other:?}"),
         };
         assert_holds(&model, the_only(answer, &what), volume, &what);
+    }
+}
+
+/// **An arc along a cone's parabola.** The plane `z = x + 4` leans at the
+/// slope of a pointed cone of slope 1, apex at the origin and base at
+/// `z = 10`, so it cuts the cone in a parabola. A tube about the same axis,
+/// radius 12 less radius 4 from `z = −10` to `20`, and the cone are each cut
+/// to the far side of that plane by a wedge built face by face, the only door
+/// to a plane leaning along `x` (extrusions run along `z`, and a quarter turn
+/// is not exact). United, the two faces on the plane would join into one whose
+/// outline is the outer pipe's ellipse, one corner, and whose hole is an arc of
+/// the inner pipe's ellipse and an arc of the parabola meeting at `(0, ±4, 4)`,
+/// two corners. Neither encloses any area between its corners, and the hole
+/// runs along a parabola, which `holds_the_other_rings` answers `None` for.
+///
+/// **That is not reached: every rule, both ways round, is refused before
+/// `rings_round`.** Tube first, on `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`;
+/// cone first, on `AFaceTrimmedByACurveThisCannotFollow` naming a face of the
+/// cone. The hole's corners are where the cone, the inner pipe and the leaning
+/// plane meet, and `rcad-geom` works out a meet of two curved surfaces and a
+/// plane about one axis only when the plane is square to that axis (a gap,
+/// `docs/decisions.md` §31.2). Two other shapes were run on the way, and their
+/// set-up fuses refused as well (Q634): the bar of radius 12 cut to this side
+/// less the cut cone, the same three-surface refusal, and the cut cone less a
+/// bar of radius 1 up its axis, `AFaceTrimmedByACurveThisCannotFollow`.
+///
+/// Both solids are measured before they are fused. The tube holds the ring's
+/// area times its mean height, `128π · 16 = 2048π`. The cone holds
+/// `1000π/3 − (2000/3)·atan(1/2) + 416/9`, of which `320π/3 − 512/9` lies inside
+/// the inner pipe; the union is then `2048π + 320π/3 − 512/9`, and the
+/// intersection the rest of the cone. All four agree with a quadrature of the
+/// slices to 1e-12 (Q634).
+#[test]
+fn a_tube_and_a_cone_cut_by_one_leaning_plane_are_refused_before_their_rings_are_placed() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let [tube, cone] = a_tube_and_a_cone_cut_by_one_leaning_plane(&mut model);
+    assert_holds(&model, tube, 2048.0 * PI, "the cut tube");
+    let the_cut_cone = 1000.0 * PI / 3.0 - 2000.0 / 3.0 * 0.5_f64.atan() + 416.0 / 9.0;
+    assert_holds(&model, cone, the_cut_cone, "the cut cone");
+
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_tube_and_a_cone_cut_by_one_leaning_plane(&mut model);
+        let refused = fused_in_order(&mut model, pair, rule, swapped);
+        if swapped {
+            let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
+                panic!("{rule:?}, cone first: {refused:?}");
+            };
+            let cone = model.solid(pair[1]).expect("this model made the key");
+            assert!(
+                cone.faces().any(|mine| mine.key() == face),
+                "{rule:?}, cone first: the refusal names a face of the tube"
+            );
+        } else {
+            assert!(
+                matches!(
+                    refused,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                    ))
+                ),
+                "{rule:?}, tube first: {refused:?}"
+            );
+        }
+    }
+}
+
+/// The tube and the cone, each cut to the far side of the leaning plane, tube
+/// first. The bar is cut before it is holed: holed first, cutting it is
+/// refused (the next test).
+fn a_tube_and_a_cone_cut_by_one_leaning_plane(model: &mut Model) -> [SolidKey; 2] {
+    let outer = model
+        .add_round_bar(12.0, 30.0, &at(0.0, 0.0, -10.0))
+        .expect("a bar of radius twelve");
+    let cone = cones::a_pointed_cone(model, 1.0, 10.0);
+    let [bar, cone] = [outer, cone].map(|whole| {
+        let wedge = the_wedge_past_the_leaning_plane(model)
+            .unwrap_or_else(|why| panic!("the wedge: {why:?}"));
+        the_one_solid(model, whole, wedge, Rule::Intersection)
+    });
+    let through = model
+        .add_round_bar(4.0, 34.0, &at(0.0, 0.0, -12.0))
+        .expect("a bar of radius four");
+    let tube = the_one_solid(model, bar, through, Rule::Difference);
+    [tube, cone]
+}
+
+/// The prism `z ≥ x + 4`, `x ≥ −14`, `z ≤ 22`, `−14 ≤ y ≤ 14`: a right
+/// triangle in the `xz`-plane with corners `(−14, −10)`, `(−14, 22)` and
+/// `(18, 22)`, run along `y`. Its face on `z = x + 4` faces `(1, 0, −1)`, and
+/// every other face lies clear of the tube and the cone.
+fn the_wedge_past_the_leaning_plane(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    use Orientation::{Forward, Reversed};
+    let mut builder = SolidBuilder::new();
+    let [low, high, far] = [[-14.0, -10.0], [-14.0, 22.0], [18.0, 22.0]];
+    let mut both_ends = |[x, z]: [f64; 2]| {
+        Ok::<_, rcad_topo::Error>([
+            builder.add_vertex(Point::new(x, -14.0, z))?,
+            builder.add_vertex(Point::new(x, 14.0, z))?,
+        ])
+    };
+    let [low_front, low_back] = both_ends(low)?;
+    let [high_front, high_back] = both_ends(high)?;
+    let [far_front, far_back] = both_ends(far)?;
+    let mut straight = |start, end| builder.add_edge(start, end, EdgeRun::Straight);
+    let low_across = straight(low_front, low_back)?;
+    let high_across = straight(high_front, high_back)?;
+    let far_across = straight(far_front, far_back)?;
+    let front_leaning = straight(low_front, far_front)?;
+    let front_top = straight(high_front, far_front)?;
+    let front_side = straight(low_front, high_front)?;
+    let back_leaning = straight(low_back, far_back)?;
+    let back_top = straight(high_back, far_back)?;
+    let back_side = straight(low_back, high_back)?;
+
+    let leaning = a_flat_face(
+        &mut builder,
+        Point::new(0.0, 0.0, 4.0),
+        Vector::new(1.0, 0.0, -1.0),
+        &[
+            (front_leaning, Reversed),
+            (low_across, Forward),
+            (back_leaning, Forward),
+            (far_across, Reversed),
+        ],
+    )?;
+    let side = a_flat_face(
+        &mut builder,
+        Point::new(-14.0, 0.0, 0.0),
+        Vector::new(-1.0, 0.0, 0.0),
+        &[
+            (front_side, Forward),
+            (high_across, Forward),
+            (back_side, Reversed),
+            (low_across, Reversed),
+        ],
+    )?;
+    let top = a_flat_face(
+        &mut builder,
+        Point::new(0.0, 0.0, 22.0),
+        Vector::new(0.0, 0.0, 1.0),
+        &[
+            (front_top, Forward),
+            (far_across, Forward),
+            (back_top, Reversed),
+            (high_across, Reversed),
+        ],
+    )?;
+    let front = a_flat_face(
+        &mut builder,
+        Point::new(0.0, -14.0, 0.0),
+        Vector::new(0.0, -1.0, 0.0),
+        &[
+            (front_leaning, Forward),
+            (front_top, Reversed),
+            (front_side, Reversed),
+        ],
+    )?;
+    let back = a_flat_face(
+        &mut builder,
+        Point::new(0.0, 14.0, 0.0),
+        Vector::new(0.0, 1.0, 0.0),
+        &[
+            (back_side, Forward),
+            (back_top, Forward),
+            (back_leaning, Reversed),
+        ],
+    )?;
+    builder.add_shell(&[
+        (leaning, Forward),
+        (side, Forward),
+        (top, Forward),
+        (front, Forward),
+        (back, Forward),
+    ])?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+fn a_flat_face(
+    builder: &mut SolidBuilder,
+    point: Point,
+    outward: Vector,
+    steps: &[(DraftEdge, Orientation)],
+) -> rcad_topo::Result<rcad_topo::DraftFace> {
+    let plane = Plane::from_point_and_normal(point, outward).expect("a normal with a length");
+    let wire = a_wire(builder, steps)?;
+    builder.add_face(Surface::Plane(plane), &[wire])
+}
+
+/// **A tube cut by a block whose floor crosses it and whose top clears it is
+/// refused**, both ways round: the tube of the test above, holed before it is
+/// cut, and the block `[−14, 14] × [−14, 14] × [0, 22]`. The block's top,
+/// `z = 22`, is two above the tube's, yet the fuse cuts it along the circles of
+/// radius 4 and 12 where the two pipes would cross it, and cannot find a point
+/// inside the ring between them to place it by (Q634, with a print in
+/// `select::choose`). Nothing of the tube reaches `z = 22`, so there is nothing
+/// there to cut along. The wedge above, holding the holed tube, refuses the
+/// same way with its top at 21, 22, 24 or 30. A bar of radius 12 gets the
+/// circle of radius 12 on the block's top as well, and is answered; so is the
+/// tube against a block reaching down past it, `z = −30` to `22`.
+#[test]
+fn a_tube_cut_by_a_block_whose_top_clears_it_is_refused_on_circles_its_walls_never_reach() {
+    for swapped in [false, true] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let outer = model
+            .add_round_bar(12.0, 30.0, &at(0.0, 0.0, -10.0))
+            .expect("a bar of radius twelve");
+        let through = model
+            .add_round_bar(4.0, 34.0, &at(0.0, 0.0, -12.0))
+            .expect("a bar of radius four");
+        let tube = the_one_solid(&mut model, outer, through, Rule::Difference);
+        let block = a_block(
+            &mut model,
+            &[[-14.0, -14.0], [14.0, -14.0], [14.0, 14.0], [-14.0, 14.0]],
+            0.0,
+            22.0,
+        );
+        let refused = fused_in_order(&mut model, [tube, block], Rule::Intersection, swapped);
+        let Err(Error::Undecidable { records }) = &refused else {
+            panic!("swapped {swapped}: {refused:?}");
+        };
+        let [record] = records.records() else {
+            panic!("swapped {swapped}: {records:?}");
+        };
+        assert_eq!(record.predicate(), "a point inside a piece of a face");
+        let corners: Vec<Option<[f64; 3]>> = record
+            .inputs()
+            .iter()
+            .map(|corner| corner.exact_coordinates())
+            .collect();
+        assert_eq!(
+            corners,
+            [Some([0.0, 4.0, 22.0]), Some([0.0, 12.0, 22.0])],
+            "swapped {swapped}"
+        );
     }
 }
 
