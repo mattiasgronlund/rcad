@@ -1211,7 +1211,12 @@ fn is_one_circle_cut_in_two(
 ///    neighbour**. Then the face is exactly the part of its surface in front of
 ///    all of them. Or, on a sphere, every side lies *behind* every other
 ///    neighbour, and then the rest of the sphere is that part, and the face is
-///    the part in front of any of them.
+///    the part in front of any of them. Or, on a cone cut by two planes through
+///    its apex and by one cap, each side on one plane lies behind the other
+///    plane, and the face is the part in front of the cap and of either plane:
+///    three quarters of a pointed cone's skin, which
+///    [`the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of`] argues
+///    for.
 ///
 /// Why that is enough: a face whose sides all lie in front of a neighbour
 /// cannot reach behind it, because the region behind is connected, holds none of
@@ -1366,6 +1371,20 @@ fn what_the_part_in_front_of_its_cuts_holds(
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
     }
+    let the_apex_is_a_corner = |held| {
+        if at_the_apex && held == OnAFace::Held {
+            OnAFace::OnItsBoundary
+        } else {
+            held
+        }
+    };
+
+    if let Some(either) =
+        the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(surface, sides, &cuts)
+    {
+        let held = held_in_front_of_the_cap_and_of_either(&either, point)?;
+        return Ok(Some(the_apex_is_a_corner(held)));
+    }
 
     let mut in_front_of_all = true;
     let mut behind_all = true;
@@ -1384,11 +1403,7 @@ fn what_the_part_in_front_of_its_cuts_holds(
             Some(run) => held_in_front_of_all_on_its_own_run(run, &cuts, point)?,
             None => held_in_front_of_all(&cuts, point)?,
         };
-        Ok(Some(if at_the_apex && held == OnAFace::Held {
-            OnAFace::OnItsBoundary
-        } else {
-            held
-        }))
+        Ok(Some(the_apex_is_a_corner(held)))
     } else if behind_all
         && (matches!(surface, Surface::Sphere(_)) || is_two_discs_taken_together(surface, &cuts))
     {
@@ -1396,6 +1411,181 @@ fn what_the_part_in_front_of_its_cuts_holds(
     } else {
         Ok(None)
     }
+}
+
+/// A cone face's cap, and the two planes through its apex it is in front of
+/// either of ([`the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of`]).
+struct InFrontOfEither {
+    cap: Cut,
+    either: [Cut; 2],
+}
+
+/// The cap and the two cuts of a cone face that is the part of its nappe in
+/// front of the cap and in front of **either** of two planes through its apex;
+/// `None` where the face is not shown to be that.
+///
+/// Three quarters of a pointed cone, cut down its axis by `x = 0` and `y = 0`
+/// with the quarter `x, y > 0` taken away, have a skin like that. It keeps
+/// `x ≤ 0` along its side on `x = 0` and `y ≤ 0` along its side on `y = 0`, and
+/// the part of the nappe in front of both is the opposite quarter, which is not
+/// the skin: its rim runs the long way round, across both planes. On a sphere
+/// the way out is that every side lies behind every other neighbour, so the
+/// rest of the sphere is the part in front of all of them turned round, and the
+/// face the part in front of any. On a cone that is not true: past the cap the
+/// rest of the nappe runs on for ever, and the sides up from the apex lie in
+/// front of the cap, not behind it. So the cap is kept apart from the two
+/// planes, and the face is asked to be in front of the one and of either of
+/// the other two.
+///
+/// # What is asked
+///
+/// - The cuts are two planes `X` and `Y` through the apex that meet in a line
+///   strictly inside the cone ([`do_two_planes_through_the_apex_meet_inside`]),
+///   and one more plane, the cap, which the apex is strictly in front of and
+///   which cuts the cone in a closed curve. Those are cuts
+///   [`is_a_family_this_follows`] takes, so the face is on no run of
+///   [`one_of_two_runs_between_two_flats`].
+/// - Every side on `X` lies strictly behind `Y`, every side on `Y` strictly
+///   behind `X`, and each of them in front of or on the cap.
+/// - The cap carries one side, the rim: an arc with one end a corner of a side
+///   on `X` and the other a corner of a side on `Y`, which leaves its end on
+///   `X` into the side of `X` the face keeps
+///   ([`the_side_an_arc_leaves_its_end_on`]).
+///
+/// # Why the face is then the part in front of the cap and of either plane
+///
+/// Every point of the nappe but the apex is on one ruling, and along a ruling a
+/// plane through the apex keeps all of it or only the apex. Call `Q` the part of
+/// the nappe strictly behind both `X` and `Y`. Turned round, the two planes
+/// still meet in the same line inside the cone, so by
+/// [`is_a_family_this_follows`]'s argument for two cuts through the apex the
+/// rulings in `Q` are **one run**, and `Q` is that run with the apex left out:
+/// one piece. The run ends at two rulings, one on each plane. `X` holds the
+/// line the two meet in, strictly inside the cone, so it cuts this nappe in two
+/// rulings with that line between them; inside `X`, `Y` changes sign only
+/// across that line, so one of the two is behind `Y` and the other in front.
+/// The run's end on `X` is the one behind `Y`, and the face's side on `X`,
+/// which lies behind `Y`, lies along it. Its side on `Y` lies along the run's
+/// other end the same way.
+///
+/// The face reaches neither past the cap nor into `Q`, by the argument
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] gives for one cut: each is
+/// one piece, holds none of the face's boundary, and borders a side of the face
+/// on the side the face does not keep, so the face cannot reach into it without
+/// filling it, and it does not fill it.
+///
+/// - Past the cap is one piece because the cap cuts every ruling of the nappe
+///   once — it closes, with the apex in front — so that part is a band right
+///   round the cone. The sides up from the apex lie in front of the cap, and the
+///   rim on it, and the rim borders the band.
+/// - `Q` holds no side on `X` or `Y`, which lie on those planes. It borders the
+///   side on `X`: just across `X` from it is behind `X`, and behind `Y` as that
+///   side is. And it holds no point of the rim, which is why the rim is asked
+///   which way it leaves `X`. The cap's curve meets the rulings one for one, so
+///   `Q` meets it in one open arc, ending on the two rulings `Q`'s run ends at,
+///   and those are where the rim's two ends are. Between those two points the
+///   curve is that arc or the rest of it; the rim leaves `X` into the face's
+///   side of `X`, which is in front of it, so the rim is not the arc in `Q`, and
+///   it is the rest.
+///
+/// So the face lies in the part `R` of the nappe on or in front of the cap and
+/// on or in front of `X` or `Y`. `R` is one piece: the rulings it holds are the
+/// whole circle of them less `Q`'s run, one run again, and each carries the
+/// piece from the apex to the cap. The face's boundary is on `R`'s: past the
+/// rim is past the cap, and just across a side on `X` or `Y` is `Q`. A face
+/// inside one piece with its boundary on that piece's boundary is all of it, as
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] says of the part in front of
+/// every cut. Three quarters of a pointed cone are that
+/// (`three_quarters_of_a_pointed_cone_hold_their_points` in
+/// `tests/a_solid_carrying_a_run_along_a_cones_ruling.rs`).
+///
+/// # What is still refused
+///
+/// A second cut the apex is in front of, a cut it is behind, a third plane
+/// through it, two planes that do not meet inside the cone, or more than one
+/// side on the cap. Each is a gap and not a limit: none of them is shown to
+/// leave the part in front of either in two pieces. The argument above leans on
+/// one band past one cap and one rim across it, and a face that needs more is
+/// the consumer `docs/decisions.md` §13 asks for.
+fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
+    surface: &Surface,
+    sides: &[Side],
+    cuts: &[Cut],
+) -> Option<InFrontOfEither> {
+    let Surface::Cone(cone) = surface else {
+        return None;
+    };
+    let apex = PredicatePoint::from(cone.apex().coordinates());
+    let mut through_the_apex = Vec::new();
+    let mut caps = Vec::new();
+    for cut in cuts {
+        let flat = cut.surface.as_plane()?;
+        let sits = flat.side_of_point(apex);
+        if sits == Decision::Zero {
+            through_the_apex.push((cut, flat));
+        } else if sits == cut.kept {
+            caps.push((cut, flat));
+        } else {
+            return None;
+        }
+    }
+    let ([(one, one_flat), (other, other_flat)], [(cap, cap_flat)]) =
+        (through_the_apex.as_slice(), caps.as_slice())
+    else {
+        return None;
+    };
+    if !do_two_planes_through_the_apex_meet_inside(cone, one_flat, other_flat)
+        || cone.is_cut_in_a_closed_curve_by(cap_flat) != Some(true)
+    {
+        return None;
+    }
+
+    let in_front_of_or_on = |side: &Side, cut: &Cut| match where_a_side_lies(surface, side, cut) {
+        Lies::On => true,
+        Lies::Beside(found) => found == cut.kept,
+        Lies::Across => false,
+    };
+    let strictly_behind = |side: &Side, cut: &Cut| match where_a_side_lies(surface, side, cut) {
+        Lies::Beside(found) => found != cut.kept,
+        Lies::On | Lies::Across => false,
+    };
+    let mut rims = Vec::new();
+    for side in sides {
+        let lies_as_it_must = if side.across == one.surface {
+            strictly_behind(side, other) && in_front_of_or_on(side, cap)
+        } else if side.across == other.surface {
+            strictly_behind(side, one) && in_front_of_or_on(side, cap)
+        } else if side.across == cap.surface {
+            rims.push(side);
+            true
+        } else {
+            panic!("every side is across one of the cuts it was read into");
+        };
+        if !lies_as_it_must {
+            return None;
+        }
+    }
+
+    let [rim] = rims.as_slice() else {
+        return None;
+    };
+    let SideRun::Arc { into_the_arc } = &rim.run else {
+        return None;
+    };
+    let on = |cut: &Cut, end: Corner| cut.corners_on_it.contains(&end.key);
+    let end_on_one = if on(one, rim.start) && on(other, rim.end) {
+        rim.start
+    } else if on(one, rim.end) && on(other, rim.start) {
+        rim.end
+    } else {
+        return None;
+    };
+    let leaves =
+        the_side_an_arc_leaves_its_end_on(surface, rim, *into_the_arc, one_flat, end_on_one.at);
+    (leaves == Some(one.kept)).then(|| InFrontOfEither {
+        cap: (*cap).clone(),
+        either: [(*one).clone(), (*other).clone()],
+    })
 }
 
 /// Whether a flat face holds `point`, which is taken as being on that face's
@@ -2288,6 +2478,10 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// (`a_quarter_of_a_pointed_cone_holds_its_points` in
 /// `tests/a_solid_carrying_a_run_along_a_cones_ruling.rs`).
 /// [`do_two_planes_through_the_apex_meet_inside`] settles where the line is.
+/// The other three quarters have their skin cut by the same planes and keep
+/// the part in front of either, not of both; this says yes to their cuts too,
+/// and [`the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of`] tells
+/// that skin from the quarter's, by the wedge turned round being one run as well.
 ///
 /// **The strip `|x| ≤ z/10` is refused because of its shape**, not for want of
 /// arithmetic: its planes meet along `y`, square to the axis and outside the
@@ -3385,15 +3579,27 @@ fn where_an_arc_with_one_end_on_a_cut_lies(
     at: Point,
     far: Decision,
 ) -> Lies {
-    let Some(along) = the_way_the_crossing_runs(surface, &side.across, at) else {
-        return Lies::Across;
-    };
-    let leaving = dot(along, into_the_arc) * dot(along, exactly(cut.normal().components()));
-    if leaving.sign() == far {
+    if the_side_an_arc_leaves_its_end_on(surface, side, into_the_arc, cut, at) == Some(far) {
         Lies::Beside(far)
     } else {
         Lies::Across
     }
+}
+
+/// The side of `cut` an arc leaves its end `at` on, as
+/// [`where_an_arc_with_one_end_on_a_cut_lies`] reads it:
+/// `(∇S × ∇T · into_the_arc)(∇S × ∇T · cut)`. [`Decision::Zero`] for a graze
+/// and [`Decision::Undecidable`] for a sign not settled, which no caller takes
+/// for a side; `None` for a surface [`gradient_at`] does not read.
+fn the_side_an_arc_leaves_its_end_on(
+    surface: &Surface,
+    side: &Side,
+    into_the_arc: [Interval; 3],
+    cut: &Plane,
+    at: Point,
+) -> Option<Decision> {
+    let along = the_way_the_crossing_runs(surface, &side.across, at)?;
+    Some((dot(along, into_the_arc) * dot(along, exactly(cut.normal().components()))).sign())
 }
 
 /// Where an arc of the curve a plane cuts one pipe in lies against another pipe
@@ -3519,6 +3725,27 @@ fn the_way_the_crossing_runs(
     Some(cross(gradient_at(surface, at)?, gradient_at(across, at)?))
 }
 
+/// The face is the part of its nappe in front of its cap and in front of either
+/// of two planes through its apex
+/// ([`the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of`]).
+fn held_in_front_of_the_cap_and_of_either(
+    either: &InFrontOfEither,
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let by_the_cap = held_in_front_of_all(core::slice::from_ref(&either.cap), point)?;
+    if by_the_cap == OnAFace::NotHeld {
+        return Ok(OnAFace::NotHeld);
+    }
+    let by_either = held_in_front_of_any(&either.either, point)?;
+    Ok(if by_either == OnAFace::NotHeld {
+        OnAFace::NotHeld
+    } else if by_the_cap == OnAFace::Held && by_either == OnAFace::Held {
+        OnAFace::Held
+    } else {
+        OnAFace::OnItsBoundary
+    })
+}
+
 /// The face is the part of its surface in front of every cut.
 fn held_in_front_of_all(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> {
     let mut on_its_boundary = false;
@@ -3561,8 +3788,11 @@ fn held_in_front_of_all_on_its_own_run(
     }
 }
 
-/// The face is the part of its sphere in front of any cut: the rest of the
-/// sphere is behind all of them.
+/// The face is the part of its surface in front of any of `cuts`: on a sphere,
+/// whose rest is behind all of them; on the plane of two discs taken together
+/// ([`is_two_discs_taken_together`]); and on a cone, of the two planes through
+/// its apex it is in front of either of
+/// ([`held_in_front_of_the_cap_and_of_either`]).
 fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> {
     let mut on_its_boundary = false;
     let mut undecided = None;

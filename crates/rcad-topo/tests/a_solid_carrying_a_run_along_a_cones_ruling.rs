@@ -33,7 +33,8 @@
 //! cost (`docs/decisions.md` §389). The two meet along the axis, inside the
 //! cone, so its skin is one run of rulings and answers, on either nappe. The
 //! other three quarters, built from the same edges, have a skin that is the part
-//! in front of either plane and not of both, and that is refused by name.
+//! in front of the cap and of either plane, not of both, and that answers too
+//! (row Q1009).
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, NamedRun, Orientation, Picker, Plane, Point, Scale,
@@ -553,133 +554,203 @@ fn a_quarter_of_a_pointed_cone_holds_its_points() {
     }
 }
 
-/// **The other three quarters of the same pointed cone have their skin refused
-/// by name, and that is a gap: point-in-solid names the skin for a point
-/// inside.** Their cap answers. Measured.
+/// **The other three quarters of the same pointed cone hold their points, and
+/// point-in-solid answers them as their own sizes say, on either nappe.** No
+/// point of the missing quarter is ever held.
 ///
 /// The solid is the part with `x ≤ 0` or `y ≤ 0`, built from the same edges as
 /// the quarter with the rim the long way round
 /// ([`a_pointed_cone_cut_along_its_axis`]); it meshes to three quarters of the
-/// cone's `π · 4² · 8 / 3`, which is `32π`. Its skin is the part of the nappe in
-/// front of **either** `x = 0` or `y = 0`, not of both, and so is its cap of the
-/// cap's disc. `holds.rs` follows the skin's two cuts, which meet along the axis
-/// inside the cone, but the part in front of both is the opposite quarter, and
-/// the rim runs across both planes, so the skin is refused rather than answered
-/// as that quarter. Answering it needs "in front of any", which `holds.rs` has
-/// only for a sphere's faces and for two discs taken together.
+/// cone's `π · 4² · 8 / 3`, which is `32π`. Its skin is the part of the nappe
+/// in front of the cap and in front of **either** `x = 0` or `y = 0`, not of
+/// both: the part in front of both is the opposite quarter, and the rim runs
+/// across both planes. `holds.rs` answers it as that
+/// (`the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of`, which
+/// says why that part is the skin). So a point on the cone is held where `x < 0`
+/// or `y < 0` below the cap, turned away where `x > 0` and `y > 0`, and on the
+/// skin's boundary along the ruling up `x = 0` at `y > 0`, the one up `y = 0` at
+/// `x > 0`, the rim, and the apex. The ruling up `x = 0` at `y < 0` is inside
+/// the skin, which runs on across it.
 ///
-/// The cap was refused the same way until row Q1002. A flat face now winds its
-/// own sides where its cuts say nothing, with the rim read as its chord from
-/// `(4, 0)` to `(0, 4)` and the part of the disc on the rim's side of that
-/// chord counted once round: so it holds three quarters of the disc and turns
+/// Point-in-solid is checked against [`is_in_the_three_quarters`] at the middle
+/// of every one of `16³` cells of the box round the cone, half a unit on a
+/// side, none of which is on a face; and the cells it calls inside add up to
+/// `32π` to within the grid's own coarseness, 813 of them, `101.6` against
+/// `100.5`.
+///
+/// The cap winds its own sides since row Q1002, with the rim read as its chord
+/// from `(4, 0)` to `(0, 4)`: so it holds three quarters of the disc and turns
 /// away the quarter `x, y > 0`, the chord across it included, and what lies
 /// outside the disc.
 ///
-/// What it does answer is right: the skin holds nothing on the other nappe, the
-/// cap and the two flat triangles answer, and a point above the cap or on the
-/// other nappe is outside.
+/// Until row Q1009 the skin was refused by name,
+/// `AFaceTrimmedByACurveThisCannotFollow`, at every point on its own nappe,
+/// because the rim lies across `y = 0`; and `(−1, −1, 6)`, `(−1, 1, 6)` and
+/// `(1, −1, 6)`, each inside, came back `CannotFollowAFacesTrimming` naming it.
 #[test]
-fn three_quarters_of_a_pointed_cone_have_their_skin_refused_by_name_and_their_cap_answered() {
+fn three_quarters_of_a_pointed_cone_hold_their_points() {
     let policy = Policy::certified();
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let rest = a_pointed_cone_cut_along_its_axis(&mut model, Kept::TheRest, |point| point);
-    model
-        .validate(&policy, &mut ProvenanceLog::new())
-        .expect("three quarters of a pointed cone is a sound solid");
-    let view = model.solid(rest).expect("this model made the key");
+    let unturned: fn([f64; 3]) -> [f64; 3] = |point| point;
+    let turned: fn([f64; 3]) -> [f64; 3] = |[x, y, z]| [x, -y, -z];
+    for turn in [unturned, turned] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let rest = a_pointed_cone_cut_along_its_axis(&mut model, Kept::TheRest, turn);
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .expect("three quarters of a pointed cone is a sound solid");
+        let view = model.solid(rest).expect("this model made the key");
 
-    let measured = view
-        .measure(
-            Deflection::of(0.002).expect("a positive length"),
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-        .expect("three quarters of a pointed cone measures");
-    let three_quarters = 0.75 * core::f64::consts::PI * 4.0 * 4.0 * 8.0 / 3.0;
-    assert!(
-        (measured.volume() - three_quarters).abs() < 0.05,
-        "three quarters of the cone's volume, {} against {three_quarters}",
-        measured.volume()
-    );
-
-    let face_on = |which: &dyn Fn(&Surface) -> bool| {
-        let mut found = view.faces().filter(|face| which(&face.surface()));
-        let face = found.next().expect("a face on that surface");
-        assert!(found.next().is_none(), "one face on that surface");
-        face.key()
-    };
-    let skin = face_on(&|surface| matches!(surface, Surface::Cone(_)));
-    let flat_facing = |normal: [f64; 3]| {
-        face_on(&|surface: &Surface| {
-            surface
-                .as_plane()
-                .is_some_and(|plane| plane.normal().components() == normal)
-        })
-    };
-    let cap = flat_facing([0.0, 0.0, 1.0]);
-    let on_x_is_zero = flat_facing([1.0, 0.0, 0.0]);
-    let on_y_is_zero = flat_facing([0.0, 1.0, 0.0]);
-    let asked = |face, point: [f64; 3]| {
-        view.face_holds_the_point(
-            face,
-            PredicatePoint::from(point),
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-    };
-
-    for (face, point) in [
-        (skin, [-1.8, -2.4, 6.0]),
-        (skin, [-1.8, 2.4, 6.0]),
-        (skin, [1.8, -2.4, 6.0]),
-        (skin, [1.8, 2.4, 6.0]),
-    ] {
+        let measured = view
+            .measure(
+                Deflection::of(0.002).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("three quarters of a pointed cone measures");
         assert!(
-            matches!(
-                asked(face, point),
-                Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: named }) if named == face
-            ),
-            "{point:?}"
+            (measured.volume() - THREE_QUARTERS_OF_THE_CONE).abs() < 0.05,
+            "three quarters of the cone's volume, {} against {THREE_QUARTERS_OF_THE_CONE}",
+            measured.volume()
         );
-    }
-    for (face, point, want) in [
-        (skin, [1.8, 2.4, -6.0], OnAFace::NotHeld),
-        (cap, [-1.0, -1.0, 8.0], OnAFace::Held),
-        (cap, [-1.0, 1.0, 8.0], OnAFace::Held),
-        (cap, [1.0, -3.0, 8.0], OnAFace::Held),
-        (cap, [1.0, 1.0, 8.0], OnAFace::NotHeld),
-        (cap, [2.0, 2.0, 8.0], OnAFace::NotHeld),
-        (cap, [1.0, 3.0, 8.0], OnAFace::NotHeld),
-        (cap, [3.0, 3.0, 8.0], OnAFace::NotHeld),
-        (cap, [-3.0, -3.0, 8.0], OnAFace::NotHeld),
-        (cap, [0.0, -4.0, 8.0], OnAFace::OnItsBoundary),
-        (cap, [0.0, 2.0, 8.0], OnAFace::OnItsBoundary),
-        (cap, [0.0, 4.0, 8.0], OnAFace::OnItsBoundary),
-        (on_x_is_zero, [0.0, 1.0, 6.0], OnAFace::Held),
-        (on_x_is_zero, [0.0, -1.0, 6.0], OnAFace::NotHeld),
-        (on_y_is_zero, [1.0, 0.0, 6.0], OnAFace::Held),
-        (on_y_is_zero, [-1.0, 0.0, 6.0], OnAFace::NotHeld),
-    ] {
-        assert_eq!(
-            asked(face, point).unwrap_or_else(|error| panic!("{point:?}: {error:?}")),
-            want,
-            "{point:?}"
-        );
-    }
 
-    let classified = |[x, y, z]: [f64; 3]| {
-        view.classify_point(Point::new(x, y, z), &policy, &mut ProvenanceLog::new())
-    };
-    for inside in [[-1.0, -1.0, 6.0], [-1.0, 1.0, 6.0], [1.0, -1.0, 6.0]] {
-        assert_eq!(
-            classified(inside),
-            Containment::CannotFollowAFacesTrimming { face: skin },
-            "{inside:?}"
+        let face_on = |which: &dyn Fn(&Surface) -> bool| {
+            let mut found = view.faces().filter(|face| which(&face.surface()));
+            let face = found.next().expect("a face on that surface");
+            assert!(found.next().is_none(), "one face on that surface");
+            face.key()
+        };
+        let skin = face_on(&|surface| matches!(surface, Surface::Cone(_)));
+        let flat_facing = |normal: [f64; 3]| {
+            face_on(&|surface: &Surface| {
+                surface
+                    .as_plane()
+                    .is_some_and(|plane| plane.normal().components() == turn(normal))
+            })
+        };
+        let cap = flat_facing([0.0, 0.0, 1.0]);
+        let on_x_is_zero = flat_facing([1.0, 0.0, 0.0]);
+        let on_y_is_zero = flat_facing([0.0, 1.0, 0.0]);
+        let asked = |face, point: [f64; 3]| {
+            view.face_holds_the_point(
+                face,
+                PredicatePoint::from(turn(point)),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+        };
+
+        for (face, point, want) in [
+            (skin, [-1.8, -2.4, 6.0], OnAFace::Held),
+            (skin, [-1.8, 2.4, 6.0], OnAFace::Held),
+            (skin, [1.8, -2.4, 6.0], OnAFace::Held),
+            (skin, [1.8, 2.4, 6.0], OnAFace::NotHeld),
+            (skin, [2.4, 1.8, 6.0], OnAFace::NotHeld),
+            (skin, [0.6, 0.8, 2.0], OnAFace::NotHeld),
+            (skin, [0.0, 3.0, 6.0], OnAFace::OnItsBoundary),
+            (skin, [3.0, 0.0, 6.0], OnAFace::OnItsBoundary),
+            (skin, [0.0, -3.0, 6.0], OnAFace::Held),
+            (skin, [-3.0, 0.0, 6.0], OnAFace::Held),
+            (skin, [0.0, -4.0, 8.0], OnAFace::OnItsBoundary),
+            (skin, [-2.4, 3.2, 8.0], OnAFace::OnItsBoundary),
+            (skin, [2.4, 3.2, 8.0], OnAFace::NotHeld),
+            (skin, [-5.0, 0.0, 10.0], OnAFace::NotHeld),
+            (skin, [0.0, 0.0, 0.0], OnAFace::OnItsBoundary),
+            (skin, [1.8, 2.4, -6.0], OnAFace::NotHeld),
+            (skin, [-1.8, -2.4, -6.0], OnAFace::NotHeld),
+            (cap, [-1.0, -1.0, 8.0], OnAFace::Held),
+            (cap, [-1.0, 1.0, 8.0], OnAFace::Held),
+            (cap, [1.0, -3.0, 8.0], OnAFace::Held),
+            (cap, [1.0, 1.0, 8.0], OnAFace::NotHeld),
+            (cap, [2.0, 2.0, 8.0], OnAFace::NotHeld),
+            (cap, [1.0, 3.0, 8.0], OnAFace::NotHeld),
+            (cap, [3.0, 3.0, 8.0], OnAFace::NotHeld),
+            (cap, [-3.0, -3.0, 8.0], OnAFace::NotHeld),
+            (cap, [0.0, -4.0, 8.0], OnAFace::OnItsBoundary),
+            (cap, [0.0, 2.0, 8.0], OnAFace::OnItsBoundary),
+            (cap, [0.0, 4.0, 8.0], OnAFace::OnItsBoundary),
+            (on_x_is_zero, [0.0, 1.0, 6.0], OnAFace::Held),
+            (on_x_is_zero, [0.0, -1.0, 6.0], OnAFace::NotHeld),
+            (on_y_is_zero, [1.0, 0.0, 6.0], OnAFace::Held),
+            (on_y_is_zero, [-1.0, 0.0, 6.0], OnAFace::NotHeld),
+        ] {
+            assert_eq!(
+                asked(face, point).unwrap_or_else(|error| panic!("{point:?}: {error:?}")),
+                want,
+                "{point:?}, turned to {:?}",
+                turn(point)
+            );
+        }
+
+        let classified = |point: [f64; 3]| {
+            let [x, y, z] = turn(point);
+            view.classify_point(Point::new(x, y, z), &policy, &mut ProvenanceLog::new())
+        };
+        for (point, want) in [
+            ([-1.0, -1.0, 6.0], Containment::Inside),
+            ([-1.0, 1.0, 6.0], Containment::Inside),
+            ([1.0, -1.0, 6.0], Containment::Inside),
+            ([1.0, 1.0, 6.0], Containment::Outside),
+            ([2.0, 2.0, 6.0], Containment::Outside),
+            ([1.0, 1.0, 9.0], Containment::Outside),
+            ([-1.0, -1.0, -6.0], Containment::Outside),
+        ] {
+            assert_eq!(
+                classified(point),
+                want,
+                "{point:?}, turned to {:?}",
+                turn(point)
+            );
+        }
+
+        let middles: Vec<f64> = (0..16).map(|step| f64::from(step) * 0.5 + 0.25).collect();
+        let mut inside = 0u32;
+        for &x in &middles {
+            for &y in &middles {
+                for &z in &middles {
+                    let point = [x - 4.0, y - 4.0, z];
+                    let want = if is_in_the_three_quarters(point) {
+                        inside += 1;
+                        Containment::Inside
+                    } else {
+                        Containment::Outside
+                    };
+                    assert_eq!(
+                        classified(point),
+                        want,
+                        "{point:?}, turned to {:?}",
+                        turn(point)
+                    );
+                }
+            }
+        }
+        let held = f64::from(inside) * 0.5f64.powi(3);
+        assert!(
+            (held - THREE_QUARTERS_OF_THE_CONE).abs() < 0.02 * THREE_QUARTERS_OF_THE_CONE,
+            "{inside} cells inside hold {held}, against {THREE_QUARTERS_OF_THE_CONE}"
         );
     }
-    for outside in [[1.0, 1.0, 9.0], [-1.0, -1.0, -6.0]] {
-        assert_eq!(classified(outside), Containment::Outside, "{outside:?}");
-    }
+}
+
+/// Three quarters of `π · 4² · 8 / 3`, the volume of the cone of slope a half
+/// from its apex to its cap at `z = 8`: `32π`.
+const THREE_QUARTERS_OF_THE_CONE: f64 = 0.75 * core::f64::consts::PI * 4.0 * 4.0 * 8.0 / 3.0;
+
+/// Whether `point` is strictly inside the three quarters of the pointed cone,
+/// from their sizes alone: above the apex, below the cap at `z = 8`, nearer
+/// the axis than the cone's radius `z/2` there, and on the `x < 0` side of
+/// `x = 0` or the `y < 0` side of `y = 0`.
+///
+/// # Panics
+///
+/// If `point` is on one of the four surfaces, where "strictly" says nothing.
+fn is_in_the_three_quarters(point: [f64; 3]) -> bool {
+    let [x, y, z] = point;
+    let sides = [z, 8.0 - z, (z / 2.0).powi(2) - (x * x + y * y), -x.min(y)];
+    assert!(
+        sides.iter().all(|side| *side != 0.0),
+        "{point:?} is on a face of the three quarters"
+    );
+    sides.iter().all(|side| *side > 0.0)
 }
 
 /// Which part of the pointed cone [`a_pointed_cone_cut_along_its_axis`] builds.
