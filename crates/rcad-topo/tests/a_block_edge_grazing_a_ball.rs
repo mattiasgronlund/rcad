@@ -17,14 +17,16 @@
 //! at height `h` and a block whose edge is the line `x = −1, y = 2⁻²⁵` therefore
 //! meet where that edge meets the ball, at `z = h ± 2⁻⁵¹`, `8.9e-16` apart.
 //!
-//! The edge runs along `z` rather than §244.2's `x` for the ball's sake. A ball
-//! here is one face whose seam is the half of `y = 0` with `x ≥ 0`, and an edge
-//! along `x` grazes it at `x = 0`, on the plane that seam is picked out by,
-//! where `Arrangement::turns_anticlockwise` refuses on the kept meet whether or
-//! not the other one is folded into it (§248.3, §317.1). An edge along `z` at
-//! `x = −1` grazes it at the equator, a whole unit from the seam, and is kept
-//! because order along a crossing refuses first there, before that turn is ever
-//! asked (§317.5).
+//! The edge runs along `z` rather than §244.2's `x` so that the pair is what a
+//! certified fuse refuses on. §248.3 chose it to keep the edge off the ball's
+//! seam; the edge along `x` refused on the turn at the kept meet instead,
+//! `Arrangement::turns_anticlockwise` over a box ending at the place (§317.1),
+//! and since Q914 it refuses on neither the turn nor the pair
+//! (`a_block_edge_grazing_a_ball_at_cx_16.rs`). An edge along `z` at `x = −1`
+//! grazes the ball at the equator, and a certified fuse refuses on the order of
+//! the two meets round the circles the block's two faces cut the ball in, with
+//! either solid first, before any turn there is asked. Q914 decides the order
+//! of two such meets along the edge itself, and not round a circle (§317.7).
 //!
 //! At `h = 0` both places are exact, `z = ±2⁻⁵¹`, and their boxes do not
 //! touch. At `h = 16` the last place of `16` is `2⁻⁴⁸` wide, so neither place is

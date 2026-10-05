@@ -284,6 +284,42 @@ impl MeetOfThree {
             }
         })
     }
+
+    /// Whether the point of the line `planes` cross in whose coordinate along
+    /// `axis` is `along` is proved off `quadric`: the quadric's own expression
+    /// there, worked out exactly ([`narrowed_onto_the_root_along_the_line`]),
+    /// is above or below nothing. `false` where it is nothing, where the line
+    /// is square to that axis, where `along` is not finite, or where a product
+    /// falls out of range.
+    ///
+    /// **What it is for.** A meet of that line with `quadric` is then not at
+    /// `along`, so two meets whose boxes along `axis` share only `along` lie
+    /// one either side of it. A block edge grazing a ball centred at `x = 16`
+    /// meets it at `16 ∓ 2⁻⁵¹`, in the boxes `[15.999999999999998, 16]` and
+    /// `[16, 16.000000000000004]`, and the edge's point at `16` is `2⁻¹⁰³`
+    /// inside the ball. `rcad-topo`'s arrangement puts the two in order along
+    /// the edge by it (§317).
+    ///
+    /// # Panics
+    ///
+    /// If `axis` is not `0`, `1` or `2`.
+    #[must_use]
+    pub fn the_line_is_off_the_quadric_at(
+        planes: [&Plane; 2],
+        quadric: &Surface,
+        axis: usize,
+        along: f64,
+    ) -> bool {
+        assert!(axis < 3, "an axis is 0, 1 or 2, not {axis}");
+        if !along.is_finite() {
+            return false;
+        }
+        let Some(written) = how_a_surface_is_written(quadric) else {
+            return false;
+        };
+        let sign = how_the_quadric_leans_where_the_line_reaches(planes, &written, axis, along);
+        sign == Some(Decision::Pos) || sign == Some(Decision::Neg)
+    }
 }
 
 /// Where three surfaces meet.
@@ -3466,6 +3502,57 @@ mod tests {
             way([&floor, &wall], 0.0),
             None,
             "a box round the middle holds no meet"
+        );
+    }
+
+    /// §244.3's block edge, `y = 1` and `z = −2⁻²⁵`, grazing a ball of radius
+    /// `1 + 2⁻⁵¹` centred at `x = 16`: its point at `16` is `2⁻¹⁰³` inside the
+    /// ball, and the boxes of its two meets with the ball end and start there.
+    /// A ball of radius five holds the `x` axis's point at `5` and not at `4`.
+    #[test]
+    fn a_line_is_proved_off_a_ball_where_it_is_inside_it_and_not_where_it_is_on_it() {
+        let top = -f64::powi(2.0, -25);
+        let lid = Plane::from_coefficients([0.0, 0.0, 1.0, -top]).expect("a plane");
+        let side = Plane::from_coefficients([0.0, 1.0, 0.0, -1.0]).expect("a plane");
+        let grazed = Surface::Sphere(
+            Sphere::new(Point::new(16.0, 0.0, 0.0), 1.0 + f64::powi(2.0, -51)).expect("a radius"),
+        );
+        let off = |planes: [&Plane; 2], quadric: &Surface, axis: usize, along: f64| {
+            MeetOfThree::the_line_is_off_the_quadric_at(planes, quadric, axis, along)
+        };
+        let MeetOfThree::At(places) = meet([&grazed, &Surface::Plane(lid), &Surface::Plane(side)])
+            .expect("a ball and two planes")
+        else {
+            panic!("the edge cuts the ball");
+        };
+        let ends: Vec<[f64; 2]> = places
+            .iter()
+            .map(|place| [place.enclosure()[0].lo(), place.enclosure()[0].hi()])
+            .collect();
+        assert_eq!(
+            ends,
+            [
+                [15.999_999_999_999_998, 16.0],
+                [16.0, 16.000_000_000_000_004]
+            ]
+        );
+        assert!(off([&lid, &side], &grazed, 0, 16.0), "inside at 16");
+        assert!(off([&side, &lid], &grazed, 0, 16.0), "either way round");
+        assert!(
+            !off([&lid, &side], &grazed, 1, 1.0),
+            "the line is square to y"
+        );
+        assert!(!off([&lid, &side], &grazed, 0, f64::INFINITY));
+
+        let floor = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a plane");
+        let wall = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a plane");
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a radius"));
+        assert!(off([&floor, &wall], &ball, 0, 4.0), "inside at 4");
+        assert!(!off([&floor, &wall], &ball, 0, 5.0), "on it at 5");
+        assert!(off([&floor, &wall], &ball, 0, 6.0), "outside at 6");
+        assert!(
+            !off([&floor, &wall], &Surface::Plane(lid), 0, 4.0),
+            "a plane is not a quadric"
         );
     }
 

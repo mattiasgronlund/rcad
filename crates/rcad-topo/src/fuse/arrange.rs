@@ -2373,7 +2373,8 @@ impl<'f> Arrangement<'f> {
     /// when `first` does, [`Decision::Zero`] when they are the same point.
     ///
     /// The boxes are asked first, and the planes
-    /// ([`Arrangement::as_the_planes_say`]) only where the boxes cannot say,
+    /// ([`Arrangement::as_the_planes_say`]) and a quadric
+    /// ([`Arrangement::as_the_quadric_says`]) only where the boxes cannot say,
     /// because the boxes are cheaper and nearly always enough.
     fn order_along(
         &self,
@@ -2390,6 +2391,11 @@ impl<'f> Arrangement<'f> {
         let mut decided = self.as_the_boxes_say(crossing, first, second)?;
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_the_quadric_says(crossing, first, second)
         {
             decided = proved;
         }
@@ -2585,6 +2591,85 @@ impl<'f> Arrangement<'f> {
             )
             .expect("each node was solved as the one point where its three planes meet"),
         )
+    }
+
+    /// Which of two nodes on a straight crossing comes first along it, where
+    /// their boxes along its axis share only one end and the line's point there
+    /// is proved off a quadric one of the two is a meet of. `None` everywhere
+    /// else.
+    ///
+    /// **That node is then not at the shared end.** The crossing is the line
+    /// the face's plane and the partner plane cross in, and a node whose three
+    /// surfaces are those two planes and a quadric is a meet of that line with
+    /// the quadric, inside its box. Where the line's point at the shared end is
+    /// proved off the quadric
+    /// ([`MeetOfThree::the_line_is_off_the_quadric_at`]), the meet is not that
+    /// point, so a box ending there holds a meet short of it and one starting
+    /// there a meet past it. One such node is enough: the other is at the end
+    /// or on its own side of it.
+    ///
+    /// §244.3's block edge grazing a ball centred at `x = 16` meets it at
+    /// `16 ∓ 2⁻⁵¹`, which are not `f64`s. Their boxes along the edge are
+    /// `[15.999999999999998, 16]` and `[16, 16.000000000000004]`, each already
+    /// between two neighbouring `f64`, and the edge's point at `16` is `2⁻¹⁰³`
+    /// inside the ball. Read as boxes the two are apart by a range from
+    /// nothing up, and every certified fuse of the two refused on it (§317).
+    ///
+    /// Only a node that stands for one meet is read: one a tolerant policy
+    /// folded several meets into keeps one of their boxes, and the others need
+    /// not be in it.
+    fn as_the_quadric_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let partner = self.crossings[crossing].partner;
+        let (Some(flat), Some(across)) = (self.surface.as_plane(), partner.as_plane()) else {
+            return None;
+        };
+        let [one, other] = [first, second].map(|node| self.nodes[node].point.enclosure()[axis]);
+        let (shared, first_is_short) = match (one.hi() == other.lo(), other.hi() == one.lo()) {
+            (true, false) => (one.hi(), true),
+            (false, true) => (other.hi(), false),
+            (true, true) | (false, false) => return None,
+        };
+        let off_at_the_shared_end = |node: usize| {
+            let Node { made_of, also, .. } = &self.nodes[node];
+            let Some((surfaces, _)) = made_of else {
+                return false;
+            };
+            if !also.is_empty() || !surfaces.contains(&self.surface) || !surfaces.contains(&partner)
+            {
+                return false;
+            }
+            surfaces
+                .iter()
+                .filter(|surface| **surface != self.surface && **surface != partner)
+                .any(|quadric| {
+                    MeetOfThree::the_line_is_off_the_quadric_at(
+                        [&flat, &across],
+                        quadric,
+                        axis,
+                        shared,
+                    )
+                })
+        };
+        if !(off_at_the_shared_end(first) || off_at_the_shared_end(second)) {
+            return None;
+        }
+        Some(if first_is_short == forward_climbs_the_axis {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
     }
 
     /// Cut every crossing into the arcs between neighbouring nodes on it, and
@@ -5646,12 +5731,24 @@ fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
 /// over the corner's box it straddles nothing by `104`, and over a box an ulp
 /// wide by `17` (§406.3).
 ///
-/// **Only on a flat face, with the curved surface a partner.** On a curved
-/// face it decides the turn §317 found undecided at the ball of
-/// `a_block_edge_grazing_a_ball_at_cx_16.rs`, and every certified fuse there
-/// then refuses one step on, on the order of the two places along the block's
-/// edge, whose boxes touch at `16`. That file pins the turn, and it is not
-/// this lane's to move (§406.5).
+/// **On a curved face as on a flat one.** Nothing above asks which of the
+/// three the face lies on: the determinant is a fact about three gradients at
+/// one point, the sign is proved at the true meet of the three surfaces, and
+/// the node's box only says which of the line's two meets with the curved one
+/// that is. With the curved one the face, its row is the first, and
+/// `det(g, a, b)` is `g · (a × b)` with no turn of sign. What a curved face
+/// adds is that the turn is read about its own gradient, which has to be
+/// something at the node. It is wherever this answers: only a root where the
+/// sign along the line changes is read, and there `∇Q · (n₁ × n₂)` is not
+/// nothing, so neither is `∇Q`. At a cone's apex, where `∇Q` is nothing,
+/// every line through it meets the cone twice at the one point or lies along
+/// it, the sign does not change there, and this stays silent.
+///
+/// §244.3's block edge grazing a ball centred at `x = 16` is where a curved
+/// face needs it: on the ball's face, the turn at the place below `16` is
+/// minus that place's `x` less the centre's, `+2⁻⁵¹`, and over the place's
+/// box, `2⁻⁴⁹` wide and ending at `16`, the determinant straddles nothing
+/// (§317).
 fn the_turn_where_two_planes_cross_a_quadric(
     rows: [&Surface; 3],
     at: PredicatePoint,
@@ -5662,9 +5759,6 @@ fn the_turn_where_two_planes_cross_a_quadric(
             Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
         )
     })?;
-    if curved == 0 {
-        return None;
-    }
     let mut planes = rows.iter().filter_map(|surface| surface.as_plane());
     let (Some(a), Some(b), None) = (planes.next(), planes.next(), planes.next()) else {
         return None;
@@ -8447,7 +8541,9 @@ mod what_the_curved_arrangement_reaches {
         SurfaceMeet, Torus, Vector, intersect, meet_of_three_surfaces,
         where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
     };
-    use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
+    use rcad_predicates::{
+        Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
+    };
 
     use super::super::bake::bake;
     use super::super::cuts;
@@ -8456,7 +8552,8 @@ mod what_the_curved_arrangement_reaches {
         a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
-        round_a_closed_crossing, side_of_surface, split_a_face, two_pipes_run_along_one_line,
+        round_a_closed_crossing, side_of_surface, split_a_face,
+        the_turn_where_two_planes_cross_a_quadric, two_pipes_run_along_one_line,
         where_a_cones_apex_stands_against_a_plane, where_the_crossing_starts,
     };
     use crate::{Error, Model, SolidKey};
@@ -9046,6 +9143,81 @@ mod what_the_curved_arrangement_reaches {
                 "{pair:?}: {order:?}"
             );
         }
+    }
+
+    /// §317's turn on the ball's own face, where §244.3's block edge grazes a
+    /// ball centred at `x = 16`: read off which root each place is, it is
+    /// `+2⁻⁵¹` at the place below `16` and `−2⁻⁵¹` at the one above, as minus
+    /// the place's `x` less the centre's (§317.2).
+    ///
+    /// **What says those are the signs** is the same shape at `x = 0`, the one
+    /// moved `16` along `x`, which leaves both planes bit for bit: there the
+    /// places are exact, and the determinant over their gradients decides. At
+    /// `16` the same determinant over each place's box straddles nothing, and
+    /// until Q914 the route stopped on a curved face and every certified fuse
+    /// with the ball first refused on that.
+    #[test]
+    fn the_turn_on_a_balls_face_where_a_block_edge_grazes_it_is_read_off_the_root() {
+        let top = -f64::powi(2.0, -25);
+        let lid = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, top), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+        let side = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 1.0, 0.0), Vector::new(0.0, 1.0, 0.0))
+                .expect("a unit normal"),
+        );
+        let the_turns_at = |centre: f64| {
+            let ball = Surface::Sphere(
+                Sphere::new(Point::new(centre, 0.0, 0.0), 1.0 + f64::powi(2.0, -51))
+                    .expect("a positive radius"),
+            );
+            let MeetOfThree::At(places) = meet_of_three_surfaces(
+                [&ball, &lid, &side],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a ball and two planes") else {
+                panic!("the edge cuts the ball");
+            };
+            places
+                .iter()
+                .map(|&place| {
+                    let over_the_box = orient3d_of_points(
+                        gradient_at(&ball, place),
+                        gradient_at(&lid, place),
+                        gradient_at(&side, place),
+                        PredicatePoint::from([0.0; 3]),
+                    );
+                    let read_off_the_root =
+                        the_turn_where_two_planes_cross_a_quadric([&ball, &lid, &side], place);
+                    (
+                        place.enclosure()[0].lo() < centre,
+                        over_the_box,
+                        read_off_the_root,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let at_0 = the_turns_at(0.0);
+        let at_16 = the_turns_at(16.0);
+        assert_eq!(at_0.len(), 2);
+        assert_eq!(at_16.len(), 2);
+        for (below, over_the_box, _) in &at_0 {
+            let expected = if *below { Decision::Pos } else { Decision::Neg };
+            assert_eq!(*over_the_box, expected, "exact places at 0, below {below}");
+        }
+        for ((below, over_the_box, read_off_the_root), (_, at_0, _)) in at_16.iter().zip(&at_0) {
+            assert!(
+                matches!(over_the_box, Decision::Undecidable { .. }),
+                "below {below}: {over_the_box:?}"
+            );
+            assert_eq!(*read_off_the_root, Some(*at_0), "below {below}");
+        }
+        assert_eq!(
+            at_16.iter().map(|(below, ..)| *below).collect::<Vec<_>>(),
+            [true, false]
+        );
     }
 
     /// A block wall beside a cone cuts a hyperbola, and both of its branches
