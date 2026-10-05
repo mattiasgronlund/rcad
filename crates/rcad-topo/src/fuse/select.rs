@@ -59,7 +59,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
-    orient3d_of_points,
+    orient3d_of_points, side_of_a_plane_where_three_planes_meet,
 };
 
 use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
@@ -67,12 +67,12 @@ use crate::holds::{
     the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
-use crate::{Containment, Error, FaceKey, Model, Result, SolidView};
+use crate::{Containment, Error, FaceKey, Model, Result, SolidView, VertexKey};
 
 use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
 use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
-use super::bake::{BakedFace, BakedSolid};
-use super::{FaceMeet, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
+use super::bake::{BakedCorner, BakedFace, BakedSolid};
+use super::{FaceMeet, MeetPoint, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
 
 /// Which pieces of the two groups a fuse keeps.
 ///
@@ -148,7 +148,7 @@ pub(crate) fn choose(
         };
         let candidates = candidate_points(piece, &corners);
         let mut place = |against: &[usize], log: &mut ProvenanceLog| -> Result<Placement> {
-            let unplaced = match place_the_piece(
+            let (unplaced, by_its_sides_or_corners) = match place_the_piece(
                 model,
                 &solids,
                 against,
@@ -159,12 +159,19 @@ pub(crate) fn choose(
                 log,
             )? {
                 Search::Placed(placement) => return Ok(placement),
-                Search::NoPointInside => INSIDE_A_PIECE,
-                Search::OnlyRungsInside => PLACED_AGAINST_EVERY_SOLID,
+                Search::NoPointInside => (INSIDE_A_PIECE, true),
+                Search::OnlyRungsInside => (PLACED_AGAINST_EVERY_SOLID, true),
+                Search::NoPointInsidePlaced => (PLACED_AGAINST_EVERY_SOLID, false),
             };
-            by_a_shared_side
-                .place(index, against, policy, log)
-                .or_else(|| by_a_corner(model, &solids, against, &corners, policy, log))
+            let by_its_sides_or_corners = if by_its_sides_or_corners {
+                by_a_shared_side
+                    .place(index, against, policy, log)
+                    .or_else(|| by_a_corner(model, &solids, against, &corners, policy, log))
+            } else {
+                None
+            };
+            by_its_sides_or_corners
+                .or_else(|| by_a_plane(&solids, against, mine, piece))
                 .ok_or_else(|| gave_up(unplaced, &corners.concat(), Measures::Length, log))
         };
 
@@ -466,12 +473,7 @@ fn place_the_piece(
         if let Some(face) = unfollowed {
             return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face });
         }
-        return Err(gave_up(
-            PLACED_AGAINST_EVERY_SOLID,
-            &corners_of(piece).concat(),
-            Measures::Length,
-            log,
-        ));
+        return Ok(Search::NoPointInsidePlaced);
     }
     Ok(if a_rung_was_inside {
         Search::OnlyRungsInside
@@ -488,6 +490,9 @@ enum Search {
     /// Only rungs of [`rungs_towards_each_crossing`] were, and none of them
     /// could be classified against every solid in the set.
     OnlyRungsInside,
+    /// A point offered before the rungs was proved inside the piece, and no
+    /// point inside it could be classified against every solid in the set.
+    NoPointInsidePlaced,
 }
 
 /// §365.3's rule: a piece no point inside which was found, or only a rung that
@@ -740,6 +745,151 @@ fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool 
         );
         matches!(side, Decision::Pos | Decision::Neg)
     })
+}
+
+/// The last rule before a refusal: a flat piece with straight sides placed
+/// outside each solid by a plane of one of that solid's faces that has the
+/// whole solid on or behind it and every corner of the piece strictly in
+/// front. Outside every solid of the group is outside; anything else is
+/// `None`, and the caller refuses as it did before this was tried.
+///
+/// **Why a plane can place a piece.** Every face of a solid `S` here is flat,
+/// so `S`'s skin is polygons with straight sides, which lie in the hull of
+/// their corners, and so does `S`. With every corner of `S` on or behind a
+/// plane `σ`, all of `S` is. A piece `P` with straight sides lies in the hull
+/// of its own corners too, so with each of them strictly in front of `σ` all
+/// of `P` is, and the two share no point. Unlike [`by_a_corner`], this does not
+/// lean on `P` having been cut by every surface of `S`.
+///
+/// **Each corner is asked as the one point where three planes meet**
+/// ([`side_of_a_plane_where_three_planes_meet`]), never by its box, and the
+/// answer is exact, so nothing goes into the log. The boxes are what cannot
+/// say. Two cubes turned so that two faces lie a rounding apart face to face
+/// have every corner of one within a box's width of the other's face, and a
+/// point picked inside one face lies on its plane, a rounding off the other's,
+/// where the ray cannot tell which side it starts on: every fuse of the two
+/// was refused, though the cubes share no point
+/// (`tests/two_turned_cubes_a_rounding_apart.rs`).
+///
+/// A corner of the input is the meet of the surfaces round it when they are
+/// exactly three planes, since bake solved it from those three
+/// ([`BakedCorner::around`](super::bake::BakedCorner)); a meet the arrangement
+/// placed is the meet of the three surfaces it names. Any other corner, a
+/// corner of `P` not on `P`'s own plane, or a curved surface on `P` or on `S`
+/// leaves this rule out.
+fn by_a_plane(
+    solids: &[&BakedSolid],
+    against: &[usize],
+    mine: usize,
+    piece: &Piece,
+) -> Option<Placement> {
+    let corners = the_planes_meeting_at_each_corner_of_a_piece(piece, solids[mine])?;
+    against
+        .iter()
+        .all(|&index| is_in_front_of_a_plane_with_all_of_it_behind(solids[index], &corners))
+        .then_some(Placement::Outside)
+}
+
+/// The three planes each corner of a flat piece with straight sides is the
+/// one meeting point of, as coefficients, or `None` where the piece is not
+/// that or some corner is not such a meet on the piece's own plane.
+fn the_planes_meeting_at_each_corner_of_a_piece(
+    piece: &Piece,
+    own: &BakedSolid,
+) -> Option<Vec<[[f64; 4]; 3]>> {
+    let flat = *piece.surface.as_plane()?;
+    piece
+        .wires
+        .iter()
+        .flatten()
+        .map(|side| {
+            if side
+                .carried_by
+                .iter()
+                .any(|surface| surface.as_plane().is_none())
+            {
+                return None;
+            }
+            let three = match &side.ends[0] {
+                MeetPoint::Existing { vertex, .. } => {
+                    three_planes(&the_corner_at(own, *vertex).around)?
+                }
+                MeetPoint::OfThreeSurfaces { surfaces, .. } => three_planes(surfaces)?,
+                MeetPoint::WhereAClosedCurveStarts { .. }
+                | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                | MeetPoint::APoleOfAClosedSurface { .. } => return None,
+            };
+            three
+                .iter()
+                .any(|plane| *plane == flat || *plane == flat.reversed())
+                .then(|| three.map(|plane| plane.coefficients()))
+        })
+        .collect()
+}
+
+/// Whether the plane of some face of `solid`, turned to face out of it, has
+/// every corner of the solid on or behind it and every one of `corners`
+/// strictly in front.
+fn is_in_front_of_a_plane_with_all_of_it_behind(
+    solid: &BakedSolid,
+    corners: &[[[f64; 4]; 3]],
+) -> bool {
+    let Some(its_own) = the_planes_meeting_at_each_corner_of_a_solid(solid) else {
+        return false;
+    };
+    solid.faces.iter().any(|face| {
+        let outward = outward_plane_of_face(face)
+            .expect("every face of a solid whose corners all meet three planes is flat")
+            .coefficients();
+        let side = |three: &[[f64; 4]; 3]| side_of_a_plane_where_three_planes_meet(*three, outward);
+        corners.iter().all(|three| side(three) == Ok(Decision::Pos))
+            && its_own
+                .iter()
+                .all(|three| matches!(side(three), Ok(Decision::Neg | Decision::Zero)))
+    })
+}
+
+/// The three planes each corner of every face of `solid` is the one meeting
+/// point of, as coefficients, or `None` where a face is curved or a corner
+/// has other than three planes round it.
+fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Vec<[[f64; 4]; 3]>> {
+    if solid
+        .faces
+        .iter()
+        .any(|face| face.surface.as_plane().is_none())
+    {
+        return None;
+    }
+    solid
+        .faces
+        .iter()
+        .flat_map(|face| face.wires.iter().flatten())
+        .map(|edge| Some(three_planes(&edge.start.around)?.map(|plane| plane.coefficients())))
+        .collect()
+}
+
+/// The corner of `solid` that is `vertex`.
+///
+/// # Panics
+///
+/// If no face of `solid` has a corner there: a piece names as a corner of the
+/// input only a corner of the face it was cut from.
+fn the_corner_at(solid: &BakedSolid, vertex: VertexKey) -> &BakedCorner {
+    &solid
+        .faces
+        .iter()
+        .flat_map(|face| face.wires.iter().flatten())
+        .find(|edge| edge.start.vertex == vertex)
+        .expect("a corner of the input a piece names is a corner of its own solid")
+        .start
+}
+
+/// The three planes `surfaces` are, or `None` when they are not three planes.
+fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
+    let [first, second, third] = surfaces else {
+        return None;
+    };
+    Some([*first.as_plane()?, *second.as_plane()?, *third.as_plane()?])
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
