@@ -102,7 +102,10 @@ impl Mesh {
     ///
     /// An edge that needed no help has an empty list: a straight edge is drawn
     /// by its two ends alone, so every edge of a polyhedron is empty even though
-    /// it was walked.
+    /// it was walked. **One straight edge is not**: a curved face's straight
+    /// edge lying across a flat face of the same solid, between two corners of
+    /// that face, has the one point in its middle that stops the flat face
+    /// drawing its side a second time (see `BuildingAMesh::walk`).
     ///
     /// An edge that was never walked comes back empty as well. A boundary is
     /// refined from a curved surface that bends round it, because a plane has
@@ -843,6 +846,34 @@ impl BuildingAMesh {
             walking_along_this_edge_refused(edge.key(), why.with_its_surfaces_moved(&there))
         })?;
         let mut points = along_it.points().to_vec();
+        // **A straight edge lying across a flat face of the same solid gets a
+        // point in its middle**, or that face draws its side a second time. The
+        // wedge less the frustum it rests on keeps its slanted face whole and
+        // the cone cut open along the ruling the two touch on, which is how
+        // `Assembly::part_each_line_two_faces_rest_against_each_other_along`
+        // leaves such a line. The ruling's two ends are corners of the slanted
+        // face, each in the middle of a straight side of it, and both of that
+        // face's triangulations with no flat triangle draw the side between
+        // them, which was the ruling's own side: four uses where a mesh has two
+        // (`degenerate_curved_fuses.rs`, queue row Q953). A point between the
+        // ends makes the cone's sides along the ruling two shorter ones that no
+        // other face names. Halving is exact and the sum rounds once, by half
+        // an ulp of each coordinate, which `halved` charges.
+        let mut halved = 0.0;
+        if points.is_empty()
+            && *edge.stored_run() == EdgeRun::Straight
+            && a_flat_face_off_it_holds_both_its_ends(solid, edge)
+        {
+            let [from, to] = ends;
+            let [x, y, z] = core::array::from_fn(|axis| {
+                from.coordinates()[axis] * 0.5 + to.coordinates()[axis] * 0.5
+            });
+            points.push(Point::new(x, y, z));
+            halved = f64::EPSILON
+                * from
+                    .largest_coordinate_magnitude()
+                    .max(to.largest_coordinate_magnitude());
+        }
         // **A closed edge is stored running the way the longitude of the curved
         // surface either side of it increases** — and *which* curved surface is
         // settled by `Surface`'s own fixed order rather than by which face got
@@ -916,7 +947,7 @@ impl BuildingAMesh {
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
         self.worst = self
             .worst
-            .max(along_it.deviation().magnitude() + moved + moving);
+            .max(along_it.deviation().magnitude() + moved + halved + moving);
         Ok(points
             .into_iter()
             .map(|along| self.remember_made_on(face, &there, along))
@@ -5719,6 +5750,31 @@ fn only_a_flat_face_can_place(
         .expect("an edge reached through a face has that face along it");
     *edge.stored_run() != EdgeRun::Straight
         && sides.iter().all(|side| side.stored.as_plane().is_some())
+}
+
+/// Whether some flat face of `solid` that does not run along `edge` has both of
+/// the edge's ends among the corners of its wires.
+///
+/// **Only then can a flat face draw a side straight between them.** A flat face
+/// is handed to the triangulator with no point inside it (see
+/// [`BuildingAMesh::hand_over`]), so every side it draws joins two corners of
+/// its own wires. Two corners a straight edge runs between put that whole edge
+/// in the face's plane, and a face that does not run along it holds it across
+/// its middle or not at all: a solid that touches itself along a line, which
+/// the fuse leaves where two faces rest against each other along one.
+fn a_flat_face_off_it_holds_both_its_ends(solid: SolidView<'_>, edge: EdgeView<'_>) -> bool {
+    let ends = [edge.start().key(), edge.end().key()];
+    if ends[0] == ends[1] {
+        return false;
+    }
+    solid.faces().any(|face| {
+        let coedges = || face.wires().flat_map(WireView::coedges);
+        face.surface().as_plane().is_some()
+            && coedges().all(|coedge| coedge.edge().key() != edge.key())
+            && ends
+                .iter()
+                .all(|&end| coedges().any(|coedge| coedge.start().key() == end))
+    })
 }
 
 /// A face's surface as the arena holds it, with where that face is placed kept
