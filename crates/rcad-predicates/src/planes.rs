@@ -612,11 +612,105 @@ fn exact_determinant(rows: [[f64; 3]; 3], total: &mut [f64; DETERMINANT_ENTRIES]
 /// own scaling and then summed.
 const DETERMINANT_ENTRIES: usize = 24;
 
+/// A number that every plane crossing `plane` in one line gives alike, boxed,
+/// so that lines can be sorted by it: two planes whose boxes share no point
+/// cross `plane` in two different lines.
+///
+/// It decides nothing on its own, and that is the point of it. Whether two
+/// planes cross a third in the same line is four exact determinants of their
+/// coefficients, and asking that of every pair of the four hundred planes
+/// that cut one face of a pin header's body was the most expensive thing left
+/// in cutting it (`docs/decisions.md` §200.1). Sorted by this, a line is
+/// asked about only the few whose boxes share a point with its own, and every
+/// line it is the same as is among them.
+///
+/// **Why the number is the line's and not the plane's.** Planes are
+/// `[nx, ny, nz, d]` taken as vectors of four numbers. Every plane through the
+/// line where `other` crosses `plane` is `a·plane + b·other` with `b` not
+/// nothing, so taking away what each one has along `plane`,
+/// `v = other·|plane|² − (other·plane)·plane`, leaves `b·|plane|²` times one
+/// vector. `v vᵀ / |v|²` is then one matrix for all of them, whatever `a` and
+/// `b` are, and the number is a fixed sum of its ten entries. Each step is
+/// done on [`Interval`]s, which round outward, so the box holds the number
+/// exactly.
+///
+/// `None` when `|v|²` cannot be told apart from nothing, which is `other`
+/// being `plane` itself or near enough to it, or when the box is not finite.
+///
+/// ```
+/// # use rcad_predicates::where_the_line_two_planes_cross_in_sorts;
+/// // z = 0 meets x = 1 and x + z = 1 in the same line.
+/// let floor = [0.0, 0.0, 1.0, 0.0];
+/// let wall = where_the_line_two_planes_cross_in_sorts(floor, [1.0, 0.0, 0.0, -1.0]).unwrap();
+/// let slope = where_the_line_two_planes_cross_in_sorts(floor, [1.0, 0.0, 1.0, -1.0]).unwrap();
+/// assert!(wall.lo() <= slope.hi() && slope.lo() <= wall.hi());
+/// ```
+#[must_use]
+pub fn where_the_line_two_planes_cross_in_sorts(
+    plane: [f64; 4],
+    other: [f64; 4],
+) -> Option<Interval> {
+    let dot = |one: [Interval; 4], two: [Interval; 4]| {
+        one[0] * two[0] + one[1] * two[1] + one[2] * two[2] + one[3] * two[3]
+    };
+    let (plane, other) = (plane.map(Interval::exactly), other.map(Interval::exactly));
+    let (across, along) = (dot(plane, plane), dot(other, plane));
+    let v: [Interval; 4] = core::array::from_fn(|m| other[m] * across - along * plane[m]);
+    let reciprocal = one_over(dot(v, v))?;
+    let mut weights = WHAT_EACH_ENTRY_IS_WEIGHED_BY.iter();
+    let mut sum = Interval::exactly(0.0);
+    for row in 0..4 {
+        for column in row..4 {
+            let weight = weights
+                .next()
+                .expect("one weight for each of the ten entries on or above the diagonal");
+            sum = sum + Interval::exactly(*weight) * v[row] * v[column];
+        }
+    }
+    let number = sum * reciprocal;
+    (number.lo().is_finite() && number.hi().is_finite()).then_some(number)
+}
+
+/// `1 / x` for every `x` in `positive`, boxed, or `None` when `positive` does
+/// not lie wholly above nothing or does not end.
+///
+/// [`Interval`] has no division, and this needs none of its own: `1.0 / x` is
+/// the `f64` nearest the true quotient, so the true quotient lies between the
+/// two `f64` either side of it, and that holds where it overflows to infinity
+/// or underflows to nothing too.
+fn one_over(positive: Interval) -> Option<Interval> {
+    if !(positive.lo() > 0.0 && positive.hi().is_finite()) {
+        return None;
+    }
+    Interval::new(
+        (1.0 / positive.hi()).next_down(),
+        (1.0 / positive.lo()).next_up(),
+    )
+    .ok()
+}
+
+/// The square roots of the first ten primes: ten different numbers with
+/// nothing to do with the lines being sorted, so that two different lines
+/// rarely give the same sum. One that does costs four exact determinants and
+/// no wrong answer.
+const WHAT_EACH_ENTRY_IS_WEIGHED_BY: [f64; 10] = [
+    1.414_213_562_373_095_1,
+    1.732_050_807_568_877_2,
+    2.236_067_977_499_79,
+    2.645_751_311_064_590_7,
+    3.316_624_790_355_4,
+    3.605_551_275_463_989,
+    4.123_105_625_617_661,
+    4.358_898_943_540_674,
+    4.795_831_523_312_719,
+    5.385_164_807_134_504,
+];
+
 #[cfg(test)]
 mod tests {
     use super::{
         meet_of_three_planes, scaled_by_a_power_of_two, side_of_a_plane_where_three_planes_meet,
-        which_meet_comes_first_along_a_line,
+        where_the_line_two_planes_cross_in_sorts, which_meet_comes_first_along_a_line,
     };
     use crate::{Decision, Error, Interval, Point};
 
@@ -1142,5 +1236,50 @@ mod tests {
             panic!("expected a refusal, got {outcome:?}");
         };
         assert!(determinant_enclosure > 0.0, "the planes are not parallel");
+    }
+
+    /// Every plane through one line on a tilted face sorts the line where its
+    /// boxes share a point, however the plane is written: turned round,
+    /// scaled, or leaned about the line. Each is written with nothing rounded,
+    /// so each is exactly a plane through the line. A plane moved off it by a
+    /// ten-millionth sorts somewhere else. Moved by one `f64` step it may not,
+    /// which costs four exact determinants and no wrong answer.
+    #[test]
+    fn every_plane_through_one_line_sorts_it_alike() {
+        let face = [0.6, 0.0, 0.8, -1.0];
+        let wall = [0.0, 1.0, 0.0, -2.0];
+        let through_the_line = [
+            wall,
+            wall.map(|coefficient| -coefficient),
+            wall.map(|coefficient| coefficient * 3.0),
+            core::array::from_fn(|m| wall[m] + face[m]),
+            core::array::from_fn(|m| 0.5 * wall[m] - 2.0 * face[m]),
+        ];
+        let sorted = |other: [f64; 4]| {
+            where_the_line_two_planes_cross_in_sorts(face, other)
+                .expect("none of these is the face's own plane")
+        };
+        let first = sorted(wall);
+        for other in through_the_line {
+            let it = sorted(other);
+            assert!(
+                it.lo() <= first.hi() && first.lo() <= it.hi(),
+                "{other:?} crosses the face in the line y = 2 and sorts at {it:?}, not {first:?}"
+            );
+        }
+        let shifted = sorted([0.0, 1.0, 0.0, -2.000_000_1]);
+        assert!(
+            shifted.lo() > first.hi() || shifted.hi() < first.lo(),
+            "y = 2 and y = 2.0000001 are two lines, sorted at {shifted:?} and {first:?}"
+        );
+    }
+
+    /// The face's own plane, written any way, crosses it in no line, and has
+    /// nothing to sort by.
+    #[test]
+    fn the_faces_own_plane_has_no_line_to_sort() {
+        let face = [0.0, 0.0, 1.0, -1.0];
+        assert!(where_the_line_two_planes_cross_in_sorts(face, face).is_none());
+        assert!(where_the_line_two_planes_cross_in_sorts(face, face.map(|c| -2.0 * c)).is_none());
     }
 }

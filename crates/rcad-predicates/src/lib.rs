@@ -85,7 +85,7 @@ pub use orient3d::{
 };
 pub use planes::{
     meet_of_three_planes, side_of_a_plane_where_three_planes_meet,
-    which_meet_comes_first_along_a_line,
+    where_the_line_two_planes_cross_in_sorts, which_meet_comes_first_along_a_line,
 };
 pub use point::Point;
 pub use policy::{Measures, Policy, Severity, Strictness, resolve_under_policy};
