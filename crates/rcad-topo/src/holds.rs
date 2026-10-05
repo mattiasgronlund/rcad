@@ -628,14 +628,22 @@ fn walk_one_outline(
 /// this one into exactly two pieces, the face is one of them, and which one is
 /// the sign every corner of the face agrees on.
 ///
+/// **Where no corner is off that surface, the wire says which side**, as it
+/// does on a ring between two planes: a lune of a ball split down a great
+/// circle has its one corner on the rim, and so has a cap cut off a ball along
+/// a plane. A pointed cone's skin is read off its apex first, as before, and
+/// every other such face off the way its wire walks the rim
+/// ([`the_side_its_wire_keeps_along`], row Q1024).
+///
 /// A face with nothing trimming it is the whole surface and holds every point on
 /// it — a ball's skin, whose one wire is a seam with the same face on both
 /// sides.
 ///
 /// # Errors
 ///
-/// The three refusals [`SolidView::face_holds_the_point`] lists, and
-/// whatever [`intersect`] makes of a pair of surfaces.
+/// The three refusals [`SolidView::face_holds_the_point`] lists,
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
+/// cannot, and whatever [`intersect`] makes of a pair of surfaces.
 fn what_a_curved_face_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -671,12 +679,15 @@ fn what_a_curved_face_holds(
         )? {
             return Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() });
         }
-        let inwards = match the_side_this_face_lies_on(face, &trimming)? {
-            Some(side) => Some(side),
-            None if trimmed_once => the_side_the_apex_is_on(surface, &trimming)?,
-            None => None,
+        let mut inwards = the_side_this_face_lies_on(face, &trimming)?;
+        if inwards.is_none() && trimmed_once {
+            inwards = the_side_the_apex_is_on(surface, &trimming)?;
         }
-        .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
+        if inwards.is_none() {
+            inwards = the_side_its_wire_keeps_along(solid, face, &trimming)?;
+        }
+        let inwards = inwards
+            .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
         let side = side_of_surface(&trimming.surface, point);
         match side {
             Decision::Zero => on_its_boundary = true,
@@ -825,35 +836,13 @@ fn what_a_ring_face_between_two_planes_holds(
             }
             other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
         }
-        let corner = edge.start().key();
-        let at = where_it_is_stored(solid, corner);
         let names_it = which_two_surfaces_a_run_is_between(edge.stored_run(), [&ring, &cap]);
-        if names_it != [ring, cap] && names_it != [cap, ring] {
+        if names_it != [ring, cap] {
             return Err(refuse());
         }
-        let outward = [
-            gradient_of(&ring, at) * face.orientation().sign(),
-            gradient_of(&cap, at) * across.orientation().sign(),
-        ];
-        let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
-            [&names_it[0], &names_it[1]],
-            outward,
-            at,
-            Decision::Neg,
-        )?
-        else {
-            return Err(refuse());
-        };
-        // `Model::validate` hands the rule the side its corners read, turned
-        // round when the plane's face is used reversed; this is that read
-        // backwards.
-        let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
-        let keeps_the_back = walked_forward == forward_if_it_keeps_the_back;
-        let kept = if keeps_the_back != across.orientation().is_reversed() {
-            Decision::Neg
-        } else {
-            Decision::Pos
-        };
+        let kept =
+            the_side_its_wire_keeps(solid, face, across, coedge, names_it)?.ok_or_else(refuse)?;
+        let corner = edge.start().key();
         cuts.push(Cut {
             surface: cap,
             placed: across.surface(),
@@ -1101,6 +1090,124 @@ fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Opt
         }
         other => panic!("a side came back with a decision nothing here knows: {other:?}"),
     }
+}
+
+/// Which side of its trimming a curved face lies on when none of its corners
+/// is off that trimming to say, read off the way its wire walks each of its
+/// edges along it.
+///
+/// **This is a ball in two faces**: two lunes either side of a great circle,
+/// or a cap cut off a ball along a plane and the rest of its skin. The rim
+/// between them is written as where the ball crosses that plane, so the plane
+/// is what trims each face ([`the_surface_an_edge_cuts`]), and each face's
+/// only corner is on the rim. The closed-edge rule says which way a wire walks
+/// a rim with its face's material on one side of the plane, so read backwards
+/// it says which side the face keeps — the side the mesher draws it on, and
+/// the one the rule that wrote the walk meant.
+///
+/// The caller has shown the face runs along every curve where its surface and
+/// the trimming cross, so the face is one of the pieces those curves cut its
+/// surface into, and that piece lies on one side of the trimming throughout.
+/// What it keeps beside one edge it keeps everywhere, so every edge along the
+/// trimming must say the same.
+///
+/// `None` when an edge along the trimming is where the two surfaces touch
+/// rather than cross, which leaves no way round to read.
+///
+/// # Errors
+///
+/// [`Invalid::AFaceStraddlesSomethingTrimmingIt`] when two edges along the
+/// trimming say different sides, which is the same broken model the corners
+/// refuse when they disagree.
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
+/// cannot, and whatever finding the face across an edge refuses.
+fn the_side_its_wire_keeps_along(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    trimming: &Trimming,
+) -> Result<Option<Decision>> {
+    let mut found: Option<Decision> = None;
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        if the_surface_an_edge_cuts(face, across, edge) != trimming.surface {
+            continue;
+        }
+        let names_it = which_two_surfaces_a_run_is_between(
+            edge.stored_run(),
+            [&face.stored_surface(), &across.stored_surface()],
+        );
+        let Some(kept) = the_side_its_wire_keeps(solid, face, across, coedge, names_it)? else {
+            return Ok(None);
+        };
+        match found {
+            None => found = Some(kept),
+            Some(already) if already == kept => (),
+            Some(_) => return Err(Invalid::AFaceStraddlesSomethingTrimmingIt.into()),
+        }
+    }
+    Ok(found)
+}
+
+/// Which side of `names_it[1]` `face` keeps beside the closed edge `coedge`
+/// walks, with `across` the face on its other side: the closed-edge rule
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`], run backwards.
+///
+/// `names_it` is the pair [`which_two_surfaces_a_run_is_between`] names the
+/// edge by, as `Model::validate` hands it to the rule. The side comes back
+/// against `names_it[1]` as it is stored, so it is turned round when that
+/// surface is the face across and the solid uses that face reversed, because
+/// the rule reads the gradient each face is used with. A surface the run names
+/// that no face is on is used as it is stored.
+///
+/// Everything is asked where the face is stored, for §168's reason: a movement
+/// keeps which side a face keeps and rounds the numbers that side is read from.
+///
+/// `None` where the rule finds no way round to read, which is the two surfaces
+/// touching rather than crossing at the edge's corner.
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the rule cannot.
+fn the_side_its_wire_keeps(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    across: FaceView<'_>,
+    coedge: CoedgeView<'_>,
+    names_it: [Surface; 2],
+) -> Result<Option<Decision>> {
+    let at = where_it_is_stored(solid, coedge.edge().start().key());
+    let partner_turn = if names_it[1] == across.stored_surface() {
+        across.orientation()
+    } else {
+        Orientation::Forward
+    };
+    let outward = [
+        gradient_of(&face.stored_surface(), at) * face.orientation().sign(),
+        gradient_of(&names_it[1], at) * partner_turn.sign(),
+    ];
+    let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
+        [&names_it[0], &names_it[1]],
+        outward,
+        at,
+        Decision::Neg,
+    )?
+    else {
+        return Ok(None);
+    };
+    // `Model::validate` hands the rule the side its corners read, turned
+    // round when the partner's face is used reversed; this is that read
+    // backwards.
+    let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
+    let keeps_the_back = walked_forward == forward_if_it_keeps_the_back;
+    Ok(Some(if keeps_the_back != partner_turn.is_reversed() {
+        Decision::Neg
+    } else {
+        Decision::Pos
+    }))
 }
 
 /// Whether a side of `face` runs along only *part* of where its surface crosses
@@ -4418,10 +4525,11 @@ fn every_piece_of_that_crossing_is_an_edge(
 /// along it are — or off it on the side the face lies on. So one corner off it
 /// answers, and every other corner off it has to agree.
 ///
-/// **This is the only place the model says which side**, and that is worth
-/// saying plainly. The other place it could come from is which way round the
-/// wire runs, and a closed edge has no direction rule to read it from (§30.8
-/// item 10, still open at §31.3). §35 says what lane 4 has to give it.
+/// **The corners are asked first, and the wire only where they say nothing.**
+/// The other place a side comes from is which way round the wire runs, read by
+/// the closed-edge rule ([`the_side_its_wire_keeps_along`]), and
+/// [`what_a_curved_face_holds`] reads a face with every corner on its
+/// trimming that way.
 ///
 /// # Errors
 ///
