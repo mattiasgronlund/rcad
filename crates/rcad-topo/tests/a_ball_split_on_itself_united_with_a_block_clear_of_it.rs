@@ -79,7 +79,7 @@ fn two_lunes_beside_a_far_cube_come_back_as_they_stand() {
 #[test]
 fn a_ball_clear_of_a_block_united_and_fused_again_with_a_far_cube_comes_back_as_it_stands() {
     for ball_first in [true, false] {
-        let (mut model, first) = a_block_and_a_ball_united([1.0, 0.5, 1.0], ball_first);
+        let (model, first) = a_block_and_a_ball_united([1.0, 0.5, 1.0], ball_first);
         assert_eq!(
             faces_on_a_ball(&model, &first),
             1,
