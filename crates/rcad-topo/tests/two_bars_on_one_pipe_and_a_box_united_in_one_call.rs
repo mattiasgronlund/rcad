@@ -382,7 +382,7 @@ fn unite(the_box: TheBox, wall: Wall, call: Call) -> (Model, Result<Vec<SolidKey
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let [lower, upper] = the_two_bars(&mut model, wall);
     let third = a_box(&mut model, the_box.bounds());
-    let mut union = |model: &mut Model, arguments: &[SolidKey], tools: &[SolidKey]| {
+    let union = |model: &mut Model, arguments: &[SolidKey], tools: &[SolidKey]| {
         model
             .fuse(
                 arguments,
