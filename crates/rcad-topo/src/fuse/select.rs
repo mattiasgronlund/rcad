@@ -47,14 +47,15 @@
 //! gets there, and answers as it did.
 
 use rcad_geom::{
-    Cone, EdgeRun, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
-    Vector, intersect,
+    Cone, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus, Vector,
+    intersect,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
     orient3d_of_points,
 };
 
+use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
 use crate::holds::{
     the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
 };
@@ -620,7 +621,7 @@ fn the_piece_holds(
         }
         return Some(piece.wires.iter().flatten().all(|side| {
             let found = match side.carried_by[1].as_plane() {
-                Some(flat) => side_of_a_plane(flat, point),
+                Some(flat) => side_of_a_flat_face(flat, point),
                 None => side_of_surface(&side.carried_by[1], point),
             };
             found == side.material_side
@@ -717,93 +718,10 @@ fn side_of_a_partner_by_its_plane(
 fn is_beyond_the_plane_from_the_centre(flat: &Plane, ball: &Sphere, point: PredicatePoint) -> bool {
     let centres_side = flat.side_of_point(PredicatePoint::from(ball.centre().coordinates()));
     matches!(
-        (side_of_a_plane(flat, point), centres_side),
+        (side_of_a_flat_face(flat, point), centres_side),
         (Decision::Pos, Decision::Neg | Decision::Zero)
             | (Decision::Neg, Decision::Pos | Decision::Zero)
     )
-}
-
-/// `point`'s box stretched along one axis until it holds a point of `flat`
-/// too, or `None` when no stretch could be proved to reach the plane. A point
-/// the plane holds comes back as it is.
-///
-/// The axis is the one the plane's normal has most of, and the box keeps its
-/// other two sides. Each of its two ends across that axis is moved out until
-/// the plane's own sign puts that end's face on its own side of the plane, or
-/// on it. Every line along the axis through the box then crosses the plane
-/// between the two faces, so the box holds a point of the plane as well as
-/// every point it held. The first try past the point is where the plane
-/// crosses the axis through the middle of the box, worked out in `f64`; nothing
-/// about it is trusted, and a try the sign does not prove is passed over.
-fn stretched_to_the_plane(flat: &Plane, point: PredicatePoint) -> Option<PredicatePoint> {
-    if flat.side_of_point(point) == Decision::Zero {
-        return Some(point);
-    }
-    let normal = flat.normal().components();
-    let along = (0..3)
-        .max_by(|&one, &other| normal[one].abs().total_cmp(&normal[other].abs()))
-        .expect("three axes");
-    let middle = middle_of(point).coordinates();
-    let crossing = (0..3)
-        .filter(|&axis| axis != along)
-        .fold(flat.offset(), |rest, axis| {
-            rest - normal[axis] * middle[axis]
-        })
-        / normal[along];
-    let mut boxed = point.enclosure();
-    let low = an_end_on_its_side(flat, boxed, along, boxed[along].lo(), crossing, -1.0)?;
-    let high = an_end_on_its_side(flat, boxed, along, boxed[along].hi(), crossing, 1.0)?;
-    boxed[along] = Interval::new(low, high).expect("each end only ever moves away from the other");
-    Some(as_exact_as_it_is(PredicatePoint::Constructed(boxed)))
-}
-
-/// Where along `along` the face of `boxed` on the `way` end is on that end's
-/// side of `flat`, or on it: `own_end` when its face already is, and otherwise
-/// the first of a run of tries from `crossing`, or from `own_end` when the
-/// crossing is not past it, each step twice the one before. `way` is `-1.0` for
-/// the low end and `1.0` for the high one. `None` when no try is proved.
-fn an_end_on_its_side(
-    flat: &Plane,
-    boxed: [Interval; 3],
-    along: usize,
-    own_end: f64,
-    crossing: f64,
-    way: f64,
-) -> Option<f64> {
-    let ends_side = if (flat.normal().components()[along] > 0.0) == (way > 0.0) {
-        Decision::Pos
-    } else {
-        Decision::Neg
-    };
-    let is_on_its_side = |end: f64| {
-        let mut face = boxed;
-        face[along] = Interval::exactly(end);
-        let side = side_of_a_plane(flat, PredicatePoint::Constructed(face));
-        side == ends_side || side == Decision::Zero
-    };
-    if is_on_its_side(own_end) {
-        return Some(own_end);
-    }
-    let size = boxed.iter().fold(flat.offset().abs(), |largest, side| {
-        largest.max(side.lo().abs()).max(side.hi().abs())
-    });
-    let mut step = size.max(f64::MIN_POSITIVE) * f64::EPSILON;
-    let mut end = if (crossing - own_end) * way > 0.0 {
-        crossing
-    } else {
-        own_end + way * step
-    };
-    for _ in 0..64 {
-        if !end.is_finite() {
-            return None;
-        }
-        if is_on_its_side(end) {
-            return Some(end);
-        }
-        end += way * step;
-        step *= 2.0;
-    }
-    None
 }
 
 /// Whether `point`, taken as being on `cone`, is on the half of it `piece` is
@@ -1130,6 +1048,18 @@ fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool>
 /// piece around it, and an undecided answer is a box straddling a plane — every
 /// corner of a turned solid is one, which is why `A \ A` there needs coincidence
 /// asked at all. Either abandons this candidate rather than being read as `ON`.
+///
+/// **A point off every face but between one face's stored plane and its
+/// corners' triangles is the ray's to place.** The fuse cuts along the stored
+/// plane, and a turned solid's corners are a rounding off it, so the two can
+/// put the point on opposite sides of the face (§200.1). Wherever the ray's
+/// count turns on such a triangle it asks the stored plane too, and where the
+/// two part it places the point by the plane or says `Undecidable`
+/// (`classify.rs`'s `count_a_polygon`, §346.6). `select` once dropped every
+/// point any triangle and its face's plane disagreed about, whatever the ray
+/// then said and however far the point was from that face, and with them every
+/// point of a cap a turned block's face takes off a ball
+/// (`tests/a_ball_shaved_by_a_turned_blocks_face.rs`).
 fn settle_against_each(
     model: &Model,
     solids: &[&BakedSolid],
@@ -1154,11 +1084,6 @@ fn settle_against_each(
         // §17.2 spends a section keeping apart.
         if !matches!(placed, Containment::Undecidable { .. }) {
             ray.drain_into(log);
-        }
-        if matches!(placed, Containment::Inside | Containment::Outside)
-            && the_ray_and_the_stored_planes_disagree_about(solid, point)
-        {
-            return Ok(None);
         }
         match placed {
             Containment::Inside => return Ok(Some(Placement::Inside)),
@@ -1224,102 +1149,6 @@ impl LyingOn {
             (None, None) => Placement::Outside,
         }
     }
-}
-
-/// Whether the ray and the arrangement put `point` on opposite sides of one of
-/// `solid`'s flat faces.
-///
-/// **The two read one face from two descriptions.** The arrangement cuts along
-/// the face's stored plane, which is the face (§17.1). The ray fans the face's
-/// corners into triangles and asks which side of *those* the point is on
-/// (`classify.rs`'s `count_a_polygon`), and a turned solid's corners are not on
-/// its stored planes: turning a block a quarter turn about the `z` axis leaves
-/// the face through the axis with corners `(∓6, ±8.9e-16, z)`, whose triangles
-/// hold the axis exactly, while its stored plane misses the axis by 4.4e-16
-/// (`a_knife_through_the_axis` in `tests/a_narrow_lune_from_a_pole_corner.rs`).
-/// A point between the two is certified on one side by the ray and was proved
-/// on the other side by the arrangement, and the piece it stands for is then
-/// placed on the wrong side of the solid (§200.1).
-///
-/// So a candidate either description could be wrong about is abandoned, as one
-/// the ray cannot honestly place, and the next is tried. Nothing here is a
-/// tolerance: both sides are signs, and a candidate is dropped only when two
-/// signs that were both decided say opposite things. A sign that could not be
-/// decided is left to the ray's own answer.
-///
-/// **A point on the plane is not this check's to catch.** The ray does not say
-/// `OnBoundary` there whenever it cannot tell: a face whose stored corner sits
-/// `1e-30` off its planes has triangles that put a point on the face certainly
-/// off it (§316.3). Counting that as a disagreement was measured and drops
-/// every candidate of a piece lying on such a face, since every one of them is
-/// on the plane: the two boxes of `tests/three_flat_seeds_that_fuse_one_way_round.rs`
-/// then refuse both ways round, by union, intersection and difference alike
-/// (§351). What catches it is [`settle_against_each`] asking whether the piece
-/// lies on a face before the ray is fired at all.
-fn the_ray_and_the_stored_planes_disagree_about(
-    solid: SolidView<'_>,
-    point: PredicatePoint,
-) -> bool {
-    solid.faces().any(|face| {
-        let Some(plane) = face.surface().as_plane().copied() else {
-            return false;
-        };
-        let every_side_is_straight = face.wires().all(|wire| {
-            wire.coedges()
-                .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)
-        });
-        if !every_side_is_straight {
-            return false;
-        }
-        let Some(off_the_plane) = InPlane::of(&plane) else {
-            return false;
-        };
-        let on_the_side_of_the_reference = match side_of_a_plane(&plane, point) {
-            Decision::Pos => off_the_plane.turned_round,
-            Decision::Neg => !off_the_plane.turned_round,
-            Decision::Zero | Decision::Undecidable { .. } => return false,
-            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
-        };
-        let mut disagree = false;
-        face.for_each_triangle(|corners| {
-            let [a, b, c] = corners.map(|corner| PredicatePoint::from(corner.coordinates()));
-            let reference = orient3d_of_points(a, b, c, off_the_plane.from);
-            let this_one = orient3d_of_points(a, b, c, point);
-            let decided = |turn: &Decision| matches!(turn, Decision::Pos | Decision::Neg);
-            if decided(&reference)
-                && decided(&this_one)
-                && (reference == this_one) != on_the_side_of_the_reference
-            {
-                disagree = true;
-            }
-        });
-        disagree
-    })
-}
-
-/// Which side of `flat` a point is on, asked of the point with each coordinate
-/// the plane cannot see narrowed to one end of its interval.
-///
-/// **A plane whose normal has no part along an axis cannot tell apart two
-/// points that differ only along it**, so narrowing that coordinate changes
-/// nothing about the answer and everything about whether it can be given. A
-/// segment up through a cap a fraction of a spacing deep
-/// ([`segments_up_through_a_cap`]) is one double in the two coordinates such a
-/// plane sees, and narrowed it is asked exactly. Asked as a box, the interval
-/// sum rounds by more than the cap is deep and cannot say: the cap of
-/// `tests/a_ball_shaved_by_a_turned_blocks_face.rs` turned by `1` about `z`
-/// is `3.6e-17` deep, and no segment through it was held until this narrowed
-/// it.
-fn side_of_a_plane(flat: &Plane, point: PredicatePoint) -> Decision {
-    let PredicatePoint::Constructed(mut boxed) = point else {
-        return flat.side_of_point(point);
-    };
-    for (axis, part) in flat.normal().components().into_iter().enumerate() {
-        if part == 0.0 {
-            boxed[axis] = Interval::exactly(boxed[axis].lo());
-        }
-    }
-    flat.side_of_point(as_exact_as_it_is(PredicatePoint::Constructed(boxed)))
 }
 
 /// Whether the face of `solid` that `point` lies on faces the same way as

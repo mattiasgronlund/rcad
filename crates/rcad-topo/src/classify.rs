@@ -769,7 +769,8 @@ fn the_box_round_both(point: PredicatePoint, beside: PredicatePoint) -> Predicat
 
 /// `point`'s box stretched along one axis until it holds a point of `flat`
 /// too, or `None` when no stretch could be proved to reach the plane. A point
-/// the plane holds comes back as it is.
+/// the plane holds comes back as the box it is, and a box of no width as the
+/// `f64` triple in it, as a stretched box does.
 ///
 /// The axis is the one the plane's normal has most of, and the box keeps its
 /// other two sides. Each of its two ends across that axis is moved out until
@@ -779,10 +780,14 @@ fn the_box_round_both(point: PredicatePoint, beside: PredicatePoint) -> Predicat
 /// every point it held. The first try past the point is where the plane
 /// crosses the axis through the middle of the box, worked out in `f64`;
 /// nothing about it is trusted, and a try the sign does not prove is passed
-/// over. `fuse::select` stretches a box the same way for the same reason.
-fn stretched_to_the_plane(flat: &Plane, point: PredicatePoint) -> Option<PredicatePoint> {
+/// over. `fuse::select` stretches a flat piece's candidate with this too,
+/// before asking the piece's curved partners about it (§346.6, Q671).
+pub(crate) fn stretched_to_the_plane(
+    flat: &Plane,
+    point: PredicatePoint,
+) -> Option<PredicatePoint> {
     if side_of_a_flat_face(flat, point) == Decision::Zero {
-        return Some(point);
+        return Some(as_exact_as_it_is(point.enclosure()));
     }
     let normal = flat.normal().components();
     let along = (0..3)
@@ -861,9 +866,9 @@ fn an_end_on_its_side(
 /// and the plane's own predicate settles it exactly. A segment up through the
 /// cap a turned block's face takes off a ball is such a box, a fraction of a
 /// spacing from the plane, and asked as a box its sign is never settled
-/// (`docs/decisions.md` §346.6, item 4, where `fuse::select` asks it the same
-/// way).
-fn side_of_a_flat_face(flat: &Plane, point: PredicatePoint) -> Decision {
+/// (`docs/decisions.md` §346.6, item 4). `fuse::select` builds those segments
+/// and asks a flat piece's plane about its candidates through this.
+pub(crate) fn side_of_a_flat_face(flat: &Plane, point: PredicatePoint) -> Decision {
     let PredicatePoint::Constructed(mut boxed) = point else {
         return flat.side_of_point(point);
     };
