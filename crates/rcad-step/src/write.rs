@@ -167,6 +167,13 @@ pub enum CannotWrite {
     /// faces cross in no single curve of their own (Q767). And the pipe an arc
     /// drawn on a flat face is named by, since the faces either side are one
     /// plane.
+    ///
+    /// So an arc drawn on a flat face whose run names a ball, a cone or a ring
+    /// is refused here, and so is a seam of one pipe whose run names a curved
+    /// surface. Both used to go out as a `LINE`, which is the chord of the arc
+    /// (Q764). What closes the first is writing the circle or conic where that
+    /// surface crosses the face's plane; only `SolidBuilder` has been seen to
+    /// build one.
     #[error(
         "an edge between a {first} and a {second} runs along a curve those two do not name \
          (closed: {closed})"
@@ -522,7 +529,16 @@ impl Writing {
     /// that the pair admits, which is what makes this a derivation rather than
     /// a guess:
     ///
-    /// - **two planes** cross in one straight line;
+    /// - **two planes** cross in one straight line, which the rule above has
+    ///   already written. So an open edge between two flat faces that reaches
+    ///   the surfaces is a curve drawn on one plane, which the plane does not
+    ///   name, and it is written only where its run names a pipe — see
+    ///   [`Writing::an_arc_of_a_circle_on_a_flat_face`]. A run naming a ball, a
+    ///   cone or a ring there is refused. Until Q764 it was written as a
+    ///   `LINE`: a disc drawn on a bar's top with its rim named by a ball went
+    ///   out as two halves of the rim written as the one chord, and the reader
+    ///   refused the file
+    ///   (`a_disc_drawn_on_a_bar_and_named_by_a_ball_is_refused_by_name_rather_than_written_as_a_chord`);
     /// - **a plane across a pipe** crosses it in one closed curve, centred
     ///   where the axis meets the plane: a circle where the plane is square to
     ///   the axis or so nearly square that the two sizes round to one, and an
@@ -531,12 +547,25 @@ impl Writing {
     ///   that curve into, and which one is read off the run — see
     ///   [`Crossing::the_way_round_the_arc`];
     /// - **a seam of one pipe**, where the pipe is on both sides, joining two
-    ///   corners that stand at the same place around the axis. A plane section
-    ///   of a cylinder that is not parallel to the axis meets each straight
-    ///   line of the surface once, so it cannot hold two points at one angle;
-    ///   a section parallel to the axis is a pair of those straight lines. So
-    ///   of everything this kernel can put on a cylinder, only the straight one
-    ///   joins two such corners;
+    ///   corners that stand at the same place around the axis, **with a run
+    ///   that names a plane**. A plane section of a cylinder that is not
+    ///   parallel to the axis meets each straight line of the surface once, so
+    ///   it cannot hold two points at one angle; a section parallel to the axis
+    ///   is a pair of those straight lines. So of every plane section, only the
+    ///   straight one joins two such corners. A seam the model calls straight
+    ///   never gets here, so this is a seam named by the plane through it,
+    ///   which `SolidBuilder` builds
+    ///   (`a_bar_whose_seam_is_named_by_the_plane_through_its_axis_is_written_with_a_line_and_comes_back_the_same`)
+    ///   and the union of a block and a bar through its floor does not: that
+    ///   fuse keeps its joined wall's seams straight (Q764).
+    ///   **A run naming a curved surface is refused**, because the argument
+    ///   covers planes only: a pipe of radius one along `x` through
+    ///   `(0, 0, 2)` crosses a pipe of radius two about `z` at `(−2, 0, 1)` and
+    ///   `(−2, 0, 3)`, at one place round it, and the arc between them is no
+    ///   straight line. No model has held such an edge yet. `SolidBuilder`
+    ///   refused a loop drawn on a bar's wall by that pipe, as a crossing too
+    ///   nearly parallel to follow, and by a ball centred on the wall or
+    ///   beside it, as a crossing in two pieces it could not tell apart;
     /// - **an arc where a plane crosses a ball** is one of the two arcs its ends
     ///   cut the circle into, which [`where_a_plane_crosses_a_ball`] names and
     ///   the run picks, as for a pipe;
@@ -585,7 +614,7 @@ impl Writing {
                     ..
                 } = run
                 else {
-                    return Ok(Curve::along(self.line(start, end - start)));
+                    return Err(refuse());
                 };
                 self.an_arc_of_a_circle_on_a_flat_face(round, run, start, end)
                     .ok_or_else(refuse)
@@ -636,6 +665,13 @@ impl Writing {
                 Ok(Curve::along(self.round(&crossing, crossing.turning)))
             }
             (Surface::Cylinder(pipe), Surface::Cylinder(other)) if !closed && pipe == other => {
+                let EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(_),
+                    ..
+                } = run
+                else {
+                    return Err(refuse());
+                };
                 let along = pipe.axis().direction();
                 let across = |corner: Point| {
                     let out = corner - pipe.axis().origin();
