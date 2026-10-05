@@ -553,9 +553,9 @@ fn a_quarter_of_a_pointed_cone_holds_its_points() {
     }
 }
 
-/// **The other three quarters of the same pointed cone have their skin and
-/// their cap refused by name, and that is a gap: point-in-solid names the cap
-/// for a point inside.** Measured.
+/// **The other three quarters of the same pointed cone have their skin refused
+/// by name, and that is a gap: point-in-solid names the skin for a point
+/// inside.** Their cap answers. Measured.
 ///
 /// The solid is the part with `x ≤ 0` or `y ≤ 0`, built from the same edges as
 /// the quarter with the rim the long way round
@@ -565,15 +565,21 @@ fn a_quarter_of_a_pointed_cone_holds_its_points() {
 /// cap's disc. `holds.rs` follows the skin's two cuts, which meet along the axis
 /// inside the cone, but the part in front of both is the opposite quarter, and
 /// the rim runs across both planes, so the skin is refused rather than answered
-/// as that quarter. The cap is refused the same way. Answering either needs
-/// "in front of any", which `holds.rs` has only for a sphere's faces and for two
-/// discs taken together.
+/// as that quarter. Answering it needs "in front of any", which `holds.rs` has
+/// only for a sphere's faces and for two discs taken together.
+///
+/// The cap was refused the same way until row Q1002. A flat face now winds its
+/// own sides where its cuts say nothing, with the rim read as its chord from
+/// `(4, 0)` to `(0, 4)` and the part of the disc on the rim's side of that
+/// chord counted once round: so it holds three quarters of the disc and turns
+/// away the quarter `x, y > 0`, the chord across it included, and what lies
+/// outside the disc.
 ///
 /// What it does answer is right: the skin holds nothing on the other nappe, the
-/// two flat triangles answer, and a point above the cap or on the other nappe is
-/// outside.
+/// cap and the two flat triangles answer, and a point above the cap or on the
+/// other nappe is outside.
 #[test]
-fn three_quarters_of_a_pointed_cone_have_their_skin_and_cap_refused_by_name() {
+fn three_quarters_of_a_pointed_cone_have_their_skin_refused_by_name_and_their_cap_answered() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let rest = a_pointed_cone_cut_along_its_axis(&mut model, Kept::TheRest, |point| point);
@@ -627,9 +633,6 @@ fn three_quarters_of_a_pointed_cone_have_their_skin_and_cap_refused_by_name() {
         (skin, [-1.8, 2.4, 6.0]),
         (skin, [1.8, -2.4, 6.0]),
         (skin, [1.8, 2.4, 6.0]),
-        (cap, [-1.0, -1.0, 8.0]),
-        (cap, [-1.0, 1.0, 8.0]),
-        (cap, [1.0, 1.0, 8.0]),
     ] {
         assert!(
             matches!(
@@ -641,6 +644,17 @@ fn three_quarters_of_a_pointed_cone_have_their_skin_and_cap_refused_by_name() {
     }
     for (face, point, want) in [
         (skin, [1.8, 2.4, -6.0], OnAFace::NotHeld),
+        (cap, [-1.0, -1.0, 8.0], OnAFace::Held),
+        (cap, [-1.0, 1.0, 8.0], OnAFace::Held),
+        (cap, [1.0, -3.0, 8.0], OnAFace::Held),
+        (cap, [1.0, 1.0, 8.0], OnAFace::NotHeld),
+        (cap, [2.0, 2.0, 8.0], OnAFace::NotHeld),
+        (cap, [1.0, 3.0, 8.0], OnAFace::NotHeld),
+        (cap, [3.0, 3.0, 8.0], OnAFace::NotHeld),
+        (cap, [-3.0, -3.0, 8.0], OnAFace::NotHeld),
+        (cap, [0.0, -4.0, 8.0], OnAFace::OnItsBoundary),
+        (cap, [0.0, 2.0, 8.0], OnAFace::OnItsBoundary),
+        (cap, [0.0, 4.0, 8.0], OnAFace::OnItsBoundary),
         (on_x_is_zero, [0.0, 1.0, 6.0], OnAFace::Held),
         (on_x_is_zero, [0.0, -1.0, 6.0], OnAFace::NotHeld),
         (on_y_is_zero, [1.0, 0.0, 6.0], OnAFace::Held),
@@ -659,7 +673,7 @@ fn three_quarters_of_a_pointed_cone_have_their_skin_and_cap_refused_by_name() {
     for inside in [[-1.0, -1.0, 6.0], [-1.0, 1.0, 6.0], [1.0, -1.0, 6.0]] {
         assert_eq!(
             classified(inside),
-            Containment::CannotFollowAFacesTrimming { face: cap },
+            Containment::CannotFollowAFacesTrimming { face: skin },
             "{inside:?}"
         );
     }

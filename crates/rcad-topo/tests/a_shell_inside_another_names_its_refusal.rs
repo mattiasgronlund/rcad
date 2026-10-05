@@ -7,75 +7,76 @@
 //! takes a quarter-round notch out of that edge, top to bottom, and touches the
 //! hollow nowhere.
 //!
-//! **The notch leaves the block's top a face nothing can follow.** Its side
-//! along the notch is part of the circle where the bar's pipe crosses `z = 4`,
-//! and the top keeps the outside of that circle, which is not one convex piece
-//! of the plane (`holds.rs`, `is_a_family_this_follows`). Whether the hollow is
-//! inside the block's skin is asked by firing a ray from a corner of the hollow
-//! at that skin, and the first ray climbs through `z = 4`, so every corner of
-//! the hollow comes back `CannotFollowAFacesTrimming` naming the top.
+//! **The notch leaves the block's top keeping the outside of a circle.** Its
+//! side along the notch is part of the circle where the bar's pipe crosses
+//! `z = 4`, which is not one convex piece of the plane (`holds.rs`,
+//! `is_a_family_this_follows`). Whether the hollow is inside the block's skin
+//! is asked by firing a ray from a corner of the hollow at that skin, and the
+//! first ray climbs through `z = 4`, so the top has to say what it holds.
 //!
-//! The fuse used to report that as `Undecidable`, with one record — the
-//! predicate "one shell inside another" at `Level::Interval`, an infinite
-//! enclosure, and the input `(0, 0, 0)`: the block's own corner, which nothing
-//! asked about. A caller reading it would loosen the policy, and no policy
-//! moves it (`docs/decisions.md` §4.2, §35.6). It now names the face. Q504.
-//!
-//! **This is a refusal of an answer that exists**, a gap and not a limit
-//! (§16.10): the hollow is inside the block, and the top face holds what it
-//! holds. Following a face that keeps the outside of a circle is what would
-//! answer it.
+//! The fuse first reported that it could not as `Undecidable`, with one record
+//! naming the block's own corner, which nothing asked about (`docs/decisions.md`
+//! §4.2, §35.6), and then, from Q504, as a refusal naming the top. **It was a
+//! refusal of an answer that exists**, a gap and not a limit (§16.10), and the
+//! file's name still says refusal. Since row Q1002 a flat face the cuts cannot
+//! follow winds its own sides, each arc read as its chord with the piece
+//! between the two added or taken away, so the top answers and so does every
+//! fuse here. Each answer is checked against the volume worked out by hand: the
+//! block's 400, less the hollow's 8, with the quarter of the bar inside the
+//! block, `4π`, taken away or the rest of the bar, `20π`, added.
 
-use rcad_geom::{Isometry, Scale, Surface, Vector};
+use core::f64::consts::PI;
+
+use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
-/// The block with its hollow, less the bar, is refused by the name of the face
-/// that stopped it: the block's notched top.
+/// The block with its hollow, less the bar: the hollow stays a shell of its
+/// own, and the notch takes a quarter of the bar out of the block.
 #[test]
-fn a_hollowed_block_less_a_bar_through_its_edge_is_refused_for_its_notched_top() {
+fn a_hollowed_block_less_a_bar_through_its_edge_keeps_its_hollow() {
     let mut model = a_model();
     let hollowed = a_block_with_a_hollow(&mut model);
     let bar = a_bar_through_the_blocks_edge(&mut model);
-    let refused = fused(&mut model, &[hollowed], &[bar], Rule::Difference);
-    assert_names_the_top(
-        &model,
-        hollowed,
-        &refused,
-        "the hollowed block less the bar",
+    the_one_solid_with_its_hollow(
+        &mut model,
+        &[hollowed],
+        &[bar],
+        Rule::Difference,
+        392.0 - 4.0 * PI,
     );
 }
 
 /// United with the bar, the hollow is still asked about against the notched
-/// skin, and the refusal is the same one.
+/// skin, and stays a shell of its own inside the block and the bar together.
 #[test]
-fn a_hollowed_block_united_with_a_bar_through_its_edge_is_refused_for_its_notched_top() {
+fn a_hollowed_block_united_with_a_bar_through_its_edge_keeps_its_hollow() {
     let mut model = a_model();
     let hollowed = a_block_with_a_hollow(&mut model);
     let bar = a_bar_through_the_blocks_edge(&mut model);
-    let refused = fused(&mut model, &[hollowed], &[bar], Rule::Union);
-    assert_names_the_top(
-        &model,
-        hollowed,
-        &refused,
-        "the hollowed block united with the bar",
+    the_one_solid_with_its_hollow(
+        &mut model,
+        &[hollowed],
+        &[bar],
+        Rule::Union,
+        392.0 + 20.0 * PI,
     );
 }
 
 /// The hollow and the notch taken out in one fuse: the plain block less the box
-/// and the bar together is refused the same way, naming the plain block's top.
+/// and the bar together is the same solid as the hollowed block less the bar.
 #[test]
-fn a_block_less_a_box_and_a_bar_at_once_is_refused_for_its_notched_top() {
+fn a_block_less_a_box_and_a_bar_at_once_keeps_its_hollow() {
     let mut model = a_model();
     let block = a_block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
     let hollow = a_block(&mut model, [2.0, 2.0, 1.0], [2.0, 2.0, 2.0]);
     let bar = a_bar_through_the_blocks_edge(&mut model);
-    let refused = fused(&mut model, &[block], &[hollow, bar], Rule::Difference);
-    assert_names_the_top(
-        &model,
-        block,
-        &refused,
-        "the block less the box and the bar",
+    the_one_solid_with_its_hollow(
+        &mut model,
+        &[block],
+        &[hollow, bar],
+        Rule::Difference,
+        392.0 - 4.0 * PI,
     );
 }
 
@@ -134,37 +135,41 @@ fn at(x: f64, y: f64, z: f64) -> Isometry {
     Isometry::translation(Vector::new(x, y, z)).expect("a finite shift")
 }
 
-fn fused(model: &mut Model, one: &[SolidKey], other: &[SolidKey], rule: Rule) -> Error {
+/// The fuse answers one solid with two shells, its skin and the hollow, whose
+/// volume is `by_hand` to within what the mesh could be hiding.
+fn the_one_solid_with_its_hollow(
+    model: &mut Model,
+    one: &[SolidKey],
+    other: &[SolidKey],
+    rule: Rule,
+    by_hand: f64,
+) {
+    let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    let refused = model
-        .fuse(one, other, rule, &Policy::certified(), &mut log)
-        .map(|answer| answer.solids().to_vec())
-        .expect_err("refused until a face keeping the outside of a circle can be followed");
-    assert!(
-        log.is_empty(),
-        "a refusal leaves the caller's log as it was"
-    );
-    refused
-}
-
-/// The refusal is the face's own, and the face it names is the top of `block`
-/// — a key into the caller's model, which the fuse's scratch model is not.
-fn assert_names_the_top(model: &Model, block: SolidKey, refused: &Error, asked: &str) {
-    let Error::AFaceTrimmedByACurveThisCannotFollow { face } = *refused else {
-        panic!("{asked} is refused for the face it cannot follow, not {refused:?}");
+    let answer = model
+        .fuse(one, other, rule, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("{rule:?} is refused: {why:?}"));
+    assert!(log.is_empty(), "a certified fuse logs nothing: {log:?}");
+    let [solid] = answer.solids()[..] else {
+        panic!("{rule:?} is one solid, not {:?}", answer.solids());
     };
-    let named = model
-        .solid(block)
-        .expect("this model made the key")
-        .faces()
-        .find(|each| each.key() == face)
-        .unwrap_or_else(|| panic!("{asked} names {face:?}, which is not a face of the block"));
-    let Surface::Plane(top) = named.surface() else {
-        panic!("{asked} names a face on {:?}", named.surface());
-    };
+    let view = model.solid(solid).expect("this model made the key");
     assert_eq!(
-        (top.normal().components(), top.offset()),
-        ([0.0, 0.0, 1.0], 4.0),
-        "{asked} names the block's top, at z = 4"
+        view.shells().count(),
+        2,
+        "{rule:?}: the skin and the hollow"
+    );
+    let measured = view
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a solid measures");
+    assert!(
+        (measured.volume() - by_hand).abs() <= measured.volume_error(),
+        "{rule:?}: measured {} ± {} against {by_hand} by hand",
+        measured.volume(),
+        measured.volume_error()
     );
 }

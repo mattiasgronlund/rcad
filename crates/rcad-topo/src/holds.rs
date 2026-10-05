@@ -42,6 +42,13 @@
 //! loop of a crossing that has two — this refuses by name rather than guessing.
 //! Both refusals are gaps and §35 names the consumer that calls each due.
 //!
+//! **A flat face is the exception, because it has a polygon after all**: put
+//! each arc back as its chord and the sides are one, and what the chord leaves
+//! out is the piece between it and the arc, which is two signs to be in. So a
+//! flat face whose sides are straight or arcs of a closed crossing, and which
+//! nothing below follows, winds its own sides
+//! ([`what_a_flat_face_of_chords_and_arcs_holds`], row Q1002).
+//!
 //! **One family of arcs is followed now** (§167): a wedge of a ball, whose skin
 //! and whose two half-discs are each bounded by half of a circle. Those faces are
 //! still the part of their surface on one side of everything that trims them —
@@ -138,7 +145,7 @@ impl<'m> SolidView<'m> {
         log: &mut ProvenanceLog,
     ) -> Result<OnAFace> {
         if a_side_of_it_is_part_of_a_crossing(self, face)? {
-            return what_a_face_cut_by_part_of_a_crossing_holds(self, face, point);
+            return what_a_face_cut_by_part_of_a_crossing_holds(self, face, point, policy, log);
         }
         let Surface::Plane(plane) = face.surface() else {
             return what_a_curved_face_holds(self, face, &face.surface(), point, policy, log);
@@ -1273,26 +1280,62 @@ fn is_one_circle_cut_in_two(
 /// `a_cone_face_round_an_apex_holds_its_own_nappe_and_not_the_other` pins the two
 /// points that used to.
 ///
+/// # A flat face outside that family winds its own boundary instead
+///
+/// A flat face that keeps the outside of a pipe it crosses in a closed curve
+/// can be one of two pieces in front of every cut, and then no reading of the
+/// cuts tells it from the other piece: the cap of a slab with a round scoop out
+/// of its top is one, and the strip past the far side of the pipe's circle is
+/// in front of every cut the cap has. On a plane that question need never be
+/// asked. [`what_a_flat_face_of_chords_and_arcs_holds`] winds the face's own
+/// sides, with each arc read as its chord and the piece between the two added
+/// or taken away, and that reads the face's boundary and not its cuts. So a
+/// flat face takes it wherever the steps above say nothing
+/// (`docs/decisions.md` §35, row Q1002).
+///
 /// # Errors
 ///
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] outside that family, and
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a curved face outside
+/// that family and for the shapes
+/// [`what_a_flat_face_of_chords_and_arcs_holds`] refuses, and
 /// [`Error::Undecidable`] when a sign could not be settled.
 fn what_a_face_cut_by_part_of_a_crossing_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
     point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
-    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let surface = face.stored_surface();
     let sides = the_sides_of(solid, face)?;
+    if let Some(held) = what_the_part_in_front_of_its_cuts_holds(face, &surface, &sides, point)? {
+        return Ok(held);
+    }
+    match surface {
+        Surface::Plane(flat) => {
+            what_a_flat_face_of_chords_and_arcs_holds(face, &flat, &sides, point, policy, log)
+        }
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => {
+            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
+        }
+    }
+}
 
+/// Steps 1 to 3 of [`what_a_face_cut_by_part_of_a_crossing_holds`], or `None`
+/// where the face is outside the family they follow.
+fn what_the_part_in_front_of_its_cuts_holds(
+    face: FaceView<'_>,
+    surface: &Surface,
+    sides: &[Side],
+    point: PredicatePoint,
+) -> Result<Option<OnAFace>> {
     let mut cuts: Vec<Cut> = Vec::new();
-    for side in &sides {
-        let kept = which_side_of_its_neighbour_a_side_keeps(face, &surface, side)?;
+    for side in sides {
+        let kept = which_side_of_its_neighbour_a_side_keeps(face, surface, side)?;
         let corners = [side.start.key, side.end.key];
         match cuts.iter_mut().find(|known| known.surface == side.across) {
             Some(known) if known.kept == kept => known.corners_on_it.extend(corners),
-            Some(_) => return Err(cannot()),
+            Some(_) => return Ok(None),
             None => cuts.push(Cut {
                 surface: side.across,
                 placed: side.across_placed,
@@ -1301,11 +1344,13 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             }),
         }
     }
-    let one_of_two_runs = if is_a_family_this_follows(&surface, &cuts) {
+    let one_of_two_runs = if is_a_family_this_follows(surface, &cuts) {
         None
     } else {
-        let run = one_of_two_runs_between_two_flats(face, &surface, &sides, &cuts)?;
-        Some(run.ok_or_else(cannot)?)
+        let Some(run) = one_of_two_runs_between_two_flats(face, surface, sides, &cuts)? else {
+            return Ok(None);
+        };
+        Some(run)
     };
 
     let placed = face.surface();
@@ -1314,7 +1359,7 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
         match is_on_the_nappe_the_face_is_on(face, &cone, point)? {
             Decision::Pos => (),
             Decision::Zero => at_the_apex = true,
-            Decision::Neg => return Ok(OnAFace::NotHeld),
+            Decision::Neg => return Ok(Some(OnAFace::NotHeld)),
             Decision::Undecidable { enclosure } => {
                 return Err(gave_up_on_a_side(&placed, point, enclosure));
             }
@@ -1326,11 +1371,11 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     let mut behind_all = true;
     for cut in &cuts {
         for side in sides.iter().filter(|side| side.across != cut.surface) {
-            match where_a_side_lies(&surface, side, cut) {
+            match where_a_side_lies(surface, side, cut) {
                 Lies::On => {}
                 Lies::Beside(found) if found == cut.kept => behind_all = false,
                 Lies::Beside(_) => in_front_of_all = false,
-                Lies::Across => return Err(cannot()),
+                Lies::Across => return Ok(None),
             }
         }
     }
@@ -1339,17 +1384,197 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             Some(run) => held_in_front_of_all_on_its_own_run(run, &cuts, point)?,
             None => held_in_front_of_all(&cuts, point)?,
         };
-        Ok(if at_the_apex && held == OnAFace::Held {
+        Ok(Some(if at_the_apex && held == OnAFace::Held {
             OnAFace::OnItsBoundary
         } else {
             held
-        })
+        }))
     } else if behind_all
-        && (matches!(surface, Surface::Sphere(_)) || is_two_discs_taken_together(&surface, &cuts))
+        && (matches!(surface, Surface::Sphere(_)) || is_two_discs_taken_together(surface, &cuts))
     {
-        held_in_front_of_any(&cuts, point)
+        held_in_front_of_any(&cuts, point).map(Some)
     } else {
-        Err(cannot())
+        Ok(None)
+    }
+}
+
+/// Whether a flat face holds `point`, which is taken as being on that face's
+/// plane, read off the face's own sides: each straight, or an arc of the closed
+/// curve where the plane cuts a ball, a cone or a pipe.
+///
+/// **Each arc is read as its chord, and the piece between the two is added or
+/// taken away.** The sides with every arc put back as its chord are a polygon,
+/// counted as [`walk_one_outline`] counts one. What the chord leaves out is
+/// the piece between the arc and its chord, and that piece is exactly the part
+/// of the plane inside the curve and on the arc's side of the chord line: the
+/// inside of a circle or an ellipse is convex, so the chord line meets it in the
+/// chord, and a line meets the curve in two points, which are the arc's ends, so
+/// the arc is all of the curve on its side of that line. So going round the arc
+/// and back along the chord goes once round that piece, and the count round the
+/// face's own sides is the polygon's count plus, for each arc, one round its
+/// piece where the point is in it. Being in it is two signs: the round
+/// surface's own, and the side of the chord line the point is on against the
+/// side [`the_way_into_an_arc`] says the arc is on. Nothing is built.
+///
+/// **The arc goes round its piece the way the polygon goes round a piece on its
+/// left exactly when the arc is on the chord's right.** Seen from the side the
+/// plane's normal points to, going along the chord with the piece on its right
+/// and back along it with the piece on its left is going round anticlockwise,
+/// which is the way [`walk_one_outline`] counts `+1`. So an arc bulging out of a
+/// polygon that goes round anticlockwise adds its piece, and one bulging into
+/// it takes its piece away, and a hole's arcs do the same turned round.
+///
+/// **This reads the face's boundary, and never asks whether the part in front of
+/// every cut is one piece.** That is why it answers the cap of a slab with a
+/// round scoop out of its top, which keeps the outside of the pipe and is one of
+/// two such pieces, and the two halves of a block's top a bar bored down into
+/// it splits in two.
+///
+/// **A point on a chord is not on the face's boundary**, and the count of the
+/// polygon is not defined there, though the count of the face is. Just off the
+/// chord on the side away from the arc, the point is in no piece of that arc,
+/// and the polygon's count there is the walk with that chord read as having the
+/// point on that side of it — provided the half-line the walk runs crosses the
+/// chord rather than running along it, so it is aimed at a corner off the
+/// chord's line. On one side and the other of a chord the face's count is the
+/// same, because the polygon's and the piece's each change by one there and
+/// turned round; so that is the face's count at the point.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the point is on the
+/// chords of two arcs at once, or on a chord with every corner of the face on
+/// that chord's line: a gap, for a point the walk would need two nudges for, and
+/// for a face no solid here has.
+///
+/// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] when no point off
+/// the plane can be found ([`a_point_off_the_plane`]), and [`Error::Undecidable`]
+/// when a sign could not be settled.
+fn what_a_flat_face_of_chords_and_arcs_holds(
+    face: FaceView<'_>,
+    flat: &Plane,
+    sides: &[Side],
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<OnAFace> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let Surface::Plane(placed) = face.surface() else {
+        unreachable!("a face stored on a plane sits on one once moved")
+    };
+    let target = a_point_off_the_plane(face, &placed)
+        .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
+
+    let mut winding = 0i64;
+    let mut on_a_chord: Option<(usize, Decision)> = None;
+    let mut along = Vec::with_capacity(sides.len());
+    for (index, side) in sides.iter().enumerate() {
+        let [from, to] = [side.start.placed, side.end.placed];
+        let beside = decide(from, to, target, point, policy, log);
+        if let Decision::Undecidable { enclosure } = beside {
+            return Err(gave_up_turning_a_corner(point, enclosure));
+        }
+        along.push(beside);
+        let SideRun::Arc { into_the_arc } = &side.run else {
+            if beside == Decision::Zero {
+                match lies_between(from, to, point) {
+                    Ok(true) => return Ok(OnAFace::OnItsBoundary),
+                    Ok(false) => (),
+                    Err(overhang) => return Err(gave_up_ordering_along_a_side(point, overhang)),
+                }
+            }
+            continue;
+        };
+        let on_the_left =
+            is_the_arc_left_of_its_chord(flat, side, *into_the_arc).ok_or_else(cannot)?;
+        let [arcs_side, away] = if on_the_left {
+            [Decision::Pos, Decision::Neg]
+        } else {
+            [Decision::Neg, Decision::Pos]
+        };
+        match side_of_surface(&side.across_placed, point) {
+            Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
+                return Ok(OnAFace::OnItsBoundary);
+            }
+            Decision::Neg if beside == arcs_side => winding += if on_the_left { -1 } else { 1 },
+            Decision::Neg if beside == Decision::Zero => {
+                if on_a_chord.is_some() {
+                    return Err(cannot());
+                }
+                on_a_chord = Some((index, away));
+            }
+            Decision::Zero | Decision::Neg | Decision::Pos => (),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(&side.across_placed, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+
+    let mut corners = sides.iter().map(|side| side.start.placed);
+    let aim = match on_a_chord {
+        None => corners.next(),
+        Some((chord, _)) => {
+            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
+            corners.find(|corner| {
+                matches!(
+                    decide(
+                        from,
+                        to,
+                        target,
+                        PredicatePoint::from(corner.coordinates()),
+                        policy,
+                        log
+                    ),
+                    Decision::Pos | Decision::Neg
+                )
+            })
+        }
+    }
+    .ok_or_else(cannot)?;
+
+    for (index, side) in sides.iter().enumerate() {
+        let along = match on_a_chord {
+            Some((chord, away)) if chord == index => away,
+            _ => along[index],
+        };
+        let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
+            if corner == aim {
+                Decision::Zero
+            } else {
+                decide(corner, aim, target, point, policy, log)
+            }
+        });
+        winding += crossing(from, to, along).ok_or_else(|| {
+            gave_up_turning_a_corner(point, whichever_of_them_was_not_read(from, to))
+        })?;
+    }
+    Ok(if winding == 0 {
+        OnAFace::NotHeld
+    } else {
+        OnAFace::Held
+    })
+}
+
+/// Whether an arc lies on the left of its chord, going from its start to its
+/// end and looking down the normal of the plane it is on: `into_the_arc` is
+/// [`the_way_into_an_arc`], which is that chord crossed with `flat`'s normal or
+/// turned round, so the sign read here is that choice and no rounding can make
+/// it otherwise. A movement keeps it, because a movement never mirrors. `None`
+/// only when the chord has no length to read it by.
+fn is_the_arc_left_of_its_chord(
+    flat: &Plane,
+    side: &Side,
+    into_the_arc: [Interval; 3],
+) -> Option<bool> {
+    let [from, to] = [side.start.at, side.end.at].map(|corner| corner.coordinates());
+    let chord =
+        core::array::from_fn(|axis| Interval::exactly(to[axis]) - Interval::exactly(from[axis]));
+    let left = cross(exactly(flat.normal().components()), chord);
+    match dot(into_the_arc, left).sign() {
+        Decision::Pos => Some(true),
+        Decision::Neg => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
     }
 }
 
@@ -1387,11 +1612,12 @@ struct Side {
     run: SideRun,
 }
 
-/// A corner of a face, where it is stored.
+/// A corner of a face, where it is stored and where it sits once moved.
 #[derive(Clone, Copy)]
 struct Corner {
     key: crate::VertexKey,
     at: Point,
+    placed: Point,
 }
 
 /// What a [`Side`] runs along between its ends.
@@ -1458,6 +1684,7 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
         let [start, end] = [coedge.start(), coedge.end()].map(|corner| Corner {
             key: corner.key(),
             at: where_it_is_stored(solid, corner.key()),
+            placed: corner.point(),
         });
         let one_surface = across.stored_surface() == face.stored_surface();
         let ruling_on = || the_flat_face_a_ruling_lies_on(solid, face, [start.at, end.at]);
@@ -1897,12 +2124,15 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// is not admitted by that argument: the outside of an ellipse is not convex,
 /// which is the first of the cone's reasons below, and a block with a bar bored
 /// down across the whole of its top keeps two pieces of that top outside the
-/// bar (`a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` in
-/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`). It is admitted by
+/// bar (`a_block_with_a_bar_bored_into_it_has_each_half_of_its_top_hold_its_own_side`
+/// in `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`). It is admitted by
 /// another, when the pipe's curve crosses the edge of the polygon the straight
 /// cuts leave only at the two ends of the face's one arc
 /// ([`is_a_polygon_less_one_bite_of_a_pipe`]): the floor of a block with a bar
-/// bored through the middle of one edge.
+/// bored through the middle of one edge. A flat face this says no to is not
+/// refused for it: [`what_a_face_cut_by_part_of_a_crossing_holds`] hands it to
+/// [`what_a_flat_face_of_chords_and_arcs_holds`], and both halves of that top
+/// are answered there.
 ///
 /// **Convexity does not need the crossing to close on a pipe**, where it does on
 /// a cone: the inside of a pipe is every point within its radius of the axis,
@@ -1926,10 +2156,10 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// thing this test exists to refuse. `Some(false)` and `None` are both refused,
 /// so an undecided sign costs a refusal and never a wrong answer.
 ///
-/// **A face keeping the cone's *outside* is refused, and that is a gap and not
-/// a conjunct in the way.** `cut.kept == Decision::Neg` is what says so, and
-/// deleting it moves nothing. Read this before reaching for it again
-/// (`docs/decisions.md` §215.3 asked, and this is the answer):
+/// **A face keeping the cone's *outside* is refused here, and that is this
+/// argument's limit and no longer the kernel's gap.** `cut.kept == Decision::Neg`
+/// is what says so, and deleting it moves nothing. Read this before reaching
+/// for it again (`docs/decisions.md` §215.3 asked, and this is the answer):
 ///
 /// - The argument above does not carry. The inside of an ellipse is convex; the
 ///   **outside** of one is not, so "any number of convex pieces meet in one" says
@@ -1958,14 +2188,24 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 ///   `Beside(Pos)` against a cone leaves 9 326 again, with all 13 187 refusals
 ///   moving from this gate to that `Lies::Across`.
 ///
-/// So the family of fixes is "loosen what this admits", and it is the only one
-/// that keeps the shape of [`what_a_face_cut_by_part_of_a_crossing_holds`] — it
-/// asks one question, "is `point` in front of every cut", and a region in two
-/// pieces has no such answer. Anything that does follow a kept outside has to
-/// decide whether the leftover region is connected, which is a predicate nobody
-/// here has, over a shape nobody here builds: where the ellipse meets the
-/// straight cuts. That is a part with no named consumer (§13), and until one
-/// appears this refuses.
+/// So the family of fixes here is "loosen what this admits", and it is the only
+/// one that keeps the shape of [`what_a_face_cut_by_part_of_a_crossing_holds`]'s
+/// steps — they ask one question, "is `point` in front of every cut", and a
+/// region in two pieces has no such answer. Following a kept outside that way
+/// would mean deciding whether the leftover region is connected, which is a
+/// predicate nobody here has, over where the ellipse meets the straight cuts.
+///
+/// **A flat face needs none of that, and since row Q1002 it does not ask.** The
+/// cap of a slab with a round scoop out of its top keeps the outside of a pipe
+/// and is one of two pieces in front of every cut, and it is the consumer that
+/// §13 asked for. [`what_a_flat_face_of_chords_and_arcs_holds`] winds the face's
+/// own sides, each arc read as its chord with the piece between the two added
+/// or taken away, which is one sign of the round surface and one side of the
+/// chord. It reads the face's boundary and not its cuts, so whether the part in
+/// front of every cut is one piece never comes up, and it holds for the cone's
+/// ellipse and the ball's circle as for the pipe's. So this still says no, which
+/// is right of the question it answers, and a flat face it says no to is
+/// answered that way instead: the slab `z = 6` above is one.
 ///
 /// On a pipe it is planes, as [`leaves_a_pipe_in_one_piece`] sets out, or two
 /// planes along the axis meeting inside the pipe in place of its one
@@ -2644,11 +2884,12 @@ fn is_a_pair_of_pipes_running_the_same_way(flat: &Plane, cuts: &[Cut]) -> bool {
 /// less half a disc.
 ///
 /// **What it is told apart from** is the top of a block too narrow for the bar,
-/// `a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` in
-/// `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`. There the bar's circle
-/// crosses each long side twice, so the strip outside the bar is two pieces,
-/// and each piece's arc has one end on each long side. Neither long side holds
-/// both ends, and neither misses the pipe, so that top is refused as it was.
+/// `a_block_with_a_bar_bored_into_it_has_each_half_of_its_top_hold_its_own_side`
+/// in `tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`. There the bar's
+/// circle crosses each long side twice, so the strip outside the bar is two
+/// pieces, and each piece's arc has one end on each long side. Neither long
+/// side holds both ends, and neither misses the pipe, so this says no to that
+/// top, and [`what_a_flat_face_of_chords_and_arcs_holds`] answers it.
 ///
 /// **Why this is one piece.** Let `P` be the part of the plane in front of
 /// every plane cut, `C` the curve the pipe cuts the plane in — a circle or an
@@ -2680,15 +2921,16 @@ fn is_a_pair_of_pipes_running_the_same_way(flat: &Plane, cuts: &[Cut]) -> bool {
 /// through [`a_straight_side_stays_outside_the_pipe`]), which is the part of the
 /// face's boundary this argument does not already place.
 ///
-/// **A plane that crosses the pipe beside `A` and `B` is refused, and that is a
-/// gap.** A block with a bar bored down through one corner keeps the square
-/// less a quarter of a disc, one piece, but each of its two sides through the
-/// bite holds one end of the arc and crosses the pipe again outside the square.
+/// **A plane that crosses the pipe beside `A` and `B` is not taken here.** A
+/// block with a bar bored down through one corner keeps the square less a
+/// quarter of a disc, one piece, but each of its two sides through the bite
+/// holds one end of the arc and crosses the pipe again outside the square.
 /// Telling that from the narrow top above wants to know whether the second
-/// crossing is on the edge of `P`, which is where two of the plane cuts meet —
-/// a part with no named consumer (§13). So is a leaned plane that misses `C`
-/// on `flat` but meets the pipe elsewhere: [`misses_the_pipe`] asks the plane,
-/// not the line it leaves on `flat`.
+/// crossing is on the edge of `P`, which is where two of the plane cuts meet.
+/// Nothing here asks it, because such a face winds its own sides instead
+/// ([`what_a_flat_face_of_chords_and_arcs_holds`]), and so does one cut by a
+/// leaned plane that misses `C` on `flat` but meets the pipe elsewhere:
+/// [`misses_the_pipe`] asks the plane, not the line it leaves on `flat`.
 fn is_a_polygon_less_one_bite_of_a_pipe(flat: &Plane, cuts: &[Cut]) -> bool {
     let (round, planes): (Vec<&Cut>, Vec<&Cut>) = cuts
         .iter()
@@ -3210,8 +3452,8 @@ fn where_an_arc_between_two_points_of_a_pipe_lies(
 ///
 /// Anything else is `false`. A side with both ends outside along a plane that
 /// crosses the pipe may run through it, as each long side of the narrow top in
-/// `a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name` would if it
-/// were one side.
+/// `a_block_with_a_bar_bored_into_it_has_each_half_of_its_top_hold_its_own_side`
+/// would if it were one side.
 fn a_straight_side_stays_outside_the_pipe(
     pipe: &rcad_geom::Cylinder,
     cut: &Surface,

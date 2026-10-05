@@ -8,16 +8,20 @@
 //! quarter of a bar — and when they are parallel and keep the strip between
 //! them, a bar with two flats, whose two walls are told apart by the half of
 //! the pipe each is in. A flat face keeping the **outside** of the pipe is
-//! answered when the pipe's circle crosses the edge of the face's square only
-//! at the two ends of its one arc — a block with a bar bored through the middle
-//! of one edge — and refused otherwise. Each refusal comes with the shape that
-//! shows why: two points the face's own cuts cannot tell apart, one on the face
-//! and one on another face, or a face that is one piece all the same and is
-//! pinned as a gap.
+//! answered by its cuts when the pipe's circle crosses the edge of the face's
+//! square only at the two ends of its one arc — a block with a bar bored
+//! through the middle of one edge. Otherwise the part of its plane in front of
+//! every cut can be two pieces, and the face winds its own sides instead, each
+//! arc read as its chord with the piece between the two added or taken away
+//! (row Q1002): the two halves of a block's top a bar bored into it splits, the
+//! floor and top of a block bored through one corner, and the caps of a slab
+//! with a round scoop out of its top. Where two pieces are in front of every
+//! cut, the test shows a point of each on the same side of every cut and the
+//! face holding only its own.
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Isometry, Point, Scale, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
@@ -203,12 +207,15 @@ fn a_bar_with_two_flats_says_which_points_are_inside_it() {
 /// A block `2 × 12 × 4` with a bar of radius 3 bored down into its middle as
 /// far as `z = 2`. The bar's circle runs into the top at one long side and out
 /// at the other, so the top is two faces, each keeping the outside of the pipe
-/// — and the other piece is in front of every one of this piece's cuts.
-/// Refused by name rather than answered wrong; the answer exists, so this is a
-/// gap of the argument, as the walls of the bar with two flats were until each
-/// was told apart by the half of the pipe it is in.
+/// — and the other piece is in front of every one of this piece's cuts, which
+/// is why no reading of the cuts answers it. Each half winds its own sides
+/// instead, its arc read as the chord at `y = ±√8` with the piece of the bore's
+/// disc past that chord taken away, and holds its own side of the bore and
+/// none of the other's: every answer worked out from the coordinates
+/// ([`on_one_half_of_the_narrow_top`]). Until row Q1002 both halves were
+/// refused by name.
 #[test]
-fn a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name() {
+fn a_block_with_a_bar_bored_into_it_has_each_half_of_its_top_hold_its_own_side() {
     let mut model = a_model();
     let block = a_block(&mut model, [-1.0, -6.0, 0.0], [2.0, 12.0, 4.0]);
     let bar = a_bar(&mut model, 3.0, [0.0, 0.0, 2.0]);
@@ -219,16 +226,29 @@ fn a_block_with_a_bar_bored_into_it_has_its_top_refused_by_name() {
         })
     });
     assert_eq!(tops.len(), 2, "the top either side of the bore");
+    let mut counted = [0; 3];
     for top in tops {
-        for y in [4.5, -4.5] {
-            assert_eq!(holds(&model, solid, top, [0.0, y, 4.0]), Err(top));
-        }
         assert_eq!(
             sides_of_every_neighbour(&model, solid, top, [0.0, 4.5, 4.0]),
             sides_of_every_neighbour(&model, solid, top, [0.0, -4.5, 4.0]),
             "the two pieces of the top are on the same side of every cut of one of them"
         );
+        let side = which_side_of_y_is_zero(&model, solid, top);
+        for x in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
+            for y in [
+                -6.5, -6.0, -5.0, -4.5, -3.0, -2.5, 0.0, 2.5, 3.0, 4.5, 5.0, 6.0, 6.5,
+            ] {
+                let expected = on_one_half_of_the_narrow_top(side, [x, y]);
+                counted[class_of(expected)] += 1;
+                assert_eq!(
+                    holds(&model, solid, top, [x, y, 4.0]),
+                    Ok(expected),
+                    "the half of the top on the side {side} of y = 0, at ({x}, {y})"
+                );
+            }
+        }
     }
+    assert_eq!(counted, [16, 24, 142]);
 }
 
 /// A block `10 × 10 × 4` with a bar of radius 3 bored down through the middle
@@ -269,27 +289,44 @@ fn a_block_with_a_bar_bored_through_one_edge_holds_the_points_of_its_floor_and_i
 }
 
 /// A block `10 × 10 × 4` with a bar of radius 3 bored down through one corner.
-/// Its floor is **one piece**, the square less a quarter of a disc, so
-/// `(5, 5, 0)` is held and `(1, 1, 0)` is not. It is refused by name all the
-/// same: each side through the bite holds one end of the arc and crosses the
-/// pipe again outside the square, and telling that from the narrow top above,
-/// whose long sides cross it again where the other piece begins, wants where
-/// two of the block's sides meet. A gap, pinned so that answering it fails here
-/// and gets moved to a test of its answers.
+/// Its floor and its top are each **one piece**, the square less a quarter of
+/// a disc. No reading of the cuts says so — each side through the bite holds
+/// one end of the arc and crosses the pipe again outside the square, as the
+/// narrow top's long sides do where its other piece begins — so each face winds
+/// its own sides, the arc read as the chord `x + y = 3` with the piece of the
+/// disc past it taken away. Every answer is worked out from the coordinates
+/// against the square and the disc ([`on_the_square_less_a_quarter_disc`]), and
+/// the points on the chord, inside the disc, are turned away. Until row Q1002
+/// the floor was refused by name.
 #[test]
-fn a_block_with_a_bar_bored_through_one_corner_has_its_floor_refused_though_it_is_one_piece() {
+fn a_block_with_a_bar_bored_through_one_corner_holds_the_points_of_its_floor_and_its_top() {
     let mut model = a_model();
     let block = a_block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
     let bar = a_bar(&mut model, 3.0, [0.0, 0.0, -1.0]);
     let solid = the_one_solid(&mut model, block, bar, Rule::Difference);
-    let floor = the_only_face(&model, solid, |surface| {
-        surface
-            .as_plane()
-            .is_some_and(|flat| flat.normal().components() == [0.0, 0.0, -1.0])
-    });
-    for point in [[5.0, 5.0, 0.0], [1.0, 1.0, 0.0]] {
-        assert_eq!(holds(&model, solid, floor, point), Err(floor));
+    let mut counted = [0; 3];
+    for (z, facing) in [(0.0, -1.0), (4.0, 1.0)] {
+        let face = the_only_face(&model, solid, |surface| {
+            surface
+                .as_plane()
+                .is_some_and(|flat| flat.normal().components() == [0.0, 0.0, facing])
+        });
+        let along = [
+            -1.0, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 9.5, 10.0, 11.0,
+        ];
+        for x in along {
+            for y in along {
+                let expected = on_the_square_less_a_quarter_disc([x, y]);
+                counted[class_of(expected)] += 1;
+                assert_eq!(
+                    holds(&model, solid, face, [x, y, z]),
+                    Ok(expected),
+                    "the face at z = {z}, at ({x}, {y})"
+                );
+            }
+        }
     }
+    assert_eq!(counted, [96, 54, 138]);
 }
 
 /// The whole block with the bar bored through one edge, asked point by point:
@@ -320,6 +357,246 @@ fn a_block_with_a_bar_bored_through_one_edge_says_which_points_are_inside_it() {
         );
         assert!(log.is_empty(), "a certified answer logs nothing: {log:?}");
     }
+}
+
+/// The two caps of a slab with a round scoop out of its top, `|x| ≤ 4`,
+/// `−6 ≤ y ≤ −3`, four tall, outside the pipe of radius 5 about `z`, built face
+/// by face and fused as a block less a bar. The pipe's circle meets `x = ±4` at
+/// `y = −3`, so the arc's ends are corners of the cap and the cap has no side
+/// along `y = −3`.
+///
+/// **On each cap the part in front of every cut is two pieces**: the cap, and
+/// the strip of `|x| ≤ 4` past the far side of the circle, `(0, 5.5)` among it.
+/// Each cap winds its own sides instead, the arc read as the chord along
+/// `y = −3` with the piece of the disc past it taken away, and every answer is
+/// worked out from the coordinates ([`on_the_slab_cap`]): the strip is turned
+/// away, so are the points on the chord, inside the disc, and the points on the
+/// circle's far arc, which is the pipe but not this face's side. Until row
+/// Q1002 every point was refused by name, on both caps of both slabs.
+#[test]
+fn a_slab_with_a_round_scoop_out_of_its_top_holds_the_points_of_its_caps() {
+    let mut counted = [0; 3];
+    for (made, (model, solid)) in [
+        ("built face by face", {
+            let mut model = a_model();
+            let solid = a_slab_with_a_round_scoop_out_of_it_built_face_by_face(&mut model);
+            (model, solid)
+        }),
+        ("fused", a_slab_with_a_round_scoop_out_of_it_fused()),
+    ] {
+        for (z, facing) in [(0.0, -1.0), (4.0, 1.0)] {
+            let cap = the_only_face(&model, solid, |surface| {
+                surface
+                    .as_plane()
+                    .is_some_and(|flat| flat.normal().components() == [0.0, 0.0, facing])
+            });
+            assert_eq!(
+                sides_of_every_neighbour(&model, solid, cap, [0.0, -5.5, z]),
+                sides_of_every_neighbour(&model, solid, cap, [0.0, 5.5, z]),
+                "the cap and the strip past the circle are on the same side of every cut"
+            );
+            for x in [
+                -5.0, -4.0, -3.5, -3.0, -2.0, 0.0, 0.5, 2.0, 3.0, 3.5, 4.0, 4.5,
+            ] {
+                for y in [
+                    -7.0, -6.0, -5.5, -5.0, -4.5, -4.0, -3.0, -2.0, 0.0, 3.0, 4.0, 4.5, 5.0, 5.5,
+                    7.0,
+                ] {
+                    let expected = on_the_slab_cap([x, y]);
+                    counted[class_of(expected)] += 1;
+                    assert_eq!(
+                        holds(&model, solid, cap, [x, y, z]),
+                        Ok(expected),
+                        "the slab {made}, its cap at z = {z}, at ({x}, {y})"
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(counted, [84, 92, 544]);
+}
+
+/// The slab built face by face places points, and less the block
+/// `2 × 1.5 × 2` at `(−1, −7, 1)` it is one solid of the volume worked out by
+/// hand: the slab's `4 · (24 − (12 + 25 asin 0.8 − 24))` — four tall over the
+/// rectangle `8 × 3` less the part of the disc of radius 5 inside it, which is
+/// the sector `25 asin 0.8` and the two triangles either side, `12`, less the
+/// rectangle's part above `y = −3`, `24` — less the block's overlap with the
+/// slab, `2 × 0.5 × 2`. Before row Q1002 the caps refused, so the slab placed
+/// no point inside it and the cut was refused `Undecidable`, naming a point in
+/// a piece no solid could place.
+#[test]
+fn a_slab_with_a_round_scoop_out_of_it_places_its_points_and_takes_a_cut() {
+    let policy = Policy::certified();
+    let mut model = a_model();
+    let slab = a_slab_with_a_round_scoop_out_of_it_built_face_by_face(&mut model);
+    let view = model.solid(slab).expect("this model made the key");
+    for (point, expected) in [
+        ([0.0, -5.5, 2.0], Containment::Inside),
+        ([3.5, -4.5, 1.0], Containment::Inside),
+        ([0.0, -4.0, 2.0], Containment::Outside),
+        ([0.0, 5.5, 2.0], Containment::Outside),
+        ([0.0, -5.5, 4.5], Containment::Outside),
+    ] {
+        let mut log = ProvenanceLog::new();
+        let [x, y, z] = point;
+        assert_eq!(
+            view.classify_point(Point::new(x, y, z), &policy, &mut log),
+            expected,
+            "the slab at {point:?}"
+        );
+        assert!(log.is_empty(), "a certified answer logs nothing: {log:?}");
+    }
+
+    let knife = a_block(&mut model, [-1.0, -7.0, 1.0], [2.0, 1.5, 2.0]);
+    let cut = the_one_solid(&mut model, slab, knife, Rule::Difference);
+    let measured = model
+        .solid(cut)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the cut slab measures");
+    let by_hand = 4.0 * (24.0 - (12.0 + 25.0 * 0.8_f64.asin() - 24.0)) - 2.0;
+    assert!(
+        (measured.volume() - by_hand).abs() <= measured.volume_error(),
+        "the cut slab measures {} ± {} against {by_hand} by hand",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+/// The slab with a round scoop out of its top as a block `|x| ≤ 4`,
+/// `−6 ≤ y ≤ −2`, four tall,
+/// less a bar of radius 5 from `z = −1` to `z = 5`: the bar takes all of the
+/// block above `y = −3`, so its side at `y = −2` goes with it.
+fn a_slab_with_a_round_scoop_out_of_it_fused() -> (Model, SolidKey) {
+    let mut model = a_model();
+    let block = a_block(&mut model, [-4.0, -6.0, 0.0], [8.0, 4.0, 4.0]);
+    let bar = model
+        .add_round_bar(5.0, 6.0, &at([0.0, 0.0, -1.0]))
+        .expect("a bar of positive size");
+    let solid = the_one_solid(&mut model, block, bar, Rule::Difference);
+    (model, solid)
+}
+
+/// The slab `|x| ≤ 4`, `−6 ≤ y ≤ −3`, four tall, less the pipe of radius five
+/// about `z`, built face by face as
+/// `crates/rcad-step/tests/a_solid_written_out_and_read_back_is_the_same_solid.rs`
+/// builds it: bottom cap, scoop, top cap, then the three flat sides.
+fn a_slab_with_a_round_scoop_out_of_it_built_face_by_face(model: &mut Model) -> SolidKey {
+    use rcad_geom::{Axis, Cylinder, EdgeRun, HalfSpace, Orientation, Picker, Plane};
+    use rcad_topo::{DraftStep, SolidBuilder};
+
+    let height = 4.0;
+    let a_plane = |at: Point, facing: Vector| {
+        Plane::from_point_and_normal(at, facing).expect("an axis direction has length")
+    };
+    let bottom = a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0));
+    let top = a_plane(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0));
+    let the_short_arc_on = |cap: Plane| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cap),
+        picked_by: [Picker::from(
+            HalfSpace::through_a_point_facing(
+                Point::new(0.0, -3.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+            )
+            .expect("an axis direction has length"),
+        )]
+        .into(),
+    };
+
+    let mut builder = SolidBuilder::new();
+    let corners = [
+        (4.0, -3.0, 0.0),
+        (-4.0, -3.0, 0.0),
+        (4.0, -3.0, height),
+        (-4.0, -3.0, height),
+        (4.0, -6.0, 0.0),
+        (-4.0, -6.0, 0.0),
+        (4.0, -6.0, height),
+        (-4.0, -6.0, height),
+    ]
+    .map(|(x, y, z)| {
+        builder
+            .add_vertex(Point::new(x, y, z))
+            .expect("a finite corner")
+    });
+    let edges = [
+        (0, 1, the_short_arc_on(bottom)),
+        (2, 3, the_short_arc_on(top)),
+        (0, 2, EdgeRun::Straight),
+        (1, 3, EdgeRun::Straight),
+        (4, 5, EdgeRun::Straight),
+        (6, 7, EdgeRun::Straight),
+        (0, 4, EdgeRun::Straight),
+        (1, 5, EdgeRun::Straight),
+        (2, 6, EdgeRun::Straight),
+        (3, 7, EdgeRun::Straight),
+        (4, 6, EdgeRun::Straight),
+        (5, 7, EdgeRun::Straight),
+    ]
+    .map(|(from, to, run)| {
+        builder
+            .add_edge(corners[from], corners[to], run)
+            .expect("an edge between two corners")
+    });
+
+    let (forward, back) = (Orientation::Forward, Orientation::Reversed);
+    let faces = [
+        (Surface::Plane(bottom), forward),
+        (
+            Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a positive radius")),
+            back,
+        ),
+        (Surface::Plane(top), forward),
+        (
+            Surface::Plane(a_plane(
+                Point::new(4.0, 0.0, 0.0),
+                Vector::new(1.0, 0.0, 0.0),
+            )),
+            forward,
+        ),
+        (
+            Surface::Plane(a_plane(
+                Point::new(-4.0, 0.0, 0.0),
+                Vector::new(-1.0, 0.0, 0.0),
+            )),
+            forward,
+        ),
+        (
+            Surface::Plane(a_plane(
+                Point::new(0.0, -6.0, 0.0),
+                Vector::new(0.0, -1.0, 0.0),
+            )),
+            forward,
+        ),
+    ];
+    let wires: [&[(usize, Orientation)]; 6] = [
+        &[(4, forward), (7, back), (0, back), (6, forward)],
+        &[(0, forward), (3, forward), (1, back), (2, back)],
+        &[(8, back), (1, forward), (9, forward), (5, back)],
+        &[(6, back), (2, forward), (8, forward), (10, back)],
+        &[(7, forward), (11, forward), (9, back), (3, back)],
+        &[(4, back), (10, forward), (5, forward), (11, back)],
+    ];
+    let mut skin = Vec::with_capacity(faces.len());
+    for ((surface, used), steps) in faces.into_iter().zip(wires) {
+        let walked: Vec<DraftStep> = steps
+            .iter()
+            .map(|&(which, way)| {
+                DraftStep::Along(builder.add_coedge(edges[which], way).expect("a coedge"))
+            })
+            .collect();
+        let wire = builder.add_wire(&walked).expect("a wire that closes");
+        skin.push((builder.add_face(surface, &[wire]).expect("a face"), used));
+    }
+    builder.add_shell(&skin).expect("a shell");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the slab with a round scoop out of it is not sound: {why}"))
 }
 
 fn a_quarter_of_a_bar(bar_first: bool) -> (Model, SolidKey) {
@@ -496,6 +773,90 @@ fn on_the_square_less_half_a_disc(point: [f64; 2]) -> OnAFace {
         OnAFace::OnItsBoundary
     } else {
         OnAFace::Held
+    }
+}
+
+/// Which side of `y = 0` every corner of `face` is on: `1.0` or `-1.0`.
+fn which_side_of_y_is_zero(model: &Model, solid: SolidKey, face: FaceKey) -> f64 {
+    let face = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .find(|used| used.key() == face)
+        .expect("a face of this solid");
+    let ys: Vec<f64> = face
+        .wires()
+        .flat_map(|wire| wire.points().collect::<Vec<_>>())
+        .map(|corner| corner.coordinates()[1])
+        .collect();
+    let side = ys[0].signum();
+    assert!(
+        ys.iter().all(|y| y.signum() == side && *y != 0.0),
+        "every corner of a half of the top is on one side of y = 0: {ys:?}"
+    );
+    side
+}
+
+/// Where a point of the plane `z = 4` is against the half of the narrow top on
+/// `side` of `y = 0`, worked out from its coordinates: `|x| ≤ 1` and `|y| ≤ 6`
+/// on that side, outside the circle of radius 3 round the axis, and on its
+/// boundary on the circle or on the block's edge. Every coordinate asked is a
+/// whole number or a half, so the distance is exact.
+fn on_one_half_of_the_narrow_top(side: f64, point: [f64; 2]) -> OnAFace {
+    let [x, y] = point;
+    let from_the_axis = x * x + y * y;
+    let in_it = x.abs() <= 1.0 && side * y >= 0.0 && y.abs() <= 6.0 && from_the_axis >= 9.0;
+    if !in_it {
+        OnAFace::NotHeld
+    } else if from_the_axis == 9.0 || x.abs() == 1.0 || y.abs() == 6.0 {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::Held
+    }
+}
+
+/// Where a point of the plane of the floor or the top of the block bored
+/// through one corner is against that face, worked out from its coordinates:
+/// the square `0 ≤ x, y ≤ 10` less the inside of the circle of radius 3 round
+/// the origin, on its boundary on the edge of the square or on the circle.
+fn on_the_square_less_a_quarter_disc(point: [f64; 2]) -> OnAFace {
+    let [x, y] = point;
+    let from_the_axis = x * x + y * y;
+    let in_the_square = (0.0..=10.0).contains(&x) && (0.0..=10.0).contains(&y);
+    if !in_the_square || from_the_axis < 9.0 {
+        OnAFace::NotHeld
+    } else if from_the_axis == 9.0 || x == 0.0 || x == 10.0 || y == 0.0 || y == 10.0 {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::Held
+    }
+}
+
+/// Where a point of a cap's plane is against a cap of the slab with a round
+/// scoop out of its top, worked out from its coordinates: `|x| ≤ 4` and
+/// `−6 ≤ y ≤ −3`, outside the circle of radius 5 round the axis, and on its
+/// boundary on the circle, at `x = ±4` or at `y = −6`. The only points of
+/// `y = −3` it holds are the two corners, which are on the circle.
+fn on_the_slab_cap(point: [f64; 2]) -> OnAFace {
+    let [x, y] = point;
+    let from_the_axis = x * x + y * y;
+    let in_it = x.abs() <= 4.0 && (-6.0..=-3.0).contains(&y) && from_the_axis >= 25.0;
+    if !in_it {
+        OnAFace::NotHeld
+    } else if from_the_axis == 25.0 || x.abs() == 4.0 || y == -6.0 {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::Held
+    }
+}
+
+/// Where an answer is counted: held, on the boundary, not held.
+fn class_of(answer: OnAFace) -> usize {
+    match answer {
+        OnAFace::Held => 0,
+        OnAFace::OnItsBoundary => 1,
+        OnAFace::NotHeld => 2,
+        other => unreachable!("the test's own answer is one of three: {other:?}"),
     }
 }
 
