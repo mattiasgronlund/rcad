@@ -199,10 +199,22 @@ corner of such a run, the answer a fuse with nothing to join already gives.
 The union is one solid of `4π/3 + 410 + 1.5 − 1.05` less the cap past
 `x = 0.9`, inside its measured bound in both orders, and
 `tests/a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs` pins it with
-the other four. The union keeps the ball in two faces either side of `x = 0`,
-and fused again with a far cube it is refused
-`AFaceMeetsItsNeighbourOnItsOwnSurface` on one of them, at `crossing_for`,
-Q584's site; that file pins the refusal too.
+the other four. The union keeps the ball in two faces either side of `x = 0`.
+
+**Note, 2026-10-05, Q575 and Q903: fused again with a far cube, this now
+answers.** Since Q575 (`9ff21bfa`) bakes the faces of a curved input as one
+face before joining, `the_union_fused_again_with_a_far_cube_is_the_union_and_the_cube`
+in `a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs` pins the union
+and the cube, either way round, no longer refused
+`AFaceMeetsItsNeighbourOnItsOwnSurface` at `crossing_for` (Q584's site). Q903
+found where that refusal still reaches a ball split on itself: the union of a
+ball merely *touching* a block also keeps the ball in two faces, and fused
+again with any cube it is refused `Undecidable` 'a point in a piece that
+every solid could place' instead, because a ball held in two faces cannot
+place a point at its own centre.
+`a_ball_touching_a_block_united_and_fused_again_with_a_far_cube_is_refused_where_it_places_a_point`
+in `a_ball_split_on_itself_united_with_a_block_clear_of_it.rs` pins it, under
+every rule both ways round, held by the row after Q977 (Q1024).
 
 ### 400.6 Q452
 
