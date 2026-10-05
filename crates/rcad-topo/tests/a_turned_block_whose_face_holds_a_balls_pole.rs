@@ -21,8 +21,9 @@
 //! **Cutting the ball.** The second test moves the face's square to be centred
 //! on the circle the plane cuts (Q547's shape, Q889). The cube then holds all
 //! of the ball below the plane, and the cap above it has `N` on its rim or
-//! within about a rounding of it. Most cases answer and measure the cap worked
-//! out from the plane's distance to the centre; the rest are pinned by name.
+//! within about a rounding of it. Most cases answer, measure the cap worked
+//! out from the plane's distance to the centre and hold the points their rule
+//! says; the rest are pinned by name.
 
 use core::f64::consts::PI;
 
@@ -32,7 +33,7 @@ use rcad_geom::{
 };
 use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
+use rcad_topo::{Error, Mesh, Model, Rule, SolidKey};
 
 const SIDE: f64 = 4.0;
 const GAP: f64 = 0.1;
@@ -75,19 +76,10 @@ fn a_block_clear_of_a_ball_whose_face_plane_holds_its_pole_fuses_and_measures() 
     }
 }
 
-/// What a case of the cut ball does on `4358cce4`.
+/// What a case of the cut ball does today.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Today {
     Answers,
-    /// `Invalid(FacesDoNotAgreeWhichWayTheyFace)`. The ball's piece below the
-    /// plane is a cap round the south pole whose rim runs through `N`, and `N`
-    /// is the last point its walk reaches before closing on the rim's corner.
-    /// `WalkingAWire::finish` closes that pole side at the first corner's
-    /// longitude as it was read, not a turn on, so the corners run the pole
-    /// side across the cap's longitudes instead of the piece's. The walk's own
-    /// count is right (`climbed` is a whole turn); only the corner written is
-    /// not. Closing it a turn on answers all twelve, and nothing else moved.
-    PoleSideClosedAtTheWrongTurn,
     /// `CannotMeshAFace { CornersCoincide }`. The rim's one corner sits
     /// `2.7e-14` from `N`, inside one rounding, so it is walked as the pole,
     /// but at its own latitude `π/2 − 2.7e-14` and not the pinch. The cap round
@@ -112,16 +104,31 @@ enum Today {
 /// less block is the cap, ball and block together are the cube and the cap,
 /// the two kept in common are the ball less the cap, and block less ball is
 /// the cube less that. Each is checked within the error the measure publishes.
+/// With the plane through `N` tilted 30 degrees, `d` is `cos 30° = √3/2` to
+/// within a rounding, so the cap is `π (1 − √3/2)² (2 + √3/2) / 3 ≈ 0.0539`.
 ///
-/// **Twenty-seven of the 144 are refused, each by name** (see [`Today`]),
-/// measured on `4358cce4`. Counted with intersection one way round, as the
-/// row did before Q847, that is the nineteen of Q889, unchanged by Q847.
+/// **And each answer's mesh winds once round the points its rule says, and
+/// not round the others.** Four points, each well clear of both skins: the
+/// centre and `(0, 0, −0.95)` near the south pole, which are the ball below
+/// the plane; `n (1 − h/2)` along the plane's normal `n`, which is in the cap;
+/// and `−1.5 n`, which is in the block clear of the ball. The union holds all
+/// four, ball less block only the cap's, block less ball only the block's,
+/// and the two kept in common the centre and the south pole's.
+///
+/// **Fifteen of the 144 are refused, each by name** (see [`Today`]). Twelve
+/// more, at direction 30 with the block less the ball or either intersection,
+/// were refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` until Q963: the
+/// piece below the plane is a cap round the south pole whose rim runs through
+/// `N`, `N` is the last point its walk reaches, and `WalkingAWire::finish`
+/// wrote that pole side's far corner at the rim corner's longitude as read
+/// rather than the whole turn on that the walk had counted.
 #[test]
 fn a_block_whose_face_plane_misses_a_balls_pole_by_a_rounding_cuts_off_a_cap_or_is_refused_by_name()
 {
     let ball = 4.0 / 3.0 * PI;
     let cube = SIDE * SIDE * SIDE;
     for direction in [0.0, 30.0, 180.0, 250.0] {
+        let n = tilted_towards(direction);
         for roundings in [-1.01, -0.99, -0.5, 0.5, 0.99, 1.01] {
             let placement = where_the_block_goes(
                 Point::origin(),
@@ -129,19 +136,57 @@ fn a_block_whose_face_plane_misses_a_balls_pole_by_a_rounding_cuts_off_a_cap_or_
                 PlaneThrough::RoundingsOff(roundings),
                 -SIDE / 2.0,
             );
-            let cap = the_cap_the_plane_cuts_off(&placement);
-            for (name, rule, ball_first, volume) in [
-                ("ball and block", Rule::Union, true, cube + cap),
-                ("block and ball", Rule::Union, false, cube + cap),
-                ("ball less block", Rule::Difference, true, cap),
+            let high = how_high_the_cap_the_plane_cuts_off_is(&placement);
+            let cap = PI * high * high * (3.0 - high) / 3.0;
+            let points = [
+                Point::origin(),
+                Point::new(0.0, 0.0, -0.95),
+                Point::origin() + n * (1.0 - high / 2.0),
+                Point::origin() + n * -1.5,
+            ];
+            for (name, rule, ball_first, volume, holds) in [
+                (
+                    "ball and block",
+                    Rule::Union,
+                    true,
+                    cube + cap,
+                    [true, true, true, true],
+                ),
+                (
+                    "block and ball",
+                    Rule::Union,
+                    false,
+                    cube + cap,
+                    [true, true, true, true],
+                ),
+                (
+                    "ball less block",
+                    Rule::Difference,
+                    true,
+                    cap,
+                    [false, false, true, false],
+                ),
                 (
                     "block less ball",
                     Rule::Difference,
                     false,
                     cube - (ball - cap),
+                    [false, false, false, true],
                 ),
-                ("ball with block", Rule::Intersection, true, ball - cap),
-                ("block with ball", Rule::Intersection, false, ball - cap),
+                (
+                    "ball with block",
+                    Rule::Intersection,
+                    true,
+                    ball - cap,
+                    [true, true, false, false],
+                ),
+                (
+                    "block with ball",
+                    Rule::Intersection,
+                    false,
+                    ball - cap,
+                    [true, true, false, false],
+                ),
             ] {
                 let what = format!(
                     "{name}, tilted towards {direction} degrees, plane {roundings} roundings off"
@@ -152,15 +197,8 @@ fn a_block_whose_face_plane_misses_a_balls_pole_by_a_rounding_cuts_off_a_cap_or_
                         let (model, solids) =
                             said.unwrap_or_else(|why| panic!("{what}: fuses: {why:?}"));
                         validates_and_measures(&model, &solids, volume, &what);
+                        winds_round_just(&model, &solids, &points, holds, &what);
                     }
-                    Today::PoleSideClosedAtTheWrongTurn => assert!(
-                        matches!(
-                            said,
-                            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
-                        ),
-                        "{what}: moved from its pin. Got {:?}",
-                        said.map(|(_, solids)| solids)
-                    ),
                     Today::CornerReadAsThePoleOffThePinch => assert!(
                         matches!(
                             said,
@@ -191,9 +229,6 @@ fn what_it_does_today(direction: f64, roundings: f64, name: &str) -> Today {
     if direction == 0.0 && roundings <= 0.5 && keeps_the_piece_below {
         return Today::CornerReadAsThePoleOffThePinch;
     }
-    if direction == 30.0 && roundings >= -0.5 && keeps_the_piece_below {
-        return Today::PoleSideClosedAtTheWrongTurn;
-    }
     let folds = [(30.0, -0.5), (250.0, -0.99), (250.0, -0.5)];
     if name == "ball less block" && folds.contains(&(direction, roundings)) {
         return Today::TheCapsCutToItsPoleIsTheDiscsChord;
@@ -201,11 +236,11 @@ fn what_it_does_today(direction: f64, roundings: f64, name: &str) -> Today {
     Today::Answers
 }
 
-/// How much of the unit ball at the origin lies beyond the cube's face plane.
-fn the_cap_the_plane_cuts_off(placement: &Isometry) -> f64 {
+/// How high the cap of the unit ball at the origin that lies beyond the
+/// cube's face plane is.
+fn how_high_the_cap_the_plane_cuts_off_is(placement: &Isometry) -> f64 {
     let plane = the_cubes_face_plane_on_y_zero().transformed(placement);
-    let high = 1.0 - plane.offset().abs();
-    PI * high * high * (3.0 - high) / 3.0
+    1.0 - plane.offset().abs()
 }
 
 /// The ball of radius 1 at `centre` fused with the cube at `placement`, and
@@ -277,6 +312,67 @@ fn validates_and_measures(model: &Model, solids: &[SolidKey], volume: f64, what:
     }
 }
 
+/// Check that the answer's meshes, taken together, wind once round each of
+/// `points` that `holds` says and not at all round the others.
+///
+/// **Counted on the mesh, not asked of `classify_point`**, which answers
+/// `CannotFollowAFacesTrimming` for the cut ball's or the cube's face on
+/// almost every answer here. The mesh is what Q963 changed, and a mesh that
+/// does not close, or folds back over itself, winds round a point a number of
+/// times that is not a whole one, or the wrong whole one.
+fn winds_round_just(
+    model: &Model,
+    solids: &[SolidKey],
+    points: &[Point],
+    holds: [bool; 4],
+    what: &str,
+) {
+    let meshes: Vec<Mesh> = solids
+        .iter()
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .expect("the fuse made the key")
+                .mesh(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what}: meshes: {why:?}"))
+        })
+        .collect();
+    for (&point, held) in points.iter().zip(holds) {
+        let turns: f64 = meshes
+            .iter()
+            .map(|mesh| how_many_times_it_winds_round(mesh, point))
+            .sum();
+        let wanted = f64::from(u8::from(held));
+        assert!(
+            (turns - wanted).abs() < 1e-9,
+            "{what}: the answer winds {turns} times round {point:?}, {wanted} wanted"
+        );
+    }
+}
+
+/// The solid angle the mesh's triangles cover seen from `point`, in whole
+/// spheres: van Oosterom and Strackee's angle for each triangle, added up.
+fn how_many_times_it_winds_round(mesh: &Mesh, point: Point) -> f64 {
+    let covered: f64 = mesh
+        .triangles()
+        .iter()
+        .map(|triangle| {
+            let [a, b, c] = triangle
+                .corners()
+                .map(|at| mesh.points()[at as usize] - point);
+            let (la, lb, lc) = (a.length(), b.length(), c.length());
+            2.0 * a
+                .dot(b.cross(c))
+                .atan2(la * lb * lc + a.dot(b) * lc + a.dot(c) * lb + b.dot(c) * la)
+        })
+        .sum();
+    covered / (4.0 * PI)
+}
+
 /// The cube turned so that its face `y = 0` faces along the normal tilted
 /// `TILT_DEGREES` off `z` towards `direction`, and moved so that the face
 /// plane holds `N` or misses it by the roundings asked, with the face's square
@@ -292,12 +388,8 @@ fn where_the_block_goes(
     through: PlaneThrough,
     away: f64,
 ) -> Isometry {
-    let (tilt, turn_towards) = (TILT_DEGREES.to_radians(), direction.to_radians());
-    let n = Vector::new(
-        tilt.sin() * turn_towards.cos(),
-        tilt.sin() * turn_towards.sin(),
-        tilt.cos(),
-    );
+    let tilt = TILT_DEGREES.to_radians();
+    let n = tilted_towards(direction);
     let pole = centre + Vector::new(0.0, 0.0, 1.0);
     let up = Vector::new(0.0, 0.0, 1.0);
     let away_from_the_pole = (up - n * up.dot(n)).normalized().expect("tilted") * -1.0;
@@ -358,6 +450,17 @@ fn where_the_block_goes(
         }
     }
     panic!("no shift within six ulps puts the plane through the pole");
+}
+
+/// The unit normal tilted `TILT_DEGREES` off `z` towards `direction`, in
+/// degrees round `z` from `x`.
+fn tilted_towards(direction: f64) -> Vector {
+    let (tilt, turn_towards) = (TILT_DEGREES.to_radians(), direction.to_radians());
+    Vector::new(
+        tilt.sin() * turn_towards.cos(),
+        tilt.sin() * turn_towards.sin(),
+        tilt.cos(),
+    )
 }
 
 fn the_cubes_face_plane_on_y_zero() -> Plane {
