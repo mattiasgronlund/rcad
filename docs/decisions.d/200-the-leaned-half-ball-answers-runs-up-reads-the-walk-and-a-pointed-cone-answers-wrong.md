@@ -84,6 +84,51 @@ after it is `crossing_like` in `draw_the_crossings`, which compares every new
 crossing with every one already drawn by exact determinants: 7 of 15 samples
 of the probed cut.
 
+**2026-10-05, Q1005: the cut through the 1x39 header in 5.81 s.** Q1005
+merges Q990's branch and makes four changes in `arrange.rs`. Every time
+below is one run, with the load average beside it. On Q990's tip the cut
+took 270.40 s (load 16); after the four changes it takes 5.81 s (load 29),
+and it refuses with the same record, *a point inside a piece of a face*.
+
+1. `leave_out_the_cuts_clear_of_the_face` runs before any meet is placed.
+   It leaves out every cut that runs along no boundary edge, is on no
+   corner, and whose surface `side_of_surface` proves on one side of the
+   face's whole box (`Bounds::as_a_point_anywhere_inside`, new in
+   `bake.rs`). Such a crossing is on that surface, so it has no point in
+   the box, and the box holds the face as far as `Bounds` says. So it draws
+   nothing on the face. `place_the_meets` then skips every pair with such a
+   cut in it, not only pairs of two as Q990's probe did: those meets are
+   points outside the box, and skipping them took the time spent placing
+   meets in the cut from 9.9 s (load 3) to 2.5 s (load 35). Its pin is
+   `planes_clear_of_the_box_round_a_face_place_no_meet_and_cut_nothing`.
+2. `crossing_like` compares a new line only with lines that may be the same
+   one. `where_the_line_two_planes_cross_in_sorts`, new in `planes.rs`,
+   gives each plane's line across a flat face a number that is the same for
+   every plane through that line, boxed. Lines whose boxes share no point
+   are different lines. With 1 and 2, the cut took 18.45 s (load 7). The
+   pins are `a_new_line_is_compared_only_with_the_lines_it_may_be` and the
+   two tests of the new function.
+3. `the_walk_of_each_other_lump_each_walk_faces` compares only walks in two
+   different lumps. It used to go through every pair of the 61 583 walks of
+   the body's top face and pass over pairs in one lump. With 1 to 3, the cut
+   took 6.03 s (load 29).
+4. `the_nodes_on_each_crossing` collects each crossing's nodes in one pass.
+   Before, `nodes_along` searched all the nodes once per crossing, and both
+   `merge_points_that_are_one_point` and `cut_the_crossings_into_arcs` call
+   it. Over the whole corpus that took merging from 12.3 s to 4.5 s, and
+   cutting arcs from 7.4 s to 2.8 s (load 35 to 50).
+
+Nothing moved in `rcad-topo` or `rcad-predicates`: their 1 593 tests pass,
+the four new ones among them, with no pin changed. `every_kicad_file_that_imports_round_trips_to_the_same_solid`
+took 35.618 s on this branch (load 17 to 29), against 21.600 s on `main` at
+`eccf76b7` (load 22 to 31).
+
+**What is still slow.** Measured over the corpus at a load of 35 to 50, 60
+faces with more than 5 000 nodes spent 13.5 s placing 1.68 million meets of
+three planes, about 8 µs each, and the other 10 486 faces spent 6.1 s.
+`gather` in `cuts.rs` meets every plane with every plane, and in an early
+sample it was 4 of 11 samples of the cut. Q1005 did not own that file.
+
 ### 200.2 A cap whose rim runs through the other pole is cut the way its walk ran
 
 `lane-runs-up-other-pole` (`d1f7eab9`, `76204dff`) closes the `runs_up` item
