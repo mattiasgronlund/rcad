@@ -87,11 +87,17 @@ enum Today {
     /// side only at the pinch's latitude, so the third quarter's pole side has
     /// no width.
     CornerReadAsThePoleOffThePinch,
-    /// `TwoPatchesOfTheMeshDrewTheSameSide`. The cap above the plane has `N`
-    /// on its rim and is cut narrower than a quarter turn; one cut runs from a
-    /// rim point straight to `N` with nothing between, and the disc's
-    /// triangulation of the same rim points draws that same chord.
-    TheCapsCutToItsPoleIsTheDiscsChord,
+    /// The fuse answers, and the answer validates, measures the cap and winds
+    /// round the right points meshed at `0.01`, but measured at `0.05` it is
+    /// refused `TwoPatchesOfTheMeshDrewTheSameSide`. The cap is cut in two
+    /// from its rim up to `N`, and the half that holds the circle's one corner,
+    /// next to `N` on the rim, is handed to the triangulator with that corner
+    /// marked as where the rim passes from one edge to another, though the rim
+    /// is one closed edge. So the triangulator cuts the corner off with a side
+    /// from `N` to the rim point past it, and the disc cuts off the same three
+    /// rim points. With the circle's corner marked as inside its edge, both
+    /// answered at `0.05` (Q964's lane, a probe in `hand_over`, not kept).
+    TheCirclesCornerIsCutOffByCapAndDiscAlike,
 }
 
 /// The ball at the origin and the cube whose face's square is centred on the
@@ -115,7 +121,13 @@ enum Today {
 /// four, ball less block only the cap's, block less ball only the block's,
 /// and the two kept in common the centre and the south pole's.
 ///
-/// **Fifteen of the 144 are refused, each by name** (see [`Today`]). Twelve
+/// **Twelve of the 144 are refused, each by name, and two more answer but are
+/// refused when measured coarsely** (see [`Today`]). Ball less block at
+/// direction 30 and `−0.5` roundings and at 250 and `−0.5` and `−0.99` were
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide` until Q964: the cap above the
+/// plane, `N` on its rim, was cut in two and its half cut again from a rim
+/// point straight to `N` with no point between, and the disc drew the same
+/// chord across the same rim. Twelve
 /// more, at direction 30 with the block less the ball or either intersection,
 /// were refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` until Q963: the
 /// piece below the plane is a cap round the south pole whose rim runs through
@@ -210,11 +222,30 @@ fn a_block_whose_face_plane_misses_a_balls_pole_by_a_rounding_cuts_off_a_cap_or_
                         "{what}: moved from its pin. Got {:?}",
                         said.map(|(_, solids)| solids)
                     ),
-                    Today::TheCapsCutToItsPoleIsTheDiscsChord => assert!(
-                        matches!(said, Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })),
-                        "{what}: moved from its pin. Got {:?}",
-                        said.map(|(_, solids)| solids)
-                    ),
+                    Today::TheCirclesCornerIsCutOffByCapAndDiscAlike => {
+                        let (model, solids) =
+                            said.unwrap_or_else(|why| panic!("{what}: fuses: {why:?}"));
+                        validates_and_measures_at(&model, &solids, volume, &[0.01], &what);
+                        winds_round_just(&model, &solids, &points, holds, &what);
+                        let coarse = model
+                            .solid(solids[0])
+                            .expect("the fuse made the key")
+                            .measure(
+                                Deflection::of(0.05).expect("a positive length"),
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            );
+                        assert!(
+                            solids.len() == 1
+                                && matches!(
+                                    coarse,
+                                    Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
+                                ),
+                            "{what}: moved from its pin at 0.05. Got {:?} of {} solids",
+                            coarse.map(|measure| measure.volume()),
+                            solids.len()
+                        );
+                    }
                 }
             }
         }
@@ -229,9 +260,8 @@ fn what_it_does_today(direction: f64, roundings: f64, name: &str) -> Today {
     if direction == 0.0 && roundings <= 0.5 && keeps_the_piece_below {
         return Today::CornerReadAsThePoleOffThePinch;
     }
-    let folds = [(30.0, -0.5), (250.0, -0.99), (250.0, -0.5)];
-    if name == "ball less block" && folds.contains(&(direction, roundings)) {
-        return Today::TheCapsCutToItsPoleIsTheDiscsChord;
+    if name == "ball less block" && direction == 250.0 && [-0.99, -0.5].contains(&roundings) {
+        return Today::TheCirclesCornerIsCutOffByCapAndDiscAlike;
     }
     Today::Answers
 }
@@ -285,11 +315,22 @@ fn fused(
 /// Validate the model, and check that the answer's solids together measure
 /// `volume` within the error the measure publishes, at two deflections.
 fn validates_and_measures(model: &Model, solids: &[SolidKey], volume: f64, what: &str) {
+    validates_and_measures_at(model, solids, volume, &[0.05, 0.01], what);
+}
+
+/// The same, at the deflections asked.
+fn validates_and_measures_at(
+    model: &Model,
+    solids: &[SolidKey],
+    volume: f64,
+    deflections: &[f64],
+    what: &str,
+) {
     let policy = Policy::certified();
     model
         .validate(&policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{what}: validates: {why:?}"));
-    for deflection in [0.05, 0.01] {
+    for &deflection in deflections {
         let mut measured = 0.0;
         let mut error = 0.0;
         for &solid in solids {
