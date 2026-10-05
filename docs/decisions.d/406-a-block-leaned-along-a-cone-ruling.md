@@ -140,7 +140,9 @@ the cone `CannotMeshAFace` with `BoundaryCrossesItself`. Printed for the block
 up to `1`'s intersection, every piece of every face cut lies within `8` of the
 origin, so the far meets are in no piece; what the mesher refuses is not
 traced. The pin is right 74, `a point inside a piece of a face` 16 and two of
-each of the three, and it took 59 s on this machine against 21 s on the base.
+each of the three. One run of it took 25.6 s on the lane's commit against
+21.4 s on the base; two runs in between, with the machine busier, took 59 s and
+48 s.
 
 ### 406.5 What this leaves
 
@@ -148,9 +150,6 @@ each of the three, and it took 59 s on this machine against 21 s on the base.
   refuses/B, the same shapes as the eight, and their cause is not traced: the
   top's ellipse is `4.5e16` long, and the pieces cut from it are arcs of it near
   the frustum, where the turn-`0` block's top cuts a parabola.
-- **The pin's wall went from 21 s to 59 s.** Not traced either: the two new
-  answers are measured at `0.002`, and the exact halving runs wherever a
-  node's own box cannot order it.
 - **The turn read off the root on a curved face.** Let
   `the_turn_where_two_planes_cross_a_quadric` answer where the face is the
   curved one, and move `a_certified_fuse_refuses_on_the_turn_at_the_place_below_16`
