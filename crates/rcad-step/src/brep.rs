@@ -308,7 +308,8 @@ impl Walk {
         keyword: Keyword,
     ) -> Result<(Surface, Orientation), Refusal> {
         let sits_on = reading.reference_at(face, keyword, 2)?;
-        let written = reading.surface_at(face, sits_on)?;
+        let written =
+            reading.surface_at(face, sits_on, || corners_as_written(reading, face, keyword))?;
         let same_sense = reading.flag_at(face, keyword, 3)?;
         Ok(match (written.as_plane(), same_sense) {
             (_, true) => (written, Orientation::Forward),
@@ -1844,7 +1845,9 @@ impl ProbeWalk {
         let keyword =
             self.record(reading.keyword_of(self.walk.brep, face, &[ADVANCED_FACE, FACE_SURFACE]))?;
         let sits_on = self.record(reading.reference_at(face, keyword, 2))?;
-        let written = self.record(reading.surface_at(face, sits_on))?;
+        let written = self.record(
+            reading.surface_at(face, sits_on, || corners_as_written(reading, face, keyword)),
+        )?;
         let same_sense = self.record(reading.flag_at(face, keyword, 3))?;
         let (surface, used) = match (written.as_plane(), same_sense) {
             (_, true) => (written, Orientation::Forward),
@@ -1951,6 +1954,60 @@ impl ProbeWalk {
             }
         }
     }
+}
+
+/// Every corner of a face as the file wrote it — each end of each edge of its
+/// `EDGE_LOOP`s, and the one corner of a `VERTEX_LOOP` — which a cone's slope
+/// is put back from where the file cut its half-angle (`cone_from`, in
+/// `geometry.rs`).
+///
+/// Read before the face is described, so it reads the file and not the walk,
+/// and it counts no integer it meets ([`Reading::point_read_ahead_at`]). `None`
+/// where a bound, a loop or a corner does not read, or a loop is neither kind:
+/// describing the face refuses it by name a moment later, and a slope from the
+/// corners that did read would be a slope from part of the face.
+///
+/// **The corner of a `VERTEX_LOOP` counts**, though the walk drops it where
+/// it stands on the apex ([`Walk::the_bounds_that_bound_something`]). On a
+/// cone placed with its radius on the cap, as `a_pointed_cone_with_its_apex_written_as_a_loop`
+/// is, the apex is the one corner off the placement's plane, and it says the
+/// slope; a cone placed at its apex finds it on that plane, where it says
+/// nothing and is passed over.
+fn corners_as_written(
+    reading: &Reading<'_>,
+    face: EntityId,
+    keyword: Keyword,
+) -> Option<Vec<Point>> {
+    let mut vertices = Vec::new();
+    for bound in reading.references_at(face, keyword, 1).ok()? {
+        let bound_keyword = reading
+            .keyword_of(face, bound, &[FACE_OUTER_BOUND, FACE_BOUND])
+            .ok()?;
+        let loop_id = reading.reference_at(bound, bound_keyword, 1).ok()?;
+        if let Some(record) = reading.file().instance(loop_id)?.part(VERTEX_LOOP.name()) {
+            vertices.push(record.attribute(1)?.as_reference()?);
+            continue;
+        }
+        for use_of_an_edge in reading.references_at(loop_id, EDGE_LOOP, 1).ok()? {
+            let edge_curve = reading
+                .reference_at(use_of_an_edge, ORIENTED_EDGE, 3)
+                .ok()?;
+            for position in 1..=2 {
+                vertices.push(
+                    reading
+                        .reference_at(edge_curve, EDGE_CURVE, position)
+                        .ok()?,
+                );
+            }
+        }
+    }
+    vertices
+        .into_iter()
+        .map(|vertex| {
+            let at = reading.reference_at(vertex, VERTEX_POINT, 1).ok()?;
+            reading.point_read_ahead_at(vertex, at).ok()
+        })
+        .collect()
 }
 
 /// One coedge as a loop walks it, with the corners it goes from and to, and

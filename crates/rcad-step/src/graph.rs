@@ -4,6 +4,7 @@ use std::fmt;
 
 use crate::error::{Error, Problem};
 use crate::read;
+use crate::token::LastDigit;
 
 /// A whole Part 21 file: its header, its instances, and where every `#id`
 /// points.
@@ -217,6 +218,10 @@ impl Instance {
 pub struct Record {
     pub(crate) keyword: String,
     pub(crate) attributes: Vec<Value>,
+    /// Where each attribute that is a real, or wraps one once, was written to
+    /// its last digit, by position. [`Value::Real`] is the number and nothing
+    /// else, and a real inside a list keeps no place.
+    pub(crate) last_digits: Box<[(usize, LastDigit)]>,
 }
 
 impl Record {
@@ -237,6 +242,15 @@ impl Record {
     /// One attribute by position, or `None` if the file wrote fewer than that.
     pub fn attribute(&self, position: usize) -> Option<&Value> {
         self.attributes.get(position)
+    }
+
+    /// The place of the last digit the attribute at `position` was written
+    /// to, where it is a real.
+    pub(crate) fn last_digit_of(&self, position: usize) -> Option<LastDigit> {
+        self.last_digits
+            .iter()
+            .find(|(at, _)| *at == position)
+            .map(|(_, last)| *last)
     }
 }
 

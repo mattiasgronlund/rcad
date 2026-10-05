@@ -17,8 +17,9 @@ pub(crate) enum Token<'a> {
     Reference(EntityId),
     /// `1`, `-4`.
     Integer(i64),
-    /// `1.`, `1.E+03`. Always finite.
-    Real(f64),
+    /// `1.`, `1.E+03`. Always finite. With the place of the last digit the
+    /// file wrote it to, which the `f64` does not keep.
+    Real(f64, Option<LastDigit>),
     /// `(`.
     Open,
     /// `)`.
@@ -47,7 +48,7 @@ impl Token<'_> {
             Token::Text(text) => format!("the string {text:?}"),
             Token::Reference(id) => format!("{id}"),
             Token::Integer(number) => format!("{number}"),
-            Token::Real(number) => format!("{number}"),
+            Token::Real(number, _) => format!("{number}"),
             Token::Open => "(".to_string(),
             Token::Close => ")".to_string(),
             Token::Comma => ",".to_string(),
@@ -59,6 +60,19 @@ impl Token<'_> {
         }
     }
 }
+
+/// The power of ten of the last digit a real was written to: `-12` for
+/// `0.463647609001` and for `4.63647609001E-01`, `0` for `1.`, `3` for
+/// `1.E+03`, and `-13` for `0.4636476090010`, whose last zero is a digit the
+/// file wrote.
+///
+/// **An exporter that cuts a number to a fixed count of digits says so only
+/// here.** The `f64` the text reads as cannot tell `0.4636476090010` from
+/// `0.463647609001`, and its shortest spelling drops the zero. A cone's slope
+/// read from a half-angle cut that way is put back from the cone's corners, and
+/// this is how far the angle may have been cut (`docs/decisions.md` §366.7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LastDigit(pub(crate) i32);
 
 /// Walks a Part 21 file's bytes one lexical item at a time.
 ///
@@ -268,6 +282,7 @@ impl<'a> Tokens<'a> {
 
         let fraction = run_of(self.bytes, whole + 1, |byte| byte.is_ascii_digit());
         let mut end = fraction;
+        let mut exponent_written = None;
         if self.bytes.get(end) == Some(&b'E') {
             let exponent = match self.bytes.get(end + 1) {
                 Some(b'+' | b'-') => end + 2,
@@ -283,6 +298,7 @@ impl<'a> Tokens<'a> {
                     },
                 ));
             }
+            exponent_written = Some(as_ascii(&self.bytes[fraction + 1..digits]));
             end = digits;
         }
         let text = as_ascii(&self.bytes[at..end]);
@@ -293,7 +309,10 @@ impl<'a> Tokens<'a> {
             return Err(self.fault(at, Problem::RealTooLarge { text: text.into() }));
         }
         self.at = end;
-        Ok(Token::Real(number))
+        Ok(Token::Real(
+            number,
+            last_digit(fraction - (whole + 1), exponent_written),
+        ))
     }
 
     fn keyword(&mut self, at: usize) -> Result<Token<'a>, Error> {
@@ -357,6 +376,21 @@ impl<'a> Tokens<'a> {
     }
 }
 
+/// The place of the last digit of a real written with `decimals` digits after
+/// its point and `exponent` after its `E`, if it has one.
+///
+/// `None` where that place is not an `i32`, which takes an exponent of ten
+/// digits on a real that is still finite — `0.E+9999999999` is nought.
+fn last_digit(decimals: usize, exponent: Option<&str>) -> Option<LastDigit> {
+    let exponent: i32 = match exponent {
+        None => 0,
+        Some(written) => written.parse().ok()?,
+    };
+    exponent
+        .checked_sub(i32::try_from(decimals).ok()?)
+        .map(LastDigit)
+}
+
 /// Where in the file a byte offset falls, counting from one.
 ///
 /// Walking the file to find out is fine because it happens once, on the way out
@@ -393,5 +427,35 @@ fn describe_byte(byte: u8) -> String {
         format!("{:?}", byte as char)
     } else {
         format!("the byte {byte:#04x}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn last_digit_of(text: &str) -> Option<LastDigit> {
+        match Tokens::over(text.as_bytes()).take() {
+            Ok((_, Token::Real(_, last))) => last,
+            other => panic!("{text} is a real, and was read as {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_real_keeps_the_place_of_the_last_digit_it_was_written_to() {
+        assert_eq!(last_digit_of("0.463647609001"), Some(LastDigit(-12)));
+        assert_eq!(last_digit_of("4.63647609001E-01"), Some(LastDigit(-12)));
+        assert_eq!(last_digit_of("0.4636476090010"), Some(LastDigit(-13)));
+        assert_eq!(last_digit_of("-2.5E-10"), Some(LastDigit(-11)));
+        assert_eq!(last_digit_of("1."), Some(LastDigit(0)));
+        assert_eq!(last_digit_of("1.E+03"), Some(LastDigit(3)));
+        assert_eq!(last_digit_of("100."), Some(LastDigit(0)));
+    }
+
+    #[test]
+    fn a_real_whose_last_digit_is_past_an_i32_keeps_no_place() {
+        assert_eq!(last_digit_of("0.E+9999999999"), None);
+        assert_eq!(last_digit_of("0.E-2147483648"), Some(LastDigit(i32::MIN)));
+        assert_eq!(last_digit_of("0.0E-2147483648"), None);
     }
 }
