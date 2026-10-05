@@ -34,6 +34,7 @@ use rcad_predicates::{
     Approximation, Cause, Decision, Filtered, Interval, Level, Measures, Point as PredicatePoint,
     Policy, Predicate, ProvenanceLog, Record, decide, resolve_under_policy,
 };
+use smallvec::SmallVec;
 
 use crate::exact::Exact;
 use crate::intersect::{
@@ -88,6 +89,12 @@ use crate::{
 ///
 /// **An error in the angle does not come into it.** Getting `angle` wrong slides
 /// the point *along* the curve, and this is how far it can sit *off* it.
+///
+/// **An arc of a plane's ellipse that [`walk`] places round a cone is charged
+/// this too**, against the arc's own size and not the ellipse's. Its chain is a
+/// different one, derived at `AnArcRoundACone`, and comes to under a tenth of
+/// this; one constant for both is what lets `rcad-topo`'s floor under a mesh,
+/// a multiple of it, hold whichever way a run was walked.
 ///
 /// `every_point_along_a_crossing_is_on_both_surfaces.rs` measures the worst a
 /// search can find and prints the figure.
@@ -224,6 +231,25 @@ pub struct PointsAlongACrossing {
 }
 
 impl PointsAlongACrossing {
+    /// How many times further up a cone's axis the ellipse a plane cuts it in
+    /// has to reach than a run's two ends do before [`walk`] places that run's
+    /// points round the cone and not round the ellipse.
+    ///
+    /// **Either way is a bound, and this only says which bound is published.**
+    /// Round the ellipse, a point rounds against the ellipse's own centre and
+    /// reach; round the cone, against the apex and the run's own ends. A plane a
+    /// rounding off parallel to a ruling cuts an ellipse `4.5e16` long whose
+    /// arcs by the frustum are `4` across, and round the ellipse their middle
+    /// points came out `1` to `2` off the cone
+    /// (`an_arc_of_a_plane_cut_nearly_along_a_cones_ruling.rs`). An ellipse a
+    /// plane cuts at an ordinary lean reaches a few times further than its arcs
+    /// and keeps the points it always had: a million is far from both.
+    ///
+    /// Public because `rcad-topo`'s mesher has to charge such a run by its
+    /// ends where this walks it by them, and it does so past **twice** this,
+    /// so that the two never disagree about a run on the line between them.
+    pub const WALKED_ROUND_THE_CONE_PAST: f64 = 1_048_576.0;
+
     /// The points, in the direction the run is stored running, **with neither
     /// end included**.
     ///
@@ -322,6 +348,17 @@ impl PointsAlongACrossing {
 /// are straight lines, and a straight run gets the same empty answer here that a
 /// run between two planes does.
 ///
+/// # An arc of a very long ellipse round a cone is walked round the cone
+///
+/// A plane a rounding off parallel to a cone's ruling cuts it in an ellipse
+/// whose centre can be `2.2e16` out while an arc of it by a frustum is `4`
+/// across, and a point placed from that centre rounds by more than the arc is
+/// wide. Where the ellipse reaches more than
+/// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`] times further up the
+/// cone's axis than the run's two ends do, the arc that misses the ellipse's far
+/// end is placed along the cone's rulings instead, and charged and counted by
+/// its own size and bend. `AnArcRoundACone` says how.
+///
 /// # A run with no ends keeps the two points at the ends of what was walked
 ///
 /// [`PointsAlongACrossing::points`] leaves both ends out because they are
@@ -368,24 +405,42 @@ pub fn walk(
     if !deviation.is_finite() {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
-    let tag = Approximation::new(deviation, Cause::PointAlongACrossing);
+    if let Some(arc) = AnArcRoundACone::of(pair, run) {
+        return arc.walk(&conic, deviation, deflection, policy, log);
+    }
     let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
-        return Ok(PointsAlongACrossing {
-            points: Vec::new(),
-            deviation: tag,
-        });
+        return Ok(nothing_walked(deviation));
     };
 
-    let (from, to) = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
-    let steps = how_many_steps(&conic, to - from, room)?;
+    let stretch = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
+    points_round_a_conic(&conic, stretch, deviation, room)
+}
+
+/// Points along `stretch` of a conic, `room` apart from the curve at most.
+fn points_round_a_conic(
+    conic: &Conic,
+    (from, to): (f64, f64),
+    deviation: f64,
+    room: f64,
+) -> Result<PointsAlongACrossing> {
+    let steps = how_many_steps(conic, to - from, room)?;
     let points = (1..steps)
         .map(|step| conic.at(from + (to - from) * (step as f64) / (steps as f64)))
         .collect();
 
     Ok(PointsAlongACrossing {
         points,
-        deviation: tag,
+        deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
     })
+}
+
+/// What a walk a tolerant caller waved through hands back: no points between
+/// the ends, and how far off they would have been.
+fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
+    PointsAlongACrossing {
+        points: Vec::new(),
+        deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+    }
 }
 
 /// The one place on a closed crossing that a vertex can go.
@@ -1100,6 +1155,9 @@ fn walk_an_endless_bend(
 /// kept, the walk handed back a straight line standing in for a bend. See
 /// [`FEWEST_STEPS_THAT_SHOW_A_BEND`], whose `1 − 1/n²` is an equality for this
 /// shape rather than a limit.
+///
+/// **An arc walked round a cone is counted here too**, with a bound on `‖p″‖`
+/// in place of its value; `AnArcRoundACone` derives the bound.
 ///
 /// # Errors
 ///
@@ -2011,6 +2069,337 @@ impl Conic {
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         every_half_space_holds(picked_by, self.at(middle), deviation, policy, log)
+    }
+}
+
+/// A piece of the ellipse a plane cuts a cone in, walked round the cone and not
+/// round the ellipse.
+///
+/// # Why round the cone
+///
+/// [`Conic::at`] puts a point at `centre + across·cos θ + and·sin θ` and rounds
+/// against the largest of those. A plane a rounding off parallel to a ruling
+/// cuts an ellipse whose centre is `2.2e16` out, so the points of an arc of it
+/// by the frustum, `4` across, are the difference of two numbers near `2.2e16`,
+/// and the one middle point of each such arc came out `1` to `2` off the cone
+/// (§406.5).
+///
+/// The ruling at angle `a` round the cone is `apex + r·g(a)`, with
+/// `g = slope·dir(a) + nappe·w` and `dir(a)` the direction [`Cone::point_at`]
+/// steps across the axis by. The plane's signed distance along it is
+/// `s₀ + r·(n·g)`, a straight line in `r`, so the ruling meets the plane at
+/// `r = −s₀ / (n·g)`. Nothing in that is larger than the apex, the plane's
+/// offset and the arc's own reach. The point is on the cone because it is on a
+/// ruling, and on the plane because of the division.
+///
+/// # How far off, derived
+///
+/// With `u = f64::EPSILON / 2` and `L` the largest of the apex's coordinates,
+/// the ends' coordinates and how far each end is from the apex, which is what
+/// [`how_big_this_is`] is handed:
+///
+/// - `s₀`, [`Plane::signed_distance_to`] the apex, rounds by under
+///   `8u·max(|apex|, |offset|)`, and the offset is under `√3·L` because the
+///   ends are on the plane: under `14u·L`.
+/// - `n·g` sums three terms each under `|g| ≤ slope + 1`, so it is out by under
+///   `7u·|g|`, and times `r` that moves the point off the plane by under
+///   `7u·r·|g| ≤ 7u·L`. The division adds `u·|s₀| ≤ u·L`.
+/// - `dir(a)` is two unit vectors, each normalised, times a `cos` and a `sin`:
+///   within `16u` of length one and of square to the axis, which moves the
+///   point off the cone by under `16u·r·slope ≤ 16u·L`.
+/// - [`Cone::point_at`] adds three terms under `L` per coordinate: `9u·L`.
+///
+/// That is about `47u·L`, under `24 · f64::EPSILON · L`. It is charged
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`], the ellipse's own constant and ten
+/// times that, so that `rcad-topo`'s floor under a mesh, a multiple of that
+/// constant, holds whichever way a run was walked.
+///
+/// # Only the arc that misses the ellipse's far end
+///
+/// **No point of such an arc is further from the apex than one of its ends.**
+/// The distance along a ruling is `|s₀| / |n·g(a)|`, and `|n·g(a)|` is least
+/// at the angle of the ellipse's far end and grows steadily from there both
+/// ways round to the near end; so on an arc that misses the far end it is
+/// least at one of the arc's ends. That is what lets the ends stand for the
+/// arc's size. The arc that passes the far end is walked round the ellipse as
+/// before, since its points are out where the ellipse's own numbers are.
+#[derive(Clone, Debug)]
+struct AnArcRoundACone {
+    flat: Plane,
+    cone: Cone,
+    picked_by: SmallVec<[Picker; 1]>,
+    /// `1` when the ellipse is up the cone's axis from the apex, `-1` when it
+    /// is down it.
+    nappe: f64,
+    /// `s₀`, the plane's signed distance to the apex.
+    apex_off_the_plane: f64,
+    ends: [Point; 2],
+    /// The angle round the cone each end is at.
+    angles: [f64; 2],
+    /// The angle round the cone the ellipse's far end is at.
+    far_end: f64,
+    /// The smaller of `|n·g|` at the two ends, which is the least it gets on
+    /// the arc that misses the far end.
+    least_lean: f64,
+    size: f64,
+}
+
+/// Which of the two arcs between a run's two ends its half-spaces pick.
+enum WhichArc {
+    /// The arc that misses the ellipse's far end, as angles round the cone.
+    Near(f64, f64),
+    /// The arc past the far end, as angles round the ellipse.
+    Far(f64, f64),
+}
+
+impl AnArcRoundACone {
+    /// The arc `run` names on the ellipse `pair` crosses in, when `pair` is a
+    /// plane and a cone, the run is a piece between two named ends, and the
+    /// ellipse reaches more than
+    /// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`] times further up
+    /// the cone's axis than either end does.
+    ///
+    /// **How far up the axis the ellipse reaches is worked out as `rcad-topo`'s
+    /// mesher works it out**, `|s₀|` over `|n·ŵ| − slope·√(1 − (n·ŵ)²)`, so the
+    /// two measure one thing. Where the bottom of that comes to nothing or less,
+    /// which in an ellipse is a rounding, the ellipse is taken to reach for
+    /// ever.
+    ///
+    /// `None` too when the ruling at an end does not meet the plane on the
+    /// ends' own side of the apex, which every ruling of an ellipse does: the
+    /// run is not what it says, and the walk round the ellipse gets to say so.
+    fn of(pair: [Surface; 2], run: &NamedRun) -> Option<Self> {
+        let ([Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)]) = pair
+        else {
+            return None;
+        };
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+            return None;
+        };
+        if run.is_the_whole_curve() || run.ends().contains(&nowhere_in_particular()) {
+            return None;
+        }
+        let ends = run
+            .ends()
+            .map(|end| Point::from(end.enclosure().map(middle_of)));
+        let apex = cone.apex();
+        let straight_on = cone.axis().direction() * cone.axis().direction().length().recip();
+        let ends_along = ends.map(|end| straight_on.dot(end - apex).abs());
+        let down = flat.normal().dot(straight_on).abs();
+        let sideways = (1.0 - down * down).max(0.0).sqrt();
+        let room = down - cone.slope() * sideways;
+        let apex_off_the_plane = flat.signed_distance_to(apex);
+        let far_along = if room > 0.0 {
+            apex_off_the_plane.abs() / room
+        } else {
+            f64::INFINITY
+        };
+        let dwarfs_its_ends = far_along
+            > PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST * ends_along[0].max(ends_along[1]);
+        if !dwarfs_its_ends {
+            return None;
+        }
+
+        let nappe = if straight_on.dot(ends[0] - apex) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let (across, and) = cone.basis();
+        let normal = flat.normal();
+        let up = nappe * normal.dot(cone.axis().direction());
+        let (towards_across, towards_and) = (normal.dot(across), normal.dot(and));
+        let far_end = if up > 0.0 {
+            (-towards_and).atan2(-towards_across)
+        } else {
+            towards_and.atan2(towards_across)
+        };
+        let mut arc = Self {
+            flat,
+            cone,
+            picked_by: picked_by.clone(),
+            nappe,
+            apex_off_the_plane,
+            ends,
+            angles: ends.map(|end| cone.coordinates_of(end).0),
+            far_end,
+            least_lean: 0.0,
+            size: how_big_this_is(
+                &[apex, ends[0], ends[1]],
+                &[(ends[0] - apex).length(), (ends[1] - apex).length()],
+            ),
+        };
+        let leans = arc.angles.map(|round| normal.dot(arc.ruling(round)));
+        let out_along_each = leans.map(|lean| -apex_off_the_plane / lean);
+        if !out_along_each
+            .iter()
+            .all(|along| along.is_finite() && *along > 0.0)
+        {
+            return None;
+        }
+        arc.least_lean = leans[0].abs().min(leans[1].abs());
+        Some(arc)
+    }
+
+    /// The run's points, round the cone when its half-spaces pick the arc that
+    /// misses the ellipse's far end and round the ellipse when they pick the
+    /// other.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when they pick both or
+    /// neither, and whatever [`room_left_over`] and the step counts refuse.
+    fn walk(
+        &self,
+        conic: &Conic,
+        deviation_round_the_ellipse: f64,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<PointsAlongACrossing> {
+        match self.which_arc(conic, deviation_round_the_ellipse, policy, log)? {
+            WhichArc::Near(from, to) => self.walk_round_the_cone(from, to, deflection, policy, log),
+            WhichArc::Far(from, to) => {
+                let Some(room) =
+                    room_left_over(deflection, deviation_round_the_ellipse, policy, log)?
+                else {
+                    return Ok(nothing_walked(deviation_round_the_ellipse));
+                };
+                points_round_a_conic(conic, (from, to), deviation_round_the_ellipse, room)
+            }
+        }
+    }
+
+    /// Which arc the run's half-spaces pick, asked at the middle of each.
+    ///
+    /// **The arc past the far end is asked at its middle round the ellipse**,
+    /// placed by [`Conic::at`] and boxed by the ellipse's own deviation. Round
+    /// the cone, its middle is where the ruling runs nearly along the plane,
+    /// and there `n·g` is a rounding and `−s₀ / (n·g)` can be anything.
+    fn which_arc(
+        &self,
+        conic: &Conic,
+        deviation_round_the_ellipse: f64,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<WhichArc> {
+        let [from, to] = self.angles;
+        let onwards = from + wrapped(to - from);
+        let near = if wrapped(self.far_end - from) < wrapped(to - from) {
+            onwards - core::f64::consts::TAU
+        } else {
+            onwards
+        };
+        let near_held = every_half_space_holds(
+            &self.picked_by,
+            self.at((from + near) / 2.0),
+            self.deviation(),
+            policy,
+            log,
+        )?;
+
+        let [start, finish] = self.ends.map(|end| conic.angle_of(end));
+        let round_the_ellipse = start + wrapped(finish - start);
+        let how_far_out = |end: f64| (conic.at((start + end) / 2.0) - self.cone.apex()).length();
+        let past_the_far_end = if how_far_out(round_the_ellipse)
+            >= how_far_out(round_the_ellipse - core::f64::consts::TAU)
+        {
+            round_the_ellipse
+        } else {
+            round_the_ellipse - core::f64::consts::TAU
+        };
+        let far_held = every_half_space_holds(
+            &self.picked_by,
+            conic.at((start + past_the_far_end) / 2.0),
+            deviation_round_the_ellipse,
+            policy,
+            log,
+        )?;
+
+        match (near_held, far_held) {
+            (true, false) => Ok(WhichArc::Near(from, near)),
+            (false, true) => Ok(WhichArc::Far(start, past_the_far_end)),
+            (true, true) | (false, false) => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+        }
+    }
+
+    /// Points round the cone from angle `from` to `to`.
+    ///
+    /// **Counted by how the arc bends and by how far it turns**, the two
+    /// questions [`how_many_steps`] asks of an ellipse, asked of angle round the
+    /// cone. A step of more than a quarter turn round the cone is one the
+    /// mesher cannot tell from a step the other way.
+    fn walk_round_the_cone(
+        &self,
+        from: f64,
+        to: f64,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<PointsAlongACrossing> {
+        let deviation = self.deviation();
+        let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
+            return Ok(nothing_walked(deviation));
+        };
+        let by_bending = how_many_pieces_an_endless_bend_takes(
+            self.how_far_a_step_of_one_stands_off_its_chord(),
+            to - from,
+            room,
+        )?;
+        let by_turning = ((to - from).abs() / (core::f64::consts::TAU / 4.0)).ceil() as usize;
+        let steps = by_bending.max(by_turning);
+        let points = (1..steps)
+            .map(|step| self.at(from + (to - from) * (step as f64) / (steps as f64)))
+            .collect();
+
+        Ok(PointsAlongACrossing {
+            points,
+            deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+        })
+    }
+
+    /// Where the ruling at angle `round` meets the plane.
+    fn at(&self, round: f64) -> Point {
+        let along = -self.apex_off_the_plane / self.flat.normal().dot(self.ruling(round));
+        self.cone.point_at(round, self.nappe * along)
+    }
+
+    /// `g(round)`: the step one unit along the ruling at `round` takes, on the
+    /// ellipse's own nappe.
+    fn ruling(&self, round: f64) -> Vector {
+        let (across, and) = self.cone.basis();
+        (across * round.cos() + and * round.sin()) * self.cone.slope()
+            + self.cone.axis().direction() * self.nappe
+    }
+
+    fn deviation(&self) -> f64 {
+        POINT_ALONG_A_CROSSING_ROUNDOFF * self.size
+    }
+
+    /// How far the arc stands off the chord of a step round the cone, per
+    /// square radian.
+    ///
+    /// A curve `p(a)` stands off the chord of a step `Δ` by at most
+    /// `‖p″‖·Δ²/8`, as [`how_many_pieces_an_endless_bend_takes`] says. Here
+    /// `p − apex = −s₀·g/D` with `D = n·g`, so
+    ///
+    /// ```text
+    /// (g/D)″ = g″/D − 2g′D′/D² − g·D″/D² + 2g·D′²/D³
+    /// ```
+    ///
+    /// and with `|g′| = |g″| = slope`, `|g| ≤ slope + ‖w‖`, `|D′|` and `|D″|`
+    /// at most `slope·‖n‖`, and `|D|` at least [`AnArcRoundACone::least_lean`]
+    /// on this arc, every term has a bound.
+    fn how_far_a_step_of_one_stands_off_its_chord(&self) -> f64 {
+        let slope = self.cone.slope();
+        let turns = slope * self.flat.normal().length();
+        let ruling = slope + self.cone.axis().direction().length();
+        let least = self.least_lean;
+        let bends = slope / least
+            + (2.0 * slope + ruling) * turns / (least * least)
+            + 2.0 * ruling * turns * turns / (least * least * least);
+        self.apex_off_the_plane.abs() * bends / 8.0
     }
 }
 
