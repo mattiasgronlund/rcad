@@ -46,6 +46,10 @@ make up exists. The lane read `assemble.rs:564-880` and reached this design:
    same `used` orientation give Pos. The same surface the other way round gives
    Neg, so do not join. A surface equal only up to how it is written gives
    Undecidable, and those faces are left apart.
+
+   > **2026-10-05 (§407): closed for pipes.** `one_cone_or_pipe_the_same_way_round`
+   > now folds a pipe's spelling before comparing, so a pipe joins however its
+   > axis is turned or its origin slid. A cone still compares raw bits here.
 2. **Rings without a normal.** The ring walk (`ring_from`/`onwards`) never
    uses the plane. Only `rings_round`'s winding about `plane.normal()` does. On
    a cone or cylinder, classify rings in `(u, v)` instead, with `u` the angle
