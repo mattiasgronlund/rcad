@@ -47,6 +47,88 @@ rounding. **That is a flat piece placed on the wrong side.** Here it ends in
 `ResultIsNotManifold`, not in a wrong answer. It is an older fault in how flat
 pieces are placed, reached for the first time.
 
+**2026-10-05, Q990: what Q901 moved.** Q901
+(`lane-q901-land-two-meets-of-three-planes`, tip `75adb1f8`) has `order_along`
+ask the planes (`as_the_planes_say`) where the boxes cannot say, and
+`passes_through` ask a corner's three planes. Its commits record six pins
+moved. In `a_narrow_lune_from_a_pole_corner.rs` the two pins above now see the
+45° wedges stop at *a point inside a piece of a face* and not at *order along a
+crossing*; no case newly answers (`fdef5ce3`). In
+`a_plane_cut_along_a_cones_other_nappe.rs` two tallies grow: three eighths
+from 36 right to 48, and the block below the frustum from 68 to 72
+(`45fbcfaf`). Two walls a hair apart now stop, under the tolerant policy, at
+the sliver between `y = 5` and the wall leaned by `1e-100`, about `1e-99`
+wide, where no `f64` point lies: a limit (`44f231d6`). The skew family's 39
+refusals in 441 now all name *a point inside a piece of a face*, where they
+named *order along a crossing* (`6e70b96a`). Two turned cubes a rounding
+apart now refuse in selection; the cubes share no point, so that refusal is a
+gap, shown by
+`every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_apart`
+(`75adb1f8`).
+
+**Q901 has not landed, and Q990 did not land it either.** On `main` the cut through
+`PinHeader_1x39_P2.54mm_Vertical` refuses early. With Q901 it runs through
+every face of the header's body. `cuts.rs` cuts each face by every plane of the
+body, 332 to 409 of them, and `place_the_meets` places a meet for every pair:
+38 116 nodes on a face with four corners, of which 54 arcs are left. Q990
+removed four costs that grew faster than that: the corner fold looked through
+every node for every meet, the tighter box was worked out for every meet of
+three planes, `lumps_with_a_curve_that_runs_on` looked each arc up by address,
+and every piece worked out every walk's lump again. The 1x39 cut still did
+not finish in 300 s. A probe, not kept, left out every cut whose partner keeps
+the face's whole box on one side of it, before any meet is placed. With that,
+the cut finished in 91.67 s (on a machine with a load average over 30), and
+refused *a point inside a piece of a face*, as the 1x11 cut does. That rule
+needs the face's box, which `bake.rs` keeps private to `Bounds`. The next cost
+after it is `crossing_like` in `draw_the_crossings`, which compares every new
+crossing with every one already drawn by exact determinants: 7 of 15 samples
+of the probed cut.
+
+**2026-10-05, Q1005: the cut through the 1x39 header in 5.81 s.** Q1005
+merges Q990's branch and makes four changes in `arrange.rs`. Every time
+below is one run, with the load average beside it. On Q990's tip the cut
+took 270.40 s (load 16); after the four changes it takes 5.81 s (load 29),
+and it refuses with the same record, *a point inside a piece of a face*.
+
+1. `leave_out_the_cuts_clear_of_the_face` runs before any meet is placed.
+   It leaves out every cut that runs along no boundary edge, is on no
+   corner, and whose surface `side_of_surface` proves on one side of the
+   face's whole box (`Bounds::as_a_point_anywhere_inside`, new in
+   `bake.rs`). Such a crossing is on that surface, so it has no point in
+   the box, and the box holds the face as far as `Bounds` says. So it draws
+   nothing on the face. `place_the_meets` then skips every pair with such a
+   cut in it, not only pairs of two as Q990's probe did: those meets are
+   points outside the box, and skipping them took the time spent placing
+   meets in the cut from 9.9 s (load 3) to 2.5 s (load 35). Its pin is
+   `planes_clear_of_the_box_round_a_face_place_no_meet_and_cut_nothing`.
+2. `crossing_like` compares a new line only with lines that may be the same
+   one. `where_the_line_two_planes_cross_in_sorts`, new in `planes.rs`,
+   gives each plane's line across a flat face a number that is the same for
+   every plane through that line, boxed. Lines whose boxes share no point
+   are different lines. With 1 and 2, the cut took 18.45 s (load 7). The
+   pins are `a_new_line_is_compared_only_with_the_lines_it_may_be` and the
+   two tests of the new function.
+3. `the_walk_of_each_other_lump_each_walk_faces` compares only walks in two
+   different lumps. It used to go through every pair of the 61 583 walks of
+   the body's top face and pass over pairs in one lump. With 1 to 3, the cut
+   took 6.03 s (load 29).
+4. `the_nodes_on_each_crossing` collects each crossing's nodes in one pass.
+   Before, `nodes_along` searched all the nodes once per crossing, and both
+   `merge_points_that_are_one_point` and `cut_the_crossings_into_arcs` call
+   it. Over the whole corpus that took merging from 12.3 s to 4.5 s, and
+   cutting arcs from 7.4 s to 2.8 s (load 35 to 50).
+
+Nothing moved in `rcad-topo` or `rcad-predicates`: their 1 593 tests pass,
+the four new ones among them, with no pin changed. `every_kicad_file_that_imports_round_trips_to_the_same_solid`
+took 35.618 s on this branch (load 17 to 29), against 21.600 s on `main` at
+`eccf76b7` (load 22 to 31).
+
+**What is still slow.** Measured over the corpus at a load of 35 to 50, 60
+faces with more than 5 000 nodes spent 13.5 s placing 1.68 million meets of
+three planes, about 8 µs each, and the other 10 486 faces spent 6.1 s.
+`gather` in `cuts.rs` meets every plane with every plane, and in an early
+sample it was 4 of 11 samples of the cut. Q1005 did not own that file.
+
 ### 200.2 A cap whose rim runs through the other pole is cut the way its walk ran
 
 `lane-runs-up-other-pole` (`d1f7eab9`, `76204dff`) closes the `runs_up` item

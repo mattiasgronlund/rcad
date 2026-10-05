@@ -277,6 +277,22 @@ impl Bounds {
         })
     }
 
+    /// The whole box, as a point that may be anywhere in it, so that a
+    /// surface asked about it answers for every point of the box at once.
+    /// `None` for a box with nothing in it, which a face with no box to
+    /// measure has.
+    ///
+    /// Round a face, a surface that proves this on one side of it shares no
+    /// point with the face, as far as [`Bounds`] holds the face, and
+    /// `arrange.rs` leaves out a cut whose surface does.
+    pub(crate) fn as_a_point_anywhere_inside(self) -> Option<PredicatePoint> {
+        let sides: [Option<Interval>; 3] =
+            core::array::from_fn(|axis| Interval::new(self.low[axis], self.high[axis]).ok());
+        Some(PredicatePoint::Constructed([
+            sides[0]?, sides[1]?, sides[2]?,
+        ]))
+    }
+
     fn nothing() -> Self {
         Self {
             low: [f64::INFINITY; 3],

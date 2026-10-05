@@ -781,6 +781,70 @@ impl Crossing {
     }
 }
 
+/// The crossings drawn so far, kept so that a new one is compared with only
+/// those that may be the same curve ([`Arrangement::crossing_like`]).
+///
+/// A plane's crossing with a flat face is a line, and is kept by where that
+/// line sorts
+/// ([`where_the_line_two_planes_cross_in_sorts`](rcad_predicates::where_the_line_two_planes_cross_in_sorts)):
+/// two lines whose boxes there share no point are two lines. Every other
+/// crossing is compared with every new one, as all of them were before.
+#[derive(Default)]
+struct CrossingsDrawn {
+    /// `(low end, high end, crossing)` of each line kept by where it sorts,
+    /// in order of the low end.
+    lines: Vec<(f64, f64, usize)>,
+    /// No line in `lines` has a box wider than this.
+    widest: f64,
+    /// Every crossing not in `lines`.
+    every_other: Vec<usize>,
+}
+
+impl CrossingsDrawn {
+    /// A box no wider than this is kept in `lines`. Where a line sorts lies
+    /// within the sum of the ten weights either side of nothing, about 34, so
+    /// this is under a billionth of the room there is. A line whose box is
+    /// wider, which takes two planes that are nearly one plane, is compared
+    /// with every new one instead.
+    const NARROW: f64 = 1e-9;
+
+    fn add(&mut self, crossing: usize, sorts_at: Option<Interval>) {
+        match sorts_at {
+            Some(line) if line.width() <= Self::NARROW => {
+                let at = self.lines.partition_point(|&(low, _, _)| low < line.lo());
+                self.lines.insert(at, (line.lo(), line.hi(), crossing));
+                self.widest = self.widest.max((line.hi() - line.lo()).next_up());
+            }
+            Some(_) | None => self.every_other.push(crossing),
+        }
+    }
+
+    /// Every crossing that may be the same curve as a new one that sorts at
+    /// `sorts_at`, in the order they were drawn. All `drawn` of them when
+    /// there is nothing to sort by.
+    ///
+    /// A line kept in `lines` whose box shares a point with `sorts_at` has a
+    /// low end no further below `sorts_at`'s than `widest`, which is where
+    /// looking starts, and one stepped down past the rounding of that
+    /// subtraction.
+    fn that_may_be(&self, sorts_at: Option<Interval>, drawn: usize) -> Vec<usize> {
+        let Some(line) = sorts_at else {
+            return (0..drawn).collect();
+        };
+        let from = (line.lo() - self.widest).next_down();
+        let start = self.lines.partition_point(|&(low, _, _)| low < from);
+        let mut found: Vec<usize> = self.lines[start..]
+            .iter()
+            .take_while(|&&(low, _, _)| low <= line.hi())
+            .filter(|&&(_, high, _)| high >= line.lo())
+            .map(|&(_, _, crossing)| crossing)
+            .chain(self.every_other.iter().copied())
+            .collect();
+        found.sort_unstable();
+        found
+    }
+}
+
 /// How points along one crossing are put in order.
 enum HowItRuns {
     /// It runs on for ever, so the order is a comparison on the axis it climbs
@@ -954,6 +1018,7 @@ impl<'f> Arrangement<'f> {
         };
         arrangement.draw_the_crossings(cuts, policy, log)?;
         arrangement.place_the_corners(policy, log)?;
+        arrangement.leave_out_the_cuts_clear_of_the_face();
         arrangement.place_the_meets(policy, log)?;
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
@@ -980,9 +1045,11 @@ impl<'f> Arrangement<'f> {
         if self.arcs.is_empty() {
             return Ok(vec![self.the_whole_surface()?]);
         }
+        let lump = self.lump_of_each_cycle();
+        let outer = self.a_lump_of_the_faces_first_wire();
         (0..self.cells.len())
             .filter(|&cell| self.winding[cell] == Some(1))
-            .map(|cell| self.piece_from(cell))
+            .map(|cell| self.piece_from(cell, &lump, outer))
             .collect()
     }
 
@@ -1090,13 +1157,14 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
+        let mut drawn = CrossingsDrawn::default();
         for wire in 0..self.face.wires.len() {
             let mut along = Vec::new();
             for position in 0..self.face.wires[wire].len() {
                 let edge = &self.face.wires[wire][position];
                 let (across, at) = (edge.across, edge.start.point);
                 let crossing = self
-                    .crossing_for(across, false, Some(at), policy, log)?
+                    .crossing_for(across, false, Some(at), &mut drawn, policy, log)?
                     .ok_or(Error::AFaceMeetsItsNeighbourNowhere {
                         face: self.face.keys[0],
                     })?;
@@ -1105,7 +1173,7 @@ impl<'f> Arrangement<'f> {
             self.crossing_of_edge.push(along);
         }
         for &cut in cuts {
-            let crossing = self.crossing_for(cut, true, None, policy, log)?;
+            let crossing = self.crossing_for(cut, true, None, &mut drawn, policy, log)?;
             self.cut_crossings.push(crossing);
         }
         Ok(())
@@ -1150,6 +1218,7 @@ impl<'f> Arrangement<'f> {
         partner: Surface,
         cuts: bool,
         through: Option<PredicatePoint>,
+        drawn: &mut CrossingsDrawn,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Option<usize>> {
@@ -1182,9 +1251,17 @@ impl<'f> Arrangement<'f> {
             }
         }
 
+        let sorts_at = match (self.surface.as_plane(), partner.as_plane()) {
+            (Some(here), Some(other)) => rcad_predicates::where_the_line_two_planes_cross_in_sorts(
+                here.coefficients(),
+                other.coefficients(),
+            ),
+            _ => None,
+        };
         let mut first = None;
         for run in wanted {
-            let index = match self.crossing_like(&partner, pickers_of(&run), policy, log)? {
+            let maybe = drawn.that_may_be(sorts_at, self.crossings.len());
+            let index = match self.crossing_like(&partner, pickers_of(&run), &maybe, policy, log)? {
                 Some(already) => {
                     self.crossings[already].cuts |= cuts;
                     already
@@ -1207,7 +1284,9 @@ impl<'f> Arrangement<'f> {
                         cuts,
                         reaches_the_face: true,
                     });
-                    self.crossings.len() - 1
+                    let index = self.crossings.len() - 1;
+                    drawn.add(index, sorts_at);
+                    index
                 }
             };
             first = first.or(Some(index));
@@ -1215,7 +1294,9 @@ impl<'f> Arrangement<'f> {
         Ok(first)
     }
 
-    /// Which crossing already drawn is this same curve, if any.
+    /// Which crossing already drawn is this same curve, if any, of those
+    /// `maybe` names, which is every one that can be
+    /// ([`CrossingsDrawn::that_may_be`]).
     ///
     /// Two *different* surfaces can cut one face in one curve: two planes
     /// through the same line, or two spheres through the same circle. All
@@ -1223,14 +1304,22 @@ impl<'f> Arrangement<'f> {
     /// coefficients, which is four exact determinants
     /// ([`relation_of_two_lines`]). Otherwise the question is whether the two
     /// partners are one surface, which [`intersect`] answers (§31.2 row 7).
+    ///
+    /// **Only the lines whose boxes share a point with the new one's are
+    /// asked.** Asking every crossing drawn before it cost each face its count
+    /// squared in exact determinants, and two lines parallel on the face make
+    /// the first of the four exactly nothing, which the fast filter cannot
+    /// show: on a face of the 1x39 pin header's body, cut by 332 to 409
+    /// planes, that was most of what drawing the crossings cost (§200.1).
     fn crossing_like(
         &mut self,
         partner: &Surface,
         picked_by: &[Picker],
+        maybe: &[usize],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Option<usize>> {
-        for index in 0..self.crossings.len() {
+        for &index in maybe {
             let mine = self.crossings[index].partner;
             let same = match (self.surface.as_plane(), mine.as_plane(), partner.as_plane()) {
                 (Some(here), Some(one), Some(other)) => {
@@ -1259,7 +1348,7 @@ impl<'f> Arrangement<'f> {
     /// Which crossings run through a corner is mostly a question about the
     /// model: the two edges either side of it, and, where more faces meet there,
     /// every other surface the corner already knows about. Only a cut has to be
-    /// *asked*, and asking is [`side_of_surface`].
+    /// *asked*, and asking is [`Arrangement::passes_through`].
     fn place_the_corners(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         for wire in 0..self.face.wires.len() {
             let mut corners = Vec::new();
@@ -1282,7 +1371,7 @@ impl<'f> Arrangement<'f> {
                     let on_it = if around.contains(&crossing.partner) {
                         nothing_rules_the_point_out(crossing.picked_by(), at)
                     } else {
-                        self.passes_through(index, at, policy, log)?
+                        self.passes_through(index, at, &around, policy, log)?
                     };
                     if on_it {
                         through.push(index);
@@ -1321,18 +1410,41 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
-    /// Whether a point is on one crossing: on its partner surface, and picked by
-    /// whichever curve of the pair this crossing is.
+    /// Whether a corner of the face, at `point` with the surfaces `around` it,
+    /// is on one crossing: on its partner surface, and picked by whichever
+    /// curve of the pair this crossing is.
+    ///
+    /// **A corner three planes meet at is asked about the planes, not its box.**
+    /// The box is where the three meet give or take a rounding, so a plane of
+    /// the other solid that runs a rounding past the corner straddles it: two
+    /// turned cubes a rounding apart refused every fuse here. The planes decide
+    /// it exactly
+    /// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)),
+    /// and the box is asked first because it is cheaper and nearly always
+    /// enough.
     fn passes_through(
         &self,
         crossing: usize,
         point: PredicatePoint,
+        around: &[Surface],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         let partner = self.crossings[crossing].partner;
+        let side = match (side_of_surface(&partner, point), partner.as_plane()) {
+            (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
+                Self::the_three_planes_a_point_is_the_meet_of(around).map_or(undecided, |three| {
+                    rcad_predicates::side_of_a_plane_where_three_planes_meet(
+                        three.map(|flat| flat.coefficients()),
+                        plane.coefficients(),
+                    )
+                    .expect("bake solved this corner as the one point where its three planes meet")
+                })
+            }
+            (side, _) => side,
+        };
         let settled = must_decide(
-            side_of_surface(&partner, point),
+            side,
             name_of_surface(&partner),
             &[point],
             Measures::Length,
@@ -1341,6 +1453,92 @@ impl<'f> Arrangement<'f> {
         )?;
         Ok(settled == Decision::Zero
             && nothing_rules_the_point_out(self.crossings[crossing].picked_by(), point))
+    }
+
+    /// The three planes a point of the arrangement is the one meeting point of,
+    /// read off the `surfaces` that placed it: the ones round a corner, or the
+    /// three a meet of three was solved from. Its box holds where they meet.
+    ///
+    /// Bake solved a corner with exactly three surfaces round it from those
+    /// three ([`BakedCorner::around`](super::bake::BakedCorner)). `None` for a
+    /// corner with more round it, because bake does not say which three it
+    /// solved from and the others pass through the box only give or take a
+    /// rounding, and `None` where any of them is not a plane.
+    fn the_three_planes_a_point_is_the_meet_of(surfaces: &[Surface]) -> Option<[Plane; 3]> {
+        match surfaces {
+            [
+                Surface::Plane(first),
+                Surface::Plane(second),
+                Surface::Plane(third),
+            ] => Some([*first, *second, *third]),
+            _ => None,
+        }
+    }
+
+    /// Leave out every cut whose surface keeps the whole box round the face on
+    /// one side of it, before any meet is placed.
+    ///
+    /// **Such a cut draws nothing on the face.** Every point of its crossing is
+    /// on its surface, and that surface was just proved to miss every point of
+    /// the box. So no point of the crossing is in the box, and the box holds the
+    /// face, as far as [`Bounds`](super::bake::Bounds) says it does: the
+    /// rounding of the corners and not the room `validate` grants a corner off
+    /// its surface. That is the same box the rule in
+    /// [`Arrangement::work_out_how_each_crossing_runs`] has always trusted.
+    /// The pieces are the cells the face's boundary winds once round, all of
+    /// them on the face, and a curve with no point on the face splits none of
+    /// them.
+    ///
+    /// Its meets with other crossings are on it, so they are off the face too,
+    /// and [`Arrangement::place_the_meets`] places none of them. A meet of two
+    /// cuts left out is on no crossing that is drawn. A meet with a crossing
+    /// that stays is a point of that crossing outside the box, where no piece
+    /// ends: it only splits a stretch of that crossing off the face in two,
+    /// and on a straight crossing [`Arrangement::join_arcs_that_meet_at_nothing`]
+    /// joins the two again. Placing a meet for every pair of the 332 to 409
+    /// planes that cut each face of the 1x39 pin header's body was what kept a
+    /// cut through it from finishing; leaving out only the meets of two cuts
+    /// left out still spent 9.9 s placing meets in it, and leaving out every
+    /// meet of one spends 2.5 s (§200.1).
+    ///
+    /// **Two things change where the box is all that knew.** A cut clear of
+    /// the box was kept and drawn before when one of its nodes had a box wide
+    /// enough to reach into the face's box, or when it closed, had no node, and
+    /// the one it was given where it starts had such a box. And a crossing
+    /// that stays loses its nodes outside the box with cuts left out, so the
+    /// rule in [`Arrangement::work_out_how_each_crossing_runs`] that drops a
+    /// cut once every node on it is clear of the box sees fewer of them. Every
+    /// one of those is a curve or a point off the face, and none of them is
+    /// part of a piece.
+    ///
+    /// **A crossing a boundary edge runs along, or one a corner is on, is never
+    /// left out.** The first is the rim. The second passes through a corner of
+    /// the face, by the model's word or by [`Arrangement::passes_through`]'s,
+    /// and the corner is in the box, so its surface is proved clear of the box
+    /// only where two answers disagree, which is not this function's to settle.
+    fn leave_out_the_cuts_clear_of_the_face(&mut self) {
+        let Some(anywhere_on_the_face) = self.face.bounds.as_a_point_anywhere_inside() else {
+            return;
+        };
+        let mut kept = vec![false; self.crossings.len()];
+        for &crossing in self.crossing_of_edge.iter().flatten() {
+            kept[crossing] = true;
+        }
+        for &corner in self.node_of_corner.iter().flatten() {
+            for &crossing in &self.nodes[corner].crossings {
+                kept[crossing] = true;
+            }
+        }
+        for (crossing, kept) in kept.into_iter().enumerate() {
+            if kept {
+                continue;
+            }
+            match side_of_surface(&self.crossings[crossing].partner, anywhere_on_the_face) {
+                Decision::Pos | Decision::Neg => self.crossings[crossing].reaches_the_face = false,
+                Decision::Zero | Decision::Undecidable { .. } => {}
+                other => panic!("a decision nothing here knows: {other:?}"),
+            }
+        }
     }
 
     /// One node per place two crossings meet, unless a corner already is that
@@ -1360,9 +1558,18 @@ impl<'f> Arrangement<'f> {
     /// anywhere near each other. So when it gives up, ask the cheaper question
     /// first — and only when the answer is *nothing*, which is a proof and not a
     /// distance, is there nothing to place (§48).
+    ///
+    /// Nor is a pair with a cut
+    /// [`Arrangement::leave_out_the_cuts_clear_of_the_face`] left out in it:
+    /// its meets are off the face.
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         for first in 0..self.crossings.len() {
             for second in (first + 1)..self.crossings.len() {
+                if !self.crossings[first].reaches_the_face
+                    || !self.crossings[second].reaches_the_face
+                {
+                    continue;
+                }
                 if self.crossings[first].partner == self.crossings[second].partner {
                     self.place_where_two_rulings_cross(first, second);
                     continue;
@@ -1383,7 +1590,17 @@ impl<'f> Arrangement<'f> {
                         return Err(gave_up_on_it.into());
                     }
                 };
-                let tight = meet.boxed_tight(asked);
+                // The tighter box is read by a fold into a corner on both
+                // crossings, and by the order along a crossing with a curved
+                // surface in it, and by nothing else. Working it out for every
+                // meet of three planes was 11 of 22 samples taken in placing
+                // the meets of a cut through the 1x39 pin header (§200.1).
+                let all_planes = surfaces.iter().all(|surface| surface.as_plane().is_some());
+                let tight = if all_planes && !self.a_corner_is_on_both(first, second) {
+                    meet.clone()
+                } else {
+                    meet.boxed_tight(asked)
+                };
                 let MeetOfThree::At(places) = meet else {
                     continue;
                 };
@@ -1421,12 +1638,7 @@ impl<'f> Arrangement<'f> {
                         self.nodes[corner].stands_for_too((sorted, which));
                         continue;
                     }
-                    let ordered_by = if surfaces.iter().all(|surface| surface.as_plane().is_some())
-                    {
-                        place
-                    } else {
-                        boxed_tight
-                    };
+                    let ordered_by = if all_planes { place } else { boxed_tight };
                     self.nodes.push(Node {
                         point: place,
                         boxed_tight: ordered_by,
@@ -1440,6 +1652,15 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(())
+    }
+
+    /// Whether some corner of the face is on both crossings, which is where
+    /// [`Arrangement::the_corner_that_is_this_place`] looks.
+    fn a_corner_is_on_both(&self, first: usize, second: usize) -> bool {
+        self.node_of_corner.iter().flatten().any(|&corner| {
+            let through = &self.nodes[corner].crossings;
+            through.contains(&first) && through.contains(&second)
+        })
     }
 
     /// The node where two curves of one pair cross, for the one pair here that
@@ -1624,6 +1845,14 @@ impl<'f> Arrangement<'f> {
     /// (§244.3, §248). This, and not the touch, is what keeps them apart: of a
     /// ball's two places grazing a block's corner, the one that misses the
     /// corner's box lies inside its room too (§395.3).
+    ///
+    /// **Only the face's corners are looked through, not every node.** They
+    /// are the first nodes, one per side of each wire
+    /// ([`Arrangement::place_the_corners`]), and every meet placed after them
+    /// is no corner. Looking through every node cost a meet as many steps as
+    /// there were meets placed before it: a face of the 1x39 pin header's body
+    /// cut by its 332 planes placed 38 116 meets, and looking each one up among
+    /// the others was 12 of 31 samples of a cut through that header (§200.1).
     fn the_corner_that_is_this_place(
         &self,
         first: usize,
@@ -1632,31 +1861,33 @@ impl<'f> Arrangement<'f> {
         boxed_tight: PredicatePoint,
         places: &[PredicatePoint],
     ) -> Option<usize> {
-        self.nodes.iter().position(|node| {
-            if !(node.vertex.is_some()
-                && node.crossings.contains(&first)
-                && node.crossings.contains(&second))
-            {
-                return false;
-            }
-            let allowed = super::bake::grown_by(
-                node.point,
-                super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
-            );
-            let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
-            let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
-            let inside_the_room = (0..3).all(|axis| {
-                room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
-            });
-            reaches_the_room(&place)
-                && places
-                    .iter()
-                    .filter(|other| reaches_the_room(other))
-                    .count()
-                    == 1
-                && (inside_the_room
-                    || self.bake_placed_the_corner_on_the_three_planes(node, first, second))
-        })
+        self.node_of_corner
+            .iter()
+            .flatten()
+            .copied()
+            .find(|&corner| {
+                let node = &self.nodes[corner];
+                if !(node.crossings.contains(&first) && node.crossings.contains(&second)) {
+                    return false;
+                }
+                let allowed = super::bake::grown_by(
+                    node.point,
+                    super::bake::what_writing_the_corner_down_cost(node.point.enclosure()),
+                );
+                let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
+                let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
+                let inside_the_room = (0..3).all(|axis| {
+                    room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+                });
+                reaches_the_room(&place)
+                    && places
+                        .iter()
+                        .filter(|other| reaches_the_room(other))
+                        .count()
+                        == 1
+                    && (inside_the_room
+                        || self.bake_placed_the_corner_on_the_three_planes(node, first, second))
+            })
     }
 
     /// Whether [`Arrangement::the_corner_that_is_this_place`] finds a corner,
@@ -1745,10 +1976,11 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         for crossing in 0..self.crossings.len() {
-            if self
-                .nodes
-                .iter()
-                .any(|node| node.crossings.contains(&crossing))
+            if !self.crossings[crossing].reaches_the_face
+                || self
+                    .nodes
+                    .iter()
+                    .any(|node| node.crossings.contains(&crossing))
             {
                 continue;
             }
@@ -1814,10 +2046,12 @@ impl<'f> Arrangement<'f> {
     /// A **cut** every node of which is provably clear of the box round the face
     /// cuts nothing off it, and is dropped rather than ordered. That is not
     /// keenness: a curve that crossed the face's boundary would share a node
-    /// with one of the crossings the boundary runs along, and every meet of
-    /// every pair has been worked out by now — so a cut with no node inside the
-    /// box is a cut wholly outside the face, and how points run along it is a
-    /// question about nothing.
+    /// with one of the crossings the boundary runs along, and every meet of a
+    /// crossing still drawn has been worked out by now — so a cut with no node
+    /// inside the box is a cut wholly outside the face, and how points run
+    /// along it is a question about nothing. A cut
+    /// [`Arrangement::leave_out_the_cuts_clear_of_the_face`] left out is not
+    /// looked at again.
     ///
     /// **A crossing the face's own boundary runs along is never dropped**,
     /// however far its nodes are. Its arcs *are* the rim, and dropping one takes
@@ -1833,6 +2067,9 @@ impl<'f> Arrangement<'f> {
     /// the curves that reach nothing takes it to none.
     fn work_out_how_each_crossing_runs(&mut self, log: &mut ProvenanceLog) -> Result<()> {
         for crossing in 0..self.crossings.len() {
+            if !self.crossings[crossing].reaches_the_face {
+                continue;
+            }
             let mut on_it = self
                 .nodes
                 .iter()
@@ -1895,11 +2132,11 @@ impl<'f> Arrangement<'f> {
     ) -> Result<()> {
         loop {
             let mut same = Sameness::of(self.nodes.len());
-            for crossing in 0..self.crossings.len() {
+            for (crossing, on_it) in self.the_nodes_on_each_crossing().iter().enumerate() {
                 if !self.crossings[crossing].reaches_the_face {
                     continue;
                 }
-                let order = self.nodes_along(crossing, policy, log)?;
+                let order = self.nodes_along(crossing, on_it, policy, log)?;
                 for pair in order.windows(2) {
                     match self.order_along(crossing, pair[0], pair[1], policy, log)? {
                         Decision::Zero => same.join(pair[0], pair[1]),
@@ -1923,6 +2160,22 @@ impl<'f> Arrangement<'f> {
             }
             self.fold_the_nodes(&mut same)?;
         }
+    }
+
+    /// The nodes on each crossing, each list in the order the nodes are
+    /// numbered, gathered in one pass over the nodes.
+    ///
+    /// Looking through every node for each crossing cost crossings × nodes,
+    /// and a face of a pin header's body has about four hundred crossings and
+    /// sixty thousand nodes (§200.1).
+    fn the_nodes_on_each_crossing(&self) -> Vec<Vec<usize>> {
+        let mut on_each = vec![Vec::new(); self.crossings.len()];
+        for (node, Node { crossings, .. }) in self.nodes.iter().enumerate() {
+            for &crossing in crossings {
+                on_each[crossing].push(node);
+            }
+        }
+        on_each
     }
 
     fn fold_the_nodes(&mut self, same: &mut Sameness) -> Result<()> {
@@ -2015,15 +2268,17 @@ impl<'f> Arrangement<'f> {
     /// straight off the hint. A hint wrong by one swap is measurable: it puts a
     /// face cut by two crossing lines back together in the wrong pieces, and
     /// nothing refuses.
+    ///
+    /// `on_it` is the nodes on the crossing, in the order they are numbered,
+    /// which is [`Arrangement::the_nodes_on_each_crossing`]'s entry for it.
     fn nodes_along(
         &self,
         crossing: usize,
+        on_it: &[usize],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Vec<usize>> {
-        let mut order: Vec<usize> = (0..self.nodes.len())
-            .filter(|&node| self.nodes[node].crossings.contains(&crossing))
-            .collect();
+        let mut order: Vec<usize> = on_it.to_vec();
         match self.crossings[crossing].order {
             HowItRuns::AlongAnAxis {
                 axis,
@@ -2087,6 +2342,10 @@ impl<'f> Arrangement<'f> {
 
     /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
     /// when `first` does, [`Decision::Zero`] when they are the same point.
+    ///
+    /// The boxes are asked first, and the planes
+    /// ([`Arrangement::as_the_planes_say`]) only where the boxes cannot say,
+    /// because the boxes are cheaper and nearly always enough.
     fn order_along(
         &self,
         crossing: usize,
@@ -2099,8 +2358,14 @@ impl<'f> Arrangement<'f> {
             HowItRuns::AlongAnAxis { .. } => Measures::Length,
             HowItRuns::AlongABend { .. } | HowItRuns::RoundAClosedCurve { .. } => Measures::Volume,
         };
+        let mut decided = self.as_the_boxes_say(crossing, first, second)?;
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_the_planes_say(crossing, first, second)
+        {
+            decided = proved;
+        }
         must_decide(
-            self.as_the_boxes_say(crossing, first, second)?,
+            decided,
             ALONG_A_CROSSING,
             &[self.nodes[first].point, self.nodes[second].point],
             measures,
@@ -2195,6 +2460,61 @@ impl<'f> Arrangement<'f> {
         })
     }
 
+    /// Which of two nodes on a crossing comes first along it, from the planes
+    /// each is the meet of. `None` unless the crossing is where the face's
+    /// plane meets a partner plane and each node is the meet of those two and
+    /// one plane more.
+    ///
+    /// **Two nodes on the line two planes cross in are put in order by the
+    /// planes when their boxes cannot be.** Two turned cubes a rounding apart
+    /// refused every fuse at the order: a corner of one, and the point a
+    /// rounding past it where the other's face crosses that corner's edge. The
+    /// line runs along `n_S × n_Q` for the face's plane `S` and the partner
+    /// `Q`, which is the crossing's forward direction ([`dominant_axis`]), so
+    /// [`which_meet_comes_first_along_a_line`](rcad_predicates::which_meet_comes_first_along_a_line)
+    /// answers in the crossing's own terms.
+    fn as_the_planes_say(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
+        let partner = self.crossings[crossing].partner;
+        let (Some(flat), Some(partner)) = (self.surface.as_plane(), partner.as_plane()) else {
+            return None;
+        };
+        let the_third_plane = |node: usize| {
+            let node = &self.nodes[node];
+            let surfaces: &[Surface] = match (node.vertex, &node.made_of) {
+                (Some(vertex), _) => {
+                    &self
+                        .face
+                        .wires
+                        .iter()
+                        .flatten()
+                        .find(|edge| edge.start.vertex == vertex)
+                        .expect("every corner node is where an edge of this face starts")
+                        .start
+                        .around
+                }
+                (None, Some((made_of, _))) => made_of,
+                (None, None) => return None,
+            };
+            let three = Self::the_three_planes_a_point_is_the_meet_of(surfaces)?;
+            let mut others = three
+                .into_iter()
+                .filter(|plane| plane != flat && plane != partner);
+            match (others.next(), others.next()) {
+                (Some(third), None) => Some(third),
+                (None, _) | (Some(_), Some(_)) => None,
+            }
+        };
+        let (mine, theirs) = (the_third_plane(first)?, the_third_plane(second)?);
+        Some(
+            rcad_predicates::which_meet_comes_first_along_a_line(
+                [flat.coefficients(), partner.coefficients()],
+                mine.coefficients(),
+                theirs.coefficients(),
+            )
+            .expect("each node was solved as the one point where its three planes meet"),
+        )
+    }
+
     /// Cut every crossing into the arcs between neighbouring nodes on it, and
     /// throw away the ones that carry nothing.
     ///
@@ -2212,11 +2532,11 @@ impl<'f> Arrangement<'f> {
                 self.crossings[crossing].order.closes() && self.crossings[crossing].reaches_the_face
             })
             .collect();
-        for crossing in 0..self.crossings.len() {
+        for (crossing, on_it) in self.the_nodes_on_each_crossing().iter().enumerate() {
             if !self.crossings[crossing].reaches_the_face {
                 continue;
             }
-            let order = self.nodes_along(crossing, policy, log)?;
+            let order = self.nodes_along(crossing, on_it, policy, log)?;
             let closes = self.crossings[crossing].order.closes();
             let steps = if closes {
                 order.len()
@@ -3373,6 +3693,12 @@ impl<'f> Arrangement<'f> {
     /// so leaving it unjoined loses nothing, and joining it to the wrong walk
     /// would not either — but a guess is not what this function hands out.
     ///
+    /// Only walks of two different lumps are compared, a pair of lumps at a
+    /// time. Going through every pair of walks and passing over those of one
+    /// lump cost the 61 583 walks of one face of the 1x39 pin header's body,
+    /// nearly all in one lump, about 1.9 billion steps that did nothing
+    /// (§200.1).
+    ///
     /// # Errors
     ///
     /// [`Error::CannotTellTheCellsOfAFaceApart`] where a walk that may be
@@ -3384,17 +3710,30 @@ impl<'f> Arrangement<'f> {
         sides: &[Vec<Option<Decision>>],
     ) -> Result<Vec<Vec<usize>>> {
         let count = self.cycles.len();
+        let mut walks_of: std::collections::BTreeMap<usize, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (walk, &which) in lump.iter().enumerate() {
+            walks_of.entry(which).or_default().push(walk);
+        }
+        let walks_of: Vec<Vec<usize>> = walks_of.into_values().collect();
         let mut agreeing: Vec<Vec<usize>> = vec![Vec::new(); count];
-        for one in 0..count {
-            for other in (one + 1)..count {
-                if lump[one] == lump[other] || self.windings_are_known_to_differ(one, other) {
-                    continue;
-                }
-                if they_agree_about_every_closed_curve(&sides[one], &sides[other]) {
-                    agreeing[one].push(other);
-                    agreeing[other].push(one);
+        for (at, mine) in walks_of.iter().enumerate() {
+            for theirs in &walks_of[at + 1..] {
+                for &one in mine {
+                    for &other in theirs {
+                        if self.windings_are_known_to_differ(one, other) {
+                            continue;
+                        }
+                        if they_agree_about_every_closed_curve(&sides[one], &sides[other]) {
+                            agreeing[one].push(other);
+                            agreeing[other].push(one);
+                        }
+                    }
                 }
             }
+        }
+        for others in &mut agreeing {
+            others.sort_unstable();
         }
 
         let mut facing = vec![Vec::new(); count];
@@ -3795,20 +4134,14 @@ impl<'f> Arrangement<'f> {
         let mut found: Vec<usize> = self
             .arcs
             .iter()
-            .filter(|arc| !self.crossings[arc.crossing].order.closes())
-            .map(|arc| lump[self.cycle_of[2 * self.position_of(arc)]])
+            .enumerate()
+            .filter(|(_, arc)| !self.crossings[arc.crossing].order.closes())
+            .map(|(position, _)| lump[self.cycle_of[2 * position]])
             .filter(|&which| Some(which) != home)
             .collect();
         found.sort_unstable();
         found.dedup();
         found
-    }
-
-    fn position_of(&self, arc: &Arc) -> usize {
-        self.arcs
-            .iter()
-            .position(|other| core::ptr::eq(other, arc))
-            .expect("the only caller borrows the arc straight out of this same list")
     }
 
     /// Which walk elsewhere in the drawing a lump of endless curves sits inside,
@@ -4270,6 +4603,9 @@ impl<'f> Arrangement<'f> {
         Stretches { axis, spans }
     }
 
+    /// The piece one cell is, given which `lump` of the drawing each walk is
+    /// in and which of them, `outer`, holds the face's first wire.
+    ///
     /// # Errors
     ///
     /// Whatever [`Arrangement::wire_from`] makes of each of the piece's walks.
@@ -4277,15 +4613,13 @@ impl<'f> Arrangement<'f> {
     /// # Panics
     ///
     /// If the piece has no wires.
-    fn piece_from(&self, cell: usize) -> Result<Piece> {
+    fn piece_from(&self, cell: usize, lump: &[usize], outer: Option<usize>) -> Result<Piece> {
         let mut cycles = self.cells[cell].clone();
         // A flat piece has an outer wire and holes, and `Model::validate` reads
         // the first as the outer one. The outer wire is the walk that keeps the
         // face's own outer boundary, which is the lump the face's first wire is
         // in. On a closed surface neither is outer (§31.3) and this leaves the
         // order the walks were found in.
-        let outer = self.a_lump_of_the_faces_first_wire();
-        let lump = self.lump_of_each_cycle();
         cycles.sort_by_key(|&cycle| usize::from(Some(lump[cycle]) != outer));
 
         let wires: Vec<Vec<FaceMeet>> = cycles
@@ -6467,7 +6801,7 @@ mod tests {
     };
 
     use super::{
-        Arc, Arrangement, Boundary, HowItRuns, Node, Piece, as_exact_as_it_is,
+        Arc, Arrangement, Boundary, CrossingsDrawn, HowItRuns, Node, Piece, as_exact_as_it_is,
         canonical_cut_surfaces, prove_the_hinted_order, split_a_face, the_other_way,
         three_planes_faced_the_one_way, where_the_crossing_starts,
     };
@@ -6912,6 +7246,81 @@ mod tests {
         assert_eq!(twice_the_area_of(plain), 2.0 * 2.0 * 4.0);
         for piece in &pieces {
             every_wire_closes(piece);
+        }
+    }
+
+    /// Planes that keep the whole box round a face on one side are left out
+    /// before any meet is placed, so no node is on them, not even where they
+    /// cross the one plane that does cut the face, and the face comes apart as
+    /// though they were not there (§200.1).
+    #[test]
+    fn planes_clear_of_the_box_round_a_face_place_no_meet_and_cut_nothing() {
+        let (model, cube) = a_cube_of_side_two();
+        let top = the_top_of_a_cube(&model, cube);
+        let through = [1.0, 0.0, 0.0, -1.0];
+        let clear = [
+            [1.0, 0.0, 0.0, -20.0],
+            [0.0, 1.0, 0.0, -30.0],
+            [1.0, 1.0, 0.0, -40.0],
+        ];
+        let cut = cut_by(&top, &[clear[0], clear[1], through, clear[2]]);
+
+        let arrangement = Arrangement::of(
+            &cut,
+            &canonical_cut_surfaces(&cut),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the top of a cube cut by planes on whole numbers");
+
+        let left_out: Vec<usize> = (0..arrangement.crossings.len())
+            .filter(|&crossing| !arrangement.crossings[crossing].reaches_the_face)
+            .collect();
+        assert_eq!(
+            left_out.len(),
+            clear.len(),
+            "each plane clear of the face is left out, and the one through it is not"
+        );
+        for node in &arrangement.nodes {
+            assert!(
+                node.crossings
+                    .iter()
+                    .all(|crossing| !left_out.contains(crossing)),
+                "a node at {:?} is on a cut that was left out",
+                node.point
+            );
+        }
+        assert_eq!(split(&cut), split(&cut_by(&top, &[through])));
+    }
+
+    /// Four hundred parallel lines across one face, each compared with no
+    /// line drawn before it, and each found again, and only it, from a plane
+    /// through it written another way round (§200.1).
+    #[test]
+    fn a_new_line_is_compared_only_with_the_lines_it_may_be() {
+        let face = [0.0, 0.0, 1.0, -2.0];
+        let wall = |step: u32| [1.0, 0.0, 0.0, -0.25 * f64::from(step)];
+        let sorts_at = |plane: [f64; 4]| {
+            rcad_predicates::where_the_line_two_planes_cross_in_sorts(face, plane)
+        };
+        let mut drawn = CrossingsDrawn::default();
+        for step in 0..400 {
+            let crossing = usize::try_from(step).expect("four hundred is a usize");
+            assert_eq!(
+                drawn.that_may_be(sorts_at(wall(step)), crossing),
+                Vec::<usize>::new(),
+                "the line x = {} is none of the {crossing} drawn before it",
+                0.25 * f64::from(step)
+            );
+            drawn.add(crossing, sorts_at(wall(step)));
+        }
+        for step in 0..400 {
+            let crossing = usize::try_from(step).expect("four hundred is a usize");
+            let turned_round = wall(step).map(|coefficient| -2.0 * coefficient);
+            assert_eq!(
+                drawn.that_may_be(sorts_at(turned_round), 400),
+                vec![crossing]
+            );
         }
     }
 
