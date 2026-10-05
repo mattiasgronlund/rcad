@@ -193,6 +193,9 @@ impl SolidView<'_> {
     /// from the point it started at, the count is not to be trusted, so the
     /// whole ray is thrown away and the next of three fixed targets is tried. If
     /// all three graze something, the answer is [`Containment::Undecidable`].
+    /// **A root the face holds none of is no graze**, wherever along the ray it
+    /// is, and nor is a point a surface's own sign cannot place, where that
+    /// face holds none of it: neither puts anything on the face.
     ///
     /// # Why the answer never wobbles
     ///
@@ -610,7 +613,11 @@ impl SolidView<'_> {
                 self.ask_whether_the_face_holds_it(face, tally, point, policy, log)?;
             }
             Decision::Pos | Decision::Neg => (),
-            Decision::Undecidable { enclosure } => tally.grazed(enclosure),
+            Decision::Undecidable { enclosure } => {
+                if !self.face_holds_none_of(face, point, policy, log) {
+                    tally.grazed(enclosure);
+                }
+            }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
 
@@ -667,6 +674,13 @@ impl SolidView<'_> {
             let at = match meeting {
                 Meeting::Ahead { at } => at,
                 Meeting::Behind => continue,
+                Meeting::Straddles { at } => {
+                    if !self.face_holds_none_of(face, PredicatePoint::Constructed(at), policy, log)
+                    {
+                        tally.grazed(0.0);
+                    }
+                    continue;
+                }
                 Meeting::CouldNotTell => {
                     tally.grazed(0.0);
                     continue;
@@ -713,6 +727,38 @@ impl SolidView<'_> {
     ) -> Result<(), Containment> {
         let held = self.what_this_face_holds(face, point, policy, log);
         tally.take_in(held, face.key())
+    }
+
+    /// Whether `face` holds no point of `point`'s box, so that the box can
+    /// neither put a point on the skin through `face` nor be where the ray
+    /// crosses it, whichever side of the face's surface each of its points is
+    /// on.
+    ///
+    /// **It rests on §323.3's contract**: [`OnAFace::NotHeld`] is a sign decided
+    /// about every point of the box, which is what the ray already drops a root
+    /// ahead of the point on. Asked where the surface's own sign cannot place a
+    /// point, and where a root cannot be told from the point it started at. A
+    /// point of an upper bar's wall, against a lower bar on the same pipe, is
+    /// both: the pipe's sign straddles the point, and one root of every ray is a
+    /// rounding either side of it. Neither is on the lower bar's wall, and each
+    /// threw every ray away until Q1080. What the face was asked goes into `log`
+    /// only when it holds none of the box.
+    fn face_holds_none_of(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let mut trial = ProvenanceLog::new();
+        let held_by_none = matches!(
+            self.what_this_face_holds(face, point, policy, &mut trial),
+            Ok(OnAFace::NotHeld)
+        );
+        if held_by_none {
+            trial.drain_into(log);
+        }
+        held_by_none
     }
 }
 
@@ -1201,8 +1247,14 @@ enum Meeting {
     },
     /// At the point itself or behind it, so the ray crosses nothing here.
     Behind,
-    /// The root's box straddles the point, or a coefficient of the quadratic
-    /// did. Nothing this ray says can be trusted.
+    /// The root's box straddles the point: somewhere in this box, and nobody
+    /// can say whether ahead of the point or behind it.
+    Straddles {
+        /// Where it landed.
+        at: [Interval; 3],
+    },
+    /// A touch no `f64` names, or a step of a kind nothing here knows. Nothing
+    /// this ray says can be trusted.
     CouldNotTell,
 }
 
@@ -1218,17 +1270,16 @@ fn gap_enclosing(from: [Interval; 3], there: Point) -> [Interval; 3] {
 /// on this face's own surface: the ray crosses nothing there, and whether the
 /// point is on the face is asked separately. A root whose box merely covers zero
 /// is a different thing — nobody can say whether the crossing is ahead — and it
-/// is a graze.
+/// is a graze unless the face holds none of the box it lands in.
 fn where_it_lands(t: Interval, from: [Interval; 3], along: [Interval; 3]) -> Meeting {
     if t.hi() < 0.0 || (t.lo() == 0.0 && t.hi() == 0.0) {
         return Meeting::Behind;
     }
+    let at = core::array::from_fn(|axis| from[axis] + t * along[axis]);
     if t.lo() <= 0.0 {
-        return Meeting::CouldNotTell;
+        return Meeting::Straddles { at };
     }
-    Meeting::Ahead {
-        at: core::array::from_fn(|axis| from[axis] + t * along[axis]),
-    }
+    Meeting::Ahead { at }
 }
 
 /// Which way the surface faces outwards at `at`, as a box.

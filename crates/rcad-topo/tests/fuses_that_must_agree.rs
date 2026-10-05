@@ -1860,8 +1860,8 @@ fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
 /// [`a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all`] assert over
 /// the flat families, asserted here for real rather than pinned.
 ///
-/// The bar refused `A \ A` on [`A_POINT_EVERY_SOLID_COULD_PLACE`] until
-/// §224.4 and the ball never did. That read as a statement about a surface that
+/// The bar refused `A \ A` on `"a point in a piece that every solid could
+/// place"` until §224.4 and the ball never did. That read as a statement about a surface that
 /// closes round a seam, and it was not: the ball has no flat face, and the
 /// bar's refusal was its flat caps, each a disk with one corner that winding
 /// counted as holding nothing.
@@ -2296,7 +2296,7 @@ fn what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does() {
 /// The first fuse answers every time. The second is handed half a ball whose
 /// flat face lies exactly in the block's floor and whose skin lies exactly on a
 /// piece of the answer's own boundary. That second fuse refused on every draw,
-/// naming [`A_POINT_EVERY_SOLID_COULD_PLACE`], until §351 made selection ask
+/// naming `"a point in a piece that every solid could place"`, until §351 made selection ask
 /// whether a **flat** piece lies on a face before firing the ray, as it already
 /// did for a curved one: 67 of 67 on the shipped corpus before, 25 of 67 after.
 ///
@@ -2423,23 +2423,26 @@ fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share
     tally.report_what_it_compared("A \\ (A \\ B) = A ∩ B over a ball");
 }
 
-/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, over a round solid — **and it cannot run
-/// today**.
+/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, over a round solid — asserted since row
+/// Q1080, and it compares on 67 of 67.
 ///
-/// The deepest chain any curved family has been asked for. The middle fuse takes
-/// the ball back out of the answer the first one built, and it refuses on 67 of
-/// 67, naming [`A_POINT_EVERY_SOLID_COULD_PLACE`]: a point in a piece was found
-/// and could not be placed against every solid.
+/// The deepest chain any curved family has been asked for. The middle fuse
+/// takes the ball back out of the answer the first one built.
 ///
 /// **It stopped earlier until row Q1024**, at
 /// [`WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON`]: the dome the union left is a
 /// face on the ball's sphere whose only corner is on the rim where the block's
 /// floor cuts it, so no corner said which side of the floor the dome keeps
 /// (§30.8 item 10). `holds.rs` now reads that side off the way the dome's wire
-/// walks the rim, and the fuse gets one step further. What stops it there has
-/// not been traced. The dome lies on `B`'s own sphere, two curved faces on one
-/// surface, which is what that name was first counted for; that this is the
-/// cause here is a guess.
+/// walks the rim, and the fuse gets one step further. Past that, it refused
+/// on 67 of 67, naming `"a point in a piece that every solid could place"` (0 compared): a
+/// point in a piece was found and no ray could place it, every middle fuse
+/// landing on the half of a bar's wall that Q1080 answers (Q1066).
+///
+/// **It answers since row Q1080**, which stopped
+/// `count_where_the_ray_meets_it` (`classify.rs`) from grazing a ray on a
+/// face that holds none of the point: 67 of 67 comparisons get both sides,
+/// 201 fuses and 0 refused, and the law holds on each.
 #[test]
 fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_union_again() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
@@ -2484,10 +2487,8 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
         );
         Ok(())
     });
-    tally.nothing_was_compared_because_it_all_refused(
-        "((A ∪ B) \\ B) ∪ B = A ∪ B over a ball, which refuses",
-        A_POINT_EVERY_SOLID_COULD_PLACE,
-    );
+    tally.report_what_it_compared("((A ∪ B) \\ B) ∪ B = A ∪ B over a ball");
+    tally.refuses_no_more_than(NOTHING_REFUSES);
 }
 
 /// Associativity of union over a **curved trio**, which no law in this file had
@@ -3893,25 +3894,21 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
 /// planes two points a rounding apart are the meets of.
 const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
-/// What the fuse gives up on when it is handed two curved faces lying on the
-/// same surface.
-///
-/// §36.16's row. `a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all` is
-/// the plainest shape that reaches it, and every law that puts an answer back
-/// against one of its own inputs reaches it too.
-///
-/// **This was *a point inside a piece of a face* until §217**, which split that
-/// one name in two. The whole family moved to the other side of the split — all
-/// 67 of these refusals found a point inside the piece and could not place it
-/// against every solid — so this is repointed rather than widened to hold both.
-const A_POINT_EVERY_SOLID_COULD_PLACE: &str = "a point in a piece that every solid could place";
+// `"a point in a piece that every solid could place"` is what the fuse gives
+// up on when it is handed two curved faces lying on the same surface (§36.16's
+// row; `a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all` is the
+// plainest shape that reaches it, and every law that puts an answer back
+// against one of its own inputs reaches it too). It was `"a point inside a
+// piece of a face"` until §217, which split that one name in two. No test
+// still names it as a constant (Q1080 answered the last refusal that did).
 
 /// What a fuse refuses when a point inside a piece was found and the ray that
 /// was to place it met a face whose trimming nothing here follows:
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`], as [`fused`] names it.
 ///
-/// Counted under [`A_POINT_EVERY_SOLID_COULD_PLACE`] until row Q882 named the
-/// face rather than calling the point undecided (`docs/decisions.md` §35.6).
+/// Counted under `"a point in a piece that every solid could place"` until row
+/// Q882 named the face rather than calling the point undecided
+/// (`docs/decisions.md` §35.6).
 const A_FACE_NOBODY_FOLLOWS: &str = "a face trimmed by a curve this cannot follow";
 
 /// The refusal §30.8 item 10 owns, as [`fused`] names it.
@@ -4737,32 +4734,6 @@ impl Tally {
             "the refusals mostly named {most:?} and not {predicate:?}, so this family \
              has stopped reaching the branch it was built for: {gave_up:?}"
         );
-    }
-
-    /// Report, and pin that the property compared **nothing**, because every
-    /// second fuse in it refused and named `predicate`.
-    ///
-    /// The counterpart of [`Tally::report_what_it_compared`] for a law that
-    /// cannot run yet. A property that has stopped comparing anything must not
-    /// read as a pass (§14.7), and the honest form of that is not a floor it
-    /// fails but an assertion that says out loud what today's kernel does — the
-    /// shape [`a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all`]
-    /// already uses at one hand-written pair, over a whole family.
-    ///
-    /// **The day the refusal closes, this fails**, and what replaces it is
-    /// [`Tally::report_what_it_compared`] and the law asserted for real.
-    fn nothing_was_compared_because_it_all_refused(&self, what: &str, predicate: &str) {
-        self.report(what);
-        let meant_to = self.meant_to_compare.get();
-        assert!(meant_to > 0, "{what} never tried to compare anything");
-        assert_eq!(
-            self.compared.get(),
-            0,
-            "{what}: {} of {meant_to} comparisons got both sides, so this law has started \
-             running and should be asserted rather than pinned",
-            self.compared.get()
-        );
-        self.the_cause_named_most_often_is(predicate);
     }
 
     /// Insist the share of fuses whose answer was not a solid is one a draw of
