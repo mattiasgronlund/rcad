@@ -69,7 +69,7 @@ fn a_block_clear_of_a_ball_whose_face_plane_holds_its_pole_fuses_and_measures() 
                     );
                     let (model, solids) = fused(centre, &placement, rule, ball_first)
                         .unwrap_or_else(|why| panic!("{what}: fuses: {why:?}"));
-                    validates_and_measures(&model, &solids, volume, &what);
+                    validates_and_measures(&model, &solids, volume, &[0.05, 0.01], &what);
                 }
             }
         }
@@ -98,7 +98,8 @@ enum Today {
 /// `h = 1 − d` high, and a cap of a unit ball holds `π h² (3 − h) / 3`. Ball
 /// less block is the cap, ball and block together are the cube and the cap,
 /// the two kept in common are the ball less the cap, and block less ball is
-/// the cube less that. Each is checked within the error the measure publishes.
+/// the cube less that. Each is checked within the error the measure publishes,
+/// measured at deflections of `0.3`, `0.1`, `0.05` and `0.01`.
 /// With the plane through `N` tilted 30 degrees, `d` is `cos 30° = √3/2` to
 /// within a rounding, so the cap is `π (1 − √3/2)² (2 + √3/2) / 3 ≈ 0.0539`.
 ///
@@ -120,7 +121,15 @@ enum Today {
 /// next to `N` on the rim, was handed over with that corner marked as where
 /// the rim passes from one edge to another, though the rim is one closed edge,
 /// so the cap cut the corner off with a side from `N` to the rim point past it
-/// and the disc cut off the same three rim points. Twelve
+/// and the disc cut off the same three rim points. All three were still
+/// refused it measured at `0.3` and `0.1` until Q1027, and so was ball less
+/// block at 180 and `−0.5` at `0.3`. In the half whose pole side runs from
+/// where the cut reaches `N` to where the rim does, the triangulator cut the
+/// side from the rim's `N` to the rim point two on, which cuts off the one
+/// between, and drew the side from the cut's `N` to that point instead, the
+/// same two points; the disc, fanned from `N`, drew it too. That was traced at
+/// 30 and at 250 and `−0.5`, at `0.3`; the rest answer with the same change.
+/// Twelve
 /// more, at direction 30 with the block less the ball or either intersection,
 /// were refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` until Q963: the
 /// piece below the plane is a cap round the south pole whose rim runs through
@@ -201,7 +210,13 @@ fn a_block_whose_face_plane_misses_a_balls_pole_by_a_rounding_cuts_off_a_cap_or_
                     Today::Answers => {
                         let (model, solids) =
                             said.unwrap_or_else(|why| panic!("{what}: fuses: {why:?}"));
-                        validates_and_measures(&model, &solids, volume, &what);
+                        validates_and_measures(
+                            &model,
+                            &solids,
+                            volume,
+                            &[0.3, 0.1, 0.05, 0.01],
+                            &what,
+                        );
                         winds_round_just(&model, &solids, &points, holds, &what);
                     }
                     Today::CornerReadAsThePoleOffThePinch => assert!(
@@ -279,13 +294,19 @@ fn fused(
 }
 
 /// Validate the model, and check that the answer's solids together measure
-/// `volume` within the error the measure publishes, at two deflections.
-fn validates_and_measures(model: &Model, solids: &[SolidKey], volume: f64, what: &str) {
+/// `volume` within the error the measure publishes, at each of `deflections`.
+fn validates_and_measures(
+    model: &Model,
+    solids: &[SolidKey],
+    volume: f64,
+    deflections: &[f64],
+    what: &str,
+) {
     let policy = Policy::certified();
     model
         .validate(&policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{what}: validates: {why:?}"));
-    for deflection in [0.05, 0.01] {
+    for &deflection in deflections {
         let mut measured = 0.0;
         let mut error = 0.0;
         for &solid in solids {

@@ -1280,8 +1280,9 @@ struct HowFineToGo<'a> {
     deflection: f64,
     slop: f64,
     step: f64,
-    /// Each corner of the domain that lies inside one edge, with the corners
-    /// before and after it along its own loop. Empty on a plane: see
+    /// Each corner of the domain that lies inside one edge, with a corner
+    /// before and a corner after it along its own loop, once for each pair
+    /// [`corners_inside_one_edge`] gives. Empty on a plane: see
     /// [`corners_cut_off_by_one_side`].
     corners_inside_one_edge: &'a [(usize, [FixedVertexHandle; 2])],
 }
@@ -1438,7 +1439,9 @@ fn refine_the_inside(
 }
 
 /// The corners of a curved patch that one side of the triangulation cuts
-/// straight across, from the corner before to the corner after along the loop.
+/// straight across, from the corner before to the corner after along the loop,
+/// or from a corner that is the same point in space as either
+/// ([`corners_inside_one_edge`]).
 ///
 /// **Such a side can be a side of the next face too, and then the mesh is
 /// wrong.** Where two faces meet at a sharp edge — a cap leaning steeply across
@@ -1490,26 +1493,82 @@ fn corners_cut_off_by_one_side(
 }
 
 /// Each corner that lies inside one edge, with the triangulation's handles for
-/// the corners either side of it along its own loop.
+/// a corner before it and a corner after it along its own loop: the one either
+/// side, and every corner that is the same point in space as one of those.
+///
+/// **Where a surface pinches, one point is several corners in a row**, and the
+/// side that cuts a corner off is a side between two points, whichever of the
+/// corners standing at each it is drawn from. A ball's pole is a whole side of
+/// the patch, from the longitude the boundary arrives at to the one it leaves
+/// by (`docs/decisions.md` §25.6). Asked only of the corner beside the cut-off
+/// one, the side from the far end of that pole side was free to be drawn
+/// instead. Q889's shape is where it showed: a unit ball less a cube whose
+/// face plane tilts 30 degrees and misses `N` by half a rounding leaves a cap
+/// with `N` on its rim, and a half of it runs from where a cut reaches `N`,
+/// along the pole side to where the rim arrives at `N`, and on down the rim.
+/// The side from the rim's `N` to the rim point two on was cut here, the
+/// triangulation drew the side from the cut's `N` to that point, the disc
+/// across, fanned from `N`, drew it too, and measured at `0.3` the answer was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` (Q1027,
+/// `a_turned_block_whose_face_holds_a_balls_pole.rs` in `rcad-topo`).
+///
+/// A corner is taken to be one point with the next only when both stand at
+/// the very second coordinate the surface pinches at
+/// ([`where_the_surface_pinches`]), which is where a caller writes a pole
+/// side. One read as a pole but written a rounding off it is not seen as one,
+/// and is asked about as any corner is.
 fn corners_inside_one_edge(
     domain: &TrimmedDomain,
     handles: &[FixedVertexHandle],
 ) -> Vec<(usize, [FixedVertexHandle; 2])> {
+    let corners = every_corner(domain);
     let mut before = vec![0; handles.len()];
     let mut after = vec![0; handles.len()];
     for (from, to) in every_side(domain) {
         after[from] = to;
         before[to] = from;
     }
-    (0..handles.len())
-        .filter(|&position| !domain.is_between_two_edges(position))
-        .map(|position| {
-            (
-                position,
-                [handles[before[position]], handles[after[position]]],
-            )
-        })
-        .collect()
+    let pinch = where_the_surface_pinches(domain.surface());
+    let one_point = |at: usize, next: usize| {
+        pinch.is_some_and(|pinch| corners[at][1].abs() == pinch)
+            && corners[next][1] == corners[at][1]
+    };
+    let the_corners_at_one_point_from = |first: usize, onwards: &[usize], cut_off: usize| {
+        let mut run = vec![first];
+        let mut at = first;
+        while onwards[at] != cut_off && !run.contains(&onwards[at]) && one_point(at, onwards[at]) {
+            at = onwards[at];
+            run.push(at);
+        }
+        run
+    };
+    let mut inside = Vec::new();
+    for position in (0..handles.len()).filter(|&position| !domain.is_between_two_edges(position)) {
+        let afters = the_corners_at_one_point_from(after[position], &after, position);
+        for one_before in the_corners_at_one_point_from(before[position], &before, position) {
+            for &one_after in &afters {
+                inside.push((position, [handles[one_before], handles[one_after]]));
+            }
+        }
+    }
+    inside
+}
+
+/// The second coordinate at which a surface pinches to one point, read without
+/// its sign, or `None` for one that pinches nowhere: a ball's poles at `±π/2`,
+/// and a cone's apex at `0` on either nappe.
+///
+/// # Panics
+///
+/// On a surface this crate has not been taught, for the reason
+/// [`how_far_a_point_lands_off_its_surface`] gives.
+fn where_the_surface_pinches(surface: &Surface) -> Option<f64> {
+    match surface {
+        Surface::Sphere(_) => Some(core::f64::consts::FRAC_PI_2),
+        Surface::Cone(_) => Some(0.0),
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) => None,
+        other => panic!("this crate cannot say where {other:?} pinches"),
+    }
 }
 
 /// The points the refinement has put down, bucketed by how far apart they have
@@ -1894,6 +1953,55 @@ mod tests {
         assert_eq!(turns_one_way_once_round(&seven(2)), None);
         assert_eq!(turns_one_way_once_round(&dented), None);
         assert_eq!(turns_one_way_once_round(&straight), None);
+    }
+
+    /// Half a cap of a unit ball with the north pole `N` on its rim, as
+    /// `rcad-topo` hands it over for Q889's shape at tilt direction 30 and
+    /// `−0.5` roundings: from where a cut reaches `N`, along the pole side to
+    /// where the rim arrives at `N`, down the rim through four points, and back
+    /// up the cut through one. The rim is one closed edge that a flat disc
+    /// holds too, so no side may cut a rim point off between its neighbours,
+    /// and the two corners at `N` are one neighbour. Before Q1027 the side from
+    /// the rim's `N` to the second rim point was cut, and the one from the
+    /// cut's `N` to it was drawn.
+    #[test]
+    fn no_side_cuts_off_the_rim_point_beside_a_pole_from_either_end_of_the_pole_side() {
+        let pole = core::f64::consts::FRAC_PI_2;
+        let corners = vec![
+            [0.517_088_499_497_801_1, pole],
+            [-0.858_556_149_995_533_4, pole],
+            [-0.858_556_149_995_533_4, 1.355_101_762_754_067_1],
+            [-0.449_901_067_827_468_6, 0.942_862_505_055_460_4],
+            [0.008_044_512_237_852_575, 0.639_814_837_818_900_4],
+            [0.515_025_951_126_744_1, 0.523_630_599_236_529_3],
+            [0.516_057_225_312_272_6, 1.047_213_463_015_713],
+        ];
+        // `N` twice, the rim's points 1 to 4, and the point along the cut.
+        let point_of: [u32; 7] = [0, 0, 1, 2, 3, 4, 8];
+        let ball = Sphere::new(Point::origin(), 1.0).expect("a unit ball");
+        let domain = TrimmedDomain::new(
+            Surface::from(ball),
+            crate::domain::Loop::through(corners).expect("seven corners"),
+            Vec::new(),
+            rcad_geom::Deflection::of(0.3).expect("a positive length"),
+        )
+        .with_corners_between_two_edges(vec![true, true, false, false, false, true, true]);
+        let patch = triangulate(&domain).expect("the half cap is cut");
+
+        let point = |corner: u32| point_of.get(corner as usize).copied();
+        let cutting_off_a_rim_point = [[0, 2], [1, 3], [2, 4]].map(|ends| ends.map(Some));
+        for triangle in patch.triangles() {
+            for (from, to) in [(0, 1), (1, 2), (2, 0)] {
+                let side = [point(triangle[from]), point(triangle[to])];
+                assert!(
+                    !cutting_off_a_rim_point
+                        .iter()
+                        .any(|&[one, other]| side == [one, other] || side == [other, one]),
+                    "triangle {triangle:?} cuts a rim point off with the side between points \
+                     {side:?}"
+                );
+            }
+        }
     }
 
     /// [`how_far_a_flat_piece_strays`]'s torus arm is a published bound, so here
