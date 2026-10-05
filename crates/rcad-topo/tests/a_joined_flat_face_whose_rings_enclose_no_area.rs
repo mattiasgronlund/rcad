@@ -30,13 +30,15 @@
 //! unturned, the probe for that family, were refused before `rings_round`
 //! until Q897 and are answered now. The probe for an arc along a cone's
 //! parabola, a tube and a cone cut by one leaning plane, is refused before
-//! `rings_round` under every rule (Q634).
+//! `rings_round` under every rule (Q634), and so is the probe for two arcs
+//! along two cones' hyperbolas, a cut cone less a second cone on its axis,
+//! because two different cones cannot be crossed (Q636).
 
 use std::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
-    Scale, Surface, Torus, Vector,
+    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
+    Point, Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftEdge, DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
@@ -484,8 +486,9 @@ fn two_holed_bars_turned_a_quarter_are_answered_with_the_hole_placed_by_the_outl
 /// (§365.2, Q635), and that piece is now placed by the side it shares with a
 /// piece of the other solid's face instead (§365.3, Q712). Moving the wall to
 /// `x = −11` or the top above the cone's base was refused the same way, and
-/// has not been run since. Neither has either probe, so whether one now
-/// reaches `holds_the_other_rings` is not known.
+/// has not been run since. The probe of two cones is refused at its second
+/// fuse (the next test, Q636); the ball's pocket has not been run since, so
+/// whether it now reaches `holds_the_other_rings` is not known.
 ///
 /// The part of the cone the block holds is the cone up to `z = 18`, `1944π`,
 /// less what lies past the wall, `∫₁₂¹⁸ (z² acos(12/z) − 12√(z² − 144)) dz`,
@@ -494,20 +497,12 @@ fn two_holed_bars_turned_a_quarter_are_answered_with_the_hole_placed_by_the_outl
 fn a_cone_cut_by_a_block_wall_off_its_axis_is_answered_under_every_rule() {
     let cone = 8000.0 * PI / 3.0;
     let block = 36.0 * 48.0 * 19.0;
-    let past_the_wall = 1944.0 * (2.0_f64 / 3.0).acos() - 144.0 * 180.0_f64.sqrt()
-        + 576.0 * ((18.0 + 180.0_f64.sqrt()) / 12.0).ln();
-    let shared = 1944.0 * PI - past_the_wall;
+    let shared = what_the_block_holds_of_the_cone();
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let the_cone = cones::a_pointed_cone(&mut model, 1.0, 20.0);
-        let the_block = a_block(
-            &mut model,
-            &[[-12.0, -24.0], [24.0, -24.0], [24.0, 24.0], [-12.0, 24.0]],
-            -1.0,
-            19.0,
-        );
+        let pair = a_cone_and_a_block_across_it(&mut model);
         let what = format!("{rule:?}, swapped {swapped}");
-        let answer = fused_in_order(&mut model, [the_cone, the_block], rule, swapped);
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
         let volume = match (rule, swapped) {
             (Rule::Union, _) => cone + block - shared,
             (Rule::Intersection, _) => shared,
@@ -517,6 +512,116 @@ fn a_cone_cut_by_a_block_wall_off_its_axis_is_answered_under_every_rule() {
         };
         assert_holds(&model, the_only(answer, &what), volume, &what);
     }
+}
+
+/// **Two cups along two cones' hyperbolas on one face.** The cone the block
+/// above holds, less a second pointed cone of slope 1 on the same axis, apex
+/// at `z = 2` and base at `z = 16`. On the wall `x = −12` the second cone's
+/// cup reaches down to `(−12, 0, 14)` and is `√52` either side at its base,
+/// inside the first's, which reaches down to `(−12, 0, 12)` and is `√112`
+/// either side at that height: the two cups nest. United with the block
+/// `[−12, −11] × [10, 12] × [17.25, 17.75]`, flush with that wall, the wall's
+/// pieces would join into one face whose outline and hole each run along a
+/// hyperbola between two corners, which `holds_the_other_rings` answers `None`
+/// for.
+///
+/// **That is not reached: the cut cone less the second cone is refused under
+/// every rule, both ways round**, in `cuts::gather` where it asks `intersect`
+/// how the two cones' faces meet (a breakpoint on `intersect`, Q636).
+/// `intersect` calls two cones one surface only when they are one cone, and
+/// refuses every other pair by name; these two differ in their apex. So
+/// whether two nested cups panic in `rings_round` cannot be asked through this
+/// shape while two different cones cannot be crossed, and the flush block is
+/// not built. The two surfaces do cross: a cone here is both nappes, and the
+/// first's upper nappe meets the second's lower one in the circle of radius 1
+/// at `z = 1`. That circle is on the first cone's face and below the second's
+/// apex, so the two faces never meet.
+///
+/// Both solids are measured first: the cut cone holds what the test above
+/// says, and the second cone `2744π/3`.
+#[test]
+fn a_cut_cone_less_a_second_cone_on_its_axis_is_refused_before_its_cups_are_joined() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let [cut, second] = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
+    assert_holds(
+        &model,
+        cut,
+        what_the_block_holds_of_the_cone(),
+        "the cut cone",
+    );
+    assert_holds(&model, second, 2744.0 * PI / 3.0, "the second cone");
+
+    let first_skin = Cone::new(Axis::z(), 1.0).expect("a positive slope");
+    let second_skin = first_skin.transformed(&at(0.0, 0.0, 2.0));
+    assert_eq!(
+        [
+            first_skin.point_at(0.0, 1.0),
+            second_skin.point_at(0.0, -1.0)
+        ],
+        [Point::new(1.0, 0.0, 1.0); 2],
+        "both cones hold the point one up and one out, the second on its lower nappe"
+    );
+    let refused = rcad_geom::intersect(
+        &Surface::Cone(first_skin),
+        &Surface::Cone(second_skin),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        ),
+        "{refused:?}"
+    );
+
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
+        let refused = fused_in_order(&mut model, pair, rule, swapped);
+        assert!(
+            matches!(
+                refused,
+                Err(Error::Geometry(
+                    rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface
+                ))
+            ),
+            "{rule:?}, swapped {swapped}: {refused:?}"
+        );
+    }
+}
+
+/// The pointed cone of slope 1 with its base at `z = 20`, and the block from
+/// `x = −12` to `24`, `y = ±24`, `z = −1` to `18`, cone first.
+fn a_cone_and_a_block_across_it(model: &mut Model) -> [SolidKey; 2] {
+    let cone = cones::a_pointed_cone(model, 1.0, 20.0);
+    let block = a_block(
+        model,
+        &[[-12.0, -24.0], [24.0, -24.0], [24.0, 24.0], [-12.0, 24.0]],
+        -1.0,
+        19.0,
+    );
+    [cone, block]
+}
+
+/// The part of [`a_cone_and_a_block_across_it`]'s cone that its block holds,
+/// as the test of the pair works it out. A quadrature of the slices agrees to
+/// 1e-11 (Q636).
+fn what_the_block_holds_of_the_cone() -> f64 {
+    let past_the_wall = 1944.0 * (2.0_f64 / 3.0).acos() - 144.0 * 180.0_f64.sqrt()
+        + 576.0 * ((18.0 + 180.0_f64.sqrt()) / 12.0).ln();
+    1944.0 * PI - past_the_wall
+}
+
+/// The cone the block holds, and the second cone, its apex moved up to `z = 2`.
+fn a_cut_cone_and_a_second_cone_on_its_axis(model: &mut Model) -> [SolidKey; 2] {
+    let [cone, block] = a_cone_and_a_block_across_it(model);
+    let cut = the_one_solid(model, cone, block, Rule::Intersection);
+    let second = cones::a_pointed_cone(model, 1.0, 14.0);
+    model
+        .place_solid(second, &at(0.0, 0.0, 2.0))
+        .expect("this model made the key");
+    [cut, second]
 }
 
 /// **An arc along a cone's parabola.** The plane `z = x + 4` leans at the
