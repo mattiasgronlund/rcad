@@ -900,30 +900,15 @@ impl HowItRuns {
 /// A point of the arrangement.
 struct Node {
     point: PredicatePoint,
-    /// A tighter box round the node, asked **one question only**: which of two
-    /// nodes comes first along a crossing, where their own boxes cannot say
-    /// ([`Arrangement::as_the_boxes_say`]). Every other question reads `point`.
-    ///
-    /// [`MeetOfThree::boxed_tight`] for a meet of two planes and a ball, a
-    /// pipe or a cone, and `point` for every other node. Wired in as `point`
-    /// itself, the tighter box of a meet of three planes moved 13 tests, most
-    /// of them to a refusal or to no solid (§345.2).
-    ///
-    /// **A meet of three planes keeps `point` here too**, as measured and not
-    /// argued. Asked by the order, its tighter box moved four pins in files
-    /// Q209 did not own: two frustum tallies in
-    /// `a_plane_cut_along_a_cones_other_nappe.rs` went from 64 to 68 and from
-    /// 68 to 80 right answers, one of the pyramid unions §395.4 leaves refused
-    /// was united, with its volume not checked, and the turned wedge in
-    /// `a_narrow_lune_from_a_pole_corner.rs` went from a refusal by name to
-    /// `Undecidable` on a point inside a piece. With three planes left out,
-    /// none of them moves and the whole workspace passes.
-    boxed_tight: PredicatePoint,
     /// The input corner this is, when it is one.
     vertex: Option<VertexKey>,
     /// The three surfaces that placed it, in [`meet_of_three_surfaces`]'s own
     /// fixed order, and which of their meeting points this is. `None` for a
     /// corner the input already had.
+    ///
+    /// `point` is where these three meet, so the two travel together: every
+    /// place that moves one moves the other, and
+    /// [`Arrangement::narrowed_box_of`] narrows `point` from these.
     made_of: Option<([Surface; 3], u8)>,
     /// Every other meet of three surfaces this node stands for, named the way
     /// `made_of` is: each one folded into it by
@@ -1385,7 +1370,6 @@ impl<'f> Arrangement<'f> {
                 corners.push(self.nodes.len());
                 self.nodes.push(Node {
                     point: at,
-                    boxed_tight: at,
                     vertex: Some(corner.vertex),
                     made_of: None,
                     also: Vec::new(),
@@ -1593,16 +1577,16 @@ impl<'f> Arrangement<'f> {
                         return Err(gave_up_on_it.into());
                     }
                 };
-                // The tighter box is read by a fold into a corner on both
-                // crossings, and by the order along a crossing with a curved
-                // surface in it, and by nothing else. Working it out for every
+                // The tighter box is read here by a fold into a corner on both
+                // crossings and by nothing else; the order along a crossing
+                // narrows a node's box itself, only where it asks
+                // (`Arrangement::narrowed_box_of`). Working it out for every
                 // meet of three planes was 11 of 22 samples taken in placing
                 // the meets of a cut through the 1x39 pin header (§200.1).
-                let all_planes = surfaces.iter().all(|surface| surface.as_plane().is_some());
-                let tight = if all_planes && !self.a_corner_is_on_both(first, second) {
-                    meet.clone()
-                } else {
+                let tight = if self.a_corner_is_on_both(first, second) {
                     meet.boxed_tight(asked)
+                } else {
+                    meet.clone()
                 };
                 let MeetOfThree::At(places) = meet else {
                     continue;
@@ -1641,10 +1625,8 @@ impl<'f> Arrangement<'f> {
                         self.nodes[corner].stands_for_too((sorted, which));
                         continue;
                     }
-                    let ordered_by = if all_planes { place } else { boxed_tight };
                     self.nodes.push(Node {
                         point: place,
-                        boxed_tight: ordered_by,
                         vertex: None,
                         made_of: Some((sorted, which)),
                         also: Vec::new(),
@@ -1714,7 +1696,6 @@ impl<'f> Arrangement<'f> {
         }
         self.nodes.push(Node {
             point: apex,
-            boxed_tight: apex,
             vertex: None,
             made_of: Some((named, 0)),
             also: Vec::new(),
@@ -1798,11 +1779,11 @@ impl<'f> Arrangement<'f> {
     /// and every other question here reads `place`, the reach below included:
     /// wired in as the node's own box, the narrowed one moved 13 tests, most of
     /// them to a refusal or to no solid, where asked only here it moves one,
-    /// to the right answer (§345). The one other question that reads it is the
-    /// order along a crossing, for a meet with a curved surface in it, where
-    /// the node's own box cannot say ([`Node::boxed_tight`]). Narrowing a
-    /// curved meet's box here changed no fold over the whole workspace's tests
-    /// when Q209 measured it.
+    /// to the right answer (§345). The one other question that reads a
+    /// narrowed box is the order along a crossing, where the node's own box
+    /// cannot say, and it narrows the node's box itself
+    /// ([`Arrangement::narrowed_box_of`]). Narrowing a curved meet's box here
+    /// changed no fold over the whole workspace's tests when Q209 measured it.
     ///
     /// **Or when the three are planes `bake` solved the corner among**, however
     /// far past the corner's grown box the meet's box reaches, as long as it
@@ -2001,7 +1982,6 @@ impl<'f> Arrangement<'f> {
             if let Some(pole) = the_one_pole_a_circle_runs_through([&self.surface, &partner]) {
                 self.nodes.push(Node {
                     point: pole,
-                    boxed_tight: pole,
                     vertex: None,
                     made_of: None,
                     also: Vec::new(),
@@ -2027,7 +2007,6 @@ impl<'f> Arrangement<'f> {
             let point = where_the_crossing_starts(&self.surface, &partner, from);
             self.nodes.push(Node {
                 point,
-                boxed_tight: point,
                 vertex: None,
                 made_of: None,
                 also: Vec::new(),
@@ -2041,7 +2020,6 @@ impl<'f> Arrangement<'f> {
             ) {
                 self.nodes.push(Node {
                     point: across,
-                    boxed_tight: across,
                     vertex: None,
                     made_of: None,
                     also: Vec::new(),
@@ -2202,7 +2180,6 @@ impl<'f> Arrangement<'f> {
                     folded[index] = Some(nodes.len());
                     nodes.push(Node {
                         point: self.nodes[index].point,
-                        boxed_tight: self.nodes[index].boxed_tight,
                         vertex: self.nodes[index].vertex,
                         made_of: self.nodes[index].made_of,
                         also: self.nodes[index].also.clone(),
@@ -2233,7 +2210,6 @@ impl<'f> Arrangement<'f> {
                     if takes_over {
                         nodes[into].vertex = mine.vertex;
                         nodes[into].point = mine.point;
-                        nodes[into].boxed_tight = mine.boxed_tight;
                         nodes[into].made_of = mine.made_of;
                     }
                     for name in loses_its_name.into_iter().chain(mine.also.iter().copied()) {
@@ -2391,8 +2367,8 @@ impl<'f> Arrangement<'f> {
     /// and without asking a policy.
     ///
     /// **Where their own boxes cannot say, their tighter boxes are asked**
-    /// ([`Node::boxed_tight`]), and only a proved [`Decision::Pos`] or
-    /// [`Decision::Neg`] is taken from them. Each tighter box holds the same
+    /// ([`Arrangement::narrowed_box_of`]), and only a proved [`Decision::Pos`]
+    /// or [`Decision::Neg`] is taken from them. Each tighter box holds the same
     /// point as the node's own, so a sign proved over the two of them is the
     /// order of those two points. A node's own box is what every other
     /// question here reads, and what the record of a refusal names.
@@ -2402,6 +2378,16 @@ impl<'f> Arrangement<'f> {
     /// `5` wide along `x`. Round the circle from `(0, −5, 0)` the sweep over
     /// that box straddles zero, and all six certified fuses of the two refused
     /// (§284.3). Over the tighter box, `[5 − 1 ulp, 5]` along `x`, it does not.
+    ///
+    /// **A meet of three planes is narrowed too.** A pyramid bent by a 4096th
+    /// at one base corner, 4 high, has a meet of three of its apex's own
+    /// planes whose box misses the apex's room, so it stays a node beside the
+    /// apex. Along a side of the pyramid the two boxes overlap, and the planes
+    /// cannot say ([`Arrangement::as_the_planes_say`]): the apex has four planes
+    /// round it and `bake` does not say which three it solved it from. So the
+    /// certified union with a cube refused on the order. The meet's narrowed
+    /// box lies `7e-13` past the apex's along that side, and the union answers
+    /// with the two solids and their volumes (Q866).
     ///
     /// **Round a closed crossing the tighter boxes are swept and not named.**
     /// [`round_a_closed_crossing`] recognises the start by comparing a node's
@@ -2425,14 +2411,47 @@ impl<'f> Arrangement<'f> {
                 self.how_far_apart_along(crossing, one, other)?
             }
         };
-        let tight = [first, second].map(|node| self.nodes[node].boxed_tight);
-        if !matches!(decided, Decision::Undecidable { .. }) || tight == [one, other] {
+        if !matches!(decided, Decision::Undecidable { .. }) {
+            return Ok(decided);
+        }
+        let tight = [first, second].map(|node| self.narrowed_box_of(node));
+        if tight == [one, other] {
             return Ok(decided);
         }
         match self.how_far_apart_along(crossing, tight[0], tight[1]) {
             Ok(proved @ (Decision::Pos | Decision::Neg)) => Ok(proved),
             Ok(_) | Err(_) => Ok(decided),
         }
+    }
+
+    /// The node's own box narrowed by one checked step, where the node is a
+    /// meet of three planes, or of two planes and a ball, a pipe or a cone
+    /// ([`MeetOfThree::boxed_tight`]), and its own box for every other node.
+    ///
+    /// **Worked out when the order asks, and not kept on the node.** Kept on
+    /// every meet of three planes, it was 11 of 22 samples in placing the meets
+    /// of a cut through the 1x39 pin header (§200.1), and the order asks for it
+    /// only where two nodes' own boxes cannot say. The answer is the one
+    /// working it out in [`Arrangement::place_the_meets`] gives: the node's box
+    /// is where its three surfaces meet, and the three are turned to face the
+    /// one way as they were when they were solved. A box that collapsed onto
+    /// one `f64` triple was stored as that triple, and narrowing either gives
+    /// the same point.
+    fn narrowed_box_of(&self, node: usize) -> PredicatePoint {
+        let Node { point, made_of, .. } = &self.nodes[node];
+        let Some((surfaces, _)) = made_of else {
+            return *point;
+        };
+        let asked = three_planes_faced_the_one_way(*surfaces);
+        let MeetOfThree::At(narrowed) = MeetOfThree::At(SmallVec::from_slice(&[*point]))
+            .boxed_tight([&asked[0], &asked[1], &asked[2]])
+        else {
+            unreachable!("a meet at a point boxed tighter is still a meet at that point")
+        };
+        let [narrowed] = narrowed[..] else {
+            unreachable!("a meet at one point boxed tighter is a meet at one point")
+        };
+        as_exact_as_it_is(narrowed)
     }
 
     /// The sign of how far `other` lies past `one` along the crossing, read
@@ -2671,7 +2690,6 @@ impl<'f> Arrangement<'f> {
         let twin = self.nodes.len();
         self.nodes.push(Node {
             point: self.nodes[node].point,
-            boxed_tight: self.nodes[node].boxed_tight,
             vertex: None,
             made_of: self.nodes[node].made_of,
             also: self.nodes[node].also.clone(),
@@ -7815,7 +7833,6 @@ mod tests {
         arrangement.nodes = (0..25)
             .map(|node| Node {
                 point: PredicatePoint::from([0.0; 3]),
-                boxed_tight: PredicatePoint::from([0.0; 3]),
                 vertex: corners.contains(&node).then_some(vertex),
                 made_of: None,
                 also: Vec::new(),
