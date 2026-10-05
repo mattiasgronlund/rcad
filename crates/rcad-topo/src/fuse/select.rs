@@ -39,12 +39,14 @@
 //! # A piece that holds no point is placed by a side it shares
 //!
 //! **The one exception, and only where the search above found no point inside
-//! the piece at all.** A piece can be narrower than the spacing of `f64`, and
-//! then no point it could be handed is inside it (§346.3). Such a piece is
-//! placed against a solid by a side it shares with a piece cut from one of that
-//! solid's faces, from which side of that face its own material is on
-//! ([`SidesItShares`], §365.3). A fuse that found a point for every piece never
-//! gets there, and answers as it did.
+//! the piece at all** — or found one only among its last tries, the rungs of
+//! [`rungs_towards_each_crossing`], and could not place it, so that a piece
+//! that came here before the rungs still does (§365.6). A piece can be
+//! narrower than the spacing of `f64`, and then no point it could be handed is
+//! inside it (§346.3). Such a piece is placed against a solid by a side it
+//! shares with a piece cut from one of that solid's faces, from which side of
+//! that face its own material is on ([`SidesItShares`], §365.3). A fuse that
+//! found a point for every piece never gets there, and answers as it did.
 
 use rcad_geom::{
     Cone, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus, Vector,
@@ -103,7 +105,9 @@ pub(crate) struct Chosen {
 /// [`Error::Undecidable`] when a piece could not be placed against the solids
 /// it has to be placed against: under [`INSIDE_A_PIECE`] when no point inside
 /// it was found and no side it shares placed it either, and under
-/// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be.
+/// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be —
+/// after the sides it shares were tried too, where only a rung of
+/// [`rungs_towards_each_crossing`] was found.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -136,7 +140,7 @@ pub(crate) fn choose(
         };
         let candidates = candidate_points(piece, &corners);
         let mut place = |against: &[usize], log: &mut ProvenanceLog| -> Result<Placement> {
-            if let Some(placement) = place_the_piece(
+            let unplaced = match place_the_piece(
                 model,
                 &solids,
                 against,
@@ -146,11 +150,13 @@ pub(crate) fn choose(
                 policy,
                 log,
             )? {
-                return Ok(placement);
-            }
+                Search::Placed(placement) => return Ok(placement),
+                Search::NoPointInside => INSIDE_A_PIECE,
+                Search::OnlyRungsInside => PLACED_AGAINST_EVERY_SOLID,
+            };
             by_a_shared_side
                 .place(index, against, policy, log)
-                .ok_or_else(|| gave_up(INSIDE_A_PIECE, &corners.concat(), Measures::Length, log))
+                .ok_or_else(|| gave_up(unplaced, &corners.concat(), Measures::Length, log))
         };
 
         let own_group: Vec<usize> = (0..solids.len())
@@ -337,25 +343,34 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
     }
 }
 
-/// Where one piece sits relative to a set of solids, or `None` when no
-/// candidate was inside the piece at all.
+/// Where one piece sits relative to a set of solids, or which of the two ways
+/// the search for a point to place it by ran out.
 ///
 /// Inside beats on, and on beats outside: a piece lying on one solid of a group
 /// but buried in another is inside the union of them. So is a piece lying on
 /// two of them that face opposite ways — see [`LyingOn::placement`].
 ///
 /// **Two searches happen here, and a caller that cannot tell them apart is told
-/// the wrong thing.** `None` says no point inside the piece was found, which is
-/// [`INSIDE_A_PIECE`] unless a side the piece shares places it
-/// ([`SidesItShares`]); [`PLACED_AGAINST_EVERY_SOLID`] says one was found and
-/// could not be classified against every solid in the set. The first says to
-/// look at the piece's trimming, the second says the piece is fine and a
+/// the wrong thing.** [`Search::NoPointInside`] says no point inside the piece
+/// was found, which is [`INSIDE_A_PIECE`] unless a side the piece shares places
+/// it ([`SidesItShares`]); [`PLACED_AGAINST_EVERY_SOLID`] says one was found
+/// and could not be classified against every solid in the set. The first says
+/// to look at the piece's trimming, the second says the piece is fine and a
 /// surface further down gave up — the lens in §216.4 is the second wearing the
 /// first's name.
 ///
+/// **The rungs of [`rungs_towards_each_crossing`] come last**, after
+/// [`points_in_a_sliver_of_a_ball`] too, so a piece any earlier point placed
+/// is placed by that point as it was. A piece only a rung was found inside,
+/// and that no rung could place, is [`Search::OnlyRungsInside`] and not a
+/// refusal here: before the rungs it was a piece with no point found, which a
+/// side it shares could place, and a rung that cannot be classified must not
+/// take that away (`docs/decisions.md` §365.6).
+///
 /// # Errors
 ///
-/// [`Error::Undecidable`] under [`PLACED_AGAINST_EVERY_SOLID`].
+/// [`Error::Undecidable`] under [`PLACED_AGAINST_EVERY_SOLID`] when a point
+/// offered before the rungs was inside the piece and no point placed it.
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -370,9 +385,9 @@ fn place_the_piece(
     in_plane: Option<&InPlane>,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<Placement>> {
+) -> Result<Search> {
     if against.is_empty() {
-        return Ok(Some(Placement::Outside));
+        return Ok(Search::Placed(Placement::Outside));
     }
     let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
     let try_one =
@@ -395,7 +410,7 @@ fn place_the_piece(
         };
         one_was_inside = true;
         if let Some(placement) = settled {
-            return Ok(Some(placement));
+            return Ok(Search::Placed(placement));
         }
     }
     if !one_was_inside {
@@ -405,23 +420,48 @@ fn place_the_piece(
             };
             one_was_inside = true;
             if let Some(placement) = settled {
-                return Ok(Some(placement));
+                return Ok(Search::Placed(placement));
             }
         }
     }
-    if !one_was_inside {
-        return Ok(None);
+    let mut a_rung_was_inside = false;
+    for rung in rungs_towards_each_crossing(piece) {
+        let Some(settled) = try_one(rung, log)? else {
+            continue;
+        };
+        a_rung_was_inside = true;
+        if let Some(placement) = settled {
+            return Ok(Search::Placed(placement));
+        }
     }
-    Err(gave_up(
-        PLACED_AGAINST_EVERY_SOLID,
-        &corners_of(piece).concat(),
-        Measures::Length,
-        log,
-    ))
+    if one_was_inside {
+        return Err(gave_up(
+            PLACED_AGAINST_EVERY_SOLID,
+            &corners_of(piece).concat(),
+            Measures::Length,
+            log,
+        ));
+    }
+    Ok(if a_rung_was_inside {
+        Search::OnlyRungsInside
+    } else {
+        Search::NoPointInside
+    })
 }
 
-/// §365.3's rule: a piece no point inside which was found, placed against each
-/// solid by a side it shares with a piece cut from one of that solid's faces.
+/// What [`place_the_piece`] found.
+enum Search {
+    Placed(Placement),
+    /// No point offered was proved inside the piece.
+    NoPointInside,
+    /// Only rungs of [`rungs_towards_each_crossing`] were, and none of them
+    /// could be classified against every solid in the set.
+    OnlyRungsInside,
+}
+
+/// §365.3's rule: a piece no point inside which was found, or only a rung that
+/// could not be placed, placed against each solid by a side it shares with a
+/// piece cut from one of that solid's faces.
 ///
 /// A piece `P` and a solid `S`. If a side of `P` is also a side of a piece cut
 /// from a face `G` of `S`, the other piece's side runs along none of `G`'s own
@@ -469,8 +509,8 @@ impl<'a> SidesItShares<'a> {
     ///
     /// **Nothing here refuses.** A naming that gives up, a plane agreement
     /// that cannot be told, or two shared sides that disagree each leave the
-    /// piece where the point search left it, and the caller refuses under
-    /// [`INSIDE_A_PIECE`] as it did before this was tried.
+    /// piece where the point search left it, and the caller refuses under the
+    /// name that search ran out under, as it did before this was tried.
     fn place(
         &mut self,
         piece: usize,
@@ -1688,17 +1728,12 @@ fn towards_every_flat_sides_material(piece: &Piece) -> Option<Vector> {
 /// straight side, and for a side with nothing to go round or no length to go
 /// square to.
 fn half_way_into_either_arc(flat: &Plane, side: &FaceMeet) -> Vec<PredicatePoint> {
-    let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
-    let chord = end - start;
-    let Ok(across) = flat.normal().cross(chord).normalized() else {
+    let Some(chord) = Chord::of(flat, side) else {
         return Vec::new();
     };
-    let middle = start + chord * 0.5;
     let mut candidates = Vec::new();
-    for centre in the_middles_of_a_round_wire(flat, &side.carried_by[1]) {
-        let off = across.dot(middle_of(centre) - middle);
-        let reach = (off * off + chord.length_squared() / 4.0).sqrt();
-        let points = [off + reach, off - reach].map(|to| middle + across * (to / 2.0));
+    for both in chord.where_the_circles_cross(flat, &side.carried_by[1]) {
+        let points = both.map(|to| chord.middle + chord.across * (to / 2.0));
         if points.iter().all(Point::is_finite) {
             candidates.extend(points.map(|point| PredicatePoint::from(point.coordinates())));
         }
@@ -1739,37 +1774,145 @@ fn half_way_across_the_chord_to_a_cone(flat: &Plane, side: &FaceMeet) -> Vec<Pre
     let Surface::Cone(cone) = side.carried_by[1] else {
         return Vec::new();
     };
-    let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
-    let chord = end - start;
-    let Ok(across) = flat.normal().cross(chord).normalized() else {
+    let Some(chord) = Chord::of(flat, side) else {
         return Vec::new();
     };
-    let middle = start + chord * 0.5;
-    let up = cone.axis().direction();
-    let widening = 1.0 + cone.slope() * cone.slope();
-    let from_apex = middle - cone.apex();
-    let (along_now, along_per_step) = (from_apex.dot(up), across.dot(up));
-    let square = widening * along_per_step * along_per_step - up.length_squared();
-    let linear =
-        2.0 * (widening * along_now * along_per_step - up.length_squared() * from_apex.dot(across));
-    let constant =
-        widening * along_now * along_now - up.length_squared() * from_apex.length_squared();
-    let steps: Vec<f64> = if square == 0.0 {
-        vec![-constant / linear]
-    } else {
+    chord
+        .where_the_cone_crosses(&cone)
+        .into_iter()
+        .map(|step| chord.middle + chord.across * (step / 2.0))
+        .filter(Point::is_finite)
+        .map(|point| PredicatePoint::from(point.coordinates()))
+        .collect()
+}
+
+/// Points ever nearer each place [`half_way_into_either_arc`] and
+/// [`half_way_across_the_chord_to_a_cone`] go half way to: a quarter of the way
+/// back from it towards the chord's middle, an eighth, and so on, and as far
+/// again past it where the side's material is outside its partner. Nothing for
+/// a curved piece, whose candidates are built another way.
+///
+/// **Half way can be in a hole when the side is long.** A tube's cap less a bar
+/// across its wall is a C (`tests/a_tube_less_a_bar_united_with_a_second_bar.rs`):
+/// the outer arc runs the long way round from `(2.6875, ±1.3332)`, so half way
+/// from its chord's middle `(2.6875, 0)` to `(−3, 0)` is `(−0.15625, 0)`, in the
+/// tube's hole, and the other way it is in the bar. Every point offered before
+/// was in the one or the other, and every fuse of the two refused. The first
+/// rung in the C is half as far again past the bar's arc as its chord's middle
+/// is from it, `(1.5028, ±1.6382)`; a quarter of the way back from `(−3, 0)`,
+/// `(−1.578125, 0)`, is in it too.
+///
+/// Near a crossing on the side's own arc the piece is on the side
+/// `material_side` names, so some rung is in it wherever the piece is wider
+/// there than the rung is near. **The ladder stops at `2⁻⁵²` of the way**,
+/// where a rung is within a rounding of the crossing it is built from and the
+/// next could not be told from it; a piece thinner than that beside every
+/// crossing gets the points it got before, and is refused by the same name.
+/// The shallow rungs of every side come before the deep ones of any, since a
+/// rung nearer a partner is harder to classify against the solid it bounds.
+///
+/// These are offered after every other point, even [`points_in_a_sliver_of_a_ball`],
+/// so they place only pieces nothing else did (`docs/decisions.md` §365.6).
+fn rungs_towards_each_crossing(piece: &Piece) -> Vec<PredicatePoint> {
+    let Some(flat) = piece.surface.as_plane() else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    for side in piece.wires.iter().flatten() {
+        let Some(chord) = Chord::of(flat, side) else {
+            continue;
+        };
+        let mut crossings: Vec<f64> = chord
+            .where_the_circles_cross(flat, &side.carried_by[1])
+            .into_iter()
+            .flatten()
+            .collect();
+        if let Surface::Cone(cone) = &side.carried_by[1] {
+            crossings.extend(chord.where_the_cone_crosses(cone));
+        }
+        let material_is_outside = side.material_side == Decision::Pos;
+        lines.push((chord, crossings, material_is_outside));
+    }
+    let mut rungs = Vec::new();
+    let mut back = 1.0;
+    for depth in 1..f64::MANTISSA_DIGITS {
+        back /= 2.0;
+        for (chord, crossings, material_is_outside) in &lines {
+            for &crossing in crossings {
+                if depth > 1 {
+                    rungs.push(chord.middle + chord.across * (crossing * (1.0 - back)));
+                }
+                if *material_is_outside {
+                    rungs.push(chord.middle + chord.across * (crossing * (1.0 + back)));
+                }
+            }
+        }
+    }
+    rungs
+        .into_iter()
+        .filter(Point::is_finite)
+        .map(|point| PredicatePoint::from(point.coordinates()))
+        .collect()
+}
+
+/// The middle of a curved side's chord, and the way square to the chord in the
+/// piece's plane.
+struct Chord {
+    middle: Point,
+    across: Vector,
+    length_squared: f64,
+}
+
+impl Chord {
+    /// `None` for a side with no length to go square to.
+    fn of(flat: &Plane, side: &FaceMeet) -> Option<Self> {
+        let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
+        let chord = end - start;
+        let across = flat.normal().cross(chord).normalized().ok()?;
+        Some(Self {
+            middle: start + chord * 0.5,
+            across,
+            length_squared: chord.length_squared(),
+        })
+    }
+
+    /// How far along [`Chord::across`] from the middle the circle round each of
+    /// [`the_middles_of_a_round_wire`] through the chord's two ends crosses,
+    /// both ways.
+    fn where_the_circles_cross(&self, flat: &Plane, partner: &Surface) -> Vec<[f64; 2]> {
+        the_middles_of_a_round_wire(flat, partner)
+            .into_iter()
+            .map(|centre| {
+                let off = self.across.dot(middle_of(centre) - self.middle);
+                let reach = (off * off + self.length_squared / 4.0).sqrt();
+                [off + reach, off - reach]
+            })
+            .collect()
+    }
+
+    /// How far along [`Chord::across`] from the middle the line crosses
+    /// `cone`, as [`half_way_across_the_chord_to_a_cone`] reads it.
+    fn where_the_cone_crosses(&self, cone: &Cone) -> Vec<f64> {
+        let up = cone.axis().direction();
+        let widening = 1.0 + cone.slope() * cone.slope();
+        let from_apex = self.middle - cone.apex();
+        let (along_now, along_per_step) = (from_apex.dot(up), self.across.dot(up));
+        let square = widening * along_per_step * along_per_step - up.length_squared();
+        let linear = 2.0
+            * (widening * along_now * along_per_step
+                - up.length_squared() * from_apex.dot(self.across));
+        let constant =
+            widening * along_now * along_now - up.length_squared() * from_apex.length_squared();
+        if square == 0.0 {
+            return vec![-constant / linear];
+        }
         let discriminant = linear * linear - 4.0 * square * constant;
         let root = discriminant.max(0.0).sqrt();
         vec![
             (-linear + root) / (2.0 * square),
             (-linear - root) / (2.0 * square),
         ]
-    };
-    steps
-        .into_iter()
-        .map(|step| middle + across * (step / 2.0))
-        .filter(Point::is_finite)
-        .map(|point| PredicatePoint::from(point.coordinates()))
-        .collect()
+    }
 }
 
 /// Points between the round wires of a flat piece: along the line from each

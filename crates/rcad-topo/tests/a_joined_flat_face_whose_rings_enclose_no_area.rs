@@ -21,12 +21,14 @@
 //!
 //! Where it answers `None` for two rings of one joined face, `rings_round`
 //! panics with that same message. The rest of this file builds the families it
-//! answers `None` for and pins what the fuse does with each. Each one is
-//! refused before `rings_round`, and each test names the stage: that was
+//! answers `None` for and pins what the fuse does with each. Each one that is
+//! refused is refused before `rings_round`, and each test names the stage: that was
 //! read with a breakpoint on `select::choose`, on `rings_round` and on
-//! `holds_the_other_rings` (Q597), which the two tests above do reach. The
-//! one probe that is answered, two holed bars turned a quarter, reaches
-//! `holds_the_other_rings` too, but not by the family it was built for (Q616).
+//! `holds_the_other_rings` (Q597), which the two tests above do reach. Two
+//! holed bars turned a quarter are answered and reach `holds_the_other_rings`
+//! too, but not by the family they were built for (Q616). The same two bars
+//! unturned, the probe for that family, were refused before `rings_round`
+//! until Q897 and are answered now.
 
 use std::f64::consts::PI;
 
@@ -393,22 +395,32 @@ mod cones;
 /// chord of the outline's arcs and inside both big bars, so
 /// `holds_the_other_rings` would pass it over and place nothing.
 ///
-/// **That is not reached.** Every rule, both ways round, is refused in
-/// `select::choose` while a point is found inside a piece of a cap, and the
-/// three corners its record names are those three on `x = 0`.
-/// `join_up_what_is_one_face` is never reached (a breakpoint on it, and on
-/// `select::choose`, under the union, Q616).
+/// **Every rule, both ways round, now answers**, and holds what the circles
+/// say: the same volumes as the pair turned a quarter, below. Each used to be
+/// refused in `select::choose` on `a point inside a piece of a face`, its
+/// record naming those three corners on `x = 0` (Q616), until `select` offered
+/// rungs nearer the places the line square to each arc's chord crosses its
+/// circle (`docs/decisions.md` §365.6, Q897). Over the six fuses,
+/// `join_up_what_is_one_face` is reached 18 times and `holds_the_other_rings`
+/// 8 times (breakpoints, Q897), and `rings_round` does not panic. Where the
+/// fuse put the hole's corner, and what `holds_the_other_rings` answered, was
+/// not read.
 #[test]
-fn two_holed_bars_whose_corners_lie_on_one_line_are_refused_while_a_piece_is_placed() {
+fn two_holed_bars_whose_corners_lie_on_one_line_are_answered_under_every_rule() {
+    let lens = 200.0 * 0.6_f64.acos() - 96.0;
+    let hole = 4.0 * PI;
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let pair = two_bars_holed_through_the_origin(&mut model, [6.0, 0.0]);
-        let refused = fused_in_order(&mut model, pair, rule, swapped);
-        assert_undecidable_on(
-            &refused,
-            "a point inside a piece of a face",
-            &format!("{rule:?}, swapped {swapped}"),
-        );
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        let area = match rule {
+            Rule::Union => 200.0 * PI - lens - hole,
+            Rule::Intersection => lens - hole,
+            Rule::Difference => 100.0 * PI - lens,
+            other => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, the_only(answer, &what), 4.0 * area, &what);
     }
 }
 
@@ -422,7 +434,8 @@ fn two_holed_bars_whose_corners_lie_on_one_line_are_refused_while_a_piece_is_pla
 /// each of the two rings of each cap, and answers `Some(false)` for each hole
 /// and `Some(true)` for each outline (read off its return with gdb, Q616). So
 /// family 5 needs the hole's corner on the chord, and the probe above that
-/// puts it there is refused before this.
+/// puts it there was refused before this until Q897; what it reaches now is
+/// read there.
 #[test]
 fn two_holed_bars_turned_a_quarter_are_answered_with_the_hole_placed_by_the_outlines_bulge() {
     let lens = 200.0 * 0.6_f64.acos() - 96.0;
@@ -769,15 +782,4 @@ fn fused_in_order(
             &mut ProvenanceLog::new(),
         )
         .map(|answer| answer.solids().to_vec())
-}
-
-fn assert_undecidable_on(refused: &rcad_topo::Result<Vec<SolidKey>>, predicate: &str, what: &str) {
-    let Err(Error::Undecidable { records }) = refused else {
-        panic!("{what}: {refused:?}");
-    };
-    assert_eq!(
-        records.records().first().map(|record| record.predicate()),
-        Some(predicate),
-        "{what}: {refused:?}"
-    );
 }
