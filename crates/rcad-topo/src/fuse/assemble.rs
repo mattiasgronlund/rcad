@@ -1023,15 +1023,34 @@ impl Assembly {
     /// (`fuse_laws_over_a_cone.rs`,
     /// `a_cone_united_with_what_it_shares_with_a_block_is_the_cone`).
     ///
-    /// A ring of several arcs that goes right round is not covered: that one
-    /// does need a seam, and [`Assembly::a_seam_across_the_band`] finds it.
+    /// A ring of several sides that goes right round beside a second ring is
+    /// not covered: the band between them does need a seam, and
+    /// [`Assembly::a_seam_across_the_band`] finds it.
+    ///
+    /// **One ring right round a cone and nothing else is a cap round its
+    /// apex**, and needs no seam either, however many sides it has. The other
+    /// piece that ring cuts the nappe into runs on for ever, and a face is
+    /// bounded, so the face holds the apex, as the input's own skin does inside
+    /// its rim. The mesher cuts such a face up to the apex
+    /// (`BuildingAMesh::cut_a_cap_up_to_its_pole` in `mesh.rs`), as it cuts a
+    /// nappe a cube stood on its corner leaves in three arcs. A cone less a
+    /// block whose floor is just above the apex leaves its skin outside the
+    /// block in three pieces whose one ring of four sides goes right round,
+    /// and left apart they were two faces too many
+    /// (`a_block_face_through_a_cones_apex.rs`, `docs/decisions.md` §347.4).
+    /// On a pipe one ring right round bounds no face, so this is the cone's
+    /// alone.
     fn needs_no_seam(&self, members: &[usize], along: &[[Dart; 2]], dissolved: &[bool]) -> bool {
         let surface = self.faces[members[0]].surface;
-        self.rings_of_a_curved_face(members, along, dissolved)
-            .iter()
-            .all(|ring| {
-                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
-            })
+        let rings = self.rings_of_a_curved_face(members, along, dissolved);
+        if let (Surface::Cone(_), [ring]) = (&surface, rings.as_slice())
+            && self.a_ring_goes_right_round(ring, &surface) == Some(true)
+        {
+            return true;
+        }
+        rings.iter().all(|ring| {
+            ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
+        })
     }
 
     /// The dissolved edges to keep as the seam across a band, where keeping
