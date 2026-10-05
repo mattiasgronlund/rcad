@@ -3542,7 +3542,11 @@ fn two_circles_round_the_axis(ring: &Torus) -> Result<SurfaceMeet> {
 /// Nothing here is rounded, so no [`Policy`] is asked: the apex and the slope
 /// are compared as stored, and the direction as [`two_directions_lie_along_one_line`]
 /// says. A pair a hair apart is two cones.
-fn one_cone_either_way_round(one: &Cone, other: &Cone) -> bool {
+///
+/// **`walk` asks the same question**, of the two faces either side of a closed
+/// run, so that the evaluator calls one cone exactly what the namer calls one
+/// cone and no pair is one surface here and two there.
+pub(crate) fn one_cone_either_way_round(one: &Cone, other: &Cone) -> bool {
     one.apex() == other.apex()
         && one.slope() == other.slope()
         && two_directions_lie_along_one_line(one.axis().direction(), other.axis().direction())

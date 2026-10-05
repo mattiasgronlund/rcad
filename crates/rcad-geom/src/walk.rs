@@ -37,7 +37,8 @@ use rcad_predicates::{
 
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, WHERE_TWO_PIPES_CROSS, ask, whether_a_cone_and_a_pipe_share_an_axis,
+    Question, WHERE_TWO_PIPES_CROSS, ask, one_cone_either_way_round,
+    whether_a_cone_and_a_pipe_share_an_axis,
 };
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
@@ -583,7 +584,9 @@ enum WhatARunLiesOn {
 /// **One cone twice is not one of those pairs**, and that is the one place the
 /// evaluator says more than the namer's table does: the namer answers it as one
 /// surface, and a run right round where that surface meets itself is a circle
-/// the run's own end names (§214). Every other run on that pair still refuses.
+/// the run's own end names (§214). "One cone" is the namer's own exact test, so
+/// a cone written about `+z` against the same cone about `−z` is one cone here
+/// too (§357.2). Every other run on that pair still refuses.
 ///
 /// [`Error::ACrossingPieceHasNoEndsAndNothingPickingIt`] for such a closed run
 /// with no ends, which leaves nothing to put the circle through.
@@ -723,10 +726,23 @@ fn what_a_run_between_these_two_lies_on(
         // them (§214). A **guarded** arm on purpose: the refusal below still
         // covers a cone against a different cone, and a sixth kind of `Surface`
         // is still a compile error here, which a wildcard would have cost.
+        //
+        // **One cone whichever way each face writes its axis**, asked exactly as
+        // `intersect` asks it (§357.2), and the circle built from the spelling
+        // that sorts first. The two spellings build one circle round opposite
+        // ways, so taking the one listed first would walk one rim two ways for
+        // the two faces either side of it; the one that sorts first is also the
+        // one `rcad-topo`'s `the_curved_one_of` reads a closed edge's direction
+        // off.
         [Surface::Cone(one), Surface::Cone(other)]
-            if one == other && run.run() == &EdgeRun::RightRoundWhereItsFacesCross =>
+            if one_cone_either_way_round(&one, &other)
+                && run.run() == &EdgeRun::RightRoundWhereItsFacesCross =>
         {
-            the_circle_a_closed_run_round_one_cone_lies_on(&one, run).map(WhatARunLiesOn::Conic)
+            let first = match Surface::Cone(one).how_it_sorts_against(&Surface::Cone(other)) {
+                Ordering::Greater => other,
+                Ordering::Less | Ordering::Equal => one,
+            };
+            the_circle_a_closed_run_round_one_cone_lies_on(&first, run).map(WhatARunLiesOn::Conic)
         }
         [Surface::Cone(_), Surface::Sphere(_) | Surface::Cone(_)]
         | [Surface::Sphere(_), Surface::Cone(_)] => {
@@ -2946,6 +2962,15 @@ fn which_of_these_circles_this_run_is(
 
 /// The circle a closed run whose two faces are the one cone lies on: through
 /// the run's own end, square to the cone's axis.
+///
+/// **Which spelling of the cone it is handed changes which way round the circle
+/// goes, and nothing else.** Turning the axis round negates both `up` and
+/// `reach` below, so `middle`, `radius` and the size come out the same bits,
+/// and [`Cone::basis`] keeps its first direction across and negates its second.
+/// So the circle is one point set and starts at one point either way, and runs
+/// right-handed about whichever axis it was handed — which is why the caller
+/// hands it the spelling that sorts first
+/// (`a_circle_walked_between_two_spellings_of_one_cone.rs`).
 ///
 /// **The pair of surfaces names nothing here**, the way a ball crossed with
 /// itself names nothing, so what names the curve is the run. It is closed, so
