@@ -85,6 +85,13 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// say. None answers for it: all twelve 45 degree cases, every size and every
 /// rule, are refused at *a point inside a piece of a face* instead, and that
 /// name takes the old one's place in [`moved_from_its_pin`].
+///
+/// **Ten of those twelve answer since Q1019**, which places a piece no point
+/// was found in by a corner the other solid's ray puts strictly inside or
+/// outside it (`docs/decisions.md` §365.7). Each is one solid that validates
+/// and measures its closed form. The difference at radius 0.001 is refused
+/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`, and at radius 1000
+/// `CannotNameWhichPieceOfACrossingThisIs`.
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
@@ -96,6 +103,16 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
         (90.0, 1000.0, "Union"),
         (90.0, 3.0, "Intersection"),
         (90.0, 3.0, "Union"),
+        (45.0, 1.0, "Intersection"),
+        (45.0, 1.0, "Difference"),
+        (45.0, 1.0, "Union"),
+        (45.0, 0.001, "Intersection"),
+        (45.0, 0.001, "Union"),
+        (45.0, 1000.0, "Intersection"),
+        (45.0, 1000.0, "Union"),
+        (45.0, 3.0, "Intersection"),
+        (45.0, 3.0, "Difference"),
+        (45.0, 3.0, "Union"),
         (10.0, 1.0, "Difference"),
         (10.0, 1.0, "Union"),
         (10.0, 0.001, "Intersection"),

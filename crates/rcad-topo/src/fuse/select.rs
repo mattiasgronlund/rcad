@@ -47,6 +47,11 @@
 //! shares with a piece cut from one of that solid's faces, from which side of
 //! that face its own material is on ([`SidesItShares`], §365.3). A fuse that
 //! found a point for every piece never gets there, and answers as it did.
+//!
+//! **And where no side it shares places it either, by a corner** that the
+//! other solid's ray puts strictly inside or strictly outside it
+//! ([`by_a_corner`], §365.7): every open neighbourhood of a corner meets the
+//! piece's inside, and that inside is all on one side of the solid.
 
 use rcad_geom::{
     Cone, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus, Vector,
@@ -104,10 +109,10 @@ pub(crate) struct Chosen {
 ///
 /// [`Error::Undecidable`] when a piece could not be placed against the solids
 /// it has to be placed against: under [`INSIDE_A_PIECE`] when no point inside
-/// it was found and no side it shares placed it either, and under
+/// it was found and neither a side it shares nor a corner placed it, and under
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be —
-/// after the sides it shares were tried too, where only a rung of
-/// [`rungs_towards_each_crossing`] was found.
+/// after the sides it shares and its corners were tried too, where only a rung
+/// of [`rungs_towards_each_crossing`] was found.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -156,6 +161,7 @@ pub(crate) fn choose(
             };
             by_a_shared_side
                 .place(index, against, policy, log)
+                .or_else(|| by_a_corner(model, &solids, against, &corners, policy, log))
                 .ok_or_else(|| gave_up(unplaced, &corners.concat(), Measures::Length, log))
         };
 
@@ -353,7 +359,8 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// **Two searches happen here, and a caller that cannot tell them apart is told
 /// the wrong thing.** [`Search::NoPointInside`] says no point inside the piece
 /// was found, which is [`INSIDE_A_PIECE`] unless a side the piece shares places
-/// it ([`SidesItShares`]); [`PLACED_AGAINST_EVERY_SOLID`] says one was found
+/// it ([`SidesItShares`]) or a corner does ([`by_a_corner`]);
+/// [`PLACED_AGAINST_EVERY_SOLID`] says one was found
 /// and could not be classified against every solid in the set. The first says
 /// to look at the piece's trimming, the second says the piece is fine and a
 /// surface further down gave up — the lens in §216.4 is the second wearing the
@@ -364,8 +371,8 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// is placed by that point as it was. A piece only a rung was found inside,
 /// and that no rung could place, is [`Search::OnlyRungsInside`] and not a
 /// refusal here: before the rungs it was a piece with no point found, which a
-/// side it shares could place, and a rung that cannot be classified must not
-/// take that away (`docs/decisions.md` §365.6).
+/// side it shares or a corner could place, and a rung that cannot be
+/// classified must not take that away (`docs/decisions.md` §365.6).
 ///
 /// # Errors
 ///
@@ -606,6 +613,109 @@ impl<'a> SidesItShares<'a> {
         }
         found
     }
+}
+
+/// The rule after §365.3's: a piece no point inside which was found, or only a
+/// rung that could not be placed, and that no side it shares placed, placed
+/// against each solid by the first of its own corners the solid's ray puts
+/// strictly inside or strictly outside it.
+///
+/// **Why a corner can place a piece.** A piece `P` and a solid `S`. `P` was cut
+/// by every surface of `S`, so its inside crosses no face of `S`, and that
+/// inside lies all inside `S`, all outside it, or all on its skin — the premise
+/// one point already rests on (§17.4). A corner `c` of `P` is on `P`'s
+/// outline, so every open neighbourhood of `c` meets `P`'s inside. When `c` is
+/// strictly inside `S`, a neighbourhood of it is inside `S` too, and the part of
+/// `P`'s inside it meets is inside `S`, which puts all of `P` inside `S`; it
+/// cannot be on `S`'s skin, which that neighbourhood does not touch. Strictly
+/// outside is the same argument the other way. No number is built and nothing
+/// is a tolerance: the ray decides the sign about the corner's whole box.
+///
+/// **A corner on `S`'s skin says nothing**, since a piece on either side of a
+/// face, or on it, can have its corner there, so
+/// [`Containment::OnBoundary`] is never read as a placement. Nor is a corner on
+/// the stored surface of any face of `S`, wherever on that surface it is: the
+/// ray reads a flat face by its stored corners, which a turned solid keeps a
+/// rounding off the stored plane, and about a point on that plane it can
+/// certify a side the plane does not have (§316.3, §351). The point search
+/// keeps such points from the ray by [`coincident_face`], which a corner has no
+/// face of its own to be asked of, so a corner any face's surface cannot put
+/// strictly on one side is passed over.
+///
+/// The piece this was built for is the strip of a KiCad pin header's wall
+/// between two notch chamfers that meet it at one line by design, and a
+/// rounding apart over the stored planes, so no `f64` lies between them
+/// (`docs/decisions.md` §365.7). Inside one solid of the group is inside,
+/// outside every one is outside, and anything else is `None`, so the caller
+/// refuses as it did before this was tried. What the ray asked the policy goes
+/// into the log only when the piece is placed.
+fn by_a_corner(
+    model: &Model,
+    solids: &[&BakedSolid],
+    against: &[usize],
+    corners: &[Vec<PredicatePoint>],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<Placement> {
+    let mut trial = ProvenanceLog::new();
+    let mut inside_one = false;
+    let mut outside_every_one = true;
+    for &index in against {
+        let solid: SolidView<'_> = model.solid_at(solids[index].key.slot_in(model.id()));
+        match is_inside_by_a_corner(solid, corners, policy, &mut trial) {
+            Some(true) => inside_one = true,
+            Some(false) => (),
+            None => outside_every_one = false,
+        }
+    }
+    let placement = if inside_one {
+        Placement::Inside
+    } else if outside_every_one {
+        Placement::Outside
+    } else {
+        return None;
+    };
+    trial.drain_into(log);
+    Some(placement)
+}
+
+/// Whether the first corner `solid`'s ray places strictly is inside it, or
+/// `None` when no corner off every one of its surfaces was placed strictly.
+fn is_inside_by_a_corner(
+    solid: SolidView<'_>,
+    corners: &[Vec<PredicatePoint>],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<bool> {
+    corners.iter().flatten().find_map(|&corner| {
+        if !is_off_every_surface_of(solid, corner) {
+            return None;
+        }
+        let mut ray = ProvenanceLog::new();
+        let inside = match solid.classify_uncertain_point(corner, policy, &mut ray) {
+            Containment::Inside => true,
+            Containment::Outside => false,
+            Containment::OnBoundary
+            | Containment::Undecidable { .. }
+            | Containment::CannotFollowAFacesTrimming { .. }
+            | Containment::CannotFireARayAtAFacesSurface { .. } => return None,
+        };
+        ray.drain_into(log);
+        Some(inside)
+    })
+}
+
+/// Whether every face of `solid` puts `point` strictly on one side of its
+/// stored surface.
+fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool {
+    solid.faces().all(|face| {
+        let surface = face.surface();
+        let side = surface.as_plane().map_or_else(
+            || side_of_surface(&surface, point),
+            |flat| side_of_a_flat_face(flat, point),
+        );
+        matches!(side, Decision::Pos | Decision::Neg)
+    })
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
