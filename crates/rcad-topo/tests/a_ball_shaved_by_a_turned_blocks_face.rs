@@ -16,7 +16,7 @@
 //! face` before §346.6: each point put back on the ball is a box `±5.7e-14`
 //! wide, far thicker than the cap. Now `select` finds points inside the cap and
 //! inside the disk the ball leaves on the face, and each draw gets past that
-//! search. What each then does is pinned below, by name.
+//! search. Each now answers, and the answer holds ([`the_answer_holds`]).
 //!
 //! Four of them answer since §402. The plane of the block's face `y = 0` cuts
 //! the ball too, beside the block, in a circle `|off|` from its middle, so the
@@ -29,43 +29,38 @@
 //! stored plane `x = 0` and the triangles of its stored corners, and the ray
 //! that counted those triangles could not settle which side of them it was.
 //! The ray now names such a face, and the block's stored plane places the
-//! point when no other face of the block is near it (§346.6). The other seven
-//! still find no point every solid could place: `select` drops every point the
-//! corners and the plane disagree about, whatever the ray then says.
+//! point when no other face of the block is near it (§346.6).
+//!
+//! The other seven answer since Q996: `-0.5` turned 1.5, 2.5 and 3, `-0.3`
+//! turned 1.5, 2.5 and 3, and `+0.3` turned 2.5. Each found its point and
+//! `select` dropped it, because some triangle of the block's corners and its
+//! face's stored plane put the point on opposite sides, whatever the ray then
+//! said. In `+0.3` turned 2.5 the point was `0.3` past the face `y = 0`, and
+//! `Outside` by either reading. `select` no longer drops such a point: the ray
+//! asks the plane itself wherever the two part (§346.6).
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Surface, SurfaceMeet, Vector, intersect};
 use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Model, Rule, SolidKey};
 
-/// What a draw's union does, whichever policy and argument order.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum TheUnion {
-    /// It is refused: a point was found inside the cap, and `select` dropped
-    /// it, because the block's stored plane `x = 0` and the triangles of its
-    /// stored corners put it on opposite sides of that face.
-    NoPointEverySolidCouldPlace,
-    /// It answers, and the answer holds ([`the_answer_holds`]).
-    Answers,
-}
-
-/// `(off, turned, what the union does)`.
-const DRAWS: [(f64, f64, TheUnion); 14] = [
-    (-0.5, 1.0, TheUnion::Answers),
-    (-0.5, 1.5, TheUnion::NoPointEverySolidCouldPlace),
-    (-0.5, 2.5, TheUnion::NoPointEverySolidCouldPlace),
-    (-0.5, 3.0, TheUnion::NoPointEverySolidCouldPlace),
-    (-0.3, 0.3, TheUnion::Answers),
-    (-0.3, 0.5, TheUnion::Answers),
-    (-0.3, 1.5, TheUnion::NoPointEverySolidCouldPlace),
-    (-0.3, 2.0, TheUnion::Answers),
-    (-0.3, 2.5, TheUnion::NoPointEverySolidCouldPlace),
-    (-0.3, 3.0, TheUnion::NoPointEverySolidCouldPlace),
-    (0.3, 0.5, TheUnion::Answers),
-    (0.3, 2.5, TheUnion::NoPointEverySolidCouldPlace),
-    (0.3, 5.0, TheUnion::Answers),
-    (0.5, 5.0, TheUnion::Answers),
+/// `(off, turned)`.
+const DRAWS: [(f64, f64); 14] = [
+    (-0.5, 1.0),
+    (-0.5, 1.5),
+    (-0.5, 2.5),
+    (-0.5, 3.0),
+    (-0.3, 0.3),
+    (-0.3, 0.5),
+    (-0.3, 1.5),
+    (-0.3, 2.0),
+    (-0.3, 2.5),
+    (-0.3, 3.0),
+    (0.3, 0.5),
+    (0.3, 2.5),
+    (0.3, 5.0),
+    (0.5, 5.0),
 ];
 
 /// The block and the ball together. The cap they share, or the ball loses, is
@@ -76,16 +71,15 @@ const THE_BLOCK_AND_THE_BALL: f64 = 8.0 + 4.0 * PI / 3.0;
 #[test]
 fn what_each_ball_shaved_by_a_turned_blocks_face_comes_to() {
     let mut wrong = Vec::new();
-    for (off, turned, expected) in DRAWS {
+    for (off, turned) in DRAWS {
         for (name, policy) in [
             ("certified", Policy::certified()),
             ("tolerant", Policy::tolerant(100.0)),
         ] {
             for ball_first in [false, true] {
                 let what = format!("off {off}, turned {turned}, {name}, ball first {ball_first}");
-                let got = what_the_union_does(turned, off, &policy, ball_first, &what);
-                if got != Ok(expected) {
-                    wrong.push(format!("{what}: {got:?} where {expected:?} is pinned"));
+                if let Err(why) = the_union_holds(turned, off, &policy, ball_first, &what) {
+                    wrong.push(format!("{what}: {why}"));
                 }
             }
         }
@@ -99,7 +93,7 @@ fn what_each_ball_shaved_by_a_turned_blocks_face_comes_to() {
 #[test]
 fn the_turned_face_cuts_the_ball_in_every_draw() {
     let policy = Policy::certified();
-    for (off, turned, _) in DRAWS {
+    for (off, turned) in DRAWS {
         let (model, block, ball) = a_block_and_a_ball_beside_it(turned, off, &policy);
         let skin = model
             .solid(ball)
@@ -188,39 +182,31 @@ fn a_segment_up_through_the_cap_is_inside_the_block() {
     }
 }
 
-fn what_the_union_does(
+fn the_union_holds(
     turned: f64,
     off: f64,
     policy: &Policy,
     ball_first: bool,
     what: &str,
-) -> Result<TheUnion, String> {
+) -> Result<(), String> {
     let (mut model, block, ball) = a_block_and_a_ball_beside_it(turned, off, policy);
     let (arguments, tools) = if ball_first {
         ([ball], [block])
     } else {
         ([block], [ball])
     };
-    let fused = model.fuse(
-        &arguments,
-        &tools,
-        Rule::Union,
-        policy,
-        &mut ProvenanceLog::new(),
-    );
-    let answer = match fused {
-        Ok(fused) => fused.solids().to_vec(),
-        Err(Error::Undecidable { records })
-            if records.records().iter().any(|record| {
-                record.predicate() == "a point in a piece that every solid could place"
-            }) =>
-        {
-            return Ok(TheUnion::NoPointEverySolidCouldPlace);
-        }
-        Err(other) => return Err(format!("{other:?}")),
-    };
-    the_answer_holds(&model, &answer, off, policy, what)?;
-    Ok(TheUnion::Answers)
+    let answer = model
+        .fuse(
+            &arguments,
+            &tools,
+            Rule::Union,
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .map_err(|why| format!("refused: {why:?}"))?
+        .solids()
+        .to_vec();
+    the_answer_holds(&model, &answer, off, policy, what)
 }
 
 /// The union validates; it is one solid where the circle is on the block's
