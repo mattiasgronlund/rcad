@@ -135,6 +135,19 @@ remaining partner, another bend on the same ring, is the turned copy the
 builder refuses. That is why no fuse is pinned. Once any of those three
 refusals is lifted, the classification in 250.1 is what a fuse would get.
 
+*Q191's measurement (`b187bab9`), once the builder makes the turned copy
+(Q190).* Fusing the quarter bend with a copy of itself turned half a turn is
+exactly that lifted refusal: the copy's caps are the bend's other disks. A
+temporary print in `what_a_round_wire_encloses` counted eight calls reaching
+it in each of the six rule-and-order combinations, two per cap, each at the
+other bend's cap centre — once through `coincident_face`
+(`face_holds_the_point`) and once through the ray `classify_uncertain_point`
+fires from the point. With the half-space not asked, both unions refuse
+`ResultIsNotManifold { count: 1 }`; the intersections and differences still
+come out right. Pinned in
+`tests/a_bends_cap_holds_one_of_the_two_disks.rs`'s
+`a_bend_fused_with_its_copy_turned_half_a_turn_comes_to_what_each_rule_says`.
+
 ### 250.5 What this leaves
 
 - `select.rs` and `holds.rs` each have their own copy of the meridian-circle
