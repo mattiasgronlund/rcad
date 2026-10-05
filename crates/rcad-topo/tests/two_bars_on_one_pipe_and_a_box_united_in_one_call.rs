@@ -42,20 +42,18 @@
 //! # The refusals, and where each comes from
 //!
 //! - **The lower bar and the block standing on the meeting, then the upper
-//!   bar.** The first union answers, `7200 + 8π`. The second is refused
-//!   `Undecidable` at "a point in a piece that every solid could place", on the
-//!   upper bar's wall, all of it inside the block. Every point of that wall
-//!   lies on the pipe the first union's wall is on, which holds none of them,
-//!   and the ray from each grazes that wall: `select.rs` finds the points, and
-//!   the first union cannot place them. The block over `x < 0` was refused for
-//!   that reason until Q1064, and is answered by the sides of the upper wall
-//!   that are cuts of the block's face on `x = 0`; this wall has no side that
-//!   is a cut of a face of the block. Until Q1062 the first union was refused
-//!   under that name instead, on the lower bar's top cap flush on the block's
-//!   floor, and so was every one call
-//!   ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
+//!   bar, answers since Q1080.** The first union answers, `7200 + 8π`. The
+//!   second was refused `Undecidable` at "a point in a piece that every solid
+//!   could place", on the upper bar's wall, all of it inside the block. Every
+//!   point of that wall lies on the pipe the first union's wall is on, which
+//!   holds none of them, and the ray from each grazed that wall: the pipe's
+//!   sign straddles the point, and so does one root of every ray. `classify.rs`
+//!   no longer grazes a ray on a face that holds none of the box it is asked
+//!   about. Until Q1062 the first union was refused under that name instead, on
+//!   the lower bar's top cap flush on the block's floor, and so was every one
+//!   call ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 //! - **The lower bar and a box through its wall, then the upper bar**
-//!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_three_boxes`]).
+//!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_two_boxes`]).
 //!   The first union answers and validates. The second is refused
 //!   `AFaceTrimmedByACurveThisCannotFollow` on that union's wall, where
 //!   `select.rs` asks the wall, through `SolidView::face_holds_the_point` in
@@ -77,10 +75,6 @@ const RADIUS: f64 = 2.0;
 
 /// Where the two bars meet; each is this tall.
 const MEETING: f64 = 2.0;
-
-/// What the search for a point in a piece is called when it found one and
-/// could not place it.
-const PLACED_AGAINST_EVERY_SOLID: &str = "a point in a piece that every solid could place";
 
 /// The seven boxes the union of all three answers in one call.
 const ANSWERED_IN_ONE_CALL: [TheBox; 7] = [
@@ -149,33 +143,38 @@ fn a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it() {
 }
 
 /// **The lower bar united with the box first, and the upper bar after, is
-/// refused for three of the seven boxes**, by every spelling of the wall, where
-/// the other two ways of asking answer:
+/// refused for two of the seven boxes**, by every spelling of the wall, where
+/// the other two ways of asking answer: the box across the meeting and the box
+/// on the lower wall, at the second, `AFaceTrimmedByACurveThisCannotFollow`
+/// naming the first union's wall. Each refusal is a gap: the same three solids
+/// unite in one call, and with the bars first.
 ///
-/// - the box across the meeting and the box on the lower wall at the second,
-///   `AFaceTrimmedByACurveThisCannotFollow` naming the first union's wall;
-/// - the block standing on the meeting at the second, at the search for a
-///   point in a piece, on the whole of the upper bar's wall, whose corners are
-///   the two ends of its seam. Until Q1062 it was refused at the first union
-///   ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
+/// The other five answer by hand. Two of them were refused at the second fuse,
+/// under "a point in a piece that every solid could place", because the ray
+/// from every point of the upper bar's wall grazed the first union's wall on
+/// the same pipe:
 ///
-/// The other four answer by hand. Each refusal is a gap: the same three
-/// solids unite in one call, and with the bars first.
+/// - the block over `x < 0` until Q1064, on the half of the upper wall at
+///   `x ≥ 0`, which `select.rs` placed by its sides on `x = 0`, cuts of the
+///   block's face there;
+/// - the block standing on the meeting until Q1080, on the whole of the upper
+///   wall, whose corners are the two ends of its seam and none of whose sides
+///   is a cut of a face of the block. Until Q1062 it was refused at the first
+///   union instead ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 ///
-/// The block over `x < 0` was refused under the same name as the block on the
-/// meeting until Q1064, on the half of the upper bar's wall at `x ≥ 0`: the
-/// ray from every point of it grazed the first union's wall, on the same pipe.
-/// Its sides on `x = 0` are cuts of the block's face there, and `select.rs`
-/// now places it by them where a point was found and none placed.
+/// The pipe's sign straddles each point of the upper wall, and one root of
+/// every ray lands a rounding either side of the point, and the lower wall
+/// holds neither. `classify.rs` grazed every ray on that until Q1080, and now
+/// grazes only where the face may hold the box.
 #[test]
-fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_three_boxes() {
-    let the_upper_seam = vec![[RADIUS, 0.0, MEETING], [RADIUS, 0.0, 2.0 * MEETING]];
+fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_two_boxes() {
     for wall in EVERY_WALL {
         for the_box in [
             TheBox::BlockOverNegativeX,
             TheBox::OnTheUpperWallOnly,
             TheBox::FarAway,
             TheBox::TopSlicedOffAbove,
+            TheBox::SlicedAtTheMeeting,
         ] {
             let asked = format!("{the_box:?}, {wall:?}");
             let (model, said) = unite(the_box, wall, Call::LowerWithTheBoxThenUpper);
@@ -186,16 +185,6 @@ fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_three_boxe
         for the_box in [TheBox::AcrossTheMeeting, TheBox::OnTheLowerWallOnly] {
             refuses_on_the_first_unions_wall(the_box, wall);
         }
-
-        let the_box = TheBox::SlicedAtTheMeeting;
-        let asked = format!("{the_box:?}, {wall:?}");
-        let (_, said) = unite(the_box, wall, Call::LowerWithTheBoxThenUpper);
-        let refused = said.expect_err(&asked);
-        assert_eq!(
-            where_it_gave_up(&refused),
-            (PLACED_AGAINST_EVERY_SOLID, the_upper_seam.clone()),
-            "{asked}"
-        );
     }
 }
 
@@ -392,27 +381,6 @@ fn unite(the_box: TheBox, wall: Wall, call: Call) -> (Model, Result<Vec<SolidKey
         Call::LowerWithTheBoxAlone => union(&mut model, &[lower], &[third]),
     };
     (model, said)
-}
-
-/// The predicate an `Undecidable` refusal gave up at, and the corners of the
-/// piece it gave up on.
-fn where_it_gave_up(refused: &Error) -> (&'static str, Vec<[f64; 3]>) {
-    let Error::Undecidable { records } = refused else {
-        panic!("not undecided: {refused:?}");
-    };
-    let [record] = records.records() else {
-        panic!("one record: {records:?}");
-    };
-    let corners = record
-        .inputs()
-        .iter()
-        .map(|corner| {
-            corner
-                .exact_coordinates()
-                .unwrap_or_else(|| panic!("an exact corner: {corner:?}"))
-        })
-        .collect();
-    (record.predicate(), corners)
 }
 
 fn is_the_union_by_hand(model: &Model, united: &[SolidKey], the_box: TheBox, asked: &str) {

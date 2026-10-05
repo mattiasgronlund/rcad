@@ -38,17 +38,25 @@
 //!
 //! # A piece no point places is placed by a side it shares
 //!
-//! **Only where the search above placed no point inside the piece.** A fuse
-//! that placed a point in every piece never gets here, and answers as it did.
+//! **Only where the search above placed no point inside the piece**, whether
+//! it found none or found some and no ray placed them. A fuse that placed a
+//! point in every piece never gets here, and answers as it did.
 //! A piece can be narrower than the spacing of `f64`, and then no point it
-//! could be handed is inside it (§346.3). Or every point inside it can be one
-//! no ray places: a piece of a bar's wall lies on the bar's pipe, and where the
-//! other solid has a face on that pipe that holds none of the piece, the ray
-//! from any point of the piece starts on that face's surface and cannot tell
-//! which side of it the point is on (Q1064). Such a piece is placed against a
-//! solid by a side it shares with a piece cut from one of that solid's faces,
-//! from which side of that face its own material is on ([`SidesItShares`],
-//! §365.3).
+//! could be handed is inside it (§346.3). Or every point found inside it can
+//! be one no ray places. Q1064 brought the first such piece here, half of a
+//! bar's wall lying on a pipe that a wall of the other solid lies on too, and
+//! holds none of the half; since Q1080 the ray places that piece itself, as
+//! `classify.rs` no longer grazes on a face that holds none of the point. The
+//! rule is still reached where a point was found, confirmed with a temporary
+//! print in `choose` (Q1079): a turned pair
+//! (`swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit`,
+//! `how_often_a_certified_fuse_of_a_turned_pair_refuses`), a solid with a
+//! torus face (`how_often_a_certified_fuse_with_a_torus_in_it_refuses`), the
+//! fuzz corpus (`every_seed_in_the_checked_in_corpus_is_fused_without_panicking`)
+//! and a fused draw (`a_fused_draw_hands_its_provenance_back_through_the_door`)
+//! each reach it. Such a piece is placed against a solid by a side it shares with a
+//! piece cut from one of that solid's faces, from which side of that face its
+//! own material is on ([`SidesItShares`], §365.3).
 //!
 //! **And where no side it shares places it either, by a corner** that the
 //! other solid's ray puts strictly inside or strictly outside it
@@ -542,8 +550,9 @@ enum Search {
 /// half of a bar's wall, `x ≥ 0`, against a block over `x < 0` that a bar on
 /// the same pipe was united with first. Every point of the half lies on the
 /// pipe, which that first bar's wall is on and holds none of, and the ray from
-/// each grazes that wall. Its two sides on `x = 0` are cuts of the block's
-/// face there, and its material is on the face's outer side.
+/// each grazed that wall. Its two sides on `x = 0` are cuts of the block's
+/// face there, and its material is on the face's outer side. Since Q1080 the
+/// ray places that half itself and it no longer comes here.
 ///
 /// Which sides are one is [`the_edge_each_side_of_every_piece_is`], the
 /// naming `assemble` gives the kept pieces, worked out once and only for a fuse
