@@ -147,10 +147,30 @@ each of the three. One run of it took 25.6 s on the lane's commit against
 
 ### 406.5 What this leaves
 
-- **The six refusals in meshing what the fuse built**, by name above. Class
-  refuses/B, the same shapes as the eight, and their cause is not traced: the
-  top's ellipse is `4.5e16` long, and the pieces cut from it are arcs of it near
-  the frustum, where the turn-`0` block's top cuts a parabola.
+- **The six refusals in meshing what the fuse built**, by name above, were
+  traced by Q1058 and closed by Q1074, and all six answer right. They shared
+  one cause: `rcad_geom::walk` placed the points of an arc of the top's
+  ellipse by the frustum by `Conic::at`, from a centre `2.2e16` out, so the
+  arc's one middle point rounded to `(−3, 0, 8)`, `(0, 0, 4)` or `(−2, 0, 8)`,
+  one or two off the cone. A **gap** (§16.10): the ruling at the arc's middle
+  angle, cut by the plane, gives a point on both surfaces to a rounding. Where
+  the ellipse reaches more than `PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`
+  (a million) times further up the axis than a run's ends, the arc that misses
+  the ellipse's far end is placed along the rulings, picked at its own middle,
+  charged by its own size and counted by a bound on its own bend
+  (`AnArcRoundACone`); and `mesh.rs` charges such an edge's floor by its ends
+  past twice that line, where it charged the ellipse's far end, `2.2e4` as a
+  floor. `an_arc_of_a_plane_cut_nearly_along_a_cones_ruling.rs` pins the arc
+  on the fuse's own plane, and the pin is right 80 and `a point inside a piece
+  of a face` 16.
+- **An edge whose half-spaces pick the arc past the far end** is charged its
+  ends in `mesh.rs` and walked round the ellipse in `walk`. Unless another edge
+  of its face reaches as far, the walk is then handed a deflection under what
+  it can place a point to: refused under a certified policy, and waved through
+  with a `room left to refine a walk` record under a tolerant one. No shape
+  that reaches it has been built; a face on a pointed cone whose only curved
+  edge runs round the far side from two ends a millionth of the way up is the
+  one to try.
 - **The turn read off the root on a curved face** was Q914's, and §317.7
   closed it: the `curved == 0` stop in `the_turn_where_two_planes_cross_a_quadric`
   is gone, the two places along the edge, `16 ∓ 2⁻⁵¹`, are ordered, and the

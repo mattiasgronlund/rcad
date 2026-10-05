@@ -303,13 +303,18 @@ fn steeper_faces_near_the_pointed_cones_apex(lean: f64) -> Vec<Case> {
 /// `2.2e16` out, two far meets on it are left out because nothing drawn
 /// crosses there, and the two far meets of the bottom's side edges are boxed
 /// to an ulp and ordered round the bottom's ellipse, and how the edge leaves
-/// the ellipse there is read off the root. The block up to `1.5` answers right
+/// the ellipse there is read off the root. The block up to `1.5` answered right
 /// for the intersection and for the block less the cone, held to the four
-/// checks and deciding 30172 grid points each; its other two rules refuse
-/// `AWireWillNotLieFlatOnItsFace`, and the block up to `1` refuses
-/// `TwoPatchesOfTheMeshDrewTheSameSide` for the union and the cone less the
-/// block and `CannotMeshAFace` for the other two. All six are raised inside the
-/// fuse, meshing what it built.
+/// checks and deciding 30172 grid points each, and the other six refused inside
+/// the fuse, meshing what it built.
+///
+/// **All eight answer right since Q1074**, each held to the four checks. The six
+/// shared one cause: `rcad_geom::walk` placed the points of an arc of the top's
+/// ellipse by the frustum from the ellipse's centre `2.2e16` out, so the arc's
+/// one middle point rounded to `(−3, 0, 8)`, `(0, 0, 4)` or `(−2, 0, 8)`, one
+/// or two off the cone. Such an arc is walked round the cone now, along its
+/// rulings, and the mesher charges its floor by the arc's ends and not by the
+/// ellipse's far end (§406.5).
 #[test]
 fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right() {
     let mut cases = Vec::new();
@@ -338,14 +343,8 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 74,
-            refused: [
-                ("a point inside a piece of a face", 16),
-                ("TwoPatchesOfTheMeshDrewTheSameSide", 2),
-                ("CannotMeshAFace", 2),
-                ("AWireWillNotLieFlatOnItsFace", 2),
-            ]
-            .into()
+            right: 80,
+            refused: [("a point inside a piece of a face", 16)].into()
         }
     );
 }
@@ -848,14 +847,11 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 /// Every way a fuse in this file refuses today, and the two ways an answer
 /// that holds every grid point it is asked about can still not be checked:
 /// a mesh finer than the mesher reaches, and a face it cannot mesh.
-const REFUSALS: [&str; 7] = [
+const REFUSALS: [&str; 4] = [
     "a point inside a piece of a face",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
     "the answer does not measure: CannotMeshAFace",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
-    "TwoPatchesOfTheMeshDrewTheSameSide",
-    "CannotMeshAFace",
-    "AWireWillNotLieFlatOnItsFace",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the
