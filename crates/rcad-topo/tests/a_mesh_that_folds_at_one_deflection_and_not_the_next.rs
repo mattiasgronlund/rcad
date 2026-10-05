@@ -19,11 +19,12 @@
 //! eight depths square to each of the three axes, and the sliver §206.3
 //! measured, at six leans and twelve turns by both rules — and each of the 168
 //! solids is meshed at ten rungs of the ladder the rescue walks, from half the
-//! ball down. Of those 1 680 meshes **38 fold, every one of them a sliver, and
-//! every one of the 38 gives way to a mesh at a finer rung.** That is what the
-//! retry is for, measured: a fold is where the mesher's own cuts happened to
-//! fall and not something about the shape, so handing it on as the answer
-//! throws away a rung that would have answered.
+//! ball down. Of those 1 680 meshes **2 fold, every one of them a sliver, and
+//! every one of the 2 gives way to a mesh at a finer rung** (38 until Q1027
+//! moved a cap side between two rim points out of the triangulator's ear
+//! rule). That is what the retry is for, measured: a fold is where the
+//! mesher's own cuts happened to fall and not something about the shape, so
+//! handing it on as the answer throws away a rung that would have answered.
 //!
 //! **No solid reaches the loop to spend those rungs, though.** §206.3's own
 //! shape is fixed at the source — `cut_in_two` charges at least two steps for a
@@ -42,8 +43,8 @@
 //! because what closed §206.3 is a cost bound and not a proof — `cut_in_two`'s
 //! own doc comment says nothing shows a bare cut across a piece bounded by
 //! *more than one* closed curve can never meet a neighbour's diagonal. The
-//! family that folds is narrowed, not emptied, and 38 of these 1 680 meshes are
-//! what that looks like from outside.
+//! family that folds is narrowed, not emptied, and 2 of these 1 680 meshes are
+//! what that looks like from outside (38 until Q1027).
 //!
 //! **The two-closed-curve family is forced to one shape, and that shape now
 //! meshes without coming back flat.** A solid encloses nothing when meshed
@@ -174,9 +175,9 @@ fn no_sliver_cut_through_a_balls_pole_folds_at_any_deflection() {
     assert_eq!(
         tally,
         BTreeMap::from([
-            ("meshed", RUNGS * LEANS.len() * TURNS * 2 - 38),
-            ("folded", 38),
-            ("folds a later rung cured", 38),
+            ("meshed", RUNGS * LEANS.len() * TURNS * 2 - 2),
+            ("folded", 2),
+            ("folds a later rung cured", 2),
             ("folds no later rung cured", 0),
         ]),
         "every rung of every sliver's ladder"
