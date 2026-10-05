@@ -104,3 +104,20 @@ of `y = 0`.
   untouched. A three-quarter band spans `3π/2` in the ring
   angle in one patch per quarter of the tube, and it measured right at all
   three deflections without cuts in the ring angle.
+- **Run 2026-10-05 (Q428), in `two_loops_that_run_the_same_way_round_a_tube.rs`.**
+  A wall walking both its circles the same way round the tube, each cap facing
+  the way its own circle's walk says: on this ring with the second circle a
+  quarter and half a turn round, and on a pipe of radius `1` and height `2`
+  with no seam, each both ways. `SolidBuilder` refuses every one
+  `AClosedEdgeIsWalkedAgainstItsSurface`; it runs `Model::validate` over a
+  scratch model first, so it leaves nothing to validate or mesh. `Model`'s
+  `Deserialize` does not call `validate`, so the same faces were written as a
+  sound band's bytes with one circle turned round, both its coedges and its
+  cap's plane. They read back, and `validate` refuses every one by the same
+  name. **`SolidView::mesh` and `measure` answer every one** at `0.1`, `0.03`
+  and `0.01`: the mesh closes everywhere but along the turned circle, whose
+  sides the wall and the cap both run the same way round, and `mesh` does not
+  ask whether its skin closes. A face that bounds no band is meshed and
+  measured, which is wrong, class C since only rewritten bytes build it. Its
+  row asks `cut_a_ring_across` to refuse two loops that run the same way before
+  it turns them both up, by the name `validate` gives the same bytes.
