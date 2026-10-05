@@ -59,6 +59,12 @@ throwaway probe that is taken out (365.2); everything else in 365.2 was read.*
   `a_face_of_the_input_holds` (through `face_holds_the_point` in `holds.rs`)
   and `the_ray_and_the_stored_planes_disagree_about` all read them.
 
+> **2026-10-05 note (Q998): `the_ray_and_the_stored_planes_disagree_about` is
+> gone.** Since Q996 dropped `select.rs`'s own copy of the guard, this list's
+> last name no longer exists there; `select.rs` reads classify.rs's copies
+> instead, as `stretched_to_the_plane`, `an_end_on_its_side` and
+> `side_of_a_plane` now do.
+
 That is the numeric layer built a second time, which §1.6 says is "a separate
 build of the numeric layer, not a type parameter dragged through topology".
 A `Point` variant is not a type parameter, but it is dragged through topology
