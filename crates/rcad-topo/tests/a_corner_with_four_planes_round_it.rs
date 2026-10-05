@@ -42,7 +42,11 @@
 //! faces share, and "with §395" is the same table on this file's commit
 //! (§395.2). What stopped that refusal is the room `bake`'s picker grants a
 //! corner, `validate`'s and not the rounding alone (§368), and the nine it
-//! answered are pinned by name below (§301.9).
+//! answered are pinned by name below (§301.9). Since Q866 orders a meet of
+//! three planes by its narrowed box where the boxes cannot say, the 4096th
+//! answers 105. Two of its 4 refusals were on the order: one answers now, and
+//! the other refuses further on, as the other 2 and the 256th's 1 do, with two
+//! regions of a face that cannot be told apart.
 //!
 //! **This file used to say the refusals left with §356 had every apex meet
 //! folded. They did not** (§344.2, §344.4). A side face has a meet at the apex
@@ -51,8 +55,8 @@
 //! apex's room and still miss its own box, by up to four tenths of a room, and
 //! the touch test turned them away before the room was looked at. Left beside
 //! the apex, two of them could not be ordered along a crossing, or the cells
-//! they cut off round it wound outside 0 and 1. The 5 left — 1 at a 256th and
-//! 4 at a 4096th — are apex meets of three of the apex's own planes whose boxes
+//! they cut off round it wound outside 0 and 1. The 4 left — 1 at a 256th and
+//! 3 at a 4096th — are apex meets of three of the apex's own planes whose boxes
 //! miss the apex's own box by 1.3 to 60 rooms, so its grown box too. §356's
 //! argument would fold those too, and does answer all 648 when it is followed
 //! (§395.4). Followed with no bound, it also folds meets of three planes that
@@ -74,7 +78,7 @@ use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftEdge, DraftStep, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftEdge, DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
 
 const TURNS: [f64; 6] = [0.1, 0.3, 0.7, 1.1, 1.9, 2.5];
 
@@ -146,7 +150,7 @@ fn a_pyramid_whose_apex_meets_lie_inside_its_room_but_miss_its_box_is_united_at_
     }
 }
 
-/// Five pyramids bent by a 256th or a 4096th are still refused. Their apex
+/// Four pyramids bent by a 256th or a 4096th are still refused. Their apex
 /// meets of three of the apex's own planes have boxes that miss the apex's
 /// own box by 1.3 to 60 rooms, so its box grown by the room too, and are left
 /// nodes beside it (§395.4).
@@ -159,6 +163,16 @@ fn a_pyramid_whose_apex_meets_lie_inside_its_room_but_miss_its_box_is_united_at_
 /// `bake` checked every plane round the apex against, answers all 648 too
 /// (§395.7). When one of these is united, check that it is united like that,
 /// and move it to the tests above.
+///
+/// **All four refuse `CannotTellTheCellsOfAFaceApart` since Q866.** Two of
+/// them, at a 4096th and turned 0.3 about `(3, −1, 2)` and 2.5 about
+/// `(1, 2, 3)`, refused on "order along a crossing" before it, as did a fifth
+/// that is united now
+/// ([`a_pyramid_whose_apex_meet_stays_a_node_beside_the_apex_is_united`]).
+/// The narrowed box of a meet of three planes puts each meet and the apex in
+/// order, and the meets left beside the apex then cut the cells round it into
+/// regions the winding cannot tell apart. That is one refusal for another,
+/// and folding the meets answers both.
 #[test]
 fn a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused() {
     for (fold, height, through, turn, axis) in [
@@ -190,7 +204,6 @@ fn a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused() {
             2.5,
             [1.0, 2.0, 3.0],
         ),
-        (1.0 / 4096.0, 4.0, Through::TheApex, 0.3, [3.0, -1.0, 2.0]),
     ] {
         let (mut model, pyramid, cube) =
             a_pyramid_and_a_cube_clear_of_it(fold, height, through, turn, axis);
@@ -202,11 +215,11 @@ fn a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused() {
             &mut ProvenanceLog::new(),
         );
         assert!(
-            fused.is_err(),
+            matches!(fused, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
             "a pyramid folding {fold}, {height} high, with its planes through {through:?}, \
-             turned {turn} about {axis:?}, was united: if into the two solids with the right \
-             volume and an empty log, apex meets outside the room are folded now, and it \
-             belongs with the pyramids that unite"
+             turned {turn} about {axis:?}, gave {fused:?}: if united into the two solids with \
+             the right volume and an empty log, apex meets outside the room are folded now, \
+             and it belongs with the pyramids that unite"
         );
     }
 }
@@ -223,8 +236,8 @@ fn a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused() {
 /// pyramid's corners as well (§368), and the furthest place is a four
 /// thousandth of that (§301.9). The tenth pyramid §344.3 named, folding a
 /// 4096th, 4 high, through its apex and turned 0.3 about `(3, -1, 2)`, is
-/// placed too and refused later, at its apex: it is the last of the five
-/// above.
+/// placed too. It was refused later, at its apex, until Q866, and is united
+/// now ([`a_pyramid_whose_apex_meet_stays_a_node_beside_the_apex_is_united`]).
 #[test]
 fn a_pyramid_whose_base_corner_lies_past_its_own_rounding_from_where_its_planes_meet_is_united() {
     for (fold, height, through, turn, axis) in [
@@ -252,6 +265,66 @@ fn a_pyramid_whose_base_corner_lies_past_its_own_rounding_from_where_its_planes_
     ] {
         is_united(fold, height, through, turn, axis);
     }
+}
+
+/// A pyramid bent by a 4096th, 4 high, its side planes written through the
+/// apex and turned 0.3 about `(3, −1, 2)`, is united, and comes back with the
+/// corners it was built with.
+///
+/// It was one of the five §395.4 left refused, on "order along a crossing". A
+/// meet of three of its apex's own planes misses the apex's room, so it is
+/// not folded and stays a node beside the apex. Along a side face's edge its
+/// box overlaps the apex's, and the planes cannot order the two either, since
+/// the apex has four planes round it and `bake` does not say which three it
+/// was solved from. The meet's box narrowed by one checked step lies `7e-13`
+/// past the apex along that edge, which puts the two in order and the meet
+/// off the face (Q866).
+#[test]
+fn a_pyramid_whose_apex_meet_stays_a_node_beside_the_apex_is_united() {
+    let (fold, height, through, turn, axis) =
+        (1.0 / 4096.0, 4.0, Through::TheApex, 0.3, [3.0, -1.0, 2.0]);
+    is_united(fold, height, through, turn, axis);
+
+    let (mut model, pyramid, cube) =
+        a_pyramid_and_a_cube_clear_of_it(fold, height, through, turn, axis);
+    let built = corners_of(&model, &[pyramid, cube]);
+    let fused = model
+        .fuse(
+            &[pyramid],
+            &[cube],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the union answers");
+    let united = corners_of(&model, fused.solids());
+    assert_eq!(
+        united.len(),
+        built.len(),
+        "the union has as many corners as the pyramid and the cube were built with"
+    );
+    for corner in united {
+        let off = built
+            .iter()
+            .map(|was| corner.distance_to(*was))
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            off <= 1e-9,
+            "the union's corner {corner:?} is {off} from every corner it was built with"
+        );
+    }
+}
+
+/// Every corner of `solids`, once each.
+fn corners_of(model: &Model, solids: &[SolidKey]) -> Vec<Point> {
+    let mut corners: Vec<Point> = solids
+        .iter()
+        .flat_map(|&solid| model.solid(solid).expect("this model made the key").faces())
+        .flat_map(|face| face.outer_wire().points().collect::<Vec<_>>())
+        .collect();
+    corners.sort_by_key(|corner| corner.coordinates().map(f64::to_bits));
+    corners.dedup();
+    corners
 }
 
 /// A pyramid bent by `fold`, `height` high, is united with a cube clear of it
