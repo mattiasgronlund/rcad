@@ -1231,6 +1231,13 @@ impl Walk {
     /// seam cut from a plane whose normal the turn left an ulp off length one,
     /// and scaling it to length one again moved its last bit (Q822,
     /// `docs/decisions.md` §366).
+    ///
+    /// **The pipe a circle on flat faces is named by keeps the axis the file
+    /// wrote** ([`Axis::as_written`]), as a `CYLINDRICAL_SURFACE` does, and the
+    /// writer asks the same constructor whether the pipe reads back
+    /// (`Writing::an_arc_of_a_circle_on_a_flat_face`). A disc drawn on a turned
+    /// bar's top has that axis an ulp off length one, and [`Axis::new`] moved
+    /// the last bit of 76 of 372 such axes (Q1001, §355.6).
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1256,7 +1263,7 @@ impl Walk {
             && self.every_face_holds_the_curve(reading, edge_curve, curve, keyword, place)?
         {
             let radius = reading.real_at(curve, CIRCLE, 2)?;
-            let round = Axis::new(place.origin, place.axis)
+            let round = Axis::as_written(place.origin, place.axis)
                 .and_then(|axis| Cylinder::new(axis, radius))
                 .map_err(not_a_working_shape)?;
             return Ok(Surface::Cylinder(round));

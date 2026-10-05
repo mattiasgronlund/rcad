@@ -236,9 +236,28 @@ correctly rounded normalize landed; the doc now says 992.
 
 **What this leaves.**
 
-- The reader's `CIRCLE` pipe (`Walk::the_surface_that_names_the_curve`,
-  `brep.rs`) and the writer's `an_arc_of_a_circle_on_a_flat_face` still ask
-  `Axis::new`, and move together: Q1001.
+- **2026-10-05, Q1001: the circle's pipe moved too.** The reader's `CIRCLE`
+  pipe on flat faces (`Walk::the_surface_that_names_the_curve`, `brep.rs`)
+  and the writer's check that it reads back
+  (`an_arc_of_a_circle_on_a_flat_face`, `write.rs`) now both ask
+  `Axis::as_written`. A round bar with a disc drawn on its top, turned the
+  same 372 ways, is the new
+  `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`. On
+  the base `eccf76b7` the writer refused 76 of them with
+  `ACurveTheFacesEitherSideOfItDoNotName` between two planes and 296 came
+  back the same; after, all 372 come back the same. The 76 refused were
+  exactly the axes `Axis::new` moves, and that count is pinned. Each leg put
+  back alone fails the pin: the reader on `Axis::new` reads 76 back with the
+  pipe's axis moved, `(372, 0, 296, 76, 0)`, and the writer on `Axis::new`
+  refuses them again, `(372, 76, 296, 0, 0)`. The harness's `the_same_run`
+  now tells an arc on a flat face by its side of the chord in the face's
+  plane, as it tells one in a plane its run names: turned about `z` by `0.1`
+  and moved, the kernel's picker and the reader's `(B − A) × w` were on the
+  same side and not along each other to the bit. `just t -p rcad-step` passed
+  288 of 288 before and 292 of 292 after, the four new being the new test in
+  four binaries; with `--no-capture` no other printed line moved. The
+  2026-09-26 crash directory gives 22 528 with no panic before and after.
+  `-p rcad-geom`, `-p rcad-topo` and `-p rcad-fuzz-explain` pass after.
 - **Two spellings of one pipe.** §355.5's second item now reaches axes: a file
   that writes one pipe's axis two ways, both near length one, gets two pipes
   an ulp apart. Nothing in the corpus or the suite showed it, and no row is
