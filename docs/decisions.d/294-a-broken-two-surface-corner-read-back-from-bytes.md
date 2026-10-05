@@ -209,6 +209,7 @@ names something other than the file — never a wrong `Ok`, never a panic.
   `8.5e-14` either way turned, `2.8e-13` turned and shifted — so every corner
   moved there is that refusal too, not an answer about the moved corner
   (`a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
+  Turned alone, it answers since §294.9; turned and shifted, it still refuses.
   Only shifted, the sound bar answers, because a corner moved by a shift that
   rounds nothing is handed on exact (Q509 fixed this; before it, it refused
   "side of plane" there as well).
@@ -238,3 +239,89 @@ names something other than the file — never a wrong `Ok`, never a panic.
   both policies
   (`a_frustum_whose_top_corner_is_moved_in_its_file_reads_back_and_does_not_validate`,
   `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more`).
+
+### 294.9 Q912: a seam corner is on its moved seam plane by construction
+
+*Queue row Q912, from Q717. Lane `lane-q912-a-seam-corner-on-its-moved-seam-plane`.*
+
+**The case.** The round bar of 294.1, turned 0.4 about `x`, less or
+intersected with `THE_HALF_PAST_THE_SEAM` turned the same way, refused
+`Undecidable` on "side of plane". Measured again on the base with Q717's probe
+(`./target/q717/run.sh none`): both rules refused at the box the turn hands on
+round the bottom seam corner, `(3, 0, 0)` give or take `8.526512829121202e-14`
+on every axis, asked about the block's face, normal `(0, -0.9210609940028851,
+-0.38941834230865047)` and offset `0`. The arrangement asks it while placing
+the corners of the bar's bottom cap: the cap's crossing with the block's face
+is a line, and whether that line runs through the corner is what
+`passes_through` asks of the corner's box. The face straddles the box, so the
+box cannot say.
+
+**The answer exists before any rounding.** As stored, the corner `(3, 0, 0)` is
+exactly on the plane `y = 0` through the bar's axis, and the turn keeps every
+incidence. The block's face is that same stored plane moved by the same
+`Plane::transformed`, so it is the same `f64`s: measured, the plane through the
+bar's stored axis and its stored corner, turned, is the block's face turned
+round, bit for bit (a scratch probe, not kept). So the line the face cuts the
+cap in meets the bottom circle at the corner, and not at a second point a
+rounding from it.
+
+**The rule.** `bake` now gives a corner read out of the model on a pipe's wall
+one more thing beside `around`: `BakedCorner::seam_plane`, the plane through
+the pipe's stored axis and the stored corner, moved by the placement with
+`Plane::transformed` — only when the stored corner is exactly on it, asked of
+the stored numbers. The plane's normal is the axis crossed with the corner,
+scaled to length one, which rounds unless the pipe stands along an axis, and a
+plane that misses the stored corner by a rounding crosses the circle a rounding
+from it, which is another point. `place_the_corners` takes a crossing whose
+partner is that plane, either way round, as through the corner without asking,
+as it already took the surfaces round a corner
+(`BakedCorner::is_on_by_construction`).
+
+It is sound for the same reason the surfaces round the corner are taken
+unasked: moved, the corner is no more exactly on its own cap and wall than on
+the seam plane, and each is a moved copy of an incidence the model held. And a
+corner with two surfaces round it is a cached sample of the curve they share
+(§17.1, §31.3): the cap and the wall are bounded by the whole circle and the
+seam is no boundary (`bake.rs`'s header), so taking the corner as where the
+plane crosses the circle moves no point of the solid. The plane holds the axis,
+so its other crossing with the circle is a diameter away.
+
+**Kept out of `around`, on purpose.** `around` promises that a corner with three
+or more surfaces in it was asked about every one, and
+`bake_placed_the_corner_on_the_three_planes` reads `around.len() >= 3` as that
+promise and takes three planes from it as planes the corner was solved among
+(§356). A bar's corner with its seam plane in `around` would have three
+surfaces, two of them planes, none asked, and §395.7 has already shown what a
+fold over three planes that do not pin a point does. A field of its own keeps
+that promise as it was; Q1036 can put its own field beside it.
+
+**What it gives.** Turned alone, both rules answer, and each answer is half the
+bar, `45π`, measured with a fine mesh, validates on its own, and has the
+unturned answer's corners turned, each within `1e-12` of exactly one of them —
+for `THE_HALF_PAST_THE_SEAM` and for `THE_HALF_SHORT_OF_THE_SEAM`, whose face
+runs along the seam the other way round, so each way round of the comparison
+is what answers one of the two
+(`a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned`).
+The top corner moved in the file gives the unturned bar's outcomes: off the wall
+`CannotTellTheCellsOfAFaceApart`, off the cap `Undecidable` on "order along a
+crossing", and a quarter turn round the sound answer — to a rounding, not to
+the bit. Cut away, that corner leaves the top seam corner of the answer to be
+placed where the block's face crosses the top circle, two ulps in `y` and one
+in `z` from where the sound bar's own corner is written, so the same-bits check
+of 294.2's second kind does not hold there and the test compares within
+`1e-12` instead.
+
+**Turned and then shifted, it still refuses** "side of plane", at the bottom
+corner's box `2.8421709430404007e-13` either way round `(10, -5, 2.5)`
+(`a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`,
+now the turned-and-shifted bar alone). There the block's face is not the seam
+plane moved: its offset is `0x400d0dd7b8f4fb64` and the reversed moved seam
+plane's `0x400d0dd7b8f4fb65`, one ulp apart, because the block's placement is
+composed with its own shift and rounds differently. That is a different plane,
+crossing the circle `3.9e-16` from the corner (Q717's figure), and the rule
+does not reach it. Whether that is a limit is Q913's to pin.
+
+**Not tried.** A cone's seam corner: a frustum turned and cut by
+`THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM` turned the same way is the same shape
+on a cone, and `the_seam_plane_a_corner_is_on` looks only at pipes, so it would
+still ask.

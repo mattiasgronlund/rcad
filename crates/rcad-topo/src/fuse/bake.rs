@@ -233,6 +233,63 @@ pub(crate) struct BakedCorner {
     /// `a_corner_is_this_place` in the arrangement leans on the first half:
     /// a meet of three planes from this list is this corner (§356).
     pub(crate) around: Vec<Surface>,
+    /// For a corner read out of the model on a pipe's wall, the plane through
+    /// the pipe's axis and the corner, moved into place — the plane a round
+    /// bar's seam lies in — when the stored corner is exactly on it as stored.
+    /// `None` for every other corner.
+    ///
+    /// **Kept apart from `around`, and never asked.** Every surface in
+    /// `around` meets here or was asked about the corner, and the arrangement
+    /// reads three planes from it as planes the corner was solved among; this
+    /// one is neither. [`BakedCorner::is_on_by_construction`] is the one
+    /// reader, and says why it may be taken as through the corner.
+    pub(crate) seam_plane: Option<Plane>,
+}
+
+impl BakedCorner {
+    /// Whether `surface` runs through this corner by construction, so that
+    /// nothing has to ask it: one of the surfaces round it, or its
+    /// [`BakedCorner::seam_plane`] either way round.
+    ///
+    /// **The seam plane is through the corner because both were moved from
+    /// one exact incidence.** A round bar turned 0.4 about `x` and cut by a
+    /// block along its seam, turned the same way, is the case. As stored, the
+    /// bottom seam corner `(3, 0, 0)` is on the plane `y = 0` exactly, and is
+    /// one of the two points where that plane crosses the bottom circle. The
+    /// turn rounds the corner into a box `8.5e-14` either way, and the block's
+    /// face — the same plane moved by the same [`Plane::transformed`], and so
+    /// the same bits — runs through that box, so asking which side of it the
+    /// corner is cannot be answered, and the fuse refused (§294.9). But the
+    /// question has an answer that exists before any rounding: the stored
+    /// corner was on the stored plane, and a turn keeps every incidence. So
+    /// the crossing the face makes with that plane meets the circle at this
+    /// corner and not at a second point a rounding away, and that is what this
+    /// says.
+    ///
+    /// It is sound for the reason the surfaces round a corner are taken
+    /// through it unasked. Moved, the corner is no more exactly on its own cap
+    /// and wall than on the seam plane; each is a moved copy of an incidence
+    /// the model held. And a corner with two surfaces round it is a cached
+    /// sample of the curve they share (§17.1): the cap and the wall are
+    /// bounded by the whole circle, and the seam is not a boundary (this
+    /// module's header), so taking the corner as the point where the plane
+    /// crosses the circle, a rounding from where it was written, moves no
+    /// point of the solid. The plane holds the axis, so it crosses the circle
+    /// again only on the far side of the axis, a diameter away, and the corner
+    /// is one of its two crossings and never both.
+    ///
+    /// **Bit for bit, or not at all.** A plane an ulp from the seam plane is
+    /// a different plane, crossing the circle an ulp from the corner, and that
+    /// is still asked: the bar turned and then shifted meets a block face whose
+    /// offset is one ulp off the seam plane's, and refuses as it did.
+    pub(crate) fn is_on_by_construction(&self, surface: &Surface) -> bool {
+        self.around.contains(surface)
+            || self.seam_plane.is_some_and(|seam| {
+                surface
+                    .as_plane()
+                    .is_some_and(|flat| *flat == seam || *flat == seam.reversed())
+            })
+    }
 }
 
 /// A box round some geometry, in world coordinates.
@@ -868,6 +925,40 @@ fn place_a_corner(
         vertex,
         point: where_the_model_puts_it,
         around: distinct,
+        seam_plane: the_seam_plane_a_corner_is_on(model, slot, around),
+    })
+}
+
+/// The plane through the axis of a pipe round a corner read out of the model,
+/// and through the stored corner, moved into place with the corner
+/// ([`BakedCorner::seam_plane`]).
+///
+/// **Only when the stored corner is exactly on it**, asked of the stored
+/// numbers. The plane is built from the corner, so it is through the corner
+/// as written, but its normal is scaled to length one and that rounds unless
+/// the pipe stands along an axis. A plane that misses the stored corner by a
+/// rounding crosses the circle a rounding away from it, which is a second
+/// point and not this one.
+fn the_seam_plane_a_corner_is_on(
+    model: &Model,
+    slot: VertexSlot,
+    around: &[PlacedSurface],
+) -> Option<Plane> {
+    let stored = model.data().vertices[slot].point;
+    around.iter().find_map(|face| {
+        let Surface::Cylinder(pipe) = face.stored else {
+            return None;
+        };
+        let axis = pipe.axis();
+        // A corner on the axis has no plane through the two, and only a
+        // corner moved off its wall in the file can be there.
+        let seam_plane = Plane::from_point_and_normal(
+            axis.origin(),
+            axis.direction().cross(stored - axis.origin()),
+        )
+        .ok()?;
+        (seam_plane.side_of_point(PredicatePoint::from(stored.coordinates())) == Decision::Zero)
+            .then(|| seam_plane.transformed(&face.movement))
     })
 }
 
@@ -1064,6 +1155,7 @@ fn derive_a_corner(
         vertex,
         point,
         around,
+        seam_plane: None,
     })
 }
 
@@ -1757,6 +1849,58 @@ mod tests {
             }
         }
         assert!(anything_was_built, "a turned bar's corners are boxes");
+    }
+
+    /// A corner on a pipe's wall carries the plane through the axis and itself
+    /// only when it is exactly on that plane as stored
+    /// ([`BakedCorner::seam_plane`](super::BakedCorner)). A bar's seam corners
+    /// are, on `y = 0`, and carry it moved with the bar. A corner written at
+    /// `(1, 3, 5)` is not: the plane's normal `(-3, 1, 0)` scaled to length one
+    /// rounds, and misses it.
+    #[test]
+    fn a_corner_carries_its_seam_plane_only_when_it_is_exactly_on_it() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model.add_round_bar(3.0, 5.0, &a_turn()).expect("a bar");
+        let through = |normal| {
+            Plane::from_point_and_normal(Point::origin(), normal).expect("a normal with length")
+        };
+        let the_seams = Some(through(Vector::new(0.0, 1.0, 0.0)).transformed(&a_turn()));
+        let mut top = None;
+        for face in &baked(&model, &[bar])[0].faces {
+            for side in face.wires.iter().flatten() {
+                assert_eq!(side.start.seam_plane, the_seams);
+                if model
+                    .vertex(side.start.vertex)
+                    .expect("this model made the key")
+                    .point()
+                    .coordinates()[2]
+                    == 5.0
+                {
+                    top = Some(side.start.vertex);
+                }
+            }
+        }
+        let top = top.expect("the bar has a top corner");
+
+        let written = Point::new(1.0, 3.0, 5.0);
+        assert_ne!(
+            through(Vector::new(-3.0, 1.0, 0.0))
+                .side_of_point(PredicatePoint::from(written.coordinates())),
+            Decision::Zero,
+            "the plane through the axis and the written corner misses it"
+        );
+        let slot = top.slot_in(model.id());
+        model.data_mut().vertices[slot].point = written;
+        for face in &baked(&model, &[bar])[0].faces {
+            for side in face.wires.iter().flatten() {
+                let expected = if side.start.vertex == top {
+                    None
+                } else {
+                    the_seams
+                };
+                assert_eq!(side.start.seam_plane, expected);
+            }
+        }
     }
 
     /// Two planes crossing in the z axis and a ball of radius one round the
