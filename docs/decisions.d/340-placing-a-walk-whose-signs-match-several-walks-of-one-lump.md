@@ -107,6 +107,44 @@ not measured one by one.
   what a walk that goes round nothing, a ball, or a curved side on a plane would
   get.
 
+**2026-10-05, queue row Q424: two shapes reach it, and the suites already had
+one.** `a_walk_neither_winding_nor_the_axis_places.rs` pins
+`CannotTellTheCellsOfAFaceApart` under every rule with the arguments both ways
+round for two shapes, and a printed probe at each of the five places
+`arrange.rs` raises it, since removed, named
+`the_walk_of_each_other_lump_each_walk_faces` for all twelve fuses.
+
+- **On a ball**: a ball of radius 2 less a small ball on its skin, against a
+  square rod through it. The rod's four walls cut the ball in four circles that
+  are one lump, with a patch inside all four at each end of the rod. The dimple
+  sits in one patch and is on the same side of every circle as both.
+- **A curved side on a plane**: a plate with a round notch at one corner, cut in
+  two by a holed slab's wall, with the hole's circle in the half away from the
+  notch. Winding by corners is not asked, because the other half has the
+  notch's arc.
+
+Both answers exist, and the test docs work out their volumes, so both are gaps
+(§16.10). The same probe on Q616's
+`a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells`
+(Q639's row) named the same place, on the bar's floor, six times: a curved side
+on a plane as well. So the bullet above was stale from Q616 on.
+
+What the file pins that does not reach it, each with what the probe printed: a
+ball face bounded by two arcs places its hole, because every face is cut by its
+own solid's faces too (`cuts.rs`), so the arcs' circles are drawn in full, and
+the fuse is refused later in selection, `AFaceTrimmedByACurveThisCannotFollow`.
+A ball against a pipe is refused `ACrossingThisCannotBeOrderedAlong` before any
+cell, and that was the one walk going round nothing on a pipe that was tried. **No
+cone was tried**, so a walk that goes round nothing is neither shown to reach it
+nor shown not to.
+
+**A second gap came up on the way, with the same cause.** A pin through a
+plate's round tab is refused `ResultIsNotManifold`: the probe printed the pin's
+circle on the plate's floor wound no times, because the face's corners are all on
+the plate's square and `say_whether_the_face_holds_each_lump_of_closed_cuts`
+counts round the corners alone. Where a side is curved, the corners are not the
+face's shape there either.
+
 ### 340.5 The half ball the second fuse turns inside out
 
 *Queue row Q412, which replaced Q204 to land this section's fix with the four
