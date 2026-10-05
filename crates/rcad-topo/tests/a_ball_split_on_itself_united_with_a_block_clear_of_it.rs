@@ -1,23 +1,26 @@
 //! A ball in two faces on its one sphere, fused again with a cube (row Q903,
 //! `docs/decisions.md` §220.1, §400.5).
 //!
-//! Two solids here carry such a ball. One is §220.1's: a ball of radius 5 split
-//! down its polar axis into two lunes, built through `SolidBuilder`, the rim
-//! between them naming the plane `x = 0`. The other is what a union writes: a
-//! block from `(-2, -2, 0)` to `(0, 0, 2)` and a ball of radius 1 at
-//! `(1, -0.5, 1)` touching its face `x = 0`, whose plane `y = 0` cuts the ball
-//! in two (`a_rim_that_names_its_cutting_surface.rs`).
+//! Three solids here carry such a ball. One is §220.1's: a ball of radius 5
+//! split down its polar axis into two lunes, built through `SolidBuilder`, the
+//! rim between them naming the plane `x = 0`. One is row Q374's half ball, its
+//! skin holed along a plane and the hole capped on the same ball
+//! (`a_half_ball_holed_round_its_pole_and_capped_on_the_same_ball.rs`). The
+//! third is what a union writes: a block from `(-2, -2, 0)` to `(0, 0, 2)` and a
+//! ball of radius 1 at `(1, -0.5, 1)` touching its face `x = 0`, whose plane
+//! `y = 0` cuts the ball in two (`a_rim_that_names_its_cutting_surface.rs`).
 //!
 //! # Beside a far cube they answer
 //!
-//! Both were refused `AFaceMeetsItsNeighbourOnItsOwnSurface` at
+//! All three were refused `AFaceMeetsItsNeighbourOnItsOwnSurface` at
 //! `Arrangement::crossing_for` (rows Q376, Q584, Q890): the arrangement asked
 //! where one face meets the face across the rim, and that is the same sphere.
 //! Since row Q575 the bake hands the faces of an input on one ball over as one
 //! face and leaves the rim out the way it leaves a seam out, so nothing asks.
-//! The lunes beside a far cube answer under every rule both ways round. So does
-//! the draw row Q171 found, the same ball at `(1, 0.5, 1)`, half a unit clear
-//! of the block: since §400 that ball is not cut at all, and comes back whole.
+//! The lunes and the capped half ball beside a far cube answer under every rule
+//! both ways round. So does the draw row Q171 found, the same ball at
+//! `(1, 0.5, 1)`, half a unit clear of the block: since §400 that ball is not
+//! cut at all, and comes back whole.
 //!
 //! # Where a point has to be placed against the ball, they do not
 //!
@@ -68,6 +71,40 @@ fn two_lunes_beside_a_far_cube_come_back_as_they_stand() {
             };
             let answer = fused(&mut model, &arguments, &tools, rule, &what);
             assert_the_solids_measure(&model, &answer, &truths, &what);
+        }
+    }
+}
+
+/// Row Q374's half ball beside a cube of side 2 at `(20, 20, 20)`, in each of
+/// the eight spellings that build: the rim's corner at the top or the bottom of
+/// the hole, the hole's plane facing either way, and the skin's hole listed
+/// before or after its equator. Every fuse is the solids as they stand, the
+/// half ball measuring `250π/3`.
+#[test]
+fn a_half_ball_capped_on_itself_beside_a_far_cube_comes_back_as_it_stands() {
+    let plane =
+        Plane::from_point_and_normal(Point::new(0.0, 3.0, 4.0), Vector::new(0.0, -1.0, 7.0))
+            .expect("a plane");
+    for corner in [Point::new(0.0, 3.0, 4.0), Point::new(0.0, -4.0, 3.0)] {
+        for and in [plane, plane.reversed()] {
+            for hole_first in [false, true] {
+                for (rule, half_first, truths) in every_fuse_of_two_apart(&[LUNES / 2.0], &[CUBE]) {
+                    let what = format!(
+                        "{rule:?}, corner {corner:?}, plane facing {:?}, hole first {hole_first}, \
+                         half ball first {half_first}",
+                        and.normal()
+                    );
+                    let (mut model, half) = a_half_ball_capped_on_itself(corner, and, hole_first);
+                    let cube = a_cube(&mut model, 2.0, [20.0, 20.0, 20.0]);
+                    let (arguments, tools) = if half_first {
+                        ([half], [cube])
+                    } else {
+                        ([cube], [half])
+                    };
+                    let answer = fused(&mut model, &arguments, &tools, rule, &what);
+                    assert_the_solids_measure(&model, &answer, &truths, &what);
+                }
+            }
         }
     }
 }
@@ -285,6 +322,82 @@ fn two_lunes(way: Orientation) -> (Model, SolidKey) {
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a ball split in two is a sound model");
+    (model, solid)
+}
+
+/// The half ball `z ≥ 0` of radius `RADIUS`, its skin holed along `and` and the
+/// hole capped on the same ball, with the rim's one corner at `corner`. The skin
+/// walks the rim `Reversed` and the cap `Forward`, the spelling
+/// `a_half_ball_holed_round_its_pole_and_capped_on_the_same_ball.rs` finds right.
+fn a_half_ball_capped_on_itself(corner: Point, and: Plane, hole_first: bool) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(25.0 * RADIUS).expect("a positive size"));
+    let mut builder = SolidBuilder::new();
+    let on_the_equator = builder
+        .add_vertex(Point::new(RADIUS, 0.0, 0.0))
+        .expect("a point");
+    let equator = builder
+        .add_edge(
+            on_the_equator,
+            on_the_equator,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("a closed edge");
+    let corner = builder.add_vertex(corner).expect("a point");
+    let rim = builder
+        .add_edge(
+            corner,
+            corner,
+            EdgeRun::RightRoundWhereItCrosses {
+                and: Surface::Plane(and),
+            },
+        )
+        .expect("a closed edge");
+    let mut walking = |edge, orientation| {
+        let coedge = builder
+            .add_coedge(edge, orientation)
+            .expect("an edge of this builder");
+        builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("a closed wire")
+    };
+    let equator_on_the_skin = walking(equator, Orientation::Forward);
+    let equator_on_the_floor = walking(equator, Orientation::Reversed);
+    let hole = walking(rim, Orientation::Reversed);
+    let rim_of_the_cap = walking(rim, Orientation::Forward);
+    let ball = Surface::Sphere(Sphere::new(Point::origin(), RADIUS).expect("a ball"));
+    let skin_wires = if hole_first {
+        [hole, equator_on_the_skin]
+    } else {
+        [equator_on_the_skin, hole]
+    };
+    let skin = builder
+        .add_face(ball, &skin_wires)
+        .expect("a face with two wires");
+    let cap = builder
+        .add_face(ball, &[rim_of_the_cap])
+        .expect("a face with one wire");
+    let floor = builder
+        .add_face(
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    .expect("the z axis is a unit normal"),
+            ),
+            &[equator_on_the_floor],
+        )
+        .expect("a face with one wire");
+    builder
+        .add_shell(&[
+            (skin, Orientation::Forward),
+            (cap, Orientation::Forward),
+            (floor, Orientation::Forward),
+        ])
+        .expect("the skin, the cap and the floor close up");
+    let solid = builder
+        .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a holed and capped half ball is a solid");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a holed and capped half ball is a sound model");
     (model, solid)
 }
 
