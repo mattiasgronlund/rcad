@@ -107,6 +107,10 @@ not measured one by one.
   what a walk that goes round nothing, a ball, or a curved side on a plane would
   get.
 
+The "Four refuse `ResultIsNotManifold`" bullet above is closed by §340.10; the
+eight that stopped at "order along a crossing" (leaned 2, turned 1) decide the
+order since §406.4.
+
 **2026-10-05, queue row Q424: two shapes reach it, and the suites already had
 one.** `a_walk_neither_winding_nor_the_axis_places.rs` pins
 `CannotTellTheCellsOfAFaceApart` under every rule with the arguments both ways
