@@ -250,20 +250,24 @@ each spacing along it is another chance for a double to fall inside.
    the cap turned by `1` (`3.6e-17` deep) was never held: the interval sum
    rounds by more than the cap is deep. Narrowed, it is asked exactly. The same
    narrowing is used where `select` compares the ray with the stored planes.
+   *Since Q996 `select` asks it through `classify.rs`'s `side_of_a_flat_face`,
+   the ray's own copy, and stretches a box through `classify.rs`'s
+   `stretched_to_the_plane`; it keeps no copy of either, and no longer compares
+   the ray with the stored planes (below).*
 
 **Measured, on the base and after.** A throwaway probe fused every draw with
 both policies and both argument orders (`crates/rcad-topo/tests/q658_probe.rs`,
 taken out). On the base all 56 refused `a point inside a piece of a face`.
 After, each draw answers alike under both policies and both orders. The third
-column is since §402 (Q904), and the last since Q668; the paragraphs on each
-row below say why:
+column is since §402 (Q904), the fourth since Q668, and the last since Q996;
+the paragraphs on each row below say why:
 
-| draws (`off`, turned) | refused with, after Q658 | since §402 | since Q668 |
-|---|---|---|---|
-| −0.5: 1; −0.3: 0.3, 0.5 | `a point in a piece that every solid could place` | the same | answers |
-| −0.5: 1.5, 2.5, 3; −0.3: 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` | the same | the same |
-| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` | answers | answers |
-| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` | answers | answers |
+| draws (`off`, turned) | refused with, after Q658 | since §402 | since Q668 | since Q996 |
+|---|---|---|---|---|
+| −0.5: 1; −0.3: 0.3, 0.5 | `a point in a piece that every solid could place` | the same | answers | answers |
+| −0.5: 1.5, 2.5, 3; −0.3: 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` | the same | the same | answers |
+| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` | answers | answers | answers |
+| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` | answers | answers | answers |
 
 `what_each_ball_shaved_by_a_turned_blocks_face_comes_to` pins that table, its
 last column now, and was `…_is_refused_with` until Q904. Q658's pin failed on
@@ -341,7 +345,7 @@ face holds.
 hold the test file's checks. `a_segment_up_through_the_cap_is_inside_the_block`
 pins one segment from each of three draws against the block alone: `Inside`
 under both policies, where it was `Undecidable` and `OnBoundary` in two and
-`Outside` in the third. The seven still refuse: the ray now says `Inside` for
+`Outside` in the third. The seven still refused (until Q996, below): the ray now says `Inside` for
 the six whose cap is on the block's face, the plane's answer, and `select`'s
 guard still drops them, since it reads every triangle and not the ray's answer.
 With the guard switched off by a throwaway check in `select.rs` (taken out),
@@ -368,6 +372,32 @@ throwaway `eprintln` in the new rule (taken out):
   steep face's stored plane has offset `4.4e-16`, so the origin is `4.4e-16`
   on the block's side of it. The test's claim survives the move: `(0.25, 1.0)`
   and `(0.375, 1.0)` are both inside, and only the second measures.
+
+*2026-10-05, Q996: the guard is dropped, and the seven answer.* *Queue row
+Q996, lane `lane-q996-drop-the-stored-plane-guard`, off `8ac9f1c8`.*
+`the_ray_and_the_stored_planes_disagree_about` is gone from `select.rs`. It
+dropped a point wherever any triangle of any straight-sided flat face of the
+solid and that face's stored plane put it on opposite sides, whatever the ray
+then said and however far the point was from the face. Since Q668 the ray asks
+the stored plane at every triangle its count turns on, so the guard only threw
+away answers the ray had already checked. With only the guard's call taken
+out, `mise exec -- just t -p rcad-topo --no-fail-fast`: 1378 run, 1377 passed,
+1 failed, 8 skipped. The one failure was Q658's pin, where all 28 runs of the
+seven draws answered and held the file's checks; it now has every draw answer.
+No pin moved in `a_narrow_lune_from_a_pole_corner.rs` or
+`fuses_that_must_agree.rs`, nor in any other file. `mise exec -- just pre-gate
+gate-lane`: 3027 run, 3027 passed, 48 skipped.
+
+**Why dropped and not narrowed.** Narrowing it to points over the face, those
+whose foot on the plane the face holds, keeps six of the seven refused: their
+points are in the sliver over the face `x = 0`, which is exactly where the ray
+now asks the plane. Narrowing it to faces the ray did not ask needs the ray to
+say which it asked. What the guard still caught that the ray does not is a
+point in one face's sliver whose ray line passes through a neighbouring face's
+triangle instead: a point within a few roundings of the edge the two share,
+the case "Why not let the ray cross the face by its stored plane outright"
+above already names. It was reasoned and not run, so it is a guess with no
+class (§360.5), and a row of its own builds it.
 
 **The second row gets past `select`**, and the mesher refuses a face of the
 ball with a hole of radius about `1e-8`. The refusal is `cut_up`'s fallback in
@@ -495,7 +525,9 @@ It is a guess nobody has run, so it carries no class.
   `the_ray_and_the_stored_planes_disagree_about` narrowed or dropped, now that
   the ray names a face where the two readings part; with it off, all ten
   answer. Two pins outside Q668's files moved to the plane's answer, and its
-  merge re-pinned both.*
+  merge re-pinned both.* *Q996: dropped; all ten answer.*
+- A point in one face's sliver whose ray crosses the neighbouring face instead,
+  above, built to see whether the ray places it by the corners.
 - The second row needs `mesh.rs`'s `cut_up` traced for a ball face with a
   small hole. *Q904: done above; it answers since §402.*
 - The third row needs the answer's check traced for which two faces disagree.
