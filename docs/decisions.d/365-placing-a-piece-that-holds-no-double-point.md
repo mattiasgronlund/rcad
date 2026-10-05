@@ -116,10 +116,20 @@ corners, not classified.
   Difference. The piece is the plate's bottom cap, the ring between the circle
   through `(4, 0, 0)` and the hole's circle through `(−3, −5, 0)`, and
   `(−14, 0, 0)` is inside it.
+
+  **2026-10-05 note (Q905): answered since Q714.** `between_the_round_wires`
+  in `fuse/select.rs` now offers points on the line through the two circles'
+  own middles, and all six fuses answer, pinned in
+  `a_plate_with_an_off_centre_hole.rs` against `300π`. The piece held an
+  `f64` point all along; this was a gap in the search, not a reach for
+  365.3's rule.
 - **Q602.** Reproduced with those heights, which the row did not know. The
   piece is the same form as Q637's: a flat cap bounded by one circle with one
   corner, with a hole that is one circle with one corner. `(30, 0, 0)` is inside
   it. The tube of radius 7 less 1 that Q621 builds answers.
+
+  **2026-10-05 note (Q905): answered since Q714 too**, by the same search
+  fix, run in a deleted scratch test rather than pinned in a tracked file.
 - **Q621.** Reproduced without waiting on Q602. The piece is the lens of the
   bar's cap outside the tube, `0.1` deep and `2.37` wide; `(−7.05, 0, 0)` is
   inside both the bar and the lens, to the nearest double.
@@ -153,12 +163,20 @@ The rest were read, not run:
   tube less the bar's disk, a C: the bottom cap for the flush bar, the top cap
   for the other two, with corners `(2.6875, ±1.3332)`, `(0.6875, ±0.7262)` and
   the hole's corner `(0, ∓1)`. The rungs of 365.6 answer all 18.
-- **365.3's rule would reach** Q635, Q637 and Q602 on paper: each piece has a
-  side that is a cut of the other solid's face (the hyperbola or circle on the
-  cone, the hole's circle on the bar's wall). Q621's lens does not: its side
-  on the tube's circle lies along the tube's bottom rim, an edge of the tube,
-  where the tube near the side is a wedge and not one face, and the tube's cap
+- **365.3's rule would reach Q635** on paper: its piece has a side that is a
+  cut of the other solid's face, the hyperbola on the cone. Q637 and Q602 no
+  longer need it, now that Q714 answers both through the point search
+  instead (above). Q621's lens is not reached either way: its side on the
+  tube's circle lies along the tube's bottom rim, an edge of the tube, where
+  the tube near the side is a wedge and not one face, and the tube's cap
   beside it is on the lens's own plane. None of that was run.
+- **A second tube and bar, a different shape from Q603's.** Q576 also found a
+  tube of radius 29 less 13 united with a bar of radius 20 at `(21, 0)`
+  refusing the same predicate, both argument orders, on a five-corner
+  C-shaped piece — Q897's kind of gap, but not Q897's own numbers: Q603's
+  tube and bar are radius 3, 1 and 1.5, so this is a separate piece and not
+  simply that one reproduced at another scale. Whether 365.6's rungs reach it
+  was not run here; Q715, running beside this row, replays it.
 
 ### 365.3 The choice: a piece placed from a side it shares with another solid's face
 
@@ -200,6 +218,8 @@ and each lies inside the ball, so each is inside the ball.
   and Q602 on paper, and Q668's draws if it is also tried after the second
   refusal. Those pieces all hold doubles, so each of their rows should still
   mend the search that missed them: this is a floor under them, not their fix.
+  (Q637 and Q602 answered through that search fix before the rule was ever
+  tried on them, Q714; 365.2.)
 - **5 moves the limit rather than removing it.** A piece narrower than two
   doubles' spacing, away from any double, is out of its reach as this piece is
   out of `f64`'s. Nobody built one, so that is a guess with no class
@@ -242,6 +262,10 @@ this pins whatever the six fuses give, without assuming they answer.
 - **Q637 and Q602 look like one stop**: a flat cap with one-corner circles for
   its outline and its hole, all six fuses, both reproduced above. Q637's row
   asked for that to be said there.
+
+  **2026-10-05 note (Q905): answered as one stop, by Q714.** Both are a gap
+  in the point search, not a reach for this rule; see the notes under
+  365.2.
 - **Q621 reproduces now**, without Q602, with the corners above.
 
 ### 365.5 What building the rule ran
