@@ -15,8 +15,9 @@
 //!    refused with [`rcad_topo::Error::AFaceMeetsItsNeighbourOnItsOwnSurface`]:
 //!    nothing folded pieces of one curved surface into one face the way pieces
 //!    of one plane are folded. The fuse now bakes pieces of one cone as one face
-//!    (row Q898), and behind them is a third gap, the frustum's floor, which
-//!    `holds.rs` cannot ask what it holds. That one is still open.
+//!    (row Q898), and behind them is a third gap, the frustum's floor. Its
+//!    longer arc's picker has the circle's centre in front, which `holds.rs`
+//!    now reads (row Q971) and the fuse's own arrangement does not yet.
 //!
 //! # The risk the picker's room carries
 //!
@@ -30,7 +31,7 @@ mod cones;
 
 use rcad_geom::{Deflection, EdgeRun, Isometry, Picker, Scale, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
 use cones::a_frustum;
 
@@ -210,9 +211,10 @@ fn a_near_semicircle_keeps_its_centre_behind_its_picker() {
 }
 
 /// With the centre kept behind, the arcs the room can be granted get past the
-/// picker on the way back in, past the cone pieces, and stop at the frustum's
-/// floor: the disc at `z = 4`, its circle cut in two where the wall's plane
-/// crosses it, cannot say whether it holds a point.
+/// picker on the way back in, past the cone pieces and past `holds.rs`'s
+/// reading of the frustum's floor, and stop where the fuse's arrangement reads
+/// that floor's longer arc: the disc at `z = 4`, its circle cut in two where
+/// the wall's plane crosses it.
 ///
 /// `t = 2⁻³⁰` and `2⁻⁴⁰` refused at the block floor's picker with
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] before the room. `2⁻⁴⁴` and
@@ -230,35 +232,76 @@ fn a_near_semicircle_keeps_its_centre_behind_its_picker() {
 /// ulps away. The corner now keeps the wall's plane from the run of the edge
 /// left out, is solved from the three, and is that meet.
 ///
-/// **What stops it now is the floor, and the first union's floor on its own
-/// refuses the same way**, before any second fuse: one of its two arcs is the
-/// longer, so its picker has the circle's centre in front, and `holds.rs`
-/// takes a lowered picker only with the centre behind.
+/// **Then it stopped at `holds.rs`'s reading of the floor** (row Q971), and the
+/// first union's floor refused on its own the same way, before any second fuse:
+/// one of its two arcs is the longer, so its picker has the circle's centre in
+/// front, and `holds.rs` read an arc only off a picker with the centre behind.
+/// It now also reads one whose other arc's middle is behind
+/// ([`the_floor_disc_a_wall_near_its_axis_cuts_in_two_holds_its_disc`]).
+///
+/// **What stops it now is the same refusal on the same face, from the fuse's
+/// arrangement**: `which_way_an_edge_runs_round` in `fuse/arrange.rs` reads the
+/// floor's arcs through its own `the_way_into_an_arc`, which asks only the two
+/// ways with the centre behind. The answer this should become is the first
+/// union and the cube, measured against the frustum's and the block's volumes
+/// less what they share, worked out by hand, and the cube's 8: the wall's plane
+/// is `x − y/10 = t`, so at each height from `z = 5` to `z = 8` the two share
+/// the slice of the frustum's circle of radius `z / 2` past a line `t/√1.01`
+/// from its centre.
 #[test]
-fn a_frustum_and_a_wall_near_its_axis_taken_back_in_stop_at_the_floor_disc() {
+fn a_frustum_and_a_wall_near_its_axis_taken_back_in_stop_at_the_floor_discs_long_arc() {
     for exponent in [1, 10, 30, 40, 42] {
         let t = 2.0_f64.powi(-exponent);
         let (model, united) =
             a_frustum_united_with_a_wall_near_its_axis(t).expect("the first union answers");
         let floor = the_floor_disc(&model, &united);
         let refusal = the_union_again_with_a_far_cube(&model, &united)
-            .expect_err("the floor disc cannot say what it holds");
+            .expect_err("the fuse cannot read the floor disc's longer arc");
         assert!(
             matches!(refusal, Error::AFaceTrimmedByACurveThisCannotFollow { face } if face == floor),
             "t = 2^-{exponent}: the second union refused before reaching the floor disc: \
              {refusal:?}"
         );
+    }
+}
+
+/// The first union's floor, the disc at `z = 4` whose circle the wall's plane
+/// cuts in two, holds the points of its disc either side of that cut and none
+/// past its circle of radius 2.
+///
+/// It used to hold nothing: [`Error::AFaceTrimmedByACurveThisCannotFollow`] at
+/// every point. Of its two arcs the longer one is picked by a half-space
+/// through the chord lowered just past both ends, so the circle's centre is in
+/// front of it, and `holds.rs` read an arc only off a picker with the centre
+/// behind. It now also reads one whose other arc's middle is behind.
+#[test]
+fn the_floor_disc_a_wall_near_its_axis_cuts_in_two_holds_its_disc() {
+    for exponent in [1, 10, 30, 40, 42] {
+        let t = 2.0_f64.powi(-exponent);
+        let (model, united) =
+            a_frustum_united_with_a_wall_near_its_axis(t).expect("the first union answers");
+        let floor = the_floor_disc(&model, &united);
         let view = model.solid(united[0]).expect("this model made the key");
-        let asked = view.face_holds_the_point(
-            floor,
-            PredicatePoint::from([0.0, 0.0, 4.0]),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-        assert!(
-            matches!(asked, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == floor),
-            "t = 2^-{exponent}: the floor disc said what it holds at its centre: {asked:?}"
-        );
+        for (at, wanted) in [
+            ([0.0, 0.0, 4.0], OnAFace::Held),
+            ([-1.5, 0.0, 4.0], OnAFace::Held),
+            ([1.5, 0.0, 4.0], OnAFace::Held),
+            ([-2.5, 0.0, 4.0], OnAFace::NotHeld),
+            ([2.5, 0.0, 4.0], OnAFace::NotHeld),
+            ([0.0, 2.5, 4.0], OnAFace::NotHeld),
+        ] {
+            let asked = view
+                .face_holds_the_point(
+                    floor,
+                    PredicatePoint::from(at),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| {
+                    panic!("t = 2^-{exponent}: the floor disc refused {at:?}: {why:?}")
+                });
+            assert_eq!(asked, wanted, "t = 2^-{exponent}: the floor disc at {at:?}");
+        }
     }
 }
 

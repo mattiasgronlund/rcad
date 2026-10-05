@@ -1249,8 +1249,9 @@ fn is_one_circle_cut_in_two(
 /// arcs cut by planes through its centre, and a cone face or a pipe face cut by
 /// planes as [`is_a_family_this_follows`] sets out. Each arc must be picked by a
 /// half-space that tells it from its sibling ([`the_way_into_an_arc`]), which
-/// asks the picker either to hold both its ends exactly or to have the arc's
-/// whole curve in front of it with that curve's centre behind — and a cone's
+/// asks the picker to hold both its ends exactly, or to have the arc's whole
+/// curve in front of it with that curve's centre behind, or to have the middle
+/// of the sibling behind it — and a cone's
 /// ellipse and a pipe's circle earn that the same way a ball's circle does,
 /// through [`where_a_closed_crossing_is_centred`]. Anything else is refused by
 /// name, as before.
@@ -2045,9 +2046,10 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// other one with the same two ends; `None` when nothing in `picked_by` says
 /// which of the two this is.
 ///
-/// This is the one thing the three steps below read out of an arc, and it is
-/// read out of the picker's **normal** alone. Where the picker's plane sits is
-/// never asked, which is what lets a fused arc in: the fuse lowers that plane
+/// This is the one thing the three steps below read out of an arc, and the
+/// first two ways below read it out of the picker's **normal** alone. Where the
+/// picker's plane sits is not asked there, which is what lets a fused arc in:
+/// the fuse lowers that plane
 /// until the predicate says both ends are on or in front of it
 /// (`the_half_space_both_ends_are_on`), so a fused arc's ends are off its
 /// picker's plane where they are stored, and §167 asked them to be on it.
@@ -2063,7 +2065,7 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// the chord", and `square_to_the_chord` below names the two sides — the chord
 /// read off the corners as they are stored, which for a fused solid is a rounded
 /// world frame and is the same frame every other step here reads (§17.3, §168).
-/// The picker has to settle which side, and it does so in one of two ways:
+/// The picker has to settle which side, and it does so in one of three ways:
 ///
 /// - **Its plane holds both ends**, which is §167's test and what a face built
 ///   by hand gives. That plane then meets the curve's plane in the chord line
@@ -2071,7 +2073,12 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 ///   points to.
 /// - **Both ends are on or in front of it and the curve's centre is on or
 ///   behind it** ([`where_the_curves_centre_sits`]), which is what a fused arc
-///   gives.
+///   gives when it is the shorter of the two.
+/// - **The middle of the other arc is behind it**, which is what a fused arc
+///   gives when it is the longer: the plane through its chord, lowered past both
+///   ends, has the centre in front. The arc is then the one on the centre's side
+///   of the chord, and [`into_the_arc_on_the_centres_side`] carries that
+///   argument, which reads where the plane sits and not only its normal.
 ///
 /// # Why the second way works, on a circle and then on an ellipse
 ///
@@ -2102,9 +2109,9 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 ///
 /// Either way the arc is on the side of the chord the picker's normal points to,
 /// so `square_to_the_chord` turned round to read positive against that normal
-/// points from the chord into the arc. That sign is the only reading taken of
-/// the picker; how nearly square to the chord its normal is never comes into it,
-/// and neither does how far the fuse lowered its plane.
+/// points from the chord into the arc. That sign is the only reading the first
+/// two ways take of the picker; how nearly square to the chord its normal is
+/// never comes into it, and neither does how far the fuse lowered its plane.
 ///
 /// **The tangent goes the same way**, and it needs no affine argument because it
 /// never mentioned the centre. Every point of the arc is off the chord on the
@@ -2130,13 +2137,11 @@ fn the_way_into_an_arc(
     let square_to_the_chord = cross(exactly(flat.normal().components()), chord);
     let asked = ends.map(|at| PredicatePoint::from(at.coordinates()));
 
-    picked_by.iter().find_map(|picker| {
-        let half = match picker {
-            Picker::InFrontOf(half) => half,
-            Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => {
-                return None;
-            }
-        };
+    let mut halves = picked_by.iter().filter_map(|picker| match picker {
+        Picker::InFrontOf(half) => Some(half),
+        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => None,
+    });
+    let by_its_normal = halves.clone().find_map(|half| {
         if !a_picker_that_tells_the_two_arcs_apart(half, flat, &centred, asked) {
             return None;
         }
@@ -2145,16 +2150,28 @@ fn the_way_into_an_arc(
             Decision::Neg => Some(square_to_the_chord.map(core::ops::Neg::neg)),
             Decision::Zero | Decision::Undecidable { .. } | _ => None,
         }
+    });
+    by_its_normal.or_else(|| {
+        let round = if surface.as_plane().is_some() {
+            across
+        } else {
+            surface
+        };
+        halves.find_map(|half| {
+            into_the_arc_on_the_centres_side(half, flat, round, &centred, ends, square_to_the_chord)
+        })
     })
 }
 
 /// Whether `half` says which of the two arcs between `ends` an edge is, by one
-/// of the two ways [`the_way_into_an_arc`] sets out.
+/// of the first two ways [`the_way_into_an_arc`] sets out.
 ///
 /// The fuse's own arrangement asks the same question of the same two ways, on
 /// the boxes it solved for rather than on stored corners, so it asks this
 /// (§23.8, and §211.5 for the three spellings of the closed-curve test that
-/// went the same way).
+/// went the same way). It does not yet ask the third,
+/// [`into_the_arc_on_the_centres_side`], so a longer arc `holds.rs` reads is one
+/// the arrangement still refuses.
 pub(crate) fn a_picker_that_tells_the_two_arcs_apart(
     half: &HalfSpace,
     flat: &Plane,
@@ -2201,6 +2218,127 @@ fn where_the_curves_centre_sits(
     ((dot(facing, from) - Interval::exactly(half.offset())) * dot(normal, centred.along)
         + above * dot(facing, centred.along))
     .sign()
+}
+
+/// The way into an arc on the same side of its chord as the curve's centre,
+/// when the middle of the **other** arc is certainly behind `half`; `None`
+/// otherwise.
+///
+/// This is the third way [`the_way_into_an_arc`] reads an arc, and the one for
+/// the longer of the two. The fuse picks an arc by a half-space through its
+/// chord, lowered until both ends read on or in front
+/// (`the_half_space_both_ends_are_on` in `fuse/assemble.rs`), and for the
+/// longer arc the centre is then in front as well, so neither way above takes
+/// it. What does: the arc lies wholly on or in front of `half`, because that is
+/// what a picker is. A point of the curve strictly behind `half` is therefore
+/// on the other arc. The part of the curve on the far side of the chord line
+/// from the centre is one arc, since a line meets a closed conic in two points
+/// and those are the ends. So if the curve has a point strictly behind `half`
+/// on that far side, the arc picked is the one on the centre's side, and the
+/// way into it is `square_to_the_chord` turned to read positive towards the
+/// centre.
+///
+/// **The point asked is the far arc's middle**, `m = c + (M − c)/λ`: the curve
+/// where the ray from the centre `c` through the chord's middle `M` leaves it.
+/// `λ` is how far out `M` is, as a fraction of the way to the curve along that
+/// ray. With `q` the round surface's own polynomial, negative inside, its
+/// restriction to the plane is `q(c)` plus a form that is positive and has no
+/// part linear in `p − c`, because `c` is the centre; so the curve is where
+/// that form reaches `−q(c)`, and `λ² = (q(M) − q(c))/(−q(c))`. That holds of a
+/// circle and of an ellipse alike, and nothing in it is a distance. `q(M)`
+/// negative puts `M` strictly inside, so `λ < 1` and `m` is past `M`, on the far
+/// side of the chord line.
+///
+/// With `f` the picker's own affine function, `f(m) = f(c) − (f(c) − f(M))/λ`,
+/// so `f(m) < 0` follows from `Δ = f(c) − f(M) > 0` and `Δ² > λ²·f(c)²`, which
+/// give `Δ > λ·|f(c)| ≥ λ·f(c)`. Every one of those is multiplied through by
+/// powers of `n·along`, which is positive, so the centre is never formed and
+/// no division is taken: the signs read are of polynomials in stored numbers,
+/// in interval arithmetic, and an interval that straddles zero is `None`.
+///
+/// **The stored ends are taken as the arc's ends**, the premise every other
+/// reading in this file makes of them. What is asked of the far arc is a long
+/// way from either end — its middle — so an end off the curve by a rounding
+/// does not move it onto the near arc.
+fn into_the_arc_on_the_centres_side(
+    half: &HalfSpace,
+    flat: &Plane,
+    round: &Surface,
+    centred: &WhereTheCurveIsCentred,
+    ends: [Point; 2],
+    square_to_the_chord: [Interval; 3],
+) -> Option<[Interval; 3]> {
+    let normal = exactly(flat.normal().components());
+    let from = exactly(centred.from.coordinates());
+    let across = dot(normal, centred.along);
+    if across.sign() != Decision::Pos {
+        return None;
+    }
+    let up = Interval::exactly(flat.offset()) - dot(normal, from);
+    let to_the_centre = centred.along.map(|step| step * up);
+    let [start, end] = ends.map(|at| exactly(at.coordinates()));
+    let middle: [Interval; 3] =
+        core::array::from_fn(|axis| (start[axis] + end[axis]) * Interval::exactly(0.5));
+
+    let start_to_from: [Interval; 3] = core::array::from_fn(|axis| from[axis] - start[axis]);
+    let into = match (dot(start_to_from, square_to_the_chord) * across
+        + dot(to_the_centre, square_to_the_chord))
+    .sign()
+    {
+        Decision::Pos => square_to_the_chord,
+        Decision::Neg => square_to_the_chord.map(core::ops::Neg::neg),
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    };
+
+    let facing = exactly(half.normal().components());
+    let offset = Interval::exactly(half.offset());
+    let at_the_centre = (dot(facing, from) - offset) * across + up * dot(facing, centred.along);
+    let at_the_middle = dot(facing, middle) - offset;
+    let falls = at_the_centre - at_the_middle * across;
+    let from_to_the_middle: [Interval; 3] = core::array::from_fn(|axis| middle[axis] - from[axis]);
+    let inside_at_the_centre = how_far_outside(round, to_the_centre, across)?;
+    let inside_at_the_middle = how_far_outside(round, from_to_the_middle, Interval::exactly(1.0))?;
+    if falls.sign() != Decision::Pos
+        || inside_at_the_centre.sign() != Decision::Neg
+        || inside_at_the_middle.sign() != Decision::Neg
+    {
+        return None;
+    }
+    let behind = falls * falls * -inside_at_the_centre
+        - (inside_at_the_middle * across * across - inside_at_the_centre)
+            * at_the_centre
+            * at_the_centre;
+    (behind.sign() == Decision::Pos).then_some(into)
+}
+
+/// `k²·q(from + x/k)`, with `q` the polynomial `round`'s sign predicate reads —
+/// negative inside — and `from` the point [`where_a_closed_crossing_is_centred`]
+/// walks from: a ball's centre, a cone's apex, a pipe's axis origin. `None` for
+/// a surface that has no closed crossing with a plane.
+///
+/// About that point `q` has no part linear in `x`, so this is its part of
+/// degree two in `x` plus `q(from)·k²`, and `k` lets a point that is a ratio be
+/// asked without dividing.
+fn how_far_outside(round: &Surface, x: [Interval; 3], k: Interval) -> Option<Interval> {
+    let squared = |u: [Interval; 3]| dot(u, u);
+    match round {
+        Surface::Sphere(ball) => {
+            let radius = Interval::exactly(ball.radius());
+            Some(squared(x) - radius * radius * k * k)
+        }
+        Surface::Cone(cone) => {
+            let axis = exactly(cone.axis().direction().components());
+            let slope = Interval::exactly(cone.slope());
+            let up = dot(x, axis);
+            Some(squared(cross(x, axis)) - slope * slope * up * up)
+        }
+        Surface::Cylinder(pipe) => {
+            let axis = exactly(pipe.axis().direction().components());
+            let radius = Interval::exactly(pipe.radius());
+            Some(squared(cross(x, axis)) - radius * radius * squared(axis) * k * k)
+        }
+        Surface::Plane(_) | Surface::Torus(_) | _ => None,
+    }
 }
 
 /// Where the closed curve `flat` cuts a round surface in is centred: walk
