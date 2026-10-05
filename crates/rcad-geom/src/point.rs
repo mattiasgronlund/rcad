@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::exact::{binary_exponent, multiplied_by_a_power_of_two};
 use crate::isometry::Isometry;
+use crate::plane::has_length_one_to_within_a_turn;
 use crate::{Error, Result};
 
 /// A position in space, in the model's declared [`Unit`](crate::Unit).
@@ -619,8 +620,13 @@ impl From<Vector> for na::Vector3<f64> {
 /// The constructor scales the direction to length one and rejects what it
 /// cannot scale; [`Axis::transformed`] turns it without scaling it again, so a
 /// moved axis points along a direction of length one to within the rounding of
-/// the turn. Serializes as `(origin, direction)` and is re-checked on the way
-/// back in, so a file cannot hand us an axis without a direction.
+/// the turn, and [`Axis::as_written`] keeps a direction that is that close
+/// rather than scale it again.
+///
+/// Serializes as `(origin, direction)` and is re-checked on the way back in
+/// through [`Axis::as_written`], so a file cannot hand us an axis without a
+/// direction, and an axis that was stored comes back with the bits it was
+/// stored with.
 ///
 /// # No stored number is `-0.0`
 ///
@@ -663,6 +669,50 @@ impl Axis {
             origin,
             direction.scaled_to_length_one_from_anywhere("axis direction")?,
         ))
+    }
+
+    /// The line through `origin` along `direction`, **storing `direction`'s
+    /// own bits** when its squared length is within
+    /// [`Plane::NORMAL_LENGTH_ROUNDOFF`](crate::Plane::NORMAL_LENGTH_ROUNDOFF)
+    /// of one, and scaling it as [`Axis::new`] does when it is not.
+    ///
+    /// This is for a direction somebody already wrote down as one: a STEP
+    /// file's pipe, cone or ring, which carries the axis its writer's model
+    /// stored, and an axis read back from saved bytes. A moved axis points
+    /// along a turn of a unit direction, an ulp or two off length one, which
+    /// [`Axis::transformed`] keeps rather than scale again. [`Axis::new`]
+    /// scales it again and can move its last bit: the axis `z` turned about
+    /// `x` by `2.5` is `(0, −0.5984721441039565, −0.8011436155469336)`, and
+    /// [`Axis::new`] makes it `(…, −0.8011436155469337)`. A ring written about
+    /// it came back an ulp off the plane its seam was cut from, which kept
+    /// that direction, and the bend was refused (`docs/decisions.md` §355.6).
+    ///
+    /// The check is [`Plane::from_point_and_normal_as_written`]'s own, exact
+    /// and shared, so a plane and an axis written along one direction keep it
+    /// or scale it alike. A direction past the bound is scaled and not
+    /// refused, for the reasons that constructor gives: STEP does not ask for
+    /// a direction of length one, and both answers are the line the caller
+    /// named.
+    ///
+    /// **Two lengths of one direction are not one axis here**, where
+    /// [`Axis::new`] makes them one: `(s, 0, s)` for the `f64` just below
+    /// `1/√2` is kept, and `(1, 0, 1)` is scaled to the `f64` just above.
+    ///
+    /// [`Plane::from_point_and_normal_as_written`]: crate::Plane::from_point_and_normal_as_written
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Axis::new`]'s.
+    pub fn as_written(origin: Point, direction: Vector) -> Result<Self> {
+        if !has_length_one_to_within_a_turn(direction) {
+            return Self::new(origin, direction);
+        }
+        if !origin.is_finite() {
+            return Err(Error::NotFinite {
+                what: "axis origin",
+            });
+        }
+        Ok(Self::holding(origin, direction))
     }
 
     /// The first coordinate axis: through the origin, pointing along `x`.
@@ -803,7 +853,7 @@ impl TryFrom<(Point, Vector)> for Axis {
     type Error = Error;
 
     fn try_from((origin, direction): (Point, Vector)) -> Result<Self> {
-        Self::new(origin, direction)
+        Self::as_written(origin, direction)
     }
 }
 
