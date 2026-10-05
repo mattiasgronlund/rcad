@@ -150,11 +150,11 @@ each of the three. One run of it took 25.6 s on the lane's commit against
   refuses/B, the same shapes as the eight, and their cause is not traced: the
   top's ellipse is `4.5e16` long, and the pieces cut from it are arcs of it near
   the frustum, where the turn-`0` block's top cuts a parabola.
-- **The turn read off the root on a curved face.** Let
-  `the_turn_where_two_planes_cross_a_quadric` answer where the face is the
-  curved one, and move `a_certified_fuse_refuses_on_the_turn_at_the_place_below_16`
-  in `a_block_edge_grazing_a_ball_at_cx_16.rs` to the order of the two places
-  along the edge, which is the next gap there: the two are `16 ∓ 2⁻⁵¹`, and
-  their boxes share only `16`. Class refuses/C, a shape built to graze.
+- **The turn read off the root on a curved face** is Q914's, which already
+  names "read the sign off which root the place is" for §317's gap. Dropping
+  the `curved == 0` stop in `the_turn_where_two_planes_cross_a_quadric` decides
+  it, and moves `a_certified_fuse_refuses_on_the_turn_at_the_place_below_16` in
+  `a_block_edge_grazing_a_ball_at_cx_16.rs` to the order of the two places
+  along the edge, `16 ∓ 2⁻⁵¹`, whose boxes share only `16`.
 - §340.4's "four refuse `ResultIsNotManifold`" is out of date since §340.10
   and this; it is §340's to say, and its owner's.
