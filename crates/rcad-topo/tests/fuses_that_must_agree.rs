@@ -2356,12 +2356,15 @@ fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
 }
 
 /// `A \ (A \ B)` is `A ∩ B`, over a round solid — **and it cannot run today**
-/// either, for the same reason.
+/// either.
 ///
 /// Two ways to the same half ball: cut the dent and then cut the dent's
 /// complement back out of the block, against sharing the block with the ball
 /// once. The second cut is handed the dent, whose skin is the ball's own, so it
-/// refuses on [`A_POINT_EVERY_SOLID_COULD_PLACE`] on 61 of 61. Pinned, with
+/// refuses on [`A_FACE_NOBODY_FOLLOWS`] on 67 of 67: a point in a piece was
+/// found, and the ray that was to place it met a face of the dent whose
+/// trimming nothing follows. It was [`A_POINT_EVERY_SOLID_COULD_PLACE`] until
+/// row Q882 named the face. Pinned, with
 /// [`taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`]
 /// as the flat control.
 #[test]
@@ -2416,7 +2419,7 @@ fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share
     });
     tally.nothing_was_compared_because_it_all_refused(
         "A \\ (A \\ B) = A ∩ B over a ball, which refuses",
-        A_POINT_EVERY_SOLID_COULD_PLACE,
+        A_FACE_NOBODY_FOLLOWS,
     );
 }
 
@@ -3900,6 +3903,14 @@ const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 /// against every solid — so this is repointed rather than widened to hold both.
 const A_POINT_EVERY_SOLID_COULD_PLACE: &str = "a point in a piece that every solid could place";
 
+/// What a fuse refuses when a point inside a piece was found and the ray that
+/// was to place it met a face whose trimming nothing here follows:
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`], as [`fused`] names it.
+///
+/// Counted under [`A_POINT_EVERY_SOLID_COULD_PLACE`] until row Q882 named the
+/// face rather than calling the point undecided (`docs/decisions.md` §35.6).
+const A_FACE_NOBODY_FOLLOWS: &str = "a face trimmed by a curve this cannot follow";
+
 /// The refusal §30.8 item 10 owns, as [`fused`] names it.
 ///
 /// Not a predicate that gave up but a whole face the arrangement could not
@@ -4290,8 +4301,8 @@ fn fused(
 /// The refusals a curved fuse is allowed to hit today, by name.
 ///
 /// Every one is a gap the kernel's own error documentation already owns: §30.8
-/// item 10 for the first, §33.1 for the second, §31.2 row 8 for the third, and
-/// §47.2 for the last two. Anything else is a bug, so this hands back `None` for
+/// item 10 for the first, §33.1 for the second, §31.2 row 8 for the third,
+/// §35.6 for a face nobody follows, and §47.2 for the last two. Anything else is a bug, so this hands back `None` for
 /// it and [`fused`] fails.
 ///
 /// **The last two are kept apart rather than folded into one name**, which is
@@ -4310,6 +4321,7 @@ fn a_curved_refusal(why: &Error) -> Option<&'static str> {
             Some(WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT)
         }
         Error::CannotTellTheCellsOfAFaceApart { .. } => Some(CANNOT_TELL_THE_CELLS_OF_A_FACE_APART),
+        Error::AFaceTrimmedByACurveThisCannotFollow { .. } => Some(A_FACE_NOBODY_FOLLOWS),
         Error::ACrossingThisCannotBeOrderedAlong => Some(ORDERING_ALONG_AN_ENDLESS_BEND),
         Error::Geometry(rcad_geom::Error::TheCrossingOfTheseTwoSurfacesIsNotClosed) => {
             Some(A_CROSSING_THAT_DOES_NOT_CLOSE)

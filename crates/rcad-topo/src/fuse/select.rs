@@ -67,7 +67,7 @@ use crate::holds::{
     the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
-use crate::{Containment, Error, Model, Result, SolidView};
+use crate::{Containment, Error, FaceKey, Model, Result, SolidView};
 
 use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
 use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
@@ -113,6 +113,9 @@ pub(crate) struct Chosen {
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be —
 /// after the sides it shares and its corners were tried too, where only a rung
 /// of [`rungs_towards_each_crossing`] was found.
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
+/// a point offered before the rungs was found inside the piece and the ray
+/// from a point tried met a face of a solid that nothing here can follow.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -374,10 +377,20 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// side it shares or a corner could place, and a rung that cannot be
 /// classified must not take that away (`docs/decisions.md` §365.6).
 ///
+/// **A point whose ray met a face nobody can follow was never placed, and the
+/// refusal says which face**, as `assemble.rs`'s `one_shell_is_inside_another`
+/// does for a hollow's corners and for the same reason (§35.6). This used to
+/// be [`PLACED_AGAINST_EVERY_SOLID`], and a caller read "loosen the policy" off
+/// a refusal no policy moves. It wins over another point left undecided, when
+/// both happen, for the reason that function gives.
+///
 /// # Errors
 ///
-/// [`Error::Undecidable`] under [`PLACED_AGAINST_EVERY_SOLID`] when a point
-/// offered before the rungs was inside the piece and no point placed it.
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the caller's face,
+/// when a point offered before the rungs was inside the piece, no point placed
+/// it, and one of them met that face. [`Error::Undecidable`] under
+/// [`PLACED_AGAINST_EVERY_SOLID`] when such a point was found and none was
+/// placed for any other reason.
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -397,7 +410,8 @@ fn place_the_piece(
         return Ok(Search::Placed(Placement::Outside));
     }
     let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
-    let try_one =
+    let mut unfollowed = None;
+    let mut try_one =
         |candidate: PredicatePoint, log: &mut ProvenanceLog| -> Result<Option<Option<Placement>>> {
             if the_piece_holds(piece, in_plane, &also_picked_by, candidate) != Some(true) {
                 return Ok(None);
@@ -405,10 +419,17 @@ fn place_the_piece(
             let mut trial = ProvenanceLog::new();
             let settled =
                 settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
-            if settled.is_some() {
-                trial.drain_into(log);
-            }
-            Ok(Some(settled))
+            Ok(Some(match settled {
+                Settled::At(placement) => {
+                    trial.drain_into(log);
+                    Some(placement)
+                }
+                Settled::MetAFaceNobodyFollows(face) => {
+                    unfollowed.get_or_insert(face);
+                    None
+                }
+                Settled::Abandoned => None,
+            }))
         };
     let mut one_was_inside = false;
     for &candidate in candidates {
@@ -442,6 +463,9 @@ fn place_the_piece(
         }
     }
     if one_was_inside {
+        if let Some(face) = unfollowed {
+            return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face });
+        }
         return Err(gave_up(
             PLACED_AGAINST_EVERY_SOLID,
             &corners_of(piece).concat(),
@@ -1174,8 +1198,8 @@ fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool>
     Some(kept)
 }
 
-/// Where one point sits relative to each solid in the set, or `None` when this
-/// point cannot say.
+/// Where one point sits relative to each solid in the set, or why this point
+/// cannot say.
 ///
 /// **Whether the piece lies on a face of the solid is asked first, and the ray
 /// only after it**, for every piece. The ray was never what settles `ON`. §17.1
@@ -1218,7 +1242,7 @@ fn settle_against_each(
     piece: &Piece,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<Placement>> {
+) -> Result<Settled> {
     let mut lying_on = LyingOn::default();
     for &index in against {
         if let Some(same_way) = coincident_face(model, solids[index], piece, point, policy, log)? {
@@ -1236,21 +1260,41 @@ fn settle_against_each(
             ray.drain_into(log);
         }
         match placed {
-            Containment::Inside => return Ok(Some(Placement::Inside)),
+            Containment::Inside => return Ok(Settled::At(Placement::Inside)),
             Containment::Outside => (),
             // A face nobody can follow is not a piece that could be placed
             // somewhere else, and reading it as `Outside` would drop material.
             // This was `unreachable!`, on the grounds that the fuse refuses
             // curved solids at entry; `docs/decisions.md` §35 records why that
             // argument stops holding and why what replaces it is a refusal
-            // about a caller's solid rather than a panic.
-            Containment::CannotFollowAFacesTrimming { .. }
-            | Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(None),
+            // about a caller's solid rather than a panic. `solid` is the
+            // caller's, so `face` is a key the caller can read.
+            Containment::CannotFollowAFacesTrimming { face } => {
+                return Ok(Settled::MetAFaceNobodyFollows(face));
+            }
+            // This crate's `Error` has nothing yet that says a ray could not
+            // be fired, so it stays with the undecided ones, as it does in
+            // `assemble.rs`'s `one_shell_is_inside_another`.
+            Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
-            Containment::OnBoundary | Containment::Undecidable { .. } => return Ok(None),
+            Containment::OnBoundary | Containment::Undecidable { .. } => {
+                return Ok(Settled::Abandoned);
+            }
         }
     }
-    Ok(Some(lying_on.placement()))
+    Ok(Settled::At(lying_on.placement()))
+}
+
+/// What one point inside a piece says about where the piece sits.
+enum Settled {
+    /// Where the piece sits against every solid asked.
+    At(Placement),
+    /// The ray from the point met this face of a caller's solid, whose
+    /// trimming nothing here follows, so the point was never placed. Not
+    /// `Undecidable`: the question was never put (`docs/decisions.md` §35.6).
+    MetAFaceNobodyFollows(FaceKey),
+    /// The point says nothing, and the next one is tried.
+    Abandoned,
 }
 
 /// The solids of a group a piece lies flush on, the first of each way round.
