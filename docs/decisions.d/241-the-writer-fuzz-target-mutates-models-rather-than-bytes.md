@@ -190,8 +190,10 @@ the writer's or the reader's, not the target's.
    but they are what caps 241.3's "came back the same".
 
 *Since Q730 (2026-09-30) a ball upright on `z` is written and comes back the
-same. A ball turned so its poles leave the `z` line through its centre is still
-refused `AWireThatStandsStillAtAPole` (`a_ball_turned_off_z_is_refused_at_its_pole`).*
+same. A ball turned so its poles leave the `z` line through its centre was
+still refused `AWireThatStandsStillAtAPole` until Q1010 (2026-10-05), which
+writes it as the same ball cut open on that line and reads it back as that
+(§404, `a_ball_turned_off_z_comes_back_as_the_same_ball_with_its_poles_on_z`).*
 
 ### 241.6 What is left
 

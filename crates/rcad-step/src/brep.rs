@@ -284,8 +284,15 @@ impl Walk {
         let bounds = self.the_bounds_that_bound_something(reading, face, keyword, &surface)?;
         let outer_first = self.outer_bound_first(reading, face, &bounds, &surface)?;
         let mut wires = Vec::with_capacity(outer_first.len());
-        for bound in outer_first {
-            wires.push(self.describe_the_bound(reading, face, bound, &surface)?);
+        if let [only] = outer_first[..]
+            && let Some((ball, loop_id)) =
+                self.a_whole_ball_off_its_chart(reading, face, only, &surface)?
+        {
+            wires.push(self.describe_a_whole_ball(&ball, loop_id)?);
+        } else {
+            for bound in outer_first {
+                wires.push(self.describe_the_bound(reading, face, bound, &surface)?);
+            }
         }
         let drafted = self
             .builder
@@ -659,6 +666,168 @@ impl Walk {
             walked.extend(self.describe_the_coedge(reading, use_of_an_edge, walk_it_backwards)?);
         }
         let steps = with_a_pole_where_it_turns_back(&walked, surface);
+        let wire = self
+            .builder
+            .add_wire(&steps)
+            .map_err(|why| self.refused(loop_id, why))?;
+        self.wire_names.push(loop_id);
+        Ok(wire)
+    }
+
+    /// The ball a face covers whole, where the file cut it open along a slit
+    /// whose two corners are not both where this kernel's ball pinches, with
+    /// the loop that says so; `None` for every other bound.
+    ///
+    /// **A loop that walks one edge there and straight back bounds the whole
+    /// ball**, wherever the edge runs on it: it encloses nothing, so the face
+    /// is the ball less the slit. A ball turned off `z` comes as one (Q1010),
+    /// and this kernel's [`Sphere`] pinches only on the `z` line through its
+    /// centre, so the poles [`with_a_pole_where_it_turns_back`] would put at
+    /// the file's corners would stand where the ball does not pinch. The ball
+    /// is read on its own chart instead — see [`Walk::describe_a_whole_ball`].
+    /// A loop whose two corners both stand on that line is the kernel's own
+    /// seam, and is walked as the file wrote it.
+    ///
+    /// **The slit and its corners are dropped, so they are only checked, and
+    /// to the digits the file was written in** (`docs/decisions.md` §404). The
+    /// slit is a `CIRCLE` that lies on the ball and each corner is on the ball,
+    /// both to [`A_SLIT_WRITTEN_IN_TWELVE_DIGITS_MAY_MISS_ITS_BALL_BY`]. A file
+    /// whose slit misses its ball by more is walked as it was before, which
+    /// refuses it. The corners are read ahead, so a file walked that way does
+    /// not count an integer in them twice; the circle's numbers it does.
+    ///
+    /// **Where the ball is too small for its centre to hold two poles apart**
+    /// — `z + r` or `z − r` rounds to `z` — there is no chart to read it on,
+    /// and it is walked as before too. The writer refuses to write such a ball
+    /// for the same reason.
+    fn a_whole_ball_off_its_chart(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        bound: EntityId,
+        surface: &Surface,
+    ) -> Result<Option<(Sphere, EntityId)>, Refusal> {
+        let Surface::Sphere(ball) = surface else {
+            return Ok(None);
+        };
+        let (loop_id, _) = self.loop_of_bound(reading, face, bound)?;
+        let uses = reading.references_at(loop_id, EDGE_LOOP, 1)?;
+        let [there, back] = uses[..] else {
+            return Ok(None);
+        };
+        let edge_curve = reading.reference_at(there, ORIENTED_EDGE, 3)?;
+        if reading.reference_at(back, ORIENTED_EDGE, 3)? != edge_curve
+            || reading.flag_at(there, ORIENTED_EDGE, 4)?
+                == reading.flag_at(back, ORIENTED_EDGE, 4)?
+            || an_edge_with_one_corner(reading, edge_curve)
+        {
+            return Ok(None);
+        }
+        let curve = reading.reference_at(edge_curve, EDGE_CURVE, 3)?;
+        let Some(held) = reading.file().instance(curve) else {
+            return Ok(None);
+        };
+        if held.parts()[0].keyword() != CIRCLE.name() {
+            return Ok(None);
+        }
+        let corner = |position| -> Result<Point, Refusal> {
+            let vertex_point = reading.reference_at(edge_curve, EDGE_CURVE, position)?;
+            let at = reading.reference_at(vertex_point, VERTEX_POINT, 1)?;
+            reading.point_read_ahead_at(vertex_point, at)
+        };
+        let corners = [corner(1)?, corner(2)?];
+        if corners.iter().all(|corner| {
+            surface
+                .the_way_its_first_coordinate_runs_at(*corner)
+                .is_none()
+        }) || the_poles_of_a_ball_on_its_chart(ball).is_none()
+        {
+            return Ok(None);
+        }
+        let on_the_ball = |(off, largest): (f64, f64)| {
+            off <= (A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF
+                + A_SLIT_WRITTEN_IN_TWELVE_DIGITS_MAY_MISS_ITS_BALL_BY)
+                * largest
+        };
+        if !corners.iter().all(|corner| {
+            on_the_ball((
+                ((*corner - ball.centre()).length() - ball.radius()).abs(),
+                largest_of(&[*corner, ball.centre()], &[ball.radius()]),
+            ))
+        }) {
+            return Ok(None);
+        }
+        let position = reading.reference_at(curve, CIRCLE, 1)?;
+        let place = reading.placement_at(curve, position)?;
+        let radius = reading.real_at(curve, CIRCLE, 2)?;
+        let Ok(its_plane) = plane_through(place.origin, place.axis) else {
+            return Ok(None);
+        };
+        if !how_far_off_the_circle_can_be(surface, place.origin, its_plane.normal(), radius)
+            .is_some_and(on_the_ball)
+        {
+            return Ok(None);
+        }
+        Ok(Some((*ball, loop_id)))
+    }
+
+    /// The whole ball as `add_ball` builds it, on the chart this kernel's ball
+    /// carries: poles at `centre ± (0, 0, r)` and the seam in the plane through
+    /// the centre square to `y`, on the side facing `+x`. The file's own slit
+    /// and its two corners are not read into the solid. It is the ball the
+    /// writer puts in a file for a whole ball turned off `z`
+    /// (`Writing::a_whole_ball_on_its_chart`), so a turned slit reads as the
+    /// file this kernel would have written for it.
+    fn describe_a_whole_ball(
+        &mut self,
+        ball: &Sphere,
+        loop_id: EntityId,
+    ) -> Result<rcad_topo::DraftWire, Refusal> {
+        let centre = ball.centre();
+        let not_a_working_shape = |why| Refusal::TheGeometryIsNotAWorkingShape { id: loop_id, why };
+        let meridian = Plane::from_point_and_normal(centre, Vector::new(0.0, 1.0, 0.0))
+            .map_err(not_a_working_shape)?;
+        let facing_x = HalfSpace::through_a_point_facing(centre, Vector::new(1.0, 0.0, 0.0))
+            .map_err(not_a_working_shape)?;
+        let mut poles = Vec::with_capacity(2);
+        for at in the_poles_of_a_ball_on_its_chart(ball)
+            .expect("a_whole_ball_off_its_chart reads only a ball that holds two poles apart")
+        {
+            let pole = self
+                .builder
+                .add_vertex(at)
+                .map_err(|why| self.refused(loop_id, why))?;
+            self.vertex_names.push(loop_id);
+            self.corner_points.insert(pole, at);
+            poles.push(pole);
+        }
+        let (north, south) = (poles[0], poles[1]);
+        let seam = self
+            .builder
+            .add_edge(
+                north,
+                south,
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(meridian),
+                    picked_by: smallvec![Picker::from(facing_x)],
+                },
+            )
+            .map_err(|why| self.refused(loop_id, why))?;
+        self.edge_names.push(loop_id);
+        self.ends.insert(seam, [north, south]);
+        let mut steps = Vec::with_capacity(4);
+        for (way, pole) in [
+            (Orientation::Forward, south),
+            (Orientation::Reversed, north),
+        ] {
+            let coedge = self
+                .builder
+                .add_coedge(seam, way)
+                .map_err(|why| self.refused(loop_id, why))?;
+            self.coedge_names.push(loop_id);
+            steps.push(DraftStep::Along(coedge));
+            steps.push(DraftStep::Pole(pole));
+        }
         let wire = self
             .builder
             .add_wire(&steps)
@@ -1865,9 +2034,21 @@ impl ProbeWalk {
         )?;
         let bound_count = outer_first.len();
         let mut wires = Vec::with_capacity(bound_count);
-        for bound in outer_first {
-            if let Some(wire) = self.probe_the_bound(reading, face, bound, &surface) {
-                wires.push(wire);
+        let whole = match outer_first[..] {
+            [only] => self.record(
+                self.walk
+                    .a_whole_ball_off_its_chart(reading, face, only, &surface),
+            )?,
+            _ => None,
+        };
+        if let Some((ball, loop_id)) = whole {
+            let described = self.walk.describe_a_whole_ball(&ball, loop_id);
+            wires.push(self.record(described)?);
+        } else {
+            for bound in outer_first {
+                if let Some(wire) = self.probe_the_bound(reading, face, bound, &surface) {
+                    wires.push(wire);
+                }
             }
         }
         if wires.len() < bound_count {
@@ -2044,6 +2225,13 @@ struct Walked {
 /// `LED_D5.0mm.step` writes its pole `1.6e-15` off that line, so it gets no
 /// pole either, and imports as it did.
 ///
+/// **A loop that is nothing but one edge walked there and back is not walked
+/// here** unless both its corners stand on that line: it is a whole ball, cut
+/// open along a slit, and [`Walk::a_whole_ball_off_its_chart`] reads it on the
+/// ball's own chart instead (`docs/decisions.md` §404). So what is left to
+/// turn back at a corner the ball does not pinch at is a part of a ball, as
+/// the domes above are.
+///
 /// An edge with one corner is never turned at: it has no far end to come back
 /// from.
 fn with_a_pole_where_it_turns_back(walked: &[Walked], surface: &Surface) -> Vec<DraftStep> {
@@ -2062,6 +2250,35 @@ fn with_a_pole_where_it_turns_back(walked: &[Walked], surface: &Surface) -> Vec<
     }
     steps
 }
+
+/// The two poles of `ball` where this kernel's ball pinches, north first:
+/// `centre ± (0, 0, r)`, which is where `add_ball` puts them. `None` where
+/// `z + r` or `z − r` rounds to `z`, so that a pole would stand on the centre
+/// and not on the ball.
+pub(crate) fn the_poles_of_a_ball_on_its_chart(ball: &Sphere) -> Option<[Point; 2]> {
+    let [x, y, z] = ball.centre().coordinates();
+    let [north, south] = [z + ball.radius(), z - ball.radius()];
+    (north != z && south != z).then(|| [Point::new(x, y, north), Point::new(x, y, south)])
+}
+
+/// How far, in parts of the largest number involved, a slit cutting a whole
+/// ball open, and each of its two corners, may sit off the ball beyond
+/// [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] roundings and still be read as on it —
+/// see [`Walk::a_whole_ball_off_its_chart`].
+///
+/// **It is what writing the numbers in twelve significant digits costs**, the
+/// allowance [`Walk::every_face_holds_the_curve`] already gives an
+/// `ELLIPSE`'s sizes, and for the same reason: the numbers never reach the
+/// model, so the check only tells a slit on the ball from a file that is
+/// wrong, and a ball turned off `z` puts its corners at irrational
+/// coordinates a file writes rounded. Each number is off by at most half a
+/// unit in its twelfth digit, `5e-12` of the largest. A corner's distance off
+/// the ball is moved by at most `√3` of that for the corner, `√3` for the
+/// centre and one for the radius; a circle's by `√3` for each of the two
+/// centres and one for each of the two radii, `2√3 + 2 < 5.5` in all, and
+/// six of them is this. A slit a thousandth of its radius off is refused
+/// (`docs/decisions.md` §404).
+const A_SLIT_WRITTEN_IN_TWELVE_DIGITS_MAY_MISS_ITS_BALL_BY: f64 = 6.0 * 5e-12;
 
 /// Whether the apex is inside the box of [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`]
 /// roundings round `corner`, a rounding being [`NEAREST_F64_POINT_ROUNDOFF`]

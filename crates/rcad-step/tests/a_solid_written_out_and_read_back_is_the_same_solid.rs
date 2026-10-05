@@ -234,23 +234,268 @@ fn a_ball_written_out_and_read_back_is_the_same_ball() {
     covered.report("a ball");
 }
 
-/// A ball turned so its poles leave the `z` line through its centre is
-/// refused, because this kernel's sphere pinches only on that line.
+/// A ball turned so its poles leave the `z` line through its centre is written
+/// as the same ball with its poles on that line, and comes back as that ball.
 ///
-/// The reader would put each pole back where it was written, which is where
-/// the ball it reads does not pinch, and `Model::validate` refuses such a pole.
-/// A ball moved without a turn is still written: its poles stay on the line.
+/// This kernel's sphere pinches only on the `z` line through its centre, so
+/// the poles cannot go out where the turn put them: the reader would put them
+/// back where the ball it reads does not pinch. The file is the one written
+/// for the same ball moved to that centre and not turned, byte for byte
+/// (`docs/decisions.md` §404). Until then the writer refused it at its pole.
 #[test]
-fn a_ball_turned_off_z_is_refused_at_its_pole() {
-    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
-    let turned = Isometry::rotation(&rcad_geom::Axis::x(), 0.5).expect("a finite angle");
-    model.add_ball(4.0, &turned).expect("a ball of radius four");
+fn a_ball_turned_off_z_comes_back_as_the_same_ball_with_its_poles_on_z() {
+    let half_a_radian_about_x = Isometry::rotation(&rcad_geom::Axis::x(), 0.5).expect("a turn");
+    let about_y_and_moved = Isometry::translation(Vector::new(3.0, -7.0, 11.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&rcad_geom::Axis::y(), 1.1).expect("a turn"));
+    for (radius, turned, centre) in [
+        (4.0, half_a_radian_about_x, Point::origin()),
+        (2.5, about_y_and_moved, Point::new(3.0, -7.0, 11.0)),
+    ] {
+        let scale = Scale::new(Unit::Millimetre, 20.0).expect("a working size");
+        let mut model = Model::new(scale);
+        model.add_ball(radius, &turned).expect("a ball");
+        let mut moved = Model::new(scale);
+        let to_its_centre = Isometry::translation(centre - Point::origin()).expect("a move");
+        moved.add_ball(radius, &to_its_centre).expect("a ball");
+        let ball = the_one_face(&model).surface();
+        assert_eq!(
+            format!("{ball:?}"),
+            format!("{:?}", the_one_face(&moved).surface()),
+            "the turned ball is not centred where the test says"
+        );
+        let poles_where_turned = the_poles_of(&model);
+        assert!(
+            poles_where_turned
+                .iter()
+                .all(|pole| ball.the_way_its_first_coordinate_runs_at(*pole).is_some()),
+            "the turn left a pole on the z line: {poles_where_turned:?}"
+        );
+
+        let text = rcad_step::write(&model, "a ball").expect("a turned ball is written");
+        assert_eq!(
+            text,
+            rcad_step::write(&moved, "a ball").expect("a moved ball is written")
+        );
+        let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let import = Import::read(&file, &policy, &mut log).expect("a turned ball is read back");
+        let back = import.model();
+        back.validate(&policy, &mut log)
+            .expect("a turned ball comes back sound");
+        assert_eq!(
+            (
+                back.faces().count(),
+                back.edges().count(),
+                back.vertices().count()
+            ),
+            (1, 1, 2)
+        );
+        assert_eq!(
+            format!("{:?}", the_one_face(back).surface()),
+            format!("{ball:?}")
+        );
+        let [x, y, z] = centre.coordinates();
+        assert_eq!(
+            the_poles_of(back),
+            [Point::new(x, y, z - radius), Point::new(x, y, z + radius)]
+        );
+    }
+}
+
+/// A turned ball too small beside its height for `z ± r` to stand apart from
+/// `z` is still refused at its pole: there are no two poles on the `z` line to
+/// write it with.
+#[test]
+fn a_turned_ball_too_small_for_its_height_is_refused_at_its_pole() {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 1e20).expect("a working size"));
+    let high_and_turned = Isometry::translation(Vector::new(0.0, 0.0, 1e20))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&rcad_geom::Axis::x(), 0.5).expect("a turn"));
+    model
+        .add_ball(1.0, &high_and_turned)
+        .expect("a ball of radius one");
+    assert_eq!(1e20 + 1.0, 1e20);
 
     let refused = rcad_step::write(&model, "a turned ball");
     assert!(
         matches!(refused, Err(CannotWrite::AWireThatStandsStillAtAPole)),
         "expected the pole to stop it, got {refused:?}"
     );
+}
+
+/// A ball a file cut open along a slit off the `z` line — here its poles are
+/// along `x` — is read as the whole ball, with its poles on the `z` line and
+/// the seam `add_ball` cuts. Written out again it is the file of that ball.
+///
+/// The slit is the file's: one `EDGE_CURVE` walked there and back, between
+/// two corners where this kernel's ball does not pinch. Walked as written it
+/// is a wire of two steps, which `SolidBuilder` refuses as too short to bound
+/// anything (`docs/decisions.md` §404).
+#[test]
+fn a_ball_a_file_cut_open_off_the_z_line_is_read_as_the_same_ball() {
+    let text = a_ball_cut_open_along_a_slit(["3.,2.,3.", "-1.,2.,3."], "2.", "1.,2.,3.", "2.");
+    let back = the_slit_file_read(&text).expect("a ball cut open off z is read");
+    assert_eq!(
+        (
+            back.faces().count(),
+            back.edges().count(),
+            back.vertices().count()
+        ),
+        (1, 1, 2)
+    );
+    assert_eq!(
+        the_poles_of(&back),
+        [Point::new(1.0, 2.0, 1.0), Point::new(1.0, 2.0, 5.0)]
+    );
+    let mut moved = Model::new(back.scale());
+    moved
+        .add_ball(
+            2.0,
+            &Isometry::translation(Vector::new(1.0, 2.0, 3.0)).expect("a move"),
+        )
+        .expect("a ball");
+    assert_eq!(
+        rcad_step::write(&back, "a ball").expect("the ball read is written"),
+        rcad_step::write(&moved, "a ball").expect("a moved ball is written")
+    );
+}
+
+/// The slit's corners at `centre ± 2·(cos 1, sin 1, 0)`, written in twelve
+/// significant digits the way a real file writes them. Each misses the ball
+/// by about `1e-12`, thousands of roundings, and is read as on it: the corners
+/// are not read into the solid, so they are held to the digits the file was
+/// written in (`docs/decisions.md` §404).
+#[test]
+fn a_slit_written_in_twelve_digits_is_read_as_the_whole_ball() {
+    let text = a_ball_cut_open_along_a_slit(
+        [
+            "2.08060461174,3.68294196962,3.",
+            "-0.0806046117363,0.317058030384,3.",
+        ],
+        "2.",
+        "1.,2.,3.",
+        "2.",
+    );
+    let back = the_slit_file_read(&text).expect("a twelve-digit slit is read");
+    assert_eq!(
+        the_poles_of(&back),
+        [Point::new(1.0, 2.0, 1.0), Point::new(1.0, 2.0, 5.0)]
+    );
+}
+
+/// A slit whose circle, or one of whose corners, is a thousandth off the ball
+/// is not read as the whole ball: the file is walked as written and refused.
+#[test]
+fn a_slit_a_thousandth_off_its_ball_is_refused() {
+    for text in [
+        a_ball_cut_open_along_a_slit(["3.,2.,3.", "-1.,2.,3."], "2.002", "1.,2.,3.", "2."),
+        a_ball_cut_open_along_a_slit(["3.002,2.,3.", "-1.,2.,3."], "2.", "1.,2.,3.", "2."),
+    ] {
+        let read = the_slit_file_read(&text);
+        assert!(read.is_err(), "read as {read:?}");
+    }
+}
+
+/// A ball too small beside its height for its poles to stand apart on the
+/// `z` line is not read on it either, the writer's limit from the other side.
+#[test]
+fn a_slit_ball_too_small_for_its_height_is_refused() {
+    let text =
+        a_ball_cut_open_along_a_slit(["1.,0.,1.E20", "-1.,0.,1.E20"], "1.", "0.,0.,1.E20", "1.");
+    let read = the_slit_file_read(&text);
+    assert!(read.is_err(), "read as {read:?}");
+}
+
+/// The text of a file holding one ball of `radius` about `centre`, its axis
+/// written along `x`, cut open along a `CIRCLE` of `circle_radius` about the
+/// same centre in the plane square to `z`, between `corners`, walked there and
+/// back.
+fn a_ball_cut_open_along_a_slit(
+    corners: [&str; 2],
+    circle_radius: &str,
+    centre: &str,
+    radius: &str,
+) -> String {
+    format!(
+        "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('a ball cut open along a slit'),'2;1');
+FILE_NAME('a turned slit','',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+#2=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));
+#3=(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.));
+#4=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-7),#1,'','');
+#5=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#4))GLOBAL_UNIT_ASSIGNED_CONTEXT((#1,#2,#3))REPRESENTATION_CONTEXT('',''));
+#6=CARTESIAN_POINT('',({centre}));
+#7=DIRECTION('',(1.,0.,0.));
+#8=AXIS2_PLACEMENT_3D('',#6,#7,$);
+#9=SPHERICAL_SURFACE('',#8,{radius});
+#10=CARTESIAN_POINT('',({centre}));
+#11=DIRECTION('',(0.,0.,1.));
+#12=AXIS2_PLACEMENT_3D('',#10,#11,$);
+#13=CIRCLE('',#12,{circle_radius});
+#14=CARTESIAN_POINT('',({}));
+#15=VERTEX_POINT('',#14);
+#16=CARTESIAN_POINT('',({}));
+#17=VERTEX_POINT('',#16);
+#18=EDGE_CURVE('',#15,#17,#13,.T.);
+#19=ORIENTED_EDGE('',*,*,#18,.T.);
+#20=ORIENTED_EDGE('',*,*,#18,.F.);
+#21=EDGE_LOOP('',(#19,#20));
+#22=FACE_OUTER_BOUND('',#21,.T.);
+#23=ADVANCED_FACE('',(#22),#9,.T.);
+#24=CLOSED_SHELL('',(#23));
+#25=MANIFOLD_SOLID_BREP('',#24);
+ENDSEC;
+END-ISO-10303-21;
+",
+        corners[0], corners[1]
+    )
+}
+
+/// The model a slit file reads as, checked sound, or the reader's refusal.
+fn the_slit_file_read(text: &str) -> Result<Model, String> {
+    let file = StepFile::read(text.as_bytes()).expect("the slit file parses");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let import = Import::read(&file, &policy, &mut log).map_err(|why| format!("{why:?}"))?;
+    let back = import.model().clone();
+    back.validate(&policy, &mut log)
+        .expect("a slit file read is sound");
+    Ok(back)
+}
+
+/// The one face of the one solid of `model`.
+fn the_one_face(model: &Model) -> rcad_topo::FaceView<'_> {
+    let mut faces = model
+        .solids()
+        .flat_map(|solid| solid.faces().collect::<Vec<_>>());
+    let (Some(face), None) = (faces.next(), faces.next()) else {
+        panic!("a ball is one face");
+    };
+    face
+}
+
+/// The two poles the one face of `model` stands still at, lowest first.
+fn the_poles_of(model: &Model) -> [Point; 2] {
+    let mut poles: Vec<Point> = the_one_face(model)
+        .wires()
+        .flat_map(|wire| wire.steps().collect::<Vec<_>>())
+        .filter_map(|step| match step {
+            rcad_topo::WireStepView::Pole(pole) => Some(pole.point()),
+            _ => None,
+        })
+        .collect();
+    poles.sort_by(|one, other| one.coordinates()[2].total_cmp(&other.coordinates()[2]));
+    let [low, high] = poles[..] else {
+        panic!("a ball stands still at two poles, not at {poles:?}");
+    };
+    [low, high]
 }
 
 /// A bar cut off by a slanted plane meets it in an **ellipse**, and it is

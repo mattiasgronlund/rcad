@@ -34,15 +34,16 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Cylinder, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, Picker, Plane, Point, Scale, Sphere,
-    Surface, Torus, Unit, Vector,
+    Cylinder, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF, Picker, Plane, Point,
+    Scale, Sphere, Surface, Torus, Unit, Vector,
 };
 use rcad_predicates::expansion::two_product;
 use rcad_predicates::{Decision, Point as PredicatePoint};
-use rcad_topo::{EdgeKey, Model, ShellView, VertexKey, WireStepView};
+use rcad_topo::{EdgeKey, FaceKey, FaceView, Model, ShellView, VertexKey, WireStepView};
 
 use crate::brep::{
     A_CIRCLE_MAY_MISS_ITS_FACE_BY, a_surface_holds_the_circle, how_far_off_the_circle_can_be,
+    the_poles_of_a_ball_on_its_chart,
 };
 use crate::geometry::plane_through;
 
@@ -120,17 +121,25 @@ pub enum CannotWrite {
     /// the reader puts the pole back wherever a loop turns back along the edge
     /// it has just walked — so a ball comes back the ball that went out.
     ///
-    /// **Gap, and what is left of it is two shapes.** A pole whose wire does not
-    /// turn back along one edge there, and a pole that is not where the face's
-    /// surface pinches — a ball turned so its poles are no longer on the `z`
-    /// line through its centre, where this kernel's [`Sphere`](rcad_geom::Sphere)
-    /// pinches. The reader would put that pole back where the surface does not
-    /// pinch, which `Model::validate` refuses, and writing a file this kernel
-    /// will not read back is not a round trip. The first is a `VERTEX_LOOP`
-    /// away, which the reader does not walk yet anywhere but a cone apex
-    /// ([`Refusal::ALoopThisReaderDoesNotWalk`](crate::Refusal::ALoopThisReaderDoesNotWalk));
-    /// the second wants a placed solid on the way back in, which the reader
-    /// never builds.
+    /// **A whole ball turned off `z` is not refused**: its poles are not where
+    /// this kernel's [`Sphere`](rcad_geom::Sphere) pinches, on the `z` line
+    /// through its centre, so it is written as the same ball on that line,
+    /// with the seam `add_ball` cuts, and read back as that (`docs/decisions.md`
+    /// §404).
+    ///
+    /// **Gap, in two shapes.** A pole whose wire does not turn back along one
+    /// edge there, which is a `VERTEX_LOOP` away and the reader does not walk
+    /// one yet anywhere but a cone apex
+    /// ([`Refusal::ALoopThisReaderDoesNotWalk`](crate::Refusal::ALoopThisReaderDoesNotWalk)).
+    /// And a face that is only part of a ball, with a pole a turn moved off
+    /// the `z` line: the reader would put it back where the surface does not
+    /// pinch, which `Model::validate` refuses. Only the reader builds a part of
+    /// a ball with a pole, where a file's loop turns back exactly on that line,
+    /// so such a face is a file read in and then turned.
+    ///
+    /// **And one limit**: a whole ball turned off `z` whose radius is too
+    /// small beside its centre's `z` for `z + r` and `z − r` to stand apart
+    /// from `z`, which has no two poles on that line to write.
     #[error("a wire in this model stands still at a pole this writer cannot leave unwritten")]
     AWireThatStandsStillAtAPole,
 
@@ -328,8 +337,12 @@ impl Writing {
     ///
     /// **A pole is left unwritten where the wire turns back along the edge it
     /// has just walked**, the way a real file writes a ball, and the reader puts
-    /// it back at exactly that turn. See [`CannotWrite::AWireThatStandsStillAtAPole`]
-    /// for the poles that are refused instead.
+    /// it back at exactly that turn. A whole ball turned so its poles leave the
+    /// `z` line is written as the same ball on that line, with its seam where
+    /// `add_ball` cuts it ([`a_whole_ball_turned_off_its_chart`]), and so is
+    /// passed over by the first pass. See
+    /// [`CannotWrite::AWireThatStandsStillAtAPole`] for the poles that are
+    /// refused instead.
     ///
     /// **A loop is written as the reader will store it.** The reader keeps a
     /// file's loop as the wire and, for a curved face whose `same_sense` is
@@ -343,7 +356,12 @@ impl Writing {
     /// wrote a loop that does not close, and the reader refused it by name.
     fn solid_from_shell(&mut self, model: &Model, shell: ShellView<'_>) -> Result<(), CannotWrite> {
         let mut either_side: HashMap<EdgeKey, Vec<Side>> = HashMap::new();
+        let mut whole_balls: HashMap<FaceKey, Sphere> = HashMap::new();
         for face in shell.faces() {
+            if let Some(ball) = a_whole_ball_turned_off_its_chart(model, face) {
+                whole_balls.insert(face.key(), ball);
+                continue;
+            }
             let side = Side {
                 located: face.surface(),
                 stored: model
@@ -388,6 +406,15 @@ impl Writing {
             };
             let turned = face.orientation().is_reversed() && outward.as_plane().is_none();
             let sits_on = self.surface(&outward)?;
+            if let Some(ball) = whole_balls.get(&face.key()) {
+                let ring = self.a_whole_ball_on_its_chart(ball)?;
+                let bound = self.entity(&format!("FACE_OUTER_BOUND('',#{ring},.T.)"));
+                skin.push(self.entity(&format!(
+                    "ADVANCED_FACE('',(#{bound}),#{sits_on},{})",
+                    flag(!turned)
+                )));
+                continue;
+            }
 
             let mut bounds = Vec::with_capacity(face.wire_count());
             for (which, wire) in face.wires().enumerate() {
@@ -740,6 +767,45 @@ impl Writing {
         Some(self.circle(centre, axis, ball.radius()))
     }
 
+    /// The `EDGE_LOOP` of a whole ball on the chart the reader reads every
+    /// ball on: poles at `centre ± (0, 0, r)`, and the seam `add_ball` cuts,
+    /// in the plane through the centre square to `y`, on the side facing `+x`.
+    /// So the file is the one this writer writes for the same ball moved to
+    /// that centre and not turned, byte for byte.
+    ///
+    /// Where `z + r` or `z − r` rounds to `z` there are no two poles on that
+    /// chart, and the ball is refused at its pole as it was before it had one
+    /// ([`CannotWrite::AWireThatStandsStillAtAPole`]).
+    fn a_whole_ball_on_its_chart(&mut self, ball: &Sphere) -> Result<u64, CannotWrite> {
+        let [north, south] = the_poles_of_a_ball_on_its_chart(ball)
+            .ok_or(CannotWrite::AWireThatStandsStillAtAPole)?;
+        let refuse = || CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
+            first: "ball",
+            second: "ball",
+            closed: false,
+        };
+        let centre = ball.centre();
+        let cut = Plane::from_point_and_normal(centre, Vector::new(0.0, 1.0, 0.0))
+            .map_err(|_| refuse())?;
+        let picking = HalfSpace::through_a_point_facing(centre, Vector::new(1.0, 0.0, 0.0))
+            .map_err(|_| refuse())?;
+        let run = EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(cut),
+            picked_by: smallvec::smallvec![Picker::from(picking)],
+        };
+        let curve = self
+            .a_seam_of_one_ball(ball, &run, north, south)
+            .ok_or_else(refuse)?;
+        let [from, to] = [north, south].map(|corner| {
+            let at = self.cartesian_point(corner);
+            self.entity(&format!("VERTEX_POINT('',#{at})"))
+        });
+        let seam = self.entity(&format!("EDGE_CURVE('',#{from},#{to},#{curve},.T.)"));
+        let there = self.entity(&format!("ORIENTED_EDGE('',*,*,#{seam},.T.)"));
+        let back = self.entity(&format!("ORIENTED_EDGE('',*,*,#{seam},.F.)"));
+        Ok(self.entity(&format!("EDGE_LOOP('',(#{there},#{back}))")))
+    }
+
     /// The arc between two curved faces that lies in the plane its run names,
     /// or `None` where the run names no such plane or the plane would not
     /// read back as itself.
@@ -1034,6 +1100,64 @@ impl Writing {
         self.text += "ENDSEC;\nEND-ISO-10303-21;\n";
         self.text
     }
+}
+
+/// The located ball `face` covers whole, where its placement turned its poles
+/// off the `z` line the located ball pinches on, or `None`.
+///
+/// A whole ball is one wire: a seam with two corners, a pole, the seam walked
+/// back, a pole. Where the face is stored both poles stand where the stored
+/// ball pinches, so the face is the whole ball and only the placement moved
+/// its poles. A turn about `z` leaves them on the line, and such a ball is
+/// written as it is, seam and all.
+///
+/// **This kernel's [`Sphere`] carries no poles of its own** and pinches on the
+/// world's `z` line wherever it is put, so a turned ball's poles cannot be
+/// written where its placement put them: the reader would put them back
+/// where its ball does not pinch, which `Model::validate` refuses. It is the
+/// same whole ball on the world's chart, so that is what is written
+/// (`docs/decisions.md` §404).
+fn a_whole_ball_turned_off_its_chart(model: &Model, face: FaceView<'_>) -> Option<Sphere> {
+    let Surface::Sphere(ball) = face.surface() else {
+        return None;
+    };
+    let stored = model
+        .face(face.key())
+        .expect("a face of the model being written");
+    let poles_pinch = |on: FaceView<'_>| -> Option<bool> {
+        let mut wires = on.wires();
+        let (Some(wire), None) = (wires.next(), wires.next()) else {
+            return None;
+        };
+        let walk: Vec<WireStepView<'_>> = wire.steps().collect();
+        let [first, second, third, fourth] = walk[..] else {
+            return None;
+        };
+        let (there, back, poles) = match (first, second, third, fourth) {
+            (
+                WireStepView::Along(there),
+                WireStepView::Pole(one),
+                WireStepView::Along(back),
+                WireStepView::Pole(other),
+            )
+            | (
+                WireStepView::Pole(one),
+                WireStepView::Along(there),
+                WireStepView::Pole(other),
+                WireStepView::Along(back),
+            ) => (there, back, [one.point(), other.point()]),
+            _ => return None,
+        };
+        if there.edge().key() != back.edge().key() || there.start().key() == there.end().key() {
+            return None;
+        }
+        Some(poles.iter().all(|pole| {
+            on.surface()
+                .the_way_its_first_coordinate_runs_at(*pole)
+                .is_none()
+        }))
+    };
+    (poles_pinch(stored)? && !poles_pinch(face)?).then_some(ball)
 }
 
 /// Whether the pole at `position` of `walk` stands where the wire turns back
