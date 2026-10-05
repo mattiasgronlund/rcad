@@ -170,14 +170,24 @@ The five `CornersCoincide` pins the row named —
 `whether_a_coarser_deflection_always_meshes.rs` — all pass unchanged, and
 `just test-slow` runs its 40 and passes them.
 
+> **2026-10-05 note (Q1018): the wedge less the frustum answers too, since
+> Q953.** Q953 (`579226d0`, merged `3b1ffe9f`) found the mesher drawing the
+> cone's two slivers' shared side twice and fixed it:
+> `BuildingAMesh::walk` in `mesh.rs` now puts a point in the middle of a
+> straight edge lying across a flat face of its own solid. The answer is one
+> solid that touches itself along the ruling, with the slanted face whole
+> and the cone's seam on the ruling — the fold was the slanted face drawing
+> the seam's side.
+> `a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand`
+> in `degenerate_curved_fuses.rs` pins it, wedge first or frustum first,
+> under both `certified` and `tolerant(100)`, measuring
+> `45.68152688333766` against the hand-worked `96 − shared =
+> 45.59969072660572`.
+
 ### 364.6 What this leaves
 
-- **The wedge less the frustum** in `degenerate_curved_fuses.rs`, 364.5: the
-  union is pinned as an answer now, and the difference by its new refusal,
-  `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }`. Which mesher step
-  draws that side twice, and whether that answer is a manifold at all, with a
-  demonstration, is the other half of queue row Q884 and is filed as a row of
-  its own.
+- **The wedge less the frustum** in `degenerate_curved_fuses.rs`, 364.5:
+  answered too, since Q953 (above).
 - **Q679** is answered by 364.3's `−y` pin.
 - **Q74's ball under `certified`**, refused on *order along a crossing* in
   364.3, is open queue row Q908's shape, which names its cause; no row is filed

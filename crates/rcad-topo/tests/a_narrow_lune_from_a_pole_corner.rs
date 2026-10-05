@@ -174,8 +174,10 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
 /// ray fans the face's corners, `(∓6, ±8.9e-16, z)`, whose triangles hold the
 /// axis exactly, and it once certified the point inside by them. Since Q668
 /// the ray asks the stored plane too where the two part, and puts the point
-/// outside with it (§346). The fuse still drops a point the two disagree about
-/// (`select.rs`'s `the_ray_and_the_stored_planes_disagree_about`).
+/// outside with it (§346). Since Q996, `select.rs` no longer drops such a
+/// point itself: its own copy of the guard,
+/// `the_ray_and_the_stored_planes_disagree_about`, is gone, and `select.rs`
+/// reads classify.rs's copies instead.
 #[test]
 fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_its_plane() {
     let mut model = a_model(1.0);
