@@ -117,6 +117,22 @@ for a sphere's faces and two discs together. Filed as Q943.
 `three_quarters_of_a_pointed_cone_have_their_skin_and_cap_refused_by_name`
 pins it.
 
+**Since Q1009 (`0e4c04d5`), the skin answers too, as the part in front of the
+cap and of either plane.** `the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of`
+(`crates/rcad-topo/src/holds.rs`) takes a cone face cut by two planes through
+its apex that meet strictly inside the cone and one closing cap the apex is
+strictly in front of, whose side on each plane lies strictly behind the
+other and in front of or on the cap, and whose rim runs from a corner on one
+plane to a corner on the other, leaving the first in front: the part behind
+both planes is one run of rulings, the rim leaving one plane in front is the
+rest of the cap's boundary curve, and what is left is one piece with the
+face's own boundary. The test is renamed
+`three_quarters_of_a_pointed_cone_hold_their_points`
+(`crates/rcad-topo/tests/a_solid_carrying_a_run_along_a_cones_ruling.rs:591`)
+and runs on both nappes, each ruling and the rim held, the missing quarter's
+points not, and `classify_point` checked over a `16³` grid against the closed
+form.
+
 ### 389.6 What moved, and what this leaves
 
 - Five tests fail with `holds.rs` put back to `b1136e72`:
@@ -127,5 +143,6 @@ pins it.
   `a_quarter_of_a_pointed_cone_holds_its_points`.
 - §334.1's last paragraph is corrected: the six fuses stopped at the cone skin,
   not the flat face.
-- Left: the other three quarters' skin and cap, refused by name for want of
-  "in front of any" (389.5), filed as Q943.
+- The other three quarters' skin and cap, refused by name for want of "in
+  front of any" (389.5), filed as Q943, both answer since Q1009
+  (`0e4c04d5`): nothing is left of this item.

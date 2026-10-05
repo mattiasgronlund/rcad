@@ -712,10 +712,10 @@ fn a_bar_sliced_along_its_length(model: &mut Model, side: Side) -> SolidKey {
 /// (`ADraftWireDoesNotClose`) — what stopped `SW_NKK_BB15AH` and the two
 /// `Relay_StandexMeder_DIP` relays once Q766 let them past the writer.
 ///
-/// Not [`Covered::the_same_solid_comes_back`], because the fuse cannot cut the
-/// slab as built — a block through its flat back leaves a decision the fuse
-/// cannot settle, before any round trip — so the cut is required to come out
-/// the same on both sides, refusal and all.
+/// Not [`Covered::the_same_solid_comes_back`], because this test also checks
+/// that the scoop is a curved face used reversed, and that each cap meets it
+/// in one arc. The cut by a third solid is required to answer on both sides,
+/// each side's volume checked against the closed form.
 #[test]
 fn a_slab_with_a_round_scoop_out_of_it_is_written_with_loops_that_close_and_comes_back_the_same() {
     let policy = Policy::certified();
@@ -771,15 +771,35 @@ fn a_slab_with_a_round_scoop_out_of_it_is_written_with_loops_that_close_and_come
     let cutter = |model: &mut Model| a_block(model, [2.0, 1.5, 2.0], Vector::new(-1.0, -7.0, 1.0));
     let [cut_here, cut_back] = [(&model, built), (there, came)].map(|(from, key)| {
         cut_by_a_third_solid(from, key, &cutter, deflection)
-            .map(|pieces| {
-                pieces
-                    .iter()
-                    .map(|piece| (piece.volume(), piece.surface_area(), piece.centroid()))
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|why| why.to_string())
+            .unwrap_or_else(|why| panic!("the slab less the block does not answer: {why}"))
     });
-    assert_eq!(cut_here, cut_back, "the cut");
+    // The slab's own closed form is 4 times the area between the scoop
+    // circle's chord at y = -3 and the one at y = -5:
+    // 24 - (12 + 25 * asin(0.8) - 24). Of the block, only x in [-1, 1],
+    // y in [-6, -5.5], z in [1, 3] lies in the slab's back, short of where
+    // the scoop has eaten into it; the rest of the block is outside the
+    // slab's y range or inside the scoop's void, so 2, not the block's own
+    // 6, comes off.
+    let slab = 4.0 * (24.0 - (12.0 + 25.0 * 0.8_f64.asin() - 24.0));
+    let closed_form = slab - 2.0;
+    for pieces in [&cut_here, &cut_back] {
+        let [piece] = pieces.as_slice() else {
+            panic!("the slab less the block is one solid, not {}", pieces.len());
+        };
+        assert!(
+            (piece.volume() - closed_form).abs() <= piece.volume_error(),
+            "the slab less the block measured {} ± {}, and the closed form is {closed_form}",
+            piece.volume(),
+            piece.volume_error()
+        );
+    }
+    let as_tuples = |pieces: &[Measurement]| {
+        pieces
+            .iter()
+            .map(|piece| (piece.volume(), piece.surface_area(), piece.centroid()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(as_tuples(&cut_here), as_tuples(&cut_back), "the cut");
 }
 
 /// The slab of the test above, built face by face: bottom cap, scoop, top cap,

@@ -597,11 +597,11 @@ pub enum Error {
     /// the skin exists, and a cut that ends on another hole, which this cut
     /// family does not try, would reach it (§402.4).
     ///
-    /// **A ball's cap cut up to its pole, with an island beside it**, reaches
-    /// this name too when the island goes far enough round that two of the
-    /// rim's cuts up to the pole land on it instead of missing it, and a cut
-    /// through the island leaves only two pieces of it rather than passing it
-    /// by whole (§212.6). The same shape without the ball under it — one wire
+    /// **A ball's cap cut up to its pole, with an island beside it**, no
+    /// longer reaches this name when the island goes far enough round that
+    /// two of the rim's cuts up to the pole land on it instead of missing it:
+    /// since Q921 the strip between two such cuts is split into two patches
+    /// instead (§212.6). The same shape without the ball under it — one wire
     /// right round beside one that is not — is refused the same way on a
     /// cone, where no fuse is known to build it; only arena surgery reaches it
     /// there (§212.6).
