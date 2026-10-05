@@ -1488,33 +1488,36 @@ mod a_box_beside_a_blocks_side {
     }
 
     #[test]
-    fn a_box_off_a_turned_top_and_one_in_an_ls_notch_are_answered_beside_a_bend() {
+    fn a_box_off_a_turned_blocks_top_is_answered_beside_a_bend() {
+        assert_outside_beside_a_bend(a_turned_block, off_the_turned_top());
+    }
+
+    #[test]
+    fn a_box_in_the_notch_of_an_l_is_answered_beside_a_bend() {
+        assert_outside_beside_a_bend(an_l_beside_the_bend, IN_THE_NOTCH);
+    }
+
+    /// That `at` is outside the bend and outside what `build` makes, each on
+    /// its own, and that a box round it is answered outside the two together.
+    fn assert_outside_beside_a_bend(build: impl FnOnce(&mut Model) -> SolidKey, at: [f64; 3]) {
         let policy = Policy::certified();
-        let beside: [(fn(&mut Model) -> SolidKey, [f64; 3]); 2] = [
-            (a_turned_block, off_the_turned_top()),
-            (an_l_beside_the_bend, IN_THE_NOTCH),
-        ];
-        for (build, at) in beside {
-            let mut model =
-                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let bend = a_quarter_bend(&mut model);
-            let other = build(&mut model);
-            let both = both_in_one_solid(&mut model, bend, other);
-            let [both, bend, other] =
-                [both, bend, other].map(|key| model.solid(key).expect("this model made the key"));
-            for alone in [bend, other] {
-                let placed =
-                    alone.classify_point(Point::from(at), &policy, &mut ProvenanceLog::new());
-                assert_eq!(
-                    placed,
-                    Containment::Outside,
-                    "{at:?} against one on its own"
-                );
-            }
-            let placed =
-                both.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
-            assert_eq!(placed, Containment::Outside, "{at:?}");
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bend = a_quarter_bend(&mut model);
+        let other = build(&mut model);
+        let both = both_in_one_solid(&mut model, bend, other);
+        let [both, bend, other] =
+            [both, bend, other].map(|key| model.solid(key).expect("this model made the key"));
+        for alone in [bend, other] {
+            let placed = alone.classify_point(Point::from(at), &policy, &mut ProvenanceLog::new());
+            assert_eq!(
+                placed,
+                Containment::Outside,
+                "{at:?} against one on its own"
+            );
         }
+        let placed =
+            both.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
+        assert_eq!(placed, Containment::Outside, "{at:?}");
     }
 
     /// Where [`the_turn`] puts `(1, 2.25, 2)`: on the plane of the block's top
