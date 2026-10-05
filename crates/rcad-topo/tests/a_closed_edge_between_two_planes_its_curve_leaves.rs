@@ -23,10 +23,19 @@
 //! hair apart, is one plane spelt twice and still builds. So does a solid whose
 //! two flat faces cross in one of a pipe's own straight lines, with the run
 //! naming the pipe: the arc there is that line, and on both planes.
+//!
+//! **The circle may name a ball, a cone or a torus instead of the pipe**, each
+//! of which crosses the lid in that same circle of radius 1. With the inner
+//! piece a hair off the lid every one of them still builds (Q612) — a torus's
+//! only with the lid listed first when the piece leans, since the walk draws no
+//! circle on a plane leaning off square to a torus's axis. The far side of the
+//! circle is then off the other plane by less than writing a plane down costs.
+//! With the inner piece leaning a little further, so that the far side really
+//! is off by more than that, every one of them is still refused.
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Scale,
-    Surface, Vector,
+    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Scale,
+    Sphere, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
@@ -41,7 +50,7 @@ const R: Orientation = Orientation::Reversed;
 fn a_disc_tilted_off_the_lid_is_refused_whichever_face_is_listed_first() {
     for disc_first in [false, true] {
         let (_, built) =
-            a_bar_with_its_lid_split_by_a_disc(tilted_through_the_corner(), disc_first);
+            a_bar_with_its_lid_split_by_a_disc(pipe(1.0), tilted_through_the_corner(), disc_first);
 
         assert!(
             matches!(
@@ -62,7 +71,7 @@ fn a_disc_tilted_off_the_lid_is_refused_whichever_face_is_listed_first() {
 #[test]
 fn the_sweep_refuses_the_tilted_disc_read_back_from_bytes() {
     for disc_first in [false, true] {
-        let (model, built) = a_bar_with_its_lid_split_by_a_disc(the_lid(), disc_first);
+        let (model, built) = a_bar_with_its_lid_split_by_a_disc(pipe(1.0), the_lid(), disc_first);
         built.expect("the disc on the lid's own plane builds");
         let tilted = with_the_inner_plane_swapped(&model, disc_first, tilted_through_the_corner());
 
@@ -84,7 +93,7 @@ fn the_sweep_refuses_the_tilted_disc_read_back_from_bytes() {
 fn a_disc_on_the_lids_own_plane_still_builds_and_validates() {
     for disc in [the_lid(), the_lid_one_ulp_higher()] {
         for disc_first in [false, true] {
-            let (model, built) = a_bar_with_its_lid_split_by_a_disc(disc, disc_first);
+            let (model, built) = a_bar_with_its_lid_split_by_a_disc(pipe(1.0), disc, disc_first);
 
             built.unwrap_or_else(|why| {
                 panic!("disc {disc:?}, disc first {disc_first}: refused with {why:?}")
@@ -99,8 +108,11 @@ fn a_disc_on_the_lids_own_plane_still_builds_and_validates() {
 #[test]
 fn a_half_disc_tilted_along_its_chord_is_refused_whichever_face_is_listed_first() {
     for half_first in [false, true] {
-        let (_, built) =
-            a_bar_with_its_lid_split_by_a_half_disc(tilted_along_the_chord(), half_first);
+        let (_, built) = a_bar_with_its_lid_split_by_a_half_disc(
+            pipe(1.0),
+            tilted_along_the_chord(),
+            half_first,
+        );
 
         assert!(
             matches!(
@@ -165,7 +177,8 @@ fn the_tilted_half_disc_measures_by_which_face_is_listed_first() {
 fn a_half_disc_on_the_lids_own_plane_still_builds_and_validates() {
     for half in [the_lid(), the_lid_one_ulp_higher()] {
         for half_first in [false, true] {
-            let (model, built) = a_bar_with_its_lid_split_by_a_half_disc(half, half_first);
+            let (model, built) =
+                a_bar_with_its_lid_split_by_a_half_disc(pipe(1.0), half, half_first);
 
             built.unwrap_or_else(|why| {
                 panic!("half disc {half:?}, half disc first {half_first}: refused with {why:?}")
@@ -193,6 +206,144 @@ fn two_faces_crossing_in_a_pipes_own_line_still_build() {
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("and the model it went into passes the sweep");
+}
+
+#[test]
+fn a_disc_a_hair_off_the_lid_builds_when_its_circle_names_a_ball() {
+    for inner_first in [false, true] {
+        a_hair_off_the_lid_builds(a_ball(), inner_first);
+    }
+}
+
+/// A pointed cone below the lid, a frustum's cone whose apex is twice the bar's
+/// height below it, and a cone whose apex is above the lid so that the circle is
+/// on its other nappe.
+#[test]
+fn a_disc_a_hair_off_the_lid_builds_when_its_circle_names_a_cone_on_either_nappe() {
+    for cone in three_cones() {
+        for inner_first in [false, true] {
+            a_hair_off_the_lid_builds(cone, inner_first);
+        }
+    }
+}
+
+/// The leaning pieces only with the lid listed first: a plane leaning off square
+/// to a torus's axis is one the walk has no circle for, so with the leaning piece
+/// first the bar is refused for that, by the walk and not by this check.
+#[test]
+fn a_disc_a_hair_off_the_lid_builds_when_its_circle_names_a_torus() {
+    a_hair_off_the_lid_builds(a_torus(), false);
+    let above = the_lid_one_ulp_higher();
+    the_bar_builds(a_torus(), [above, above], true);
+}
+
+/// The inner piece leaning far enough that its circle's far side really is
+/// further off the other plane than writing a plane down costs: `8e-14` against
+/// the `5.7e-14` the bar has room for. Leaning `4e-14` through the disc's one
+/// corner puts the far side of the circle `8e-14` off, and leaning `8e-14` along
+/// the half disc's chord puts the middle of the half circle `8e-14` off.
+///
+/// The circle is 2 across on the lid, and a bound of half that would let the
+/// disc through: `1 × 4e-14` is inside the room.
+#[test]
+fn a_disc_leaning_off_the_lid_past_what_writing_a_plane_down_costs_is_still_refused() {
+    let surfaces = [pipe(1.0), a_ball(), a_torus()]
+        .into_iter()
+        .chain(three_cones());
+    let mut not_refused = Vec::new();
+    for named in surfaces {
+        for inner_first in [false, true] {
+            let disc = leaning_off_the_lid_through(Point::new(1.0, 0.0, 4.0), 4e-14);
+            let (_, built) = a_bar_with_its_lid_split_by_a_disc(named, disc, inner_first);
+            if !matches!(
+                built,
+                Err(Error::Invalid(
+                    Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes
+                ))
+            ) {
+                not_refused.push(format!("{named:?}, disc first {inner_first}: {built:?}"));
+            }
+
+            let half = leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), 8e-14);
+            let (_, built) = a_bar_with_its_lid_split_by_a_half_disc(named, half, inner_first);
+            if !matches!(
+                built,
+                Err(Error::Invalid(
+                    Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes
+                ))
+            ) {
+                not_refused.push(format!(
+                    "{named:?}, half disc first {inner_first}: {built:?}"
+                ));
+            }
+        }
+    }
+    assert!(not_refused.is_empty(), "{not_refused:#?}");
+}
+
+/// The bar whose circle names `named`, with the inner piece one ulp above the
+/// lid and then leaning `1e-14` off it, builds and passes the sweep.
+///
+/// The far side of the circle is then at most `2e-14` off the other plane, and
+/// writing a plane down costs `5.7e-14` here: sixteen times
+/// `Plane::SIGNED_DISTANCE_ROUNDOFF`, which is `4ε`, times the largest
+/// coordinate, which is `4`.
+fn a_hair_off_the_lid_builds(named: Surface, inner_first: bool) {
+    let above = the_lid_one_ulp_higher();
+    the_bar_builds(named, [above, above], inner_first);
+    let leaning = [
+        leaning_off_the_lid_through(Point::new(1.0, 0.0, 4.0), 1e-14),
+        leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), 1e-14),
+    ];
+    the_bar_builds(named, leaning, inner_first);
+}
+
+/// The bar split by a disc on `disc` and by a half disc on `half`, the circle
+/// naming `named`, each builds and passes the sweep.
+fn the_bar_builds(named: Surface, [disc, half]: [Plane; 2], inner_first: bool) {
+    let (model, built) = a_bar_with_its_lid_split_by_a_disc(named, disc, inner_first);
+    built.unwrap_or_else(|why| {
+        panic!("{named:?} on disc {disc:?}, disc first {inner_first}: refused with {why:?}")
+    });
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("and the model it went into passes the sweep");
+
+    let (model, built) = a_bar_with_its_lid_split_by_a_half_disc(named, half, inner_first);
+    built.unwrap_or_else(|why| {
+        panic!("{named:?} on half disc {half:?}, half first {inner_first}: refused with {why:?}")
+    });
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("and the model it went into passes the sweep");
+}
+
+/// The ball of radius 1 about the middle of the lid.
+fn a_ball() -> Surface {
+    Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 1.0).expect("a ball"))
+}
+
+/// Three cones up the bar's axis, each crossing the lid in the circle of radius
+/// 1: slope 1 from an apex 1 below the lid, slope `1/8` from an apex 8 below it,
+/// and slope 1 from an apex 1 above it, where the circle is on the nappe below
+/// the apex.
+fn three_cones() -> [Surface; 3] {
+    [(3.0, 1.0), (-4.0, 0.125), (5.0, 1.0)].map(|(apex, slope)| {
+        let axis = Axis::new(Point::new(0.0, 0.0, apex), up()).expect("an axis");
+        Surface::Cone(Cone::new(axis, slope).expect("a cone"))
+    })
+}
+
+/// The torus about the bar's axis, centred in the lid, whose outer circle on the
+/// lid is the one of radius 1: a ring of `3/4` and a tube of `1/4`.
+fn a_torus() -> Surface {
+    let axis = Axis::new(Point::new(0.0, 0.0, 4.0), up()).expect("an axis");
+    Surface::Torus(Torus::new(axis, 0.75, 0.25).expect("a torus"))
+}
+
+/// A plane through `through`, a point of the lid, leaning `by` off it along `x`.
+fn leaning_off_the_lid_through(through: Point, by: f64) -> Plane {
+    Plane::from_point_and_normal(through, Vector::new(-by, 0.0, 1.0)).expect("a plane")
 }
 
 /// The plane the disc is tilted onto: through the circle's corner `(1, 0, 4)`,
@@ -231,9 +382,17 @@ fn pipe(radius: f64) -> Surface {
 }
 
 /// The lid split by a circle of radius 1 into an annulus on the lid's plane and
-/// a disc on `disc`. The circle names the pipe of radius 1 about the bar's
-/// axis.
-fn a_bar_with_its_lid_split_by_a_disc(disc: Plane, disc_first: bool) -> (Model, Result<SolidKey>) {
+/// a disc on `disc`. The circle names `named`, which crosses the lid in it: the
+/// pipe of radius 1 about the bar's axis, say.
+///
+/// A torus's circle round its axis is walked the other way from a pipe's, a
+/// ball's or a cone's, so the hole walks it forwards there: walked as for the
+/// others, the bar is refused `AClosedEdgeIsWalkedAgainstItsSurface`.
+fn a_bar_with_its_lid_split_by_a_disc(
+    named: Surface,
+    disc: Plane,
+    disc_first: bool,
+) -> (Model, Result<SolidKey>) {
     a_bar_whose_lid_is_split(disc, disc_first, |builder| {
         let on_the_circle = builder
             .add_vertex(Point::new(1.0, 0.0, 4.0))
@@ -242,20 +401,27 @@ fn a_bar_with_its_lid_split_by_a_disc(disc: Plane, disc_first: bool) -> (Model, 
             .add_edge(
                 on_the_circle,
                 on_the_circle,
-                EdgeRun::RightRoundWhereItCrosses { and: pipe(1.0) },
+                EdgeRun::RightRoundWhereItCrosses { and: named },
             )
             .expect("an edge");
+        let (round_the_hole, round_the_disc) = if matches!(named, Surface::Torus(_)) {
+            (F, R)
+        } else {
+            (R, F)
+        };
         (
-            one_step_round(builder, circle, R),
-            one_step_round(builder, circle, F),
+            one_step_round(builder, circle, round_the_hole),
+            one_step_round(builder, circle, round_the_disc),
         )
     })
 }
 
 /// The lid split by the half of the circle of radius 1 at `x ≥ 0` and the
-/// chord `x = 0` across it, the half disc on `half`. The arc names the pipe of
-/// radius 1 about the bar's axis and is picked out by the half-space `x ≥ 0`.
+/// chord `x = 0` across it, the half disc on `half`. The arc names `named`,
+/// which crosses the lid in that circle, and is picked out by the half-space
+/// `x ≥ 0`.
 fn a_bar_with_its_lid_split_by_a_half_disc(
+    named: Surface,
     half: Plane,
     half_first: bool,
 ) -> (Model, Result<SolidKey>) {
@@ -273,7 +439,7 @@ fn a_bar_with_its_lid_split_by_a_half_disc(
                 south,
                 north,
                 EdgeRun::PartOfWhereItCrosses {
-                    and: pipe(1.0),
+                    and: named,
                     picked_by: smallvec::smallvec![Picker::from(east)],
                 },
             )
@@ -372,7 +538,7 @@ fn one_step_round(builder: &mut SolidBuilder, edge: DraftEdge, way: Orientation)
 /// builds, with the half disc's plane then swapped for the tilted one in the
 /// bytes.
 fn the_tilted_half_disc_read_back_from_bytes(half_first: bool) -> Model {
-    let (model, built) = a_bar_with_its_lid_split_by_a_half_disc(the_lid(), half_first);
+    let (model, built) = a_bar_with_its_lid_split_by_a_half_disc(pipe(1.0), the_lid(), half_first);
     built.expect("the half disc on the lid's own plane builds");
     with_the_inner_plane_swapped(&model, half_first, tilted_along_the_chord())
 }
