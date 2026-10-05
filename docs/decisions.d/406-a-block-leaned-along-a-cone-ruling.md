@@ -123,8 +123,9 @@ place below `16` turns as minus its gradient's `x`. Every certified fuse there
 then refuses one step on, `order along a crossing` between the two places
 along the block's edge, whose boxes `[15.999999999999998, 16]` and
 `[16, 16.000000000000004]` touch at `16` (enclosure `5.3e-15`). That file pins
-the turn and is not this lane's, so the route stops at flat faces, and 406.5
-leaves the rest as a row.
+the turn and is not this lane's, so the route stopped at flat faces, and 406.5
+left the rest as a row. Q914 has since dropped the stop and ordered the two
+places by the quadric at the end they share; §317.7 says why both are sound.
 
 ### 406.4 What the pin says now
 
@@ -150,11 +151,9 @@ each of the three. One run of it took 25.6 s on the lane's commit against
   refuses/B, the same shapes as the eight, and their cause is not traced: the
   top's ellipse is `4.5e16` long, and the pieces cut from it are arcs of it near
   the frustum, where the turn-`0` block's top cuts a parabola.
-- **The turn read off the root on a curved face** is Q914's, which already
-  names "read the sign off which root the place is" for §317's gap. Dropping
-  the `curved == 0` stop in `the_turn_where_two_planes_cross_a_quadric` decides
-  it, and moves `a_certified_fuse_refuses_on_the_turn_at_the_place_below_16` in
-  `a_block_edge_grazing_a_ball_at_cx_16.rs` to the order of the two places
-  along the edge, `16 ∓ 2⁻⁵¹`, whose boxes share only `16`.
+- **The turn read off the root on a curved face** was Q914's, and §317.7
+  closed it: the `curved == 0` stop in `the_turn_where_two_planes_cross_a_quadric`
+  is gone, the two places along the edge, `16 ∓ 2⁻⁵¹`, are ordered, and the
+  pin is now `every_fuse_refuses_on_a_point_inside_a_piece_between_the_two_places`.
 - §340.4's "four refuse `ResultIsNotManifold`" is out of date since §340.10
   and this; it is §340's to say, and its owner's.

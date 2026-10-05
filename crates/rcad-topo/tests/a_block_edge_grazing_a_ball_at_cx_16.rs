@@ -1,5 +1,6 @@
-//! §244.3's block edge along `x`, grazing a ball centred at `x = 16`: what a
-//! certified fuse refuses on, and why the sign it refuses on is a gap.
+//! §244.3's block edge along `x`, grazing a ball centred at `x = 16`: the three
+//! questions a fuse of the two used to refuse on, each now decided, and what it
+//! refuses on after them.
 //!
 //! # The shape
 //!
@@ -8,7 +9,7 @@
 //! `x = 16 ± 2⁻⁵¹`, which are not `f64`s: the two places come back as the boxes
 //! `[15.999999999999998, 16]` and `[16, 16.000000000000004]`.
 //!
-//! # The order of the two places is decided
+//! # The order of the two places round each circle is decided
 //!
 //! The walked start of both the top's circle and the side's is `(16, 1, −2⁻²⁵)`,
 //! on the edge between the two places and `2⁻¹⁰³` inside the ball. All three
@@ -21,72 +22,92 @@
 //! comes first (`fuse/arrange.rs`,
 //! `two_places_whose_boxes_end_at_the_start_put_the_one_past_it_first`).
 //!
-//! # What refuses next, and why that is a gap
+//! # The turn at each place is decided
 //!
-//! Splitting the ball's face, `Arrangement::turns_anticlockwise` in
-//! `fuse/arrange.rs` asks which way two crossings turn at a place they meet:
-//! the sign of the determinant of the ball's gradient there and the two
-//! planes' normals. The gradient is the place minus the ball's centre, taken
-//! from the box, so its `x` is `[−2⁻⁴⁹, 0]` and the sign cannot be told. That
-//! is what every certified fuse refuses on with the ball first, the record
-//! §317.1 found before §244.5 folded the two places into one node and Q663
-//! stopped the fold. The seam of the ball is not involved; `docs/decisions.md`
-//! §248.3 guessed that it was.
+//! Splitting the ball's face, `Arrangement::turns_anticlockwise` asks which way
+//! two crossings turn at a place they meet: the sign of the determinant of the
+//! ball's gradient there and the two planes' normals. Over the place's box the
+//! gradient's `x` is `[−2⁻⁴⁹, 0]` and the sign cannot be told. It is `∓2⁻⁵¹`,
+//! never zero (the second test below), and since Q914 it is read off which of
+//! the edge's two meets with the ball the place is, by two exact signs of the
+//! ball along the edge (`fuse/arrange.rs`,
+//! `the_turn_on_a_balls_face_where_a_block_edge_grazes_it_is_read_off_the_root`).
+//! Until then every certified fuse with the ball first refused on it, the gap
+//! `docs/decisions.md` §317 measured.
 //!
-//! The sign exists. The determinant is minus the gradient's `x`, which is
-//! `∓2⁻⁵¹`, never zero. And the same three surfaces solved about the ball's
-//! own centre meet at two `f64` triples, where the same determinant is decided.
-//! So this is a gap and not a limit (§16.10). `docs/decisions.md` §317 has the
-//! measurement and the question a fix should ask.
+//! # The order of the two places along the edge is decided
+//!
+//! On the block's top and side the two places lie on the edge, in boxes that
+//! share only `16` along it, so read as boxes they are apart by a range from
+//! nothing up. Until Q914 every certified fuse with the block first refused on
+//! that. The edge's point at `16` is `2⁻¹⁰³` inside the ball, so neither place
+//! is at `16`, and the one whose box ends there comes first along the edge's
+//! `x` (`Arrangement::as_the_quadric_says`).
+//!
+//! # What it refuses on next
+//!
+//! Every fuse, with either solid first and under either policy, then refuses on
+//! a point inside a piece of a face between the two places, with those two
+//! places as the record's inputs. No fuse answers, so none is held to a volume.
+//! Why §365.3's rule, which places the slivers between the same two places on
+//! the edge along `z` at `h = 0` in `a_block_edge_grazing_a_ball.rs`, does not
+//! place these is not traced (§317.7).
 
 use rcad_geom::{
     Isometry, MeetOfThree, Plane, Point, Scale, Sphere, Surface, Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{
-    Decision, Interval, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record,
-    orient3d_of_points,
+    Decision, Interval, Level, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
 };
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule};
 
-/// The name `turns_anticlockwise`'s determinant records a refusal under.
-const THE_TURN: &str = "orient3d";
+/// The name a point search records a refusal under when nothing places a
+/// piece of a face.
+const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
-/// The pin: under a certified policy every rule refuses on the turn at the
-/// place below `x = 16`, and on nothing else.
+/// The pin: every fuse gets past the turn and both orders, and refuses on a
+/// point inside a piece between the two places, and on nothing else.
 ///
-/// From §244.5 until Q699 every rule refused one step earlier, on which of the
-/// two places comes first round a circle.
+/// Until Q914 a certified fuse refused on the turn at the place below `16`
+/// with the ball first, and on the order of the two places along the edge
+/// with the block first; under `Policy::tolerant(25.0)` every one was
+/// `ResultIsNotManifold { count: 3 }`.
 #[test]
-fn a_certified_fuse_refuses_on_the_turn_at_the_place_below_16() {
+fn every_fuse_refuses_on_a_point_inside_a_piece_between_the_two_places() {
     let places = where_the_edge_meets_a_ball_centred_at(16.0);
-    let below: Vec<PredicatePoint> = places
-        .iter()
-        .copied()
-        .filter(|place| place.enclosure()[0].hi() == 16.0)
-        .collect();
-    let [below] = below[..] else {
-        panic!("one place has its box end at 16 from below: {places:?}");
-    };
-    let gradient = gradient_of_the_ball(below, 16.0);
-    for rule in EVERY_RULE {
-        let mut log = ProvenanceLog::new();
-        let refused = match fuse_a_block_edge_grazing_a_ball(rule, &mut log) {
-            Err(Error::Undecidable { records }) => records.records().to_vec(),
-            other => panic!("{rule:?}: {other:?}"),
-        };
-        assert_eq!(refused.len(), 1, "{rule:?}: {refused:#?}");
-        assert!(
-            is_the_turn_at(&refused[0], gradient),
-            "{rule:?}: {:#?}",
-            refused[0]
-        );
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for ball_first in [true, false] {
+            for rule in EVERY_RULE {
+                let case = (policy.strictness(), ball_first, rule);
+                let mut log = ProvenanceLog::new();
+                let refused =
+                    match fuse_a_block_edge_grazing_a_ball(rule, &policy, ball_first, &mut log) {
+                        Err(Error::Undecidable { records }) => records.records().to_vec(),
+                        other => panic!("{case:?}: {other:?}"),
+                    };
+                let [refused] = &refused[..] else {
+                    panic!("{case:?}: one record, not {refused:#?}");
+                };
+                assert_eq!(
+                    refused.predicate(),
+                    A_POINT_INSIDE_A_PIECE,
+                    "{case:?}: {refused:#?}"
+                );
+                assert_eq!(refused.level(), Level::Interval, "{case:?}");
+                let named = refused.inputs();
+                assert!(
+                    named == [places[0], places[1]] || named == [places[1], places[0]],
+                    "{case:?}: the piece is not named by the two places: {refused:#?}"
+                );
+            }
+        }
     }
 }
 
-/// The measurement that makes it a gap: the sign the turn needs exists, and the
-/// same three surfaces solved about the ball's own centre reach it.
+/// The measurement that made the turn a gap: the sign it needs exists, and
+/// the same three surfaces solved about the ball's own centre reach it.
 ///
 /// Moving the ball to the origin moves nothing else. Both planes' normals have
 /// no `x` part, so a shift along `x` leaves their four numbers as they were,
@@ -148,6 +169,8 @@ fn the_sign_that_turn_needs_is_there_when_the_ball_is_solved_about_its_own_centr
 
 fn fuse_a_block_edge_grazing_a_ball(
     rule: Rule,
+    policy: &Policy,
+    ball_first: bool,
     log: &mut ProvenanceLog,
 ) -> rcad_topo::Result<Fused> {
     let centre_x = 16.0;
@@ -174,26 +197,15 @@ fn fuse_a_block_edge_grazing_a_ball(
             &Isometry::translation(Vector::new(0.0, 0.0, top - 2.0)).expect("a finite shift"),
         )
         .expect("a positive height");
-    model.fuse(&[ball], &[block], rule, &Policy::certified(), log)
-}
-
-/// Whether a record is the turn at the place whose ball gradient is `gradient`,
-/// with the block's top and side as its other two rows, as wide as that
-/// gradient's `x`, `2⁻⁴⁹`.
-fn is_the_turn_at(record: &Record, gradient: PredicatePoint) -> bool {
-    record.predicate() == THE_TURN
-        && record.level() == Level::Interval
-        && record.inputs()
-            == [
-                gradient,
-                PredicatePoint::from([0.0, 0.0, 1.0]),
-                PredicatePoint::from([0.0, 1.0, 0.0]),
-            ]
-        && record.enclosure() == f64::powi(2.0, -49)
+    if ball_first {
+        model.fuse(&[ball], &[block], rule, policy, log)
+    } else {
+        model.fuse(&[block], &[ball], rule, policy, log)
+    }
 }
 
 /// The block's top, `z = −2⁻²⁵`, and its side, `y = 1`, facing the way the
-/// fuse's record has them.
+/// fuse's record of the turn had them.
 fn the_block_edge() -> (Plane, Plane) {
     let top = -f64::powi(2.0, -25);
     let lid = Plane::from_point_and_normal(Point::new(0.0, 0.0, top), Vector::new(0.0, 0.0, 1.0))
@@ -232,7 +244,7 @@ fn gradient_of_the_ball(place: PredicatePoint, centre_x: f64) -> PredicatePoint 
 }
 
 /// `turns_anticlockwise`'s determinant, with the rows in the order the fuse's
-/// record has them.
+/// record of it had them.
 fn the_turn_at(gradient: PredicatePoint) -> Decision {
     orient3d_of_points(
         gradient,
