@@ -533,7 +533,15 @@ impl Writing {
     ///   already written. So an open edge between two flat faces that reaches
     ///   the surfaces is a curve drawn on one plane, which the plane does not
     ///   name, and it is written only where its run names a pipe — see
-    ///   [`Writing::an_arc_of_a_circle_on_a_flat_face`]. A run naming a ball, a
+    ///   [`Writing::an_arc_of_a_circle_on_a_flat_face`]. **Or it is one of that
+    ///   pipe's own straight lines**: where the first face's plane holds the
+    ///   axis's direction, `n·a == 0.0`, the walk draws the edge straight
+    ///   between its ends (`what_a_run_between_these_two_lies_on` in
+    ///   `rcad-geom`), and it is written as a `LINE`. An edge between two
+    ///   different planes named that way is one; it went to the circle until
+    ///   Q775 and was refused by name
+    ///   (`a_bar_whose_straight_edge_is_named_by_a_pipe_it_lies_along_is_written_with_a_line_and_comes_back_the_same`).
+    ///   A run naming a ball, a
     ///   cone or a ring there is refused. Until Q764 it was written as a
     ///   `LINE`: a disc drawn on a bar's top with its rim named by a ball went
     ///   out as two halves of the rim written as the one chord, and the reader
@@ -608,7 +616,7 @@ impl Writing {
             return Ok(Curve::along(self.line(start, end - start)));
         }
         match (first, second) {
-            (Surface::Plane(_), Surface::Plane(_)) if !closed => {
+            (Surface::Plane(flat), Surface::Plane(_)) if !closed => {
                 let EdgeRun::PartOfWhereItCrosses {
                     and: Surface::Cylinder(round),
                     ..
@@ -616,8 +624,18 @@ impl Writing {
                 else {
                     return Err(refuse());
                 };
-                self.an_arc_of_a_circle_on_a_flat_face(round, run, start, end)
-                    .ok_or_else(refuse)
+                if flat.normal().dot(round.axis().direction()) == 0.0 {
+                    return Ok(Curve::along(self.line(start, end - start)));
+                }
+                self.an_arc_of_a_circle_on_a_flat_face(
+                    flat,
+                    [first, second],
+                    round,
+                    run,
+                    start,
+                    end,
+                )
+                .ok_or_else(refuse)
             }
             (Surface::Plane(flat), Surface::Cylinder(pipe))
             | (Surface::Cylinder(pipe), Surface::Plane(flat)) => {
@@ -941,16 +959,17 @@ impl Writing {
     }
 
     /// An arc of a circle drawn on a flat face, which the run names by the pipe
-    /// of the circle's radius about its axis; `None` where that pipe would not
-    /// read back as itself or the run's pickers do not tell the two arcs apart.
+    /// of the circle's radius about its axis; `None` where the faces along it
+    /// would not hold that circle, the pipe would not read back with its own
+    /// axis and radius, or the run's pickers do not tell the two arcs apart.
     ///
     /// **Two flat faces either side of an edge that bends are one plane**, and
     /// a plane crossed with itself names nothing, so the reader names such an
     /// arc by that pipe (`Walk::the_surface_that_names_the_curve`) and walks
-    /// where it crosses the face. The pipe is written as the `CIRCLE` of its
-    /// own axis and radius, and the reader's `Axis::as_written` and
-    /// `Cylinder::new` are asked here whether they give the same pipe back.
-    /// Until Q1001 both sides asked `Axis::new`, which scales a turned axis
+    /// where it crosses the face. The pipe is written as a `CIRCLE` of its
+    /// radius about its axis, and the reader's `Axis::as_written` and
+    /// `Cylinder::new` are asked here whether they give that axis and radius
+    /// back. Until Q1001 both sides asked `Axis::new`, which scales a turned axis
     /// again and can move its last bit, so a disc drawn on a bar's top and
     /// turned was refused by name wherever it did: 76 of the 372 turns in
     /// `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`
@@ -959,31 +978,68 @@ impl Writing {
     /// faces, drew a face whose edge cut through its own holes: twenty KiCad
     /// LEDs, once Q767 let them past their domes, came back refused as
     /// `BoundaryCrossesItself`.
+    ///
+    /// **The circle is centred where the faces hold it.** The reader builds the
+    /// pipe through the circle's centre, and names the run by it only where
+    /// every face along the edge holds the circle ([`a_surface_holds_the_circle`],
+    /// shared with the reader); otherwise it names the run by the circle's own
+    /// plane, and refuses the file. The pipe's own axis origin is written where
+    /// the faces hold the circle there, which brings the pipe back bit for bit.
+    /// Anywhere else on the axis it is not: the pipe about a bar's own axis,
+    /// whose origin is on the floor, drew a disc on the top whose circle went
+    /// out on the floor, and the reader refused the file (Q775,
+    /// `a_disc_drawn_on_a_bar_by_the_pipe_about_its_own_axis_comes_back_the_same`).
+    /// So there the circle goes where the axis meets `flat`, worked out the way
+    /// `rcad_geom::walk` centres a plane's crossing with a pipe
+    /// ([`where_a_plane_crosses_a_pipe`]), which makes it the circle the model's
+    /// edge is walked along. **That point rounds**, so the pipe read back runs
+    /// through it and not along the model's line, and the reader's own walk of
+    /// it can land a few ulps away. The check above bounds how far: the faces
+    /// hold the circle only where its centre is within the reader's allowance of
+    /// them and its axis square to them to within it, and the walk moves the
+    /// centre along the axis by how far off the face it is.
+    /// `every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file`
+    /// holds the turns.
     fn an_arc_of_a_circle_on_a_flat_face(
         &mut self,
+        flat: &Plane,
+        either_side: [&Surface; 2],
         round: &Cylinder,
         run: &EdgeRun,
         start: Point,
         end: Point,
     ) -> Option<Curve> {
-        let centre = round.axis().origin();
         let axis = round.axis().direction();
+        let radius = round.radius();
+        let normal = plane_through(Point::origin(), axis).ok()?.normal();
+        let held = |centre: Point| {
+            either_side
+                .iter()
+                .all(|face| a_surface_holds_the_circle(face, centre, normal, radius))
+        };
+        let origin = round.axis().origin();
+        let centre = if held(origin) {
+            origin
+        } else {
+            where_a_plane_crosses_a_pipe(flat, round)?.centre
+        };
+        if !held(centre) {
+            return None;
+        }
         let read_back = rcad_geom::Axis::as_written(centre, axis)
-            .and_then(|line| Cylinder::new(line, round.radius()))
+            .and_then(|line| Cylinder::new(line, radius))
             .ok()?;
-        if read_back != *round {
+        if read_back.axis().direction() != axis || read_back.radius() != radius {
             return None;
         }
         let crossing = Crossing {
             centre,
             turning: axis,
-            shape: Shape::Circle {
-                radius: round.radius(),
-            },
+            shape: Shape::Circle { radius },
         };
         let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
         Some(Curve {
-            id: self.circle(centre, axis, round.radius()),
+            id: self.circle(centre, axis, radius),
             the_edge_runs_its_way,
         })
     }

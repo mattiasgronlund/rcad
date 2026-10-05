@@ -1338,6 +1338,185 @@ fn a_disc_drawn_on_a_bar_and_named_by_a_ball_is_refused_by_name_rather_than_writ
     );
 }
 
+/// The same disc with its rim named by the pipe of radius one about the bar's
+/// own axis, whose origin is on the floor four below the top, is written as
+/// the file of the disc drawn by the pipe standing on the top, and comes back
+/// the same.
+///
+/// The writer wrote the rim's circle at the pipe's axis origin, which no face
+/// along the rim holds, so the reader named the rim by the plane `z = 0` the
+/// circle lay in and refused the file (Q775). It now writes the circle where
+/// the axis meets the top.
+#[test]
+fn a_disc_drawn_on_a_bar_by_the_pipe_about_its_own_axis_comes_back_the_same() {
+    use rcad_geom::{Axis, Cylinder};
+
+    let called = "a disc drawn by the pipe about the bar's axis";
+    let scale = Scale::new(Unit::Millimetre, 4.0).expect("a working size");
+    let mut model = Model::new(scale);
+    let about_the_bars_axis =
+        Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a positive radius"));
+    let built = a_bar_with_a_disc_drawn_on_its_top_by(&mut model, about_the_bars_axis);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the pipe about the bar's axis says where the rim runs");
+    let text = comes_back_the_same(called, &model, built, &|model| {
+        a_block(model, [2.0, 2.0, 2.0], Vector::new(0.0, -1.0, 3.0))
+    });
+    let mut standing_on_the_top = Model::new(scale);
+    a_bar_with_a_disc_drawn_on_its_top(&mut standing_on_the_top);
+    assert_eq!(
+        text,
+        rcad_step::write(&standing_on_the_top, called).expect("the disc on its own top"),
+        "the rim's circle is where the axis meets the top"
+    );
+}
+
+/// That disc turned and moved, drawn by the pipe about the bar's axis or by
+/// that pipe moved up its axis to three above the top, is written, read back
+/// and sound every time, and its rim comes back named by a pipe of the axis
+/// direction and radius it went out with.
+///
+/// Where the axis meets the turned top is worked out in `f64` and rounds, so
+/// the pipe read back runs through a point an ulp or so off the model's line;
+/// the reader holds the circle there all the same. The turns are those of
+/// `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`: a
+/// tenth to `6.2` about each of `x`, `y` and `z`, unmoved and moved by
+/// `(3, 5, 10)`, so 372 for each pipe.
+#[test]
+fn every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file() {
+    use rcad_geom::{Axis, Cylinder};
+
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let (mut came_back, mut refused) = (0, Vec::new());
+    for standing_at in [0.0, 7.0] {
+        let drawn = Cylinder::new(
+            Axis::new(
+                Point::new(0.0, 0.0, standing_at),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .expect("a direction"),
+            1.0,
+        )
+        .expect("a positive radius");
+        for about in [Axis::x(), Axis::y(), Axis::z()] {
+            for tenths in 1..63 {
+                for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
+                    let turned = Isometry::translation(moved)
+                        .expect("a finite offset")
+                        .compose(
+                            &Isometry::rotation(&about, f64::from(tenths) * 0.1)
+                                .expect("a finite angle about a unit axis"),
+                        );
+                    let mut model =
+                        Model::new(Scale::new(Unit::Millimetre, 16.0).expect("a working size"));
+                    let built =
+                        a_bar_with_a_disc_drawn_on_its_top_by(&mut model, Surface::Cylinder(drawn));
+                    model
+                        .place_solid(built, &turned)
+                        .expect("a bar can be turned");
+                    let went = the_pipes_its_runs_name(model.solid(built).expect("its key"));
+                    match the_pipes_its_runs_name_back(&model, &policy, &mut log) {
+                        Ok(back)
+                            if back.len() == went.len()
+                                && went.iter().zip(&back).all(|(went, back)| {
+                                    went.axis().direction() == back.axis().direction()
+                                        && went.radius() == back.radius()
+                                }) =>
+                        {
+                            came_back += 1;
+                        }
+                        Ok(back) => {
+                            refused.push(format!("{turned:?}: {went:?} came back {back:?}"))
+                        }
+                        Err(why) => refused.push(format!("{turned:?}: {why}")),
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!((came_back, refused.first()), (744, None));
+}
+
+/// Every pipe a run of `solid` names, where the solid puts it, in the order
+/// its faces, wires and coedges are walked.
+fn the_pipes_its_runs_name(solid: rcad_topo::SolidView<'_>) -> Vec<rcad_geom::Cylinder> {
+    let mut pipes = Vec::new();
+    for face in solid.faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                if let EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(pipe),
+                    ..
+                } = coedge.edge().run()
+                {
+                    pipes.push(pipe);
+                }
+            }
+        }
+    }
+    pipes
+}
+
+/// [`the_pipes_its_runs_name`] for the one solid of `model` written out and
+/// read back, which has to come back sound.
+fn the_pipes_its_runs_name_back(
+    model: &Model,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<rcad_geom::Cylinder>, String> {
+    let text = rcad_step::write(model, "a turned disc").map_err(|why| format!("{why:?}"))?;
+    let file = StepFile::read(text.as_bytes()).map_err(|why| why.to_string())?;
+    let import = Import::read(&file, policy, log).map_err(|why| why.to_string())?;
+    let [(_, came)] = import.solids() else {
+        return Err(format!("{} solids came back", import.solids().len()));
+    };
+    let there = import.model();
+    there.validate(policy, log).map_err(|why| why.to_string())?;
+    Ok(the_pipes_its_runs_name(
+        there.solid(*came).expect("this model made the key"),
+    ))
+}
+
+/// Half a bar whose straight edge across the floor is named by a pipe it is
+/// one of the straight lines of, rather than said to be straight, is written
+/// with a `LINE` and comes back the same.
+///
+/// The floor and the flat side are two planes that cross in that edge, and
+/// the pipe of radius five along `x` through `(0, 3, 4)` holds it as well.
+/// The walk draws an edge straight where the face's plane holds the pipe's
+/// axis direction. The writer sent every open edge between two flat faces
+/// whose run names a pipe to an arc of that pipe's circle, which has no arc
+/// running along the axis, and refused the edge by name (Q775).
+///
+/// The cut stays clear of the flat side: a block across the floor's edge is
+/// refused on the solid that went out, as an edge that runs along part of a
+/// curve rather than the whole of one, and cut on the one that came back, whose
+/// edge is straight.
+#[test]
+fn a_bar_whose_straight_edge_is_named_by_a_pipe_it_lies_along_is_written_with_a_line_and_comes_back_the_same()
+ {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let built = half_a_bar_whose_edge_across_the_floor_is_named_by_a_pipe(&mut model);
+    assert_eq!(
+        open_bends(&model, built),
+        [["pipe", "plane"], ["pipe", "plane"], ["plane", "plane"]],
+        "the two half circles and the edge across the floor"
+    );
+    let text = comes_back_the_same(
+        "half a bar whose edge across the floor is named by a pipe",
+        &model,
+        built,
+        &|model| a_block(model, [2.0, 2.0, 2.0], Vector::new(-1.0, 1.0, 3.0)),
+    );
+    assert_eq!(
+        text.matches("LINE(").count(),
+        4,
+        "the edge across the floor, the one across the top and the two up the sides"
+    );
+}
+
 /// A bar whose seam is named by the plane through its axis, rather than said to
 /// be straight, is written with a `LINE` and comes back the same.
 ///
@@ -1911,6 +2090,74 @@ fn a_bar_whose_seam_is_named_by_the_plane_through_its_axis(model: &mut Model) ->
                     Vector::new(0.0, 0.0, 1.0),
                 )),
                 vec![vec![Forward(2)]],
+            ),
+        ],
+        &[],
+    )
+}
+
+/// The half `y ≥ 0` of a bar of radius two about `z`, four tall, whose edge
+/// across the floor from `(2, 0, 0)` to `(−2, 0, 0)` is not
+/// [`EdgeRun::Straight`] but the piece nearer the floor of where a face crosses
+/// the pipe of radius five along `x` through `(0, 3, 4)`. That pipe crosses
+/// the floor in the lines `y = 0` and `y = 6`, and the flat side in `z = 0` and
+/// `z = 8`.
+fn half_a_bar_whose_edge_across_the_floor_is_named_by_a_pipe(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder};
+
+    let floor = a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0));
+    let top = a_plane(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0));
+    let along_the_floor = Surface::Cylinder(
+        Cylinder::new(
+            Axis::new(Point::new(0.0, 3.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("a direction"),
+            5.0,
+        )
+        .expect("a positive radius"),
+    );
+    let in_front = Vector::new(0.0, 1.0, 0.0);
+    a_solid_drawn_face_by_face(
+        model,
+        &[
+            Point::new(2.0, 0.0, 0.0),
+            Point::new(-2.0, 0.0, 0.0),
+            Point::new(2.0, 0.0, 4.0),
+            Point::new(-2.0, 0.0, 4.0),
+        ],
+        vec![
+            (
+                0,
+                1,
+                part_of(
+                    along_the_floor,
+                    Point::new(0.0, 1.5, 2.0),
+                    Vector::new(0.0, -4.0, -3.0),
+                ),
+            ),
+            (
+                1,
+                0,
+                part_of(Surface::Plane(floor), Point::origin(), in_front),
+            ),
+            (2, 3, EdgeRun::Straight),
+            (
+                3,
+                2,
+                part_of(Surface::Plane(top), Point::new(0.0, 0.0, 4.0), in_front),
+            ),
+            (0, 2, EdgeRun::Straight),
+            (1, 3, EdgeRun::Straight),
+        ],
+        vec![
+            (Surface::Plane(floor), vec![vec![Forward(0), Forward(1)]]),
+            (Surface::Plane(top), vec![vec![Reversed(3), Reversed(2)]]),
+            (
+                Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, -1.0, 0.0))),
+                vec![vec![Forward(4), Forward(2), Reversed(5), Reversed(0)]],
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a positive radius")),
+                vec![vec![Reversed(1), Forward(5), Forward(3), Reversed(4)]],
             ),
         ],
         &[],
