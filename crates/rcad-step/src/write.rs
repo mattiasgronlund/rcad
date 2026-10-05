@@ -846,8 +846,13 @@ impl Writing {
     /// a plane crossed with itself names nothing, so the reader names such an
     /// arc by that pipe (`Walk::the_surface_that_names_the_curve`) and walks
     /// where it crosses the face. The pipe is written as the `CIRCLE` of its
-    /// own axis and radius, and the reader's `Axis::new` and `Cylinder::new`
-    /// are asked here whether they give the same pipe back. Writing the chord
+    /// own axis and radius, and the reader's `Axis::as_written` and
+    /// `Cylinder::new` are asked here whether they give the same pipe back.
+    /// Until Q1001 both sides asked `Axis::new`, which scales a turned axis
+    /// again and can move its last bit, so a disc drawn on a bar's top and
+    /// turned was refused by name wherever it did: 76 of the 372 turns in
+    /// `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`
+    /// (`docs/decisions.md` §355.6). Writing the chord
     /// instead, as this writer did for every open edge between two flat
     /// faces, drew a face whose edge cut through its own holes: twenty KiCad
     /// LEDs, once Q767 let them past their domes, came back refused as
@@ -861,7 +866,7 @@ impl Writing {
     ) -> Option<Curve> {
         let centre = round.axis().origin();
         let axis = round.axis().direction();
-        let read_back = rcad_geom::Axis::new(centre, axis)
+        let read_back = rcad_geom::Axis::as_written(centre, axis)
             .and_then(|line| Cylinder::new(line, round.radius()))
             .ok()?;
         if read_back != *round {
