@@ -101,4 +101,9 @@ lens splitting one side's arc and not its neighbour's, was not tested.
 - The joiner could join two spellings of one curved surface. It would have to
   pick one spelling by bits, and then turn round every closed side of the
   joined face read off the other one — §231.3's second pass, once more.
+
+  > **2026-10-05 (§407): closed for pipes.** `84538a4e`/Q354 build exactly
+  > this, for a pipe: `rings_of_each_joined_face` picks the lowest spelling
+  > by bits, and `turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way`
+  > is §231.3's second pass, generalised. A cone is not reached by it.
 - `lane-swallowed-pointed-cone` (`184962b9`), as §229.7 says.
