@@ -232,6 +232,19 @@ ball whose seam is refused. The draws are pinned by
 `a_turned_ball_whose_seam_plane_passes_near_the_origin_comes_back_from_its_own_file`
 and `a_seam_picked_from_the_other_side_is_a_different_run`.
 
+*2026-10-05, Q1010, lane `lane-q1010-a-turned-ball-written-on-the-world-chart`
+off `39218a67`.* The 38 `AWireThatStandsStillAtAPole` are gone: a whole ball
+turned off `z` is written cut open on the `z` line, and the target compares
+it by its surface, its poles and its seam (§404). The same command prints
+
+    5 of 400 drawn models refused
+         1  ACurveTheFacesEitherSideOfItDoNotName { first: "plane", second: "cone", closed: true }
+         4  ASolidWithNoShell
+    0 sound models refused where a flat face meets a cone or a ring
+
+and no comparison that panicked. The test now also fails on any ball refused
+at its pole.
+
 ### 366.5 What this leaves
 
 - `every_shape_seed_is_the_shape_it_is_named_for`, in

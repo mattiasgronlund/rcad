@@ -564,7 +564,10 @@ fn a_turned_round_bar_comes_back_with_its_caps_on_the_same_planes() {
 /// balls whose seam came back a different run were Q822, and none is left.
 /// Nor may a ball's seam be refused, which is what two of the seven became
 /// before the writer stepped two coordinates of the seam's centre together,
-/// nor a sound model's flat cap on a cone (Q662) or on a bend (Q407).
+/// nor a sound model's flat cap on a cone (Q662) or on a bend (Q407), nor a
+/// ball at its pole: 38 draws were (§366.4), and none has been since the
+/// writer writes a whole ball turned off `z` cut open on the `z` line
+/// (`docs/decisions.md` §404).
 #[test]
 fn how_often_a_model_the_mutator_draws_is_refused() {
     fn one_byte_bumped(data: &mut [u8], size: usize, _max_size: usize) -> usize {
@@ -670,6 +673,10 @@ fn how_often_a_model_the_mutator_draws_is_refused() {
             .keys()
             .any(|named| named.contains("first: \"ball\", second: \"ball\"")),
         "a ball's seam was refused: {refusals:?}"
+    );
+    assert!(
+        !refusals.contains_key("AWireThatStandsStillAtAPole"),
+        "a ball was refused at its pole: {refusals:?}"
     );
 }
 

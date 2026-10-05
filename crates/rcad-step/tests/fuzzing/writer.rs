@@ -45,7 +45,10 @@
 //! are the numbers the writer writes and the reader reads, and §249.2 found
 //! every one of them come back the same bits for a turned round bar. A cone's
 //! slope is the one exception: the file carries its half-angle, no angle reads
-//! back as most slopes, and the slope is compared as a measurement (§366).
+//! back as most slopes, and the slope is compared as a measurement (§366). A
+//! whole ball turned off `z` is the other: it is written cut open on the `z`
+//! line, the only line this kernel's ball pinches on, and compared by its
+//! surface, its poles and its seam (§404).
 //! Volume, surface area and centroid are then also checked bit for bit, but
 //! only for a solid whose every number came back the same bits and that sits
 //! wholly on planes or carries no placement at all. A
@@ -302,6 +305,12 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// reader reads it off the circle's placement, and the writer places the
 /// circle at a centre that plane reads back from (Q822).
 ///
+/// **A whole ball a turn moved its poles off the `z` line is the one face not
+/// compared corner by corner.** The writer writes it as the same ball cut open
+/// on that line, and [`assert_cut_again_on_the_z_line`] compares it by its
+/// surface, its poles and its seam; its solid is not then measured bit for
+/// bit, which a turned solid is not anyway (`docs/decisions.md` §404).
+///
 /// # Panics
 ///
 /// If a face, a coedge, a corner or a run differs between `here` and `back`.
@@ -341,6 +350,11 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
                 "a sound solid's face came back from its own file with a different surface"
             );
         }
+        if let Some(ball) = a_whole_ball_turned_off_z(here_face) {
+            assert_cut_again_on_the_z_line(ball, back_face);
+            every_number_the_same_bits = false;
+            continue;
+        }
         let here_coedges: Vec<_> = here_face.wires().flat_map(WireView::coedges).collect();
         let back_coedges: Vec<_> = back_face.wires().flat_map(WireView::coedges).collect();
         assert_eq!(
@@ -369,6 +383,99 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
         }
     }
     every_number_the_same_bits
+}
+
+/// The ball `face` covers whole, where a turn moved a pole of it off the `z`
+/// line its located ball pinches on, or `None`.
+fn a_whole_ball_turned_off_z(face: &rcad_topo::FaceView<'_>) -> Option<rcad_geom::Sphere> {
+    let Surface::Sphere(ball) = face.surface() else {
+        return None;
+    };
+    let mut wires = face.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        return None;
+    };
+    let poles = the_poles_of_a_whole_ball(wire)?;
+    poles
+        .iter()
+        .any(|pole| {
+            face.surface()
+                .the_way_its_first_coordinate_runs_at(*pole)
+                .is_some()
+        })
+        .then_some(ball)
+}
+
+/// The two poles of a wire that walks one edge there and back with a pole at
+/// each turn, in walk order, or `None` for any other wire.
+fn the_poles_of_a_whole_ball(wire: WireView) -> Option<[Point; 2]> {
+    use rcad_topo::WireStepView::{Along, Pole};
+    let walk: Vec<_> = wire.steps().collect();
+    let [first, second, third, fourth] = walk[..] else {
+        return None;
+    };
+    let ((Along(there), Pole(one), Along(back), Pole(other))
+    | (Pole(one), Along(there), Pole(other), Along(back))) = (first, second, third, fourth)
+    else {
+        return None;
+    };
+    (there.edge().key() == back.edge().key()).then(|| [one.point(), other.point()])
+}
+
+/// That `back` is the whole of `ball` cut open again on the `z` line, the way
+/// the writer writes a whole ball turned off it (`docs/decisions.md` §404):
+/// its poles at `centre ± (0, 0, r)` to the bit, and its seam the run
+/// `add_ball` cuts between them, in the plane through the centre square to `y`
+/// on the side facing `+x`. Its surface was compared before this.
+///
+/// **This is the one face compared by its poles and not corner by corner.**
+/// This kernel's ball pinches only on the `z` line, so the poles the turn
+/// moved off it have no way into a file and back; the ball they bound does.
+///
+/// # Panics
+///
+/// If `back` is not that face.
+fn assert_cut_again_on_the_z_line(ball: rcad_geom::Sphere, back: &rcad_topo::FaceView<'_>) {
+    let mut wires = back.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        panic!("a sound solid's whole ball came back from its own file with other than one wire");
+    };
+    let poles = the_poles_of_a_whole_ball(wire).unwrap_or_else(|| {
+        panic!("a sound solid's whole ball came back from its own file cut some other way")
+    });
+    let centre = ball.centre();
+    let [x, y, z] = centre.coordinates();
+    let [north, south] = [z + ball.radius(), z - ball.radius()].map(|at| Point::new(x, y, at));
+    let came_back = format!("{poles:?}");
+    assert!(
+        came_back == format!("{:?}", [north, south])
+            || came_back == format!("{:?}", [south, north]),
+        "a sound solid's whole ball came back from its own file with its poles at {came_back}, \
+         not at {north:?} and {south:?}"
+    );
+    let seam = wire
+        .coedges()
+        .next()
+        .expect("a wire with two steps along its edge");
+    let cut = Plane::from_point_and_normal(centre, Vector::new(0.0, 1.0, 0.0))
+        .expect("the y axis is a unit normal");
+    let facing_x = HalfSpace::through_a_point_facing(centre, Vector::new(1.0, 0.0, 0.0))
+        .expect("the x axis has length");
+    let add_balls_seam = EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cut),
+        picked_by: [Picker::from(facing_x)].into_iter().collect(),
+    };
+    let back_run = seam.edge().run();
+    assert!(
+        the_same_run(
+            &add_balls_seam,
+            &back_run,
+            seam.end().point() - seam.start().point(),
+            Surface::Sphere(ball)
+        ),
+        "a sound solid's whole ball came back from its own file with a different edge run: \
+         {add_balls_seam:?} was written, {back_run:?} came back"
+    );
 }
 
 /// Whether a cone's slope came back as near as a written half-angle can carry
