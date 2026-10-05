@@ -12,13 +12,16 @@
 //! What tells the two disks apart is a flat half-space whose plane holds the
 //! ring's axis and stands square to the cap: for the cap on `y = 0` that plane
 //! is `x = 0`. It cuts the tube too, in the disks of two more circles, round
-//! `(0, ±4, 0)`. The last three tests are about points there.
+//! `(0, ±4, 0)`. The three tests after the fuse are about points there.
+//!
+//! That plane meets the cap's plane in the ring's axis, and the three tests
+//! after those are about the axis and points a hair off it (Q418).
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, SIDE_OF_A_HALF_SPACE, Scale};
+use rcad_geom::{Axis, Deflection, Isometry, Point, SIDE_OF_A_HALF_SPACE, Scale, Vector};
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, FaceKey, Model, OnAFace, Rule, SolidKey};
+use rcad_topo::{Containment, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
 mod rings;
 
@@ -326,6 +329,268 @@ fn a_box_holding_a_point_of_a_turned_fat_bends_cap_is_refused_across_the_plane_b
     assert!(is_the_half_space_giving_up(&answer), "{answer:?}");
 }
 
+/// Neither the cap nor the bend holds a point of the ring's axis, which is the
+/// line where the cap's plane meets the plane between its two disks, nor a point
+/// a hair off that line on either plane (§250.8, Q418).
+///
+/// The half-space naming the cap's circle keeps a point on its own plane, and
+/// `the_meridian_half_space_keeps` says no point of the face's plane gets that
+/// far: the two planes meet in the axis, and the axis is the ring's radius from
+/// the ring's circle, which is more than the tube's. These are the points that
+/// claim is about. On the axis: the ring's centre, and heights from inside the
+/// tube's height to a million out. Beside it: `2⁻¹⁰⁰⁰` and `2⁻⁵²` off it either
+/// way along the cap's plane, and the same along the plane between the disks.
+/// They are asked of the bend of ring four and tube one as built, and of the
+/// bend of ring four and tube three turned an eighth of a turn by `place_solid`,
+/// whose cap is asked in a frame it is not stored in. Every point is at least
+/// `4 − 2⁻⁵²` from the ring's circle against a tube of three at most, so the cap
+/// holds none of them and the bend leaves every one outside.
+///
+/// **The half-space's `Zero` arm was made a panic for Q418's probe**, and none
+/// of these 144 points reached it, through either question: the tube holds none
+/// of them, and the cap asks its half-space only about a point the tube holds.
+#[test]
+fn a_bends_cap_holds_nothing_on_or_beside_the_rings_axis() {
+    let as_built = a_bend_and_its_cap_through(4.0, 1.0);
+    let (mut model, turned, turned_cap) = a_bend_and_its_cap_through(4.0, 3.0);
+    let an_eighth_of_a_turn =
+        Isometry::rotation(&Axis::z(), std::f64::consts::FRAC_PI_4).expect("a finite turn");
+    model
+        .place_solid(turned, &an_eighth_of_a_turn)
+        .expect("this model made the key");
+    let mut wrong = Vec::new();
+    for (named, (model, solid, cap)) in [
+        ("as built", as_built),
+        ("turned", (model, turned, turned_cap)),
+    ] {
+        let bend = model.solid(solid).expect("this model made the key");
+        for point in on_and_beside_the_axis(&model, solid, cap) {
+            let on_the_face = bend.face_holds_the_point(
+                cap,
+                PredicatePoint::from(point),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let in_the_solid = bend.classify_point(
+                Point::from(point),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            if !matches!(on_the_face, Ok(OnAFace::NotHeld)) || in_the_solid != Containment::Outside
+            {
+                wrong.push(format!(
+                    "{named}, {point:?}: {on_the_face:?}, {in_the_solid:?}"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// The same line for a bend whose tube all but reaches its axis: ring one and
+/// tube `1 − g`, with `g = 2⁻³⁰`. Its cap's corner is `(g, 0, 0)`, the other
+/// disk's circle passes through `(−g, 0, 0)`, and between the two, on the cap's
+/// plane, is the ring's axis. Each answer is read off the distance from the
+/// point to the centre of the circle on its own side, `(±1, 0, 0)`, against the
+/// tube's radius: `2g` off the axis is `1 − 2g` from that centre and inside, `g`
+/// off is on the circle, and `g/2` off is `1 − g/2` from it and outside.
+///
+/// So the points of the tube nearest the line are asked about here, and the
+/// half-space is asked about four of them. **Its `Zero` arm was made a panic for
+/// Q418's probe**, and none of these 15 points reached it, through either
+/// question: on the cap's plane the tube holds nothing nearer the axis than
+/// `g`, and the half-space is strictly on one side or the other there.
+///
+/// **Two of the bend's answers are refusals where an answer exists.** The cap's
+/// corner is on the bend's skin and `(−g, 0, 0)` is outside it, and
+/// `classify_point` says `CannotFireARayAtAFacesSurface` of both, naming the
+/// wall. Both points are on the torus. The corner of the bend of ring four and
+/// tube one, `(3, 0, 0)`, answers `OnBoundary`, and the bend of ring four and
+/// tube `4 − g` refuses its corner `(g, 0, 0)` the same way, so it is not the
+/// ring's size. Why no ray was fired is not traced. A gap, pinned as it stands;
+/// Q418's lane filed it.
+///
+/// `g` keeps this inside §3.5's envelope: the bend is two across and `g` is
+/// about `1e-9`. At `g = 2⁻⁵²` the bend is refused at build,
+/// `CannotNameWhichPieceOfACrossingThisIs`, a spread of `2⁵³` and past the
+/// envelope.
+#[test]
+fn a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it() {
+    let gap = 2.0_f64.powi(-30);
+    let (model, solid, cap) = a_bend_and_its_cap_through(1.0, 1.0 - gap);
+    let bend = model.solid(solid).expect("this model made the key");
+    let wall = bend
+        .faces()
+        .find(|face| face.surface().as_plane().is_none())
+        .expect("a bend has a curved wall")
+        .key();
+    let refused_at_the_wall = Containment::CannotFireARayAtAFacesSurface { face: wall };
+    let a_hair = 2.0_f64.powi(-1000);
+    let mut wrong = Vec::new();
+    for (point, on_the_face, in_the_solid, why) in [
+        (
+            [0.0, 0.0, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "the ring's centre",
+        ),
+        (
+            [0.0, 0.0, 0.5],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "the axis, inside the tube's height",
+        ),
+        (
+            [0.0, 0.0, -1.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "the axis, level with the bottom of the tube",
+        ),
+        (
+            [0.0, 0.0, 1.0e6],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "the axis, far above the ring",
+        ),
+        (
+            [a_hair, 0.0, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "a hair off the axis towards the cap",
+        ),
+        (
+            [-a_hair, 0.0, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "a hair off the axis towards the other disk",
+        ),
+        (
+            [0.0, a_hair, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "a hair off the axis on the plane between the disks",
+        ),
+        (
+            [0.0, -a_hair, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "a hair off the axis on the plane between the disks, the other way",
+        ),
+        (
+            [gap / 2.0, 0.0, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "between the axis and the cap's corner",
+        ),
+        (
+            [-gap / 2.0, 0.0, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "between the axis and the other circle",
+        ),
+        (
+            [gap, 0.0, 0.0],
+            OnAFace::OnItsBoundary,
+            refused_at_the_wall,
+            "the cap's corner, where OnBoundary is right",
+        ),
+        (
+            [-gap, 0.0, 0.0],
+            OnAFace::NotHeld,
+            refused_at_the_wall,
+            "the other circle, where Outside is right",
+        ),
+        (
+            [2.0 * gap, 0.0, 0.0],
+            OnAFace::Held,
+            Containment::OnBoundary,
+            "just inside the cap's disk",
+        ),
+        (
+            [-2.0 * gap, 0.0, 0.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "just inside the other disk",
+        ),
+        (
+            [gap, 0.0, 1.0],
+            OnAFace::NotHeld,
+            Containment::Outside,
+            "above the cap's corner, level with the top of the tube",
+        ),
+    ] {
+        let found_on_the_face = bend.face_holds_the_point(
+            cap,
+            PredicatePoint::from(point),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let found_in_the_solid = bend.classify_point(
+            Point::from(point),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        if !matches!(found_on_the_face, Ok(found) if found == on_the_face)
+            || found_in_the_solid != in_the_solid
+        {
+            wrong.push(format!(
+                "{point:?}, {why}: {found_on_the_face:?}, {found_in_the_solid:?}"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A fuse that would put corners on the ring's axis is refused: a block with a
+/// face on the cap's plane, a face on the plane between the disks, and an edge
+/// along the axis from `(0, 0, −½)` to `(0, 0, ½)`, under every rule, both ways
+/// round. Its sides at `x = 1` and `y = −1` run along the axis and off it, and
+/// such a plane cuts a torus in a quartic
+/// (`how_often_a_fuse_with_a_torus_refuses.rs` has the general argument).
+///
+/// **When this fuse is answered, ask it again with the half-space's `Zero` arm
+/// made a panic**: its corners are on the line the arm is said never to see.
+#[test]
+fn a_block_with_an_edge_along_a_bends_axis_is_refused_as_a_quartic() {
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for block_first in [false, true] {
+            let (mut model, bend, _) = a_bend_and_its_cap_on_y_equals_zero();
+            let square =
+                ProfileBuilder::new(vec![[0.0, -1.0], [1.0, -1.0], [1.0, 0.0], [0.0, 0.0]])
+                    .build(&Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("a unit square with a corner on the axis");
+            let block = model
+                .add_extrusion(
+                    &square,
+                    1.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, -0.5)).expect("a finite shift"),
+                )
+                .expect("a block");
+            let (one, other) = if block_first {
+                (block, bend)
+            } else {
+                (bend, block)
+            };
+            let refused = model.fuse(
+                &[one],
+                &[other],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            assert!(
+                matches!(
+                    refused,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic
+                    ))
+                ),
+                "{rule:?}, block first {block_first}: {refused:?}"
+            );
+        }
+    }
+}
+
 /// Which of the two bends `solid` is: it holds the middle of that bend's tube
 /// and not the other's, has a bend's three faces, and holds the `2π²` of a
 /// quarter of the ring within what `measure` says it can be out by.
@@ -367,4 +632,42 @@ fn is_the_half_space_giving_up(answer: &Result<OnAFace, Error>) -> bool {
         }
         Ok(_) | Err(_) => false,
     }
+}
+
+/// The ring's axis, which is `z`, at eight heights from the ring's centre to a
+/// million out, and beside each height `2⁻¹⁰⁰⁰` and `2⁻⁵²` off the axis either
+/// way along the cap's plane and along the plane between its disks: 72 points.
+///
+/// The step along the cap's plane is the axis crossed with the cap's normal as
+/// `face`'s view places it, so a step of a power of two lands exactly on the cap's
+/// plane whatever the turn. The step along the plane between the disks is the
+/// cap's normal itself, which that plane holds.
+fn on_and_beside_the_axis(model: &Model, solid: SolidKey, cap: FaceKey) -> Vec<[f64; 3]> {
+    let surface = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .find(|face| face.key() == cap)
+        .expect("the cap is a face of the bend")
+        .surface();
+    let [x, y, z] = surface
+        .as_plane()
+        .expect("a bend's cap is flat")
+        .normal()
+        .components();
+    assert_eq!(z, 0.0, "a cap's plane holds the ring's axis, which is z");
+    let along_the_cap = [-y, x];
+    let across_the_cap = [x, y];
+    let mut points = Vec::new();
+    for height in [0.0, 0.5, -0.5, 1.0, -1.0, 3.0, -3.0, 1.0e6] {
+        points.push([0.0, 0.0, height]);
+        for step in [2.0_f64.powi(-1000), f64::EPSILON] {
+            for signed in [step, -step] {
+                for [x, y] in [along_the_cap, across_the_cap] {
+                    points.push([signed * x, signed * y, height]);
+                }
+            }
+        }
+    }
+    points
 }
