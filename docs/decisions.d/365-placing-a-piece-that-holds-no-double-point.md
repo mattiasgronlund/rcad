@@ -16,6 +16,7 @@ throwaway probe that is taken out (365.2); everything else in 365.2 was read.*
   365.3   The choice: a piece placed from a side it shares with another solid's face
   365.4   What this leaves
   365.5   What building the rule ran
+  365.6   Rungs nearer each crossing, after every other point
 
 ### 365.1 What each family has to change
 
@@ -138,6 +139,14 @@ The rest were read, not run:
   fuses need their sweep rebuilt. Neither was run here, so neither is placed in
   the table. Q464's own guess, §350.5's, is candidates stepping past the apex,
   which is a search gap and not a piece without a double.
+  **Q603's lane, and Q897 after it, ran it.** The tube is a bar of radius 3,
+  height 4, less a bar of radius 1 from `z = −1` to `5`; the second bar has
+  radius 1.5 and stands at `(2, 0)`, from `z = 0` to `4`, `−1` to `4` or `−1`
+  to `3`. All 18 fuses, every rule both orders, refused `a point inside a
+  piece of a face` (Q897 re-ran them on `dbf8eaa8`). The piece is a cap of the
+  tube less the bar's disk, a C: the bottom cap for the flush bar, the top cap
+  for the other two, with corners `(2.6875, ±1.3332)`, `(0.6875, ±0.7262)` and
+  the hole's corner `(0, ∓1)`. The rungs of 365.6 answer all 18.
 - **365.3's rule would reach** Q635, Q637 and Q602 on paper: each piece has a
   side that is a cut of the other solid's face (the hyperbola or circle on the
   cone, the hole's circle on the bar's wall). Q621's lens does not: its side
@@ -201,7 +210,8 @@ whose corner sits on a convex edge of `S` with a side along each of its two
 faces. The grazing block needs neither, since the rule above places all three
 slivers, so §13 leaves both until a piece that the rule cannot reach asks for
 one; Q621's lens may be that piece. And **the rule runs only where no point
-inside the piece was found** (the `INSIDE_A_PIECE` exit of `place_the_piece`).
+inside the piece was found** (the `INSIDE_A_PIECE` exit of `place_the_piece`),
+or, since 365.6, where only a rung was found and none could be placed.
 A fuse that answers today reached a point for every piece, never gets to the
 rule, and answers exactly as before; only refusals under that name can move.
 The point search also stays a check on the arrangement (Q609 above), which a
@@ -354,3 +364,81 @@ point inside a piece of a face` that way, so the rule is what moved each one.
 
 `just pre-gate gate-lane` then passed with 3003 tests run, and `just
 test-slow` with 40 run and 40 passed.
+
+### 365.6 Rungs nearer each crossing, after every other point
+
+*Queue row Q897. Lane `lane-q897-a-ladder-of-points-into-a-c-shaped-piece`,
+off `dbf8eaa8`. Everything here was run, with throwaway prints and a probe
+test that are taken out, unless it says otherwise.*
+
+**The gap.** Q603's C (365.2) has an outer arc that runs the long way round.
+`half_way_into_either_arc` goes half way from the chord's middle,
+`(2.6875, 0)`, to where the line square to the chord crosses the circle,
+`(−3, 0)`, and that is `(−0.15625, 0)`, in the hole; the other way is in the
+bar. The C holds plenty of doubles, so this is family 1 of §346.3.
+
+**What was built.** `rungs_towards_each_crossing` in `fuse/select.rs`: for
+each side of a flat piece, each place the two half-way functions aim at, and
+`k` from 2 to 52, the point `2⁻ᵏ` of the way back from that place to the
+chord's middle; and where the side's material is outside its partner, the
+point as far past it, `k` from 1. The shallow rungs of every side come before
+the deep ones of any. The two half-way functions now build their points
+through one `Chord`, with the same expressions in the same order.
+
+**Where they are tried, and why there.** In `place_the_piece`, after the old
+candidates and after `points_in_a_sliver_of_a_ball`, which still runs only
+where no old candidate was held, as before. A piece any earlier point placed is
+placed by that same point. A piece only a rung was held in and no rung placed
+goes to 365.3's rule, as it did before the rungs, and is refused `a point in a
+piece that every solid could place` only if the rule fails too: a rung that
+cannot be classified must not take away an answer the rule gave. A piece an
+old point was held in and no point placed is refused under that name as
+before, without the rule; the rungs are tried there too, so one of them can
+now place it.
+
+**Why 52.** A rung `2⁻⁵²` of the way from its crossing is within about one
+rounding of it, and the next would not differ from it. A piece thinner than
+that beside every crossing gets the points it got before, then
+`points_in_a_sliver_of_a_ball`, then 365.3's rule, then the same refusal by
+name. The C needs one rung: the first that places it is half as far again past
+the bar's arc as the arc is from its chord's middle, `(1.5028, ±1.6382)`, a
+`k = 1` rung past a side whose material is outside its circle. The row's
+point worked by hand, `(−1.578125, 0)`, a quarter of the way back from
+`(−3, 0)`, is rung 9 of the C's 926; the piece holds it and it settles
+`Outside`, but the earlier rung places the piece first.
+
+**What it answers.**
+
+- **Q603's tube and bar**: all 18 fuses answer, and
+  `a_tube_less_a_bar_united_with_a_second_bar.rs` holds each to the tube `32π`,
+  the bar `2.25π` per unit of height, and the lens with radius 3 less the lens
+  with radius 1 per unit of shared height. On `dbf8eaa8` all 18 refused `a
+  point inside a piece of a face`, naming the C's five corners.
+- **Q716's lens** (the tube of radius 7 less 1, a bar of radius 3.6 at
+  `(−3.5, 0)`): all six fuses answer and hold the same kind of volume, pinned
+  in the same file. With the rungs switched off by hand, all six refused `a
+  point inside a piece of a face` at `(−6.8986, ±1.1873, 0)`, so the rungs are
+  what answers it.
+- **Q635's cone and block** (Q972's question): not reached. The piece 365.3's
+  rule places there, in all six fuses, is the cone's skin inside the block,
+  between `(−12, ±13.416, 18)`. It is curved, so it has no rungs, and its
+  search is still the six steps of the curved branch.
+- **Q714's closed circles** have no chord, so no rungs, as the row said
+  (read, not run).
+
+**Pins that moved.** The row's files and the crate's own tests were run with
+their pins untouched, the slow tier among them: 525 tests, one failure.
+`two_holed_bars_whose_corners_lie_on_one_line` in
+`a_joined_flat_face_whose_rings_enclose_no_area.rs` had all six fuses
+refuse `a point inside a piece of a face`, and now answers all six, each one
+solid that validates and measures the area of the quarter-turned pair beside
+it, times 4: union `200π − lens − 4π`, intersection `lens − 4π`, difference
+`100π − lens`, with `lens = 200 acos(0.6) − 96`. Over the six,
+`join_up_what_is_one_face` is reached 18 times and `holds_the_other_rings` 8
+times (breakpoints), and `rings_round` does not panic; what that answered was
+not read.
+
+**What this leaves.** Q635's piece is a curved piece, and Q929's ladder of
+shorter steps from the corners' middle is the curved branch's version of this
+one; whether it reaches Q635's piece was not run. Q714's closed circles are
+still the job of `between_the_round_wires`.
