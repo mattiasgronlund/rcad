@@ -2385,9 +2385,11 @@ impl Assembly {
     /// `Undecidable` (`docs/decisions.md` §4.2, §35.6). This used to fold it
     /// into [`Error::Undecidable`] with a record of a point it never asked —
     /// the first corner of the whole answer — so a caller read "loosen the
-    /// policy" off a refusal no policy moves. A box hollowed out of a block
-    /// with a bar through the block's edge was refused that way:
-    /// `tests/a_shell_inside_another_names_its_refusal.rs`.
+    /// policy" off a refusal no policy moves. Since Q1002 a flat face the cuts
+    /// cannot follow winds its own chords and arcs, so this refusal needs a
+    /// hollow whose rays still meet a face nobody can follow; nothing in this
+    /// crate's tests reaches it as of this writing (`docs/decisions.md`
+    /// §35.6).
     ///
     /// **A face nobody can follow wins over a corner left undecided**, when
     /// both happen. Either refusal is true, and only one can be returned;

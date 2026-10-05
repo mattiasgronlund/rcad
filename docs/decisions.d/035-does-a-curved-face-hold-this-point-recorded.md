@@ -263,6 +263,13 @@ they are lane 5's files and lane 5 should read them.
 > that face was cut from; `Error::Undecidable` is left for the corners that were
 > asked and not answered.
 > `crates/rcad-topo/tests/a_shell_inside_another_names_its_refusal.rs` pins it.
+>
+> **2026-10-05 note (Q1007): since Q1002, the fuses that file pins now answer.**
+> A flat face the cuts cannot follow winds its own chords and arcs instead of
+> being handed to `one_shell_is_inside_another`'s abandon-the-corner arm, so the
+> notched block's top is no longer such a face and every fuse in that file
+> answers, each checked against its volume by hand. The file's name is now
+> about what it used to pin rather than what it pins.
 
 ### 35.7 §31.10 item 5, scored: nothing this lane builds reaches `mesh.rs`'s two claims
 

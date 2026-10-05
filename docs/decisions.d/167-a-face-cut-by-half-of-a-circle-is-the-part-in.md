@@ -174,4 +174,14 @@ turned or moved wedge says which points are inside it.
 > because each side through the bite crosses the pipe again outside the
 > square, is pinned refused as the gap it still is
 > (`a_block_with_a_bar_bored_through_one_corner_has_its_floor_refused_though_it_is_one_piece`).
+>
+> **2026-10-05 note (Q1007): since Q1002, both answer.** A flat face the cuts
+> cannot follow now winds its own chords and arcs, each arc read as its chord
+> with the piece between the two added or taken away, so the narrow top's two
+> halves and the corner bore's floor and top all answer instead of refusing.
+> `a_block_with_a_bar_bored_into_it_has_each_half_of_its_top_hold_its_own_side`
+> and
+> `a_block_with_a_bar_bored_through_one_corner_holds_the_points_of_its_floor_and_its_top`
+> (`crates/rcad-topo/tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`) are
+> their current names.
 
