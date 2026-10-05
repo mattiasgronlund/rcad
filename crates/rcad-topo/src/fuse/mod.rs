@@ -217,7 +217,7 @@ impl Model {
     /// `a_turned_and_shifted_bar_blames_itself_for_a_corner_off_the_cap_with_the_distance_rounded`,
     /// `under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_touches_without_crossing`,
     /// `a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer`, and
-    /// `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more`
+    /// `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives`
     /// (§294.8). Only a corner with three or more surfaces round it is still
     /// untried (§294.7).
     pub fn fuse(

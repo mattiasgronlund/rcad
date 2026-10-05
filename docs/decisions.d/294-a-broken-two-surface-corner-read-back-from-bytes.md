@@ -238,10 +238,15 @@ names something other than the file — never a wrong `Ok`, never a panic.
   block over the rim by its seam, and so was every moved corner there, under
   both policies
   (`a_frustum_whose_top_corner_is_moved_in_its_file_reads_back_and_does_not_validate`,
-  `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more`).
+  `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives`).
   Since Q712 each of those answers or blames itself, the block over the rim
   giving the sound frustum's answer for every corner, because a piece no
-  point was found in is placed by a side it shares (§365.3).
+  point was found in is placed by a side it shares (§365.3). **Renamed by
+  Q1103**: the extra refusal Q712 fixed was the one thing the name's "one
+  refusal more" meant: the table still gives `CannotTellTheCellsOfAFaceApart`
+  past the seam, the same way the bar's own seam cut does
+  (`a_cut_along_the_seam_refuses_a_corner_moved_in_the_cut_and_answers_one_moved_out_of_it`),
+  so that was never "more" than the bar and the old name's claim was false.
 
   **By its seam is not why the block over the rim refused** (Q929). That
   block's wall at `x = 2` cuts the cone below the block's floor too, down to
