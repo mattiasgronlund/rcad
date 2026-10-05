@@ -138,7 +138,8 @@ pub(crate) struct Chosen {
 /// a plane ([`by_a_plane`]) placed it: under [`INSIDE_A_PIECE`] when no point
 /// inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a point
 /// was found and could not be placed, or only a rung of
-/// [`rungs_towards_each_crossing`] was found.
+/// [`rungs_towards_each_crossing`] or [`shorter_steps_across_a_curved_piece`]
+/// was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; no
@@ -413,7 +414,10 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// and that no rung could place, is [`Search::OnlyRungsInside`] and not a
 /// refusal here: before the rungs it was a piece with no point found, which a
 /// side it shares or a corner could place, and a rung that cannot be
-/// classified must not take that away (`docs/decisions.md` §365.6).
+/// classified must not take that away (`docs/decisions.md` §365.6). A curved
+/// piece's rungs are [`shorter_steps_across_a_curved_piece`], offered only
+/// where no earlier point was found inside the piece, so a piece one was found
+/// in and not placed is refused or placed as it was.
 ///
 /// **A point whose ray met a face nobody can follow was never placed, and the
 /// refusal says which face**, as `assemble.rs`'s `one_shell_is_inside_another`
@@ -492,7 +496,11 @@ fn place_the_piece(
         }
     }
     let mut a_rung_was_inside = false;
-    for rung in rungs_towards_each_crossing(piece) {
+    let mut rungs = rungs_towards_each_crossing(piece);
+    if !one_was_inside {
+        rungs.extend(shorter_steps_across_a_curved_piece(piece));
+    }
+    for rung in rungs {
         let Some(settled) = try_one(rung, log)? else {
             continue;
         };
@@ -519,8 +527,9 @@ enum Search {
     Placed(Placement),
     /// No point offered was proved inside the piece.
     NoPointInside,
-    /// Only rungs of [`rungs_towards_each_crossing`] were, and none of them
-    /// could be classified against every solid in the set.
+    /// Only rungs of [`rungs_towards_each_crossing`] or
+    /// [`shorter_steps_across_a_curved_piece`] were, and none of them could be
+    /// classified against every solid in the set.
     OnlyRungsInside,
     /// A point offered before the rungs was proved inside the piece, and no
     /// point inside it could be classified against every solid in the set.
@@ -2056,20 +2065,7 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
     // not depend on anything but the piece.
     let middle = middle_of_the_corners(wires);
     let reach = how_big_the_surface_is(&piece.surface, middle);
-    for axis in 0..3 {
-        for way in [1.0, -1.0] {
-            let mut step = [0.0; 3];
-            step[axis] = way * reach;
-            candidates.push(PredicatePoint::from(
-                [0, 1, 2].map(|which| middle.coordinates()[which] + step[which]),
-            ));
-        }
-    }
-    if let Some(towards) = towards_every_flat_sides_material(piece) {
-        candidates.push(PredicatePoint::from(
-            (middle + towards * reach).coordinates(),
-        ));
-    }
+    candidates.extend(steps_from_the_middle(piece, middle, reach));
     // **A step of one radius towards a cone's apex goes past it** wherever the
     // cone's radius is more than its height, and lands on the other half of
     // the cone, where the piece is not (§350). Half way from the corners'
@@ -2085,6 +2081,66 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         .into_iter()
         .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
         .collect()
+}
+
+/// The steps [`candidate_points`] takes across a curved piece from the middle
+/// of its corners, taken again at a half, a quarter, an eighth and a sixteenth
+/// of the length, each put back onto the surface. Nothing for a flat piece,
+/// whose last points are [`rungs_towards_each_crossing`].
+///
+/// **A step of one radius can be too long for every way it goes.** A block
+/// over a frustum's rim, its wall at `x = 2` and its floor at `z = 5`, has its
+/// wall's plane cut the cone below the floor in a hyperbola whose lowest point
+/// is `(2, 0, 4)`. The piece between that and the circle at `z = 5` has two
+/// corners, `(2, ±1.5, 5)`, and is nowhere more than one unit deep, while the
+/// cone there is `2.5` across: every step of `2.5` from `(2, 0, 5)`, put back
+/// on the cone, lands on that circle or outside the piece. Half the step
+/// towards the side of both planes the piece is on, `(2.88, 0, 4.12)`, comes
+/// back as `(2.06, 0, 4.12)`, inside it. A single block finds its way round
+/// that by a side the piece shares with it (§365.3), but placed against the
+/// block and a second solid together, even a cube far away, it has no side to
+/// share with the second, and its corners lie on the block's edge, where no
+/// corner places it: such fuses were refused `"a point inside a piece of a
+/// face"` (`tests/a_frustums_wall_cut_below_a_blocks_floor.rs`).
+///
+/// The lengths are the reach halved, which is exact, and the steps are tried
+/// only where no other point was found inside the piece, after every other
+/// point, by [`place_the_piece`]'s rule for a rung: so a piece any earlier
+/// point placed is placed by that point as it was.
+fn shorter_steps_across_a_curved_piece(piece: &Piece) -> Vec<PredicatePoint> {
+    if piece.surface.as_plane().is_some() {
+        return Vec::new();
+    }
+    let middle = middle_of_the_corners(&corners_of(piece));
+    let reach = how_big_the_surface_is(&piece.surface, middle);
+    [2.0, 4.0, 8.0, 16.0]
+        .into_iter()
+        .flat_map(|shorter| steps_from_the_middle(piece, middle, reach / shorter))
+        .filter_map(|step| back_onto_the_surface(&piece.surface, step))
+        .collect()
+}
+
+/// Six steps of `reach` from `middle`, one each way along each axis, and one
+/// more towards the side of every plane that cut the piece that the piece is
+/// on ([`towards_every_flat_sides_material`]), none of them put back onto the
+/// piece's surface yet.
+fn steps_from_the_middle(piece: &Piece, middle: Point, reach: f64) -> Vec<PredicatePoint> {
+    let mut steps = Vec::new();
+    for axis in 0..3 {
+        for way in [1.0, -1.0] {
+            let mut step = [0.0; 3];
+            step[axis] = way * reach;
+            steps.push(PredicatePoint::from(
+                [0, 1, 2].map(|which| middle.coordinates()[which] + step[which]),
+            ));
+        }
+    }
+    if let Some(towards) = towards_every_flat_sides_material(piece) {
+        steps.push(PredicatePoint::from(
+            (middle + towards * reach).coordinates(),
+        ));
+    }
+    steps
 }
 
 /// Which way from a curved piece's corners its material lies, as far as the
@@ -2201,7 +2257,7 @@ fn half_way_across_the_chord_to_a_cone(flat: &Plane, side: &FaceMeet) -> Vec<Pre
 /// [`half_way_across_the_chord_to_a_cone`] go half way to: a quarter of the way
 /// back from it towards the chord's middle, an eighth, and so on, and as far
 /// again past it where the side's material is outside its partner. Nothing for
-/// a curved piece, whose candidates are built another way.
+/// a curved piece, whose last points are [`shorter_steps_across_a_curved_piece`].
 ///
 /// **Half way can be in a hole when the side is long.** A tube's cap less a bar
 /// across its wall is a C (`tests/a_tube_less_a_bar_united_with_a_second_bar.rs`):

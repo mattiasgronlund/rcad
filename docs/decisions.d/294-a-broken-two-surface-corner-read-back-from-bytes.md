@@ -233,12 +233,36 @@ names something other than the file — never a wrong `Ok`, never a panic.
   2, 6)`, moved off the wall, off the cap and a quarter turn round: the bar's
   outcomes, and one refusal more. Moved off the cap to `(3.5, 0, 7)`, the
   corner sits inside a block over the top (`z` from 5 to 8), and both rules
-  tried with that block are `Undecidable` on "a point inside a piece of a
-  face". The sound frustum is `Undecidable` on that same predicate against a
-  block over the rim by its seam, and so is every moved corner there, under
+  tried with that block were `Undecidable` on "a point inside a piece of a
+  face". The sound frustum was `Undecidable` on that same predicate against a
+  block over the rim by its seam, and so was every moved corner there, under
   both policies
   (`a_frustum_whose_top_corner_is_moved_in_its_file_reads_back_and_does_not_validate`,
   `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more`).
+  Since Q712 each of those answers or blames itself, the block over the rim
+  giving the sound frustum's answer for every corner, because a piece no
+  point was found in is placed by a side it shares (§365.3).
+
+  **By its seam is not why the block over the rim refused** (Q929). That
+  block's wall at `x = 2` cuts the cone below the block's floor too, down to
+  `(2, 0, 4)`, and leaves a piece of the cone between that cut and the circle
+  at `z = 5`, with corners `(2, ±1.5, 5)` and nowhere more than one unit deep.
+  Every step `select.rs`'s `candidate_points` took across a curved piece was
+  one radius long, `2.5` there, and each landed on that circle or outside the
+  piece. The seam turned to `−x` or `+y`, and the block over the far rim at
+  `x = −2`, leave the same piece, with no point found inside it either. The
+  block over the rim away from the seam stops at `x = −1`, whose cut reaches
+  down to the bottom rim at `(−1, 0, 2)`, and a point the fuse offered was
+  inside every piece that cut left. A side the piece shares placed it against
+  one block, but not against two solids together: the frustum fused with that
+  block and a cube far away as its tools still refused under every rule.
+  Since Q929 the fuse
+  takes the same steps at a half, a quarter, an eighth and a sixteenth of the
+  length after every other point, and half the step towards the side of both
+  planes the piece is on comes back on the cone at `(2.06, 0, 4.12)`, inside
+  it. Each fuse of the frustum, the block and a second block, far away, over
+  the far rim, or the rest of the top, answers and measures its closed form
+  (`tests/a_frustums_wall_cut_below_a_blocks_floor.rs`).
 
 ### 294.9 Q912: a seam corner is on its moved seam plane by construction
 

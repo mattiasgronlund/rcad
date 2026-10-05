@@ -80,6 +80,18 @@
 //!   by a side it shares (§365.3, Q712); the sound frustum's two answers that
 //!   moved measure what the frustum and the block say.
 //!
+//!   **The seam was never what refused the block over the rim by the seam.**
+//!   That block's wall at `x = 2` cuts the cone below its floor, down to
+//!   `(2, 0, 4)`, and leaves a piece of the cone between that cut and the
+//!   circle at `z = 5` that no step of one radius from its two corners
+//!   reached. The seam turned to `−x` or `+y`, or the block put over the far
+//!   rim at `x = −2`, leaves the same piece. The block over the rim away from
+//!   the seam stops at `x = −1`, where its wall's cut reaches down to the
+//!   bottom rim at `(−1, 0, 2)`, and a point the fuse offered was inside every
+//!   piece that cut left, so it answered. Since Q929 the fuse takes the same
+//!   steps shorter as well, and one of them is inside the piece
+//!   (`a_frustums_wall_cut_below_a_blocks_floor.rs`).
+//!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
 
