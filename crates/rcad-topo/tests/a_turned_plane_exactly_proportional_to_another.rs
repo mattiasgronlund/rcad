@@ -37,7 +37,7 @@
 //! its closed form and one that is a hole measures over, by no more than that
 //! wall's area times [`DEFLECTION`].
 
-use core::f64::consts::PI;
+use core::f64::consts::{FRAC_1_SQRT_2, PI};
 
 use rcad_geom::{Axis, Deflection, Isometry, PlaneAgreement, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -68,7 +68,8 @@ const THE_SKIN_THE_TWO_PIECES_LEAVE: f64 = 4.0 * PI * RADIUS * RADIUS - 2.0 * ON
 /// `c = 0.707 106 781 186 547 5`.
 const TO_THE_SHORTER_SPELLING: [f64; 2] = [0.29, 0.495_398_163_397_448_4];
 
-/// The two turns that put it there spelled with `c′ = 0.707 106 781 186 547 6`.
+/// The two turns that put it there spelled with `c′ = 0.707 106 781 186 547 6`,
+/// which is [`FRAC_1_SQRT_2`] and the `f64` just above `c`.
 const TO_THE_LONGER_SPELLING: [f64; 2] = [0.45, 0.335_398_163_397_448_05];
 
 /// The two blocks' faces on `x = y` hold four numbers each in a ratio of
@@ -86,13 +87,11 @@ fn two_turns_put_a_face_on_one_plane_with_coefficients_an_ulp_apart_in_scale() {
             .find(|plane| plane.coefficients()[3] == 0.0)
             .expect("each block has a face through the turn's axis")
     });
-    assert_eq!(
-        shorter.coefficients(),
-        [-0.707_106_781_186_547_5, 0.707_106_781_186_547_5, 0.0, 0.0]
-    );
+    let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
+    assert_eq!(shorter.coefficients(), [-c, c, 0.0, 0.0]);
     assert_eq!(
         longer.coefficients(),
-        [-0.707_106_781_186_547_6, 0.707_106_781_186_547_6, 0.0, 0.0]
+        [-FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0, 0.0]
     );
     assert_eq!(shorter.agreement_with(&longer), PlaneAgreement::SameWay);
 }
