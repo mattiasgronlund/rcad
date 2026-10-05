@@ -55,7 +55,10 @@
 //! 4 at a 4096th — are apex meets of three of the apex's own planes whose boxes
 //! miss the apex's own box by 1.3 to 60 rooms, so its grown box too. §356's
 //! argument would fold those too, and does answer all 648 when it is followed
-//! (§395.4).
+//! (§395.4). Followed with no bound, it also folds meets of three planes that
+//! share a line, 1.6 and 326 units off their corners in a KiCad relay. The
+//! fold's room grown to `bake`'s answers all 648 and leaves those apart
+//! (§395.7).
 //!
 //! **So a four-plane corner does fill the room, and the room is not what it
 //! should be measured in.** Every plane round the apex passes through the
@@ -151,7 +154,10 @@ fn a_pyramid_whose_apex_meets_lie_inside_its_room_but_miss_its_box_is_united_at_
 /// **The answer exists, so this is a gap.** §356's argument, that three planes
 /// meet once, folds these meets as well, and folding them answers every one
 /// of the module table's 648 unions with the two solids, their volumes and an
-/// empty log. When one of these is united, check that it is united like that,
+/// empty log. With no bound at all it also folds wrong meets, of three planes
+/// that share a line. The fold's room grown by `1e-9`, less than the room
+/// `bake` checked every plane round the apex against, answers all 648 too
+/// (§395.7). When one of these is united, check that it is united like that,
 /// and move it to the tests above.
 #[test]
 fn a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused() {
