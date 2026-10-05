@@ -1300,6 +1300,66 @@ fn a_disc_drawn_on_the_top_of_a_bar_is_written_with_arcs_and_comes_back_the_same
     );
 }
 
+/// The same disc with its rim named by a ball rather than a pipe is refused by
+/// name, rather than written as a chord.
+///
+/// The ball of radius one about the disc's centre crosses the top in exactly
+/// the rim, so the model is sound. The writer reads a curve drawn on a flat
+/// face off a pipe and nothing else, and until Q764 wrote any other as a
+/// `LINE`: both halves of the rim went out as the chord from `(1, 0, 4)` to
+/// `(−1, 0, 4)`, and the reader refused the file the writer had written.
+#[test]
+fn a_disc_drawn_on_a_bar_and_named_by_a_ball_is_refused_by_name_rather_than_written_as_a_chord() {
+    use rcad_geom::Sphere;
+
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let ball = Surface::Sphere(Sphere::new(the_discs_centre(), 1.0).expect("a positive radius"));
+    let built = a_bar_with_a_disc_drawn_on_its_top_by(&mut model, ball);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a ball through the rim says where it runs");
+    assert_eq!(
+        open_bends(&model, built),
+        [["plane", "plane"], ["plane", "plane"]],
+        "the two halves of the disc's rim"
+    );
+    let refused = rcad_step::write(&model, "a disc drawn on a bar by a ball")
+        .expect_err("a half circle named by a ball is not written as its chord");
+    assert!(
+        matches!(
+            refused,
+            CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
+                first: "plane",
+                second: "plane",
+                closed: false,
+            }
+        ),
+        "refused as {refused:?}"
+    );
+}
+
+/// A bar whose seam is named by the plane through its axis, rather than said to
+/// be straight, is written with a `LINE` and comes back the same.
+///
+/// That is the one run an open edge with the one pipe on both sides is written
+/// as a `LINE` from, since Q764: a plane that holds two points of the wall at
+/// one place round the axis holds the straight line between them. Read back,
+/// the seam is straight, and the solid is the same one, cut and all.
+#[test]
+fn a_bar_whose_seam_is_named_by_the_plane_through_its_axis_is_written_with_a_line_and_comes_back_the_same()
+ {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let built = a_bar_whose_seam_is_named_by_the_plane_through_its_axis(&mut model);
+    assert_eq!(open_bends(&model, built), [["pipe", "pipe"]], "the seam");
+    let text = comes_back_the_same(
+        "a bar whose seam is named by its plane",
+        &model,
+        built,
+        &|model| a_block(model, [2.0, 2.0, 2.0], Vector::new(1.0, -1.0, 1.0)),
+    );
+    assert_eq!(text.matches("LINE(").count(), 1, "the seam");
+}
+
 /// The outer side of a rod bent round a ring, whose ring meets a pipe in four
 /// arcs: the tube's circle where a straight pipe carries on from the bend, and
 /// the circles where the pipe about the ring's own axis crosses it.
@@ -1754,18 +1814,27 @@ fn two_bars_meeting_at_a_mitre(model: &mut Model) -> SolidKey {
 /// own on the same plane, and the circle between them is two half circles the
 /// model names by the pipe of radius one standing on the cap.
 fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> SolidKey {
-    use Step::{Forward, Reversed};
     use rcad_geom::{Axis, Cylinder};
 
-    let centre = Point::new(0.0, 0.0, 4.0);
-    let top = Surface::Plane(a_plane(centre, Vector::new(0.0, 0.0, 1.0)));
     let drawn = Surface::Cylinder(
         Cylinder::new(
-            Axis::new(centre, Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+            Axis::new(the_discs_centre(), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
             1.0,
         )
         .expect("a positive radius"),
     );
+    a_bar_with_a_disc_drawn_on_its_top_by(model, drawn)
+}
+
+/// [`a_bar_with_a_disc_drawn_on_its_top`] with the two half circles named by
+/// `drawn`, which has to cross the top in the circle of radius one about
+/// [`the_discs_centre`].
+fn a_bar_with_a_disc_drawn_on_its_top_by(model: &mut Model, drawn: Surface) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder};
+
+    let centre = the_discs_centre();
+    let top = Surface::Plane(a_plane(centre, Vector::new(0.0, 0.0, 1.0)));
     a_solid_drawn_face_by_face(
         model,
         &[
@@ -1792,6 +1861,57 @@ fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> SolidKey {
             ),
             (top, vec![vec![Forward(2)], vec![Reversed(4), Reversed(3)]]),
             (top, vec![vec![Forward(3), Forward(4)]]),
+        ],
+        &[],
+    )
+}
+
+/// Where the disc [`a_bar_with_a_disc_drawn_on_its_top_by`] draws is centred,
+/// on the bar's top.
+fn the_discs_centre() -> Point {
+    Point::new(0.0, 0.0, 4.0)
+}
+
+/// A bar of radius two about `z`, four tall, whose seam at `x = 2` is not
+/// [`EdgeRun::Straight`] but the piece in front of `x = 0` of where the plane
+/// `y = 0` crosses the wall.
+fn a_bar_whose_seam_is_named_by_the_plane_through_its_axis(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder};
+
+    let through_the_axis = Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, 1.0, 0.0)));
+    a_solid_drawn_face_by_face(
+        model,
+        &[Point::new(2.0, 0.0, 0.0), Point::new(2.0, 0.0, 4.0)],
+        vec![
+            (0, 0, EdgeRun::RightRoundWhereItsFacesCross),
+            (
+                0,
+                1,
+                part_of(
+                    through_the_axis,
+                    Point::origin(),
+                    Vector::new(1.0, 0.0, 0.0),
+                ),
+            ),
+            (1, 1, EdgeRun::RightRoundWhereItsFacesCross),
+        ],
+        vec![
+            (
+                Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0))),
+                vec![vec![Reversed(0)]],
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a positive radius")),
+                vec![vec![Forward(0), Forward(1), Reversed(2), Reversed(1)]],
+            ),
+            (
+                Surface::Plane(a_plane(
+                    Point::new(0.0, 0.0, 4.0),
+                    Vector::new(0.0, 0.0, 1.0),
+                )),
+                vec![vec![Forward(2)]],
+            ),
         ],
         &[],
     )
