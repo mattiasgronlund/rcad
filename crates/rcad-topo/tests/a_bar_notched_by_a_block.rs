@@ -41,83 +41,78 @@ const STEP: f64 = 0.2;
 /// How many faces refuse in each fuse, by shape, rule and which went first.
 ///
 /// Before the arcs and rulings between two patches of one pipe were read off
-/// the plane that cut them, 150 faces refused here, where these add to 75: the
-/// notch united `19` each way round and less the block `19`, the bores through
-/// an edge `5` and through a corner `13`, `13` and `11`.
+/// the plane that cut them, 150 faces refused here, and 75 after. Since a flat
+/// face the cuts cannot follow winds its own chords and arcs instead (row
+/// Q1002), these add to 39, and every one of them is a curved face: the 36 that
+/// moved were all flat, and each now answers what the solid says at every point
+/// asked. They were the block's top and floor across the notch, keeping the
+/// outside of the pipe in two pieces; the bored corner's floor and top, the
+/// square less a quarter of a disc; and the arcs against a plane that crosses
+/// their circle and holds neither end, in the caps of the bar cut along a side
+/// of the block, the faces of the block inside the bar, and the caps of the box
+/// through a cap and the wall, each a disc with the box's end bitten out.
 ///
-/// - **The notch united, `14`**: twelve patches of the wall have a ruling at
+/// - **The notch united, `12`**: twelve patches of the wall have a ruling at
 ///   `x = 2, y = ±√21` on a side. The block's back face is the plane that cut
 ///   the wall there, and the union keeps none of it, so no face of the answer
 ///   holds that ruling and nothing says which side of it the patch keeps. A
-///   gap: the fuse knows the plane and stores the ruling as straight. The other
-///   two are the block's top and floor, below.
-/// - **The block's top or floor keeping the outside of the pipe across a strip,
-///   `2`, in the notch united and the block less the bar**: the strip
-///   `|y| ≤ 2` crosses the bar's circle from side to side, so the part of the
-///   plane in front of every cut is two pieces, one each side of the bar. A
-///   gap: the face is the piece on its own side.
-/// - **The bored corner's floor and top, `2`**: the square less a quarter of a
-///   disc, pinned refused in `a_cap_trimmed_by_a_pipe_holds_its_points.rs`.
-/// - **Four of the box through the caps' `6`**: each quarter of the wall inside
-///   the box is cut by two of its sides, which meet outside the pipe, so the
-///   part in front of both is two runs of rulings. A gap.
-/// - **An arc against a plane that crosses its circle and holds neither of its
-///   ends, the `2` in every other case**: a cap of the bar cut along a side of
-///   the block, or a face of the block inside the bar. A gap.
-/// - **The box through a cap and the wall's `3`** are its two caps, each a disc
-///   with the box's end bitten out of its rim, which no cut keeps whole, and the
-///   wall, which keeps the outside of the strip `|y| ≤ 2` where one of two flats
-///   is read for a strip kept between them. Gaps, both.
+///   gap: the fuse knows the plane and stores the ruling as straight.
+/// - **The box through the caps' `4`**: each quarter of the wall inside the box
+///   is cut by two of its sides, which meet outside the pipe, so the part in
+///   front of both is two runs of rulings. A gap.
+/// - **The box through a cap and the wall's `1`** is the wall, which keeps the
+///   outside of the strip `|y| ≤ 2` where one of two flats is read for a strip
+///   kept between them. A gap.
 const REFUSED: [(&str, Rule, bool, usize); 30] = [
-    ("the notch", Rule::Union, true, 14),
-    ("the notch", Rule::Union, false, 14),
-    ("the notch", Rule::Difference, true, 2),
-    ("the notch", Rule::Difference, false, 2),
-    ("the notch", Rule::Intersection, true, 2),
-    ("the notch", Rule::Intersection, false, 2),
+    ("the notch", Rule::Union, true, 12),
+    ("the notch", Rule::Union, false, 12),
+    ("the notch", Rule::Difference, true, 0),
+    ("the notch", Rule::Difference, false, 0),
+    ("the notch", Rule::Intersection, true, 0),
+    ("the notch", Rule::Intersection, false, 0),
     ("a bore through one edge", Rule::Union, true, 0),
     ("a bore through one edge", Rule::Union, false, 0),
     ("a bore through one edge", Rule::Difference, true, 0),
     ("a bore through one edge", Rule::Difference, false, 0),
     ("a bore through one edge", Rule::Intersection, true, 0),
     ("a bore through one edge", Rule::Intersection, false, 0),
-    ("a bore through one corner", Rule::Union, true, 2),
-    ("a bore through one corner", Rule::Union, false, 2),
+    ("a bore through one corner", Rule::Union, true, 0),
+    ("a bore through one corner", Rule::Union, false, 0),
     ("a bore through one corner", Rule::Difference, true, 0),
-    ("a bore through one corner", Rule::Difference, false, 2),
+    ("a bore through one corner", Rule::Difference, false, 0),
     ("a bore through one corner", Rule::Intersection, true, 0),
     ("a bore through one corner", Rule::Intersection, false, 0),
     ("a box through the caps", Rule::Union, true, 0),
     ("a box through the caps", Rule::Union, false, 0),
     ("a box through the caps", Rule::Difference, true, 0),
-    ("a box through the caps", Rule::Difference, false, 6),
-    ("a box through the caps", Rule::Intersection, true, 6),
-    ("a box through the caps", Rule::Intersection, false, 6),
-    ("a box through a cap and the wall", Rule::Union, true, 3),
-    ("a box through a cap and the wall", Rule::Union, false, 3),
+    ("a box through the caps", Rule::Difference, false, 4),
+    ("a box through the caps", Rule::Intersection, true, 4),
+    ("a box through the caps", Rule::Intersection, false, 4),
+    ("a box through a cap and the wall", Rule::Union, true, 1),
+    ("a box through a cap and the wall", Rule::Union, false, 1),
     (
         "a box through a cap and the wall",
         Rule::Difference,
         true,
-        3,
+        1,
     ),
     (
         "a box through a cap and the wall",
         Rule::Difference,
         false,
-        2,
+        0,
     ),
     (
         "a box through a cap and the wall",
         Rule::Intersection,
         true,
-        2,
+        0,
     ),
     (
         "a box through a cap and the wall",
         Rule::Intersection,
         false,
-        2,
+        0,
     ),
 ];
 
