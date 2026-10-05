@@ -109,6 +109,13 @@
 //!   above. The hand-written rows of
 //!   [`a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand`]
 //!   all answer since Q508.
+//! - `Invalid(FacesDoNotAgreeWhichWayTheyFace)` on a ball resting on a block
+//!   whose wall planes cut its skin into a rim of arcs: **closed** by Q451,
+//!   where the mesher learnt to open such a rim the way it opens one closed
+//!   curve. Queue row Q892 counted 2 of this cell's touching differences and 4
+//!   of its unions refused that way on `a7ad3f4b`;
+//!   [`a_ball_whose_skin_the_blocks_walls_cut_into_a_rim_of_arcs_fuses_by_every_rule`]
+//!   pins three shapes of it by every rule.
 //!
 //! **The dome is known: §124.** A ball on a bar of its own radius, centred on
 //! the bar's axis, shares exactly one circle with it **only** because it is
@@ -161,7 +168,7 @@ use proptest::test_runner::{
 };
 use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
 mod touching;
 
@@ -704,6 +711,91 @@ fn a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand(
     unites_into_both(2.0, [1.0, 1.0, 3.0], 1.0);
     unites_into_both(4.0, [1.0, 2.0, 5.0], 1.0);
     unites_into_both(4.0, [2.0, 2.0, 6.0], 2.0);
+}
+
+/// A ball of radius two resting on the block `[0, 3] × [0, 2] × [0, 1]` at
+/// `(1, 1, 3)`, and two more of the same family, answer every rule both ways
+/// round: the union is the two solids as they stand, `6 + 32π/3`, the
+/// intersection is nothing, and each difference is its first solid.
+///
+/// The fuse cuts the ball along the planes of the block's walls and not only
+/// where the walls are, so `x = 0`, `y = 0` and `y = 2`, each a unit from its
+/// centre, cut circles of radius `√3` in it that cross one another, and `x = 3`
+/// touches it at `(3, 1, 3)` the way the top touches its south pole. The
+/// piece of the ball's skin that holds both poles is the ball less those three
+/// caps, bounded by **one rim of ten arcs** — not one closed curve, and holding
+/// the material outside it in the mesher's chart (it encloses `−7.63` there).
+/// Until Q451 the mesher opened a ball's skin along a seam only when its rim was
+/// one closed curve; this one fell through to the paths below that one, which
+/// Q451's own commit message says filled such a rim inside out, and the check
+/// of the fuse's own answer refused union both ways and the ball less the block
+/// `Invalid(FacesDoNotAgreeWhichWayTheyFace)`. Measured on `a7ad3f4b`,
+/// where every shape below refused those three fuses; a bisect of the first
+/// shape to `d0eb84cc` names `75a593bd` the first that answers. Its change is
+/// the `it_passes_each_of_its_points_once` arm of the first test in
+/// `cut_off_what_goes_too_far_round` in `mesh.rs`, and with that arm switched
+/// off this test refuses the first union the same way again (queue row Q892).
+///
+/// The three shapes: the row's own; a ball of radius three at `(2, 1)` on the
+/// block `[0, 4] × [0, 4] × [0, 2]`, cut by the planes `x = 0`, `x = 4` and
+/// `y = 0` and touched by `y = 4`; and a ball of radius two at `(3, 3)` on that
+/// block, cut by `x = 4` and `y = 4` only. The ten arcs and the `−7.63` were
+/// printed for the first; the other two were only seen to refuse the same three
+/// fuses on `a7ad3f4b` and to answer here.
+#[test]
+fn a_ball_whose_skin_the_blocks_walls_cut_into_a_rim_of_arcs_fuses_by_every_rule() {
+    for (size, at, radius) in [
+        ([3, 2, 1], [1, 1], 2),
+        ([4, 4, 2], [2, 1], 3),
+        ([4, 4, 2], [3, 3], 2),
+    ] {
+        let case = format!("a ball of {radius} at {at:?} on a block of {size:?}");
+        let [x, y, z] = size.map(f64::from);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [x, 0.0], [x, y], [0.0, y]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a rectangle");
+        let block = model
+            .add_extrusion(&rectangle, z, &Isometry::identity())
+            .expect("building a box needs no decision");
+        let r = f64::from(radius);
+        let [across, along] = at.map(f64::from);
+        let ball = model
+            .add_ball(
+                r,
+                &Isometry::translation(Vector::new(across, along, z + r))
+                    .expect("a whole-number shift"),
+            )
+            .expect("a whole-number ball");
+        let block_holds = x * y * z;
+        let ball_holds = 4.0 / 3.0 * std::f64::consts::PI * r.powi(3);
+        for (one, other, rule, solids, holds) in [
+            (block, ball, Rule::Union, 2, block_holds + ball_holds),
+            (ball, block, Rule::Union, 2, block_holds + ball_holds),
+            (block, ball, Rule::Intersection, 0, 0.0),
+            (ball, block, Rule::Intersection, 0, 0.0),
+            (block, ball, Rule::Difference, 1, block_holds),
+            (ball, block, Rule::Difference, 1, ball_holds),
+        ] {
+            let held = match fused(&model, one, other, rule) {
+                Ok(Outcome::Answered(held)) => held,
+                Ok(Outcome::Refused(why)) => panic!("{case}: {rule:?} refused {why}"),
+                Err(why) => panic!("{case}: {rule:?} {why}"),
+            };
+            let block_first = one == block;
+            assert_eq!(
+                held.solids, solids,
+                "{case}: {rule:?} (block first: {block_first}), how many solids"
+            );
+            assert!(
+                (held.volume - holds).abs() <= held.error,
+                "{case}: {rule:?} (block first: {block_first}) measures {} against {holds}, \
+                 out by more than the {} its measurements declare",
+                held.volume,
+                held.error
+            );
+        }
+    }
 }
 
 /// What a cell's rows must have done for the run to have measured anything.
