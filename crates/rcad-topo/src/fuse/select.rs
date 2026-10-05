@@ -1720,6 +1720,13 @@ fn a_face_of_the_input_holds(
 /// crosses instead, reading a corner on that line as below it, so it has no
 /// spokes to sit on.
 ///
+/// **Why a `Held` puts the piece on the face**, as a winding that is not zero
+/// does. The caller proved the piece's plane and the face's plane one plane,
+/// and `point` was proved inside the piece. The piece was cut by every surface
+/// of the solid, so its inside lies all on the face or all off it (§17.4), and
+/// a point of that inside the face's material holds, away from its outline,
+/// puts it on the face.
+///
 /// Only [`OnAFace::Held`](crate::OnAFace::Held) counts, as in the caller. Any
 /// other answer, and a refusal, leave the point where the fan left it: off
 /// this face, for the next face and then the ray to place. So a point the fan
