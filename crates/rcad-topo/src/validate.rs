@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use rcad_geom::{
     Cone, Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun,
     Orientation, Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE,
-    SIDE_OF_SPHERE, SIDE_OF_TORUS, Scale, Surface, Vector, which_two_surfaces_a_run_is_between,
+    SIDE_OF_SPHERE, SIDE_OF_TORUS, Scale, Surface, Vector, how_a_plane_leans_against_a_cone,
+    where_a_cones_apex_stands_against_a_plane, which_two_surfaces_a_run_is_between,
     which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
@@ -546,8 +547,9 @@ impl Model {
     /// curve on each plane can reach off the other, against `rounding`, the
     /// room [`Model::what_writing_a_plane_down_costs`] gives a corner against
     /// its own face's plane. A pipe, a ball and a torus have that bound, and a
-    /// cone where the plane crosses it in an ellipse
-    /// ([`how_far_a_crossing_reaches_off_another_plane`], Q612); an edge whose
+    /// cone where the plane crosses it in an ellipse (Q612) or in straight lines
+    /// through its apex ([`how_far_a_crossing_reaches_off_another_plane`],
+    /// Q613); an edge whose
     /// crossing has none between two planes proved different is refused, which
     /// is the safe way for a missing bound to fall.
     ///
@@ -2055,6 +2057,13 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
 /// can draw; `R / 0` is infinite, and the answer is a NaN or infinite, which
 /// no room holds.
 ///
+/// **A plane through a cone's apex, leaning at or past the cone's own angle**,
+/// crosses it in one or two of the straight lines through the apex, and an arc
+/// there is drawn straight between its ends just the same
+/// ([`the_walk_draws_it_straight`]), so two faces that cross in one of those
+/// lines are kept the same way (Q613). A closed run there is left to the
+/// width, which has none for it.
+///
 /// **A ball** of radius `r` is crossed by any plane in a circle no wider than
 /// the ball, so the width is `2r`.
 ///
@@ -2082,10 +2091,7 @@ fn how_far_a_crossing_reaches_off_another_plane(
     else {
         return None;
     };
-    if let Surface::Cylinder(pipe) = and
-        && on.normal().dot(pipe.axis().direction()) == 0.0
-        && matches!(run, EdgeRun::PartOfWhereItCrosses { .. })
-    {
+    if matches!(run, EdgeRun::PartOfWhereItCrosses { .. }) && the_walk_draws_it_straight(on, and) {
         return Some(
             off.signed_distance_to(start)
                 .abs()
@@ -2095,6 +2101,30 @@ fn how_far_a_crossing_reaches_off_another_plane(
     let widest = how_wide_a_plane_crosses(on, and)?;
     let tilt = on.normal().cross(off.normal()).length();
     Some(off.signed_distance_to(start).abs() + on.signed_distance_to(start).abs() + widest * tilt)
+}
+
+/// Whether `on` crosses `and` in straight lines by the very tests the walk
+/// draws a run between them straight by, so that an arc there is the straight
+/// line between its two ends.
+///
+/// For a pipe that is `n·a == 0.0`, which is the walk's own test written out
+/// again. For a cone it is two proved signs, the apex on `on` and `E` at or
+/// below nothing, asked of `rcad-geom`'s own two functions for them. The walk
+/// asks the same two signs: it works both numbers out exactly, rounds each
+/// to the nearest `f64`, which keeps its sign, and refuses where it cannot work
+/// them out, so it never draws a curve where these say straight lines.
+fn the_walk_draws_it_straight(on: &Plane, and: &Surface) -> bool {
+    if let Surface::Cylinder(pipe) = and {
+        return on.normal().dot(pipe.axis().direction()) == 0.0;
+    }
+    if let Surface::Cone(cone) = and {
+        return where_a_cones_apex_stands_against_a_plane(on, cone) == Decision::Zero
+            && matches!(
+                how_a_plane_leans_against_a_cone(on, cone),
+                Decision::Zero | Decision::Neg
+            );
+    }
+    false
 }
 
 /// How far apart two points of the curve `on` crosses `and` in can be, for the
@@ -2148,9 +2178,10 @@ fn how_wide_a_plane_crosses(on: &Plane, and: &Surface) -> Option<f64> {
 ///
 /// **A plane whose `E` is not proved above zero gets no width**: a parabola or
 /// a hyperbola runs on for ever, and a closed run on one names nothing the walk
-/// draws. An arc of one, and an arc along a ruling through the apex, are
-/// refused here though the walk draws them — a bound for those would read the
-/// arc's ends, not the crossing.
+/// draws. An arc of one is refused here though the walk draws it — a bound for
+/// it would read the arc's ends, not the crossing. An arc along a straight line
+/// through the apex gets no width here either, and needs none: the caller has
+/// already bounded it by its two ends (Q613).
 fn how_wide_a_plane_crosses_a_cone(on: &Plane, cone: &Cone) -> Option<f64> {
     let normal = on.normal().components().map(Interval::exactly);
     let along = cone.axis().direction().components().map(Interval::exactly);
