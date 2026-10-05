@@ -982,10 +982,15 @@ fn how_often_a_turned_bar_or_cone_comes_back_from_its_own_file() {
 
 /// The axis of the one pipe or cone `solid` is bounded by, where it is placed.
 fn the_curved_axis(solid: SolidView) -> Axis {
-    let mut axes = solid.faces().filter_map(|face| match face.surface() {
-        Surface::Cylinder(pipe) => Some(pipe.axis()),
-        Surface::Cone(cone) => Some(cone.axis()),
-        _ => None,
+    let mut axes = solid.faces().filter_map(|face| {
+        let surface = face.surface();
+        if let Surface::Cylinder(pipe) = surface {
+            return Some(pipe.axis());
+        }
+        let Surface::Cone(cone) = surface else {
+            return None;
+        };
+        Some(cone.axis())
     });
     let axis = axes.next().expect("a bar or a cone has one curved face");
     assert!(axes.next().is_none(), "a bar or a cone has one curved face");
