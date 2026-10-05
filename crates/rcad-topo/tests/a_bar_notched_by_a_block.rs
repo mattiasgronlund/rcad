@@ -8,7 +8,8 @@
 //! often has another patch of the same pipe across it, and nothing about the
 //! pipe says which side of that side the face keeps. What does is the plane the
 //! wall was cut along: an arc carries it in its run, and a ruling lies on the
-//! plane of one of the block's faces.
+//! plane of one of the block's faces, or on a plane square to `x` or `y` that
+//! holds its two ends where the answer keeps none of that face.
 //!
 //! **The oracle is the solid, worked out from the coordinates alone**: the bar
 //! is every point less than its radius from its axis between its two ends, the
@@ -52,11 +53,16 @@ const STEP: f64 = 0.2;
 /// of the block, the faces of the block inside the bar, and the caps of the box
 /// through a cap and the wall, each a disc with the box's end bitten out.
 ///
-/// - **The notch united, `12`**: twelve patches of the wall have a ruling at
-///   `x = 2, y = ±√21` on a side. The block's back face is the plane that cut
-///   the wall there, and the union keeps none of it, so no face of the answer
-///   holds that ruling and nothing says which side of it the patch keeps. A
-///   gap: the fuse knows the plane and stores the ruling as straight.
+/// The notch united refused 12 faces each way round until row Q975, and these
+/// added to 15 after it. Those were the twelve patches of the wall with a ruling
+/// at `x = 2, y = ±√21` on a side: the block's back face is the plane that cut
+/// the wall there, and the union keeps none of it, so no face of the answer
+/// holds that ruling. Each is now read against the planes square to `x` and to
+/// `y` that hold the ruling's two ends, `x = 2` and `y = √21` as rounded, and
+/// `x = 2` proves each patch the part of the pipe in front of its cuts. They
+/// answer 110 points more held and 43 more not held than they were asked
+/// before, each the solid's answer.
+///
 /// - **The box through the caps' `4`**: each quarter of the wall inside the box
 ///   is cut by two of its sides, which meet outside the pipe, so the part in
 ///   front of both is two runs of rulings. A gap.
@@ -64,8 +70,8 @@ const STEP: f64 = 0.2;
 ///   outside of the strip `|y| ≤ 2` where one of two flats is read for a strip
 ///   kept between them. A gap.
 const REFUSED: [(&str, Rule, bool, usize); 30] = [
-    ("the notch", Rule::Union, true, 12),
-    ("the notch", Rule::Union, false, 12),
+    ("the notch", Rule::Union, true, 0),
+    ("the notch", Rule::Union, false, 0),
     ("the notch", Rule::Difference, true, 0),
     ("the notch", Rule::Difference, false, 0),
     ("the notch", Rule::Intersection, true, 0),

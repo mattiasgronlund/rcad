@@ -57,7 +57,7 @@
 //! rather than off a corner, because every corner sits on every cut.
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet,
+    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet, Vector,
     WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS, intersect,
     which_two_surfaces_a_run_is_between,
 };
@@ -1117,7 +1117,7 @@ fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Opt
 /// sides are straight too is a polygon and is walked as one: the face of a
 /// half frustum down its axis (`docs/decisions.md` §389). On a curved face a
 /// ruling is still part of a crossing, read as a straight side by
-/// [`the_sides_of`].
+/// [`every_reading_of_the_sides_of`].
 fn a_side_of_it_is_part_of_a_crossing(solid: SolidView<'_>, face: FaceView<'_>) -> Result<bool> {
     let flat = face.stored_surface().as_plane().is_some();
     for wire in face.wires() {
@@ -1262,6 +1262,14 @@ fn is_one_circle_cut_in_two(
 /// ([`one_of_two_runs_between_two_flats`]). Step 3 then holds of each piece on
 /// its own, and the point is asked which half of the pipe it is in as well.
 ///
+/// **A ruling between two patches of one pipe may be read against more than one
+/// plane**, where no flat face of the solid holds it
+/// ([`every_reading_of_the_sides_of`]). Each reading is taken in turn, and the
+/// first whose steps prove the face to be the part in front of its cuts answers.
+/// Each such proof is about the face in hand, so any reading that gets through
+/// is a true one, and a reading that does not costs a refusal only when none
+/// does.
+///
 /// **All of that is asked of the face where it is stored, and only `point` is
 /// asked where it sits** (§168). Each step is a property a movement keeps —
 /// a plane holding two points, a plane through a centre, which way a wire runs
@@ -1313,13 +1321,28 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     let surface = face.stored_surface();
-    let sides = the_sides_of(solid, face)?;
-    if let Some(held) = what_the_part_in_front_of_its_cuts_holds(face, &surface, &sides, point)? {
-        return Ok(held);
+    let readings = every_reading_of_the_sides_of(solid, face)?;
+    let mut refused = None;
+    for sides in &readings {
+        match what_the_part_in_front_of_its_cuts_holds(face, &surface, sides, point) {
+            Ok(Some(held)) => return Ok(held),
+            Ok(None) => {}
+            Err(why) => {
+                refused.get_or_insert(why);
+            }
+        }
+    }
+    if let Some(why) = refused {
+        return Err(why);
     }
     match surface {
         Surface::Plane(flat) => {
-            what_a_flat_face_of_chords_and_arcs_holds(face, &flat, &sides, point, policy, log)
+            let [sides] = readings.as_slice() else {
+                panic!(
+                    "a flat face's sides are read one way, since only a ruling of a pipe is read more ways than one"
+                );
+            };
+            what_a_flat_face_of_chords_and_arcs_holds(face, &flat, sides, point, policy, log)
         }
         Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => {
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
@@ -1795,6 +1818,7 @@ fn is_two_discs_taken_together(surface: &Surface, cuts: &[Cut]) -> bool {
 /// One side of a face in the frame the face is stored in, with the surface of
 /// the face across it there, and that surface as it reads once moved into
 /// place.
+#[derive(Clone)]
 struct Side {
     across: Surface,
     across_placed: Surface,
@@ -1812,6 +1836,7 @@ struct Corner {
 }
 
 /// What a [`Side`] runs along between its ends.
+#[derive(Clone)]
 enum SideRun {
     Straight,
     /// Part of a circle, carrying the one thing about it the steps below read:
@@ -1844,8 +1869,9 @@ enum Lies {
     Across,
 }
 
-/// Every side of `face` in the order its wires walk them, seams left out, in the
-/// frame the face is stored in.
+/// Every way to read the sides of `face`, each one every side in the order its
+/// wires walk them, seams left out, in the frame the face is stored in. One way
+/// for every face but a pipe face with a ruling no flat face of the solid holds.
 ///
 /// **A side with another face of the same surface across it is cut by
 /// something else**, and that is what the side carries as `across`. The fuse
@@ -1859,11 +1885,26 @@ enum Lies {
 /// [`what_a_face_cut_by_part_of_a_crossing_holds`] read it as a cut like any
 /// other. An arc names that plane in its run's `and`, which the fuse writes for
 /// exactly this. A ruling is stored straight and names nothing, so it is read
-/// off a flat face of the solid that holds it ([`the_flat_face_a_ruling_lies_on`]),
-/// and where no face does the side is left as it was, which step 1 refuses.
-fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
+/// off a flat face of the solid that holds it ([`the_flat_face_a_ruling_lies_on`]).
+///
+/// **Where no flat face holds it, the ruling is read against each plane square
+/// to a coordinate axis that does** ([`the_planes_square_to_an_axis_a_ruling_lies_on`]),
+/// one reading for each. The union of a bar and a block notched into it keeps
+/// none of the block's back face, `x = 2`, though the fuse cut the wall along
+/// it at `y = ±√21`; the ruling there lies on `x = 2` and on `y = √21` as the
+/// corners round it, and either is a plane along the axis crossing the pipe
+/// through it, which is all [`the_flat_face_a_ruling_lies_on`]'s argument asks.
+/// Which of the two the face is in front of all of is the steps' question:
+/// tried first, `y = √21` gets six of those twelve patches through them, and
+/// `x = 2` all twelve, so it takes the second reading to answer the same
+/// whichever comes first. Where no such plane holds the ruling either, the side
+/// is left as it was, which step 1 refuses.
+fn every_reading_of_the_sides_of(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+) -> Result<Vec<Vec<Side>>> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let mut sides = Vec::new();
+    let mut readings: Vec<Vec<Side>> = vec![Vec::new()];
     for coedge in face.wires().flat_map(WireView::coedges) {
         let edge = coedge.edge();
         let Some(across) = the_face_across(solid, face, edge)? else {
@@ -1878,55 +1919,102 @@ fn the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Vec<Side>> {
             placed: corner.point(),
         });
         let one_surface = across.stored_surface() == face.stored_surface();
-        let ruling_on = || the_flat_face_a_ruling_lies_on(solid, face, [start.at, end.at]);
-        let (across_surface, across_placed) = match edge.stored_run() {
+        let as_it_is = || vec![(across.stored_surface(), across.surface())];
+        let read_against = match edge.stored_run() {
             EdgeRun::PartOfWhereItCrosses { and, .. } if one_surface => {
-                (*and, and.transformed(&face.location()))
+                vec![(*and, and.transformed(&face.location()))]
             }
-            EdgeRun::Straight if one_surface => match ruling_on() {
-                Some(flat) => (flat.stored_surface(), flat.surface()),
-                None => (across.stored_surface(), across.surface()),
-            },
+            EdgeRun::Straight if one_surface => {
+                match the_flat_face_a_ruling_lies_on(solid, face, [start.at, end.at]) {
+                    Some(flat) => vec![(flat.stored_surface(), flat.surface())],
+                    None => {
+                        let planes =
+                            the_planes_square_to_an_axis_a_ruling_lies_on(face, [start.at, end.at]);
+                        if planes.is_empty() {
+                            as_it_is()
+                        } else {
+                            planes
+                                .into_iter()
+                                .map(|flat| {
+                                    let flat = Surface::Plane(flat);
+                                    (flat, flat.transformed(&face.location()))
+                                })
+                                .collect()
+                        }
+                    }
+                }
+            }
             EdgeRun::Straight
             | EdgeRun::PartOfWhereItCrosses { .. }
             | EdgeRun::RightRoundWhereItsFacesCross
             | EdgeRun::RightRoundWhereItCrosses { .. }
-            | _ => (across.stored_surface(), across.surface()),
+            | _ => as_it_is(),
         };
-        let run = match edge.stored_run() {
-            EdgeRun::Straight => SideRun::Straight,
-            EdgeRun::PartOfWhereItCrosses { .. } if is_a_piece_of_a_ruling(solid, face, edge)? => {
-                SideRun::Straight
-            }
-            EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key != end.key => {
-                SideRun::Arc {
-                    into_the_arc: the_way_into_an_arc(
-                        &face.stored_surface(),
-                        &across_surface,
-                        [start.at, end.at],
-                        picked_by,
-                    )
-                    .ok_or_else(cannot)?,
-                }
-            }
-            // A whole closed crossing among parts of others, or a kind of run
-            // this has not been taught.
-            EdgeRun::PartOfWhereItCrosses { .. }
-            | EdgeRun::RightRoundWhereItsFacesCross
-            | EdgeRun::RightRoundWhereItCrosses { .. }
-            | _ => {
-                return Err(cannot());
-            }
-        };
-        sides.push(Side {
-            across: across_surface,
-            across_placed,
-            start,
-            end,
-            run,
-        });
+        let mut ways = Vec::with_capacity(read_against.len());
+        for (across_surface, across_placed) in read_against {
+            let run = the_way_a_side_runs(solid, face, edge, [start, end], &across_surface)?;
+            ways.push(Side {
+                across: across_surface,
+                across_placed,
+                start,
+                end,
+                run,
+            });
+        }
+        readings = readings
+            .into_iter()
+            .flat_map(|reading| {
+                ways.iter().map(move |way| {
+                    let mut widened = reading.clone();
+                    widened.push(way.clone());
+                    widened
+                })
+            })
+            .collect();
     }
-    Ok(sides)
+    Ok(readings)
+}
+
+/// What `edge`, a side of `face` between `ends` with `across` across it, runs
+/// along.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc no half-space
+/// tells from its sibling, a whole closed crossing among parts of others, or a
+/// kind of run this has not been taught, and whatever [`the_face_across`] gives
+/// for the edge.
+fn the_way_a_side_runs(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    edge: EdgeView<'_>,
+    [start, end]: [Corner; 2],
+    across: &Surface,
+) -> Result<SideRun> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    Ok(match edge.stored_run() {
+        EdgeRun::Straight => SideRun::Straight,
+        EdgeRun::PartOfWhereItCrosses { .. } if is_a_piece_of_a_ruling(solid, face, edge)? => {
+            SideRun::Straight
+        }
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key != end.key => SideRun::Arc {
+            into_the_arc: the_way_into_an_arc(
+                &face.stored_surface(),
+                across,
+                [start.at, end.at],
+                picked_by,
+            )
+            .ok_or_else(cannot)?,
+        },
+        // A whole closed crossing among parts of others, or a kind of run
+        // this has not been taught.
+        EdgeRun::PartOfWhereItCrosses { .. }
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. }
+        | _ => {
+            return Err(cannot());
+        }
+    })
 }
 
 /// A flat face of `solid` whose plane holds a straight side between two patches
@@ -1959,13 +2047,47 @@ fn the_flat_face_a_ruling_lies_on<'m>(
         let Surface::Plane(flat) = other.stored_surface() else {
             return false;
         };
-        other.location() == face.location()
-            && lies_along_the_axis(&pipe, &flat)
-            && crosses_the_pipe_in_two_rulings(&pipe, &flat)
-            && ends.iter().all(|end| {
-                flat.side_of_point(PredicatePoint::from(end.coordinates())) == Decision::Zero
-            })
+        other.location() == face.location() && holds_a_ruling_of(&pipe, &flat, ends)
     })
+}
+
+/// Each plane square to a coordinate axis that holds a straight side between
+/// two patches of `face`'s pipe as [`the_flat_face_a_ruling_lies_on`] asks a
+/// face's plane to: along the axis, crossing the pipe, and holding both `ends`
+/// exactly. Empty when `face` is not on a pipe.
+///
+/// **Each is built through the start with a normal of one `1.0` and two
+/// zeros**, so its offset is the start's own coordinate and nothing rounds;
+/// the end is on it exactly when it shares that coordinate, which the ends of a
+/// ruling up a pipe standing square to that axis do as the fuse solves them.
+/// Nothing else is built: a plane through the axis would round, and a corner a
+/// hair off it is the one case the argument cannot have.
+fn the_planes_square_to_an_axis_a_ruling_lies_on(
+    face: FaceView<'_>,
+    ends: [Point; 2],
+) -> Vec<Plane> {
+    let Surface::Cylinder(pipe) = face.stored_surface() else {
+        return Vec::new();
+    };
+    [
+        Vector::new(1.0, 0.0, 0.0),
+        Vector::new(0.0, 1.0, 0.0),
+        Vector::new(0.0, 0.0, 1.0),
+    ]
+    .into_iter()
+    .filter_map(|normal| Plane::from_point_and_normal_as_written(ends[0], normal).ok())
+    .filter(|flat| holds_a_ruling_of(&pipe, flat, ends))
+    .collect()
+}
+
+/// Whether `flat` lies along `pipe`'s axis, crosses the pipe in two rulings,
+/// and holds both `ends` exactly where they are stored.
+fn holds_a_ruling_of(pipe: &rcad_geom::Cylinder, flat: &Plane, ends: [Point; 2]) -> bool {
+    lies_along_the_axis(pipe, flat)
+        && crosses_the_pipe_in_two_rulings(pipe, flat)
+        && ends.iter().all(|end| {
+            flat.side_of_point(PredicatePoint::from(end.coordinates())) == Decision::Zero
+        })
 }
 
 /// Whether `flat`'s stored normal is exactly square to `pipe`'s stored axis.
