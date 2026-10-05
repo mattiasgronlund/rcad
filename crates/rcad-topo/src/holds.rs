@@ -3550,9 +3550,14 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   pipe, so it never reaches the plane, and is on the side its ends are. The
 ///   floor of a block with a bar bored through one edge has its arc against the
 ///   three sides of the block the bar is clear of.
+/// - Any other arc against a plane, both ends on the same side of it, when the
+///   line the plane meets the arc's own plane in misses the arc's curve or meets
+///   it only behind the chord ([`an_arc_never_reaches_the_plane`]). The skin of
+///   a ball cut down to four planes through its centre has each of its four arcs
+///   against the plane across from it (row Q976).
 ///
-/// Everything else is [`Lies::Across`]: an arc with neither end on the plane may
-/// bulge across it, and nothing here builds the point where it would.
+/// Everything else is [`Lies::Across`]: an arc with neither end on the plane
+/// that the line does meet in front of its chord really does bulge across it.
 fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
     let side_of_an_end = |end: Corner| {
         if cut.corners_on_it.contains(&end.key) {
@@ -3621,6 +3626,7 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 (None, Some(_)) => Some(surface),
                 (Some(_), Some(_)) | (None, None) => None,
             };
+            let own_plane = surface.as_plane().or(side.across.as_plane());
             let Surface::Plane(flat) = cut.surface else {
                 let on_a_pipe_running_the_same_way = arcs_own_round_surface
                     .is_some_and(|own| are_pipes_running_the_same_way(own, &cut.surface));
@@ -3648,7 +3654,7 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             };
             match ends {
                 [Decision::Zero, Decision::Zero] => {
-                    let Some(own_plane) = surface.as_plane().or(side.across.as_plane()) else {
+                    let Some(own_plane) = own_plane else {
                         return Lies::Across;
                     };
                     let normal = exactly(own_plane.normal().components());
@@ -3667,13 +3673,22 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 }
                 [one @ (Decision::Pos | Decision::Neg), other]
                     if one == other
-                        && (surface
-                            .as_plane()
-                            .or(side.across.as_plane())
+                        && (own_plane
                             .is_some_and(|own| the_normals_lie_along_one_line(own, &flat))
                             || arcs_own_round_surface.is_some_and(|own| {
                                 matches!(own, Surface::Cylinder(pipe) if misses_the_pipe(pipe, &flat))
-                            })) =>
+                            })
+                            || own_plane.zip(arcs_own_round_surface).is_some_and(
+                                |(own, round)| {
+                                    an_arc_never_reaches_the_plane(
+                                        own,
+                                        round,
+                                        side.start.at,
+                                        *into_the_arc,
+                                        &flat,
+                                    )
+                                },
+                            )) =>
                 {
                     Lies::Beside(one)
                 }
@@ -3851,6 +3866,87 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
         Interval::exactly(flat.offset()) - dot(normal, exactly(pipe.axis().origin().coordinates()));
     let radius = Interval::exactly(pipe.radius());
     (off_the_axis * off_the_axis - radius * radius * dot(normal, normal)).sign()
+}
+
+/// Whether an arc of the closed curve the plane `own` cuts `round` in never
+/// reaches the plane `cut`: the line the two planes meet in misses the curve,
+/// or meets it only behind the arc's chord. `start` is either end of the arc and
+/// `into_the_arc` is [`the_way_into_an_arc`]. `false` when the two planes are
+/// side by side, when the curve does not close, and when a sign could not be
+/// settled.
+///
+/// **Why that is enough.** The arc lies on `own`, so it can be on `cut` only on
+/// that line, and only where the line meets its curve. The arc is all of the
+/// curve strictly on the `into_the_arc` side of its chord, with its two ends,
+/// so a point of the curve strictly behind the chord is not on the arc. When
+/// every point where the line meets the curve is behind it, nothing of the arc
+/// is on `cut`, the arc is in one piece, and it stays on whichever side its two
+/// ends are on. The caller asks that they are on the same side.
+///
+/// **How the meets are read without building them.** With `u = n × h` along
+/// the line, `n·x = e` the arc's plane and `h·x = d` the cut,
+/// `x₀ = (e(h × u) + d(u × n))/|u|²` is on both planes, and the line is
+/// `(|u|²x₀ + t·u)/|u|²`. [`how_far_outside`] at that point, scaled by `|u|²`,
+/// is `a·t² + 2b·t + c`: `a` is the round surface's part of degree two at `u`,
+/// positive because the curve closes; `c` is its value at `|u|²x₀`; and `b`, the
+/// cross term, is a quarter of its value a step of `u` past that point less its
+/// value a step before, since the two squares cancel. The meets are
+/// `t = (−b ± √(b² − ac))/a`, and `b² − ac` negative is the line missing the
+/// curve. Behind the chord is `g + γ·t < 0`, with `g` how far the arc's side of
+/// the chord reads at `|u|²x₀` against `start`, and `γ` how fast it grows along
+/// `u`. Both meets read that when `Δ = a·g − γ·b` is negative and `Δ²` is more
+/// than `γ²(b² − ac)`, which is `Δ < −|γ|·√(b² − ac)` multiplied through by `a`
+/// — the same two signs [`into_the_arc_on_the_centres_side`] reads of the far
+/// arc's middle, for a pair of points instead of one. Nothing is divided and no
+/// root is taken: every sign is of a polynomial in stored numbers, in interval
+/// arithmetic.
+fn an_arc_never_reaches_the_plane(
+    own: &Plane,
+    round: &Surface,
+    start: Point,
+    into_the_arc: [Interval; 3],
+    cut: &Plane,
+) -> bool {
+    let Some(centred) = where_a_closed_crossing_is_centred(round, own) else {
+        return false;
+    };
+    let normal = exactly(own.normal().components());
+    let facing = exactly(cut.normal().components());
+    let along = cross(normal, facing);
+    let scale = dot(along, along);
+    let [own_offset, cut_offset] = [own.offset(), cut.offset()].map(Interval::exactly);
+    let [towards_own, towards_the_cut] = [cross(facing, along), cross(along, normal)];
+    let on_both: [Interval; 3] = core::array::from_fn(|axis| {
+        own_offset * towards_own[axis] + cut_offset * towards_the_cut[axis]
+    });
+    let less = |point: Point| -> [Interval; 3] {
+        let point = exactly(point.coordinates());
+        core::array::from_fn(|axis| on_both[axis] - scale * point[axis])
+    };
+    let off_from = less(centred.from);
+    let step = |by: Interval| -> [Interval; 3] {
+        core::array::from_fn(|axis| off_from[axis] + by * along[axis])
+    };
+    let (Some(a), Some(c), Some(past), Some(before)) = (
+        how_far_outside(round, along, Interval::exactly(0.0)),
+        how_far_outside(round, off_from, scale),
+        how_far_outside(round, step(Interval::exactly(1.0)), scale),
+        how_far_outside(round, step(Interval::exactly(-1.0)), scale),
+    ) else {
+        return false;
+    };
+    if scale.sign() != Decision::Pos || a.sign() != Decision::Pos {
+        return false;
+    }
+    let b = (past - before) * Interval::exactly(0.25);
+    let meets = b * b - a * c;
+    if meets.sign() == Decision::Neg {
+        return true;
+    }
+    let grows = dot(into_the_arc, along);
+    let middle = a * dot(into_the_arc, less(start)) - grows * b;
+    middle.sign() == Decision::Neg
+        && (middle * middle - grows * grows * meets).sign() == Decision::Pos
 }
 
 /// Which way the curve two surfaces cross in runs where it passes `at`, as
@@ -4544,6 +4640,102 @@ mod tests {
             .expect("this model made the key")
             .face_holds_the_point(face, point, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a washer is a shape this can follow")
+    }
+
+    /// A ball of radius 5 cut down to `x ≥ |y|` and `x ≥ |z|`, four planes
+    /// through its centre, keeps one face of its skin, and that face holds a
+    /// point of the sphere exactly when the four planes do.
+    ///
+    /// Each of the face's four arcs has the plane across from it as a cut with
+    /// neither of its ends on it: the arc on `x = z` runs from `(a, a, a)` to
+    /// `(a, −a, a)`, and `x = −z` meets its circle at `(0, ±5, 0)`, behind its
+    /// chord. Until row Q976 that read [`Lies::Across`] and the face was refused.
+    #[test]
+    fn the_skin_of_a_ball_cut_down_to_four_planes_through_its_centre_holds_what_they_hold() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let ball = model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let square =
+            crate::ProfileBuilder::new(vec![[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]])
+                .build(&policy, &mut log)
+                .expect("a square");
+        let quarter = core::f64::consts::FRAC_PI_4;
+        let a_cube_turned = |model: &mut Model, about: Axis, turn: f64, shift: Vector| {
+            let placed = Isometry::rotation(&about, turn)
+                .expect("a finite turn")
+                .compose(&Isometry::translation(shift).expect("a finite shift"));
+            model
+                .add_extrusion(&square, 20.0, &placed)
+                .expect("a positive height")
+        };
+        let either_side_of_y =
+            a_cube_turned(&mut model, Axis::y(), quarter, Vector::new(0.0, -10.0, 0.0));
+        let either_side_of_z = a_cube_turned(
+            &mut model,
+            Axis::z(),
+            -quarter,
+            Vector::new(0.0, 0.0, -10.0),
+        );
+        let wedge = model
+            .fuse(
+                &[ball],
+                &[either_side_of_y],
+                crate::Rule::Intersection,
+                &policy,
+                &mut log,
+            )
+            .expect("a ball and a cube with an edge through its centre")
+            .solids()
+            .to_vec();
+        let pyramid = model
+            .fuse(
+                &wedge,
+                &[either_side_of_z],
+                crate::Rule::Intersection,
+                &policy,
+                &mut log,
+            )
+            .expect("a wedge of a ball and a second such cube");
+        assert!(log.is_empty(), "a certified fuse logs nothing: {log:?}");
+        let [solid] = pyramid.solids() else {
+            panic!("one solid: {:?}", pyramid.solids());
+        };
+        let skins: Vec<FaceKey> = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+            .map(|face| face.key())
+            .collect();
+        let [skin] = skins[..] else {
+            panic!("one face on the sphere: {skins:?}");
+        };
+
+        let mut on_the_sphere: Vec<[f64; 3]> = vec![[5.0, 0.0, 0.0], [-5.0, 0.0, 0.0]];
+        for [one, other] in [[3.0, 4.0], [4.0, 3.0], [0.0, 5.0]] {
+            for [x, y] in [[one, other], [-one, other], [one, -other], [-one, -other]] {
+                on_the_sphere.extend([[x, y, 0.0], [x, 0.0, y], [0.0, x, y]]);
+            }
+        }
+        let mut held = 0;
+        for point in on_the_sphere {
+            let [x, y, z] = point;
+            let expected = if x > y.abs() && x > z.abs() {
+                held += 1;
+                OnAFace::Held
+            } else {
+                OnAFace::NotHeld
+            };
+            assert_eq!(
+                what_it_holds(&model, *solid, skin, PredicatePoint::from(point)),
+                expected,
+                "{point:?}"
+            );
+        }
+        assert_eq!(held, 5, "the points inside the four planes");
     }
 
     /// A flat face with a round hole in it holds the ring and not the hole.
