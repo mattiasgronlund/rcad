@@ -62,12 +62,14 @@ use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, Sol
 
 const TUBE: f64 = 1.0;
 
+type BuildsARing = fn(&mut Model) -> SolidKey;
+
 /// Each whole ring is a sound solid of the volume Pappus gives it, so what the
 /// fuses below refuse is the pair and not either ring.
 #[test]
 fn a_whole_ring_written_as_two_faces_validates_and_measures_what_pappus_gives() {
     let pi = core::f64::consts::PI;
-    let rings: [(&str, fn(&mut Model) -> SolidKey, f64); 3] = [
+    let rings: [(&str, BuildsARing, f64); 3] = [
         (
             "the ring of four cut along its equators",
             |model| a_whole_ring_cut_along_its_equators(model, 4.0),
