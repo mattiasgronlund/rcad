@@ -5343,24 +5343,42 @@ impl WalkingAWire {
         if self.will_not_lie_flat {
             return None;
         }
-        // A walk that ends at a pole leaves it by the way it set off, because
-        // that is where the loop closes, so the pole side is the last side of
-        // the patch and the longitude the walk ends at is the one it started at.
+        // A pole side still open at the end closes on the corner the walk set
+        // off from, which is where the loop closes; its far end is that corner,
+        // and so is the far corner of a pole the walk is still standing on.
+        //
+        // **That corner goes as many whole turns on from the first corner as
+        // the side's count put the walk, and not at the first corner's
+        // longitude as read.** A ball's piece below a plane whose circle runs
+        // through `N` is walked to `N` last, and the side there carries the
+        // walk a whole turn on from the rim's corner, so `climbed` below says
+        // a whole turn. Written at the rim corner's longitude as read, the
+        // side ran back across the piece instead, and the block less the ball
+        // and the two kept in common were refused
+        // `FacesDoNotAgreeWhichWayTheyFace` (Q963). The turns are added to the
+        // first corner's longitude rather than the walk's own taken, because
+        // the walk's own comes back as much as `4.4e-16` off the first corner
+        // where it comes back no turns on, in rcad-topo's own turned ball and
+        // block tests, and that side still closes on the first corner exactly,
+        // as it always did.
+        if let (Some(whole), Some(way), Some(first)) = (
+            self.wraps,
+            self.crossing.take(),
+            self.corners.first().copied(),
+        ) {
+            self.longitude +=
+                way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole);
+            self.leave_the_pole_at(first[0] + whole_turns_between(self.longitude, first[0], whole));
+        }
+        // A walk that ends at a pole with no side open leaves it by the way it
+        // set off, because that is where the loop closes, so the pole side is
+        // the last side of the patch and the longitude the walk ends at is the
+        // one it started at.
         if let Some(first) = self.corners.first().copied()
             && self.still_at_a_pole.is_some()
         {
             self.leave_the_pole_at(first[0]);
-            if self.crossing.is_none() {
-                self.longitude = first[0];
-            }
-        }
-        // A pole side still open at the end closes on the corner the walk set
-        // off from, which is where the loop closes; its far end is that corner.
-        if let (Some(whole), Some(way), Some(first)) =
-            (self.wraps, self.crossing.take(), self.corners.first())
-        {
-            self.longitude +=
-                way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole);
+            self.longitude = first[0];
         }
         // **Whether it went right round the surface is measured and not read
         // off the wire**, and that is §39.7 item 1. One coedge whose two ends
