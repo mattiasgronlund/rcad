@@ -126,6 +126,14 @@ Considered and not built:
   `Plane::transformed`'s doc comment and §17.9 are why it does not: the second
   scaling moves the last bit on every read.
 
+*Since §355 (2026-09-28) that constructor exists and the reader calls it for
+every `PLANE`, so "every constructor `Plane` has scales the normal again" is
+no longer true. The same gap reached a pipe's, a cone's and a ring's axis,
+which the reader scaled with `Axis::new`, and since §355.6 (2026-10-05) those
+keep the direction the file wrote too, through `Axis::as_written` and the same
+exact check: the 190 crash files of §355.5 that stopped at a pipe's axis pass,
+and 28 turned bends the reader refused are read back.*
+
 ### 313.4 The crash directory, before and after
 
 The same replay, on the base `4ac75a74` and on this branch:

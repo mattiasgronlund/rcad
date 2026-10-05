@@ -308,3 +308,14 @@ The walk's own zero test is not the gap — a plane that is not exactly square
 to a ring's axis does not cross it in circles round the axis, and drawing them
 there would need a bound on the lean charged to the walk's deviation that
 nothing names.*
+
+*Since Q1000 (2026-10-05, §355.6) the reader keeps a pipe's, a cone's and a
+ring's axis as the file wrote it (`Axis::as_written`), and a saved model
+loads with the axis bits it was saved with. Of the 372 turned bends all 372
+come back the same and none is refused
+(`how_often_a_turned_bend_comes_back_from_its_own_file` pins `(372, 0, 372, 0,
+0)`, and 76 for the ring axes `Axis::new` would have moved). Of
+`how_often_a_model_the_mutator_draws_is_refused`'s 400 draws, the 29
+comparisons that stopped at a different surface and the 3 at a file the
+reader refused went to none. The walk's own zero test is unchanged, for the
+reason the paragraph above gives.*
