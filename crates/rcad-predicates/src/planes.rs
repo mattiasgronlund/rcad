@@ -694,7 +694,7 @@ fn one_over(positive: Interval) -> Option<Interval> {
 /// rarely give the same sum. One that does costs four exact determinants and
 /// no wrong answer.
 const WHAT_EACH_ENTRY_IS_WEIGHED_BY: [f64; 10] = [
-    1.414_213_562_373_095_1,
+    core::f64::consts::SQRT_2,
     1.732_050_807_568_877_2,
     2.236_067_977_499_79,
     2.645_751_311_064_590_7,

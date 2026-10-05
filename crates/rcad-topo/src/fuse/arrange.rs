@@ -2132,12 +2132,11 @@ impl<'f> Arrangement<'f> {
     ) -> Result<()> {
         loop {
             let mut same = Sameness::of(self.nodes.len());
-            let on_each = self.the_nodes_on_each_crossing();
-            for crossing in 0..self.crossings.len() {
+            for (crossing, on_it) in self.the_nodes_on_each_crossing().iter().enumerate() {
                 if !self.crossings[crossing].reaches_the_face {
                     continue;
                 }
-                let order = self.nodes_along(crossing, &on_each[crossing], policy, log)?;
+                let order = self.nodes_along(crossing, on_it, policy, log)?;
                 for pair in order.windows(2) {
                     match self.order_along(crossing, pair[0], pair[1], policy, log)? {
                         Decision::Zero => same.join(pair[0], pair[1]),
@@ -2533,12 +2532,11 @@ impl<'f> Arrangement<'f> {
                 self.crossings[crossing].order.closes() && self.crossings[crossing].reaches_the_face
             })
             .collect();
-        let on_each = self.the_nodes_on_each_crossing();
-        for crossing in 0..self.crossings.len() {
+        for (crossing, on_it) in self.the_nodes_on_each_crossing().iter().enumerate() {
             if !self.crossings[crossing].reaches_the_face {
                 continue;
             }
-            let order = self.nodes_along(crossing, &on_each[crossing], policy, log)?;
+            let order = self.nodes_along(crossing, on_it, policy, log)?;
             let closes = self.crossings[crossing].order.closes();
             let steps = if closes {
                 order.len()
