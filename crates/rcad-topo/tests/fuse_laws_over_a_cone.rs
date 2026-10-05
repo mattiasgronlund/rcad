@@ -140,16 +140,96 @@ fn a_block_shared_with_its_union_with_a_cone_is_the_block() {
     .print_and_check("absorption A ∩ (A ∪ B), A the block", 4);
 }
 
-/// `A ∩ (A ∪ B)` is `A`, with `A` the cone.
+/// `A ∩ (A ∪ B)` is `A`, with `A` the cone, over every pair but the three of
+/// [`FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE`], which the next test pins as the
+/// wrong answers they are.
 #[test]
 fn a_cone_shared_with_its_union_with_a_block_is_the_cone() {
-    absorption(
-        &every_pair(),
-        Which::TheCone,
-        Rule::Union,
-        Rule::Intersection,
-    )
-    .print_and_check("absorption A ∩ (A ∪ B), A the cone", 1);
+    let pairs: Vec<Pair> = every_pair()
+        .into_iter()
+        .filter(|pair| !its_share_keeps_the_circle(*pair))
+        .collect();
+    absorption(&pairs, Which::TheCone, Rule::Union, Rule::Intersection)
+        .print_and_check("absorption A ∩ (A ∪ B), A the cone", 2);
+}
+
+/// `A ∩ (A ∪ B)` with `A` the frustum, in the three rows where it answers with
+/// a face, an edge and a corner `A` never had. **A known wrong B-rep, pinned as
+/// it is and not as right**: the row filed from Q977 is to leave the circle out
+/// (`docs/decisions.md` §325.5).
+///
+/// The block stands beside the frustum with their two boxes touching, so
+/// `A ∪ B` cuts the frustum's wall where the block's floor plane
+/// `z = near + 1` crosses it, and hands the wall back as two bands with a
+/// circle between them. `a_rim_a_fuse_cut_round_one_cone.rs` pins that circle
+/// on the first of these rows. `A ∩ (A ∪ B)` has the same block among its
+/// tools, is cut by the same plane, and keeps the circle too: four faces where
+/// `A` has three, and the corner the circle starts at. It validates, and
+/// measures what `A` measures within `measure`'s own bounds.
+///
+/// The first of them refused `AFaceMissesPartOfWhereItsSurfacesCross` until Q977 let a
+/// band of `A ∪ B` read the circle by the plane its run names. Leaving the circle out
+/// in `assemble.rs`, where a band's rim in two arcs of one closed input edge
+/// counts as the one closed side it becomes, gave all three `A` back and took
+/// the circle out of `A ∪ B` as well, which is the circle the rim file pins.
+///
+/// The day the fuse leaves the circle out, this fails, and the three rows go
+/// back to [`a_cone_shared_with_its_union_with_a_block_is_the_cone`].
+#[test]
+fn a_frustum_shared_with_its_union_with_a_block_beside_it_keeps_the_circle_the_union_cut() {
+    let policy = Policy::certified();
+    for (near, circle_starts_at) in FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE {
+        let pair = Pair::BesideABlock {
+            slope: 0.125,
+            near,
+            far: 8.0,
+        };
+        let mut model = a_model();
+        let (block, cone) = pair.build_into(&mut model);
+        let (united, union) = fused(&model, &[cone], &[block], Rule::Union)
+            .unwrap_or_else(|why| panic!("{pair:?}: A ∪ B refused at {why}"));
+        let (answer, pieces) = fused(&united, &[cone], &union, Rule::Intersection)
+            .unwrap_or_else(|why| panic!("{pair:?}: A ∩ (A ∪ B) refused at {why}"));
+        answer
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{pair:?}: A ∩ (A ∪ B) is not a sound solid: {why:?}"));
+        assert_eq!(pieces.len(), 1, "{pair:?}: A ∩ (A ∪ B) is one solid");
+
+        let mut want = corners_of(&model, &[cone]);
+        want.push(circle_starts_at.map(f64::to_bits));
+        want.sort_unstable();
+        assert_eq!(
+            corners_of(&answer, &pieces),
+            want,
+            "{pair:?}: A ∩ (A ∪ B) has A's corners and the one the circle at z = {} starts at",
+            near + 1.0
+        );
+        let faces_of = |model: &Model, solid: SolidKey| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .count()
+        };
+        assert_eq!(
+            (faces_of(&answer, pieces[0]), faces_of(&model, cone)),
+            (4, 3),
+            "{pair:?}: A ∩ (A ∪ B) has A's wall in two bands"
+        );
+
+        let found = volume_of(&answer, &pieces);
+        let want = volume_of(&model, &[cone]);
+        println!(
+            "{pair:?}: A ∩ (A ∪ B) measures {} ± {}, A {} ± {}",
+            found.volume, found.bound, want.volume, want.bound
+        );
+        assert!(
+            (found.volume - want.volume).abs() <= found.bound + want.bound,
+            "{pair:?}: A ∩ (A ∪ B) measures {} where A measures {}",
+            found.volume,
+            want.volume
+        );
+    }
 }
 
 /// `(A ∪ B) ∪ C` is `A ∪ (B ∪ C)`, with `A` a block, `B` a cone and `C` a
@@ -610,6 +690,28 @@ const fn a_pointed_cone_in_a_block_six_across(z: f64) -> Pair {
         far: 4.0,
         apex: [3.0, 3.0, z],
     }
+}
+
+/// The three rows of [`the_rows_the_answered_block_family_draws`], all of slope
+/// one eighth and `far` eight, whose `A ∩ (A ∪ B)` keeps the circle `A ∪ B` cut
+/// round the frustum's wall: each row's `near`, and the corner the circle
+/// starts at, at `z = near + 1`.
+const FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE: [(f64, [f64; 3]); 3] = [
+    (1.0, [0.0, -0.25, 2.0]),
+    (2.0, [0.0, -0.375, 3.0]),
+    (4.0, [0.0, -0.625, 5.0]),
+];
+
+/// Whether `pair` is one of [`FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE`].
+fn its_share_keeps_the_circle(pair: Pair) -> bool {
+    let Pair::BesideABlock { slope, near, far } = pair else {
+        return false;
+    };
+    slope.to_bits() == 0.125_f64.to_bits()
+        && far.to_bits() == 8.0_f64.to_bits()
+        && FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE
+            .iter()
+            .any(|(row, _)| row.to_bits() == near.to_bits())
 }
 
 /// Every pair: the grid frustums, the pointed cones, and the sixteen rows
