@@ -10,17 +10,19 @@
 //! (§361), when the first began to — so the answers are pinned in
 //! `classify.rs`'s own tests, on one solid holding two shells, the way a fuse
 //! writes two pieces that do not touch. Each test here fails the day its way
-//! opens, and that is the day the pin can move out here.
+//! opens, and that is the day the pin can move out here. The first builds with
+//! its cap circle drawn as two half circles too (Q524).
 
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
-    Scale, Surface, Torus, Vector,
+    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation, Picker, Plane,
+    Point, Scale, Surface, Torus, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftStep, Error, Invalid, Model, ProfileBuilder, Result, Rule, SolidBuilder, SolidKey,
+    DraftEdge, DraftStep, Error, Invalid, Model, ProfileBuilder, Result, Rule, SolidBuilder,
+    SolidKey,
 };
 use smallvec::smallvec;
 
@@ -75,6 +77,159 @@ fn a_bend_growing_out_of_a_blocks_side_builds_walked_the_one_way_round() {
         ),
         "the block's side walking the circle the same way as the wall: {turned_over:?}"
     );
+}
+
+/// The same glued bend with its cap circle drawn as two half circles builds
+/// walked the one way round too, and is refused walked the other way.
+///
+/// Q342's lane drew it so and was refused `AWireWillNotLieFlatOnItsFace`, and
+/// wrote down that it did not know whether that was a defect or a picker
+/// written wrong. Neither: the next test shows the pickers pick the two
+/// halves, and the input was wrong. That lane walked the cap's two halves the
+/// way this test's `Forward` does, which is the way the side's hole forces, but
+/// walked the end circle on the wall the other way and used the wall
+/// `Reversed`, the way bends were built before §361. So its wall's wire went
+/// round the tube the same way at both ends of the bend. A wire that goes
+/// round the tube twice in all bounds no piece of the torus, whichever way the
+/// face is used, and the mesher refused it by name. Walked `Reversed` here,
+/// the wall's wire goes round the tube the same way at both ends too, and is
+/// refused by that same name.
+///
+/// With one closed edge round the cap, the wrong walk is refused
+/// `AClosedEdgeIsWalkedAgainstItsSurface` instead; the halves are not closed
+/// edges, so that check does not see them, and the mesher is what refuses.
+#[test]
+fn a_bend_whose_cap_circle_is_two_halves_builds_walked_the_one_way_round() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let built = a_bend_out_of_a_block_with_its_cap(
+        &mut model,
+        Orientation::Forward,
+        TheCapCircle::TwoHalves,
+    )
+    .expect("a bend growing out of a block's side is a solid");
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("the block and the bend validate");
+    let measured = model
+        .solid(built)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a hundredth of the tube"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the block and the bend measure");
+    let holds = 32.0 + 2.0 * core::f64::consts::PI * core::f64::consts::PI;
+    assert!(
+        (measured.volume() - holds).abs() <= measured.volume_error(),
+        "the block and the bend hold {holds}, and measure {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+
+    let mut elsewhere = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turned_over = a_bend_out_of_a_block_with_its_cap(
+        &mut elsewhere,
+        Orientation::Reversed,
+        TheCapCircle::TwoHalves,
+    );
+    assert!(
+        matches!(turned_over, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
+        "the block's side walking the halves the same way as the wall: {turned_over:?}"
+    );
+}
+
+/// The two half circles the glued bend is built with are the half of the cap
+/// circle under its middle, from `(3, 0, 0)` to `(5, 0, 0)`, and the half over
+/// it, back again.
+///
+/// Read off the built solid: the hole in the block's side, each of its two
+/// edges walked between the surfaces of the two faces along it, and every
+/// point of each walk on the circle round `(4, 0, 0)` of radius one, on its
+/// own side of `z = 0`, and reaching the bottom or the top of the circle.
+#[test]
+fn the_cap_circles_two_halves_are_the_half_under_its_middle_and_the_half_over_it() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let built = a_bend_out_of_a_block_with_its_cap(
+        &mut model,
+        Orientation::Forward,
+        TheCapCircle::TwoHalves,
+    )
+    .expect("a bend growing out of a block's side is a solid");
+    let solid = model.solid(built).expect("this model made the key");
+    let side = solid
+        .faces()
+        .find(|face| face.wire_count() == 2)
+        .expect("the block's side y = 0 holds the cap circle as a hole");
+    let hole = side
+        .wires()
+        .find(|wire| wire.coedge_count() == 2)
+        .expect("the hole is two half circles");
+
+    let mut halves = Vec::with_capacity(2);
+    for coedge in hole.coedges() {
+        let edge = coedge.edge();
+        let along: Vec<Surface> = edge
+            .neighbouring_faces()
+            .map(|key| {
+                solid
+                    .faces()
+                    .find(|face| face.key() == key)
+                    .expect("a face along an edge of this solid is one of its faces")
+                    .surface()
+            })
+            .collect();
+        let [one, other] = along[..] else {
+            panic!("a half circle has two faces along it, and this one {along:?}");
+        };
+        let ends = [edge.start().point(), edge.end().point()];
+        let run = NamedRun::new(edge.run(), ends.map(PredicatePoint::from))
+            .expect("a half circle is not a closed run");
+        let walked = rcad_geom::walk(
+            &run,
+            [&one, &other],
+            Deflection::of(0.001).expect("a thousandth of the tube"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a half circle is walked");
+        halves.push((ends.map(|end| end.coordinates()), walked));
+    }
+
+    let [(under_ends, under), (over_ends, over)] = &halves[..] else {
+        panic!("two halves round the hole");
+    };
+    assert_eq!(*under_ends, [[3.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
+    assert_eq!(*over_ends, [[5.0, 0.0, 0.0], [3.0, 0.0, 0.0]]);
+    for (walked, up) in [(under, -1.0), (over, 1.0)] {
+        let off = walked.deviation().magnitude();
+        let points: Vec<[f64; 3]> = walked.points().iter().map(|at| at.coordinates()).collect();
+        assert!(
+            !points.is_empty(),
+            "a half circle has points between its ends"
+        );
+        for [x, y, z] in &points {
+            let from_the_middle = ((x - 4.0) * (x - 4.0) + z * z).sqrt();
+            assert!(
+                y.abs() <= off && (from_the_middle - 1.0).abs() <= off,
+                "({x}, {y}, {z}) is on the circle round (4, 0, 0) of radius one, to {off}"
+            );
+            assert!(
+                z * up > 0.0,
+                "({x}, {y}, {z}) is on the side of z = 0 that {up} points to"
+            );
+        }
+        let furthest = points
+            .iter()
+            .map(|[_, _, z]| z * up)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            furthest > 0.999,
+            "the half on the side {up} points to reaches {furthest} out of one"
+        );
+    }
 }
 
 /// A solid built face by face has one shell, so a block with a bend-shaped
@@ -153,10 +308,33 @@ fn an_l_less_a_bend_wholly_inside_it_is_refused_as_a_quartic() {
 /// `the_side_walks_it`; the bend's wall walks it the other way. The other five
 /// sides are rectangles.
 fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> Result<SolidKey> {
-    let the_wall_walks_it = match the_side_walks_it {
-        Orientation::Forward => Orientation::Reversed,
-        Orientation::Reversed => Orientation::Forward,
-    };
+    a_bend_out_of_a_block_with_its_cap(model, the_side_walks_it, TheCapCircle::OneClosedEdge)
+}
+
+/// How the bend's first cap circle, the hole in the block's side, is drawn.
+#[derive(Clone, Copy, Debug)]
+enum TheCapCircle {
+    /// One edge right round it, from its inner point `(3, 0, 0)` back to it.
+    OneClosedEdge,
+    /// Two half circles between its inner point `(3, 0, 0)` and its outer
+    /// point `(5, 0, 0)`, each a piece of where the side's plane crosses the
+    /// ring picked by `x ≥ 0`, which leaves the circle round `(4, 0, 0)` and
+    /// not the one round `(−4, 0, 0)`, and by `z ≤ 0` for the one that sets
+    /// off from the inner point, `z ≥ 0` for the one that comes back to it.
+    TwoHalves,
+}
+
+/// [`a_bend_out_of_a_block`] with its cap circle drawn `cap`'s way.
+///
+/// Walked `Forward`, the side goes round the cap's two halves from `(3, 0, 0)`
+/// under the middle to `(5, 0, 0)` and back over it, which is clockwise seen
+/// from `+y`, the side's outward normal, as a hole in it has to be. `Forward`
+/// is the walk that builds, whichever way the cap is drawn.
+fn a_bend_out_of_a_block_with_its_cap(
+    model: &mut Model,
+    the_side_walks_it: Orientation,
+    cap: TheCapCircle,
+) -> Result<SolidKey> {
     let mut builder = SolidBuilder::new();
     let mut corners = BTreeMap::new();
     for x in [2, 6] {
@@ -187,11 +365,27 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
             ],
         },
     )?;
-    let start_circle = builder.add_edge(
-        start_corner,
-        start_corner,
-        EdgeRun::RightRoundWhereItsFacesCross,
-    )?;
+    let round_the_cap_forwards: Vec<(DraftEdge, Orientation)> = match cap {
+        TheCapCircle::OneClosedEdge => vec![(
+            builder.add_edge(
+                start_corner,
+                start_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )?,
+            Orientation::Forward,
+        )],
+        TheCapCircle::TwoHalves => {
+            let outer_corner = builder.add_vertex(Point::new(5.0, 0.0, 0.0))?;
+            let under = builder.add_edge(start_corner, outer_corner, half_of_the_cap(-1.0))?;
+            let over = builder.add_edge(outer_corner, start_corner, half_of_the_cap(1.0))?;
+            vec![(under, Orientation::Forward), (over, Orientation::Forward)]
+        }
+    };
+    let the_side_goes_round_the_cap = match the_side_walks_it {
+        Orientation::Forward => round_the_cap_forwards,
+        Orientation::Reversed => walked_the_other_way(&round_the_cap_forwards),
+    };
+    let the_wall_goes_round_the_cap = walked_the_other_way(&the_side_goes_round_the_cap);
     let end_circle = builder.add_edge(
         end_corner,
         end_corner,
@@ -229,8 +423,11 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
         }
         let mut wires = vec![builder.add_wire(&steps)?];
         if normal == [0, 1, 0] {
-            let round_the_cap = builder.add_coedge(start_circle, the_side_walks_it)?;
-            wires.push(builder.add_wire(&[DraftStep::Along(round_the_cap)])?);
+            let mut round_the_cap = Vec::with_capacity(the_side_goes_round_the_cap.len());
+            for &(edge, turn) in &the_side_goes_round_the_cap {
+                round_the_cap.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
+            }
+            wires.push(builder.add_wire(&round_the_cap)?);
         }
         let [x, y, z] = normal.map(f64::from);
         let on_it = round[0].map(f64::from);
@@ -250,13 +447,12 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
         builder.add_face(Surface::Plane(plane), &[wire])?
     };
 
-    let mut round_the_wall = Vec::with_capacity(4);
-    for (edge, turn) in [
-        (start_circle, the_wall_walks_it),
+    let mut round_the_wall = Vec::with_capacity(5);
+    for (edge, turn) in the_wall_goes_round_the_cap.into_iter().chain([
         (seam, Orientation::Forward),
         (end_circle, Orientation::Forward),
         (seam, Orientation::Reversed),
-    ] {
+    ]) {
         round_the_wall.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
     }
     let wire = builder.add_wire(&round_the_wall)?;
@@ -271,4 +467,30 @@ fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> R
     shell.push((wall, Orientation::Forward));
     builder.add_shell(&shell)?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// The same edges walked back the way they came: last first, each turned round.
+fn walked_the_other_way(walk: &[(DraftEdge, Orientation)]) -> Vec<(DraftEdge, Orientation)> {
+    walk.iter()
+        .rev()
+        .map(|&(edge, turn)| (edge, turn.reversed()))
+        .collect()
+}
+
+/// The half of the cap circle round `(4, 0, 0)` on the side of `z = 0` that
+/// `side`, `1` or `−1`, points to.
+fn half_of_the_cap(side: f64) -> EdgeRun {
+    let the_blocks_side = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("the y axis is a unit normal");
+    EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(the_blocks_side),
+        picked_by: smallvec![
+            Picker::from(
+                HalfSpace::new(Vector::new(1.0, 0.0, 0.0), 0.0).expect("a normal with a length")
+            ),
+            Picker::from(
+                HalfSpace::new(Vector::new(0.0, 0.0, side), 0.0).expect("a normal with a length")
+            ),
+        ],
+    }
 }
