@@ -30,7 +30,9 @@
 //!
 //! # What is decided here instead
 //!
-//! A face is trimmed by the surfaces of the faces around it. Where each of
+//! A face is trimmed by the surfaces of the faces around it, or, at a circle
+//! whose run names a surface neither face is on, by that one
+//! ([`the_surface_an_edge_cuts`]). Where each of
 //! those surfaces meets this one in **whole closed curves that are all edges of
 //! this face**, the face is one of the two pieces that curve cuts its surface
 //! into, and which piece is a sign — [`side_of_surface`], the predicate that
@@ -4256,6 +4258,9 @@ fn dot(u: [Interval; 3], v: [Interval; 3]) -> Interval {
 /// so it is where the surface's own two coordinates were cut open and not where
 /// the face stops.
 ///
+/// What trims the face along an edge is the surface of the face across it,
+/// unless the edge's run names a third surface ([`the_surface_an_edge_cuts`]).
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when an edge of the face is
@@ -4276,7 +4281,7 @@ pub(crate) fn what_trims_this_face(
             if edge.start().key() != edge.end().key() {
                 return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
             }
-            let surface = partner.surface();
+            let surface = the_surface_an_edge_cuts(face, partner, edge);
             let corner = edge.start().key();
             match trimming.iter_mut().find(|known| known.surface == surface) {
                 Some(known) => known.corners_on_it.push(corner),
@@ -4288,6 +4293,48 @@ pub(crate) fn what_trims_this_face(
         }
     }
     Ok(trimming)
+}
+
+/// The surface that cuts `face` along `edge`, with `partner` across it, moved
+/// into place: the partner's own, unless the edge's run names a third surface,
+/// and then that one.
+///
+/// **A face across a circle can be on the face's own surface.** A bar whose
+/// wall is two bands on one pipe has the circle between them written as where
+/// the pipe crosses a plane, because the pair either side is one pipe and names
+/// no curve. Read off the partner, the band is trimmed by its own pipe, which
+/// [`intersect`] calls one surface with it, and every point of the band was
+/// refused `AFaceMissesPartOfWhereItsSurfacesCross` (row Q977, §325.5).
+///
+/// **Which two surfaces a run is between has one answer**,
+/// [`which_two_surfaces_a_run_is_between`], which the mesher and
+/// `Model::validate` already read the circle by. Every surface it hands back is
+/// one of the two faces' or the run's own, so a surface that is neither face's
+/// is the run's, and that is the surface the circle is on and the one that cuts
+/// this face there. Where it names only the two faces, the partner is it.
+///
+/// The question is asked of the stored surfaces, as the other readers ask it,
+/// so that a run naming a face's own surface bit for bit still does once both
+/// are moved; and the run's surface comes back moved the way the edge is.
+fn the_surface_an_edge_cuts(
+    face: FaceView<'_>,
+    partner: FaceView<'_>,
+    edge: EdgeView<'_>,
+) -> Surface {
+    let (mine, theirs) = (face.stored_surface(), partner.stored_surface());
+    let named = which_two_surfaces_a_run_is_between(edge.stored_run(), [&mine, &theirs]);
+    if named.iter().all(|one| *one == mine || *one == theirs) {
+        return partner.surface();
+    }
+    let run = edge.run();
+    let (EdgeRun::RightRoundWhereItCrosses { and } | EdgeRun::PartOfWhereItCrosses { and, .. }) =
+        &run
+    else {
+        panic!(
+            "only a run carrying a surface names one that neither face is on, and this is {run:?}"
+        );
+    };
+    *and
 }
 
 /// One surface trimming a face: which surface, how many edges of the face run

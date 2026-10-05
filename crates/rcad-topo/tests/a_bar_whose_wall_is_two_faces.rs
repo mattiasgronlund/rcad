@@ -1,5 +1,5 @@
 //! A round bar whose wall is two faces on one pipe, fused with a cube that
-//! touches nothing, and with a round bar on its own pipe, which is refused.
+//! touches nothing, and with a round bar on its own pipe.
 //!
 //! The bar runs from `z = 0` to `z = 4` and its wall is two bands, `z` 0 to 2
 //! and 2 to 4, with the circle at `z = 2` between them. Each band is written on
@@ -16,17 +16,19 @@
 //! input that are one surface used one way to the arrangement as one face, with
 //! the edges between them left out the way a seam is.
 //!
-//! A round bar on the bar's own pipe is still refused (row Q899, §325.5), and
-//! not by the fuse: neither band can say whether it holds a point of its wall,
-//! because the face across the circle is on its own surface. The two tests at
-//! the end pin that refusal, say what the answers are, and say what a temporary
-//! fix showed.
+//! A round bar on the bar's own pipe was refused (row Q899, §325.5), and not by
+//! the fuse: neither band could say whether it held a point of its wall,
+//! because the face across the circle is on its own surface. Each band now
+//! reads its trimming at that circle off the plane the circle's run names, and
+//! the fuse asks every band of the wall rather than the first (row Q977).
 //!
 //! # The oracle
 //!
 //! The cube touches nothing, so every answer is the bar, the cube, both or
 //! neither, and each solid is measured against `4π` and `1` inside the bound
-//! its own measurement publishes.
+//! its own measurement publishes. A round bar on the bar's pipe makes every
+//! answer a round bar of radius 1 or two of them, measured against `π` times
+//! its height the same way.
 
 use core::f64::consts::PI;
 
@@ -36,8 +38,8 @@ use rcad_geom::{
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    Containment, DraftEdge, DraftFace, DraftStep, Error, FaceKey, Invalid, Model, Rule,
-    SolidBuilder, SolidKey,
+    Containment, DraftEdge, DraftFace, DraftStep, Error, FaceKey, FaceView, Invalid, Model,
+    OnAFace, Rule, SolidBuilder, SolidKey,
 };
 
 const RADIUS: f64 = 1.0;
@@ -84,41 +86,34 @@ fn a_bar_whose_wall_is_two_bands_fuses_with_a_cube_that_touches_nothing() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// A round bar on the bar's own pipe is refused by every fuse with the bar, and
-/// what refuses it is the round bar's floor, not the two walls lying on one
-/// pipe.
+/// A round bar on the bar's own pipe, fused with the bar under every rule with
+/// either one as the argument, for every spelling pair and either order of the
+/// bar's faces: 48 fuses with each of two round bars.
 ///
 /// The round bar is `add_round_bar(1, 4)` standing on `z = 1`, or
 /// `add_round_bar(1, 1)` standing on `z = 2.5`, which lies on the upper band
-/// alone. Either one's floor is a disk inside the bar. The ray that places the
-/// disk's middle crosses the bar's wall, where neither band can say whether it
-/// holds the crossing ([`no_band_of_the_bar_can_say_what_it_holds`]), so every
-/// fuse refuses `a point in a piece that every solid could place` at the
-/// floor's one corner, `(1, 0, 1)` or `(1, 0, 2.5)`. That is every spelling
-/// pair, either order of the faces, every rule and both orders of the
-/// arguments: 48 fuses with each round bar.
+/// alone. With the long one the union is `5π`, the intersection `3π`, and the
+/// difference `π` either way round. With the short one the union is the bar,
+/// `4π`; the intersection is the short bar, `π`; the bar less it is two solids,
+/// `2.5π` and `0.5π`; and it less the bar is nothing.
 ///
-/// The answers exist. With the long round bar the union is `5π`, the
-/// intersection `3π`, and the difference `π` either way round. With the short
-/// one the union is the bar, `4π`; the intersection is the short bar, `π`; the
-/// bar less it is two solids, `2.5π` and `0.5π`; and it less the bar is
-/// nothing.
+/// Every fuse here used to be refused (row Q899, §325.5). The round bar's floor
+/// is a disk inside the bar, and the ray that places it crosses the bar's wall,
+/// where neither band could say whether it held the crossing
+/// ([`every_band_of_the_bar_says_what_it_holds`]): until row Q1008
+/// `Undecidable` at `a point in a piece that every solid could place`, at the
+/// floor's one corner, and since then `AFaceTrimmedByACurveThisCannotFollow`.
 ///
-/// **Why this is not `fuse/select.rs`.** The bar's wall goes into the fuse as
-/// one face with two keys, one per band, and `a_face_of_the_input_holds` asks
-/// a curved face about the first key only. Both are true, and a temporary
-/// print showed the two keys in all 48 fuses with the long round bar. But no
-/// fuse here gets that far,
-/// and once it does, every key refuses the way the bands do below. With a
-/// temporary change to `holds.rs` that read the circle at `z = 2` by the plane
-/// its run names, all 48 fuses with the long round bar answered, validated and
-/// measured what they should within the bound `measure` publishes. The short
-/// one then refused the 24 fuses where the lower band was the wall's first key
-/// and answered the other 24: its wall lies on the upper band only, the first
-/// key alone said no, and every point of its wall then lay on the bar's skin.
-/// Asking every key as well answered all 48. Both changes were taken out.
+/// **Two changes answer them, and the short bar needs both** (row Q977). The
+/// first is the band reading the circle at `z = 2` by the plane its run names,
+/// and that answers every fuse with the long round bar. The bar's wall goes into
+/// the fuse as one face with two keys, one per band, and the second change is
+/// `a_face_of_the_input_holds` in `fuse/select.rs` asking every key of it rather
+/// than the first. Without it the short bar's wall, which lies on the upper
+/// band alone, was refused in the 24 fuses whose first key is the lower band:
+/// that key alone said no, so every point of its wall lay on the bar's skin.
 #[test]
-fn a_round_bar_on_the_bars_own_pipe_is_refused_at_its_floor_inside_the_bar() {
+fn a_round_bar_on_the_bars_own_pipe_fuses_with_it() {
     let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
     let down = Cylinder::new(Axis::z().reversed(), RADIUS).expect("a radius");
     let mut wrong = Vec::new();
@@ -130,43 +125,26 @@ fn a_round_bar_on_the_bars_own_pipe_is_refused_at_its_floor_inside_the_bar() {
                 which_way(upper)
             );
             let (model, bar) = the_bar(lower, upper, lower_first, &bar_is);
-            // The long round bar from `z = 1` to `z = 5`, and the short one
-            // from `z = 2.5` to `z = 3.5` on the upper band alone.
-            for (floor, height) in [(1.0, 4.0), (2.5, 1.0)] {
-                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-                    for bar_first in [true, false] {
-                        let mut model = model.clone();
-                        let other = a_round_bar_on_the_pipe(&mut model, floor, height);
-                        let (arguments, tools) = if bar_first {
-                            ([bar], [other])
-                        } else {
-                            ([other], [bar])
-                        };
-                        let said = model
-                            .fuse(
-                                &arguments,
-                                &tools,
-                                rule,
-                                &Policy::certified(),
-                                &mut ProvenanceLog::new(),
-                            )
-                            .map(|fused| fused.solids().len());
-                        let refused_at_the_floor = matches!(
-                            &said,
-                            Err(Error::Undecidable { records })
-                                if records.records().iter().any(|record| {
-                                    record.predicate()
-                                        == "a point in a piece that every solid could place"
-                                        && record.inputs()
-                                            == [PredicatePoint::Exact([RADIUS, 0.0, floor])]
-                                })
-                        );
-                        if !refused_at_the_floor {
-                            wrong.push(format!(
-                                "{bar_is}, the round bar's floor at z = {floor}, {rule:?}, \
-                                 the bar first {bar_first}: {said:?}"
-                            ));
-                        }
+            for (floor, height, answers) in [
+                (1.0, 4.0, THE_LONG_ROUND_BAR),
+                (2.5, 1.0, THE_SHORT_ROUND_BAR),
+            ] {
+                for (rule, bar_first, truths) in answers {
+                    let what = format!(
+                        "{bar_is}, the round bar's floor at z = {floor}, {rule:?}, \
+                         the bar first {bar_first}"
+                    );
+                    let mut model = model.clone();
+                    let other = a_round_bar_on_the_pipe(&mut model, floor, height);
+                    let (arguments, tools) = if bar_first {
+                        ([bar], [other])
+                    } else {
+                        ([other], [bar])
+                    };
+                    if let Err(why) =
+                        fused_and_measured(&mut model, &arguments, &tools, rule, truths)
+                    {
+                        wrong.push(format!("{what}: {why}"));
                     }
                 }
             }
@@ -175,21 +153,42 @@ fn a_round_bar_on_the_bars_own_pipe_is_refused_at_its_floor_inside_the_bar() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The refusal above with no fuse: neither band of the bar can say whether it
-/// holds a point of its wall, so a ray from inside the bar that crosses the
-/// wall places nothing.
+/// The bar and `add_round_bar(1, 4)` on `z = 1`: each rule with the bar as the
+/// argument or as the tool, and the volumes of the solids that come back.
+const THE_LONG_ROUND_BAR: [(Rule, bool, &[f64]); 6] = [
+    (Rule::Union, true, &[5.0 * PI]),
+    (Rule::Union, false, &[5.0 * PI]),
+    (Rule::Intersection, true, &[3.0 * PI]),
+    (Rule::Intersection, false, &[3.0 * PI]),
+    (Rule::Difference, true, &[PI]),
+    (Rule::Difference, false, &[PI]),
+];
+
+/// The bar and `add_round_bar(1, 1)` on `z = 2.5`, the same way.
+const THE_SHORT_ROUND_BAR: [(Rule, bool, &[f64]); 6] = [
+    (Rule::Union, true, &[THE_BAR]),
+    (Rule::Union, false, &[THE_BAR]),
+    (Rule::Intersection, true, &[PI]),
+    (Rule::Intersection, false, &[PI]),
+    (Rule::Difference, true, &[2.5 * PI, 0.5 * PI]),
+    (Rule::Difference, false, &[]),
+];
+
+/// Each band of the bar says which points of its wall it holds, so a ray from
+/// inside the bar that crosses the wall places the point it started from:
+/// `(0, 0, 1)` is inside the bar, the lower band holds `(0, −1, 1)` and not
+/// `(0, −1, 3)`, and the upper band the other way round.
 ///
 /// `SolidView::face_holds_the_point` reads what trims a curved face off the
 /// faces across its edges, and across the circle at `z = 2` is the other band,
 /// on the same pipe. `intersect` calls two spellings of one pipe one surface,
-/// so the circle is not a curve the two cross in, and the band is refused
-/// `AFaceMissesPartOfWhereItsSurfacesCross` wherever it is asked. The circle's
-/// run names the plane `z = 2` as what it crosses. A temporary change to
-/// `holds.rs` that read the band's trimming at that circle off that plane gave
-/// the answers that exist: `(0, 0, 1)` is inside the bar, the lower band holds
-/// `(0, −1, 1)` and not `(0, −1, 3)`, and the upper band the other way round.
+/// so the circle is not a curve the two cross in, and every band was refused
+/// `AFaceMissesPartOfWhereItsSurfacesCross` wherever it was asked, and
+/// `(0, 0, 1)` was `CannotFollowAFacesTrimming` (row Q899). The circle's run
+/// names the plane `z = 2` as what it crosses, and the band now reads its
+/// trimming at that circle off that plane (row Q977, §325.5).
 #[test]
-fn no_band_of_the_bar_can_say_what_it_holds() {
+fn every_band_of_the_bar_says_what_it_holds() {
     let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
     let down = Cylinder::new(Axis::z().reversed(), RADIUS).expect("a radius");
     let policy = Policy::certified();
@@ -203,10 +202,10 @@ fn no_band_of_the_bar_can_say_what_it_holds() {
             );
             let (model, bar) = the_bar(lower, upper, lower_first, &bar_is);
             let solid = model.solid(bar).expect("this model made the key");
-            let bands: Vec<FaceKey> = solid
+            let bands: Vec<(FaceKey, f64)> = solid
                 .faces()
                 .filter(|face| face.surface().as_plane().is_none())
-                .map(|face| face.key())
+                .map(|face| (face.key(), the_middle_height_of(face)))
                 .collect();
             assert_eq!(bands.len(), 2, "{bar_is}: the wall is two bands");
             let middle = solid.classify_point(
@@ -214,21 +213,26 @@ fn no_band_of_the_bar_can_say_what_it_holds() {
                 &policy,
                 &mut ProvenanceLog::new(),
             );
-            if !matches!(middle, Containment::CannotFollowAFacesTrimming { face } if bands.contains(&face))
-            {
+            if !matches!(middle, Containment::Inside) {
                 wrong.push(format!("{bar_is}: (0, 0, 1) is {middle:?}"));
             }
-            for &band in &bands {
-                for at in [[0.0, -RADIUS, 1.0], [0.0, -RADIUS, 3.0]] {
+            for &(band, height) in &bands {
+                for z in [1.0, 3.0] {
                     let held = solid.face_holds_the_point(
                         band,
-                        PredicatePoint::Exact(at),
+                        PredicatePoint::Exact([0.0, -RADIUS, z]),
                         &policy,
                         &mut ProvenanceLog::new(),
                     );
-                    if !matches!(held, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == band)
-                    {
-                        wrong.push(format!("{bar_is}: {band:?} at {at:?} says {held:?}"));
+                    let truth = if (z < 2.0) == (height < 2.0) {
+                        OnAFace::Held
+                    } else {
+                        OnAFace::NotHeld
+                    };
+                    if !matches!(held, Ok(said) if said == truth) {
+                        wrong.push(format!(
+                            "{bar_is}: the band round z = {height} at (0, -1, {z}) says {held:?}"
+                        ));
                     }
                 }
             }
@@ -326,9 +330,22 @@ fn fused_with_a_far_cube(
     } else {
         ([cube], [bar])
     };
+    fused_and_measured(&mut model, &arguments, &tools, rule, truths)
+}
+
+/// Fuse `arguments` with `tools` in `model`, validate it, and match each solid
+/// of the answer to one of `truths` inside the bound its own measurement
+/// publishes.
+fn fused_and_measured(
+    model: &mut Model,
+    arguments: &[SolidKey],
+    tools: &[SolidKey],
+    rule: Rule,
+    truths: &[f64],
+) -> Result<(), String> {
     let policy = Policy::certified();
     let fused = model
-        .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+        .fuse(arguments, tools, rule, &policy, &mut ProvenanceLog::new())
         .map_err(|why| format!("refused {why:?}"))?;
     model
         .validate(&policy, &mut ProvenanceLog::new())
@@ -388,6 +405,19 @@ fn a_round_bar_on_the_pipe(model: &mut Model, floor: f64, height: f64) -> SolidK
             &Isometry::translation(Vector::new(0.0, 0.0, floor)).expect("a finite shift"),
         )
         .expect("a round bar")
+}
+
+/// Halfway between the lowest and the highest corner of a band: 1 for the
+/// lower, 3 for the upper.
+fn the_middle_height_of(band: FaceView<'_>) -> f64 {
+    let heights: Vec<f64> = band
+        .wires()
+        .flat_map(|wire| wire.points())
+        .map(|corner| corner.z())
+        .collect();
+    let lowest = heights.iter().copied().fold(f64::INFINITY, f64::min);
+    let highest = heights.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    (lowest + highest) / 2.0
 }
 
 fn which_way(wall: Cylinder) -> &'static str {

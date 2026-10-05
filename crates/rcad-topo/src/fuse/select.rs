@@ -1477,6 +1477,14 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 /// and its copy answered. Only [`OnAFace::Held`](crate::OnAFace::Held) counts
 /// here, as a zero winding does not count above: a point on the face's rim says
 /// nothing about the piece around it.
+///
+/// **A curved face of the input can be several faces of the model**, which the
+/// bake hands over as one because they are one surface used one way: a bar's
+/// wall in two bands on one pipe is one face with a key per band. It holds a
+/// point when any of them does. Asked of the first key alone, the wall of a
+/// round bar lying on the upper band read as off the bar's wall whenever the
+/// lower band was listed first, and every such fuse was refused `Undecidable`
+/// at [`PLACED_AGAINST_EVERY_SOLID`] (row Q977).
 fn a_face_of_the_input_holds(
     model: &Model,
     solid: &BakedSolid,
@@ -1518,7 +1526,12 @@ fn a_face_of_the_input_holds(
             .winding_around(&corners, point)
             .is_some_and(|winding| winding != 0));
     }
-    Ok(view.face_holds_the_point(face.keys[0], point, policy, log)? != crate::OnAFace::NotHeld)
+    for &key in &face.keys {
+        if view.face_holds_the_point(key, point, policy, log)? != crate::OnAFace::NotHeld {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The plane a piece's material is *behind*: the piece's own plane, turned round
