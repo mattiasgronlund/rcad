@@ -5,18 +5,24 @@
 //! the torus's sign alone cannot say what the cap holds: it is inside at the
 //! centre of the other disk too, and zero all round the other circle.
 //!
+//! The fuse asks this as well. The one partner whose caps are a bend's other
+//! disks is the bend turned half a turn, and fusing the two asks each cap about
+//! the centre of its other disk (§250.4, §280.6).
+//!
 //! What tells the two disks apart is a flat half-space whose plane holds the
 //! ring's axis and stands square to the cap: for the cap on `y = 0` that plane
 //! is `x = 0`. It cuts the tube too, in the disks of two more circles, round
 //! `(0, ±4, 0)`. The last three tests are about points there.
 
-use rcad_geom::{Axis, Isometry, Point, SIDE_OF_A_HALF_SPACE, Scale};
+use core::f64::consts::PI;
+
+use rcad_geom::{Axis, Deflection, Isometry, Point, SIDE_OF_A_HALF_SPACE, Scale};
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, FaceKey, Model, OnAFace, SolidKey};
+use rcad_topo::{Containment, Error, FaceKey, Model, OnAFace, Rule, SolidKey};
 
 mod rings;
 
-use rings::a_quarter_bend;
+use rings::{a_bend_turned_and_written_out, a_quarter_bend};
 
 /// A quarter bend of ring four and tube one, and its cap on `y = 0`, whose
 /// circle goes round `(4, 0, 0)` through the corner `(3, 0, 0)`.
@@ -143,6 +149,74 @@ fn a_point_in_the_other_disk_is_outside_the_bend() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// The bend fused with a copy of itself turned half a turn about the ring's
+/// axis, under every rule in both orders (§250.4, §280.6).
+///
+/// The copy runs from `−x` round to `−y`, so its caps are the other disks on
+/// the bend's two cap planes: round `(−4, 0, 0)` on `y = 0` and round
+/// `(0, −4, 0)` on `x = 0`. The two bends share no point, and each holds
+/// `π · 1² · (π/2) · 4 = 2π²` by Pappus. So the union is the two bends apart,
+/// the intersection is nothing, and each difference is its first argument,
+/// each in the three faces it came in with.
+///
+/// **This is the fuse that asks a cap about a point in its other disk.** The
+/// fuse tries each cap at its centre, so it asks the bend about `(−4, 0, 0)`
+/// and `(0, −4, 0)` and the copy about `(4, 0, 0)` and `(0, 4, 0)`. Each of
+/// those is in the other disk of the cap on the same plane, and
+/// `settle_against_each` puts it to that cap twice: once to see whether the
+/// piece lies on the cap (`coincident_face`, through `face_holds_the_point`),
+/// and once through the ray `classify_uncertain_point` fires from the point,
+/// which starts on the cap's plane. A temporary print in
+/// `what_a_round_wire_encloses` counted eight such calls in each of the six
+/// fuses, two per cap. In every one the tube holds the point and the
+/// half-space puts it outside the cap. Every other call it counted had its
+/// point outside the tube.
+///
+/// So the half-space is what this test leans on. With the `InFrontOf` arm
+/// keeping whatever the tube holds without asking the half-space, as before
+/// §250, both unions are refused `ResultIsNotManifold { count: 1 }`. The
+/// intersections and differences still come out right.
+#[test]
+fn a_bend_fused_with_its_copy_turned_half_a_turn_comes_to_what_each_rule_says() {
+    for (rule, bend_first, answer) in [
+        (Rule::Union, true, &["the bend", "the copy"][..]),
+        (Rule::Union, false, &["the bend", "the copy"]),
+        (Rule::Intersection, true, &[]),
+        (Rule::Intersection, false, &[]),
+        (Rule::Difference, true, &["the bend"]),
+        (Rule::Difference, false, &["the copy"]),
+    ] {
+        let named = format!(
+            "{rule:?} with the bend {}",
+            if bend_first { "first" } else { "second" }
+        );
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bend = a_bend_turned_and_written_out(&mut model, 4.0, 1.0, 1, 0)
+            .expect("a quarter bend is a solid");
+        let copy = a_bend_turned_and_written_out(&mut model, 4.0, 1.0, 1, 2)
+            .expect("a quarter bend turned half a turn is a solid since Q190");
+        let (one, other) = if bend_first {
+            (bend, copy)
+        } else {
+            (copy, bend)
+        };
+        let fused = model
+            .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{named}: {why:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{named}: the answer does not validate: {why:?}"));
+        let mut found: Vec<&str> = fused
+            .solids()
+            .iter()
+            .map(|&solid| which_bend_it_is(&model, solid, &named))
+            .collect();
+        found.sort_unstable();
+        assert_eq!(found, answer, "{named}");
+    }
+}
+
 /// A point the tube holds on `x = 0`, the plane between the cap's disk and the
 /// other one, is counted in the cap's disk: the half-space naming the cap's
 /// circle keeps what is on its plane, as a picker keeps what is on it. The
@@ -250,6 +324,36 @@ fn a_box_holding_a_point_of_a_turned_fat_bends_cap_is_refused_across_the_plane_b
     let answer =
         bend.face_holds_the_point(cap, across, &Policy::certified(), &mut ProvenanceLog::new());
     assert!(is_the_half_space_giving_up(&answer), "{answer:?}");
+}
+
+/// Which of the two bends `solid` is: it holds the middle of that bend's tube
+/// and not the other's, has a bend's three faces, and holds the `2π²` of a
+/// quarter of the ring within what `measure` says it can be out by.
+fn which_bend_it_is(model: &Model, solid: SolidKey, named: &str) -> &'static str {
+    let policy = Policy::certified();
+    let view = model.solid(solid).expect("the fuse made the key");
+    let holds = |at| view.classify_point(Point::from(at), &policy, &mut ProvenanceLog::new());
+    let which = match (holds([3.5, 3.5, 0.0]), holds([-3.5, -3.5, 0.0])) {
+        (Containment::Inside, Containment::Outside) => "the bend",
+        (Containment::Outside, Containment::Inside) => "the copy",
+        both => panic!("{named}: a solid that places the middles of the two tubes {both:?}"),
+    };
+    assert_eq!(view.faces().count(), 3, "{named}: {which}");
+    let measured = view
+        .measure(
+            Deflection::of(0.01).expect("a hundredth of the tube"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{named}: {which} does not measure: {why:?}"));
+    let a_quarter_of_the_ring = 2.0 * PI * PI;
+    assert!(
+        (measured.volume() - a_quarter_of_the_ring).abs() <= measured.volume_error(),
+        "{named}: {which} holds {a_quarter_of_the_ring}, and measures {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+    which
 }
 
 fn is_the_half_space_giving_up(answer: &Result<OnAFace, Error>) -> bool {
