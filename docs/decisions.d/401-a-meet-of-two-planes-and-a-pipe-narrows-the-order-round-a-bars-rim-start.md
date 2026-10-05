@@ -99,6 +99,20 @@ row Q866, queued rather than built here, since checking each of the
 four new answers against its volume by hand, and arguing the fourth under
 §16.10, is more than this section's row.
 
+**2026-10-05, queue row Q866 (`9b57019e`): the exclusion above is lifted.**
+`Arrangement::as_the_boxes_say` now asks the narrowed box for a meet of three
+planes too, worked out by `Arrangement::narrowed_box_of` from the node's own
+box and its three surfaces (`made_of`) only when the order asks, rather than
+kept on the node — keeping it on every three-plane meet was what Q990
+(`bd081312`) had already taken out for the 1x39 pin header's cost. By then
+Q901's `as_the_planes_say` and Q1008 had already moved three of the four pins
+above on their own: `a_block_below_a_frustum_...` and both steeper-plane
+tallies stay at the counts this lane measured for them, and the wedge still
+refuses by name, so none needed the §16.10 argument this section deferred. The
+fourth, the pyramid family, moves instead on a different case than item 3
+measured: a pyramid folding 1/4096 through its apex is united, checked
+against its volume by hand and against the corners it was built with.
+
 ### 401.5 The six fuses, both policies
 
 On `164b8f73`, under `Policy::certified()`, each of 284's six fuses of the

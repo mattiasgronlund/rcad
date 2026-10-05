@@ -173,10 +173,12 @@ impl MeetOfThree {
     /// failed and the draw above refused on another face (§281.3). The one
     /// caller is `rcad-topo`'s arrangement of a face. It asks the narrowed box
     /// whether every point of the meet lies within a corner's rounding, before
-    /// it folds the meet into the corner (§345), and, for a meet with a curved
-    /// surface in it, which of two points comes first along a crossing where
-    /// the meet's own box cannot say (Q209). The node it places keeps the box
-    /// [`meet_of_three_surfaces`] handed back.
+    /// it folds the meet into the corner (§345), and, since Q866, for a meet of
+    /// three planes as well as one with a curved surface in it, which of two
+    /// points comes first along a crossing where the meet's own box cannot say
+    /// (Q209). That question is worked out only when the order asks it, from
+    /// the node's own box and the three surfaces it was solved from, rather
+    /// than kept on the node (§401.4).
     ///
     /// The three planes are narrowed in [`meet_of_three_surfaces`]'s own fixed
     /// order, so the box that comes back depends on which three they are and
