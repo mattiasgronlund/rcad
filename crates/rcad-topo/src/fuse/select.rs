@@ -36,33 +36,40 @@
 //! plane whose side has been proved — see [`InPlane`]. No new predicate, and
 //! nothing is projected into two dimensions, which is §15.5's rule.
 //!
-//! # A piece that holds no point is placed by a side it shares
+//! # A piece no point places is placed by a side it shares
 //!
-//! **The one exception, and only where the search above found no point inside
-//! the piece at all** — or found one only among its last tries, the rungs of
-//! [`rungs_towards_each_crossing`], and could not place it, so that a piece
-//! that came here before the rungs still does (§365.6). A piece can be
-//! narrower than the spacing of `f64`, and then no point it could be handed is
-//! inside it (§346.3). Such a piece is placed against a solid by a side it
-//! shares with a piece cut from one of that solid's faces, from which side of
-//! that face its own material is on ([`SidesItShares`], §365.3). A fuse that
-//! found a point for every piece never gets there, and answers as it did.
+//! **Only where the search above placed no point inside the piece.** A fuse
+//! that placed a point in every piece never gets here, and answers as it did.
+//! A piece can be narrower than the spacing of `f64`, and then no point it
+//! could be handed is inside it (§346.3). Or every point inside it can be one
+//! no ray places: a piece of a bar's wall lies on the bar's pipe, and where the
+//! other solid has a face on that pipe that holds none of the piece, the ray
+//! from any point of the piece starts on that face's surface and cannot tell
+//! which side of it the point is on (Q1064). Such a piece is placed against a
+//! solid by a side it shares with a piece cut from one of that solid's faces,
+//! from which side of that face its own material is on ([`SidesItShares`],
+//! §365.3).
 //!
 //! **And where no side it shares places it either, by a corner** that the
 //! other solid's ray puts strictly inside or strictly outside it
 //! ([`by_a_corner`], §365.7): every open neighbourhood of a corner meets the
 //! piece's inside, and that inside is all on one side of the solid.
 //!
-//! # Last of all, a flat piece outside a flat solid by a plane
+//! # Or a flat piece outside a flat solid by a plane
 //!
-//! **After every rule above, and also where a point was found inside the piece
-//! and none of them could be placed**, a flat piece with straight sides is
-//! placed outside a solid with only flat faces when the plane of one of that
-//! solid's faces has the whole solid on or behind it and every corner of the
-//! piece strictly in front, each corner asked as the meet of three planes,
-//! exactly ([`by_a_plane`], Q991). Two turned cubes whose facing faces lie a
-//! rounding apart have no point inside either face that a ray can place, and
-//! this is what answers them.
+//! A flat piece with straight sides is placed outside a solid with only flat
+//! faces when the plane of one of that solid's faces has the whole solid on or
+//! behind it and every corner of the piece strictly in front, each corner asked
+//! as the meet of three planes, exactly ([`by_a_plane`], Q991). Two turned
+//! cubes whose facing faces lie a rounding apart have no point inside either
+//! face that a ray can place, and this is what answers them.
+//!
+//! **The plane comes last where no point was found inside the piece, and first
+//! where one was found and none placed.** That is the order each rule came in:
+//! the sides and the corners were tried only where no point was found, or only
+//! a rung of [`rungs_towards_each_crossing`] was (§365.6), until Q1064 tried
+//! them after the plane where a point was found as well. So every piece one of
+//! them placed before is placed by the same rule now.
 
 use rcad_geom::{
     Cone, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus, Vector,
@@ -119,16 +126,15 @@ pub(crate) struct Chosen {
 /// # Errors
 ///
 /// [`Error::Undecidable`] when a piece could not be placed against the solids
-/// it has to be placed against: under [`INSIDE_A_PIECE`] when no point inside
-/// it was found and neither a side it shares, nor a corner, nor a plane
-/// ([`by_a_plane`]) placed it, and under [`PLACED_AGAINST_EVERY_SOLID`] when a
-/// point was found and could not be, and no plane placed it either — after the
-/// sides it shares and its corners were tried too, where only a rung of
+/// it has to be placed against, and neither a side it shares, nor a corner, nor
+/// a plane ([`by_a_plane`]) placed it: under [`INSIDE_A_PIECE`] when no point
+/// inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a point
+/// was found and could not be placed, or only a rung of
 /// [`rungs_towards_each_crossing`] was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; no
-/// plane is tried then.
+/// side, corner or plane is tried then.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -161,7 +167,7 @@ pub(crate) fn choose(
         };
         let candidates = candidate_points(piece, &corners);
         let mut place = |against: &[usize], log: &mut ProvenanceLog| -> Result<Placement> {
-            let (unplaced, by_its_sides_or_corners) = match place_the_piece(
+            let (unplaced, the_plane_first) = match place_the_piece(
                 model,
                 &solids,
                 against,
@@ -172,20 +178,22 @@ pub(crate) fn choose(
                 log,
             )? {
                 Search::Placed(placement) => return Ok(placement),
-                Search::NoPointInside => (INSIDE_A_PIECE, true),
-                Search::OnlyRungsInside => (PLACED_AGAINST_EVERY_SOLID, true),
-                Search::NoPointInsidePlaced => (PLACED_AGAINST_EVERY_SOLID, false),
+                Search::NoPointInside => (INSIDE_A_PIECE, false),
+                Search::OnlyRungsInside => (PLACED_AGAINST_EVERY_SOLID, false),
+                Search::NoPointInsidePlaced => (PLACED_AGAINST_EVERY_SOLID, true),
             };
-            let by_its_sides_or_corners = if by_its_sides_or_corners {
+            let mut by_its_sides_or_corners = |log: &mut ProvenanceLog| {
                 by_a_shared_side
                     .place(index, against, policy, log)
                     .or_else(|| by_a_corner(model, &solids, against, &corners, policy, log))
-            } else {
-                None
             };
-            by_its_sides_or_corners
-                .or_else(|| by_a_plane(&solids, against, mine, piece))
-                .ok_or_else(|| gave_up(unplaced, &corners.concat(), Measures::Length, log))
+            let by_its_plane = || by_a_plane(&solids, against, mine, piece);
+            let placed = if the_plane_first {
+                by_its_plane().or_else(|| by_its_sides_or_corners(log))
+            } else {
+                by_its_sides_or_corners(log).or_else(by_its_plane)
+            };
+            placed.ok_or_else(|| gave_up(unplaced, &corners.concat(), Measures::Length, log))
         };
 
         let own_group: Vec<usize> = (0..solids.len())
@@ -385,11 +393,11 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// it ([`SidesItShares`]), a corner does ([`by_a_corner`]) or a plane does
 /// ([`by_a_plane`]); [`Search::NoPointInsidePlaced`] says one was found and
 /// could not be classified against every solid in the set, which is
-/// [`PLACED_AGAINST_EVERY_SOLID`] unless a plane places the piece. The first
-/// says to look at the piece's trimming, the second says the piece is fine and
-/// a surface further down gave up — the lens in §216.4 is the second wearing
-/// the first's name. Neither is a refusal here, so that the caller can try the
-/// plane before it refuses.
+/// [`PLACED_AGAINST_EVERY_SOLID`] unless a plane, a side or a corner places the
+/// piece. The first says to look at the piece's trimming, the second says the
+/// piece is fine and a surface further down gave up — the lens in §216.4 is the
+/// second wearing the first's name. Neither is a refusal here, so that the
+/// caller can try the plane, the sides and the corners before it refuses.
 ///
 /// **The rungs of [`rungs_towards_each_crossing`] come last**, after
 /// [`points_in_a_sliver_of_a_ball`] too, so a piece any earlier point placed
@@ -412,7 +420,8 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// when a point offered before the rungs was inside the piece, no point placed
 /// it, and one of them met that face. Such a point that none placed for any
 /// other reason is [`Search::NoPointInsidePlaced`], which the caller refuses
-/// under [`PLACED_AGAINST_EVERY_SOLID`] when no plane places the piece.
+/// under [`PLACED_AGAINST_EVERY_SOLID`] when no plane, side or corner places
+/// the piece.
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -510,9 +519,8 @@ enum Search {
     NoPointInsidePlaced,
 }
 
-/// §365.3's rule: a piece no point inside which was found, or only a rung that
-/// could not be placed, placed against each solid by a side it shares with a
-/// piece cut from one of that solid's faces.
+/// §365.3's rule: a piece no point inside which was placed, placed against each
+/// solid by a side it shares with a piece cut from one of that solid's faces.
 ///
 /// A piece `P` and a solid `S`. If a side of `P` is also a side of a piece cut
 /// from a face `G` of `S`, the other piece's side runs along none of `G`'s own
@@ -527,10 +535,20 @@ enum Search {
 /// [`FaceMeet::material_side`] names, which the walk that made the side decided
 /// for nothing (§36.6). No number is built and nothing is a tolerance.
 ///
+/// **None of this asks whether a point was found inside `P`**, so the rule
+/// holds where one was found and the ray could not place it. Nor can `P` lie on
+/// another face of `S`: beside the middle of the side, `S`'s skin is `G` alone.
+/// The piece Q1064 brought here is
+/// half of a bar's wall, `x ≥ 0`, against a block over `x < 0` that a bar on
+/// the same pipe was united with first. Every point of the half lies on the
+/// pipe, which that first bar's wall is on and holds none of, and the ray from
+/// each grazes that wall. Its two sides on `x = 0` are cuts of the block's
+/// face there, and its material is on the face's outer side.
+///
 /// Which sides are one is [`the_edge_each_side_of_every_piece_is`], the
 /// naming `assemble` gives the kept pieces, worked out once and only for a fuse
-/// that reaches here, so a fuse that found a point in every piece never pays
-/// for it.
+/// that reaches here, so a fuse that placed every piece by a point or a plane
+/// never pays for it.
 struct SidesItShares<'a> {
     model: &'a Model,
     scratch: &'a Scratch,
@@ -660,10 +678,9 @@ impl<'a> SidesItShares<'a> {
     }
 }
 
-/// The rule after §365.3's: a piece no point inside which was found, or only a
-/// rung that could not be placed, and that no side it shares placed, placed
-/// against each solid by the first of its own corners the solid's ray puts
-/// strictly inside or strictly outside it.
+/// The rule after §365.3's: a piece no point inside which was placed, and that
+/// no side it shares placed, placed against each solid by the first of its own
+/// corners the solid's ray puts strictly inside or strictly outside it.
 ///
 /// **Why a corner can place a piece.** A piece `P` and a solid `S`. `P` was cut
 /// by every surface of `S`, so its inside crosses no face of `S`, and that
@@ -692,9 +709,9 @@ impl<'a> SidesItShares<'a> {
 /// rounding apart over the stored planes, so no `f64` lies between them
 /// (`docs/decisions.md` §365.7). Inside one solid of the group is inside,
 /// outside every one is outside, and anything else is `None`, so the caller
-/// tries [`by_a_plane`] and refuses as it did before this was tried if that
-/// places nothing either. What the ray asked the policy goes into the log only
-/// when the piece is placed.
+/// tries [`by_a_plane`] where it has not yet, and refuses under the name the
+/// point search ran out under if nothing places the piece. What the ray asked
+/// the policy goes into the log only when the piece is placed.
 fn by_a_corner(
     model: &Model,
     solids: &[&BakedSolid],
@@ -764,11 +781,11 @@ fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool 
     })
 }
 
-/// The last rule before a refusal: a flat piece with straight sides placed
-/// outside each solid by a plane of one of that solid's faces that has the
-/// whole solid on or behind it and every corner of the piece strictly in
-/// front. Outside every solid of the group is outside; anything else is
-/// `None`, and the caller refuses as it did before this was tried.
+/// A flat piece with straight sides placed outside each solid by a plane of
+/// one of that solid's faces that has the whole solid on or behind it and
+/// every corner of the piece strictly in front. Outside every solid of the
+/// group is outside; anything else is `None`, and the caller tries the sides
+/// and the corners where it has not yet, or refuses.
 ///
 /// **Why a plane can place a piece.** Every face of a solid `S` here is flat,
 /// so `S`'s skin is polygons with straight sides, which lie in the hull of

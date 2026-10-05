@@ -44,13 +44,18 @@
 //! - **The lower bar and the block standing on the meeting, then the upper
 //!   bar.** The first union answers, `7200 + 8π`. The second is refused
 //!   `Undecidable` at "a point in a piece that every solid could place", on the
-//!   upper bar's wall, all of it inside the block, as the block over `x < 0`
-//!   is below. Not traced past the name. Until Q1062 the first union was
-//!   refused under that name instead, on the lower bar's top cap flush on the
-//!   block's floor, and so was every one call
+//!   upper bar's wall, all of it inside the block. Every point of that wall
+//!   lies on the pipe the first union's wall is on, which holds none of them,
+//!   and the ray from each grazes that wall: `select.rs` finds the points, and
+//!   the first union cannot place them. The block over `x < 0` was refused for
+//!   that reason until Q1064, and is answered by the sides of the upper wall
+//!   that are cuts of the block's face on `x = 0`; this wall has no side that
+//!   is a cut of a face of the block. Until Q1062 the first union was refused
+//!   under that name instead, on the lower bar's top cap flush on the block's
+//!   floor, and so was every one call
 //!   ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 //! - **The lower bar and a box through its wall, then the upper bar**
-//!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_four_boxes`]).
+//!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_three_boxes`]).
 //!   The first union answers and validates. The second is refused
 //!   `AFaceTrimmedByACurveThisCannotFollow` on that union's wall, where
 //!   `select.rs` asks the wall, through `SolidView::face_holds_the_point` in
@@ -58,10 +63,6 @@
 //!   pipe. A window cut opposite the seam is refused the same, so the seam is
 //!   not what stops it
 //!   ([`a_window_cut_opposite_the_seam_is_refused_the_same`]).
-//! - **The lower bar and the block over `x < 0`, then the upper bar.** Refused
-//!   `Undecidable` at "a point in a piece that every solid could place", on the
-//!   half of the upper bar's wall the block leaves, `x ≥ 0`. Not traced past
-//!   the name.
 
 use core::f64::consts::PI;
 
@@ -148,33 +149,30 @@ fn a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it() {
 }
 
 /// **The lower bar united with the box first, and the upper bar after, is
-/// refused for four of the seven boxes**, by every spelling of the wall, where
+/// refused for three of the seven boxes**, by every spelling of the wall, where
 /// the other two ways of asking answer:
 ///
 /// - the box across the meeting and the box on the lower wall at the second,
 ///   `AFaceTrimmedByACurveThisCannotFollow` naming the first union's wall;
-/// - the block over `x < 0` at the second, at the search for a point in a
-///   piece, on the half of the upper bar's wall at `x ≥ 0`;
-/// - the block standing on the meeting at the second, under the same name, on
-///   the whole of the upper bar's wall, whose corners are the two ends of its
-///   seam. Until Q1062 it was refused at the first union
+/// - the block standing on the meeting at the second, at the search for a
+///   point in a piece, on the whole of the upper bar's wall, whose corners are
+///   the two ends of its seam. Until Q1062 it was refused at the first union
 ///   ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 ///
-/// The other three answer by hand. Each refusal is a gap: the same three
+/// The other four answer by hand. Each refusal is a gap: the same three
 /// solids unite in one call, and with the bars first.
+///
+/// The block over `x < 0` was refused under the same name as the block on the
+/// meeting until Q1064, on the half of the upper bar's wall at `x ≥ 0`: the
+/// ray from every point of it grazed the first union's wall, on the same pipe.
+/// Its sides on `x = 0` are cuts of the block's face there, and `select.rs`
+/// now places it by them where a point was found and none placed.
 #[test]
-fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_four_boxes() {
+fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_three_boxes() {
     let the_upper_seam = vec![[RADIUS, 0.0, MEETING], [RADIUS, 0.0, 2.0 * MEETING]];
-    let half_the_upper_wall = vec![
-        [0.0, -RADIUS, MEETING],
-        [RADIUS, 0.0, MEETING],
-        [0.0, RADIUS, MEETING],
-        [0.0, RADIUS, 2.0 * MEETING],
-        [RADIUS, 0.0, 2.0 * MEETING],
-        [0.0, -RADIUS, 2.0 * MEETING],
-    ];
     for wall in EVERY_WALL {
         for the_box in [
+            TheBox::BlockOverNegativeX,
             TheBox::OnTheUpperWallOnly,
             TheBox::FarAway,
             TheBox::TopSlicedOffAbove,
@@ -189,19 +187,15 @@ fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_four_boxes
             refuses_on_the_first_unions_wall(the_box, wall);
         }
 
-        for (the_box, corners) in [
-            (TheBox::BlockOverNegativeX, &half_the_upper_wall),
-            (TheBox::SlicedAtTheMeeting, &the_upper_seam),
-        ] {
-            let asked = format!("{the_box:?}, {wall:?}");
-            let (_, said) = unite(the_box, wall, Call::LowerWithTheBoxThenUpper);
-            let refused = said.expect_err(&asked);
-            assert_eq!(
-                where_it_gave_up(&refused),
-                (PLACED_AGAINST_EVERY_SOLID, corners.clone()),
-                "{asked}"
-            );
-        }
+        let the_box = TheBox::SlicedAtTheMeeting;
+        let asked = format!("{the_box:?}, {wall:?}");
+        let (_, said) = unite(the_box, wall, Call::LowerWithTheBoxThenUpper);
+        let refused = said.expect_err(&asked);
+        assert_eq!(
+            where_it_gave_up(&refused),
+            (PLACED_AGAINST_EVERY_SOLID, the_upper_seam.clone()),
+            "{asked}"
+        );
     }
 }
 
