@@ -165,6 +165,11 @@ the block off it answers the same `8π` half bar
    through. Neither has been tried. `crates/rcad-topo/src/fuse/assemble.rs`,
    `crates/rcad-topo/src/fuse/arrange.rs`.
 
+   **Closed for pipes by §407, 2026-10-05.** The first of the two fixes
+   landed (Q354, `84538a4e`): the joiner now folds a pipe's spelling before
+   comparing, which is what §325.4's own 2026-09-29 note already recorded for
+   this row's own case.
+
 Once row 1 lands, the half bars reach `assemble` for the first time. Then
 they are §247.3's shape for putting an open arc between two spellings of
 one wall, and they can test the fold in an arc's name (§247.5's third item).

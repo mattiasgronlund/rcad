@@ -33,7 +33,14 @@ fail for reasons outside the reader (§229.4).
 ### 229.2 The joiner: three of §224.2's four items, and why not the third
 
 `ff78ab00` builds items 1, 2 and 4. Two curved faces with the same surface bits,
-used the same way round, are one face. A band that goes right round the axis
+used the same way round, are one face.
+
+> **2026-10-05 (§407): closed for pipes.** The rule above is now the folded
+> one for a pipe — the same bits are no longer required, only the same point
+> set and the same `used`. A cone still needs the same bits, as this section
+> built it.
+
+A band that goes right round the axis
 keeps one dissolved edge as its seam — the one with the lowest corners from ring
 to ring, so the choice does not depend on argument order — and a group with a
 ring it cannot count, or with no such edge, is left apart. No ring of a curved
