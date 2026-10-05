@@ -3047,12 +3047,16 @@ impl BuildingAMesh {
         let mut loops = Vec::with_capacity(patch.len());
         let mut along_a_loop = HashSet::new();
         let mut between_two_edges = Vec::new();
-        let model_corners: HashSet<u32> = self.at_vertex.values().copied().collect();
+        let mut model_corners: HashSet<u32> = self.at_vertex.values().copied().collect();
+        if let Some(corner) = self.the_corner_of_the_one_closed_edge_round(face) {
+            model_corners.remove(&corner);
+        }
         for one in patch {
             for (at, &from) in one.points.iter().enumerate() {
                 along_a_loop.insert(a_side(from, one.points[(at + 1) % one.points.len()]));
                 // A loop that is one closed edge passes its own corner and stays
-                // on that edge. Anywhere else a corner of the model, or a point
+                // on that edge, and so does a piece of a face bounded by that one
+                // edge alone. Anywhere else a corner of the model, or a point
                 // where this face was cut into pieces, is taken to be where the
                 // boundary passes from one neighbour to another; where that is
                 // not so — two edges between the same two faces — `finish` is
@@ -3143,6 +3147,48 @@ impl BuildingAMesh {
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
         self.worst = self.worst.max(cut.deviation().magnitude() + moving);
         Ok(())
+    }
+
+    /// The entry in the point table of the one corner of the one closed edge
+    /// `face` is bounded by, when that edge is all it is bounded by.
+    ///
+    /// **Cut into pieces, such a face still has that edge on both sides of its
+    /// corner**, so the corner is no place where the boundary passes from one
+    /// neighbour to another, and the face across sees the same three points in
+    /// a row there. Marked as such a place, it let a curved piece cut the corner
+    /// off with a side the face across draws too. A unit ball less a cube whose
+    /// face plane tilts 30 degrees and misses `N` by half a rounding leaves a
+    /// cap with `N` on its rim, cut in two from the rim up to `N`; at tilt
+    /// direction 250 the half holding the circle's corner cut it off as an ear
+    /// with `N` and the rim point past it, the disc cut off the same ear, and
+    /// measured at a deflection of `0.05` the answer was refused
+    /// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` (Q1026,
+    /// `a_turned_block_whose_face_holds_a_balls_pole.rs`). A corner a cut
+    /// leaves from stays marked, since there the boundary does pass from the
+    /// rim to the cut.
+    ///
+    /// **Only a face with one wire is asked**, the same reading
+    /// [`BuildingAMesh::cut_in_two`] makes of a cut's two ends, because that is
+    /// where the collision was shown. In a piece of a face with several wires,
+    /// each closing on one edge, those corners are still marked.
+    fn the_corner_of_the_one_closed_edge_round(&self, face: FaceView<'_>) -> Option<u32> {
+        let mut wires = face.wires();
+        let (Some(wire), None) = (wires.next(), wires.next()) else {
+            return None;
+        };
+        if !wire.closes_on_one_edge() {
+            return None;
+        }
+        let coedge = wire
+            .coedges()
+            .next()
+            .expect("a wire that closes on one edge has that edge's coedge");
+        Some(
+            *self
+                .at_vertex
+                .get(&coedge.start().key())
+                .expect("walking the wire put the corner its coedge starts at in the table"),
+        )
     }
 
     /// One wire, as corners in the face's own two coordinates and the points of
