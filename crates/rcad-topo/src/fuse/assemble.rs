@@ -5074,7 +5074,10 @@ fn which_meridian_circle_it_is(
 /// **Both named either way round, because two faces along one arc can carry
 /// two spellings of one surface** (§231.3) — a plane facing the other way, a
 /// pipe written with its axis turned round or its origin slid along the axis —
-/// and the fold is what keeps them one edge. Every fold is exact, so two
+/// and the fold is what keeps them one edge. The plane is folded further, to
+/// every multiple of its four numbers and not only the negation
+/// ([`name_of_the_plane_at_any_scale`]), because two turned faces can spell one
+/// plane a factor an ulp from one apart. Every fold is exact, so two
 /// different surfaces never come out with one name, and a spelling the fold
 /// leaves apart can only split an edge, which is refused, and never pair the
 /// faces of two different arcs (§330).
@@ -5161,7 +5164,7 @@ fn which_arc_of_a_circle_this_is(
     Some((
         [
             name_of_the_surface_either_way_round(&meet.carried_by[round_one]),
-            name_of_the_surface_either_way_round(flat),
+            name_of_the_plane_at_any_scale(flat),
         ],
         (along_the_round_one_then_the_plane != walked_from_the_far_corner)
             != is_written_the_other_way_round(flat),
@@ -5185,6 +5188,86 @@ fn is_written_the_other_way_round(flat: &Surface) -> bool {
         .into_iter()
         .find(|number| *number != 0.0)
         .is_some_and(|number| number < 0.0)
+}
+
+/// A name for the points of a plane, the same for every spelling of them:
+/// two planes get one name exactly when their four coefficients are in one
+/// ratio, whatever that ratio is.
+///
+/// **A ratio of `−1` is not the only one a fuse meets.** `intersect` calls two
+/// planes one surface whenever their coefficients are exactly proportional,
+/// and [`Plane::transformed`](rcad_geom::Plane) does not scale a turned normal
+/// back to length one, so two solids turned to put a face on one plane can
+/// spell it `(−c, c, 0, 0)` and `(c′, −c′, 0, 0)` with `c` and `c′` an ulp
+/// apart. [`name_of_the_surface_either_way_round`] folds only the negation and
+/// gave those two names, so the arc they both run along was two edges of one
+/// face each (`tests/a_turned_plane_exactly_proportional_to_another.rs`).
+///
+/// **The fold is exact.** Each coefficient that is not zero is an odd whole
+/// number times a power of two. Multiplying all four by one number multiplies
+/// every odd part by one odd ratio and adds one step to every power, so the odd
+/// parts divided by their greatest common divisor, and each power less the
+/// first one's, do not move — and the signs are turned so the first number that
+/// is not zero is positive, as [`is_written_the_other_way_round`] reads it.
+/// Two coefficient sets with one name are in one ratio by the same argument
+/// read backwards, so two different planes never share one. Slot 0 is `0`, the
+/// kind [`name_of_surface_bits`] gives a plane; slots 1 to 4 hold the odd parts
+/// with the turned sign in the top bit, and slots 5 to 8 the powers.
+///
+/// # Panics
+///
+/// If the surface is not a plane, as [`is_written_the_other_way_round`] does,
+/// or if one of its coefficients is not a finite number: `intersect` refuses
+/// a plane holding one before any crossing of it is walked.
+fn name_of_the_plane_at_any_scale(flat: &Surface) -> [u64; 9] {
+    let flat = flat
+        .as_plane()
+        .expect("a closed crossing this names runs between a plane and a curved surface");
+    let parts = flat.coefficients().map(|number| {
+        assert!(
+            number.is_finite(),
+            "a plane with a crossing walked holds finite numbers: {number}"
+        );
+        (number != 0.0).then(|| odd_part_and_power_of_two(number))
+    });
+    let common = parts.iter().flatten().fold(0, |common, &(odd, _, _)| {
+        greatest_common_divisor(common, odd)
+    });
+    let &(_, first_power, first_is_negative) = parts
+        .iter()
+        .flatten()
+        .next()
+        .expect("a plane's normal is never zero");
+    let mut name = [0; 9];
+    for (slot, part) in parts.iter().enumerate() {
+        if let &Some((odd, power, negative)) = part {
+            name[1 + slot] = (odd / common) | (u64::from(negative != first_is_negative) << 63);
+            name[5 + slot] = (power - first_power).cast_unsigned();
+        }
+    }
+    name
+}
+
+/// `number` as an odd whole number times two to a power, and whether it is
+/// negative: `(odd, power, negative)`.
+fn odd_part_and_power_of_two(number: f64) -> (u64, i64, bool) {
+    const FRACTION_BITS: u64 = (1 << 52) - 1;
+    let bits = number.abs().to_bits();
+    let stored_power = i64::try_from(bits >> 52).expect("eleven bits");
+    let (whole, power) = if stored_power == 0 {
+        (bits & FRACTION_BITS, -1074)
+    } else {
+        ((bits & FRACTION_BITS) | (1 << 52), stored_power - 1075)
+    };
+    let zeros = whole.trailing_zeros();
+    (whole >> zeros, power + i64::from(zeros), number < 0.0)
+}
+
+fn greatest_common_divisor(mut one: u64, mut other: u64) -> u64 {
+    while other != 0 {
+        (one, other) = (other, one % other);
+    }
+    one
 }
 
 /// Which of two surfaces a closed crossing runs round — `0` or `1` — or `None`
