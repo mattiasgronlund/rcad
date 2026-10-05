@@ -149,6 +149,14 @@ impl Plane {
     ///
     /// A normal outside it is not refused, only scaled; see
     /// [`Plane::from_point_and_normal_as_written`] for why.
+    ///
+    /// **An axis's direction is held to the same bound**, by
+    /// [`Axis::as_written`](crate::Axis::as_written) and through the same
+    /// check: [`Axis::new`](crate::Axis::new) scales a direction with the same
+    /// [`Vector::scaled_to_length_one_from_anywhere`] and
+    /// [`Axis::transformed`](crate::Axis::transformed) turns it with the same
+    /// [`Isometry::apply_to_vector`], so the two roundings above are the two
+    /// that reach a moved axis too.
     pub const NORMAL_LENGTH_ROUNDOFF: f64 = 64.0 * f64::EPSILON;
 
     /// The plane through `point` at right angles to `normal`.
@@ -746,7 +754,12 @@ pub enum PlaneAgreement {
 /// `false` for a normal that is not made of finite numbers, and for one with
 /// a square past the top of the range: neither is a turned unit vector, and
 /// [`Plane::from_point_and_normal`] is what answers for them.
-fn has_length_one_to_within_a_turn(normal: Vector) -> bool {
+///
+/// [`Axis::as_written`](crate::Axis::as_written) asks the same of an axis's
+/// direction, so that a plane and an axis a file wrote with one direction keep
+/// or scale it alike; for an axis, [`Axis::new`](crate::Axis::new) is what
+/// answers when this says `false`.
+pub(crate) fn has_length_one_to_within_a_turn(normal: Vector) -> bool {
     const EVERY_SQUARE_TOO_SMALL_TO_FORM_IS_BELOW: f64 =
         f64::MIN_POSITIVE * 9_007_199_254_740_992.0 * 2.0;
     if !normal.is_finite() {
