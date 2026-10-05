@@ -182,6 +182,95 @@ fn a_frustum_up_through_a_block_read_back_from_rounded_text() {
     }
 }
 
+/// `FrustumAndBlock { side: 11, narrow: 1, wide: 3, up_per_unit_wider: 2, at:
+/// [7, 4] }` puts the frustum's apex at `(7, 4, −3)` with slope one half, so
+/// the cone it is cut from, swept up to `z = 11` — the block's own roof,
+/// though the frustum's own faces stop at `z = 3` — has radius exactly seven
+/// there: tangent to both `x = 0` and `y = 11`, the far edges of the range
+/// `at`'s strategy allows.
+///
+/// An importer that re-exports a file it read writes every real at its own
+/// precision, not the file's. Reading this pair's file rounded to thirteen
+/// digits and written out again at seventeen defeats §366.7's corner
+/// recovery: the angle now carries seventeen digits of its own, so
+/// `its_angle_is_written_as`'s half-unit-in-the-last-digit bracket no longer
+/// holds the true angle, and the reader takes the tangent of the thirteen-digit
+/// angle instead. Measured here: a slope of `0.49999999999999234`, `7.66e-15`
+/// short of one half, and at `z = 11` a radius `1.07e-13` short of seven — the
+/// swept circle no longer touches `x = 0` and `y = 11`, and the sliver between
+/// is a C-shaped piece with two necks that thin (`rungs_towards_each_crossing`'s
+/// own words for the shape).
+///
+/// Q828 traced the three `Undecidable` fuses in §366.6's thirteen-digit row to
+/// this piece. Since Q897 (`a7e263e9`) the rungs of `rungs_towards_each_crossing`
+/// reach into a piece this thin, and all three rules answer within
+/// [`how_far_rounding_can_move_a_volume`] of the exact reading. Before, at
+/// `b00d9291`, the same piece was `Undecidable` for every rule.
+#[test]
+fn a_frustum_tangent_to_two_walls_at_its_blocks_roof_is_read_back_rounded_and_reexported() {
+    let policy = Policy::certified();
+    let drawn = FrustumAndBlock {
+        side: 11,
+        narrow: 1,
+        wide: 3,
+        up_per_unit_wider: 2,
+        at: [7, 4],
+    };
+    let (mut model, keys) = drawn.build();
+    for key in keys {
+        let answer = model
+            .fuse(&[key], &[], Rule::Union, &policy, &mut ProvenanceLog::new())
+            .expect("a solid united with nothing is one solid");
+        assert_eq!(
+            answer.solids().len(),
+            1,
+            "baking one solid gave {} solids",
+            answer.solids().len()
+        );
+    }
+    let written = model.solid_count();
+
+    let text = rcad_step::write(&model, "a frustum tangent to two walls").expect("written");
+    let (exact, _) = with_every_real_rounded(&text, DIGITS_THAT_READ_BACK_EXACTLY);
+    let exact = read_back(&exact).expect("the exact text is read back");
+    let exact_keys = the_baked_pair_in(&exact, written).expect("the baked pair is the last two");
+    let skin = skin_of(exact.model(), &exact_keys).expect("the pair measures");
+    let largest = exact.model().scale().nominal_size();
+
+    let mut control = Vec::with_capacity(RULES.len());
+    for rule in RULES {
+        let answer = fused(exact.model(), exact_keys[0], exact_keys[1], rule)
+            .expect("the exact reading answers every rule")
+            .expect("the exact reading answers every rule");
+        control.push(answer);
+    }
+
+    let reexported = rounded_then_reexported_at_seventeen_digits(&text, 13);
+    let back = read_back(&reexported).expect("the rounded and reexported text is read back");
+    let back_keys = the_baked_pair_in(&back, written).expect("the baked pair is the last two");
+    back.model()
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("the rounded and reexported reading is a sound model");
+
+    let bound = how_far_rounding_can_move_a_volume(13, largest, skin);
+    for (rule, control) in RULES.into_iter().zip(&control) {
+        let answer = fused(back.model(), back_keys[0], back_keys[1], rule)
+            .unwrap_or_else(|wrong| panic!("{rule:?}: {wrong}"))
+            .unwrap_or_else(|refused| {
+                panic!("{rule:?} was decided from the exact reading and is refused here: {refused}")
+            });
+        let moved = (control.volume - answer.volume).abs();
+        let allowed = bound + control.volume_error + answer.volume_error;
+        assert!(
+            moved <= allowed,
+            "{rule:?}: volume {} against {} exactly, {moved:e} apart where rounding can move it \
+             {allowed:e}",
+            answer.volume,
+            control.volume
+        );
+    }
+}
+
 /// Every ball of the family is written and read back, since the writer leaves
 /// a ball's poles unwritten and the reader puts them back where the seam turns
 /// (`a_ball_written_out_and_read_back_is_the_same_ball` in
@@ -753,6 +842,66 @@ fn with_every_real_rounded(text: &str, digits: usize) -> (String, usize) {
         "{moved} reals came out different at seventeen digits"
     );
     (out, moved)
+}
+
+/// The Part 21 text with every `REAL` cut to `digits` significant digits and
+/// then written out again at seventeen — what an importer that reads a
+/// rounded file and re-exports it does, carrying forward the rounded value
+/// but none of the rounding's digit count.
+///
+/// Unlike [`with_every_real_rounded`], the written text is not the rounding
+/// itself but `{cut:.16E}` of it, so the text claims the precision of an
+/// `f64` for a number that is only good to `digits`.
+fn rounded_then_reexported_at_seventeen_digits(text: &str, digits: usize) -> String {
+    let data = text
+        .find("DATA;")
+        .expect("a Part 21 text has a data section");
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..data]);
+    let mut at = data;
+    while at < bytes.len() {
+        let here = bytes[at];
+        let next = bytes.get(at + 1).copied().unwrap_or(b' ');
+        let end = if here == b'\'' {
+            at + 2 + text[at + 1..].find('\'').expect("a string that ends")
+        } else if here.is_ascii_alphabetic() || here == b'_' || here == b'#' {
+            at + 1
+                + bytes[at + 1..]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_')
+                    .count()
+        } else if here.is_ascii_digit() || ((here == b'-' || here == b'+') && next.is_ascii_digit())
+        {
+            let end = the_end_of_a_number(bytes, at);
+            let number = &text[at..end];
+            if number.contains('.') {
+                let value: f64 = number
+                    .parse()
+                    .unwrap_or_else(|_| panic!("{number} is a real this writer wrote"));
+                let cut: f64 = format!("{value:.*E}", digits - 1)
+                    .parse()
+                    .expect("a real this function wrote");
+                let written = format!("{cut:.16E}");
+                let written = if written.contains('.') {
+                    written
+                } else {
+                    written.replacen('E', ".E", 1)
+                };
+                out.push_str(&written);
+            } else {
+                out.push_str(number);
+            }
+            at = end;
+            continue;
+        } else {
+            assert!(here.is_ascii(), "outside a string this writer writes ASCII");
+            at + 1
+        };
+        out.push_str(&text[at..end]);
+        at = end;
+    }
+    out
 }
 
 /// Where the number starting at `at` ends: a sign, digits, and then a decimal
