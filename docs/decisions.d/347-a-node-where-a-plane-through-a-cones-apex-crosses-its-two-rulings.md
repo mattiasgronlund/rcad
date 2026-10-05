@@ -177,6 +177,25 @@ showed that group in both unions and the cone less the block.
   whose walls touch its rim, so joining these is more than dropping the
   rule. The answer is the right solid and validates, with two faces too
   many and edges with one cone on both sides.
+
+  **2026-10-05 (Q989):** joined. `Assembly::needs_no_seam` now takes one
+  ring right round a cone, and nothing else, as a cap round its apex: the
+  other piece that ring cuts the nappe into is unbounded, so the face holds
+  the apex, and the mesher cuts it up to the apex
+  (`cut_a_cap_up_to_its_pole`) with no seam kept. The unions answer 8 faces
+  and the cone less the block 4, validated and inside the mesh's own error
+  of the volumes in 347.3; `mise exec -- just t -p rcad-topo --test
+  a_block_face_through_a_cones_apex` pins them. Over the workspace, a
+  temporary print in the new arm showed it reached in three more tests, all
+  passing: `fuses_that_touch.rs`'s
+  `a_pointed_cone_standing_on_its_apex_on_a_block` (rings of 4 and 8 sides),
+  and `how_often_a_fuse_with_a_cone_refuses.rs`'s
+  `how_often_a_certified_fuse_with_a_cone_in_it_refuses` and
+  `uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_asked`
+  (rings of 3, 6 and 9 sides, seven pieces each, the corner-up cube round a
+  pointed cone's apex). Whether their printed counts moved was not compared.
+  The rim case on `Assembly::the_corners_each_closed_run_keeps` was not
+  measured again.
 - **A pin outside Q207's write set moved.** In
   `a_frustum_cut_in_half_down_its_axis.rs`,
   `a_block_whose_floor_runs_through_the_apex_is_refused_there` pinned all six

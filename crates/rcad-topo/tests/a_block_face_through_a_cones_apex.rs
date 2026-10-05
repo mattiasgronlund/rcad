@@ -157,19 +157,22 @@ fn the_same_block_one_unit_off_the_apex_answers_every_fuse() {
 /// its cap and the trapezium on `x = 0`, each cut to `x > 0`, and the half
 /// disc on the floor. The block less the cone is eight: the block's six, the
 /// floor and the face `x = 0` each notched where the cone runs through them,
-/// and the skin and the cap the other way round.
+/// and the skin and the cap the other way round. The cone less the block is
+/// four: the skin outside the block, the cap's `x < 0` half, and the
+/// trapezium on `x = 0` and the half disc on the floor turned round. The union
+/// is eight: the block's six with the floor and the face `x = 0` notched, the
+/// skin outside the block and the cap's `x < 0` half.
 ///
-/// **The skin outside the block is three faces where one would do**, so the
-/// cone less the block is six faces and not four, and the union ten and not
-/// eight. The cut along the rulings below the floor and round the cone at
-/// `z = 1` for `x < 0` leaves three pieces of the one cone: the tip either
-/// side of `x = 0`, and the `x < 0` half above the floor. Joined, they are
-/// one face whose one ring, of four sides, goes right round the apex, and
-/// `Assembly::edges_a_curved_face_keeps` in `fuse/assemble.rs` leaves apart
-/// every group with a ring that goes right round and is not a band between
-/// two rings. A temporary print there showed that group, one ring of four
-/// sides going round and no seam, in both unions and the cone less the block.
-/// The answer is still the right solid, and it validates.
+/// **The skin outside the block is one face** (§347.4, Q989). The cut along
+/// the rulings below the floor and round the cone at `z = 1` for `x < 0`
+/// leaves three pieces of the one cone: the tip either side of `x = 0`, and
+/// the `x < 0` half above the floor. Joined, they are one face whose one ring,
+/// of four sides, goes right round the apex, and
+/// `Assembly::edges_a_curved_face_keeps` in `fuse/assemble.rs` left them
+/// apart, since it only looked for a seam across a band between two rings:
+/// ten faces for the unions and six for the cone less the block. One ring
+/// right round a cone and nothing else is a cap round its apex, which needs
+/// no seam, and the mesher cuts it up to the apex.
 #[test]
 fn the_same_block_with_the_apex_just_below_its_face_answers_every_fuse() {
     let pi = core::f64::consts::PI;
@@ -177,9 +180,9 @@ fn the_same_block_with_the_apex_just_below_its_face_answers_every_fuse() {
     let shared = 511.0 * pi / 24.0;
     for (rule, cone_first) in six_fuses() {
         let (volume, faces) = match (rule, cone_first) {
-            (Rule::Union, _) => (block + cone - shared, 10),
+            (Rule::Union, _) => (block + cone - shared, 8),
             (Rule::Intersection, _) => (shared, 4),
-            (Rule::Difference, true) => (cone - shared, 6),
+            (Rule::Difference, true) => (cone - shared, 4),
             (Rule::Difference, false) => (block - shared, 8),
             (other, _) => panic!("{other:?} is not one of the six"),
         };
