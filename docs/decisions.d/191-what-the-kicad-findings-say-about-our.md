@@ -205,6 +205,15 @@ are pinned at nothing answered. Not built: a bar lying on its side (a quarter
 turn of a round solid is not exact), a plane along a cone's ruling, cone against
 anything curved.
 
+**2026-10-05 note (Q1078): the bar's cap and the frustum's cap rows above are
+stale.** Since Q1062 (`7376b2f3`) both answer every fuse: `fuses_that_touch.rs`'s
+refreshed table gives the bar's cap flush on a block 66 of 66 touching and the
+frustum's cap flush on a block 90 of 90 touching. The cause was
+`select.rs`'s `a_face_of_the_input_holds`, which asked `SolidView::face_holds_the_point`
+where its fan of corners could not wind round a point on a spoke — the point in
+the middle of a flush square cap sits on both diagonals, so every apex's fan had
+it on a spoke and the winding read `None`.
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which
