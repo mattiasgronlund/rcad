@@ -48,8 +48,9 @@
 //! asserts a floor on what it compared, measured on the day it was written, and
 //! a drop in it is a regression rather than a draw (§19.1).
 //!
-//! The four `#[ignore]`d tests at the bottom are the asymmetries this found that
-//! still stand; the far cube's went when pieces of one cone were joined (§224.2).
+//! The three `#[ignore]`d tests at the bottom are the asymmetries this found
+//! that still stand; the far cube's went when pieces of one cone were joined
+//! (§224.2), and the frustum-beside-a-block's went too, un-diagnosed, by Q1102.
 
 mod cones;
 mod pairs;
@@ -543,9 +544,11 @@ fn a_frustum_cut_by_a_block_and_a_cube_in_the_frustum_unite_one_way_and_not_the_
 /// Until §222.3's first case was fixed both groupings refused, so this sat
 /// among the trios that agree: the grouping that answers now was the
 /// frustum and the cube handed to the block as two tools, which is that case.
+///
+/// **Un-ignored by Q1102: both groupings now answer and agree.** Found
+/// passing by Q929; which change of the several since this was ignored fixed
+/// it was not traced.
 #[test]
-#[ignore = "associativity: frustum through a block, cube overlapping the block — (block ∪ frustum) \
-            is Undecidable on a point inside a piece of a face, the other grouping answers"]
 fn a_frustum_a_block_and_a_cube_beside_the_frustum_unite_one_way_and_not_the_other() {
     associativity(&[Trio {
         pair: on_the_grid(8, 2, [4, 4]),
