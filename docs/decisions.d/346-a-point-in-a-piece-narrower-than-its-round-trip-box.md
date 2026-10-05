@@ -515,7 +515,71 @@ costs one fuse some correct first candidates without changing its answer.
 point itself. `InPlane` reads a point that is off the plane at the place where
 the line from its reference point through that point meets the plane. Whether
 that place can be far enough from the point's foot to matter was not traced.
-It is a guess nobody has run, so it carries no class.
+It is a guess nobody has run, so it carries no class. *Q685: it can, and the
+corners are now read over the same box; below.*
+
+**The winding read off the plane (Q685).** *Queue row Q685, lane
+`lane-q685-a-candidate-a-rounding-off-a-flat-pieces-plane`, off `34bd7ffd`.*
+`InPlane`'s reference point `r` is `max(|offset|, 1)` off the plane, above the
+plane's point `o` nearest the origin, and every turn it answers is the turn of
+the places where lines from `r` meet the plane. A point `h` high, whose foot is
+`f`, is read at `f + (f − o)·h/(d − h)`, with `d` the height of `r`: similar
+triangles, since the line from `r` through the point leaves the plane's normal
+through `o` at the ratio `d : d − h`. So the read place is
+`|f − o|·|h|/(d − h)` from the foot. A rounding off the plane is about `ε·M`
+high for coordinates of size `M`, so on a plane through the origin, or near
+it, the reading is about `ε·M²` from the foot, and the row's figure is right.
+On a plane far from the origin it is `|f − o|/|offset|` times the height,
+which is about the height itself when the piece is near `o`. The case that
+matters is the opposite of "a plane that does not pass near the origin": a
+plane near the origin, with the piece far along it.
+
+*Measured through the public API.* A throwaway probe (`tests/q685_probe.rs`,
+taken out) built a bar of radius 1 about `x = 10⁶`, cut off above by the plane
+`x + z = 0`, which runs through the origin, and a block whose wall
+`x = 999999.00002` cuts a sliver `2e-5` wide off the near end of that cap, and
+fused them by all three rules both ways round, certified. A throwaway
+`eprintln` in `place_the_piece` printed every candidate on the cap and what
+`the_piece_holds` said of it, and `q685_read.py` (in the lane's scratchpad)
+worked out each double candidate's foot and the place `InPlane` reads it at,
+in exact rationals. The cap's stored plane has normal
+`(0.7071067811865476, 0, 0.7071067811865476)` and offset
+`−1.1152634371569548e-11`, and `r` is `(0.7071067811786614, 0,
+0.7071067811786614)`. Every double candidate on the cap lies on `x + z = 0`
+exactly, so each is `1.115e-11` high, and each was read `1.115e-5` from its
+foot in `x` and in `z`, which is `|f − o|·h/d` with `|f − o| = 1.414e6` and
+`d = 1`. 312 of them, over the six fuses, had their foot in the sliver and were
+read outside it. **None was held or dropped for it**: every one came back
+`None`, the turn against the sliver's chord undecided, with enclosures from
+`4.6e-5` to `6.9e-5`. The chord's corners are where the plane, the wall and the
+pipe meet, boxes about `4e-10` wide, and `InPlane` spreads a corner's box along
+the normal by the same `|c − o|/d` it moves the point by. All six fuses
+answered and validated. The same block and bar turned about `y` by `0.3` or
+`0.5`, so that the bar's own cap is the leaning plane, were refused at `order
+along a crossing` before `select`, at `10⁶`, `10⁵`, `10³` and at the origin
+alike, so they could not be used.
+
+*Demonstrated where the corners are exact.* A corner narrower along the normal
+than the point is high does not hide it. The unit test
+`a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held`
+in `select.rs` puts a half disk `2²⁰` out on `x + z = 0`: the ball of radius 1
+round `(2²⁰, 0, −2²⁰)` and the chord `x = 2²⁰`, whose two corners `(2²⁰, ±1,
+−2²⁰)` are exact and on all three surfaces. A point one spacing of `z`
+(`2⁻³³`) off the plane, with its foot `2⁻²⁰` short of the chord, is read about
+`8.6e-5` further out in `x`, over the chord, and on the base `the_piece_holds`
+answered `Some(true)` for it. **`wrong/C`**: a wrong hold sends a point of one
+piece to place another, inside §3.5's envelope (the half disk's radius is `1`
+at `10⁶`), and only that probe has built it. No public shape was found whose
+chord or straight side has corners that narrow beside a double candidate.
+
+*The fix.* `the_piece_holds` winds the corners and reads each bulge's chord
+over the box Q671 stretched to the plane, as it asks the partners. A turn
+settled over that box is the turn of the point and of a point of the plane
+beside it, which `InPlane` reads where it is, so the corners are read at the
+plane and no tolerance is added. The test's point now comes back `None`, and
+its foot `Some(false)`. A candidate on the plane stretches to itself and is
+read as before. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1474 run,
+1474 passed, 8 skipped. No pin moved.
 
 **What this leaves**, each for a row of its own:
 
@@ -533,3 +597,9 @@ It is a guess nobody has run, so it carries no class.
 - The third row needs the answer's check traced for which two faces disagree.
   *Q904: done above; it answers since §402.*
 - The winding of a point off a flat piece's plane, above, if anyone runs it.
+  *Q685: run; a half disk with exact corners held a point whose foot was
+  outside it, and the corners and chords are now read over the stretched box.*
+- `a_face_of_the_input_holds` still winds an input face's corners round the
+  candidate itself, when it asks whether a piece lies on a flat face of the
+  same plane, so the same reading could put a piece on a face its foot is off.
+  A guess nobody has run, so it has no class.

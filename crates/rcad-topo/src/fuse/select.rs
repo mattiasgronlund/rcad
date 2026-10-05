@@ -974,8 +974,19 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// the plane it is wider a rounding off it than on it by far more than a
 /// rounding: a point inside the ball beside a disk `1e-8` wide can have its
 /// foot outside the disk, and asked about the point alone the disk held it
-/// (`docs/decisions.md` §346.6). The corners are still wound round the point
-/// itself, as they were.
+/// (`docs/decisions.md` §346.6).
+///
+/// **So are its corners and the chord across each bulge, over the same box.**
+/// [`InPlane`] reads a point off its plane where the line from its reference
+/// point through it meets the plane, and that is `|f − o|·h/(d − h)` from the
+/// foot `f`: `h` the point's height, `d` the reference point's, at most
+/// `max(|offset|, 1)`, and `o` the plane's point nearest the origin. On a plane
+/// through the origin, `2²⁰` out, a point one spacing high is read `8.6e-5`
+/// from its foot, and a half disk held a point whose foot was short of its
+/// chord
+/// (`a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held`).
+/// A turn settled over the box is the same for the point and for a point of
+/// the plane beside it, which the plane reads where it is.
 fn the_piece_holds(
     piece: &Piece,
     in_plane: Option<&InPlane>,
@@ -1045,9 +1056,10 @@ fn the_piece_holds(
             None => {
                 let corners: Vec<PredicatePoint> =
                     wire.iter().map(|side| side.ends[0].point()).collect();
-                winding += in_plane.winding_around(core::slice::from_ref(&corners), point)?;
+                winding +=
+                    in_plane.winding_around(core::slice::from_ref(&corners), reaching_the_plane)?;
                 for side in wire {
-                    winding += in_the_bulge_of(flat, side, in_plane, point)?;
+                    winding += in_the_bulge_of(flat, side, in_plane, reaching_the_plane)?;
                 }
             }
         }
@@ -1836,6 +1848,12 @@ fn corners_of(piece: &Piece) -> Vec<Vec<PredicatePoint>> {
 /// Nothing is projected into the plane's own two coordinates, which would round
 /// exact corners into inexact ones and manufacture the undecidability M2.5
 /// exists to measure (§15.5).
+///
+/// **A point off the plane is read where the line from the reference point
+/// through it meets the plane**, not at its foot, and the two can be far apart:
+/// `M` out on a plane through the origin, a point a rounding high is read about
+/// `M` times that height from its foot. A caller that needs the foot asks about
+/// a box that reaches the plane, as [`the_piece_holds`] does.
 pub(crate) struct InPlane {
     from: PredicatePoint,
     /// Whether [`InPlane::from`] came out above the plane rather than below it.
@@ -3291,6 +3309,76 @@ mod tests {
             holds([0.67, 0.0, -0.1]),
             None,
             "inside the ball, with its foot past the arc"
+        );
+    }
+
+    /// A half disk a million units out on `x + z = 0`, a plane through the
+    /// origin: the ball of radius 1 round `(2²⁰, 0, −2²⁰)` cuts the plane in a
+    /// circle, and the chord `x = 2²⁰` across its middle keeps the half further
+    /// out. Its two corners are exact, on the plane, the ball and the chord.
+    ///
+    /// The point is one spacing of `z` off the plane, on the side
+    /// [`InPlane`]'s reference point is on, and its foot is `2⁻²⁰` short of the
+    /// chord, outside the half disk. `InPlane` reads a point off its plane where
+    /// the line from its reference point, one unit off the plane beside the
+    /// origin, meets the plane, and for a point `2²⁰` out that is `2²⁰` times the
+    /// point's height further out than its foot: about `8.6e-5` in `x`, so over
+    /// the chord. Read there the chord's turn put the point in the half disk
+    /// (`docs/decisions.md` §346.6, Q685).
+    #[test]
+    fn a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held() {
+        let out = f64::powi(2.0, 20);
+        let flat = Plane::from_coefficients([1.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let ball = Sphere::new(Point::from([out, 0.0, -out]), 1.0).expect("a positive radius");
+        let chord = Plane::from_coefficients([1.0, 0.0, 0.0, -out]).expect("a normal");
+        let corner = |at: [f64; 3], which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [
+                Surface::Plane(flat),
+                Surface::Sphere(ball),
+                Surface::Plane(chord),
+            ],
+            which,
+            point: PredicatePoint::from(at),
+        };
+        let [low, high] = [[out, -1.0, -out], [out, 1.0, -out]];
+        let half_disk = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![vec![
+                FaceMeet {
+                    carried_by: [Surface::Plane(flat), Surface::Sphere(ball)],
+                    ends: [corner(low, 0), corner(high, 1)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+                FaceMeet {
+                    carried_by: [Surface::Plane(flat), Surface::Plane(chord)],
+                    ends: [corner(high, 1), corner(low, 0)],
+                    material_side: Decision::Pos,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+            ]],
+            is_the_whole_surface: false,
+        };
+        let short = out - f64::powi(2.0, -20);
+        let foot = PredicatePoint::from([short, 0.0, -short]);
+        let spacing = f64::powi(2.0, -33);
+        let point = PredicatePoint::from([short, 0.0, -short + spacing]);
+        assert_eq!(flat.side_of_point(foot), Decision::Zero);
+        assert_eq!(flat.side_of_point(point), Decision::Pos);
+        assert_eq!(ball.side_of(point), Decision::Neg);
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&half_disk, foot),
+            Some(false),
+            "short of the chord"
+        );
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&half_disk, point),
+            None,
+            "the point is read over the chord and its foot short of it"
         );
     }
 
