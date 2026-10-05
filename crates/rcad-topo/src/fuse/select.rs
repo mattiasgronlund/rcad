@@ -46,9 +46,14 @@
 //! bar's wall lying on a pipe that a wall of the other solid lies on too, and
 //! holds none of the half; since Q1080 the ray places that piece itself, as
 //! `classify.rs` no longer grazes on a face that holds none of the point. The
-//! rule is still reached where a point was found: by turned pairs, a solid
-//! with a torus face, the fuzz corpus and a fused draw, which nobody has
-//! traced. Such a piece is placed against a solid by a side it shares with a
+//! rule is still reached where a point was found, confirmed with a temporary
+//! print in `choose` (Q1079): a turned pair
+//! (`swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit`,
+//! `how_often_a_certified_fuse_of_a_turned_pair_refuses`), a solid with a
+//! torus face (`how_often_a_certified_fuse_with_a_torus_in_it_refuses`), the
+//! fuzz corpus (`every_seed_in_the_checked_in_corpus_is_fused_without_panicking`)
+//! and a fused draw (`a_fused_draw_hands_its_provenance_back_through_the_door`)
+//! each reach it. Such a piece is placed against a solid by a side it shares with a
 //! piece cut from one of that solid's faces, from which side of that face its
 //! own material is on ([`SidesItShares`], §365.3).
 //!

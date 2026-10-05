@@ -251,6 +251,23 @@ rule, and answers exactly as before; only refusals under that name can move.
 The point search also stays a check on the arrangement (Q609 above), which a
 rule tried first would silence.
 
+> **2026-10-05 note (Q1079): also tried, since Q1064, where a point was found
+> but no ray placed it.** `choose` (`fuse/select.rs`) now tries the side rule
+> and then the corner rule after `by_a_plane` as well, for
+> `Search::NoPointInsidePlaced`. The piece that first needed this was half of a
+> bar's wall, `x ≥ 0`, against a block over `x < 0` that was united first with
+> a bar on the same pipe: every point of that half lies on the first bar's
+> pipe, which holds none of it, and the ray grazed there. **Since Q1080 that
+> half no longer reaches this rule**: the ray places it itself now, because
+> `count_where_the_ray_meets_it` (`classify.rs`) no longer grazes a ray on a
+> face that holds none of the point. A temporary print in `choose`, run one
+> test at a time with `mise exec -- just t <name> --no-capture`, showed the
+> rule still reached this way by `how_often_a_certified_fuse_of_a_turned_pair_refuses`,
+> `swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit`,
+> `how_often_a_certified_fuse_with_a_torus_in_it_refuses`,
+> `every_seed_in_the_checked_in_corpus_is_fused_without_panicking` and
+> `a_fused_draw_hands_its_provenance_back_through_the_door`.
+
 **What it does not settle.** Past `select`, the grazing block's answer has a
 face with a hole `2⁻⁵⁰` long and `2⁻⁷⁸` wide, and whether assembling and
 meshing that answers or refuses was not run. §346.2's ball `1e-14` across got
@@ -267,6 +284,10 @@ this pins whatever the six fuses give, without assuming they answer.
   `a point inside a piece of a face` that moves.
 - **Trying the rule after `a point in a piece that every solid could place` as
   well** is Q668's to decide; its ten draws are the first consumer.
+
+  **2026-10-05 note (Q1079): decided, by Q1064.** `choose` tries the side rule
+  and then the corner rule after `by_a_plane` for a piece a point was found in
+  and no ray placed (`Search::NoPointInsidePlaced`); see the note under 365.3.
 - **Q637 and Q602 look like one stop**: a flat cap with one-corner circles for
   its outline and its hole, all six fuses, both reproduced above. Q637's row
   asked for that to be said there.
