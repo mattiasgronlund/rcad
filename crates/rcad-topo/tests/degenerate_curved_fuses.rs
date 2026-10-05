@@ -52,7 +52,8 @@ use rcad_geom::{
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    Containment, DraftStep, Error, Fused, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+    Containment, DraftStep, EdgeKey, Error, Fused, Model, ProfileBuilder, Rule, SolidBuilder,
+    SolidKey, WireView,
 };
 
 mod cones;
@@ -896,10 +897,9 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
     }
 }
 
-/// **A wall lying on a cone's side runs along the ruling it rests on, and what
-/// the wedge and the frustum share, the frustum less the wedge and the two of
-/// them together are answered** and held to the volumes worked out level by
-/// level without the kernel.
+/// **A wall lying on a cone's side runs along the ruling it rests on, and every
+/// fuse of the wedge and the frustum is answered** and held to the volumes
+/// worked out level by level without the kernel.
 ///
 /// This is [`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`]
 /// asked of a cone. Along a ruling a plane rests on, the plane's normal and the
@@ -920,11 +920,30 @@ fn the_wedge_and_the_cone_it_rests_on_really_do_share_space() {
 /// The mesher refused it `CornersCoincide` until it learned to cut such a wire
 /// there into an outline and a hole touching it (§364).
 ///
-/// **The wedge less the frustum is refused by the mesher**, under either
-/// policy, `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }`: it keeps
-/// the slanted face and the cone's skin either side of the ruling, two slivers
-/// that meet along it. Before §364 it was refused `CornersCoincide` like the
-/// union. Whether that answer is a manifold at all is not settled here.
+/// **The wedge less the frustum is answered**, built either way round and
+/// under either policy: one solid that validates and measures `45.6815`
+/// against the hand-worked `96 − shared = 45.5997`, over it, since the cone's
+/// skin bounds a hole in this answer and an inscribed mesh leaves the hole too
+/// small. It is two slivers either side of the ruling, each between the
+/// slanted face and the cone and thin to nothing at the ruling, joined round
+/// the back of the cone below `z ≈ 14.9`, so one solid that touches itself
+/// along the ruling. **What the fuse writes is a sound model**, printed and
+/// walked under queue row Q953: six faces, and every edge used by exactly two
+/// coedges. The slanted face is kept whole, with `(1, 0, 8)` and
+/// `(2.5, 0, 20)` on its outline and no edge between them, and the cone is cut
+/// open along the ruling, which is one edge used twice by the cone alone — the
+/// way `fuse/assemble.rs` parts a line two faces rest against each other along,
+/// and what [`uses_of_the_ruling`] checks.
+///
+/// **It used to be refused by the mesher**, `TwoPatchesOfTheMeshDrewTheSameSide
+/// { drawn: 2, used: 4 }`, and before §364 `CornersCoincide`, like the union.
+/// The two ends of the ruling sit in the middle of two straight sides of the
+/// slanted face, so both of its triangulations without a flat triangle draw
+/// the side between them, and the cone's seam was that same side, walked with
+/// no point between its ends. The mesher now puts a point in the middle of a
+/// straight edge lying across a flat face of its own solid. Meshed finer, the
+/// answer comes down to the hand-worked volume, `45.6200` at a deflection of
+/// `0.005` and `45.6051` at `0.00125`.
 ///
 /// **The control halves the cone's slope and nothing else.** The same wedge
 /// against a cone of slope a sixteenth: the slanted face no longer rests on the
@@ -994,17 +1013,40 @@ fn a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand() 
         );
     }
 
-    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+    for wedge_first in [false, true] {
         let mut model = a_model();
-        let pair = either_way_round(a_wedge_lying_on_a_cones_side(&mut model), true);
-        let why = refusal(&mut model, &pair, Rule::Difference, &policy);
+        let pair = the_wedge_less_the_frustum(&mut model, wedge_first);
+        let left = fused(&mut model, &pair, Rule::Difference);
+        assert_eq!(left.solids().len(), 1, "wedge first {wedge_first}");
+        measures(volume_of(&model, left.solids()), 96.0 - shared, Side::Over);
+        let uses = uses_of_the_ruling(&model, left.solids()[0]);
         assert!(
             matches!(
-                why,
-                Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }
+                uses.as_slice(),
+                [(one, Surface::Cone(_)), (other, Surface::Cone(_))] if one == other
             ),
-            "the wedge less the frustum under {policy:?}: {why:?}"
+            "wedge first {wedge_first}: the ruling is one edge, the cone's seam, and no \
+             edge of the slanted face: {uses:?}"
         );
+
+        let mut model = a_model();
+        let pair = the_wedge_less_the_frustum(&mut model, wedge_first);
+        let left = model
+            .fuse(
+                &pair.arguments,
+                &pair.tools,
+                Rule::Difference,
+                &Policy::tolerant(100.0),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| {
+                panic!("a tolerant difference, wedge first {wedge_first}, refused: {why}")
+            });
+        assert_eq!(left.solids().len(), 1, "a tolerant difference");
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a fuse writes a sound model or writes nothing");
+        measures(volume_of(&model, left.solids()), 96.0 - shared, Side::Over);
     }
 
     let mut model = a_model();
@@ -1024,6 +1066,37 @@ fn a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand() 
         frustum + 96.0 - what_the_wedge_shares_with_a_cone_of_slope(halved, THE_WEDGES_BACK),
         Side::Under,
     );
+}
+
+/// The wedge and the frustum it lies on, with the wedge built into the model
+/// first or second, as the wedge less the frustum.
+fn the_wedge_less_the_frustum(model: &mut Model, wedge_first: bool) -> Pair {
+    if wedge_first {
+        let wedge = a_wedge_resting_on_a_cones_side(model);
+        let cone = cones::a_frustum(model, A_CONES_SLOPE, A_CONES_NEAR_END, A_CONES_FAR_END);
+        return Pair::of(wedge, cone);
+    }
+    either_way_round(a_wedge_lying_on_a_cones_side(model), true)
+}
+
+/// Every use of an edge of `solid` that runs between the two ends of the ruling
+/// the wedge rests on, `(1, 0, 8)` and `(2.5, 0, 20)`: the edge, and the surface
+/// of the face that uses it.
+fn uses_of_the_ruling(model: &Model, solid: SolidKey) -> Vec<(EdgeKey, Surface)> {
+    let at = |point: Point, [x, y, z]: [f64; 3]| point.distance_to(Point::new(x, y, z)) < 1e-9;
+    let mut uses = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        for coedge in face.wires().flat_map(WireView::coedges) {
+            let edge = coedge.edge();
+            let ends = [edge.start().point(), edge.end().point()];
+            if ends.iter().any(|&end| at(end, [1.0, 0.0, 8.0]))
+                && ends.iter().any(|&end| at(end, [2.5, 0.0, 20.0]))
+            {
+                uses.push((edge.key(), face.surface()));
+            }
+        }
+    }
+    uses
 }
 
 /// The pair as built, or with its two solids swapped.
