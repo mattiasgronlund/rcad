@@ -48,7 +48,8 @@ wall (12), and answers on the flat face at `x = 0` (13). `classify_point`
 of `(1, 0, 1)`, `(−1, 0, 1)` and `(1, 0.5, 0.5)` all come back
 `CannotFollowAFacesTrimming` on face 11; `(1, 0, 3)`, outside the box, comes
 back `Outside`. Every one of those refusals was raised at `holds.rs:1131`,
-in `the_sides_of`, reached through `what_a_face_cut_by_part_of_a_crossing_holds`.
+in `every_reading_of_the_sides_of`, reached through
+`what_a_face_cut_by_part_of_a_crossing_holds`.
 
 ### 325.2 Why both places refuse
 

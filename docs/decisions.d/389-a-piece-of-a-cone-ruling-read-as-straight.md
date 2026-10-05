@@ -29,7 +29,8 @@ the apex, and an edge does not pass one point twice.
 It is read that way in three places: `walk_one_outline`, so a flat face whose
 sides are all straight or rulings is walked as a polygon;
 `a_side_of_it_is_part_of_a_crossing`, so such a flat face goes to that walk;
-and `the_sides_of`, so a cone face's ruling side is a straight side. Every
+and `every_reading_of_the_sides_of`, so a cone face's ruling side is a
+straight side. Every
 number asked is stored, so a corner rounded off its line fails the test and is
 refused as before, and a plane leaned off the apex cuts a curve and is never
 read as straight.
