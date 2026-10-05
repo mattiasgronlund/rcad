@@ -2085,7 +2085,14 @@ check-fuzz-builds:
 # One fewer. `degenerate_curved_fuses.rs`'s wall lying on a bar's skin matched
 # its `Undecidable` and sent every other `Error` to `panic!`; that fuse now
 # answers every rule, and the test that replaced it has no match on a refusal.
-wildcard_arms := "97"
+#
+#     Q930's lane  97 -> 95
+#
+# Two fewer. `degenerate_curved_fuses.rs`'s block corner on a bar's wall and
+# block on a bar's cap each matched `TwoCurvesTouchWithoutCrossing` and sent
+# every other `Error` to `panic!`; the fold of a straight cut along a straight
+# crossing answers both, and the tests that replaced them match no refusal.
+wildcard_arms := "95"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
