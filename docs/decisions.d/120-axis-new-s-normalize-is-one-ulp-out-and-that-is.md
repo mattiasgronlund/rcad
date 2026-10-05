@@ -243,5 +243,15 @@ draws 210 000 pairs of proportional directions and still finds **0** that store
 different bits. §120.1 is right that a correctly rounded answer keeps the
 property by construction; the test is what says the construction holds.
 
+*Since §355.6 (Q1000, 2026-10-05) not every axis goes through this
+normalize.* A direction a STEP file or a saved model carries, already of
+length one to within `Plane::NORMAL_LENGTH_ROUNDOFF`, is kept as written by
+`Axis::as_written`, which the reader's pipe, cone and ring arms and `Axis`'s
+`Deserialize` call. The bound above is still `Axis::new`'s, and §22.6's
+same-ray property is still `Axis::new`'s alone: two lengths of one direction
+near one are two axes as written. The 992 of §120.7's table is what
+`as_written` spares a saved axis: a direction this normalize made moves on
+about one rebuild in a hundred, and one a turn left on 175 of 744.
+
 ---
 

@@ -805,34 +805,27 @@ fn every_bend_this_target_draws_comes_back_from_its_own_file() {
 /// until Q843 looked further for its centre
 /// (`a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file`).
 ///
-/// **Whether a bend comes back the same is decided by one thing: whether its
-/// ring's axis keeps its bits when scaled to length one again.** The writer
-/// writes the axis as the model places it, a turn of `z` an ulp or so off
-/// length one, and the reader builds a `TOROIDAL_SURFACE`'s axis with
-/// `Axis::new`, which scales it again (`geometry.rs`). 296 bends keep their
-/// bits and come back the same, every located number bit for bit. 76 do not:
+/// **All 372 come back the same, every located number bit for bit, and the
+/// ring's axis with the bits the file wrote.** The writer writes the axis as
+/// the model places it, a turn of `z` an ulp or so off length one, and the
+/// reader keeps it (`Axis::as_written`, in `geometry.rs`'s `TOROIDAL_SURFACE`
+/// arm), as it keeps the normal of the seam's plane (§313.3).
 ///
-/// - 48 are read back, with the ring's axis the written one scaled again and
-///   so an ulp moved: not the same solid.
-/// - 28 are refused with `CannotNameWhichPieceOfACrossingThisIs`, all turned
-///   about `x` or `y` by 2.5, 2.8, 3.2, 3.3, 3.7, 4.1 or 4.6, in place or
-///   moved. The reader keeps the normal of the seam's plane as the file wrote
-///   it (§313.3), so that plane and the ring's scaled axis are two spellings
-///   of one written direction. Turned about `x` by 2.5 they are
-///   `(0, -0.5984721441039565, -0.8011436155469336)` and `(…, -0.8011436155469337)`,
-///   and their cross product is `(5.55e-17, 0, 0)` and not exactly nothing.
-///   `rcad_geom`'s walk asks exactly that to tell a plane square to a ring's
-///   axis from one holding it (`where_a_plane_cuts_a_torus`), so it takes the
-///   seam's plane for one holding the axis, and neither meridian circle holds
-///   the seam's two ends (`which_of_these_circles_this_run_is`).
-///
-/// Read with the ring's axis kept as the file wrote it, all 372 came back the
-/// same, measured with that change made by hand and taken out again: the gap
-/// is the reader's, and Q497 is the row that closes it (`docs/decisions.md`
-/// §241.6).
+/// Until Q1000 the reader built that axis with `Axis::new`, which scales it
+/// again and moved the last bit of 76 of these axes, the count pinned below.
+/// 48 of those bends were read back with the ring an ulp moved, and 28 were
+/// refused with `CannotNameWhichPieceOfACrossingThisIs`: turned about `x` by
+/// 2.5 the seam's plane and the ring's axis were
+/// `(0, -0.5984721441039565, -0.8011436155469336)` and
+/// `(…, -0.8011436155469337)`, whose cross product is `(5.55e-17, 0, 0)` and
+/// not exactly nothing, so `rcad_geom`'s walk took the seam's plane for one
+/// holding the axis (`where_a_plane_cuts_a_torus`) and neither meridian circle
+/// held the seam's two ends (`which_of_these_circles_this_run_is`).
+/// `docs/decisions.md` §355.6.
 #[test]
 fn how_often_a_turned_bend_comes_back_from_its_own_file() {
     let (mut bends, mut writer_refused, mut the_same, mut ring_moved) = (0, 0, 0, 0);
+    let mut new_would_have_moved_the_ring = 0;
     let mut reader_refused = Vec::new();
     for axis in [Axis::x(), Axis::y(), Axis::z()] {
         for tenths in 1..63 {
@@ -857,41 +850,35 @@ fn how_often_a_turned_bend_comes_back_from_its_own_file() {
                 let written = the_ring_axis(the_one_solid(&model));
                 let scaled_again = Axis::new(written.origin(), written.direction())
                     .expect("a ring's placed axis is finite and has a length");
-                let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
-                let read = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new());
-                if format!("{scaled_again:?}") == format!("{written:?}") {
-                    let back = read.unwrap_or_else(|why| {
-                        panic!("{turned:?}: a bend whose ring keeps its axis is refused: {why:?}")
-                    });
-                    assert!(
-                        assert_located_numbers_the_same(
-                            the_one_solid(&model),
-                            the_one_solid(back.model())
-                        ),
-                        "{turned:?}"
-                    );
-                    the_same += 1;
-                    continue;
+                if format!("{scaled_again:?}") != format!("{written:?}") {
+                    new_would_have_moved_the_ring += 1;
                 }
-                match read {
+                let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+                match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
                     Ok(back) => {
                         let read = the_ring_axis(the_one_solid(back.model()));
-                        assert_eq!(
-                            format!("{read:?}"),
-                            format!("{scaled_again:?}"),
-                            "{turned:?}: the reader holds a ring's axis as written, \
-                             scaled to length one again"
+                        if format!("{read:?}") != format!("{written:?}") {
+                            ring_moved += 1;
+                            continue;
+                        }
+                        assert!(
+                            assert_located_numbers_the_same(
+                                the_one_solid(&model),
+                                the_one_solid(back.model())
+                            ),
+                            "{turned:?}"
                         );
-                        ring_moved += 1;
+                        the_same += 1;
                     }
-                    Err(why) => reader_refused.push(format!("{why:?}")),
+                    Err(why) => reader_refused.push(format!("{turned:?}: {why:?}")),
                 }
             }
         }
     }
     println!(
         "{bends} turned bends: {writer_refused} refused by the writer, {the_same} the same, \
-         {ring_moved} with the ring's axis an ulp moved, {} refused by the reader",
+         {ring_moved} with the ring's axis moved, {} refused by the reader; Axis::new would \
+         have moved {new_would_have_moved_the_ring} of the written ring axes",
         reader_refused.len()
     );
     assert_eq!(
@@ -902,13 +889,148 @@ fn how_often_a_turned_bend_comes_back_from_its_own_file() {
             ring_moved,
             reader_refused.len()
         ),
-        (372, 0, 296, 48, 28)
-    );
-    assert!(
-        reader_refused
-            .iter()
-            .all(|why| why.contains("CannotNameWhichPieceOfACrossingThisIs")),
+        (372, 0, 372, 0, 0),
         "{reader_refused:?}"
+    );
+    assert_eq!(new_would_have_moved_the_ring, 76);
+}
+
+/// A round bar, a frustum and a pointed cone, turned as
+/// [`how_often_a_turned_bend_comes_back_from_its_own_file`] turns its bend:
+/// all 1 116 are written, and every one comes back with its pipe's or cone's
+/// axis as the file wrote it, and the same solid.
+///
+/// The reader's `CYLINDRICAL_SURFACE` arm and `cone_from` keep the axis
+/// (`Axis::as_written`), and `cone_from` moves it to the apex rather than
+/// build it again (`Axis::moved_to`). The count pinned last is how many of the
+/// written axes `Axis::new` would have moved, which is how many came back
+/// moved while the reader built them with it (`docs/decisions.md` §355.6).
+#[test]
+fn how_often_a_turned_bar_or_cone_comes_back_from_its_own_file() {
+    let shapes: [fn(&mut Model) -> rcad_topo::Result<SolidKey>; 3] = [
+        a_round_bar,
+        |model| a_frustum(model, 0.5, 2.0, 6.0),
+        |model| a_pointed_cone(model, 0.5, 6.0),
+    ];
+    let (mut drawn, mut writer_refused, mut the_same, mut axis_moved) = (0, 0, 0, 0);
+    let mut new_would_have_moved_the_axis = 0;
+    let mut reader_refused = Vec::new();
+    for shape in shapes {
+        for axis in [Axis::x(), Axis::y(), Axis::z()] {
+            for tenths in 1..63 {
+                for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
+                    let turned = Isometry::translation(moved)
+                        .expect("a finite offset")
+                        .compose(
+                            &Isometry::rotation(&axis, f64::from(tenths) * 0.1)
+                                .expect("a finite angle about a unit axis"),
+                        );
+                    let model = one_solid_placed_by(shape, &turned);
+                    drawn += 1;
+                    let Ok(text) = rcad_step::write(&model, "a turned bar or cone") else {
+                        writer_refused += 1;
+                        continue;
+                    };
+                    let written = the_curved_axis(the_one_solid(&model));
+                    let scaled_again = Axis::new(written.origin(), written.direction())
+                        .expect("a placed axis is finite and has a length");
+                    if format!("{scaled_again:?}") != format!("{written:?}") {
+                        new_would_have_moved_the_axis += 1;
+                    }
+                    let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+                    match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
+                        Ok(back) => {
+                            let read = the_curved_axis(the_one_solid(back.model()));
+                            if format!("{read:?}") != format!("{written:?}") {
+                                axis_moved += 1;
+                                continue;
+                            }
+                            assert!(
+                                assert_located_numbers_the_same(
+                                    the_one_solid(&model),
+                                    the_one_solid(back.model())
+                                ),
+                                "{turned:?}"
+                            );
+                            the_same += 1;
+                        }
+                        Err(why) => reader_refused.push(format!("{turned:?}: {why:?}")),
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "{drawn} turned bars and cones: {writer_refused} refused by the writer, {the_same} the \
+         same, {axis_moved} with the axis moved, {} refused by the reader; Axis::new would have \
+         moved {new_would_have_moved_the_axis} of the written axes",
+        reader_refused.len()
+    );
+    assert_eq!(
+        (
+            drawn,
+            writer_refused,
+            the_same,
+            axis_moved,
+            reader_refused.len()
+        ),
+        (1116, 0, 1116, 0, 0),
+        "{reader_refused:?}"
+    );
+    assert_eq!(new_would_have_moved_the_axis, 228);
+}
+
+/// The axis of the one pipe or cone `solid` is bounded by, where it is placed.
+fn the_curved_axis(solid: SolidView) -> Axis {
+    let mut axes = solid.faces().filter_map(|face| {
+        let surface = face.surface();
+        if let Surface::Cylinder(pipe) = surface {
+            return Some(pipe.axis());
+        }
+        let Surface::Cone(cone) = surface else {
+            return None;
+        };
+        Some(cone.axis())
+    });
+    let axis = axes.next().expect("a bar or a cone has one curved face");
+    assert!(axes.next().is_none(), "a bar or a cone has one curved face");
+    axis
+}
+
+/// The bend of [`how_often_a_turned_bend_comes_back_from_its_own_file`] turned
+/// about `x` by `2.5`, read back from its own file, keeps its ring's axis
+/// through its model's saved bytes.
+///
+/// A model read back from a file stores the ring's axis as the file wrote it,
+/// an ulp off length one, where a model built here stores `z` and a placement.
+/// Saved and loaded, that axis comes back through `Axis`'s `Deserialize`,
+/// which is `Axis::as_written`. Through `Axis::new` it came back
+/// `(0, -0.5984721441039565, -0.8011436155469337)`, an ulp from what was saved
+/// (`docs/decisions.md` §355.6).
+#[test]
+fn a_turned_bend_read_back_from_its_own_file_keeps_its_ring_axis_through_its_bytes() {
+    let turned = Isometry::rotation(&Axis::x(), 2.5).expect("a finite angle about a unit axis");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_quarter_bend(&mut model, 7.0, 1.0).expect("a bend fits this model");
+    model
+        .place_solid(solid, &turned)
+        .expect("the key came from this model");
+    let written = the_ring_axis(the_one_solid(&model));
+
+    let text = rcad_step::write(&model, "a turned bend").expect("the bend is written");
+    let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+    let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the bend is read back");
+    let read = the_ring_axis(the_one_solid(back.model()));
+    assert_eq!(format!("{read:?}"), format!("{written:?}"));
+
+    let bytes = postcard::to_allocvec(back.model()).expect("a model always encodes");
+    let loaded: Model = postcard::from_bytes(&bytes).expect("a model's own bytes decode");
+    let reloaded = the_ring_axis(the_one_solid(&loaded));
+    assert_eq!(
+        format!("{reloaded:?}"),
+        format!("{written:?}"),
+        "the ring's axis moved between saving the read-back model and loading it"
     );
 }
 

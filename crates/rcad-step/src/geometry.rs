@@ -59,6 +59,15 @@ impl<'a> Reading<'a> {
     /// Five kinds, and every other kind the file may hold is refused by the
     /// name the file gave it — which is §42.12 criterion 4 and, by the spike's
     /// count, the commonest thing this reader says.
+    ///
+    /// **A pipe's, a cone's and a ring's axis keep the direction the file
+    /// wrote** when it is of length one to within what a turn leaves
+    /// ([`Axis::as_written`]), as a plane's normal does ([`plane_through`]).
+    /// This writer writes a seam's plane and the ring it cuts along one
+    /// direction, and scaling the ring's axis again while keeping the plane's
+    /// normal made them two directions an ulp apart: of 372 turned bends, 28
+    /// were refused and 48 read back with the axis moved
+    /// (`docs/decisions.md` §355.6).
     pub(crate) fn surface_at(&self, face: EntityId, id: EntityId) -> Result<Surface, Refusal> {
         let instance = self.instance(face, id)?;
         let keyword = instance.parts()[0].keyword();
@@ -74,7 +83,7 @@ impl<'a> Reading<'a> {
                 let position = self.reference_at(id, CYLINDRICAL_SURFACE, 1)?;
                 let place = self.placement_at(id, position)?;
                 let radius = self.real_at(id, CYLINDRICAL_SURFACE, 2)?;
-                let pipe = Axis::new(place.origin, place.axis)
+                let pipe = Axis::as_written(place.origin, place.axis)
                     .and_then(|axis| Cylinder::new(axis, radius))
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Cylinder(pipe))
@@ -111,7 +120,7 @@ impl<'a> Reading<'a> {
                 let place = self.placement_at(id, position)?;
                 let ring_radius = self.real_at(id, TOROIDAL_SURFACE, 2)?;
                 let tube_radius = self.real_at(id, TOROIDAL_SURFACE, 3)?;
-                let ring = Axis::new(place.origin, place.axis)
+                let ring = Axis::as_written(place.origin, place.axis)
                     .and_then(|axis| Torus::new(axis, ring_radius, tube_radius))
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Torus(ring))
@@ -456,13 +465,19 @@ pub(crate) fn plane_through(origin: Point, axis: Vector) -> rcad_geom::Result<Pl
 /// [`Cone`] stores the tangent rather than the angle — and the division. A cone
 /// written with its apex at its placement, `radius = 0`, has neither: the
 /// offset is exactly zero and the apex is exactly the origin the file wrote.
+///
+/// The direction is the file's own when it is of length one to within what a
+/// turn leaves ([`Axis::as_written`]), and the axis through the apex is that
+/// one moved there ([`Axis::moved_to`]). Building it again with [`Axis::new`]
+/// would scale an already-scaled direction a second time, which moves its
+/// last bit on about one direction in a hundred.
 fn cone_from(
     id: EntityId,
     place: &Placement,
     radius: f64,
     half_angle: f64,
 ) -> Result<Cone, Refusal> {
-    let along = Axis::new(place.origin, place.axis)
+    let along = Axis::as_written(place.origin, place.axis)
         .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
     let slope = half_angle.tan();
     let apex = if radius == 0.0 {
@@ -470,7 +485,8 @@ fn cone_from(
     } else {
         place.origin - along.direction() * (radius / slope)
     };
-    Axis::new(apex, along.direction())
+    along
+        .moved_to(apex)
         .and_then(|axis| Cone::new(axis, slope))
         .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })
 }
