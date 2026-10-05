@@ -9,11 +9,14 @@ effect of the queue work rather than needing its own trigger. It reads
 on a lane branch — plus the claims file `tooling/queue/queue.py` also reads,
 and writes a self-contained page: two SVG charts of the queue's shape over
 every commit of `docs/queue.md` on main's first-parent line, then the current
-ready, running and lately-closed rows, and rows added against rows closed per
-day. `docs/decisions.md` §230, §263.
+ready, running and lately-closed rows, rows added against rows closed per
+day, and what the overnight fuzz job did night by night — that last section
+is `fuzz_section.py`'s, read from the fuzz log root the caller names.
+`docs/decisions.md` §230, §263.
 
-The only state this keeps across runs is `<out>/.history-cache.json`, one
-entry per commit sha already tallied. Recomputing every commit on every write
+The state this keeps across runs is `<out>/.history-cache.json`, one entry
+per commit sha already tallied, and `<out>/.fuzz-cache.json`, one entry per
+fuzz log already read (`fuzz_section.py` says why). Recomputing every commit on every write
 would make the render the queue pays for grow with the queue's own history;
 a sha's tally changes only when the list of tiers does, and `load_cache` drops
 an entry taken under another list. Measured through `just queue-page` against
@@ -37,16 +40,17 @@ sys.dont_write_bytecode = True
 QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
 sys.path.insert(0, QUEUE_TOOLING)
 from rows import Queue, TIERS_IN_ORDER  # noqa: E402
+import fuzz_section  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
 CLOSED_ROWS_SHOWN = 12
 
 
 def main(argv):
-    if len(argv) != 1:
-        print("usage: render.py <out-dir>", file=sys.stderr)
+    if len(argv) != 2:
+        print("usage: render.py <out-dir> <fuzz-log-root>", file=sys.stderr)
         return 2
-    out_dir = argv[0]
+    out_dir, fuzz_root = argv
     git = Git()
     if git.rev_parse("refs/heads/main") is None:
         print("queue-page: no 'main' branch here, so there is nothing to render", file=sys.stderr)
@@ -60,7 +64,10 @@ def main(argv):
     points = [tallied(git, sha, when, cache) for sha, when in history]
     save_cache(cache_path, cache)
     tip = Queue(git.show(history[-1][0], QUEUE_PATH))
-    page = render_page(points, current_state(tip))
+    fuzz_cache_path = os.path.join(out_dir, ".fuzz-cache.json")
+    fuzz, fuzz_cache = fuzz_section.section(fuzz_root, read_json(fuzz_cache_path))
+    write_atomically(fuzz_cache_path, json.dumps(fuzz_cache, sort_keys=True))
+    page = render_page(points, current_state(tip), fuzz)
     write_atomically(os.path.join(out_dir, "index.html"), page)
     return 0
 
@@ -102,12 +109,17 @@ def load_cache(path):
     Such a tally has no count for a tier added since, and counted that tier's
     rows as parked (§403.8), so its commit is tallied again.
     """
+    cache = read_json(path)
+    return {sha: counts for sha, counts in cache.items() if set(counts["by_tier"]) == set(TIERS_IN_ORDER)}
+
+
+def read_json(path):
+    """A cache file's contents, or an empty cache when there is none or it does not parse."""
     try:
         with open(path, encoding="utf-8") as f:
-            cache = json.load(f)
+            return json.load(f)
     except (OSError, ValueError):
         return {}
-    return {sha: counts for sha, counts in cache.items() if set(counts["by_tier"]) == set(TIERS_IN_ORDER)}
 
 
 def save_cache(path, cache):
@@ -272,7 +284,7 @@ SLOT_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", 
 SLOT_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
 
 
-def render_page(points, state):
+def render_page(points, state, fuzz):
     by_tier_chart = stacked_area(
         points=points,
         series=[(f"Tier {t}", lambda counts, t=t: counts["by_tier"][t]) for t in TIERS_IN_ORDER]
@@ -300,7 +312,10 @@ def render_page(points, state):
         ready_section=ready_section(state["ready"]),
         running_section=running_section(state["running"]),
         closed_section=closed_section(state["closed"]),
+        fuzz_section=fuzz,
         series_colors=series_color_css(),
+        coverage_light=SLOT_LIGHT[0],
+        coverage_dark=SLOT_DARK[0],
     )
 
 
@@ -500,6 +515,32 @@ code {{ font-size: 12px; }}
 {series_colors}
 .qp-grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1200px; }}
 @media (max-width: 700px) {{ .qp-grid2 {{ grid-template-columns: 1fr; }} }}
+.qp-chart.qp-wide {{ max-width: 1200px; }}
+.qp-multiples {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px 20px; }}
+.qp-panel-title {{ font-size: 12px; color: var(--qp-ink-2); }}
+.qp-cov-line {{ fill: none; stroke: {coverage_light}; stroke-width: 2; }}
+.qp-cov-dot {{ fill: {coverage_light}; stroke: var(--qp-surface); stroke-width: 2; }}
+@media (prefers-color-scheme: dark) {{
+  .qp-cov-line {{ stroke: {coverage_dark}; }}
+  .qp-cov-dot {{ fill: {coverage_dark}; }}
+}}
+pre.qp-latest {{
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: var(--qp-surface);
+  border: 1px solid var(--qp-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  max-width: 1200px;
+}}
+table.qp-fuzz {{ border-collapse: collapse; font-size: 12px; margin: 0 0 8px; }}
+table.qp-fuzz th, table.qp-fuzz td {{ padding: 3px 8px; border-bottom: 1px solid var(--qp-grid); text-align: left; vertical-align: top; }}
+table.qp-fuzz thead th {{ color: var(--qp-ink-2); font-weight: 600; }}
+table.qp-fuzz tbody th {{ font-weight: 600; white-space: nowrap; }}
+table.qp-fuzz tbody th .qp-note {{ width: 11em; white-space: normal; }}
+table.qp-fuzz td.n {{ text-align: right; font-variant-numeric: tabular-nums; }}
+table.qp-fuzz td.faults {{ white-space: nowrap; }}
+.qp-note {{ color: var(--qp-muted); font-size: 12px; font-weight: normal; max-width: 900px; }}
 </style>
 </head>
 <body>
@@ -525,6 +566,9 @@ code {{ font-size: 12px; }}
 
 <h2>Pace</h2>
 {added_closed_chart}
+
+<h2>Fuzzing, night by night</h2>
+{fuzz_section}
 </body>
 </html>
 """
