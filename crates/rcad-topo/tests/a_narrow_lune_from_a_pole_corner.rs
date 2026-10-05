@@ -79,6 +79,12 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// wedge's at radii 1 and 3. Most of the rest
 /// now reach the flat pieces and assembly and are refused there instead. A case
 /// that moves either way fails, naming itself.
+///
+/// **No case stops at `order along a crossing` since Q901**, which orders two
+/// meets of three planes that share two by the planes when their boxes cannot
+/// say. None answers for it: all twelve 45 degree cases, every size and every
+/// rule, are refused at *a point inside a piece of a face* instead, and that
+/// name takes the old one's place in [`moved_from_its_pin`].
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
@@ -218,6 +224,12 @@ fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_
 /// Whenever it is answered, cutting that half ball again by `x >= 0` is
 /// refused by name, on one of three refusals that depend on the angle and the
 /// size.
+///
+/// **None stops at `order along a crossing` since Q901**, which orders two
+/// meets of three planes that share two by the planes when their boxes cannot
+/// say. The 45 degree wedge, at every size, is refused at *a point inside a
+/// piece of a face* instead; every other wedge that gets this far at *a point
+/// in a piece that every solid could place*.
 #[test]
 fn a_wedge_cut_with_the_turned_knife_first_is_refused_by_name() {
     for degrees in WEDGES {
@@ -264,8 +276,8 @@ fn a_wedge_cut_with_the_turned_knife_first_is_refused_by_name() {
                 matches!(
                     which_refusal(&why),
                     "a point in a piece that every solid could place"
+                        | "a point inside a piece of a face"
                         | "CannotTellTheCellsOfAFaceApart"
-                        | "order along a crossing"
                 ),
                 "a {degrees} degree wedge of a ball of radius {radius}: {why:?}"
             );
@@ -454,7 +466,7 @@ fn moved_from_its_pin(
             assert!(
                 matches!(
                     which_refusal(&why),
-                    "order along a crossing"
+                    "a point inside a piece of a face"
                         | "CannotTellTheCellsOfAFaceApart"
                         | "ResultIsNotManifold"
                         | "CannotMeshAFace"

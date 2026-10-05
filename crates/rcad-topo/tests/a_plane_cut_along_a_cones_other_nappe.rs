@@ -73,12 +73,16 @@ use cones::{a_frustum, a_pointed_cone};
 /// a piece that is one cell; each such piece is now placed by a side it shares
 /// with a piece of the other solid's face (`docs/decisions.md` §365.3), and
 /// all sixteen answer right. The twelve that could not order along a crossing
-/// are the same twelve as before.
+/// were the same twelve as before.
+///
+/// **All ninety-six answer right since Q901**, which orders two meets of three
+/// planes that share two by the planes when their boxes cannot say: the twelve
+/// at three eighths, turned `0.5`, that could not order along a crossing answer
+/// now, each held to the four checks at the top of this file.
 ///
 /// **The family is two tests, one per lean**, so that neither sets the slow
 /// tier's wall (`docs/decisions.md` §397.4). Their tallies add up to the counts
-/// above: the sixteen are all at a quarter, crossing `−6`, and the twelve all
-/// at three eighths, turned `0.5`.
+/// above: the sixteen are all at a quarter, crossing `−6`.
 #[test]
 fn a_steeper_plane_at_a_lean_of_a_quarter_across_a_frustum_answers_right_or_refuses() {
     assert_eq!(
@@ -95,8 +99,8 @@ fn a_steeper_plane_at_a_lean_of_three_eighths_across_a_frustum_answers_right_or_
     assert_eq!(
         tally(&steeper_planes_across_the_frustum(0.375)),
         Tally {
-            right: 36,
-            refused: [("order along a crossing", 12)].into()
+            right: 48,
+            refused: [].into()
         }
     );
 }
@@ -281,8 +285,16 @@ fn steeper_faces_near_the_pointed_cones_apex(lean: f64) -> Vec<Case> {
 /// That box is grown by what writing a corner down costs now. All four measure:
 /// the union decides 6986 grid points, the intersection 17954, the cone less the
 /// block 16361 and the block less the cone 8579. Turned `1`, the same block
-/// refuses `order along a crossing` instead, and those four are among the twenty
+/// refuses `order along a crossing` instead, and those four are among the eight
 /// counted below.
+///
+/// **Twelve fewer stop at `order along a crossing` since Q901**, which orders
+/// two meets of three planes that share two by the planes when their boxes
+/// cannot say. Right answers went from 68 to 72, each held to the four checks
+/// at the top of this file, and refusals for want of a point inside a piece
+/// from 8 to 16. The sixteen are the blocks from `−3` up to `1` and up to
+/// `1.5`, leaned at a quarter, both turns and every rule, and the eight left at
+/// the order are the same two blocks leaned at `2` and turned `1`.
 #[test]
 fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right() {
     let mut cases = Vec::new();
@@ -311,10 +323,10 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 68,
+            right: 72,
             refused: [
-                ("a point inside a piece of a face", 8),
-                ("order along a crossing", 20),
+                ("a point inside a piece of a face", 16),
+                ("order along a crossing", 8),
             ]
             .into()
         }

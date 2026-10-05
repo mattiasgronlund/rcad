@@ -271,7 +271,10 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// unnoticed rather than as a target.
 ///
 /// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
-/// of 429 skew fuses refuses 51 of them, 11.89%, every run on every machine.
+/// of 429 skew fuses refused 51 of them, 11.89%, every run on every machine.
+/// Measured on Q901's merge it is 441 fuses and 39 refused, 8.84%, which leaves
+/// this threshold further off than the drift below argues for; it was not moved
+/// down with it.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -1633,11 +1636,18 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// something the total cannot. §17.7 records that every refusal the turned
 /// family has ever produced named `"side of plane"`, with
 /// `"a point inside a piece of a face"` turning up rarely and no seed ever
-/// naming a third. This family's leading cause is `"order along a crossing"`, which
-/// that corpus essentially never reaches — and reaching it is the point. Three
-/// cut lines through one point put two intersections at the same place on a
-/// line, and an ordering that is a tie is not a comparison any amount of
-/// precision settles.
+/// naming a third. This family's leading cause was `"order along a crossing"`,
+/// which that corpus essentially never reaches — and reaching it is the point.
+/// Three cut lines through one point put two intersections at the same place
+/// on a line, and their two boxes overlap, so no reading of the boxes can put
+/// them in order.
+///
+/// **The planes can, and since Q901 they are asked.** Each of the two is the
+/// meet of the face's plane, the crossing's partner and one plane more, and
+/// `which_meet_comes_first_along_a_line` settles their order exactly, a tie
+/// included. On the shipped corpus that took every refusal off the order: 441
+/// fuses, 39 refused, and all 39 named `"a point inside a piece of a face"`,
+/// one step further on. That is what the cause below now pins.
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
@@ -1661,7 +1671,7 @@ fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
             tally.fuses.get(),
             SKEW_REFUSALS_MUST_STAY_BELOW * 100.0
         );
-        tally.the_cause_named_most_often_is(ORDER_ALONG_A_LINE);
+        tally.the_cause_named_most_often_is(A_POINT_INSIDE_A_PIECE);
     }
 }
 
@@ -3865,16 +3875,17 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
     );
 }
 
-/// The predicate that settles which of two points on a crossing comes first.
+/// The search for a point inside a piece of a face, which the skew family's
+/// refusals name since Q901.
 ///
 /// Named here because [`how_often_a_certified_fuse_of_a_skew_pair_refuses`]
 /// asserts on it rather than only printing it, and a bare string in an
 /// assertion is a thing that goes stale silently.
 ///
-/// It was `"order along a line"` until the arrangement learned to draw a curve
-/// that closes, and the same question about a straight crossing is still the
-/// same question — the count this family asserts on did not move.
-const ORDER_ALONG_A_LINE: &str = "order along a crossing";
+/// It was `"order along a crossing"`, the predicate that settles which of two
+/// points on a crossing comes first, until Q901 had that order asked of the
+/// planes two points a rounding apart are the meets of.
+const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
 /// What the fuse gives up on when it is handed two curved faces lying on the
 /// same surface.
