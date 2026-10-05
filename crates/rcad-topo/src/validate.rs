@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
-    Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE,
-    SIDE_OF_TORUS, Scale, Surface, Vector, which_two_surfaces_a_run_is_between,
+    Cone, Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun,
+    Orientation, Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE,
+    SIDE_OF_SPHERE, SIDE_OF_TORUS, Scale, Surface, Vector, which_two_surfaces_a_run_is_between,
     which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
@@ -545,10 +545,11 @@ impl Model {
     /// (`docs/decisions.md` §219.6) — so those are then asked how far the
     /// curve on each plane can reach off the other, against `rounding`, the
     /// room [`Model::what_writing_a_plane_down_costs`] gives a corner against
-    /// its own face's plane. Only a pipe has that bound
-    /// ([`how_far_a_crossing_reaches_off_another_plane`]); an edge that names
-    /// any other curved surface between two planes proved different is
-    /// refused, which is the safe way for a missing bound to fall.
+    /// its own face's plane. A pipe, a ball and a torus have that bound, and a
+    /// cone where the plane crosses it in an ellipse
+    /// ([`how_far_a_crossing_reaches_off_another_plane`], Q612); an edge whose
+    /// crossing has none between two planes proved different is refused, which
+    /// is the safe way for a missing bound to fall.
     ///
     /// # Errors
     ///
@@ -2037,12 +2038,14 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
 /// most the end's distance from `on` (the step from the end to `V` is along
 /// `n`, and `|m·n| ≤ 1`), plus `m·(X − V)` — and `X − V` lies in `on`, so
 /// only the part of `m` square to `n` reads it, which is `|n × m|` long.
+/// What is left is how far apart two points of the crossing can be, which is
+/// the crossing's width and is all each surface below has to say. What the
+/// end misses the crossing by is left out: it is multiplied by `|n × m|`,
+/// which is a rounding wherever the answer is near the room it is held to.
 ///
 /// **A pipe** of radius `R` about the unit axis `a` is crossed by `on` in an
 /// ellipse whose longest half-width is `R / |n·a|`, so `|X − V|` is at most
-/// twice that, for the whole ellipse and so for any arc of it. What the end
-/// misses the ellipse by is left out: it is multiplied by `|n × m|`, which is
-/// a rounding wherever the answer is near the room it is held to.
+/// twice that, for the whole ellipse and so for any arc of it.
 ///
 /// **A plane along the axis** crosses the pipe in two lines, and an arc there
 /// is drawn straight between its ends — `n·a == 0.0` is the very test the walk
@@ -2052,36 +2055,130 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
 /// can draw; `R / 0` is infinite, and the answer is a NaN or infinite, which
 /// no room holds.
 ///
+/// **A ball** of radius `r` is crossed by any plane in a circle no wider than
+/// the ball, so the width is `2r`.
+///
+/// **A torus** lies inside the ball of radius `R + r` about its centre, for a
+/// ring of `R` and a tube of `r`, so whatever a plane crosses it in is no wider
+/// than `2(R + r)` — and a plane square to the axis through the centre crosses
+/// it in a circle that wide, so `R + r` alone would be short by half. The
+/// circles the walk draws for it are inside that ball too: round the axis they
+/// are at most `R + r` from it, and round the tube they are `r` across.
+///
+/// **A cone** is [`how_wide_a_plane_crosses_a_cone`].
+///
 /// Worked in plain `f64` as [`off_a_plane_by_no_more_than_writing_it_down_cost`]
 /// is: the distances are what [`Plane::signed_distance_to`] rounds, and the
-/// caller's room is sixteen times that.
+/// caller's room is sixteen times that. The cone's width is the exception, and
+/// says why.
 fn how_far_a_crossing_reaches_off_another_plane(
     on: &Plane,
     off: &Plane,
     run: &EdgeRun,
     [start, end]: [Point; 2],
 ) -> Option<f64> {
-    let (EdgeRun::RightRoundWhereItCrosses {
-        and: Surface::Cylinder(pipe),
-    }
-    | EdgeRun::PartOfWhereItCrosses {
-        and: Surface::Cylinder(pipe),
-        ..
-    }) = run
+    let (EdgeRun::RightRoundWhereItCrosses { and } | EdgeRun::PartOfWhereItCrosses { and, .. }) =
+        run
     else {
         return None;
     };
-    let leans = on.normal().dot(pipe.axis().direction());
-    if leans == 0.0 && matches!(run, EdgeRun::PartOfWhereItCrosses { .. }) {
+    if let Surface::Cylinder(pipe) = and
+        && on.normal().dot(pipe.axis().direction()) == 0.0
+        && matches!(run, EdgeRun::PartOfWhereItCrosses { .. })
+    {
         return Some(
             off.signed_distance_to(start)
                 .abs()
                 .max(off.signed_distance_to(end).abs()),
         );
     }
-    let widest = 2.0 * pipe.radius() / leans.abs();
+    let widest = how_wide_a_plane_crosses(on, and)?;
     let tilt = on.normal().cross(off.normal()).length();
     Some(off.signed_distance_to(start).abs() + on.signed_distance_to(start).abs() + widest * tilt)
+}
+
+/// How far apart two points of the curve `on` crosses `and` in can be, for the
+/// four curved surfaces [`how_far_a_crossing_reaches_off_another_plane`] says
+/// why of; `None` for any other.
+///
+/// Asked one surface at a time rather than by a `match`, which would need a
+/// wildcard arm for the kinds [`Surface`] has yet to grow (`docs/decisions.md`
+/// §40). A flat `and` between flat faces says nothing about where the edge
+/// bends, and `check_something_curved_says_where_this_edge_bends` has refused it
+/// before this is asked.
+fn how_wide_a_plane_crosses(on: &Plane, and: &Surface) -> Option<f64> {
+    if let Surface::Sphere(ball) = and {
+        return Some(2.0 * ball.radius());
+    }
+    if let Surface::Torus(ring) = and {
+        return Some(2.0 * (ring.ring_radius() + ring.tube_radius()));
+    }
+    if let Surface::Cone(cone) = and {
+        return how_wide_a_plane_crosses_a_cone(on, cone);
+    }
+    let Surface::Cylinder(pipe) = and else {
+        return None;
+    };
+    Some(2.0 * pipe.radius() / on.normal().dot(pipe.axis().direction()).abs())
+}
+
+/// How far apart two points of the ellipse `on` crosses `cone` in can be, or
+/// `None` where the crossing is not proved to be an ellipse.
+///
+/// For `n` and `w` the plane's normal and the cone's axis at length one, `t`
+/// the slope and `h` the apex's distance from `on`, the crossing is an ellipse
+/// wherever `E = (n·w)² − t²|n × w|²` is above zero, and its two half-widths
+/// are `|h|t/E` and `|h|t/√E` — `where_a_plane_cuts_a_cone` in `rcad-geom`
+/// derives both, and draws that ellipse. `E` is at most `(n·w)²`, which is at
+/// most one, so the first is the longer, and no two points of an ellipse are
+/// further apart than twice its longer half-width: the width is `2|h|t/E`.
+///
+/// **That is the whole ellipse, on whichever nappe it lies.** Only `|h|` enters
+/// it, so the apex may stand on either side of `on`; and a frustum is a piece of
+/// the same double cone [`Cone`] stores by its apex and slope, so its rim is a
+/// piece of this same ellipse. A plane through the apex that cuts across the
+/// cone meets it there and nowhere else, and gets a width of nothing.
+///
+/// **Worked in intervals, unlike the rest.** `E` is a small difference of two
+/// near-equal numbers wherever the plane leans at nearly the cone's own angle,
+/// and `f64` can round it up by more than it is, which would shrink the width.
+/// So `E` is taken at the least it can be and `h` at the most; the division and
+/// the root at the end round by an ulp or two of the width, which is a rounding
+/// of a term already held to sixteen times the rounding.
+///
+/// **A plane whose `E` is not proved above zero gets no width**: a parabola or
+/// a hyperbola runs on for ever, and a closed run on one names nothing the walk
+/// draws. An arc of one, and an arc along a ruling through the apex, are
+/// refused here though the walk draws them — a bound for those would read the
+/// arc's ends, not the crossing.
+fn how_wide_a_plane_crosses_a_cone(on: &Plane, cone: &Cone) -> Option<f64> {
+    let normal = on.normal().components().map(Interval::exactly);
+    let along = cone.axis().direction().components().map(Interval::exactly);
+    let apex = cone.apex().coordinates().map(Interval::exactly);
+    let slope = Interval::exactly(cone.slope());
+    let dot = |one: [Interval; 3], other: [Interval; 3]| {
+        one[0] * other[0] + one[1] * other[1] + one[2] * other[2]
+    };
+    let square_to_both = [
+        normal[1] * along[2] - normal[2] * along[1],
+        normal[2] * along[0] - normal[0] * along[2],
+        normal[0] * along[1] - normal[1] * along[0],
+    ];
+    let up = dot(normal, along);
+    let leaning = up * up - slope * slope * dot(square_to_both, square_to_both);
+    if leaning.lo() <= 0.0 {
+        return None;
+    }
+    let reach = dot(normal, apex) - Interval::exactly(on.offset());
+    let furthest_reach = reach.lo().abs().max(reach.hi().abs());
+    // `h = reach/‖n‖` and `E = leaning/(‖n‖²‖w‖²)`, put into `2|h|t/E`.
+    Some(
+        2.0 * furthest_reach
+            * cone.slope()
+            * dot(normal, normal).hi().sqrt()
+            * dot(along, along).hi()
+            / leaning.lo(),
+    )
 }
 
 /// Every one of `held` named exactly once by `named`, and none of them left out.
