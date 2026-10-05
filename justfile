@@ -2085,7 +2085,7 @@ check-fuzz-builds:
 # One fewer. `degenerate_curved_fuses.rs`'s wall lying on a bar's skin matched
 # its `Undecidable` and sent every other `Error` to `panic!`; that fuse now
 # answers every rule, and the test that replaced it has no match on a refusal.
-wildcard_arms := "97"
+wildcard_arms := "95"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
