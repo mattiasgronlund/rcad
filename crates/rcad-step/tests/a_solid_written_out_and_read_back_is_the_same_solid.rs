@@ -486,9 +486,11 @@ fn the_poles_of(model: &Model) -> [Point; 2] {
     let mut poles: Vec<Point> = the_one_face(model)
         .wires()
         .flat_map(|wire| wire.steps().collect::<Vec<_>>())
-        .filter_map(|step| match step {
-            rcad_topo::WireStepView::Pole(pole) => Some(pole.point()),
-            _ => None,
+        .filter_map(|step| {
+            let rcad_topo::WireStepView::Pole(pole) = step else {
+                return None;
+            };
+            Some(pole.point())
         })
         .collect();
     poles.sort_by(|one, other| one.coordinates()[2].total_cmp(&other.coordinates()[2]));
