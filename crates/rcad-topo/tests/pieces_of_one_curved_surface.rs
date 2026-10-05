@@ -2,7 +2,7 @@
 //! by the next fuse.
 //!
 //! §223.4: `block ∪ frustum` leaves the frustum's cone as several faces, and the
-//! fuse could not take that answer back in. Two gaps stand in the way, one
+//! fuse could not take that answer back in. Two gaps stood in the way, one
 //! behind the other (§223.2):
 //!
 //! 1. **The arc's picker.** The first fuse lowered the picker of the block
@@ -15,9 +15,10 @@
 //!    refused with [`rcad_topo::Error::AFaceMeetsItsNeighbourOnItsOwnSurface`]:
 //!    nothing folded pieces of one curved surface into one face the way pieces
 //!    of one plane are folded. The fuse now bakes pieces of one cone as one face
-//!    (row Q898), and behind them is a third gap, the frustum's floor. Its
+//!    (row Q898), and behind them was a third gap, the frustum's floor. Its
 //!    longer arc's picker has the circle's centre in front, which `holds.rs`
-//!    now reads (row Q971) and the fuse's own arrangement does not yet.
+//!    learned to read (row Q971), and the fuse's own arrangement reads it now
+//!    by asking `holds.rs`'s reading rather than a copy of it (row Q1033).
 //!
 //! # The risk the picker's room carries
 //!
@@ -114,20 +115,32 @@ fn one_curved_face_sound_and_measured(model: &Model, united: &[SolidKey], exactl
         .filter(|face| face.surface().as_plane().is_none())
         .count();
     assert_eq!(curved, 1, "the curved surface is one face");
+    let (volume, allowed) = sound_and_measured(model, united, Deflection::for_scale(model.scale()));
+    assert!(
+        (volume - exactly).abs() <= allowed,
+        "measured {volume} against {exactly}, allowed {allowed}"
+    );
+}
+
+/// `Model::validate` passes, and the volume of `solids` together as measured
+/// off a mesh `deflection` fine, with the error the measuring publishes for it.
+fn sound_and_measured(model: &Model, solids: &[SolidKey], deflection: Deflection) -> (f64, f64) {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     model
         .validate(&policy, &mut log)
         .expect("the union is sound");
-    let measured = view
-        .measure(Deflection::for_scale(model.scale()), &policy, &mut log)
-        .expect("the union measures");
-    assert!(
-        (measured.volume() - exactly).abs() <= measured.volume_error(),
-        "measured {} against {exactly}, allowed {}",
-        measured.volume(),
-        measured.volume_error()
-    );
+    solids.iter().fold((0.0, 0.0), |(volume, allowed), &solid| {
+        let measured = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(deflection, &policy, &mut log)
+            .expect("the union measures");
+        (
+            volume + measured.volume(),
+            allowed + measured.volume_error(),
+        )
+    })
 }
 
 /// The area of `x > 1, y > 1` inside a circle of radius `r` about the origin,
@@ -210,16 +223,22 @@ fn a_near_semicircle_keeps_its_centre_behind_its_picker() {
     }
 }
 
-/// With the centre kept behind, the arcs the room can be granted get past the
-/// picker on the way back in, past the cone pieces and past `holds.rs`'s
-/// reading of the frustum's floor, and stop where the fuse's arrangement reads
-/// that floor's longer arc: the disc at `z = 4`, its circle cut in two where
-/// the wall's plane crosses it.
+/// `(block ∪ frustum) ∪ cube`, with the block's wall passing `t` from the
+/// frustum's axis and a cube that touches nothing, is the first union and the
+/// cube, sound and of the volume worked out by hand, at each `t`.
 ///
-/// `t = 2⁻³⁰` and `2⁻⁴⁰` refused at the block floor's picker with
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] before the room. `2⁻⁴⁴` and
-/// `2⁻⁴⁵` still do: there the room would take the plane past the centre, so it
-/// is not granted, and the re-solved corners straddle the picker as before.
+/// That volume is the frustum's and the block's less what they share, and the
+/// cube's 8. The block is `3` tall over a floor of `50 − 10t`. The wall's plane
+/// is `x − y/10 = t`, so at each height from `z = 5` to `z = 8` the two share
+/// the part of the frustum's circle of radius `r = z/2` past a line
+/// `h = t/√1.01` from its centre, which is `r²·acos(h/r) − h·√(r² − h²)`.
+///
+/// With the centre kept behind, the arcs the room can be granted get past the
+/// picker on the way back in. `t = 2⁻³⁰` and `2⁻⁴⁰` refused at the block
+/// floor's picker with [`Error::AFaceTrimmedByACurveThisCannotFollow`] before
+/// the room. `2⁻⁴⁴` and `2⁻⁴⁵` still would: there the room would take the plane
+/// past the centre, so it is not granted, and the re-solved corners straddle
+/// the picker as before. They are not asked here.
 ///
 /// **The cone pieces are passed in two steps** (row Q898). The first union keeps
 /// the cone as five faces, cut apart by the wall's plane and by the block's
@@ -239,28 +258,40 @@ fn a_near_semicircle_keeps_its_centre_behind_its_picker() {
 /// It now also reads one whose other arc's middle is behind
 /// ([`the_floor_disc_a_wall_near_its_axis_cuts_in_two_holds_its_disc`]).
 ///
-/// **What stops it now is the same refusal on the same face, from the fuse's
-/// arrangement**: `which_way_an_edge_runs_round` in `fuse/arrange.rs` reads the
-/// floor's arcs through its own `the_way_into_an_arc`, which asks only the two
-/// ways with the centre behind. The answer this should become is the first
-/// union and the cube, measured against the frustum's and the block's volumes
-/// less what they share, worked out by hand, and the cube's 8: the wall's plane
-/// is `x − y/10 = t`, so at each height from `z = 5` to `z = 8` the two share
-/// the slice of the frustum's circle of radius `z / 2` past a line `t/√1.01`
-/// from its centre.
+/// **Then it stopped at the same refusal on the same face, from the fuse's
+/// arrangement** (row Q1033): `which_way_an_edge_runs_round` in
+/// `fuse/arrange.rs` read the floor's arcs through a copy of `holds.rs`'s
+/// reading that asked only the two ways with the centre behind. It now asks
+/// `holds.rs`'s own, on the boxes it solved the corners into.
 #[test]
-fn a_frustum_and_a_wall_near_its_axis_taken_back_in_stop_at_the_floor_discs_long_arc() {
+fn a_frustum_and_a_wall_near_its_axis_taken_back_in_are_the_union_and_the_cube() {
+    let frustum = core::f64::consts::PI / 3.0 * 0.25 * (9.0_f64.powi(3) - 4.0_f64.powi(3));
     for exponent in [1, 10, 30, 40, 42] {
         let t = 2.0_f64.powi(-exponent);
         let (model, united) =
             a_frustum_united_with_a_wall_near_its_axis(t).expect("the first union answers");
-        let floor = the_floor_disc(&model, &united);
-        let refusal = the_union_again_with_a_far_cube(&model, &united)
-            .expect_err("the fuse cannot read the floor disc's longer arc");
+        let (model, again) = the_union_again_with_a_far_cube(&model, &united)
+            .unwrap_or_else(|why| panic!("t = 2^-{exponent}: the second union refused: {why:?}"));
+        assert_eq!(
+            again.len(),
+            2,
+            "t = 2^-{exponent}: the first union and the cube"
+        );
+        let block = 3.0 * (50.0 - 10.0 * t);
+        let h = t / 1.01_f64.sqrt();
+        let shared = simpson(5.0, 8.0, |z| {
+            let r = z / 2.0;
+            r * r * (h / r).acos() - h * (r * r - h * h).sqrt()
+        });
+        let exactly = frustum + block - shared + 8.0;
+        let (volume, allowed) = sound_and_measured(
+            &model,
+            &again,
+            Deflection::of(0.001).expect("a positive length"),
+        );
         assert!(
-            matches!(refusal, Error::AFaceTrimmedByACurveThisCannotFollow { face } if face == floor),
-            "t = 2^-{exponent}: the second union refused before reaching the floor disc: \
-             {refusal:?}"
+            (volume - exactly).abs() <= allowed,
+            "t = 2^-{exponent}: measured {volume} against {exactly}, allowed {allowed}"
         );
     }
 }
@@ -382,7 +413,12 @@ fn the_picker_facing_into_the_block(
     found[0].1
 }
 
-fn the_union_again_with_a_far_cube(model: &Model, united: &[SolidKey]) -> Result<(), Error> {
+/// `united ∪ cube`, with a cube of side 2 at `(20, 20, 20)` that touches
+/// nothing here.
+fn the_union_again_with_a_far_cube(
+    model: &Model,
+    united: &[SolidKey],
+) -> Result<(Model, Vec<SolidKey>), Error> {
     let mut model = model.clone();
     let far = a_box(
         &mut model,
@@ -390,7 +426,7 @@ fn the_union_again_with_a_far_cube(model: &Model, united: &[SolidKey]) -> Result
         2.0,
         [20.0, 20.0, 20.0],
     );
-    fused(&model, united, &[far], Rule::Union).map(|_| ())
+    fused(&model, united, &[far], Rule::Union)
 }
 
 fn a_model() -> Model {
