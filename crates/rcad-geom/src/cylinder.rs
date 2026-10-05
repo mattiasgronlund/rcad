@@ -94,17 +94,18 @@ impl Cylinder {
     /// # Panics
     ///
     /// If the stored axis direction has no length. That never happens:
-    /// [`Axis::new`] checks it, and [`Axis::x`]/[`Axis::y`]/[`Axis::z`] each
-    /// build one straight from a literal unit vector, so neither public
-    /// constructor can hand back a zero direction. `Deserialize` goes
-    /// through the first check —
-    /// `#[serde(try_from = "(Point, Vector)")]` on `Axis` makes `Axis::new`
-    /// the route in on the wire.
+    /// [`Axis::new`] checks it, [`Axis::as_written`] keeps a direction only
+    /// when its length is within a hair of one and hands any other to
+    /// [`Axis::new`], and [`Axis::x`]/[`Axis::y`]/[`Axis::z`] each build one
+    /// straight from a literal unit vector, so no public constructor can hand
+    /// back a zero direction. `Deserialize` goes through [`Axis::as_written`] —
+    /// `#[serde(try_from = "(Point, Vector)")]` on `Axis` makes it the route
+    /// in on the wire.
     /// `a_pipe_stored_with_a_zero_length_axis_direction_is_refused_on_the_way_in`
     /// (`crates/rcad-geom/tests/serialization.rs`) shows the bytes refused
     /// before a `Cylinder` exists to ask.
     ///
-    /// **There is a third route in and it is not a constructor.**
+    /// **There is one more route in and it is not a constructor.**
     /// [`Cylinder::transformed`] goes through `Axis::transformed`, which does
     /// not re-normalize — deliberately, so a direction that was exactly square
     /// to something stays exactly square to it (`docs/decisions.md` §32.3). What

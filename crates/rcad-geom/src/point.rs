@@ -739,7 +739,9 @@ impl Axis {
         self.origin
     }
 
-    /// Which way the line points. Scaled to length one when the axis was built.
+    /// Which way the line points: of length one to within what a turn leaves,
+    /// since [`Axis::transformed`] and [`Axis::as_written`] keep a direction an
+    /// ulp or two off it rather than scale it again.
     #[must_use]
     pub fn direction(&self) -> Vector {
         self.direction
@@ -792,10 +794,12 @@ impl Axis {
     /// origin and leaves a direction alone, because a direction is not a length
     /// — so there is nothing left to work out and nothing that should round.
     /// Going back through [`Axis::new`] instead scales an already-scaled
-    /// direction, and that is not the direction that went in: **24 750 of
+    /// direction, and that is not always the direction that went in: **992 of
     /// 100 000** random directions come back with other bits when an axis is
-    /// rebuilt from its own. [`Axis::transformed`] refuses the same second
-    /// scaling and says more about what it costs.
+    /// rebuilt from its own
+    /// (`rebuilding_an_axis_from_its_own_direction_moves_it_and_moving_its_origin_does_not`).
+    /// [`Axis::transformed`] refuses the same second scaling and says more
+    /// about what it costs.
     ///
     /// That is a footgun and not a broken promise. [`Axis::new`] keeps what it
     /// claims — two vectors *exactly* along one line give the same axis bit for
@@ -866,6 +870,7 @@ impl From<Axis> for (Point, Vector) {
 #[cfg(test)]
 mod tests {
     use core::cmp::Ordering;
+    use core::f64::consts::FRAC_1_SQRT_2;
 
     use rcad_predicates::Decision;
 
@@ -1635,6 +1640,105 @@ mod tests {
     fn an_axis_rebuilt_from_stored_parts_without_a_direction_is_refused() {
         let stored = (Point::origin(), Vector::zero());
         assert!(Axis::try_from(stored).is_err());
+    }
+
+    /// The ring axis of the turned bend Q842 traced (`docs/decisions.md`
+    /// §355.6): `z` turned about `x` by `2.5`. [`Axis::as_written`] keeps its
+    /// bits, and [`Axis::new`] scales it again and moves its last one.
+    #[test]
+    fn the_z_axis_turned_about_x_by_two_and_a_half_is_kept_as_written_and_moved_by_new() {
+        let turn = Isometry::rotation(&Axis::x(), 2.5).expect("a finite angle about a unit axis");
+        let turned = Axis::z().transformed(&turn);
+        assert_eq!(
+            turned.direction().components().map(f64::to_bits),
+            [0.0, -0.598_472_144_103_956_5, -0.801_143_615_546_933_6].map(f64::to_bits)
+        );
+
+        let kept = Axis::as_written(turned.origin(), turned.direction()).expect("a finite axis");
+        assert_eq!(bits_of(kept), bits_of(turned));
+
+        let scaled = Axis::new(turned.origin(), turned.direction()).expect("a finite axis");
+        assert_eq!(
+            scaled.direction().components().map(f64::to_bits),
+            [0.0, -0.598_472_144_103_956_5, -0.801_143_615_546_933_7].map(f64::to_bits)
+        );
+    }
+
+    /// [`Axis::as_written`] keeps a direction up to
+    /// [`Plane::NORMAL_LENGTH_ROUNDOFF`](crate::Plane::NORMAL_LENGTH_ROUNDOFF)
+    /// and scales it past, at the two pairs of neighbouring `f64` either side
+    /// of one that `a_normal_is_kept_up_to_the_published_bound_and_scaled_past_it`
+    /// in `plane.rs` draws a plane's edge with: `1 + 31ε` and `1 − 32ε` kept,
+    /// `1 + 32ε` and `1 − 32.5ε` scaled. One check serves both, so the edge is
+    /// the same place for an axis and a plane.
+    #[test]
+    fn a_direction_is_kept_up_to_the_published_bound_and_scaled_past_it() {
+        let epsilon = f64::EPSILON;
+        for (length, kept) in [
+            (1.0 + 31.0 * epsilon, true),
+            (1.0 + 32.0 * epsilon, false),
+            (1.0 - 32.0 * epsilon, true),
+            (1.0 - 32.5 * epsilon, false),
+        ] {
+            let written = Vector::new(0.0, 0.0, length);
+            let stored = Axis::as_written(Point::new(1.0, 2.0, 3.0), written)
+                .expect("a finite direction with a length")
+                .direction();
+            let expected = if kept {
+                written
+            } else {
+                Vector::new(0.0, 0.0, 1.0)
+            };
+            assert_eq!(
+                stored.components().map(f64::to_bits),
+                expected.components().map(f64::to_bits),
+                "a direction {length} long"
+            );
+        }
+    }
+
+    /// **Two lengths of one direction are two axes as written and one through
+    /// [`Axis::new`].** `(s, 0, s)` for the `f64` just below `1/√2` is within
+    /// the bound and kept; `(1, 0, 1)` is not, and is scaled to the `f64` just
+    /// above, which is where [`Axis::new`] puts both.
+    #[test]
+    fn two_lengths_of_one_direction_are_two_axes_as_written_and_one_through_new() {
+        let short = FRAC_1_SQRT_2.next_down();
+        let near_one = Vector::new(short, 0.0, short);
+        let long = Vector::new(1.0, 0.0, 1.0);
+        let scaled = Vector::new(FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2);
+        let as_written = |direction| {
+            Axis::as_written(Point::origin(), direction)
+                .expect("a direction with a length")
+                .direction()
+        };
+        let through_new = |direction| {
+            Axis::new(Point::origin(), direction)
+                .expect("a direction with a length")
+                .direction()
+        };
+
+        assert_eq!(as_written(near_one), near_one);
+        assert_eq!(as_written(long), scaled);
+        assert_eq!(through_new(near_one), scaled);
+        assert_eq!(through_new(long), scaled);
+    }
+
+    /// [`Axis::as_written`] refuses what [`Axis::new`] refuses, by the same
+    /// name, and names a bad origin before a bad direction as it does.
+    #[test]
+    fn an_axis_as_written_refuses_what_new_refuses() {
+        let nowhere = Point::new(f64::NAN, 0.0, 0.0);
+        for (origin, direction) in [
+            (nowhere, Vector::new(0.0, 0.0, 1.0)),
+            (nowhere, Vector::zero()),
+            (Point::origin(), Vector::zero()),
+            (Point::origin(), Vector::new(f64::INFINITY, 0.0, 0.0)),
+        ] {
+            let refused = Axis::as_written(origin, direction);
+            assert!(refused.is_err(), "{origin:?} along {direction:?}");
+            assert_eq!(refused, Axis::new(origin, direction));
+        }
     }
 
     fn bits_of(axis: Axis) -> [u64; 6] {
