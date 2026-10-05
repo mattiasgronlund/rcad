@@ -143,7 +143,8 @@ origin, so the far meets are in no piece; what the mesher refuses is not
 traced. The pin is right 74, `a point inside a piece of a face` 16 and two of
 each of the three. One run of it took 25.6 s on the lane's commit against
 21.4 s on the base; two runs in between, with the machine busier, took 59 s and
-48 s.
+48 s. Q1074 has since traced and closed the six, and the pin is right 80
+(§406.5).
 
 ### 406.5 What this leaves
 
