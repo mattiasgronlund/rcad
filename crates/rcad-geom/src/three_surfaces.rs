@@ -157,6 +157,13 @@ impl MeetOfThree {
     /// from `(0, −5, 0)` the two cannot be put in order from it. Narrowed, the
     /// box is `[5 − 1 ulp, 5]` along `x`, which orders them (§284.3, Q209).
     ///
+    /// **Then each side is narrowed to the root along the line**, where the
+    /// quadric's sign there can be asked exactly
+    /// ([`narrowed_onto_the_root_along_the_line`]). A meet at a graze, far out
+    /// where a line a rounding off parallel to a cone's ruling meets the cone
+    /// again, is one the step cannot narrow, and this boxes it between two
+    /// neighbouring `f64` on each axis (§406.3).
+    ///
     /// **Why this is not what [`meet_of_three_surfaces`] hands back to everyone.**
     /// A narrower box round a meet is not a narrower box round a stored corner:
     /// `rcad-topo`'s `bake.rs` derives a face's corners through
@@ -203,10 +210,79 @@ impl MeetOfThree {
             places
                 .iter()
                 .map(|&place| {
-                    narrowed_onto_a_quadric_by_one_checked_step([&one, &other], &quadric, place)
+                    let stepped = narrowed_onto_a_quadric_by_one_checked_step(
+                        [&one, &other],
+                        &quadric,
+                        place,
+                    );
+                    narrowed_onto_the_root_along_the_line([&one, &other], &quadric, stepped)
                 })
                 .collect(),
         )
+    }
+
+    /// Which way the line `planes` cross in runs through `quadric`, at the one
+    /// place inside `near` where it meets it: the sign of `∇Q · (n₁ × n₂)`
+    /// there, for the planes' stored normals in the order given and `Q` the
+    /// quadric's own expression, which is below nothing inside a ball, a pipe
+    /// or a cone and above it outside. `None` where that is not proved.
+    ///
+    /// **Proved from two exact signs, and no gradient is worked out.** Along an
+    /// axis the line is not square to, its point with coordinate `s` is
+    /// `N(s) / E` for `E` the part of `n₁ × n₂` along that axis
+    /// ([`narrowed_onto_the_root_along_the_line`]), and `E² Q(N(s)/E)` is a
+    /// polynomial in `s` of degree two at most. Where it is above nothing at
+    /// one end of `near`'s side and below at the other, it has one root
+    /// between them, that root is where the line meets the quadric inside
+    /// `near`, and it is simple, since a double root does not change sign. So
+    /// the polynomial climbs through it exactly when it is above nothing at the
+    /// high end, and its slope there is `E² ∇Q · (n₁ × n₂) / E`.
+    ///
+    /// **What it is for.** A line a rounding off parallel to a cone's ruling
+    /// meets the cone `2.26e16` out at a graze: `∇Q · (n₁ × n₂)` is a few
+    /// units, a cancellation of terms near `1e16`, and worked out over even a
+    /// box one ulp wide its enclosure is `17` wide and straddles nothing. That
+    /// sign is which way two curves leave the place they meet, and `rcad-topo`'s
+    /// arrangement asks it there (§406.3).
+    #[must_use]
+    pub fn which_way_a_line_runs_through_a_quadric(
+        planes: [&Plane; 2],
+        quadric: &Surface,
+        near: PredicatePoint,
+    ) -> Option<Decision> {
+        let PredicatePoint::Constructed(boxed) = near else {
+            return None;
+        };
+        let written = how_a_surface_is_written(quadric)?;
+        let [one, other] = planes.map(|plane| plane.normal().components());
+        (0..3).find_map(|axis| {
+            let (low, high) = (boxed[axis].lo(), boxed[axis].hi());
+            if !(low.is_finite() && high.is_finite()) {
+                return None;
+            }
+            let sign_at = |along: f64| {
+                how_the_quadric_leans_where_the_line_reaches(planes, &written, axis, along)
+            };
+            let at_the_high_end = sign_at(high)?;
+            if !one_root_between(sign_at(low)?, at_the_high_end) {
+                return None;
+            }
+            let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+            let across = Exact::product_of(one[next], other[after])?
+                .minus(&Exact::product_of(one[after], other[next])?)
+                .sign();
+            if across == Decision::Pos {
+                Some(at_the_high_end)
+            } else if across == Decision::Neg {
+                Some(if at_the_high_end == Decision::Pos {
+                    Decision::Neg
+                } else {
+                    Decision::Pos
+                })
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -983,6 +1059,152 @@ fn where_two_boxes_of_one_number_overlap(one: Interval, other: Interval) -> Inte
     Interval::new(lo, hi).unwrap_or_else(|_| {
         panic!("two boxes that each hold the same number do not overlap: {one:?} and {other:?}")
     })
+}
+
+/// `place`, a box round where two planes and a quadric meet, with each side
+/// narrowed to the two `f64` either side of the meet, where the quadric's sign
+/// along the line can be asked exactly and changes once across that side.
+///
+/// **Why the checked step is not enough.** A line a rounding off parallel to a
+/// cone's ruling meets the cone a second time far out, `2.26e16` along the
+/// edges of a block leaned along a ruling, and it meets it there at a graze:
+/// the cone's gradient is `4e16` long and its dot with the line about `10`.
+/// The step's row is that gradient worked out over the whole box, which is
+/// about 30 wide, so the determinant straddles zero and the step gives up.
+/// Along the line the root is simple and the quadratic's slope there is well
+/// clear of zero, so asking the sign is enough.
+///
+/// **The sign along one axis.** Where the line's direction `n₁ × n₂` has a
+/// part `E` along an axis, the point of the line whose coordinate there is `s`
+/// is `N(s) / E`, with every part of `N` worked out exactly from the stored
+/// planes and `s`. So `E² Q(N/E) = N·(M N) + 2E b·N + E² c` has the sign of
+/// the quadric there, and nothing in it rounds. The meet's coordinate is a root
+/// of it in the box's side. Where the signs at the two ends are opposite and
+/// neither is zero, the polynomial, of degree two at most and not nothing, has
+/// exactly one root between them, so that root is the meet's coordinate, and
+/// halving keeps it between two numbers where the signs still differ. A zero
+/// met on the way is the coordinate itself. Anything else hands the side back
+/// as it was: an end where the quadric is nothing, two ends of one sign, the
+/// line square to the axis, or a product out of range.
+fn narrowed_onto_the_root_along_the_line(
+    planes: [&Plane; 2],
+    quadric: &HowASurfaceIsWritten,
+    place: PredicatePoint,
+) -> PredicatePoint {
+    let PredicatePoint::Constructed(boxed) = place else {
+        return place;
+    };
+    PredicatePoint::Constructed(core::array::from_fn(|axis| {
+        the_root_along_the_line_inside(planes, quadric, axis, boxed[axis]).unwrap_or(boxed[axis])
+    }))
+}
+
+/// The meet's coordinate along `axis`, boxed between two neighbouring `f64`
+/// inside `side`, or `None` where the signs at the ends of `side` do not show
+/// one root between them ([`narrowed_onto_the_root_along_the_line`]).
+fn the_root_along_the_line_inside(
+    planes: [&Plane; 2],
+    quadric: &HowASurfaceIsWritten,
+    axis: usize,
+    side: Interval,
+) -> Option<Interval> {
+    let sign_at =
+        |along: f64| how_the_quadric_leans_where_the_line_reaches(planes, quadric, axis, along);
+    let (mut low, mut high) = (side.lo(), side.hi());
+    if !(low.is_finite() && high.is_finite()) {
+        return None;
+    }
+    let low_sign = sign_at(low)?;
+    if !one_root_between(low_sign, sign_at(high)?) {
+        return None;
+    }
+    // Each halving halves the width, so this many reach the two neighbouring
+    // `f64` from any side a step of the box hands over that is not stretched
+    // down into the subnormals; one that is ends here, still holding the root.
+    for _ in 0..HALVINGS {
+        if low.next_up() >= high {
+            break;
+        }
+        let middle = (0.5 * low + 0.5 * high).clamp(low.next_up(), high.next_down());
+        let sign = sign_at(middle)?;
+        if sign == Decision::Zero {
+            return Some(Interval::exactly(middle));
+        }
+        if sign == low_sign {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    Some(Interval::new(low, high).expect("the ends were only ever moved towards each other"))
+}
+
+/// Whether a polynomial of degree two at most, not nothing, with these signs at
+/// the two ends of a stretch has one root inside it: the two are strict and
+/// differ, so the count of roots between them is odd.
+fn one_root_between(at_one_end: Decision, at_the_other: Decision) -> bool {
+    matches!(at_one_end, Decision::Pos | Decision::Neg)
+        && matches!(at_the_other, Decision::Pos | Decision::Neg)
+        && at_one_end != at_the_other
+}
+
+/// How many times [`the_root_along_the_line_inside`] halves a side at most.
+const HALVINGS: usize = 64;
+
+/// The sign of the quadric at the point of the two planes' line whose
+/// coordinate along `axis` is `along`, worked out exactly, or `None` where the
+/// line is square to that axis or a product falls out of range.
+fn how_the_quadric_leans_where_the_line_reaches(
+    [one, other]: [&Plane; 2],
+    quadric: &HowASurfaceIsWritten,
+    axis: usize,
+    along: f64,
+) -> Option<Decision> {
+    let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+    let (mine, theirs) = (one.normal().components(), other.normal().components());
+    let across = Exact::product_of(mine[next], theirs[after])?
+        .minus(&Exact::product_of(mine[after], theirs[next])?);
+    if !matches!(across.sign(), Decision::Pos | Decision::Neg) {
+        return None;
+    }
+    let short_of = |plane: &Plane, normal: [f64; 3]| -> Option<Exact> {
+        Some(Exact::of(plane.offset()).minus(&Exact::product_of(normal[axis], along)?))
+    };
+    let (mine_short, theirs_short) = (short_of(one, mine)?, short_of(other, theirs)?);
+    let mut reaches: [Exact; 3] = core::array::from_fn(|_| Exact::of(0.0));
+    reaches[axis] = across.times(&Exact::of(along))?;
+    reaches[next] = mine_short
+        .times(&Exact::of(theirs[after]))?
+        .minus(&theirs_short.times(&Exact::of(mine[after]))?);
+    reaches[after] = theirs_short
+        .times(&Exact::of(mine[next]))?
+        .minus(&mine_short.times(&Exact::of(theirs[next]))?);
+
+    let mut squared = Exact::of(0.0);
+    let mut linear = Exact::of(0.0);
+    for ((entries, half), reach) in quadric
+        .squared
+        .iter()
+        .zip(&quadric.half_linear)
+        .zip(&reaches)
+    {
+        let mut pulled = Exact::of(0.0);
+        for (entry, along) in entries.iter().zip(&reaches) {
+            pulled = pulled.plus(&entry.times(along)?);
+        }
+        squared = squared.plus(&reach.times(&pulled)?);
+        linear = linear.plus(&half.times(reach)?);
+    }
+    let twice_across = across.times(&Exact::of(2.0))?;
+    let total = squared
+        .plus(&twice_across.times(&linear)?)
+        .plus(&across.times(&across)?.times(&quadric.constant)?);
+    let sign = total.sign();
+    match sign {
+        Decision::Pos | Decision::Neg | Decision::Zero => Some(sign),
+        Decision::Undecidable { .. } => None,
+        other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+    }
 }
 
 /// What a third surface leaves of two planes that never cross in a line.
@@ -3109,6 +3331,142 @@ mod tests {
             "the exact check holds the meet's x in a box one ulp past it"
         );
         println!("as placed {wide:?}, narrowed {tight:?}");
+    }
+
+    /// The bottom face of the block leaned `2` and turned `1` in
+    /// `a_plane_cut_along_a_cones_other_nappe.rs`, one of its side walls, and
+    /// the frustum's cone, by the numbers the block stores. The side edge runs
+    /// a rounding off parallel to a ruling, so it meets the cone a second time
+    /// `2.26e16` out, at a graze. The quadratic boxes that meet several ulps
+    /// wide and the checked step cannot narrow it, since its row straddles
+    /// nothing over a box that wide; the sign along the line boxes each side
+    /// between two neighbouring `f64` (§406.3).
+    #[test]
+    fn the_far_meet_of_an_edge_leaned_along_a_ruling_is_boxed_between_two_neighbouring_f64() {
+        let plane = |normal: [f64; 3], offset: f64| {
+            let made = Plane::from_coefficients([normal[0], normal[1], normal[2], -offset])
+                .expect("a plane");
+            assert_eq!(
+                (made.normal().components(), made.offset()),
+                (normal, offset),
+                "the plane is stored as the block stores it"
+            );
+            Surface::Plane(made)
+        };
+        let bottom = plane(
+            [
+                -0.48326107372841764,
+                -0.7526345292496597,
+                -0.447213595499958,
+            ],
+            1.3416407864998727,
+        );
+        let side = plane(
+            [
+                -0.8414709848078965,
+                0.5403023058681398,
+                5.551115123125783e-17,
+            ],
+            4.999999999999998,
+        );
+        let cone = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a slope"));
+        let three = [&side, &bottom, &cone];
+        let as_placed = meet(three).expect("two planes and a cone meet");
+        let MeetOfThree::At(places) = &as_placed else {
+            panic!("the side edge meets the cone at two points: {as_placed:?}");
+        };
+        let far = places
+            .iter()
+            .position(|place| place.enclosure()[2].hi() < -1e16)
+            .expect("one meet is 2.26e16 down the lower nappe");
+        let MeetOfThree::At(narrowed) = as_placed.boxed_tight(three) else {
+            panic!("a meet at points boxed tighter is a meet at those points");
+        };
+        let (wide, tight) = (places[far].enclosure(), narrowed[far].enclosure());
+        for axis in 0..3 {
+            assert!(
+                wide[axis].lo() <= tight[axis].lo() && tight[axis].hi() <= wide[axis].hi(),
+                "the narrowed box {tight:?} is not inside the quadratic's {wide:?}"
+            );
+            assert!(
+                tight[axis].hi() <= tight[axis].lo().next_up(),
+                "the narrowed box {tight:?} is wider than two neighbouring f64 along {axis}"
+            );
+        }
+        let ulps_wide = |side: Interval| {
+            let mut count = 0;
+            let mut at = side.lo();
+            while at < side.hi() {
+                at = at.next_up();
+                count += 1;
+            }
+            count
+        };
+        assert!(
+            (0..3).all(|axis| ulps_wide(wide[axis]) >= 4),
+            "the quadratic's box {wide:?} is already narrow"
+        );
+
+        let [Surface::Plane(one), Surface::Plane(other), third] = in_a_fixed_order(three) else {
+            unreachable!("two planes sort before a cone")
+        };
+        let written = how_a_surface_is_written(&third).expect("a cone is a quadric");
+        assert_eq!(
+            narrowed_onto_a_quadric_by_one_checked_step([&one, &other], &written, places[far]),
+            places[far],
+            "the checked step narrows it on its own"
+        );
+    }
+
+    /// The sign of a ball's expression along the `x` axis, which the planes
+    /// `y = 0` and `z = 0` cross in, asked where nothing rounds: inside at
+    /// `4`, on it at `5` and outside at `6`.
+    #[test]
+    fn the_sign_along_two_planes_line_is_inside_on_or_outside_the_ball_where_it_is() {
+        let floor = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a plane");
+        let wall = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a plane");
+        let ball = how_a_surface_is_written(&Surface::Sphere(
+            Sphere::new(Point::origin(), 5.0).expect("a radius"),
+        ))
+        .expect("a ball is a quadric");
+        let sign_at =
+            |x: f64| how_the_quadric_leans_where_the_line_reaches([&floor, &wall], &ball, 0, x);
+        assert_eq!(sign_at(4.0), Some(Decision::Neg));
+        assert_eq!(sign_at(5.0), Some(Decision::Zero));
+        assert_eq!(sign_at(6.0), Some(Decision::Pos));
+        assert_eq!(sign_at(-6.0), Some(Decision::Pos));
+        assert_eq!(
+            how_the_quadric_leans_where_the_line_reaches([&floor, &wall], &ball, 1, 0.0),
+            None,
+            "the line is square to y, so no point of it is picked out by y"
+        );
+    }
+
+    /// The `x` axis runs into the ball at `x = −5` and out of it at `x = 5`, so
+    /// the ball's gradient points against `n₁ × n₂ = +x` at the first and with
+    /// it at the second, and turns round with the two planes.
+    #[test]
+    fn a_line_runs_into_a_ball_where_it_meets_it_first_and_out_where_it_meets_it_last() {
+        let floor = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a plane");
+        let wall = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a plane");
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a radius"));
+        let near = |x: f64| {
+            PredicatePoint::Constructed(
+                [x, 0.0, 0.0].map(|at| Interval::new(at - 1e-9, at + 1e-9).expect("a range")),
+            )
+        };
+        let way = |planes: [&Plane; 2], x: f64| {
+            MeetOfThree::which_way_a_line_runs_through_a_quadric(planes, &ball, near(x))
+        };
+        assert_eq!(way([&floor, &wall], -5.0), Some(Decision::Neg));
+        assert_eq!(way([&floor, &wall], 5.0), Some(Decision::Pos));
+        assert_eq!(way([&wall, &floor], -5.0), Some(Decision::Pos));
+        assert_eq!(way([&wall, &floor], 5.0), Some(Decision::Neg));
+        assert_eq!(
+            way([&floor, &wall], 0.0),
+            None,
+            "a box round the middle holds no meet"
+        );
     }
 
     /// The ball sits off the bar's axis, so the floor cuts the two in circles

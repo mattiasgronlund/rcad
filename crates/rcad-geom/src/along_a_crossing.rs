@@ -363,16 +363,31 @@ impl Predicate for HowThreeOnACurveWind {
         None
     }
 
+    /// **Swept two ways, and the overlap is the answer.** `(one − from) ×
+    /// (other − from)` and `(one − from) × (other − one)` are one number for
+    /// every three points, since the difference is `(one − from) × (one −
+    /// from)`, which is nothing. So each enclosure holds every value the three
+    /// boxes allow, and so does where they overlap.
+    ///
+    /// The second is the one that decides where `one` and `other` are close
+    /// together and far from `from`. There each step from `from` rounds by an
+    /// ulp of how far it reaches, and the first form multiplies that rounding
+    /// by the other long step; the second subtracts two boxes that are close
+    /// together and rounds by an ulp of the short step between them. The block
+    /// leaned along a cone's ruling and turned `1` in
+    /// `a_plane_cut_along_a_cones_other_nappe.rs` cuts the cone in an ellipse
+    /// whose start is `2.2e16` out, and two nodes `3.9` apart near the frustum
+    /// swept from it straddle zero by `1.9e17` (§406.1).
     fn on_intervals(&self) -> Interval {
-        let base = self.from.enclosure();
-        let step = |to: PredicatePoint| {
-            let there = to.enclosure();
-            core::array::from_fn(|axis| there[axis] - base[axis])
+        let [from, one, other] = [self.from, self.one, self.other].map(PredicatePoint::enclosure);
+        let gap = |here: [Interval; 3], there: [Interval; 3]| -> [Interval; 3] {
+            core::array::from_fn(|axis| there[axis] - here[axis])
         };
-        dot_enclosing(
-            cross_enclosing(step(self.one), step(self.other)),
-            exactly(self.anticlockwise_about),
-        )
+        let about = exactly(self.anticlockwise_about);
+        let swept_from_the_start =
+            dot_enclosing(cross_enclosing(gap(from, one), gap(from, other)), about);
+        let swept_from_one = dot_enclosing(cross_enclosing(gap(from, one), gap(one, other)), about);
+        where_two_enclosures_of_one_number_overlap(swept_from_the_start, swept_from_one)
     }
 
     fn exactly(&self) -> Option<Decision> {
@@ -399,6 +414,18 @@ impl Predicate for HowThreeOnACurveWind {
             other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
         }
     }
+}
+
+/// Where two enclosures of one number overlap.
+///
+/// # Panics
+///
+/// If they do not. Two boxes that each hold the same number share at least that
+/// number, so an empty overlap is a broken enclosure.
+fn where_two_enclosures_of_one_number_overlap(one: Interval, other: Interval) -> Interval {
+    Interval::new(one.lo().max(other.lo()), one.hi().min(other.hi())).unwrap_or_else(|_| {
+        panic!("two enclosures of the same number do not overlap: {one:?} and {other:?}")
+    })
 }
 
 #[cfg(test)]
@@ -782,6 +809,73 @@ mod tests {
             Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
             "and this refuses the very same pair"
         );
+    }
+
+    /// Two meets `3.9` apart by the frustum, swept from where the ellipse a
+    /// block's top cuts in the cone starts, `2.2e16` out: the block leaned
+    /// along a ruling and turned `1` in `a_plane_cut_along_a_cones_other_nappe.rs`,
+    /// by its stored numbers. Swept from the start the two steps each round by
+    /// an ulp of `2.2e16` and the sweep straddles nothing by `1.9e17`; swept
+    /// from `one` it is decided, and it is the sign the two middles give
+    /// exactly (§406.1).
+    #[test]
+    fn two_points_close_together_far_from_the_start_are_ordered_round_a_long_ellipse() {
+        let boxed = |sides: [[f64; 2]; 3]| {
+            PredicatePoint::Constructed(
+                sides.map(|[lo, hi]| Interval::new(lo, hi).expect("a range")),
+            )
+        };
+        let from = PredicatePoint::from([
+            -6052001170552803.0,
+            -9425433034941358.0,
+            2.2402277211438692e16,
+        ]);
+        let one = boxed([
+            [-5.676794340559188, -5.67679434055918],
+            [0.41299523114051584, 0.41299523114052195],
+            [11.383595046548264, 11.383595046548281],
+        ]);
+        let other = boxed([
+            [-3.8082163550265475, -3.8082163550265435],
+            [1.2237190009590946, 1.2237190009590968],
+            [8.0, 8.0],
+        ]);
+        let anticlockwise_about = [0.48326107372841764, 0.7526345292496597, 0.447213595499958];
+        let swept = HowThreeOnACurveWind {
+            from,
+            one,
+            other,
+            anticlockwise_about,
+        };
+
+        let step = |to: PredicatePoint| -> [Interval; 3] {
+            core::array::from_fn(|axis| to.enclosure()[axis] - from.enclosure()[axis])
+        };
+        assert!(
+            dot_enclosing(
+                cross_enclosing(step(one), step(other)),
+                exactly(anticlockwise_about)
+            )
+            .contains_zero(),
+            "swept from the start alone the two are already told apart"
+        );
+
+        let middle = |point: PredicatePoint| {
+            PredicatePoint::from(
+                point
+                    .enclosure()
+                    .map(|side| 0.5 * side.lo() + 0.5 * side.hi()),
+            )
+        };
+        let at_the_middles = decide(&HowThreeOnACurveWind {
+            from,
+            one: middle(one),
+            other: middle(other),
+            anticlockwise_about,
+        })
+        .0;
+        assert!(matches!(at_the_middles, Decision::Pos | Decision::Neg));
+        assert_eq!(decide(&swept).0, at_the_middles);
     }
 
     /// A point known only as a box that straddles another's is refused rather
