@@ -1628,7 +1628,9 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 /// Whether the material of one face of an input holds a point already known to
 /// be on that face's surface.
 ///
-/// A flat face with straight sides is wound, the way it always was. A **curved**
+/// A flat face with straight sides is wound, the way it always was, and asked
+/// of the model where the winding cannot say
+/// ([`the_model_says_one_of_its_faces_holds`]). A **curved**
 /// one is [`SolidView::face_holds_the_point`], which is the one authority on that
 /// question (§35) and which the fuse can call here because what it is asked
 /// about is a face of an *input* — a face the model holds, with corners it holds
@@ -1676,9 +1678,6 @@ fn a_face_of_the_input_holds(
             }
             return Ok(false);
         }
-        let Some(in_plane) = InPlane::of(flat) else {
-            return Ok(false);
-        };
         let corners: Vec<Vec<PredicatePoint>> = face
             .wires
             .iter()
@@ -1689,9 +1688,14 @@ fn a_face_of_the_input_holds(
         // piece's normal, and a face pressed against this one from the other
         // side runs the other way — which is what the agreement above already
         // said. Zero is the only answer that puts the point outside it.
-        return Ok(in_plane
-            .winding_around(&corners, point)
-            .is_some_and(|winding| winding != 0));
+        if let Some(winding) =
+            InPlane::of(flat).and_then(|in_plane| in_plane.winding_around(&corners, point))
+        {
+            return Ok(winding != 0);
+        }
+        return Ok(the_model_says_one_of_its_faces_holds(
+            view, face, point, policy, log,
+        ));
     }
     for &key in &face.keys {
         if view.face_holds_the_point(key, point, policy, log)? != crate::OnAFace::NotHeld {
@@ -1699,6 +1703,53 @@ fn a_face_of_the_input_holds(
         }
     }
     Ok(false)
+}
+
+/// Whether [`SolidView::face_holds_the_point`] says one of the model's faces
+/// that `face` was baked from holds `point`, for a flat face with straight
+/// sides whose corners [`InPlane::winding_around`] could not wind round it.
+///
+/// **What the fan cannot see.** Every triangle of the fan has its apex at a
+/// corner of the face, and a point on a spoke from that apex is on the edge of
+/// two triangles, neither of which can say it holds it. The middle of a
+/// rectangle is on both its diagonals, so every apex leaves it on a spoke. A
+/// bar's cap flush on a block's floor is that case: the one point found inside
+/// the cap is its middle, under the middle of the floor, so the cap was never
+/// read as lying on the floor, the ray called the point on the block's skin,
+/// and the fuse was refused (Q1062). `holds.rs` counts the sides a half-line
+/// crosses instead, reading a corner on that line as below it, so it has no
+/// spokes to sit on.
+///
+/// **Why a `Held` puts the piece on the face**, as a winding that is not zero
+/// does. The caller proved the piece's plane and the face's plane one plane,
+/// and `point` was proved inside the piece. The piece was cut by every surface
+/// of the solid, so its inside lies all on the face or all off it (§17.4), and
+/// a point of that inside the face's material holds, away from its outline,
+/// puts it on the face.
+///
+/// Only [`OnAFace::Held`](crate::OnAFace::Held) counts, as in the caller. Any
+/// other answer, and a refusal, leave the point where the fan left it: off
+/// this face, for the next face and then the ray to place. So a point the fan
+/// placed is placed as it was, and what the model was asked goes into the log
+/// only when it says the face holds the point.
+fn the_model_says_one_of_its_faces_holds(
+    view: SolidView<'_>,
+    face: &BakedFace,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    face.keys.iter().any(|&key| {
+        let mut trial = ProvenanceLog::new();
+        let held = matches!(
+            view.face_holds_the_point(key, point, policy, &mut trial),
+            Ok(crate::OnAFace::Held)
+        );
+        if held {
+            trial.drain_into(log);
+        }
+        held
+    })
 }
 
 /// The plane a piece's material is *behind*: the piece's own plane, turned round

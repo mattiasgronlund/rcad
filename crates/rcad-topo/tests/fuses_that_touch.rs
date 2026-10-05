@@ -28,26 +28,32 @@
 //! # The table
 //!
 //! `mise exec -- just t -p rcad-topo --test fuses_that_touch --no-capture`, from
-//! the fixed seed: 24 drawn shapes per cell, split between the two rows, six
-//! fuses each. "answered" is out of every fuse that row made.
+//! the fixed seed: 26 drawn shapes per cell, split between the two rows, six
+//! fuses each. "answered" is out of every fuse that row made. Refreshed by
+//! queue row Q1062, whose change moved two cells, the bar's cap and the
+//! frustum's cap flush on a block. With that change switched off by hand the
+//! bar's cap answered 36 of 66 touching and the frustum's 0 of 90, every other
+//! fuse of both refused `Undecidable` at *a point in a piece that every solid
+//! could place*, and every other cell printed what it prints here; what moved
+//! the other cells since the table before was not traced.
 //!
 //! | cell | touching | clear by one | what the touch alone refuses |
 //! |---|---|---|---|
-//! | two blocks, one flush on the other | 66 of 66 | 84 of 84 | — |
+//! | two blocks, one flush on the other | 66 of 66 | 90 of 90 | — |
 //! | a bar beside a block's wall | 78 of 78 | 78 of 78 | — |
 //! | a bar in an inside corner (a fillet) | 84 of 84 | 72 of 72 | — |
-//! | a bar's cap flush on a block | 0 of 66 | 84 of 84 | *a point inside a piece of a face* 66 |
-//! | a ball resting on a block | 54 of 72 | 78 of 78 | `NotFinite` 9, `ResultIsNotManifold` 9 |
-//! | a ball against a block's wall | 57 of 78 | 72 of 72 | `ResultIsNotManifold` 21 |
+//! | a bar's cap flush on a block | 66 of 66 | 90 of 90 | — |
+//! | a ball resting on a block | 78 of 78 | 78 of 78 | — |
+//! | a ball against a block's wall | 78 of 78 | 78 of 78 | — |
 //! | two bars touching along a line | 60 of 60 | 96 of 96 | — |
 //! | a bar inside a bar, touching | panics on its control | — | see below |
-//! | two balls touching at a point | 54 of 54 | 96 of 96 | — |
-//! | a ball inside a ball, touching once | 54 of 54 | 96 of 96 | — |
+//! | two balls touching at a point | 60 of 60 | 96 of 96 | — |
+//! | a ball inside a ball, touching once | 60 of 60 | 96 of 96 | — |
 //! | the dome on a shaft of its radius | 0 of 66 | 90 of 90 | `TwoCurvesTouchWithoutCrossing` 66 |
-//! | a ball against a bar's wall | 54 of 54 | 96 of 96 | — |
-//! | a ball inside a bar, touching | 54 of 54 | 96 of 96 | — |
-//! | a cone's apex on a block | 33 of 90 | 66 of 66 | `CannotNameWhichPieceOfACrossingThisIs` 21, *a point inside a piece of a face* 36 |
-//! | a frustum's cap flush on a block | 0 of 84 | 66 of 66 | *a point inside a piece of a face* 84 |
+//! | a ball against a bar's wall | 60 of 60 | 96 of 96 | — |
+//! | a ball inside a bar, touching | 60 of 60 | 96 of 96 | — |
+//! | a cone's apex on a block | 90 of 90 | 66 of 66 | — |
+//! | a frustum's cap flush on a block | 90 of 90 | 66 of 66 | — |
 //! | a bend lying on a block | 0 of 66 | 0 of 90 | nothing: both rows refuse as a quartic |
 //! | a bend's cap flush against a block | 0 of 66 | 90 of 90 | `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` 66 |
 //!
@@ -88,17 +94,21 @@
 //!   corner that a whole-number move had put there without rounding anything;
 //!   `a_bar_moved_by_whole_numbers_keeps_its_seam_corner_exact.rs` is that gap,
 //!   closed.
-//! - *a point inside a piece of a face*, a flat cap flush on a flat face with a
-//!   circle round it: known, §39.4's coincident-face row and §38.9.
-//! - `ResultIsNotManifold` and `NotFinite` on a ball resting on a block:
-//!   **new**, unclassified before this file, and demonstrated a gap by
-//!   [`a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand`],
-//!   whose hand-written rows all answer since Q508.
-//!   A `NotFinite` out of whole-number input is also a coordinate the kernel
-//!   worked out as infinity, which is worth a look on its own.
-//! - `CannotNameWhichPieceOfACrossingThisIs` on a cone's apex: a plane through a
-//!   cone's apex square to its axis crosses it in the apex alone. Unclassified
-//!   here beyond the argument above, that the answer is the two inputs.
+//! - A flat cap flush on a flat face with a circle round it: **closed**, every
+//!   fuse of the bar's cap and the frustum's cap on a block answers since queue
+//!   row Q1062. The one point found inside a cap is the middle of its circle,
+//!   and where that is the middle of the block's face too it lies on both the
+//!   face's diagonals, so `fuse/select.rs`'s fan of triangles over the face's
+//!   corners had it on a spoke from every corner and could not say the face
+//!   held it. The cap was never read as lying on the face, and the ray called
+//!   the point on the block's skin. `select.rs` asks
+//!   `SolidView::face_holds_the_point` where the fan cannot say.
+//! - `ResultIsNotManifold` and `NotFinite` on a ball resting on a block, and
+//!   `CannotNameWhichPieceOfACrossingThisIs` and *a point inside a piece of a
+//!   face* on a cone's apex: every fuse of both cells answers in the table
+//!   above. The hand-written rows of
+//!   [`a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand`]
+//!   all answer since Q508.
 //!
 //! **The dome is known: §124.** A ball on a bar of its own radius, centred on
 //! the bar's axis, shares exactly one circle with it **only** because it is

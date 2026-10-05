@@ -10,13 +10,13 @@
 //!
 //! Q354's lane reported the one-call union refused `ResultIsNotManifold
 //! { count: 1 }` in 24 of 24 runs, and did not say which boxes. On this base
-//! **no fuse here is refused `ResultIsNotManifold`**: six of the seven boxes
-//! unite in one call to the solid worked out by hand, under every spelling of
-//! the wall and both orders of the call, and the same as two calls give
+//! **no fuse here is refused `ResultIsNotManifold`**: all seven boxes unite in
+//! one call to the solid worked out by hand, under every spelling of the wall
+//! and both orders of the call, and the same as two calls give
 //! ([`one_call_and_two_calls_unite_the_bars_and_each_box_to_the_same_solid`]).
-//! The seventh, the block standing on the plane the bars meet on, is refused
-//! in one call for another reason
-//! ([`the_block_standing_on_the_meeting_is_refused_in_one_call_and_answered_in_two`]).
+//! The seventh, the block standing on the plane the bars meet on, was refused
+//! in one call for another reason until Q1062
+//! ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 //!
 //! # Whether the upper bar and the box overlap, and what fuse promises then
 //!
@@ -41,14 +41,14 @@
 //!
 //! # The refusals, and where each comes from
 //!
-//! - **The block standing on the meeting, in one call.** The lower bar united
-//!   with that block on its own is refused `Undecidable` at "a point in a piece
-//!   that every solid could place", on a piece whose one corner is `(2, 0, 2)`:
-//!   one of the two discs where the bar's top cap lies flush on the block's
-//!   floor. That is the cell "a bar's cap flush on a block" of
-//!   `fuses_that_touch.rs`, which refuses under the same name. Two calls never
-//!   put that cap against the block, as the union of the two bars has no cap at
-//!   `z = 2`, and answer `7200 + 8π`.
+//! - **The lower bar and the block standing on the meeting, then the upper
+//!   bar.** The first union answers, `7200 + 8π`. The second is refused
+//!   `Undecidable` at "a point in a piece that every solid could place", on the
+//!   upper bar's wall, all of it inside the block, as the block over `x < 0`
+//!   is below. Not traced past the name. Until Q1062 the first union was
+//!   refused under that name instead, on the lower bar's top cap flush on the
+//!   block's floor, and so was every one call
+//!   ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 //! - **The lower bar and a box through its wall, then the upper bar**
 //!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_four_boxes`]).
 //!   The first union answers and validates. The second is refused
@@ -81,14 +81,15 @@ const MEETING: f64 = 2.0;
 /// could not place it.
 const PLACED_AGAINST_EVERY_SOLID: &str = "a point in a piece that every solid could place";
 
-/// The six boxes the union of all three answers in one call.
-const ANSWERED_IN_ONE_CALL: [TheBox; 6] = [
+/// The seven boxes the union of all three answers in one call.
+const ANSWERED_IN_ONE_CALL: [TheBox; 7] = [
     TheBox::BlockOverNegativeX,
     TheBox::AcrossTheMeeting,
     TheBox::OnTheUpperWallOnly,
     TheBox::OnTheLowerWallOnly,
     TheBox::FarAway,
     TheBox::TopSlicedOffAbove,
+    TheBox::SlicedAtTheMeeting,
 ];
 
 const EVERY_WALL: [Wall; 4] = [
@@ -98,7 +99,7 @@ const EVERY_WALL: [Wall; 4] = [
     Wall::TwoRoundBars,
 ];
 
-/// **For six boxes, one call and two calls give the same union**, by every
+/// **For all seven boxes, one call and two calls give the same union**, by every
 /// spelling of the wall: `fuse([lower], [upper, box])`,
 /// `fuse([upper, box], [lower])`, and `lower ∪ upper` first with the box after,
 /// each the solid or solids [`TheBox::union_by_hand`] works out, and each
@@ -121,35 +122,26 @@ fn one_call_and_two_calls_unite_the_bars_and_each_box_to_the_same_solid() {
     }
 }
 
-/// **The block standing on the plane the bars meet on is refused in one call,
-/// both orders, every spelling, and answered in two**: `7200 + 8π`, the block
-/// and the lower bar under it.
+/// **The lower bar and the block standing on its top cap unite**, by every
+/// spelling of the wall: `7200 + 8π`, the block and the bar under it, which is
+/// what [`TheBox::union_by_hand`] gives the block standing on the meeting,
+/// since the block holds the upper bar.
 ///
-/// A gap and not a limit: the answer exists and two calls reach it. The lower
-/// bar and the block alone are refused under the same name, on a piece whose
-/// one corner is `(2, 0, 2)` — a disc where the bar's top cap lies flush on
-/// the block's floor, `fuses_that_touch.rs`'s "a bar's cap flush on a block".
+/// Refused `Undecidable` at "a point in a piece that every solid could place"
+/// until Q1062, on the bar's top cap flush on the block's floor, and every one
+/// call with it. The one point found inside the cap is its middle, `(0, 0, 2)`,
+/// which is the middle of the floor too and lies on both its diagonals, so the
+/// fan of triangles `select.rs` wound the floor's corners in had the point on
+/// a spoke from every corner and could not say the floor held it. The cap was
+/// never read as lying on the floor, and the ray called its middle on the
+/// block's skin. `select.rs` now asks `SolidView::face_holds_the_point` where
+/// the fan cannot say.
 #[test]
-fn the_block_standing_on_the_meeting_is_refused_in_one_call_and_answered_in_two() {
+fn a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it() {
     let the_box = TheBox::SlicedAtTheMeeting;
     for wall in EVERY_WALL {
-        for call in [
-            Call::LowerAgainstUpperAndBox,
-            Call::UpperAndBoxAgainstLower,
-            Call::LowerWithTheBoxAlone,
-        ] {
-            let asked = format!("{wall:?}, {call:?}");
-            let (_, said) = unite(the_box, wall, call);
-            let refused = said.expect_err(&asked);
-            assert_eq!(
-                where_it_gave_up(&refused),
-                (PLACED_AGAINST_EVERY_SOLID, vec![[RADIUS, 0.0, MEETING]]),
-                "{asked}"
-            );
-        }
-
-        let asked = format!("{wall:?}, two calls");
-        let (model, said) = unite(the_box, wall, Call::LowerWithUpperThenTheBox);
+        let asked = format!("{wall:?}, the lower bar and the block");
+        let (model, said) = unite(the_box, wall, Call::LowerWithTheBoxAlone);
         let united = said.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
         is_the_union_by_hand(&model, &united, the_box, &asked);
     }
@@ -159,18 +151,20 @@ fn the_block_standing_on_the_meeting_is_refused_in_one_call_and_answered_in_two(
 /// refused for four of the seven boxes**, by every spelling of the wall, where
 /// the other two ways of asking answer:
 ///
-/// - the block standing on the meeting at the first union, as
-///   [`the_block_standing_on_the_meeting_is_refused_in_one_call_and_answered_in_two`]
-///   says;
 /// - the box across the meeting and the box on the lower wall at the second,
 ///   `AFaceTrimmedByACurveThisCannotFollow` naming the first union's wall;
 /// - the block over `x < 0` at the second, at the search for a point in a
-///   piece, on the half of the upper bar's wall at `x ≥ 0`.
+///   piece, on the half of the upper bar's wall at `x ≥ 0`;
+/// - the block standing on the meeting at the second, under the same name, on
+///   the whole of the upper bar's wall, whose corners are the two ends of its
+///   seam. Until Q1062 it was refused at the first union
+///   ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 ///
 /// The other three answer by hand. Each refusal is a gap: the same three
 /// solids unite in one call, and with the bars first.
 #[test]
 fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_four_boxes() {
+    let the_upper_seam = vec![[RADIUS, 0.0, MEETING], [RADIUS, 0.0, 2.0 * MEETING]];
     let half_the_upper_wall = vec![
         [0.0, -RADIUS, MEETING],
         [RADIUS, 0.0, MEETING],
@@ -195,18 +189,19 @@ fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_four_boxes
             refuses_on_the_first_unions_wall(the_box, wall);
         }
 
-        let asked = format!("the block over x < 0, {wall:?}");
-        let (_, said) = unite(
-            TheBox::BlockOverNegativeX,
-            wall,
-            Call::LowerWithTheBoxThenUpper,
-        );
-        let refused = said.expect_err(&asked);
-        assert_eq!(
-            where_it_gave_up(&refused),
-            (PLACED_AGAINST_EVERY_SOLID, half_the_upper_wall.clone()),
-            "{asked}"
-        );
+        for (the_box, corners) in [
+            (TheBox::BlockOverNegativeX, &half_the_upper_wall),
+            (TheBox::SlicedAtTheMeeting, &the_upper_seam),
+        ] {
+            let asked = format!("{the_box:?}, {wall:?}");
+            let (_, said) = unite(the_box, wall, Call::LowerWithTheBoxThenUpper);
+            let refused = said.expect_err(&asked);
+            assert_eq!(
+                where_it_gave_up(&refused),
+                (PLACED_AGAINST_EVERY_SOLID, corners.clone()),
+                "{asked}"
+            );
+        }
     }
 }
 
