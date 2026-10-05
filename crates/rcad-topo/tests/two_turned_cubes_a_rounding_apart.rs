@@ -1,5 +1,5 @@
-//! Two cubes of side two that a turn leaves a rounding apart (queue rows Q397
-//! and Q676).
+//! Two cubes of side two that a turn leaves a rounding apart (queue rows Q397,
+//! Q676 and Q991).
 //!
 //! The second cube is moved by `(2, 0.5, 0.25)`, so upright the two touch face
 //! to face, and both are turned about the axis through `(1, 0, 0)` along
@@ -8,7 +8,7 @@
 //! at 1.1 and 2.5 they leave a gap of `2^-51` and `2^-52`, and at 0.3 the two
 //! faces overlap by `2^-52`.
 //!
-//! **Where it stops now.** Every fuse used to refuse at the first question:
+//! **What it took to answer.** Every fuse used to refuse at the first question:
 //! which side of the second cube's face `x = 0` a corner of the first cube lies
 //! on, asked of the corner's box, which the face runs straight through.
 //! `Arrangement::passes_through` asks the three planes the corner is the meet
@@ -18,18 +18,19 @@
 //! three planes that share two, and the planes now put them in order too
 //! (Q676, `which_meet_comes_first_along_a_line`).
 //!
-//! Every fuse then stops in selection. The first cube's face `x = 2` comes out
-//! of the arrangement whole, and so does the second's face `x = 0`; each has to
-//! be placed against the other cube. The point picked inside it lies on its
-//! own plane and so a rounding off the other cube's face, and the ray cast from
-//! that point's box into the other cube cannot say which side of that face it
-//! starts on: every candidate came back undecided, which a probe of
-//! `settle_against_each` showed at 1.1. The answer is the inputs as they stand
-//! — the union two solids of eight faces, `A \ B` is `A`, `B \ A` is `B`, and
-//! the intersection nothing — so this is still a gap, and
+//! Every fuse then stopped in selection. The first cube's face `x = 2` comes
+//! out of the arrangement whole, and so does the second's face `x = 0`; each
+//! has to be placed against the other cube. The point picked inside it lies on
+//! its own plane and so a rounding off the other cube's face, and the ray cast
+//! from that point's box into the other cube cannot say which side of that
+//! face it starts on. Selection now places such a face by a plane instead
+//! (`by_a_plane` in `fuse/select.rs`, Q991): the other cube has every corner on
+//! or behind its own touching face, and the piece has every corner in front of
+//! it, each corner asked as the meet of three planes, exactly.
 //! [`every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_apart`]
-//! is the demonstration that the answer exists: the cubes' own planes, asked
-//! exactly, put them apart.
+//! asks the same question by hand, and
+//! [`every_fuse_of_two_cubes_a_rounding_apart_gives_back_the_cubes_as_they_stand`]
+//! pins the five answers.
 //!
 //! **0.3 is a limit.** The faces overlap by `2^-52`, so the union and the
 //! intersection keep a sliver whose edges are about `2.2e-16` long at a
@@ -37,9 +38,9 @@
 //! supports. It is pinned by name here and is to be refused whatever the
 //! later stages learn.
 
-use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Measurement, Model, Rule, SolidKey};
 
 /// The turns at which the two touching faces leave a gap, and what their
 /// offsets add up to there: `-2^-51` and `-2^-52`.
@@ -63,37 +64,109 @@ fn the_touching_faces_lie_a_rounding_apart_at_1_1_and_2_5_and_overlap_at_0_3() {
     );
 }
 
-/// The corner and the point a rounding past it on its edge are put in order
-/// now, and every fuse gets past the arrangement. Before Q397 each refusal
-/// named `side of plane` at a corner of one cube, before Q676 each named
-/// `order along a crossing`, and now each names the search for a point in the
-/// touching face that the other cube can place.
+/// **At 1.1 and 2.5 the cubes share no point, and every fuse says so.** The
+/// union is the two cubes, each less the other is itself, and the
+/// intersection is nothing. Each solid of an answer is held against the input
+/// it is: one face on each of that cube's six planes, bit for bit, each corner
+/// within the slop the fuse tagged it with of a corner of that cube, and its
+/// volume within what the two measurements say they may be out by and what
+/// those corners' moves can add.
+///
+/// **The corners move, so the volume is given room for it.** The fuse writes
+/// each corner down again from the planes it is the meet of, a rounding or so
+/// from where the input had it, and a measurement's own error is only the
+/// rounding of its sums: at 2.5 the second cube came back `5e-15` smaller,
+/// where the two errors add to `7e-16`. Moving the corners of a closed skin
+/// of triangles by at most `d` changes what it encloses by at most its area
+/// times `d`, near enough, since the volume changes with a corner by a third
+/// of the area of the triangles round it, turned along their normals.
+///
+/// Before Q991 every one of these was refused at `a point in a piece that
+/// every solid could place`, since Q397 and Q676 got the fuse through the
+/// arrangement.
 #[test]
-fn a_corner_and_the_point_a_rounding_past_it_no_longer_stop_the_fuse() {
+fn every_fuse_of_two_cubes_a_rounding_apart_gives_back_the_cubes_as_they_stand() {
     for (angle, _) in A_ROUNDING_APART {
-        for (what, refused_at) in every_fuse_refused(angle) {
-            assert_eq!(
-                refused_at, "a point in a piece that every solid could place",
-                "{angle} {what} refused at {refused_at}"
-            );
+        let (mut model, a, b) = two_turned_cubes(angle);
+        let as_it_stands = |solid: SolidKey| {
+            (
+                the_planes_of(&model, solid),
+                the_corners_of(&model, solid),
+                measured(&model, solid),
+            )
+        };
+        let (cube_a, cube_b) = (as_it_stands(a), as_it_stands(b));
+        for (what, left, right, rule, mut want) in [
+            ("a union b", a, b, Rule::Union, vec![&cube_a, &cube_b]),
+            ("b union a", b, a, Rule::Union, vec![&cube_a, &cube_b]),
+            ("a and b", a, b, Rule::Intersection, vec![]),
+            ("a less b", a, b, Rule::Difference, vec![&cube_a]),
+            ("b less a", b, a, Rule::Difference, vec![&cube_b]),
+        ] {
+            let answer = model
+                .fuse(
+                    &[left],
+                    &[right],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{angle} {what} refused: {why:?}"))
+                .solids()
+                .to_vec();
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{angle} {what} does not validate: {why}"));
+            for solid in answer {
+                let planes = the_planes_of(&model, solid);
+                let at = want
+                    .iter()
+                    .position(|(theirs, _, _)| *theirs == planes)
+                    .unwrap_or_else(|| {
+                        panic!("{angle} {what}: a solid on {planes:?} is no cube still wanted")
+                    });
+                let (_, corners, cube) = want.swap_remove(at);
+                let mut moved = 0.0_f64;
+                for (corner, slop) in the_corners_of(&model, solid) {
+                    let nearest = corners
+                        .iter()
+                        .map(|(theirs, _)| corner.distance_to(*theirs))
+                        .fold(f64::INFINITY, f64::min);
+                    assert!(
+                        nearest <= slop,
+                        "{angle} {what}: a corner moved {nearest:e}, tagged {slop:e}"
+                    );
+                    moved = moved.max(nearest);
+                }
+                let found = measured(&model, solid);
+                assert!(
+                    (found.volume() - cube.volume()).abs()
+                        <= found.volume_error()
+                            + cube.volume_error()
+                            + found.surface_area() * moved,
+                    "{angle} {what}: volume {} against {}, corners moved {moved:e}",
+                    found.volume(),
+                    cube.volume()
+                );
+            }
+            assert!(want.is_empty(), "{angle} {what}: a cube is missing");
         }
     }
 }
 
-/// **At 1.1 and 2.5 every answer exists, so the refusal there is a gap.** A
-/// cube is where all six of its planes have it behind them, so it lies in the
-/// hull of its eight corners, each the meet of three of its planes. Asked of
-/// those planes exactly
+/// **At 1.1 and 2.5 every answer exists.** A cube is where all six of its
+/// planes have it behind them, so it lies in the hull of its eight corners,
+/// each the meet of three of its planes. Asked of those planes exactly
 /// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)),
 /// every corner of each cube is in front of the other cube's touching face, so
 /// the two share no point: the union is the two as they stand, each less the
 /// other is itself, and the intersection is nothing. At 0.3 the four corners
 /// on each touching face are behind the other's, which is the sliver.
 ///
-/// The fuse places the touching face by a point picked inside it, which lies
-/// on its plane and so only `2^-51` from the other face, and the ray from it
-/// could not say which side it starts on (the module doc). Here the question
-/// is put to the planes instead, and they answer it.
+/// A point picked inside the touching face lies on its plane and so only
+/// `2^-51` from the other face, and the ray from it cannot say which side it
+/// starts on (the module doc). This is the question the fuse now puts to the
+/// planes instead.
 #[test]
 fn every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_apart() {
     let in_front = [Decision::Pos; 8];
@@ -116,8 +189,15 @@ fn every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_a
 
 /// A limit, not a gap: every answer needs an edge `2.2e-16` long at `2.18`.
 /// Since Q676 orders the corners along their edges it is refused in
-/// selection, at the search for a point inside a piece; which piece was not
-/// traced.
+/// selection, at the search for a point inside a piece. With the second cube
+/// as argument that piece is the slab's own face on the second cube's bottom.
+/// With the first, the two strips `2^-52` wide on the first cube's bottom,
+/// between its face `x = 2` and the plane of the second cube's face `x = 0`,
+/// are placed outside by the second cube's bottom plane since Q991, and the
+/// refusal moved to the strip between the same two planes on the first cube's
+/// top, from `y = 0` to `0.5`. That strip is outside the second cube too, but
+/// two of its corners lie on the plane of the second cube's face `y = 0.5`
+/// rather than in front of it, which `by_a_plane` does not take.
 #[test]
 fn two_cubes_overlapping_by_a_rounding_are_refused_for_the_sliver_between_them() {
     for (what, refused_at) in every_fuse_refused(A_ROUNDING_INTO_EACH_OTHER) {
@@ -185,6 +265,55 @@ fn two_turned_cubes(angle: f64) -> (Model, SolidKey, SolidKey) {
         )
         .expect("this model made the key");
     (model, a, b)
+}
+
+/// The plane of each face of `solid`, as coefficients, in one fixed order.
+fn the_planes_of(model: &Model, solid: SolidKey) -> Vec<[f64; 4]> {
+    let mut planes: Vec<[f64; 4]> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.plane().coefficients())
+        .collect();
+    planes.sort_by(|one, other| {
+        one.iter()
+            .zip(other)
+            .map(|(one, other)| one.total_cmp(other))
+            .find(|order| order.is_ne())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    planes
+}
+
+/// Where each corner of `solid` is, with the slop a decision put into it, or
+/// `0.0` where none did, once for every face it is a corner of.
+fn the_corners_of(model: &Model, solid: SolidKey) -> Vec<(Point, f64)> {
+    let mut corners = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let corner = coedge.start();
+                let slop = corner
+                    .approximation()
+                    .map_or(0.0, |approximation| approximation.magnitude());
+                corners.push((corner.point(), slop));
+            }
+        }
+    }
+    corners
+}
+
+/// The volume and skin of one solid, each with how far it may be out.
+fn measured(model: &Model, solid: SolidKey) -> Measurement {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("a solid does not measure: {why}"))
 }
 
 /// The offsets of the one pair of faces, one from each cube, that face
