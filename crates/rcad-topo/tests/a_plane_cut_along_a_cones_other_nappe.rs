@@ -315,6 +315,13 @@ fn steeper_faces_near_the_pointed_cones_apex(lean: f64) -> Vec<Case> {
 /// or two off the cone. Such an arc is walked round the cone now, along its
 /// rulings, and the mesher charges its floor by the arc's ends and not by the
 /// ellipse's far end (§406.5).
+///
+/// **The sixteen that found no point inside a piece answer right since
+/// Q929**, each held to the four checks. The piece is one of the cone's, and
+/// every step of one radius from its corners' middle missed it; the fuse
+/// offers the same steps at a half, a quarter, an eighth and a sixteenth of
+/// that after every other point, and one of them is inside it
+/// (`a_frustums_wall_cut_below_a_blocks_floor.rs`).
 #[test]
 fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right() {
     let mut cases = Vec::new();
@@ -343,8 +350,8 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 80,
-            refused: [("a point inside a piece of a face", 16)].into()
+            right: 96,
+            refused: [].into()
         }
     );
 }
