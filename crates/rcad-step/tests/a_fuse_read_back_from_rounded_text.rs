@@ -65,10 +65,12 @@
 //!   one, so those rows are controls and not measurements. The ball and block
 //!   decide all 144 fuses at each.
 //! - A frustum and a block: written since §366, and all 144 fuses decided from
-//!   exact text. The reader refuses the rounded file,
+//!   exact text, and at 11, 12 and 13 digits. Rounding moves only the cone's
+//!   half-angle, and the reader puts the slope back from the cone's corners
+//!   (§366.7). Before that it refused the rounded file,
 //!   `ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn`, in 48 of 48 at 11 and 12
-//!   digits and 40 of 48 at 13. Of the 24 fuses of the eight read at 13
-//!   digits, 21 are decided and rounding introduces 3 `Undecidable`.
+//!   digits and 40 of 48 at 13, and of the 24 fuses of the eight read at 13
+//!   digits, 21 were decided and rounding introduced 3 `Undecidable`.
 //! - The writer dropped a solid's placement:
 //!   [`a_cube_moved_along_x_is_written_where_it_was_moved_to`], fixed in §191.
 //!
@@ -149,6 +151,12 @@ fn a_block_with_a_bar_through_it_read_back_from_rounded_text() {
 /// names the circle where a flat cap meets a cone (`docs/decisions.md` §366).
 /// Until then the writer refused all 48 as
 /// `ACurveTheFacesEitherSideOfItDoNotName` and nothing reached the reader.
+///
+/// **And every rounded file is read back, and every fuse of it decided**,
+/// since the reader puts a cone's slope back from its corners where the file
+/// cut its half-angle (§366.7). Until then the reader refused all 48 at 11 and
+/// 12 digits and 40 at 13, `ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn`, and
+/// 3 of the 24 fuses of the other eight were `Undecidable`.
 #[test]
 fn a_frustum_up_through_a_block_read_back_from_rounded_text() {
     let tally = a_family_read_back_from_rounded_text(
@@ -162,6 +170,16 @@ fn a_frustum_up_through_a_block_read_back_from_rounded_text() {
         "every frustum and block was expected to be written: {:?}",
         tally.not_written
     );
+    for (digits, row) in &tally.rounded {
+        assert!(
+            row.reader_refused.is_empty() && row.fuses.refused.is_empty(),
+            "at {digits} digits every rounded frustum file was expected to be read back and \
+             every fuse of it decided: the reader refused {:?} and the fuse {:?}",
+            row.reader_refused,
+            row.fuses.refused
+        );
+        assert_eq!(row.fuses.decided, 3 * row.files, "at {digits} digits");
+    }
 }
 
 /// Every ball of the family is written and read back, since the writer leaves
