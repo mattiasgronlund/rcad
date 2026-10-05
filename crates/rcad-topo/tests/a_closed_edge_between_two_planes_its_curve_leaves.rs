@@ -22,7 +22,10 @@
 //! The same bar with the inner piece on the lid's own plane, or on it written a
 //! hair apart, is one plane spelt twice and still builds. So does a solid whose
 //! two flat faces cross in one of a pipe's own straight lines, with the run
-//! naming the pipe: the arc there is that line, and on both planes.
+//! naming the pipe: the arc there is that line, and on both planes. And so does
+//! one whose two faces cross in one of the straight lines through a cone's
+//! apex, with the run naming the cone (Q613) — but not one whose two faces
+//! cross in a line that is not one of the cone's own.
 //!
 //! **The circle may name a ball, a cone or a torus instead of the pipe**, each
 //! of which crosses the lid in that same circle of radius 1. With the inner
@@ -206,6 +209,89 @@ fn two_faces_crossing_in_a_pipes_own_line_still_build() {
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("and the model it went into passes the sweep");
+}
+
+/// The same two faces and the same line, with the edge naming a cone that line
+/// is one of the straight lines through the apex of: [`down_a_cones_ruling`].
+/// Both planes hold the apex and cut the cone in straight lines, so the walk
+/// draws the edge straight from either face, and the sweep lets it through
+/// whichever is listed first (Q613).
+#[test]
+fn two_faces_crossing_in_a_line_through_a_cones_apex_still_build() {
+    for x_first in [false, true] {
+        let mut model = Model::new(Scale::millimetres(10.0).expect("a size"));
+
+        let built =
+            a_tetrahedron_whose_upright_edge_runs(&mut model, down_a_cones_ruling(), x_first);
+
+        built.unwrap_or_else(|why| panic!("x = 5 first {x_first}: refused with {why:?}"));
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("and the model it went into passes the sweep");
+    }
+}
+
+/// The same two faces with the edge naming a cone through both its ends that
+/// the line `x = y = 5` is not one of the straight lines of. Each lets through
+/// a bound that is wider than the one that lets the cone above through:
+///
+/// - **One face holds the apex, and the other does not.** The cone with its
+///   apex at `(0, 5, 2.5)`, about `x`, with slope `1/2`: the face on `y = 5`
+///   holds the apex and the axis, and cuts the cone in two straight lines
+///   through the apex, one through each end, so from that face the edge is
+///   drawn straight and on both planes. But `x = 5` cuts the cone in the circle
+///   of radius `2.5` about `(5, 5, 2.5)`, and the half of it the edge names from
+///   there bows `2.5` off `y = 5`. A bound read off the ends once either face
+///   draws the edge straight lets this through.
+/// - **Both faces lean at the cone's own angle, and neither holds the apex.**
+///   The cone with its apex at `(2.5, 3.75, 2.5)`, about `(1, 1, 0)`, with
+///   slope 1: each face is parallel to one of its straight lines, and cuts it in
+///   a parabola through both ends, which bows `1.25` off `y = 5` from the face
+///   on `x = 5` and `2.5` off `x = 5` from the other. A bound read off the ends
+///   wherever the lean alone says straight lines, without the apex, lets this
+///   through.
+#[test]
+fn two_faces_whose_line_is_not_one_of_the_cones_own_are_still_refused() {
+    let half_a_circle = {
+        let axis =
+            Axis::new(Point::new(0.0, 5.0, 2.5), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+        let away_from_y = HalfSpace::through_a_point_facing(
+            Point::new(5.0, 5.0, 2.5),
+            Vector::new(0.0, -1.0, 0.0),
+        )
+        .expect("a half-space");
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Cone(Cone::new(axis, 0.5).expect("a cone")),
+            picked_by: smallvec::smallvec![Picker::from(away_from_y)],
+        }
+    };
+    let two_parabolas = {
+        let axis =
+            Axis::new(Point::new(2.5, 3.75, 2.5), Vector::new(1.0, 1.0, 0.0)).expect("an axis");
+        let the_nappe_both_ends_are_on =
+            HalfSpace::through_a_point_facing(axis.origin(), axis.direction())
+                .expect("a half-space");
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Cone(Cone::new(axis, 1.0).expect("a cone")),
+            picked_by: smallvec::smallvec![Picker::from(the_nappe_both_ends_are_on)],
+        }
+    };
+    let mut not_refused = Vec::new();
+    for run in [half_a_circle, two_parabolas] {
+        for x_first in [false, true] {
+            let mut model = Model::new(Scale::millimetres(10.0).expect("a size"));
+            let built = a_tetrahedron_whose_upright_edge_runs(&mut model, run.clone(), x_first);
+            if !matches!(
+                built,
+                Err(Error::Invalid(
+                    Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes
+                ))
+            ) {
+                not_refused.push(format!("{run:?}, x = 5 first {x_first}: {built:?}"));
+            }
+        }
+    }
+    assert!(not_refused.is_empty(), "{not_refused:#?}");
 }
 
 #[test]
@@ -575,25 +661,13 @@ fn the_bytes_of(plane: Plane) -> Vec<u8> {
         .collect()
 }
 
-/// The tetrahedron with corners `(5, 5, 0)`, `(5, 5, 5)`, `(0, 5, 0)` and
-/// `(5, 0, 0)`, whose edge between the first two runs down the line where its
-/// faces on `y = 5` and `x = 5` cross.
-///
-/// That edge names the pipe of radius 5 about the line through `(2, 1)` up
+/// The tetrahedron [`a_tetrahedron_whose_upright_edge_runs`] builds, its
+/// upright edge naming the pipe of radius 5 about the line through `(2, 1)` up
 /// `z`, which holds it: `3² + 4² = 5²`. The plane `x = 5` crosses the pipe in
 /// the lines at `y = 5` and `y = −3`, and `y = 5` in those at `x = 5` and
 /// `x = −1`, so the edge is picked out by the half-space facing `(3, 4)` from
-/// half way out to it, which holds `(5, 5)` and neither of the others. Every
-/// other edge is straight.
+/// half way out to it, which holds `(5, 5)` and neither of the others.
 fn a_tetrahedron_with_an_edge_down_a_pipe(model: &mut Model) -> Result<SolidKey> {
-    let mut builder = SolidBuilder::new();
-    let [a, b, c, d] = [
-        Point::new(5.0, 5.0, 0.0),
-        Point::new(5.0, 5.0, 5.0),
-        Point::new(0.0, 5.0, 0.0),
-        Point::new(5.0, 0.0, 0.0),
-    ]
-    .map(|at| builder.add_vertex(at).expect("a corner"));
     let the_pipe = Cylinder::new(
         Axis::new(Point::new(2.0, 1.0, 0.0), up()).expect("an axis"),
         5.0,
@@ -602,16 +676,52 @@ fn a_tetrahedron_with_an_edge_down_a_pipe(model: &mut Model) -> Result<SolidKey>
     let towards_the_edge =
         HalfSpace::through_a_point_facing(Point::new(3.5, 3.0, 0.0), Vector::new(3.0, 4.0, 0.0))
             .expect("a half-space");
-    let down_the_pipe = builder
-        .add_edge(
-            a,
-            b,
-            EdgeRun::PartOfWhereItCrosses {
-                and: Surface::Cylinder(the_pipe),
-                picked_by: smallvec::smallvec![Picker::from(towards_the_edge)],
-            },
-        )
-        .expect("an edge");
+    let run = EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cylinder(the_pipe),
+        picked_by: smallvec::smallvec![Picker::from(towards_the_edge)],
+    };
+    a_tetrahedron_whose_upright_edge_runs(model, run, false)
+}
+
+/// The run along the line `x = y = 5` that names the cone with its apex at
+/// `(5, 5, −5)`, about `(1, 0, 1)`, with slope 1.
+///
+/// That line is one of the cone's own: it leaves the apex straight up, at 45°
+/// to an axis 45° off upright. `x = 5` holds the apex and rests along the cone
+/// on that line alone, and `y = 5` holds the apex and cuts the cone in that line
+/// and in `z = −5`. The run is picked out by the two half-spaces either side of
+/// `x = 5`, which between them hold that plane and nothing else: the whole of the
+/// one line, and of the other only the apex — the same pair `intersect` names a
+/// line through a cone's apex with.
+fn down_a_cones_ruling() -> EdgeRun {
+    let axis = Axis::new(Point::new(5.0, 5.0, -5.0), Vector::new(1.0, 0.0, 1.0)).expect("an axis");
+    let cone = Cone::new(axis, 1.0).expect("a cone");
+    let east = HalfSpace::through_a_point_facing(cone.apex(), Vector::new(1.0, 0.0, 0.0))
+        .expect("a half-space");
+    EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cone(cone),
+        picked_by: smallvec::smallvec![Picker::from(east), Picker::from(east.reversed())],
+    }
+}
+
+/// The tetrahedron with corners `(5, 5, 0)`, `(5, 5, 5)`, `(0, 5, 0)` and
+/// `(5, 0, 0)`, whose upright edge between the first two runs down the line
+/// where its faces on `y = 5` and `x = 5` cross, and runs `run` there. Every
+/// other edge is straight. The face on `y = 5` is listed first unless `x_first`.
+fn a_tetrahedron_whose_upright_edge_runs(
+    model: &mut Model,
+    run: EdgeRun,
+    x_first: bool,
+) -> Result<SolidKey> {
+    let mut builder = SolidBuilder::new();
+    let [a, b, c, d] = [
+        Point::new(5.0, 5.0, 0.0),
+        Point::new(5.0, 5.0, 5.0),
+        Point::new(0.0, 5.0, 0.0),
+        Point::new(5.0, 0.0, 0.0),
+    ]
+    .map(|at| builder.add_vertex(at).expect("a corner"));
+    let upright = builder.add_edge(a, b, run).expect("an edge");
     let straight = |builder: &mut SolidBuilder, from, to| {
         builder
             .add_edge(from, to, EdgeRun::Straight)
@@ -632,19 +742,32 @@ fn a_tetrahedron_with_an_edge_down_a_pipe(model: &mut Model) -> Result<SolidKey>
             .add_face(Surface::Plane(plane), &[round])
             .expect("a face")
     };
-    let faces = [
+    let on_y = |builder: &mut SolidBuilder| {
         face(
-            &mut builder,
+            builder,
             Vector::new(0.0, 1.0, 0.0),
             Point::new(0.0, 5.0, 0.0),
-            [(ac, F), (bc, R), (down_the_pipe, R)],
-        ),
+            [(ac, F), (bc, R), (upright, R)],
+        )
+    };
+    let on_x = |builder: &mut SolidBuilder| {
         face(
-            &mut builder,
+            builder,
             Vector::new(1.0, 0.0, 0.0),
             Point::new(5.0, 0.0, 0.0),
-            [(down_the_pipe, F), (bd, F), (ad, R)],
-        ),
+            [(upright, F), (bd, F), (ad, R)],
+        )
+    };
+    let [first, second] = if x_first {
+        let listed_first = on_x(&mut builder);
+        [listed_first, on_y(&mut builder)]
+    } else {
+        let listed_first = on_y(&mut builder);
+        [listed_first, on_x(&mut builder)]
+    };
+    let faces = [
+        first,
+        second,
         face(
             &mut builder,
             Vector::new(0.0, 0.0, -1.0),
