@@ -2898,6 +2898,22 @@ impl BuildingAMesh {
     /// otherwise have none of, which is what turned `VolumeIsNotPositive` into
     /// an answer.
     ///
+    /// **So does a cut between two points of that curve in a piece cut off
+    /// it.** A half keeps its rim corners on the one edge, and the face across
+    /// still holds them all; only the flag that says so is gone, since a half
+    /// is a stretch and a cut ([`WalkedLoop::between`]). So it is read off the
+    /// face and not the piece: the face's one wire is one closed edge, and both
+    /// ends are that edge's corner or points walked along it. A point strictly
+    /// inside an earlier cut is this face's alone, so a cut to one stays bare.
+    /// Q889's shape is where it showed. A block whose face plane misses a
+    /// ball's `N` by half a rounding leaves a cap with `N` on its rim; its
+    /// first cut ran from the rim up to `N` with a point on it, and the half it
+    /// left, a little over a quarter turn wide, was cut again from a rim point
+    /// straight to the middle of the pole side with nothing between. The disc
+    /// fanned the same rim from `N`, drew the same chord, and ball less block
+    /// was refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }`
+    /// (Q964, `a_turned_block_whose_face_holds_a_balls_pole.rs`).
+    ///
     /// **It is asked for where the collision was shown and not everywhere.**
     /// Charging every cut a point moved a round bar's measured volume by `3.6e-4` when the bar was
     /// shifted three thousand units out, against `1.8e-13` before, because a
@@ -2971,9 +2987,31 @@ impl BuildingAMesh {
 
         let leaving = opened.corners[at[1]];
         let arriving = opened.corners[at[0]];
+        let ends = [opened.points[at[0]], opened.points[at[1]]];
+        let on_the_one_curve_its_face_closes_on = |end: u32| {
+            let mut wires = face.wires();
+            let (Some(wire), None) = (wires.next(), wires.next()) else {
+                return false;
+            };
+            wire.closes_on_one_edge()
+                && wire.coedges().any(|coedge| {
+                    self.at_vertex.get(&coedge.start().key()) == Some(&end)
+                        || self
+                            .along_edge
+                            .get(&coedge.edge().key())
+                            .is_some_and(|walked| walked.contains(&end))
+                })
+        };
         let least_steps = match chart {
             Chart::OnItsSide => 2,
             Chart::Upright if piece.closes_on_one_curve => 2,
+            Chart::Upright
+                if ends
+                    .iter()
+                    .all(|&end| on_the_one_curve_its_face_closes_on(end)) =>
+            {
+                2
+            }
             Chart::Upright => 1,
         };
         let steps = how_many_steps(
@@ -2983,8 +3021,7 @@ impl BuildingAMesh {
             room,
         )
         .max(least_steps);
-        self.on_a_cut.insert(opened.points[at[0]]);
-        self.on_a_cut.insert(opened.points[at[1]]);
+        self.on_a_cut.extend(ends);
         let along_the_cut =
             self.points_along_a_cut_in(face, stored, chart, [leaving, arriving], steps)?;
 
