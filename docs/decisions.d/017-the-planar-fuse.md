@@ -860,7 +860,7 @@ oracles.** One at a time, against the shipped code:
 | 4. History maps returned per operation | `the_input_keys_still_work_and_a_face_nothing_reaches_comes_through_once`, `a_face_that_is_swallowed_whole_has_no_image`, `every_face_of_the_answer_has_exactly_one_input_face_behind_it` |
 | 5. The catalogue as hand-written cases, each passing or refusing with a reason | `the_nine_planar_entries_as_a_table` and the eighteen per-entry tests beside it in `degenerate_fuses.rs`; `a_solid_that_runs_through_itself_cannot_be_fused` for the ninth entry, which no public API can build |
 | 6. The §11.2 metamorphic properties as a `proptest` suite | `what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up`, `uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the_first`, `taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`, and transform invariance in both halves — `turning_a_pair_a_quarter_turn_and_moving_it_a_whole_number_changes_not_one_bit` exactly, `turning_the_answer_to_a_fuse_agrees_with_fusing_the_turned_inputs` within the bound |
-| 7. `Policy::max_wobble` has a caller, judged against `ProvenanceLog::worst_wobble` | `Model::fuse` judges it after assembly and before the commit; `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove` and `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` are the two halves, and `a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag` is §17.2's guard against reading the wrong quantity |
+| 7. `Policy::max_wobble` has a caller, judged against `ProvenanceLog::worst_wobble` | `Model::fuse` judges it after assembly and before the commit; `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove` and `what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused` are the two halves, and `a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag` is §17.2's guard against reading the wrong quantity. The refusing half was `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` until 2026-10-05, and the paragraph after these tables says why it moved |
 | 8. A measured refusal rate under `Policy::certified()`, recorded in this file | §17.7, asserted by `how_often_a_certified_fuse_of_a_turned_pair_refuses` with `every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing` and `every_certified_fuse_of_a_pair_sharing_coordinates_is_decided` as its controls |
 
 | §14.8 oracle | The test that discharges it |
@@ -868,6 +868,38 @@ oracles.** One at a time, against the shipped code:
 | Commutativity of union and intersection | `swapping_the_two_sides_of_a_lattice_pair_changes_not_one_bit`, and the same for turned pairs and for pairs sharing coordinates, all comparing the answer's faces bit for bit; `uniting_two_ells_flush_against_each_other_gives_the_same_faces_either_way_round` is the case that first failed |
 | Idempotence and absorption | `a_solid_united_with_a_copy_of_itself_is_itself` for `A ∪ A` and `A ∩ A`, `a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all` for `A \ A` over both a lattice solid and a turned one, `a_solid_united_with_what_it_shares_with_another_is_itself` for `A ∪ (A ∩ B)` |
 | `fuse([A,B,C]) ≡ fuse([fuse([A,B]), C])` | `uniting_three_at_once_is_uniting_two_and_then_the_third`, with `uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the_first` beside it for the order the three arrive in |
+
+**Criterion 7's refusing half, amended 2026-10-05 (Q490).** The table named
+`a_fuse_that_needs_a_decision_nothing_can_prove_refuses`, two towers `1e308`
+tall, and three times its refusal turned out to be a gap: `InPlane::of` at
+`1e200` (§19.5), `orient3d` at `1e308` (§324.6), and `midway_between` at
+`1e308` (§353). The towers now unite, as
+`two_towers_1e308_tall_are_united_by_proof_alone`. A refusal shows this half
+only where the answer does not exist (§15.8, §16.10). So the new one was looked
+for among fuses whose answer no `Model` can hold, and three kinds were tried:
+
+- **A corner past the largest double.** No fuse has one. Its answer lies
+  inside its inputs, whose corners are doubles, so no coordinate of the answer
+  is bigger than the inputs' biggest. The towers are this kind, and they
+  answer.
+- **A corner between two doubles.** The model holds it as a box. That is
+  representation wobble, which is never refused on (§17.2):
+  `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove`
+  answers with every corner it solved a box.
+- **Two corners of the answer closer than a double can tell apart.** Found.
+  The two cubes `two_turned_cubes_a_rounding_apart.rs` turns by `0.3` overlap
+  by a slab about `2^-52` thick. The new test finds the slab's eight corners
+  and twelve edges from the planes alone, exactly, and shows that however an
+  answer places its corners inside their boxes, its largest coordinate over its
+  shortest edge is past `7.9e14`. `Model::validate` refuses every such answer
+  (§3.5). The certified fuse stops before that, in selection, on the slab's
+  face on the second cube's bottom, a strip `2^-52` wide. If selection ever
+  places that strip, the range check refuses the answer instead, as
+  `Invalid::DynamicRangeTooWide`, and the test fails so this half is looked at
+  again.
+
+The refusals of `a_block_edge_grazing_a_ball.rs` do not qualify: the answers
+of those fuses exist (§346.3).
 
 Two things §17.6 promised that did **not** ship, recorded rather than claimed.
 Its ninth piece names "Euler characteristic and shell counts on the assembled
