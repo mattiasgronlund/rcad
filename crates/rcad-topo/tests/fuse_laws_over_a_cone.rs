@@ -167,8 +167,8 @@ fn a_cone_shared_with_its_union_with_a_block_is_the_cone() {
 /// `A` has three, and the corner the circle starts at. It validates, and
 /// measures what `A` measures within `measure`'s own bounds.
 ///
-/// These refused until Q977, at a point in a piece every solid could place,
-/// because neither band of `A ∪ B` could hold a point. Leaving the circle out
+/// The first of them refused `AFaceMissesPartOfWhereItsSurfacesCross` until Q977 let a
+/// band of `A ∪ B` read the circle by the plane its run names. Leaving the circle out
 /// in `assemble.rs`, where a band's rim in two arcs of one closed input edge
 /// counts as the one closed side it becomes, gave all three `A` back and took
 /// the circle out of `A ∪ B` as well, which is the circle the rim file pins.
