@@ -1805,8 +1805,8 @@ impl<'f> Arrangement<'f> {
     /// far past the corner's grown box the meet's box reaches, as long as it
     /// reaches into it. Those three were each asked about the corner grown by
     /// `bake.rs`'s whole room, and none proved it off; a meet of three of them
-    /// can then sit many rooms away in space only because two of them are
-    /// nearly one plane ([`Arrangement::bake_placed_the_corner_on_the_three_planes`]).
+    /// can then sit many rooms away in space because two of them are nearly
+    /// one plane ([`Arrangement::bake_placed_the_corner_on_the_three_planes`]).
     /// A turned pyramid whose base is bent by a sixty-fourth has its apex's two
     /// folding faces' meets 4.7 rooms past the apex's box, and the meet of the
     /// three stored planes itself, worked out exactly, still 1.6 rooms past it.
@@ -1814,6 +1814,13 @@ impl<'f> Arrangement<'f> {
     /// are all answered with it (§356). Bent by a 256th or less, a few such
     /// meets miss the corner's own box by 1.3 to 60 rooms, and so the grown
     /// box too, and stay nodes (§395.4).
+    ///
+    /// **The reach is a bound this rule needs.** Three of a corner's own planes
+    /// can share a line in the file, and then their meet is wherever rounding
+    /// puts it on that line. A KiCad relay has two: the floor and two faces
+    /// tilted about the line they all pass through, and a tilted face with the
+    /// plane `y = 1.8` written two ways. Their meets lie 326 and 1.6 units from
+    /// the corners, and with no bound they were folded into them (§395.7).
     ///
     /// **Whether the meet's box touches the corner's own box is not asked.**
     /// That was the whole fold before §253, and the two rules above were laid
@@ -1928,7 +1935,10 @@ impl<'f> Arrangement<'f> {
     /// corner (§356.2). That is the same corner written down by a worse triple,
     /// not a second point: three planes meet at most once, so two straight
     /// crossings on a flat face that both run through the corner cross nowhere
-    /// else.
+    /// else. **That needs three planes that pin a point.** Three that share a
+    /// line in the file have two crossings that are one line written twice,
+    /// and their meet says nothing about the corner, so the caller still bounds
+    /// how far the meet may be (§395.7).
     fn bake_placed_the_corner_on_the_three_planes(
         &self,
         corner: &Node,
@@ -7711,10 +7721,12 @@ mod tests {
     /// a box from the room's edge out to a thousand rooms is folded, and one
     /// starting a step past the edge is not (§395.4).
     ///
-    /// The second is a gap left on purpose. Three planes meet once, so §356's
-    /// argument folds it as well, and a pyramid bent by a 256th or less has
-    /// apex meets out there. Folding them changes a fold the KiCad round trip
-    /// makes, so it is a row of its own.
+    /// The second needs some bound. With none, a KiCad relay's meets of three
+    /// planes that share a line in the file, 1.6 and 326 units off their
+    /// corners, are folded too. A pyramid bent by a 256th or less has apex
+    /// meets out past this room, and the bound that would fold them and still
+    /// keep the relay's apart is `bake`'s room, which the fold cannot read yet
+    /// (§395.7).
     #[test]
     fn a_meet_of_three_planes_bake_solved_the_corner_among_is_folded_only_while_its_box_reaches_the_corners_room()
      {
