@@ -1678,6 +1678,64 @@ fn the_corner_of_a_slab_with_a_round_edge_is_written_where_its_faces_rest_on_the
     );
 }
 
+/// The top of a bent rod sawn off flat at `z = 3`, three of its radius of
+/// five above its middle, is written with the two circles the saw cut crosses
+/// its ring in, and comes back the same.
+///
+/// A plane square to a ring's axis and nearer its centre than the tube's
+/// radius crosses it in two circles about the axis, of radii `R ± √(r² − h²)`:
+/// here `10 ± √(25 − 9)`, which is `14` and `6` with no rounding. The flat
+/// face meets the ring along an open quarter of each, so each circle carries
+/// an open edge between a plane and a ring. Until Q778 the writer wrote only
+/// the circle a plane resting on the tube touches it along, and refused this
+/// as `{ first: "plane", second: "ring", closed: false }`.
+#[test]
+fn the_top_of_a_bent_rod_sawn_off_flat_is_written_with_both_circles_the_cut_crosses_its_ring_in() {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 14.0).expect("a working size"));
+    let built = the_top_of_a_bent_rod_sawn_off_flat(&mut model);
+    assert_eq!(
+        open_bends(&model, built),
+        [
+            ["pipe", "plane"],
+            ["pipe", "plane"],
+            ["pipe", "ring"],
+            ["pipe", "ring"],
+            ["plane", "ring"],
+            ["plane", "ring"],
+        ],
+        "the outer and the inner circle where the cut crosses the ring, where the \
+         ring carries on as a pipe, and where the ends cut the pipes"
+    );
+    let text = comes_back_the_same(
+        "the top of a bent rod sawn off flat",
+        &model,
+        built,
+        &|model| a_block(model, [2.0, 2.0, 4.0], Vector::new(7.0, 7.0, 2.0)),
+    );
+    assert_eq!(
+        the_radii_of_the_circles_written(&text),
+        [5.0, 5.0, 5.0, 5.0, 6.0, 14.0].map(f64::to_bits),
+        "the tube's circle at each end of each pipe and of the bend, and the \
+         inner and the outer circle the cut crosses the ring in"
+    );
+}
+
+/// The radius of every `CIRCLE` in the file, as its bits, smallest first.
+fn the_radii_of_the_circles_written(text: &str) -> Vec<u64> {
+    let mut radii: Vec<f64> = text
+        .lines()
+        .filter_map(|line| line.strip_suffix(");")?.split_once("=CIRCLE("))
+        .map(|(_, body)| {
+            let (_, radius) = body
+                .rsplit_once(',')
+                .unwrap_or_else(|| panic!("a CIRCLE with no radius: {body}"));
+            radius.parse::<f64>().expect("a radius")
+        })
+        .collect();
+    radii.sort_by(f64::total_cmp);
+    radii.into_iter().map(f64::to_bits).collect()
+}
+
 /// The cap the plane `z = 3` cuts off a ball of radius five, whose rim is one
 /// closed circle between the flat floor and the ball, is written and comes
 /// back the same, its rim walked the same way round by both faces.
@@ -2848,6 +2906,100 @@ fn the_corner_of_a_slab_with_a_round_edge(model: &mut Model) -> SolidKey {
                 second_end,
                 vec![vec![Forward(8), Reversed(14), Reversed(3), Reversed(13)]],
             ),
+        ],
+        &[],
+    )
+}
+
+/// The part above `z = 3` of a rod of radius five bent round a quarter of the
+/// ring of radius ten about `z`: a pipe along `y` at `x = 10` from its end at
+/// `y = −4` up to `y = 0`, the quarter of the ring from there round to `x = 0`,
+/// and a pipe along `x` at `y = 10` on to its end at `x = −4`.
+///
+/// So the flat face `z = 3` meets the ring along a quarter of the circle of
+/// radius fourteen, from `(14, 0, 3)` to `(0, 14, 3)`, and a quarter of the
+/// circle of radius six, from `(0, 6, 3)` to `(6, 0, 3)`, and meets each pipe
+/// along two straight lines. The ring meets each pipe in the part of its
+/// tube's circle above the cut, and each end cuts its pipe in the same.
+fn the_top_of_a_bent_rod_sawn_off_flat(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder, Torus};
+
+    let x = Vector::new(1.0, 0.0, 0.0);
+    let y = Vector::new(0.0, 1.0, 0.0);
+    let z = Vector::new(0.0, 0.0, 1.0);
+    let flat = |at: Point, facing: Vector| Surface::Plane(a_plane(at, facing));
+    let pipe = |at: Point, along: Vector| {
+        Surface::Cylinder(
+            Cylinder::new(Axis::new(at, along).expect("a direction"), 5.0)
+                .expect("a positive radius"),
+        )
+    };
+    let cut = flat(Point::new(0.0, 0.0, 3.0), -z);
+    let first_end = flat(Point::new(0.0, -4.0, 0.0), -y);
+    let second_end = flat(Point::new(-4.0, 0.0, 0.0), -x);
+    a_solid_drawn_face_by_face(
+        model,
+        &[
+            Point::new(14.0, -4.0, 3.0),
+            Point::new(14.0, 0.0, 3.0),
+            Point::new(0.0, 14.0, 3.0),
+            Point::new(-4.0, 14.0, 3.0),
+            Point::new(-4.0, 6.0, 3.0),
+            Point::new(0.0, 6.0, 3.0),
+            Point::new(6.0, 0.0, 3.0),
+            Point::new(6.0, -4.0, 3.0),
+        ],
+        vec![
+            (0, 1, EdgeRun::Straight),
+            (1, 2, part_of(cut, Point::new(14.0, 0.0, 3.0), x + y)),
+            (2, 3, EdgeRun::Straight),
+            (3, 4, EdgeRun::Straight),
+            (4, 5, EdgeRun::Straight),
+            (5, 6, part_of(cut, Point::new(6.0, 0.0, 3.0), x + y)),
+            (6, 7, EdgeRun::Straight),
+            (7, 0, EdgeRun::Straight),
+            (
+                1,
+                6,
+                part_of(flat(Point::origin(), y), Point::new(10.0, 0.0, 3.0), z),
+            ),
+            (
+                2,
+                5,
+                part_of(flat(Point::origin(), x), Point::new(0.0, 10.0, 3.0), z),
+            ),
+            (7, 0, part_of(first_end, Point::new(10.0, -4.0, 3.0), z)),
+            (3, 4, part_of(second_end, Point::new(-4.0, 10.0, 3.0), z)),
+        ],
+        vec![
+            (
+                cut,
+                vec![vec![
+                    Reversed(0),
+                    Reversed(7),
+                    Reversed(6),
+                    Reversed(5),
+                    Reversed(4),
+                    Reversed(3),
+                    Reversed(2),
+                    Reversed(1),
+                ]],
+            ),
+            (
+                Surface::Torus(Torus::new(Axis::z(), 10.0, 5.0).expect("a working ring")),
+                vec![vec![Forward(1), Forward(9), Forward(5), Reversed(8)]],
+            ),
+            (
+                pipe(Point::new(10.0, 0.0, 0.0), y),
+                vec![vec![Forward(0), Forward(8), Forward(6), Forward(10)]],
+            ),
+            (
+                pipe(Point::new(0.0, 10.0, 0.0), x),
+                vec![vec![Forward(2), Forward(11), Forward(4), Reversed(9)]],
+            ),
+            (first_end, vec![vec![Forward(7), Reversed(10)]]),
+            (second_end, vec![vec![Forward(3), Reversed(11)]]),
         ],
         &[],
     )
