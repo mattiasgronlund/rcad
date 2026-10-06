@@ -1999,13 +1999,13 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         } else {
             [Decision::Neg, Decision::Pos]
         };
-        let inside = match side_of_surface(&side.across_placed, point) {
-            Decision::Neg | Decision::Zero
-                if is_on_the_other_nappe_from_the_arc(flat, side, point)? =>
-            {
-                Decision::Pos
-            }
-            read => read,
+        let read = side_of_surface(&side.across_placed, point);
+        let inside = if matches!(read, Decision::Neg | Decision::Zero)
+            && is_on_the_other_nappe_from_the_arc(flat, side, point)?
+        {
+            Decision::Pos
+        } else {
+            read
         };
         match inside {
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
