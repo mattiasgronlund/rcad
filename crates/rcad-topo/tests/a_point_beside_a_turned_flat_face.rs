@@ -24,6 +24,15 @@
 //! by face and turned (`tests/a_ray_from_beside_a_box.rs` builds it unturned).
 //! The block is convex and each point here is far from the bend, so the block's
 //! six stored planes say where each point is.
+//!
+//! The side the bend grows out of holds the bend's first cap circle as a hole,
+//! and the bend's end cap is a disk. Each is a plane through the ring's axis,
+//! and turned, each plane as stored lands a rounding off the turned axis, where
+//! `rcad_geom::intersect` reads the plane and the ring as a quartic and names no
+//! circle. Which circle the hole is was asked of the plane and the ring as they
+//! sit, so every ray that met either plane was refused
+//! `CannotFollowAFacesTrimming` (row Q1168). It is asked where the face is
+//! stored now, and the last two tests are points whose rays cross both.
 
 use std::collections::BTreeMap;
 
@@ -74,6 +83,150 @@ fn a_point_outside_whose_ray_from_beside_parts_at_the_top_is_not_put_inside() {
         ],
         Containment::Outside,
     );
+}
+
+/// Points well clear of every face, in the block, in the bend and outside
+/// both, answer turned what they answer unturned, which is what their places
+/// say by hand.
+///
+/// Each turn is about an axis off `z`, so the side `y = 0` and the end cap
+/// `x = 0`, both through the ring's axis as built, lean off it by a rounding
+/// once turned. Every one of these points was refused
+/// `CannotFollowAFacesTrimming` before the circle was named where the face is
+/// stored: no ray from any of them misses both planes.
+#[test]
+fn points_clear_of_every_face_answer_turned_as_they_do_unturned() {
+    let by_hand = [
+        ([4.0, -1.0, 0.0], Containment::Inside),
+        ([4.0, -0.5, 0.5], Containment::Inside),
+        ([5.5, -1.5, 1.5], Containment::Inside),
+        ([4.0, 0.5, 0.0], Containment::Inside),
+        ([4.0, 2.0, 0.0], Containment::Inside),
+        ([3.0, 3.0, 0.5], Containment::Inside),
+        ([0.5, 4.0, 0.0], Containment::Inside),
+        ([1.0, -1.0, 0.0], Containment::Outside),
+        ([4.0, 0.5, 1.5], Containment::Outside),
+        ([-0.5, 4.0, 0.0], Containment::Outside),
+        ([2.0, 2.0, 0.0], Containment::Outside),
+        ([6.5, 0.5, 0.0], Containment::Outside),
+        ([4.0, -3.0, 0.5], Containment::Outside),
+    ];
+    let mut unturned = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_bend_out_of_a_block(&mut unturned).expect("a bend growing out of a block's side");
+    let view = unturned.solid(solid).expect("this model made the key");
+    for (at, should) in by_hand {
+        assert_eq!(
+            view.classify_point(
+                Point::new(at[0], at[1], at[2]),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            should,
+            "{at:?} unturned"
+        );
+    }
+
+    for (axis, angle) in [
+        ([1.0, 2.0, 3.0], 0.3),
+        ([3.0, -1.0, 2.0], 1.5),
+        ([-2.0, 1.0, 5.0], 2.5),
+        ([5.0, 3.0, -1.0], 5.0),
+    ] {
+        let (model, solid) = a_bend_out_of_a_turned_block(axis, angle);
+        let view = model.solid(solid).expect("this model made the key");
+        let turn = the_turn(axis, angle);
+        for (at, should) in by_hand {
+            let turned = turn.apply_to_point(Point::new(at[0], at[1], at[2]));
+            for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+                assert_eq!(
+                    view.classify_point(turned, &policy, &mut ProvenanceLog::new()),
+                    should,
+                    "{at:?} turned {angle} about {axis:?}, {policy:?}"
+                );
+            }
+        }
+    }
+}
+
+/// No point within a spacing of the middle of one of the block's five
+/// rectangular sides is refused `CannotFollowAFacesTrimming`, over 48 turns:
+/// 6 axes and 8 angles, every double within one spacing in each coordinate.
+///
+/// These are the middles of Q1068's grid. Before the hole's circle was named
+/// where the side is stored, every turn about an axis off `z` refused these
+/// points whenever a ray crossed the side or the end cap.
+///
+/// The tally printed counts the answers the block's stored planes agree with
+/// and the ones they do not. Some do not: a point a spacing outside a turned
+/// side comes back `OnBoundary`, row Q1156's shape.
+#[test]
+fn no_point_beside_a_turned_blocks_side_is_refused_for_the_hole_or_the_end_cap() {
+    let axes = [
+        [1.0, 2.0, 3.0],
+        [3.0, -1.0, 2.0],
+        [1.0, 1.0, 1.0],
+        [-2.0, 1.0, 5.0],
+        [0.0, 0.0, 1.0],
+        [5.0, 3.0, -1.0],
+    ];
+    let angles = [0.3, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 5.0];
+    let mut tally = BTreeMap::<&str, usize>::new();
+    for axis in axes {
+        for angle in angles {
+            let (model, solid) = a_bend_out_of_a_turned_block(axis, angle);
+            let view = model.solid(solid).expect("this model made the key");
+            let sides = the_blocks_sides(view);
+            for rectangle in sides.iter().filter(|side| side.wire_count() == 1) {
+                let corners: Vec<[f64; 3]> = rectangle
+                    .outer_wire()
+                    .points()
+                    .map(|corner| corner.coordinates())
+                    .collect();
+                let middle: [f64; 3] = core::array::from_fn(|axis| {
+                    corners[0][axis]
+                        + 0.5 * (corners[1][axis] - corners[0][axis])
+                        + 0.5 * (corners[3][axis] - corners[0][axis])
+                });
+                for step in 0..27_i32 {
+                    let by = [step % 3, step / 3 % 3, step / 9].map(|by| by - 1);
+                    let point: [f64; 3] =
+                        core::array::from_fn(|axis| a_spacing_off(middle[axis], by[axis]));
+                    let answer = view.classify_point(
+                        Point::new(point[0], point[1], point[2]),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    let kind = match answer {
+                        Containment::Inside | Containment::Outside | Containment::OnBoundary
+                            if answer == what_the_stored_planes_say(&sides, point) =>
+                        {
+                            "right"
+                        }
+                        Containment::Inside | Containment::Outside | Containment::OnBoundary => {
+                            "wrong"
+                        }
+                        Containment::CannotFollowAFacesTrimming { .. } => "trimming",
+                        Containment::CannotFireARayAtAFacesSurface { .. } => "no ray",
+                        Containment::Undecidable { .. } => "undecidable",
+                        other => panic!("an answer this test does not know: {other:?}"),
+                    };
+                    *tally.entry(kind).or_default() += 1;
+                }
+            }
+        }
+    }
+    eprintln!("the middles of Q1068's grid: {tally:?}");
+    assert_eq!(tally.get("trimming"), None, "{tally:?}");
+}
+
+/// `x` moved `by` doubles up, or down when `by` is below zero.
+fn a_spacing_off(x: f64, by: i32) -> f64 {
+    match by {
+        -1 => x.next_down(),
+        0 => x,
+        1 => x.next_up(),
+        other => panic!("one spacing either way, not {other}"),
+    }
 }
 
 /// That `point`, on the block with a bend turned `angle` about `axis`, is in no
@@ -276,15 +429,19 @@ fn the_blocks_sides(view: SolidView<'_>) -> Vec<FaceView<'_>> {
 fn a_bend_out_of_a_turned_block(axis: [f64; 3], angle: f64) -> (Model, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let solid = a_bend_out_of_a_block(&mut model).expect("a bend growing out of a block's side");
-    let turn = Isometry::rotation(
+    model
+        .place_solid(solid, &the_turn(axis, angle))
+        .expect("this model made the key");
+    (model, solid)
+}
+
+/// A turn of `angle` about `axis` through the origin.
+fn the_turn(axis: [f64; 3], angle: f64) -> Isometry {
+    Isometry::rotation(
         &Axis::new(Point::origin(), Vector::new(axis[0], axis[1], axis[2])).expect("an axis"),
         angle,
     )
-    .expect("a finite turn");
-    model
-        .place_solid(solid, &turn)
-        .expect("this model made the key");
-    (model, solid)
+    .expect("a finite turn")
 }
 
 /// The side `y = 0` holds the bend's first cap circle as a hole, walked the
