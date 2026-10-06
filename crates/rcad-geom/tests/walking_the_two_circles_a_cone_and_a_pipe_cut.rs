@@ -212,6 +212,9 @@ fn where_each_circle_starts_is_on_both_surfaces_and_does_not_move_when_the_pair_
 /// a file read in states runs this crate never named. So a leaning cone and pipe
 /// handed over as a closed run has to come back with the row's own refusal and
 /// not with a circle worked out from numbers that do not describe one.
+///
+/// The ball stands one to the side of the axis. On it, a ball is drawn the way
+/// the pipe is, and `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` walks it.
 #[test]
 fn a_run_stated_on_a_pair_that_does_not_share_an_axis_is_refused_by_name() {
     let cone = Cone::new(Axis::z(), 1.0).expect("a slope above zero");
@@ -225,7 +228,7 @@ fn a_run_stated_on_a_pair_that_does_not_share_an_axis_is_refused_by_name() {
         2.0,
     )
     .expect("a radius above zero");
-    let ball = Sphere::new(Point::new(0.0, 0.0, 4.0), 2.0).expect("a radius above zero");
+    let ball = Sphere::new(Point::new(1.0, 0.0, 4.0), 2.0).expect("a radius above zero");
 
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a closed curve is never a piece with nothing picking it");

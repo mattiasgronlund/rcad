@@ -522,7 +522,8 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
 
 /// Two pointed cones base to base on one circle, their rim vertices half a turn
 /// apart — the shape that would hand §204.1's join a run of pieces carrying two
-/// input edges — refused before the fuse assembles anything.
+/// input edges. **Their intersection and both differences answer, and their
+/// union is refused as an edge with one face along it.**
 ///
 /// §204.1 joins a closed curve that was cut into pieces back into one edge only
 /// **when every piece came from one input edge**. A run whose pieces are an
@@ -537,17 +538,24 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
 /// the two cut points stays a corner and the run keeps it. A pointed cone's
 /// side is the one face here with a closed wire and no seam, so both solids
 /// have to be pointed cones on one circle, which is two cone faces meeting one
-/// curve: refused by name. The same family with a sphere in place of the second
-/// cone is [`a_ball_on_a_bar_of_the_same_radius`], whose touching row answers
-/// none of its fuses either.
+/// curve. The same family with a sphere in place of the second cone is
+/// [`a_ball_on_a_bar_of_the_same_radius`], whose touching row answers none of
+/// its fuses either.
 ///
-/// So *this* family is a **limit and not a gap** (§16.10) and the pin is here:
-/// the day either refusal goes, the closed-run join has a second case to
-/// answer. What is **not** settled is a closing run of pieces of two *different*
-/// input edges, or of a fresh crossing curve carrying no input edge at all;
-/// neither has been built and neither has been ruled out.
+/// **That curve used to be refused by name and is named now** (Q1122): two
+/// cones of one slope on one axis, apexes four apart, cross in the one circle
+/// halfway between them, which is this rim. The fuse then gets past it, and
+/// what it gives is measured here rather than predicted: the two lumps touch
+/// along a curve and nowhere else, so their intersection holds nothing and each
+/// difference is the first cone, `8π/3`, unchanged. The union stops in
+/// `fuse/assemble.rs` with `ResultIsNotManifold { count: 1 }` — no panic, so
+/// the join §204.1 feared did not turn this into a crash — and a second pair
+/// whose rim vertices are **one** point refuses it the same way, so the half
+/// turn is not what it turns on. The rim is the cap plane's circle with each
+/// cone, the shape `Q1118` traces for a frustum against a bar; whether it is
+/// that one was not traced.
 #[test]
-fn two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them() {
+fn two_cones_sharing_one_rim_circle_answer_all_but_their_union() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let lower = a_pointed_cone_with_its_vertex_at(
         &mut model,
@@ -555,25 +563,52 @@ fn two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them()
         2.0,
         Point::new(2.0, 0.0, 2.0),
     );
-    let upper = a_pointed_cone_with_its_vertex_at(
+    let half_a_turn_round = a_pointed_cone_with_its_vertex_at(
         &mut model,
         Point::new(0.0, 0.0, 4.0),
         -2.0,
         Point::new(-2.0, 0.0, 2.0),
     );
+    let at_one_point = a_pointed_cone_with_its_vertex_at(
+        &mut model,
+        Point::new(0.0, 0.0, 4.0),
+        -2.0,
+        Point::new(2.0, 0.0, 2.0),
+    );
+    let one_cone = 8.0 * std::f64::consts::PI / 3.0;
     let policy = Policy::certified();
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+    for upper in [half_a_turn_round, at_one_point] {
         for (one, other) in [(lower, upper), (upper, lower)] {
-            let why = model
-                .clone()
-                .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
-                .expect_err("a cone against a cone is refused");
+            let fused = |rule: Rule| {
+                let mut fused = model.clone();
+                let answer = fused
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .map(|answer| answer.solids().to_vec());
+                (fused, answer)
+            };
+
+            let (_, union) = fused(Rule::Union);
             assert!(
-                matches!(
-                    why,
-                    Error::Geometry(rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-                ),
-                "{rule:?}: refused {why} instead"
+                matches!(union, Err(Error::ResultIsNotManifold { count: 1 })),
+                "the union: {union:?}"
+            );
+
+            let (_, intersection) = fused(Rule::Intersection);
+            assert!(
+                intersection.as_ref().is_ok_and(Vec::is_empty),
+                "two cones touching along a rim share no volume: {intersection:?}"
+            );
+
+            let (left, difference) = fused(Rule::Difference);
+            let solids = difference.unwrap_or_else(|why| panic!("the difference: {why}"));
+            assert_eq!(solids.len(), 1, "{solids:?}");
+            left.validate(&policy, &mut ProvenanceLog::new())
+                .expect("a fuse hands back a sound model");
+            let (volume, error) = volume_and_error(&left, &solids);
+            assert!(
+                (volume - one_cone).abs() <= error,
+                "the first cone holds {one_cone} and its difference holds {volume} give or take \
+                 {error}"
             );
         }
     }

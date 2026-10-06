@@ -29,7 +29,9 @@
 //! - anything curved against a cone `intersect` does still refuse outright, and
 //!   **one cone twice is not that pair**: `intersect` has always answered it as
 //!   one surface, and since §214 `walk` does too. For a cone against a *different*
-//!   cone the refusal is the degree-four space curve; for a cone coaxial with a
+//!   cone off its axis the refusal is the degree-four space curve, and on its
+//!   axis it is circles or the apex alone, which `intersect` names since Q1122;
+//!   for a cone coaxial with a
 //!   pipe it is two circles, which `intersect` names now, and where a cap plane
 //!   square to their axis meets both, which `three_surfaces.rs` answers now too
 //!   (Q981). The arrangement draws that pair since Q987, and the refusal has
@@ -128,7 +130,8 @@ enum Family {
     /// pipe**, which crosses in exactly two circles and not in a degree-four
     /// curve (§50.11).
     AFrustumAgainstABar,
-    /// Two coaxial frustums of different slopes: cone against cone.
+    /// Two coaxial frustums of different slopes and one apex: cone against
+    /// cone, meeting at the apex alone.
     TwoFrustumsOnOneAxis,
 }
 
@@ -283,9 +286,9 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 ///
 /// # What is asserted and what is only reported
 ///
-/// The two curved-tool families are each asserted at **nothing answered**, and
-/// they have **one assertion apiece** because the reason is no longer the same
-/// one.
+/// The two curved-tool families have **one assertion apiece**, because the
+/// reason is no longer the same one: the bar is asserted at nothing answered,
+/// and the second frustum, since Q1122, at everything answered.
 ///
 /// `AFrustumAgainstABar` is a cone coaxial with a pipe. That pair crosses in
 /// exactly two circles, so the old shared reason — a degree-four space curve —
@@ -332,11 +335,14 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// A pin that holds for a new reason is a pin saying nothing until the reason is
 /// written down, so the refusals are asserted by name here and not only counted.
 ///
-/// `TwoFrustumsOnOneAxis` is a cone against another cone, which §50.2 item 4
-/// keeps out of scope: two cones sharing an apex meet along rulings, which are
-/// lines, so naming the pair would turn `assemble`'s *"this crossing holds no
-/// straight line"* into a wrong answer rather than a refusal — the wrong answer
-/// §4.1 ranks below refusing. It **stays** pinned at nothing answered.
+/// `TwoFrustumsOnOneAxis` is a cone against another cone, and was pinned at
+/// nothing answered while `intersect` refused every such pair. §50.2 item 4
+/// held it out because two cones sharing an apex meet along rulings — but only
+/// where their axes lean apart, and those are still refused. **This family's
+/// two frustums share an apex and an axis, and meet at the apex alone**, which
+/// is off both of their faces, so since Q1122 every one of its 96 fuses
+/// answers, and `assemble`'s *"this crossing holds no straight line"* is right
+/// about every cone-and-cone pair that reaches it.
 ///
 /// The two corner-up-cube families are asserted at **something answered and
 /// something refused**, and no more than that. Every plane of such a cube leans
@@ -502,13 +508,14 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                 );
             }
             Family::TwoFrustumsOnOneAxis => assert_eq!(
-                answered,
-                0,
-                "{}: this is a cone against another cone, which §50.2 item 4 keeps out of \
-                 scope — two cones that share an apex meet along rulings, which are lines, so \
-                 naming the pair turns `the_crossing_of_these_runs_straight`'s `false` into a \
-                 wrong answer rather than a refusal. It stays pinned at nothing answered, and \
-                 it answered {answered} of {fuses}",
+                (answered, refused),
+                (96, 0),
+                "{}: two frustums of one apex and two slopes on one axis meet at that apex and \
+                 nowhere else, which `intersect` answers as touching since Q1122, so no face is \
+                 cut by the other cone; every fuse was measured answering, and \
+                 `a_cone_hollowed_along_its_axis.rs` checks what they hold. It answered \
+                 {answered} of {fuses} here. When this breaks, re-derive the number over the \
+                 family rather than relax it (§19.1)",
                 family.named()
             ),
             Family::AFrustumAgainstABlock => assert!(

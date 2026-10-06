@@ -4902,16 +4902,20 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // and `a_pipe_alongside_one_of_a_cones_rulings_holds_it` are the two
         // demonstrations.
         //
-        // **`false` rests on `intersect` and not on the geometry** for cone
-        // against cone as well: two cones that share an apex meet along
-        // rulings, which are lines. No such pair reaches here — `intersect`
-        // answers `ACrossingBetweenAConeAndAnotherCurvedSurface` for every
-        // cone-and-cone that is not the same cone.
+        // **Cone against cone is half the geometry and half `intersect`.** Two
+        // cones on one axis meet in circles — two, or one halfway between the
+        // apexes for one slope — or at their one apex and nowhere else, which
+        // `intersect` answers as touching and builds no run for. None of that
+        // holds a line, so `false` is about the geometry there. Two cones that
+        // share an apex with their axes leaning apart *do* meet along rulings,
+        // which are lines (§50.2 item 4), and what keeps the arm right for them
+        // is that `intersect` refuses every cone-and-cone off one axis by name.
+        // `where_two_cones_cross` in `rcad-geom` carries the table.
         //
         // So **two** of the three rows here are right only for as long as
         // those refusals stand, and both are rows to revisit the day one
-        // lifts: cone against cone, and cone against a pipe it is not coaxial
-        // with. Only the coaxial pipe and the ball answer out of the shapes
+        // lifts: a cone against a cone or a pipe it is not coaxial with. The
+        // ball, the coaxial pipe and the coaxial cone answer out of the shapes
         // themselves.
         [
             Surface::Cone(_),
