@@ -390,3 +390,49 @@ tests come back as pinned.
   Whether its two circles give the same near-ties, and so whether a placed
   tube's ends are cut into other triangles than an unplaced tube's, was not
   measured: no builder makes a tube without a fuse, and a probe was not cheap.
+
+**2026-10-06, Q797: a pipe's rings do not match; a bar's whole discs still
+do.** Lane `lane-q797-a-placed-pipes-flat-ends-meshed-from-stored-corners`,
+off `9e6da7e1`.
+
+- **The measurement.** A pipe — a bar of radius 3 and height 5 less a
+  coaxial bar of radius 1 that pokes through both ends, built with
+  `Model::fuse(Rule::Difference)` since no builder makes one directly — is
+  meshed at `0.005` under the same twelve placements §333.2 uses, and each
+  flat end's triangles are compared with the unplaced pipe's as sorted sets
+  of point indices, the bottom ring and the top ring kept apart. Both rings
+  have 796 triangles, bottom and top together, in every placement.
+  `crates/rcad-topo/tests/a_placed_pipe_is_meshed_from_the_corners_it_stores.rs`,
+  run as
+  `mise exec -- just t -p rcad-topo --test a_placed_pipe_is_meshed_from_the_corners_it_stores --no-capture`.
+
+  | placement | bottom ring off | top ring off |
+  |---|---|---|
+  | an eighth about `z` | 2 | 0 |
+  | the same, then `(3, −5, 7)` | 0 | 2 |
+  | the same, then `(0.25, −0.5, 0.125)` | 2 | 0 |
+  | the same, then `(0.1, 0.2, 0.3)` | 2 | 0 |
+  | 0.7 about `(1, 2, 3)` | 2 | 2 |
+  | the same, then `(3, 5, 7)` | 2 | 0 |
+  | 2.5 about `(1, 2, 3)` | 0 | 0 |
+  | the same, then `(3, 5, 7)` | 0 | 0 |
+  | 0.7 about `(−3, 1, 0.5)` | 2 | 0 |
+  | the same, then `(3, 5, 7)` | 2 | 0 |
+  | 2.5 about `(−3, 1, 0.5)` | 0 | 2 |
+  | the same, then `(3, 5, 7)` | 0 | 0 |
+
+- **A ring has a hole, so §379.5's corner-order rule leaves it to spade.**
+  `mesh.rs` asks for a flat face bounded by one closed edge; a ring is
+  bounded by two (the outer circle and the inner one), so it is cut by
+  spade's Delaunay test whichever bar it was. That test is near-tied on a
+  circle's points the same way it is on a bar's whole disc (§379.5, Q784), and
+  nine of the twelve placements move 2 of a ring's 796 triangles onto other
+  points, once on both rings at once. A bar's whole discs stay at `0` under
+  the same twelve placements, so this is the gap Q796 left: a pipe's ends are
+  not cut into the unplaced pipe's triangles the way a bar's are.
+- **A row is filed for it** (not yet judged wrong, so untagged): a fix would
+  need `TrimmedDomain`'s loop-count check in `crates/rcad-mesh/src/domain.rs`
+  widened to a one-hole ring whose outer loop meets §379.5's corner-order
+  conditions and whose hole is a circle read at the same height everywhere,
+  plus `mesh.rs`'s ask for it — not measured whether that is sufficient, so
+  no class.
