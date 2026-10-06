@@ -103,6 +103,17 @@ using the half-space `intersect` names each circle by. A probe without it
 showed the side check refusing all three such walls first. So it was dropped,
 which also saves an `intersect` per query.
 
+*2026-10-06, Q790: the check is back. Those walls walk the circle once each
+way. A wall that walks it twice the same way round, built straight into the
+arena (`a_piece_of_pipe_walking_each_circle` in `holds.rs`), passed the side
+check, and all six (two walks times three ways of storing and using the far
+cap) were read as a half. `are_on_two_circles` now runs after the side check
+passes, naming each corner's circle by the picker `intersect` tells it by, and
+refuses the wall `AFaceMissesPartOfWhereItsSurfacesCross` unless the names
+differ (`74780e25`, pinned by
+`a_wall_round_one_circle_twice_the_same_way_is_refused_rather_than_read_as_a_half`).
+The lane's probe, since removed, found `Model::validate` refusing all six.*
+
 **One refusal is renamed.** A ring face with two edges along one plane that
 does not hold the axis, such as the top half of a ring on `z = 0`, used to be
 refused by the general rule with `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`.

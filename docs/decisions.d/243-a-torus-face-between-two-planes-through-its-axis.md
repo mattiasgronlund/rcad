@@ -351,5 +351,11 @@ eight. On this base it does not.
 - A wall whose two edges are one circle walked twice the same way round would
   pass the side check here as it would for a plane through the axis. That is
   Q790's question, not run for a plane square to the axis either.
+  *2026-10-06, Q790: answered. The same wall on `z = 0`, walked the same way
+  round twice, was read as a half too, and the check §377.3 puts back refuses
+  it (`ca9c8434`, pinned by
+  `a_wall_round_one_circle_round_the_axis_twice_the_same_way_is_refused`). This
+  closes Q951. The lane's probe, since removed, found `Model::validate`
+  refusing both such walls.*
 - §377.3's paragraph "One refusal is renamed" says this shape is refused at
   step 1. It is answered now. §377 was outside this lane's write set.
