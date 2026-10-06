@@ -859,13 +859,17 @@ impl Assembly {
                 .flatten()
                 .flat_map(|side| self.edges[side.edge].ends)
             {
-                let side = plane.side_of_point(PredicatePoint::from(
+                match plane.side_of_point(PredicatePoint::from(
                     self.corners[corner].point.coordinates(),
-                ));
-                let (Decision::Pos | Decision::Zero) = side else {
-                    return false;
-                };
-                off_the_plane |= side == Decision::Pos;
+                )) {
+                    Decision::Pos => off_the_plane = true,
+                    Decision::Zero => {}
+                    Decision::Neg | Decision::Undecidable { .. } => return false,
+                    other => panic!(
+                        "which side of a plane a corner is on came back as a decision nothing \
+                         here knows: {other:?}"
+                    ),
+                }
             }
             off_the_plane
         })
