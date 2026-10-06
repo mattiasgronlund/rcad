@@ -476,10 +476,13 @@ pub(crate) fn the_half_space_naming_the_meridian_circle_through(
 /// gives each circle round the axis one side of the pipe of the ring's own
 /// radius. A run is taken only when exactly one picker picks it.
 ///
+/// `pub(crate)` so `validate.rs` tells a ring face's circles round the axis
+/// apart by the same pipe this file tells its bands apart by (row Q1153).
+///
 /// # Errors
 ///
 /// Whatever [`intersect`] gives for the two.
-fn the_picker_naming_the_circle_through(
+pub(crate) fn the_picker_naming_the_circle_through(
     flat: &Surface,
     ring: &Surface,
     corner: PredicatePoint,
@@ -7210,9 +7213,11 @@ mod tests {
     ];
 
     /// The walk of a band's two circles that `Model::validate` passes, near
-    /// circle on `z = −3` first: each of the other three is refused
-    /// `AClosedEdgeIsWalkedAgainstItsSurface`, for the barrel and the spool
-    /// alike.
+    /// circle on `z = −3` first: each of the other three is refused, for the
+    /// barrel and the spool alike, the two that walk both circles the same way
+    /// round with `AClosedEdgeIsWalkedAgainstItsSurface`, and the one turned
+    /// over at both with `FacesDoNotAgreeWhichWayTheyFace`
+    /// ([`a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused`]).
     const THE_BANDS_WALK: [Orientation; 2] = [Orientation::Reversed, Orientation::Forward];
 
     /// A piece of the ring of radius ten and tube five between the planes
@@ -7401,13 +7406,35 @@ mod tests {
     /// barrel's does; the inner twin's is used as stored where the spool's is
     /// used reversed, so it walks the spool's walk turned over.
     fn a_grooved_ring(outer: bool, placed: Isometry) -> (Model, SolidKey, FaceKey) {
-        let (band, floor, floor_walk, floor_used, walk) = if outer {
+        a_grooved_ring_walked(outer, the_grooves_walk(outer), placed)
+    }
+
+    /// The walk of a grooved ring's wall, near circle on `z = −3` first.
+    fn the_grooves_walk(outer: bool) -> [Orientation; 2] {
+        if outer {
+            THE_BANDS_WALK.map(Orientation::reversed)
+        } else {
+            THE_BANDS_WALK
+        }
+    }
+
+    /// [`a_grooved_ring`] with its wall walking `walk`, and the side and the
+    /// floor along each circle the wall walks other than [`the_grooves_walk`]
+    /// turned over to match: the side walks that circle and its floor circle
+    /// the other way and faces the other way, and the floor walks its circle
+    /// the other way. So each edge is still walked once each way and each side
+    /// still winds the way it faces, and only the wall's walk says anything new.
+    fn a_grooved_ring_walked(
+        outer: bool,
+        walk: [Orientation; 2],
+        placed: Isometry,
+    ) -> (Model, SolidKey, FaceKey) {
+        let (band, floor, floor_walk, floor_used) = if outer {
             (
                 14.0,
                 12.0,
                 [Orientation::Reversed, Orientation::Forward],
                 Orientation::Forward,
-                THE_BANDS_WALK.map(Orientation::reversed),
             )
         } else {
             (
@@ -7415,9 +7442,17 @@ mod tests {
                 8.0,
                 [Orientation::Forward, Orientation::Reversed],
                 Orientation::Reversed,
-                THE_BANDS_WALK,
             )
         };
+        let grooves = the_grooves_walk(outer);
+        let turned = [walk[0] != grooves[0], walk[1] != grooves[1]];
+        let floor_walk = [0, 1].map(|index| {
+            if turned[index] {
+                floor_walk[index].reversed()
+            } else {
+                floor_walk[index]
+            }
+        });
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let circle = |model: &mut Model, radius: f64, up: f64| {
             let corner = model.add_vertex(rcad_geom::Point::new(radius, 0.0, up));
@@ -7449,6 +7484,7 @@ mod tests {
             &[(band_circles[0], walk[0]), (band_circles[1], walk[1])],
         );
         let sides = [(-3.0, 1.0, 0), (3.0, -1.0, 1)].map(|(up, facing, index)| {
+            let facing = if turned[index] { -facing } else { facing };
             face(
                 &mut model,
                 Surface::Plane(
@@ -7513,29 +7549,24 @@ mod tests {
     /// `AFaceMissesPartOfWhereItsSurfacesCross` at every point asked. Moved a
     /// hundred along `x`, each wall holds the same points moved.
     ///
-    /// **`Model::validate` refuses both grooved rings**, with
-    /// `AClosedEdgeIsWalkedAgainstItsSurface`, and both are sound. At a circle
-    /// round the axis it reads the side of the plane the wall keeps off the
-    /// wall's corners, and the only corner off that plane is the other
-    /// circle's, which is on the side the wall does not keep: `Pos` where the
-    /// wire says `Neg`, at all four circles. That is the reading §392 took
-    /// away from circles round the tube, and it is `validate.rs`'s to change.
+    /// **`Model::validate` passes both grooved rings** (row Q1153). It refused
+    /// them `AClosedEdgeIsWalkedAgainstItsSurface`: at a circle round the axis
+    /// it read the side of the plane the wall keeps off the wall's corners, and
+    /// the only corner off that plane is the other circle's, which is on the
+    /// side the wall does not keep: `Pos` where the wire says `Neg`, at all
+    /// four circles. It now holds the wall to leaving its two circles going
+    /// opposite ways round the tube, and reads no corner there.
     #[test]
     fn a_grooved_rings_wall_holds_the_ring_less_the_band_the_groove_took() {
         let moved = Isometry::translation(Vector::new(100.0, 0.0, 0.0)).expect("a finite shift");
         for outer in [true, false] {
             for (placed, by) in [(Isometry::identity(), 0.0), (moved, 100.0)] {
                 let (model, solid, wall) = a_grooved_ring(outer, placed);
-                let refused = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                assert!(
-                    matches!(
-                        refused,
-                        Err(Error::Invalid(
-                            Invalid::AClosedEdgeIsWalkedAgainstItsSurface
-                        ))
-                    ),
-                    "outer {outer}: {refused:?}"
-                );
+                model
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| {
+                        panic!("outer {outer}: a grooved ring is a solid: {why:?}")
+                    });
                 let ring = model.solid(solid).expect("this model made the key");
                 for (index, (x, y, z, on)) in ON_THE_RING.into_iter().enumerate() {
                     let expected = match on {
@@ -7553,6 +7584,127 @@ mod tests {
                         )
                         .expect("a ring less a band between two planes is followed");
                     assert_eq!(held, expected, "outer {outer}, {point:?}");
+                }
+            }
+        }
+    }
+
+    /// A grooved ring's wall walked any way but the groove's, with the side and
+    /// the floor along each circle it walks the other way turned over to match,
+    /// is refused `AClosedEdgeIsWalkedAgainstItsSurface` (row Q1153).
+    ///
+    /// **Walked the other way round one circle**, the wall leaves both its
+    /// circles going the same way round the tube, which bounds neither piece
+    /// of the ring between them, and `Model::validate` refuses it at the wall,
+    /// the first face, by comparing the two circles. **Turned over at both**,
+    /// the wall is the band the groove took and is a face, but the floor is
+    /// still used the way the groove's is; worked by hand and not traced, the
+    /// floor's own corners, off each side's plane, say it is walked against
+    /// the sides that turned over. With the comparison switched off in place,
+    /// all three are still refused `AClosedEdgeIsWalkedAgainstItsSurface`:
+    /// here the comparison names the fault first, and a band's wall
+    /// ([`a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused`])
+    /// is where it is the only check that does.
+    #[test]
+    fn a_grooved_rings_wall_walked_any_other_way_is_refused() {
+        for outer in [true, false] {
+            for walk in EVERY_WALK {
+                let (model, _, _) = a_grooved_ring_walked(outer, walk, Isometry::identity());
+                let answer = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                if walk == the_grooves_walk(outer) {
+                    assert!(answer.is_ok(), "outer {outer}, walked {walk:?}: {answer:?}");
+                } else {
+                    assert!(
+                        matches!(
+                            answer,
+                            Err(Error::Invalid(
+                                Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                            ))
+                        ),
+                        "outer {outer}, walked {walk:?}: {answer:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A band's wall walking both its circles the same way round the tube is
+    /// refused `AClosedEdgeIsWalkedAgainstItsSurface`, for the barrel and the
+    /// spool, and so is the wall along the outer circle of `z = −3` and the
+    /// inner circle of `z = 3` walked so (row Q1154's wall). Each is a wire that
+    /// leaves one circle up the outside of the tube and the other down it, and
+    /// no piece of the ring does that.
+    ///
+    /// With the comparison of the two circles switched off in place, and the
+    /// corners not read at them, the barrel walked `[Reversed, Reversed]` and
+    /// the outer-and-inner wall walked `[Reversed, Reversed]` passed
+    /// `Model::validate`. The sound walk of each validates, the outer-and-inner
+    /// wall's being the outer band and the top of the tube, and so does the
+    /// ring with its hole plugged between the planes: the ring less the inner
+    /// band, used as stored, with the two caps facing out.
+    ///
+    /// With `validate.rs` put back to `55a27b3d`, the first shape this asks
+    /// fails: the barrel turned over at both circles was refused
+    /// `AClosedEdgeIsWalkedAgainstItsSurface` off the corners, where the mesh
+    /// now refuses it `FacesDoNotAgreeWhichWayTheyFace`.
+    #[test]
+    fn a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused() {
+        let facing = |up: f64| {
+            Plane::from_point_and_normal(
+                rcad_geom::Point::new(0.0, 0.0, up),
+                Vector::new(0.0, 0.0, up.signum()),
+            )
+            .expect("the z axis is a unit normal")
+        };
+        let a_wall = |near: f64, far: f64, walk, wall_used| {
+            a_piece_of_pipe_placed(
+                rcad_geom::Torus::new(Axis::z(), 10.0, 5.0).expect("a tube narrower than its ring"),
+                End {
+                    corner: rcad_geom::Point::new(near, 0.0, -3.0),
+                    cap: facing(-3.0),
+                    used: Orientation::Forward,
+                },
+                End {
+                    corner: rcad_geom::Point::new(far, 0.0, 3.0),
+                    cap: facing(3.0),
+                    used: Orientation::Forward,
+                },
+                None,
+                walk,
+                wall_used,
+                Isometry::identity(),
+            )
+            .0
+        };
+        let barrel = (14.0, 14.0, Orientation::Forward);
+        let spool = (6.0, 6.0, Orientation::Reversed);
+        let plugged = (6.0, 6.0, Orientation::Forward);
+        let outer_and_inner = (14.0, 6.0, Orientation::Forward);
+        for (near, far, wall_used) in [barrel, spool, plugged, outer_and_inner] {
+            for walk in EVERY_WALK {
+                let answer = a_wall(near, far, walk, wall_used)
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new());
+                let shape = format!("{near} to {far}, used {wall_used:?}, walked {walk:?}");
+                match walk {
+                    [Orientation::Reversed, Orientation::Forward] => {
+                        assert!(answer.is_ok(), "{shape}: {answer:?}");
+                    }
+                    [Orientation::Forward, Orientation::Reversed] => assert!(
+                        matches!(
+                            answer,
+                            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
+                        ),
+                        "{shape}: {answer:?}"
+                    ),
+                    _ => assert!(
+                        matches!(
+                            answer,
+                            Err(Error::Invalid(
+                                Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                            ))
+                        ),
+                        "{shape}: {answer:?}"
+                    ),
                 }
             }
         }

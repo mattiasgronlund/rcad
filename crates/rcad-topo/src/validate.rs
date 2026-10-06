@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use rcad_geom::{
     Cone, Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun,
-    Orientation, Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE,
-    SIDE_OF_SPHERE, SIDE_OF_TORUS, Scale, Surface, Vector, how_a_plane_leans_against_a_cone,
-    where_a_cones_apex_stands_against_a_plane, which_two_surfaces_a_run_is_between,
-    which_way_a_closed_crossing_turns,
+    Orientation, Picker, Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER,
+    SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS, Scale, Surface, Vector,
+    how_a_plane_leans_against_a_cone, where_a_cones_apex_stands_against_a_plane,
+    which_two_surfaces_a_run_is_between, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -22,7 +22,7 @@ use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{
     Trimming, how_the_axis_lies_on, lie_along_one_line, the_face_across,
-    the_side_this_face_lies_on, what_trims_this_face,
+    the_picker_naming_the_circle_through, the_side_this_face_lies_on, what_trims_this_face,
 };
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over;
@@ -236,7 +236,7 @@ impl Model {
         self.check_wires(scope)?;
         self.check_faces(scope, policy, log)?;
         self.check_which_side_of_its_trimming_each_curved_face_lies_on(scope)?;
-        self.check_closed_edges_are_walked_the_way_their_surfaces_wind(scope)?;
+        self.check_closed_edges_are_walked_the_way_their_surfaces_wind(scope, policy, log)?;
         self.check_no_flat_face_is_used_reversed(scope)?;
         self.check_no_face_use_carries_a_placement(scope)?;
         self.check_shells_and_solids(scope, policy, log)?;
@@ -966,10 +966,17 @@ impl Model {
     ///
     /// So at a circle round the axis ([`a_circle_round_the_axis`]), the side of
     /// the plane the ring's face keeps is read off the way its wire walks the
-    /// circle ([`the_side_its_wire_keeps`]), and it must be the side read at
-    /// every other circle along the same stored plane. Two that differ say the
-    /// face lies on both sides of the plane, which neither piece does: the wire
-    /// walks its two circles the same way round the axis.
+    /// circle ([`the_side_its_wire_keeps`]). **With two such circles, along one
+    /// plane or two**, the face is one of the two pieces of the ring between
+    /// them, and each leaves its two circles going opposite ways round the
+    /// tube: that is what the face is held to, by each circle's side and the
+    /// side of the pipe of the ring's own radius that names it
+    /// ([`its_circles_round_the_axis_bound_a_band_of_the_tube`]), and no corner
+    /// is read there. Two planes leave the band between them or the ring less
+    /// it, a grooved ring's wall, and both have the same corners: read off the
+    /// other circle's, the grooved ring was refused (row Q1153). Where that
+    /// cannot be read, the side must be the side read at every other circle
+    /// along the same stored plane, and the corners are read as before.
     ///
     /// **Both gradients are the ones the solid uses**, which is the clause §36.6
     /// got wrong: it says the face's orientation does not come into it, and for a
@@ -1008,9 +1015,13 @@ impl Model {
     fn check_closed_edges_are_walked_the_way_their_surfaces_wind(
         &self,
         scope: &Scope,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<()> {
         for slot in scope.solids.keys() {
-            self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(slot)?;
+            self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
+                slot, policy, log,
+            )?;
         }
         Ok(())
     }
@@ -1066,9 +1077,13 @@ impl Model {
     fn check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
         &self,
         slot: SolidSlot,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<()> {
         let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
         for face in solid.faces() {
+            let bounds_a_band_of_the_tube =
+                its_circles_round_the_axis_bound_a_band_of_the_tube(solid, face, policy, log)?;
             let mut sides_kept: Vec<SideKept> = Vec::new();
             for coedge in face.wires().flat_map(WireView::coedges) {
                 let edge = coedge.edge();
@@ -1091,30 +1106,16 @@ impl Model {
                     across.location() == face.location(),
                     "two faces along one edge are placed apart, which the door refuses"
                 );
-                let at = edge.stored_ends()[0];
-                let outward = |used: FaceView<'_>| {
-                    gradient_of(&used.stored_surface(), at) * used.orientation().sign()
-                };
-                let names_it = which_two_surfaces_a_run_is_between(
-                    edge.stored_run(),
-                    [&face.stored_surface(), &across.stored_surface()],
-                );
+                let asked = what_the_rule_is_asked_at(face, across, edge);
+                let names_it = asked.names_it;
                 let partner = names_it[1];
-                let (partner_outward, partner_turn) = if partner == across.stored_surface() {
-                    (outward(across), across.orientation())
-                } else {
-                    (gradient_of(&partner, at), Orientation::Forward)
-                };
-                if a_circle_round_the_axis(names_it)
-                    && let Some(kept) = the_side_its_wire_keeps(
-                        names_it,
-                        [outward(face), partner_outward],
-                        at,
-                        coedge.orientation_on_its_edge(),
-                        partner_turn,
-                    )?
-                {
-                    the_same_side_as_at_its_other_circles(&mut sides_kept, partner, kept)?;
+                if a_circle_round_the_axis(names_it) {
+                    if bounds_a_band_of_the_tube {
+                        continue;
+                    }
+                    if let Some(kept) = the_side_its_wire_keeps(&asked, coedge)? {
+                        the_same_side_as_at_its_other_circles(&mut sides_kept, partner, kept)?;
+                    }
                 }
                 let read = match a_circle_round_the_tube(names_it) {
                     Some(RoundTheTube::OnTheRing) => {
@@ -1140,9 +1141,9 @@ impl Model {
                 };
                 let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
                     [&names_it[0], &names_it[1]],
-                    [outward(face), partner_outward],
-                    at,
-                    turned_by(material, partner_turn),
+                    asked.outward,
+                    asked.at,
+                    turned_by(material, asked.partner_turn),
                 )?
                 else {
                     continue;
@@ -3119,15 +3120,55 @@ fn a_circle_round_the_axis(names_it: [Surface; 2]) -> bool {
     )
 }
 
+/// What the closed-edge rule is asked with at one closed edge of a face.
+struct AskedAt {
+    /// The face's own surface and the partner, as the run names them.
+    names_it: [Surface; 2],
+    /// Each of the two surfaces' gradients, turned the way the solid uses it.
+    outward: [Vector; 2],
+    /// How the solid uses the partner: as stored when no face of it is on it.
+    partner_turn: Orientation,
+    /// The edge's corner, where it is stored.
+    at: Point,
+}
+
+/// What the closed-edge rule is asked with where `face` and `across` meet
+/// along `edge`, everything as stored.
+fn what_the_rule_is_asked_at(
+    face: FaceView<'_>,
+    across: FaceView<'_>,
+    edge: EdgeView<'_>,
+) -> AskedAt {
+    let at = edge.stored_ends()[0];
+    let outward =
+        |used: FaceView<'_>| gradient_of(&used.stored_surface(), at) * used.orientation().sign();
+    let names_it = which_two_surfaces_a_run_is_between(
+        edge.stored_run(),
+        [&face.stored_surface(), &across.stored_surface()],
+    );
+    let partner = names_it[1];
+    let (partner_outward, partner_turn) = if partner == across.stored_surface() {
+        (outward(across), across.orientation())
+    } else {
+        (gradient_of(&partner, at), Orientation::Forward)
+    };
+    AskedAt {
+        names_it,
+        outward: [outward(face), partner_outward],
+        partner_turn,
+        at,
+    }
+}
+
 /// Which side of `names_it[1]` a face keeps next to a closed edge, read off
 /// the way its wire walks the edge.
 ///
 /// This is the closed-edge rule [`a_closed_crossing_is_walked_the_way_it_is_stored`]
 /// run backwards, as `holds.rs` reads which side of a plane a ring's face keeps
-/// (`docs/decisions.md` §243.3, §243.8). `outward` and `partner_turn` are what
-/// the sweep hands the rule going forwards, and the side comes back turned
-/// round when the partner's face is used reversed, because the sweep turns a
-/// side round before handing it in.
+/// (`docs/decisions.md` §243.3, §243.8). `asked` is what the sweep hands the
+/// rule going forwards, and the side comes back turned round when the
+/// partner's face is used reversed, because the sweep turns a side round
+/// before handing it in.
 ///
 /// Handed back into the rule at the same edge, this side gives back the walk it
 /// was read from, so it checks nothing there (§392.2). What it is for is
@@ -3135,29 +3176,23 @@ fn a_circle_round_the_axis(names_it: [Surface; 2]) -> bool {
 ///
 /// `None` where the rule finds no way round to read, which is the two surfaces
 /// touching rather than crossing.
-fn the_side_its_wire_keeps(
-    names_it: [Surface; 2],
-    outward: [Vector; 2],
-    at: Point,
-    walked: Orientation,
-    partner_turn: Orientation,
-) -> Result<Option<Decision>> {
+fn the_side_its_wire_keeps(asked: &AskedAt, coedge: CoedgeView<'_>) -> Result<Option<Decision>> {
     let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
-        [&names_it[0], &names_it[1]],
-        outward,
-        at,
+        [&asked.names_it[0], &asked.names_it[1]],
+        asked.outward,
+        asked.at,
         Decision::Neg,
     )?
     else {
         return Ok(None);
     };
-    let keeps_the_back = (walked == Orientation::Forward) == forward_if_it_keeps_the_back;
-    let handed = if keeps_the_back {
+    let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
+    let handed = if walked_forward == forward_if_it_keeps_the_back {
         Decision::Neg
     } else {
         Decision::Pos
     };
-    Ok(Some(turned_by(handed, partner_turn)))
+    Ok(Some(turned_by(handed, asked.partner_turn)))
 }
 
 /// The side of `plane` a ring's face keeps at one circle round the axis is the
@@ -3182,6 +3217,164 @@ fn the_same_side_as_at_its_other_circles(
             Ok(())
         }
     }
+}
+
+/// Whether a ring's face has two circles round the axis, along planes square to
+/// it, and leaves them going opposite ways round the tube, which is what the
+/// sweep then holds it to at those circles in place of a corner.
+///
+/// **Both bands between two such circles have the same corners**, as §392.2
+/// found for circles round the tube. The ring less the two circles is two
+/// pieces, and a face whose only edges they are is one of them: the band
+/// between the planes, a barrel's wall, or the ring less that band, which a
+/// groove turned into the ring's rim leaves. The corner of each circle is on
+/// the side of the other circle's plane the band keeps, so read off it, the
+/// side kept at a grooved ring's circle came out the band's (row Q1153).
+///
+/// **What does say it is the other circle.** Each piece runs on round the tube
+/// from one of its circles and back towards the other, so it leaves them going
+/// opposite ways round the tube ([`which_way_round_the_tube_it_leaves`]).
+/// Which way it leaves one is the side of its plane it keeps there, read off the
+/// wire, and the side of the pipe of the ring's own radius that [`intersect`]
+/// names that circle by. A wire leaving both the same way round bounds neither
+/// piece; nor does one with three such circles, since two of them would be
+/// left the same way.
+///
+/// The wire read at one circle is still the only thing saying which piece the
+/// face is, and that is right: each piece is a face. Whether the solid round it
+/// is sound is the faces across' to say, whose own corners are read as before.
+///
+/// `false`, leaving every circle to be read as before, when the face has fewer
+/// than two such circles, or one of them is where the plane touches the tube,
+/// or the pipe names no one circle through its corner.
+///
+/// # Errors
+///
+/// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] for two circles left the
+/// same way round the tube; whatever [`intersect`] gives for a plane and the
+/// ring, and whatever finding the face across an edge refuses.
+fn its_circles_round_the_axis_bound_a_band_of_the_tube(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    let mut ways_left: Vec<bool> = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        if !matches!(
+            edge.stored_run(),
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. }
+        ) {
+            continue;
+        }
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        let asked = what_the_rule_is_asked_at(face, across, edge);
+        if !a_circle_round_the_axis(asked.names_it) {
+            continue;
+        }
+        let Some(up_the_outside) = which_way_round_the_tube_it_leaves(&asked, coedge, policy, log)?
+        else {
+            return Ok(false);
+        };
+        if ways_left.contains(&up_the_outside) {
+            return Err(Invalid::AClosedEdgeIsWalkedAgainstItsSurface.into());
+        }
+        ways_left.push(up_the_outside);
+    }
+    Ok(ways_left.len() == 2)
+}
+
+/// Whether a ring's face leaves a circle round the axis going round the tube
+/// the way that runs up its outside and down its inside, "up" being the way
+/// the ring's axis is stored pointing.
+///
+/// On the outer circle of a plane square to the axis, that way round runs up
+/// and away from the plane on the side the axis points to; on the inner
+/// circle it runs down. So the face goes that way exactly when it keeps the
+/// side of the plane the axis points to at an outer circle, or the other side
+/// at an inner one. The side is read off the wire ([`the_side_its_wire_keeps`]),
+/// and which circle it is off the side of the pipe of the ring's own radius
+/// that [`intersect`] names it by (`holds.rs`'s
+/// `the_picker_naming_the_circle_through`), the same reading
+/// `what_a_ring_face_between_two_planes_holds` tells the two bands apart by.
+///
+/// `None` when the rule finds no way round to read, which is the plane resting
+/// on the tube, or when no one circle certainly keeps the corner.
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the rule cannot, and
+/// whatever [`intersect`] gives for the plane and the ring.
+///
+/// # Panics
+///
+/// When `asked` is not a ring and a plane square to its axis, which
+/// [`a_circle_round_the_axis`] has shown, or [`intersect`] names a circle that
+/// such a plane cuts the ring in by anything but the pipe.
+fn which_way_round_the_tube_it_leaves(
+    asked: &AskedAt,
+    coedge: CoedgeView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<bool>> {
+    let [Surface::Torus(ring), Surface::Plane(flat)] = asked.names_it else {
+        panic!(
+            "only a ring and a plane square to its axis are asked this, not {:?}",
+            asked.names_it
+        );
+    };
+    let Some(kept) = the_side_its_wire_keeps(asked, coedge)? else {
+        return Ok(None);
+    };
+    let corner = PredicatePoint::from(asked.at.coordinates());
+    let Some(picker) = the_picker_naming_the_circle_through(
+        &asked.names_it[1],
+        &asked.names_it[0],
+        corner,
+        policy,
+        log,
+    )?
+    else {
+        return Ok(None);
+    };
+    let outer = matches!(picker, Picker::OutsideAPipe(_));
+    assert!(
+        outer || matches!(picker, Picker::InsideAPipe(_)),
+        "a plane square to a ring's axis names its circles by the pipe, and this one by {picker:?}"
+    );
+    let keeps_the_side_the_axis_points_to =
+        (kept == Decision::Pos) == faces_the_way_its_axis_points(&flat, &ring);
+    Ok(Some(keeps_the_side_the_axis_points_to == outer))
+}
+
+/// Whether a plane whose normal lies exactly along a ring's axis points the
+/// way the axis does.
+///
+/// Along one line, the normal is an exact multiple of the axis direction, so a
+/// component is zero in both or in neither, and the multiple's sign is whether
+/// the signs agree where they are not zero. Nothing is worked out, so nothing
+/// rounds.
+///
+/// # Panics
+///
+/// When the two are zero along different components, which
+/// [`lie_along_one_line`] has shown they are not.
+fn faces_the_way_its_axis_points(flat: &Plane, ring: &rcad_geom::Torus) -> bool {
+    let (normal, along) = (
+        flat.normal().components(),
+        ring.axis().direction().components(),
+    );
+    let axis = (0..3)
+        .find(|&axis| along[axis] != 0.0)
+        .expect("an axis has a direction");
+    assert!(
+        normal[axis] != 0.0,
+        "a normal along the axis is zero where the axis is not: {normal:?} and {along:?}"
+    );
+    (normal[axis] > 0.0) == (along[axis] > 0.0)
 }
 
 /// Which of the two surfaces either side of an edge names which way it runs.
