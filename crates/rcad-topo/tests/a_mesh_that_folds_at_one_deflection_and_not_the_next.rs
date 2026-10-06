@@ -10,7 +10,10 @@
 //! call: the sliver's coarse mesh came back flat, its next mesh folded two
 //! patches onto each other, and the bulge a third mesh would have found was
 //! never asked for. `TwoPatchesOfTheMeshDrewTheSameSide` is now retried; every
-//! other refusal still stops the loop.
+//! other refusal still stops the loop, except that since Q783
+//! `PlacingItTookAwayTheSpaceItsMeshEncloses` — a finer mesh that found the
+//! space the zero was hiding — is handed on instead of stopped on
+//! (`hand_on_a_refusal_that_found_the_space`).
 //!
 //! **The fold is real and it is curable; what no solid on this tree does any
 //! more is pair it with a zero.** This file is that search rather than a
