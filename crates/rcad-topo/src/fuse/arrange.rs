@@ -4277,16 +4277,20 @@ impl<'f> Arrangement<'f> {
                 Some(
                     so_far
                         + self.how_often_a_side_and_its_chord_wind_round(
-                            in_plane, half_edge, point,
+                            in_plane,
+                            self.direction(half_edge),
+                            [self.from(half_edge), self.to(half_edge)],
+                            point,
                         )?,
                 )
             })
     }
 
-    /// How often one side of a walk on a flat face and its chord wind round
-    /// `point` between them, anticlockwise counting one: `0` for a straight
-    /// side, and `None` where a sign is not settled or the side's curve is not
-    /// one of those below.
+    /// How often one side on a flat face, of a walk or of the face's own rim,
+    /// and its chord wind round `point` between them, anticlockwise counting
+    /// one: `0` for a straight side, and `None` where a sign is not settled or
+    /// the side's curve is not one of those below. The side leaves the node
+    /// `from` along `direction` and stops at the node `to`.
     ///
     /// **A plane crosses a pipe, a ball or a cone in a circle, an ellipse, a
     /// parabola or one branch of a hyperbola**, wherever it does not cross it
@@ -4311,10 +4315,11 @@ impl<'f> Arrangement<'f> {
     fn how_often_a_side_and_its_chord_wind_round(
         &self,
         in_plane: &InPlane,
-        half_edge: usize,
+        direction: Direction,
+        [from, to]: [usize; 2],
         point: PredicatePoint,
     ) -> Option<i32> {
-        let crossing = &self.crossings[self.arcs[half_edge / 2].crossing];
+        let crossing = &self.crossings[direction.crossing];
         if crossing.order.runs_straight() {
             return Some(0);
         }
@@ -4329,9 +4334,8 @@ impl<'f> Arrangement<'f> {
                 Decision::Zero | Decision::Undecidable { .. } | _ => None,
             }
         };
-        let from = self.from(half_edge);
-        let (start, end) = (self.nodes[from].point, self.nodes[self.to(half_edge)].point);
-        let out = self.way_out_of(from, self.direction(half_edge));
+        let (start, end) = (self.nodes[from].point, self.nodes[to].point);
+        let out = self.way_out_of(from, direction);
         let ahead = PredicatePoint::Constructed(core::array::from_fn(|axis| {
             start.enclosure()[axis] + out[axis]
         }));
@@ -4586,6 +4590,8 @@ impl<'f> Arrangement<'f> {
     /// straight lines, and the stretch of a line past the edge lying on it is
     /// not drawn, so the sign says the same thing on both sides of the face's
     /// own rim: the count is what tells the inside from the outside there.
+    /// It follows the rim's curved sides as well as its corners
+    /// ([`Arrangement::how_often_the_faces_rim_winds_round`]).
     ///
     /// **The first curved face with an open boundary edge falsifies the first
     /// half of that**, and it is a face this fuse cuts and hands back — so lane
@@ -4593,7 +4599,11 @@ impl<'f> Arrangement<'f> {
     /// winding rules nothing out, and what follows either places the lump some
     /// other way or refuses by name.
     fn say_whether_the_face_holds_each_lump_of_closed_cuts(&mut self, lump: &[usize]) {
-        let in_plane = self.surface.as_plane().and_then(InPlane::of);
+        let flat = self
+            .surface
+            .as_plane()
+            .and_then(InPlane::of)
+            .map(|in_plane| (in_plane, self.which_way_the_rim_runs()));
         let rim: Vec<Vec<PredicatePoint>> = self
             .face
             .wires
@@ -4637,9 +4647,14 @@ impl<'f> Arrangement<'f> {
             let held = if outside {
                 Some(0)
             } else {
-                in_plane.as_ref().and_then(|in_plane| {
+                flat.as_ref().and_then(|(in_plane, ways)| {
                     nodes.iter().find_map(|&node| {
-                        how_often_the_rim_winds_round(in_plane, &rim, self.nodes[node].point)
+                        self.how_often_the_faces_rim_winds_round(
+                            in_plane,
+                            &rim,
+                            ways,
+                            self.nodes[node].point,
+                        )
                     })
                 })
             };
@@ -4650,6 +4665,88 @@ impl<'f> Arrangement<'f> {
                 self.winding_of_cycle[cycle] = Some(held);
             }
         }
+    }
+
+    /// Which way the face's rim runs along each of its sides, by wire and
+    /// position: along the crossing the side lies on, forward or back as the
+    /// arcs it covers are walked.
+    fn which_way_the_rim_runs(&self) -> Vec<Vec<Direction>> {
+        let mut ways: Vec<Vec<Option<Direction>>> = self
+            .face
+            .wires
+            .iter()
+            .map(|wire| vec![None; wire.len()])
+            .collect();
+        for (arc, boundary) in self
+            .arcs
+            .iter()
+            .filter_map(|arc| Some((arc, arc.boundary?)))
+        {
+            ways[boundary.wire][boundary.position] = Some(Direction {
+                crossing: arc.crossing,
+                forward: boundary.runs_forward,
+            });
+        }
+        ways.into_iter()
+            .map(|sides| {
+                sides
+                    .into_iter()
+                    .map(|way| way.expect("every side of a face's rim covers an arc"))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// How often the face's own rim winds round `point` on a flat face: once
+    /// inside the material and never outside it; `None` when a sign it needs is
+    /// not settled, which takes in a point on the line of one of the rim's
+    /// sides or chords.
+    ///
+    /// **Counted the way a walk is**
+    /// ([`Arrangement::how_often_a_walk_winds_round`]): the polygons of the
+    /// rim's corners, plus how often each curved side and its chord wind round
+    /// the point between them. The corners alone are not the rim's shape. A
+    /// plate with a round tab has every corner on its square, so they put a pin
+    /// through the tab outside the plate; a plate with a round notch has the
+    /// same corners, so they put a pin standing in the notch inside it.
+    ///
+    /// **A side that is the whole of a closed curve is not answered**, as in a
+    /// walk: it has no chord. A round hole is one, so a face with a round hole
+    /// leaves its lumps of closed cuts to be placed some other way.
+    fn how_often_the_faces_rim_winds_round(
+        &self,
+        in_plane: &InPlane,
+        rim: &[Vec<PredicatePoint>],
+        ways: &[Vec<Direction>],
+        point: PredicatePoint,
+    ) -> Option<i32> {
+        let ends = |wire: usize, position: usize| {
+            [
+                self.node_of_corner[wire][position],
+                self.node_of_the_end[wire][position],
+            ]
+        };
+        let closed_side = ways.iter().enumerate().any(|(wire, sides)| {
+            (0..sides.len()).any(|position| {
+                let [start, end] = ends(wire, position);
+                start == end
+            })
+        });
+        if closed_side {
+            return None;
+        }
+        let mut wound = how_often_the_rim_winds_round(in_plane, rim, point)?;
+        for (wire, sides) in ways.iter().enumerate() {
+            for (position, &way) in sides.iter().enumerate() {
+                wound += self.how_often_a_side_and_its_chord_wind_round(
+                    in_plane,
+                    way,
+                    ends(wire, position),
+                    point,
+                )?;
+            }
+        }
+        Some(wound)
     }
 
     /// The lumps of the drawing holding a curve that runs on for ever, other
@@ -5522,12 +5619,17 @@ fn where_a_ball_pinches(ball: &Sphere, at_the_top: bool) -> PredicatePoint {
     ]))
 }
 
-/// How many times a face's own rim winds round a point on its surface: one
-/// inside the material, zero outside it.
+/// How many times the polygons of a rim's corners wind round a point on their
+/// plane, anticlockwise counting one: for a rim of straight sides, one inside
+/// the material and none outside it.
 ///
 /// A half-line runs from the point towards the first corner of the rim and the
-/// sides crossing it are counted, `+1` one way round and `-1` the other, so a
-/// hole subtracts itself. Which side of the half-line's line each corner falls
+/// sides crossing it are counted, `+1` one way round and `-1` the other. **Each
+/// ring is counted the way it is walked.** A face's wires keep its material on
+/// their left, so a hole is walked the other way round from the outline and
+/// subtracts itself. Turning a hole round as well, as this once did, counted a
+/// pin through a square hole in a plate inside the plate twice over (queue row
+/// Q1054). Which side of the half-line's line each corner falls
 /// is read as a **half-open** range — a corner exactly on it counts as below —
 /// and that is what leaves no tie to break however many corners the line runs
 /// through.
@@ -5578,8 +5680,7 @@ fn how_often_the_rim_winds_round_aiming_at(
     aim: PredicatePoint,
 ) -> Option<i32> {
     let mut winding = 0;
-    for (position, ring) in rim.iter().enumerate() {
-        let inwards = if position == 0 { 1 } else { -1 };
+    for ring in rim {
         for index in 0..ring.len() {
             let (from, to) = (ring[index], ring[(index + 1) % ring.len()]);
             let along = in_plane.turn(from, to, point);
@@ -5602,12 +5703,11 @@ fn how_often_the_rim_winds_round_aiming_at(
                     Decision::Undecidable { .. } | _ => None,
                 }
             };
-            winding += inwards
-                * match (above(from)?, above(to)?, along) {
-                    (false, true, Decision::Pos) => 1,
-                    (true, false, Decision::Neg) => -1,
-                    _ => 0,
-                };
+            winding += match (above(from)?, above(to)?, along) {
+                (false, true, Decision::Pos) => 1,
+                (true, false, Decision::Neg) => -1,
+                _ => 0,
+            };
         }
     }
     Some(winding)

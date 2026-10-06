@@ -1138,10 +1138,11 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule() {
 /// eleven corners, four of them on the arc. Their sweep is what the corners
 /// on the arc add over its chord, so the ring winds with the plane and is the
 /// outline by that, before any ring enclosing nothing is looked at. Over the
-/// twelve fuses `rings_round` is reached four times, and each time one ring
-/// winds with the plane and `holds_the_other_rings` is never asked
-/// (breakpoints on `outline = Some(ring)` and on the closure that asks it,
-/// Q641).
+/// twelve fuses `rings_round` is reached twelve times, twice in each of the six
+/// whose answer keeps the cap, and each time one ring winds with the plane and
+/// `holds_the_other_rings` is never asked (breakpoints on `outline =
+/// Some(ring)` and on the closure that asks it, Q641, counted again for
+/// Q1119).
 ///
 /// **So a ring of one arc and straight sides does not reach `rings_round` with
 /// its corners cancelling**, wherever the fuse cuts the arc along every wall
@@ -1165,10 +1166,18 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule() {
 /// the line argument does not cover.
 ///
 /// What each fuse answers is pinned: the union, the intersection and both
-/// differences, both ways round, with the second bar in both places. Five of
-/// the twelve are refused `ResultIsNotManifold { count: 1 }`, among them the
-/// flush union with the second bar handed over first, whose other order is
-/// answered.
+/// differences, both ways round, with the second bar in both places. The
+/// second bar lies wholly inside the staircase's circle and past its walls, so
+/// each answer is the staircase, `4(100π − 200)`, the bar, `16π` flush or `8π`
+/// on top, their sum or difference, or nothing. All twelve are answered, and
+/// each answer that keeps the cap has the eleven corners above. Five of them
+/// were refused `ResultIsNotManifold { count: 1 }`: the flush union with the
+/// second bar handed over first, the flush intersection both ways round, the
+/// flush staircase less the bar, and the union with the bar on top both ways
+/// round. They are answered since queue row Q1054 counts a flat face's rim
+/// round a closed cut by its curved sides as well as its corners
+/// (`say_whether_the_face_holds_each_lump_of_closed_cuts` in
+/// `fuse/arrange.rs`).
 #[test]
 fn a_staircase_cap_whose_corners_cancel_is_cut_on_its_arc_by_its_own_walls() {
     let as_written = STAIRCASE.map(|[x, y]| [x, y, 4.0]);
@@ -1204,13 +1213,11 @@ fn a_staircase_cap_whose_corners_cancel_is_cut_on_its_arc_by_its_own_walls() {
             let what = format!("{rule:?}, swapped {swapped}, on top {on_top}");
             let answer = fused_in_order(&mut model, [staircase, pin], rule, swapped);
             let pin_volume = if on_top { 8.0 * PI } else { 16.0 * PI };
-            let with_the_cap = match (on_top, rule, swapped) {
-                (false, Rule::Union, false) | (true, Rule::Difference, false) => {
-                    let solid = the_only(answer, &what);
-                    assert_holds(&model, solid, staircase_volume, &what);
-                    solid
-                }
-                (false, Rule::Intersection, true) | (true, Rule::Difference, true) => {
+            let volume = match (on_top, rule, swapped) {
+                (false, Rule::Union, _) | (true, Rule::Difference, false) => staircase_volume,
+                (false, Rule::Difference, false) => staircase_volume - pin_volume,
+                (true, Rule::Union, _) => staircase_volume + pin_volume,
+                (false, Rule::Intersection, _) | (true, Rule::Difference, true) => {
                     assert_holds(&model, the_only(answer, &what), pin_volume, &what);
                     continue;
                 }
@@ -1219,17 +1226,10 @@ fn a_staircase_cap_whose_corners_cancel_is_cut_on_its_arc_by_its_own_walls() {
                     assert_eq!(solids, Vec::new(), "{what}: no solid is shared");
                     continue;
                 }
-                (false, Rule::Union | Rule::Intersection, _)
-                | (false, Rule::Difference, false)
-                | (true, Rule::Union, _) => {
-                    assert!(
-                        matches!(answer, Err(Error::ResultIsNotManifold { count: 1, .. })),
-                        "{what}: {answer:?}"
-                    );
-                    continue;
-                }
                 (_, other, _) => panic!("not a rule this probes: {other:?}"),
             };
+            let with_the_cap = the_only(answer, &what);
+            assert_holds(&model, with_the_cap, volume, &what);
             let written = the_outline_of_the_cap(&model, with_the_cap, as_written[0]);
             for corner in as_written {
                 assert!(
