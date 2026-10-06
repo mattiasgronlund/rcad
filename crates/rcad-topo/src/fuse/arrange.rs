@@ -4284,13 +4284,17 @@ impl<'f> Arrangement<'f> {
     ///
     /// - Every node of both lumps is on one nappe, by the sign of `(x − apex)·w`,
     ///   so no arc runs through the apex and the ring is the whole story.
-    /// - Every curved arc is cut by a **plane**. A plane crosses a cone or a
-    ///   pipe in a curve whose height is a function of the angle round the axis
-    ///   — `h = d / (s(n_x cos θ + n_y sin θ) + n_z)` on a cone in its own frame,
-    ///   and `z = (d − r(n_x cos θ + n_y sin θ)) / n_z` on a pipe — so along one
-    ///   the angle only ever grows or only ever shrinks, and a closed one goes
-    ///   round exactly once. A straight arc is a ruling or a line along a pipe,
-    ///   at one angle throughout. Another curved partner is not answered.
+    /// - Every curved arc is cut by a **plane**, or is a circle square to the
+    ///   axis. A plane crosses a cone or a pipe in a curve whose height is a
+    ///   function of the angle round the axis — `h = d / (s(n_x cos θ + n_y
+    ///   sin θ) + n_z)` on a cone in its own frame, and `z = (d − r(n_x cos θ +
+    ///   n_y sin θ)) / n_z` on a pipe — so along one the angle only ever grows or
+    ///   only ever shrinks, and a closed one goes round exactly once. A circle
+    ///   square to the axis is that at one height. A cone against a pipe, a
+    ///   second cone or a ball, and a pipe against a cone, cross only in such
+    ///   circles, because `intersect` names those pairs only on one axis. A
+    ///   straight arc is a ruling or a line along a pipe, at one angle
+    ///   throughout. Every other curved partner is not answered.
     /// - How often a walk goes round is counted as how often it crosses one
     ///   half-plane through the axis, each arc's crossing read off exact signs of
     ///   the node boxes ([`Arrangement::how_often_an_arc_crosses`]). A half-plane
@@ -4403,7 +4407,18 @@ impl<'f> Arrangement<'f> {
             turns_left(end, reference)?;
             return Some(0);
         }
-        crossing.partner.as_plane()?;
+        match (self.surface, crossing.partner) {
+            (_, Surface::Plane(_))
+            | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_))
+            | (Surface::Cylinder(_), Surface::Cone(_)) => (),
+            (Surface::Cone(_), Surface::Torus(_))
+            | (
+                Surface::Cylinder(_),
+                Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Torus(_),
+            )
+            | (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _)
+            | _ => return None,
+        }
         let way_round = cross_of_intervals(up, start);
         let anticlockwise =
             match dot_of(way_round, self.way_out_of(from, self.direction(half_edge))).sign() {
@@ -4853,47 +4868,79 @@ impl<'f> Arrangement<'f> {
         Ok(sides)
     }
 
-    /// Whether a point of a pipe's face lies past the flat half-space that picks
-    /// one closed curve out of two the partner cuts the pipe in, and if it does,
-    /// which side of the partner the curve has towards that half-space's edge.
+    /// Whether a point of a pipe's, a cone's or a ball's face lies past the flat
+    /// half-space that picks one closed curve out of two the partner cuts the
+    /// face's surface in, and if it does, which side of the partner the curve
+    /// has towards that half-space's edge.
     ///
-    /// **Only on a pipe, and only where the half-space faces along the pipe's
-    /// axis** — the cone round a bar's axis cutting it in a circle in each
-    /// nappe, and a ball cutting it in two loops either side of its centre. Each
-    /// curve then crosses every straight line of the pipe once, so it goes
-    /// right round, and the pipe's circle on the half-space's flat surface goes
-    /// right round as well. The curve lies inside the half-space and the other
-    /// curve outside it, so every point of the pipe past the flat surface is on
-    /// the curve's near side, and the partner keeps one sign from the curve to
-    /// the flat surface and over it. That sign is the one a step down the pipe
-    /// towards the flat surface meets: the partner's gradient against the
-    /// half-space's normal turned round, at every node of the curve.
+    /// **Only where both curves go right round one axis and the half-space
+    /// faces along it.** On a pipe, that is the cone round a bar's axis cutting
+    /// it in a circle in each nappe, and a ball cutting it in two loops either
+    /// side of its centre, and the axis is the pipe's. On a cone it is a pipe, a
+    /// second cone or a ball on its axis cutting it in two circles square to
+    /// that axis, and the axis is the cone's. On a ball it is a cone whose axis
+    /// runs through the ball's centre, cutting it in two circles square to the
+    /// cone's axis, and the axis is the cone's: `intersect` names no other cone
+    /// against a ball. Each curve then splits the surface in two, and so does
+    /// the surface's own curve on the half-space's flat surface, where there is
+    /// one. The curve lies inside the half-space and the other curve outside it,
+    /// so every point of the surface past the flat surface is on the curve's
+    /// near side: on a cone that holds through the apex too, which joins the two
+    /// nappes without crossing the curve, and on a ball the points past the
+    /// flat surface are one cap of it, inside the cap the curve bounds on that
+    /// side.
+    ///
+    /// That side is the one a step from the curve towards the flat surface
+    /// meets: the partner's gradient against the half-space's normal turned
+    /// round and laid onto the surface, at every node of the curve. Laid onto
+    /// the surface is `|g|²·d − (g·d)·g` for the surface's gradient `g` and
+    /// the direction `d` down towards the flat surface, which on a pipe is `d`
+    /// itself, since the pipe's gradient is square to its axis, and so `d` is
+    /// used there as it is. On a cone it runs along the ruling through the node,
+    /// and on a ball along the line of longitude.
     ///
     /// Everywhere else a node's sign against the partner is its side of the
     /// curve, as it always was, and [`PastThePicker::No`] says so: inside the
-    /// half-space the partner cuts the pipe in this one curve and nothing else.
+    /// half-space the partner cuts the surface in this one curve and nothing
+    /// else. A half-space that cannot be shown to face along the axis or shown
+    /// not to says [`PastThePicker::CannotTell`].
+    ///
+    /// **A point whose box straddles the half-space's flat surface is still
+    /// answered where the two readings agree.** In front of it the partner's
+    /// sign there is the side, and past it the sign a step towards it meets is,
+    /// so where those are one sign it is the side either way. A frustum's cap
+    /// on the plane halfway between the two circles a ball on its axis cuts it
+    /// in puts the cap's circle on the ball exactly there.
     fn whether_past_the_picker(&self, crossing: usize, at: PredicatePoint) -> PastThePicker {
-        let Surface::Cylinder(pipe) = self.surface else {
-            return PastThePicker::No;
+        let partner = self.crossings[crossing].partner;
+        let axis = match (self.surface, partner) {
+            (Surface::Cylinder(pipe), _) => pipe.axis(),
+            (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) => cone.axis(),
+            (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) | _ => {
+                return PastThePicker::No;
+            }
         };
         let [Picker::InFrontOf(picker)] = self.crossings[crossing].picked_by() else {
             return PastThePicker::No;
         };
         let facing = picker.normal().components().map(Interval::exactly);
-        let along = pipe.axis().direction().components().map(Interval::exactly);
-        if cross_of_intervals(facing, along)
+        let along = axis.direction().components().map(Interval::exactly);
+        let square = cross_of_intervals(facing, along).map(|component| component.sign());
+        if square
             .iter()
-            .any(|component| component.sign() != Decision::Zero)
+            .any(|sign| matches!(sign, Decision::Pos | Decision::Neg))
         {
             return PastThePicker::No;
         }
-        match picker.side_of_point(at) {
-            Decision::Pos | Decision::Zero => return PastThePicker::No,
-            Decision::Neg => (),
-            Decision::Undecidable { .. } | _ => return PastThePicker::CannotTell,
+        if square.iter().any(|sign| *sign != Decision::Zero) {
+            return PastThePicker::CannotTell;
         }
+        let known_to_be_past = match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => return PastThePicker::No,
+            Decision::Neg => true,
+            Decision::Undecidable { .. } | _ => false,
+        };
 
-        let partner = self.crossings[crossing].partner;
         let down = facing.map(|component| -component);
         let mut found = None;
         for node in self
@@ -4901,7 +4948,14 @@ impl<'f> Arrangement<'f> {
             .iter()
             .filter(|node| node.crossings.contains(&crossing))
         {
-            let here = dot_of(gradient_at(&partner, node.point).enclosure(), down).sign();
+            let step = if matches!(self.surface, Surface::Cylinder(_)) {
+                down
+            } else {
+                let across = gradient_at(&self.surface, node.point).enclosure();
+                let (squared, leaning) = (dot_of(across, across), dot_of(across, down));
+                core::array::from_fn(|index| squared * down[index] - leaning * across[index])
+            };
+            let here = dot_of(gradient_at(&partner, node.point).enclosure(), step).sign();
             match (here, found) {
                 (Decision::Pos | Decision::Neg, None) => found = Some(here),
                 (Decision::Pos | Decision::Neg, Some(already)) if already == here => (),
@@ -4917,7 +4971,12 @@ impl<'f> Arrangement<'f> {
                 }
             }
         }
-        found.map_or(PastThePicker::CannotTell, PastThePicker::Yes)
+        match found {
+            Some(found) if known_to_be_past || side_of_surface(&partner, at) == found => {
+                PastThePicker::Yes(found)
+            }
+            Some(_) | None => PastThePicker::CannotTell,
+        }
     }
 
     /// Which side of `partner` a walk is on, read off a half-edge of it along a
@@ -6748,20 +6807,28 @@ fn along_a_bend(
 ///
 /// The same arms [`which_comes_first_round_a_crossing`] can answer about, asked
 /// before anything is built rather than after (§34.10's last two rows), and
-/// one arm more: a cone and a pipe.
+/// three arms more: a cone against a pipe, a second cone or a ball.
 ///
-/// # A cone and a pipe is a row that is started and not ordered
+/// # A cone against a pipe, a cone or a ball is a row that is started and not ordered
 ///
-/// [`intersect`](rcad_geom::intersect) names a cone against a pipe only where
-/// the two share an axis, and refuses every other cone and pipe by name, so a
-/// run of that pair reaching here is one of the two circles they cross in.
+/// [`intersect`](rcad_geom::intersect) names each of those pairs only where
+/// the two share an axis, and refuses the rest by name, so a run of one of them
+/// reaching here is a circle square to that axis.
 /// [`where_a_closed_crossing_starts`] builds that circle, and so a crossing of
 /// the pair with no node on it, or one, is drawn and needs no order at all: a
 /// bar of a frustum's narrow radius through the frustum is cut by the cone's
-/// other nappe at the mirror height, in a circle nothing else meets.
-/// [`which_comes_first_round_a_crossing`] has no row for the pair, so where two
-/// nodes on one such circle do need ordering it refuses by name, which is what
-/// returning `true` too often costs, as for a torus below.
+/// other nappe at the mirror height, in a circle nothing else meets. Two nodes
+/// need none either, since one of them is where the circle starts: two
+/// frustums on one axis seamed a quarter turn apart answer every rule
+/// (`tests/a_cone_hollowed_along_its_axis.rs`).
+/// [`which_comes_first_round_a_crossing`] has no row for any pair with a cone
+/// in it, so where a third node on one such circle does need ordering it
+/// refuses by name, which is what returning `true` too often costs, as for a
+/// torus below.
+///
+/// A ball against a pipe is not listed, though a ball centred on a pipe's axis
+/// crosses it in two circles: `intersect` names that pair off the axis too, in
+/// loops that are quartics, so a run of it is not known to be a circle.
 ///
 /// # A plane and a torus is a row, and it does not read the placement
 ///
@@ -6808,23 +6875,27 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
         // and no run of any other family exists to be asked.
         | (Surface::Plane(_), Surface::Torus(_))
         | (Surface::Torus(_), Surface::Plane(_))
-        // A cone and a pipe: `intersect` names the pair only on one axis, where
-        // they cross in circles square to it, and refuses the rest by name.
-        | (Surface::Cone(_), Surface::Cylinder(_))
-        | (Surface::Cylinder(_), Surface::Cone(_)) => true,
+        // A cone against a pipe, a second cone or a ball: off one axis each
+        // crosses in a quartic, and `intersect` refuses all three by name
+        // there. On one axis they cross in circles square to it, and those are
+        // the only runs of these pairs `intersect` names.
+        | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_))
+        | (Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)) => true,
         // Two planes cross in a straight line and are answered one step up, so
         // this arm is about the shape of the crossing and not about reaching it.
         (Surface::Plane(_), Surface::Plane(_))
-        // A ball against a pipe, a cone or a ring crosses in a quartic.
-        | (Surface::Sphere(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_))
-        | (Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Sphere(_))
+        // A ball against a pipe or a ring crosses in a quartic. A ball centred
+        // on a pipe's axis crosses it in two circles, but `intersect` names that
+        // pair off the axis as well, so a run of it is not known to be a circle.
+        | (Surface::Sphere(_), Surface::Cylinder(_) | Surface::Torus(_))
+        | (Surface::Cylinder(_) | Surface::Torus(_), Surface::Sphere(_))
         // So does every other pair among the pipe, the cone and the ring, bar
         // two side-by-side pipes, which cut straight lines. `false` is right
         // for them here — a pair of endless lines is not a closed conic — and
         // they never reach here anyway: `a_pair_that_crosses_in_straight_lines`
         // answers them one step up.
         | (Surface::Cylinder(_), Surface::Cylinder(_) | Surface::Torus(_))
-        | (Surface::Cone(_), Surface::Cone(_) | Surface::Torus(_))
+        | (Surface::Cone(_), Surface::Torus(_))
         | (
             Surface::Torus(_),
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),

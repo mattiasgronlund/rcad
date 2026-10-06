@@ -32,8 +32,10 @@
 //! parabola, a tube and a cone cut by one leaning plane, is refused before
 //! `rings_round` under every rule (Q634), and so is the probe for two arcs
 //! along two cones' hyperbolas, a cut cone less a second cone on its axis,
-//! because two different cones could not be crossed (Q636) and now because
-//! the arrangement cannot order points round the circle they cross in (Q1122).
+//! because two different cones could not be crossed (Q636), then because the
+//! arrangement could not order points round the circle they cross in (Q1122),
+//! and now because a point cannot be tested against the cut cone's face
+//! (Q1129).
 //! The family of
 //! corners that sweep no area and are not on one line is built with corners
 //! that cancel exactly, face by face, and the fuse that would join its cap
@@ -532,18 +534,22 @@ fn a_cone_cut_by_a_block_wall_off_its_axis_is_answered_under_every_rule() {
 /// for.
 ///
 /// **That is not reached: the cut cone less the second cone is refused under
-/// every rule, both ways round**, and since Q1122 one step further on. The two
-/// surfaces cross: a cone here is both nappes, and the first's upper nappe
-/// meets the second's lower one in the circle of radius 1 at `z = 1`, which
-/// `intersect` names now — it used to refuse every pair of two different cones
-/// in `cuts::gather` (a breakpoint on `intersect`, Q636). That circle is on the
-/// first cone's face and below the second's apex, so the two faces never meet,
-/// and the arrangement of the first cone's face is what refuses it:
-/// `how_a_crossing_runs` in `fuse/arrange.rs` orders points only along the
-/// pairs `a_pair_that_crosses_in_a_conic` lists, and two cones are not one of
-/// them (a breakpoint on that refusal, `arrange.rs:6156`, under the union,
-/// Q1122). **So the nested cups still do not reach `rings_round`**, and the
-/// flush block is not built.
+/// every rule, both ways round**, and each of Q1122 and Q1129 took it one step
+/// further on. The two surfaces cross: a cone here is both nappes, and the
+/// first's upper nappe meets the second's lower one in the circle of radius 1
+/// at `z = 1`, which `intersect` names now — it used to refuse every pair of
+/// two different cones in `cuts::gather` (a breakpoint on `intersect`, Q636).
+/// That circle is on the first cone's face and below the second's apex, so the
+/// two faces never meet. The arrangement of the first cone's face refused it
+/// next, `ACrossingThisCannotBeOrderedAlong`, because two cones were not a pair
+/// `a_pair_that_crosses_in_a_conic` in `fuse/arrange.rs` listed (Q1122), and
+/// then `CannotTellTheCellsOfAFaceApart`, because the circle's walks could not
+/// be placed round the cone's axis against the face's own outline (Q1129).
+/// Both are answered now, and every rule is refused
+/// `AFaceTrimmedByACurveThisCannotFollow` on the first cone's face, which
+/// comes from `holds.rs`, where a point is tested against a face; which of its
+/// tests gives up was not traced. **So the nested cups still do not reach
+/// `rings_round`**, and the flush block is not built.
 ///
 /// Both solids are measured first: the cut cone holds what the test above
 /// says, and the second cone `2744π/3`.
@@ -589,7 +595,10 @@ fn a_cut_cone_less_a_second_cone_on_its_axis_is_refused_before_its_cups_are_join
         let pair = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
         let refused = fused_in_order(&mut model, pair, rule, swapped);
         assert!(
-            matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
+            matches!(
+                refused,
+                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+            ),
             "{rule:?}, swapped {swapped}: {refused:?}"
         );
     }
