@@ -717,6 +717,10 @@ struct Crossing {
     /// Where the partner rests along the face's surface on one straight line
     /// and crosses it nowhere, and `None` for every other crossing.
     touching: Option<AlongATouch>,
+    /// Every other surface that cuts the face in this same curve, folded into
+    /// it by [`Arrangement::one_curve_two_partners_cut`]. Empty for nearly
+    /// every crossing.
+    also_cut_by: Vec<Surface>,
 }
 
 /// One straight line a plane or a pipe rests along a pipe on, the fillet's
@@ -1247,7 +1251,7 @@ impl<'f> Arrangement<'f> {
         let mut first = None;
         for run in wanted {
             let maybe = drawn.that_may_be(sorts_at, self.crossings.len());
-            let index = match self.crossing_like(&partner, pickers_of(&run), &maybe, policy, log)? {
+            let index = match self.crossing_like(&partner, &run, &maybe, policy, log)? {
                 Some(already) => {
                     self.crossings[already].cuts |= cuts;
                     already
@@ -1269,6 +1273,7 @@ impl<'f> Arrangement<'f> {
                         },
                         cuts,
                         reaches_the_face: true,
+                        also_cut_by: Vec::new(),
                     });
                     let index = self.crossings.len() - 1;
                     drawn.add(index, sorts_at);
@@ -1289,7 +1294,11 @@ impl<'f> Arrangement<'f> {
     /// planes, and it is the rank of a three-by-four matrix of stored
     /// coefficients, which is four exact determinants
     /// ([`relation_of_two_lines`]). Otherwise the question is whether the two
-    /// partners are one surface, which [`intersect`] answers (§31.2 row 7).
+    /// partners are one surface, which [`intersect`] answers (§31.2 row 7),
+    /// and where they are not, whether the face and the two share the curve,
+    /// with one of the three flat
+    /// ([`Arrangement::one_curve_two_partners_cut`]). A fold of that last kind
+    /// is written down on the crossing kept ([`Crossing::also_cut_by`]).
     ///
     /// **Only the lines whose boxes share a point with the new one's are
     /// asked.** Asking every crossing drawn before it cost each face its count
@@ -1300,11 +1309,12 @@ impl<'f> Arrangement<'f> {
     fn crossing_like(
         &mut self,
         partner: &Surface,
-        picked_by: &[Picker],
+        run: &NamedRun,
         maybe: &[usize],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Option<usize>> {
+        let picked_by = pickers_of(run);
         for &index in maybe {
             let mine = self.crossings[index].partner;
             let same = match (self.surface.as_plane(), mine.as_plane(), partner.as_plane()) {
@@ -1325,8 +1335,118 @@ impl<'f> Arrangement<'f> {
             if same && self.crossings[index].picked_by() == picked_by {
                 return Ok(Some(index));
             }
+            if !same && self.one_curve_two_partners_cut(index, partner, run, policy) {
+                self.crossings[index].also_cut_by.push(*partner);
+                return Ok(Some(index));
+            }
         }
         Ok(None)
+    }
+
+    /// Whether the crossing at `index` and `run` of `surface ∩ partner` are
+    /// one curve because the face's surface and the two partners share it:
+    /// one of the three flat and the other two curved, and
+    /// [`meet_of_three_surfaces`] says they share more than a point.
+    ///
+    /// **A bar's cap is the shape**: a ball of the bar's radius centred on the
+    /// cap cuts the cap's plane in the cap's own rim, and so does the pipe.
+    /// The two are one circle, and drawn as two crossings every node on it has
+    /// two ways out leaving it the same way and bending alike, which
+    /// [`Arrangement::sorted_anticlockwise`] refuses as
+    /// [`Error::TwoCurvesTouchWithoutCrossing`]. A frustum's narrow cap on a
+    /// bar of that cap's radius, about the frustum's axis, is the same circle
+    /// three times: the cap, the cone and the pipe.
+    ///
+    /// **Why sharing more than a point is the whole proof.** One plane `P` and
+    /// two quadrics reach that answer two ways. Two quadrics that bend alike
+    /// differ by a flat `F`, and share a curve with `P` only where `F` is `P`,
+    /// so the two cut `P` in one set, or where `P` and `F` cross in a line on
+    /// both, so each pair's curve holds that line. Two turned about one axis
+    /// square to `P` cut it in circles about one centre, and share more than
+    /// a point only where the radii are equal, so each pair's curve holds that
+    /// circle. A pair that names one curve, with nothing picking it, names the
+    /// whole of it, so where both are such a pair each is the shared one.
+    ///
+    /// **Where one of them is picked out of two curves**, as a pipe and a cone
+    /// about one axis cross in two circles, it is the shared one when its
+    /// pickers hold a point of the other, which names the whole shared curve
+    /// ([`Arrangement::picks_the_whole_of`]). Two picked out of two are left
+    /// apart, as they were before.
+    ///
+    /// A meet that cannot be worked out folds nothing, and leaves the two to
+    /// [`Arrangement::place_the_meets`], which asks the same three again and
+    /// refuses there if it has to. Its records are not kept: a fold that is
+    /// not proved here decides nothing.
+    fn one_curve_two_partners_cut(
+        &self,
+        index: usize,
+        partner: &Surface,
+        run: &NamedRun,
+        policy: &Policy,
+    ) -> bool {
+        let (mine, my_run) = (self.crossings[index].partner, &self.crossings[index].run);
+        let three = [self.surface, mine, *partner];
+        if three
+            .iter()
+            .filter(|surface| surface.as_plane().is_some())
+            .count()
+            != 1
+        {
+            return false;
+        }
+        let whole = [pickers_of(my_run).is_empty(), pickers_of(run).is_empty()];
+        if whole == [false, false]
+            || !matches!(
+                meet_of_three_surfaces(
+                    [&three[0], &three[1], &three[2]],
+                    policy,
+                    &mut ProvenanceLog::new()
+                ),
+                Ok(MeetOfThree::MoreThanAPoint)
+            )
+        {
+            return false;
+        }
+        match whole {
+            [true, true] => true,
+            [true, false] => self.picks_the_whole_of(&mine, my_run, pickers_of(run)),
+            [false, true] => self.picks_the_whole_of(partner, run, pickers_of(my_run)),
+            [false, false] => unreachable!("two curves both picked out were turned away above"),
+        }
+    }
+
+    /// Whether every one of `picked_by` certainly holds the point where the one
+    /// curve `whole_run` of `surface ∩ whole` starts.
+    ///
+    /// **One point is enough.** The two crossings share the whole of that
+    /// curve ([`Arrangement::one_curve_two_partners_cut`]), so it is a whole
+    /// closed curve of the picked pair too, and a pair's curves are apart: the
+    /// one curve holding a point of it is it. Held strictly, because a point
+    /// on a picker's own plane is where a picker parts nothing.
+    ///
+    /// Where the curve starts is walked ([`where_the_crossing_starts`]), so it
+    /// is asked as the box it is. A start that cannot be found, or a box a
+    /// picker cannot place, folds nothing.
+    fn picks_the_whole_of(
+        &self,
+        whole: &Surface,
+        whole_run: &NamedRun,
+        picked_by: &[Picker],
+    ) -> bool {
+        let Ok(from) = where_a_closed_crossing_starts(
+            whole_run,
+            [&self.surface, whole],
+            &mut ProvenanceLog::new(),
+        ) else {
+            return false;
+        };
+        if !from.is_finite() {
+            return false;
+        }
+        let at = where_the_crossing_starts(&self.surface, whole, from);
+        picked_by
+            .iter()
+            .all(|picker| picker.side_of_point(at) == Decision::Pos)
     }
 
     /// One node per corner of the face, read out of the baked solid.
@@ -4685,8 +4805,51 @@ impl<'f> Arrangement<'f> {
                     break;
                 }
             }
+            if side.is_none() {
+                *side = self.side_off_a_curve_it_also_cuts(cycle, &partner);
+            }
         }
         Ok(sides)
+    }
+
+    /// Which side of `partner` a walk is on, read off a half-edge of it along a
+    /// crossing `partner` cuts the face in too ([`Crossing::also_cut_by`]), or
+    /// `None` where no half-edge says.
+    ///
+    /// **Every node of such a walk is on `partner`**, so the nodes say
+    /// nothing, and a frustum's narrow cap on a bar of its radius is the walk:
+    /// round the bar at the cap's height, where the cap, the cone and the pipe
+    /// all meet. What is left of the walk is the side its half-edge already
+    /// gives of the crossing's own partner `A`, the region left of a forward
+    /// half-edge being `A`'s negative side. Along the same curve, `partner`'s
+    /// crossing would run along `∇S × ∇partner` and `A`'s along `∇S × ∇A`, both
+    /// along the one tangent; so the region is on the same side of `partner`
+    /// where the two point the same way, and on the other side where they
+    /// point opposite ways. A dot product that cannot be signed, which a touch
+    /// gives, says nothing, and neither does an arc a ruling through an apex
+    /// runs against its gradients along.
+    fn side_off_a_curve_it_also_cuts(&self, cycle: usize, partner: &Surface) -> Option<Decision> {
+        self.cycles[cycle].iter().find_map(|&half_edge| {
+            let arc = &self.arcs[half_edge / 2];
+            let crossing = &self.crossings[arc.crossing];
+            if arc.against_its_gradients || !crossing.also_cut_by.contains(partner) {
+                return None;
+            }
+            let at = self.nodes[self.from(half_edge)].point;
+            let face = gradient_at(&self.surface, at).enclosure();
+            let its_own = cross_of_intervals(face, gradient_at(&crossing.partner, at).enclosure());
+            let theirs = cross_of_intervals(face, gradient_at(partner, at).enclosure());
+            let of_its_own = if half_edge.is_multiple_of(2) {
+                Decision::Neg
+            } else {
+                Decision::Pos
+            };
+            match dot_of(its_own, theirs).sign() {
+                Decision::Pos => Some(of_its_own),
+                Decision::Neg => Some(the_other_way(of_its_own)),
+                Decision::Zero | Decision::Undecidable { .. } | _ => None,
+            }
+        })
     }
 
     /// Whether `node` is on `partner` because a crossing running through it
@@ -6476,7 +6639,21 @@ fn along_a_bend(
 /// Whether the pair crosses in one closed curve lying in a plane.
 ///
 /// The same arms [`which_comes_first_round_a_crossing`] can answer about, asked
-/// before anything is built rather than after (§34.10's last two rows).
+/// before anything is built rather than after (§34.10's last two rows), and
+/// one arm more: a cone and a pipe.
+///
+/// # A cone and a pipe is a row that is started and not ordered
+///
+/// [`intersect`](rcad_geom::intersect) names a cone against a pipe only where
+/// the two share an axis, and refuses every other cone and pipe by name, so a
+/// run of that pair reaching here is one of the two circles they cross in.
+/// [`where_a_closed_crossing_starts`] builds that circle, and so a crossing of
+/// the pair with no node on it, or one, is drawn and needs no order at all: a
+/// bar of a frustum's narrow radius through the frustum is cut by the cone's
+/// other nappe at the mirror height, in a circle nothing else meets.
+/// [`which_comes_first_round_a_crossing`] has no row for the pair, so where two
+/// nodes on one such circle do need ordering it refuses by name, which is what
+/// returning `true` too often costs, as for a torus below.
 ///
 /// # A plane and a torus is a row, and it does not read the placement
 ///
@@ -6522,20 +6699,26 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
         // A plane and a torus: circles in the two families `intersect` names,
         // and no run of any other family exists to be asked.
         | (Surface::Plane(_), Surface::Torus(_))
-        | (Surface::Torus(_), Surface::Plane(_)) => true,
+        | (Surface::Torus(_), Surface::Plane(_))
+        // A cone and a pipe: `intersect` names the pair only on one axis, where
+        // they cross in circles square to it, and refuses the rest by name.
+        | (Surface::Cone(_), Surface::Cylinder(_))
+        | (Surface::Cylinder(_), Surface::Cone(_)) => true,
         // Two planes cross in a straight line and are answered one step up, so
         // this arm is about the shape of the crossing and not about reaching it.
         (Surface::Plane(_), Surface::Plane(_))
         // A ball against a pipe, a cone or a ring crosses in a quartic.
         | (Surface::Sphere(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_))
         | (Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_), Surface::Sphere(_))
-        // So does every pair among the pipe, the cone and the ring, bar two
-        // side-by-side pipes, which cut straight lines. `false` is right for
-        // them here — a pair of endless lines is not a closed conic — and they
-        // never reach here anyway: `a_pair_that_crosses_in_straight_lines`
+        // So does every other pair among the pipe, the cone and the ring, bar
+        // two side-by-side pipes, which cut straight lines. `false` is right
+        // for them here — a pair of endless lines is not a closed conic — and
+        // they never reach here anyway: `a_pair_that_crosses_in_straight_lines`
         // answers them one step up.
+        | (Surface::Cylinder(_), Surface::Cylinder(_) | Surface::Torus(_))
+        | (Surface::Cone(_), Surface::Cone(_) | Surface::Torus(_))
         | (
-            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Torus(_),
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
         ) => false,
         _ => false,
