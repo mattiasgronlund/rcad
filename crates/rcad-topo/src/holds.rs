@@ -7598,11 +7598,11 @@ mod tests {
     /// of the ring between them, and `Model::validate` refuses it at the wall,
     /// the first face, by comparing the two circles. **Turned over at both**,
     /// the wall is the band the groove took and is a face, but the floor is
-    /// still used the way the groove's is, and the floor's own corners, off
-    /// each side's plane, say it is walked against the sides that turned over.
-    /// With the comparison switched off in place, all three are still refused,
-    /// by the floor: here the comparison names the fault first, and a band's
-    /// wall
+    /// still used the way the groove's is; worked by hand and not traced, the
+    /// floor's own corners, off each side's plane, say it is walked against
+    /// the sides that turned over. With the comparison switched off in place,
+    /// all three are still refused `AClosedEdgeIsWalkedAgainstItsSurface`:
+    /// here the comparison names the fault first, and a band's wall
     /// ([`a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused`])
     /// is where it is the only check that does.
     #[test]
