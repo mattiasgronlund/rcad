@@ -107,9 +107,12 @@
 //! although a different coordinate collapses on each
 //! ([`the_law_and_its_refusal_travel_to_another_axis`]).
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{
+    Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale, Sphere,
+    Surface, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model};
+use rcad_topo::{DraftStep, Error, Model, SolidBuilder};
 
 /// The reported placement that refuses. Its mantissa's last bit is 0.
 const EVEN: f64 = 1.080_863_910_568_919_2e16;
@@ -298,6 +301,64 @@ fn mesh_validate_and_measure_all_refuse_the_flat_ball_by_one_name() {
             (4.0 / 3.0, 0.0),
             "{call}: the octahedron of a unit ball encloses 4/3 where it is made \
              and nothing where it lands"
+        );
+    }
+}
+
+/// A thin cap put out where its height rounds away is refused by name too, by
+/// its very first mesh, and never reaches `validate`'s zero ladder.
+///
+/// The ladder meshes a curved solid finer when its coarsest mesh encloses
+/// exactly nothing, and until Q783 it read a finer mesh refused
+/// [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] as "stop" and returned
+/// the zero, which `validate` then calls `VolumeIsNotPositive`
+/// (`docs/decisions.md` §333.6, §379.5). This is the shape built to reach that:
+/// a cap of a ball under a quarter turn wide, whose rim is two half circles so
+/// that the two steps a cut across a rim of one closed edge is charged do not
+/// cover it. It is `0.25` high, and out at `2^52` the ulp is `1`, so all of it
+/// lands on the plane of its rim. And the rim is `148` across, far above the
+/// floor of about `18` ulps a finer mesh is asked for out there.
+///
+/// It does not reach the ladder. Its coarsest mesh already holds a point off
+/// the rim's plane where it was made, so it is refused at the first mesh,
+/// with the space that mesh encloses where it was made and none where it lands.
+/// At no placement it validates.
+#[test]
+fn a_thin_cap_placed_where_its_height_rounds_away_is_refused_by_name() {
+    let out = two_to_the(52);
+    assert_eq!(ulp_of(out), 1.0, "the ulp out at 2^52");
+    assert_eq!(out + 0.25, out, "so the cap's height rounds away");
+
+    let (mut model, cap) = a_thin_cap_with_a_rim_of_two_half_circles();
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("at no placement the cap is a sound model");
+
+    model
+        .place_solid(
+            cap,
+            &Isometry::translation(Vector::new(out, 0.0, 0.0)).expect("a finite placement"),
+        )
+        .expect("this model made the key");
+    let meshed = model.solid(cap).expect("this model made the key").mesh(
+        Deflection::of(COARSE).expect("a positive length"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let validated = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+    for (call, answer) in [("mesh", meshed.map(|_| ())), ("validate", validated)] {
+        let Err(Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+            enclosed_where_made,
+            enclosed_where_placed,
+        }) = answer
+        else {
+            panic!("{call} of a cap 0.25 high at 2^52 answered {answer:?}");
+        };
+        assert_eq!(
+            (enclosed_where_made, enclosed_where_placed),
+            (912.666_666_666_666_6, 0.0),
+            "{call}: the cap's first mesh encloses space where it was made and \
+             none where it lands"
         );
     }
 }
@@ -993,6 +1054,80 @@ fn what_it_refused(why: &Error) -> String {
         Error::Undecidable { .. } => "a predicate could not settle a sign".to_owned(),
         other => format!("an unexpected refusal: {other:?}"),
     }
+}
+
+/// The cap of a ball `0.25` high on the far side of the plane `x = 0`, its rim
+/// written as two half circles, in a model of its own and at no placement.
+///
+/// The ball's centre sits `(m² − 1) / 8` behind the plane and its radius is
+/// `(m² + 1) / 8`, so the rim's radius is `2m / 8` and every corner is exact:
+/// `(2m, m² − 1, m² + 1)` is a right triangle for any `m`. `m = 296` makes the
+/// rim `148` across.
+fn a_thin_cap_with_a_rim_of_two_half_circles() -> (Model, rcad_topo::SolidKey) {
+    let m = 296.0f64;
+    let rim = 2.0 * m / 8.0;
+    let behind = (m * m - 1.0) / 8.0;
+    let radius = (m * m + 1.0) / 8.0;
+    let mut model = Model::new(Scale::millimetres(4.0 * radius).expect("a working size"));
+    let lid = Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.0))
+        .expect("a plane");
+
+    let mut builder = SolidBuilder::new();
+    let top = builder
+        .add_vertex(Point::new(0.0, 0.0, rim))
+        .expect("a finite point");
+    let bottom = builder
+        .add_vertex(Point::new(0.0, 0.0, -rim))
+        .expect("a finite point");
+    let the_half_facing = |y: f64| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(lid),
+        picked_by: smallvec::smallvec![Picker::from(
+            HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, y, 0.0))
+                .expect("the y axis has length")
+        )],
+    };
+    let over = builder
+        .add_edge(top, bottom, the_half_facing(1.0))
+        .expect("the half of the rim with y ≥ 0");
+    let back = builder
+        .add_edge(bottom, top, the_half_facing(-1.0))
+        .expect("the half of the rim with y ≤ 0");
+    let mut step = |edge, way| {
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, way)
+                .expect("an edge of this builder"),
+        )
+    };
+    let lid_steps = [
+        step(over, Orientation::Forward),
+        step(back, Orientation::Forward),
+    ];
+    let skin_steps = [
+        step(back, Orientation::Reversed),
+        step(over, Orientation::Reversed),
+    ];
+    let lid_wire = builder.add_wire(&lid_steps).expect("a closed wire");
+    let skin_wire = builder.add_wire(&skin_steps).expect("a closed wire");
+    let skin = builder
+        .add_face(
+            Surface::Sphere(Sphere::new(Point::new(-behind, 0.0, 0.0), radius).expect("a ball")),
+            &[skin_wire],
+        )
+        .expect("a face with one wire");
+    let lid_face = builder
+        .add_face(Surface::Plane(lid), &[lid_wire])
+        .expect("a face with one wire");
+    builder
+        .add_shell(&[
+            (skin, Orientation::Forward),
+            (lid_face, Orientation::Forward),
+        ])
+        .expect("two faces close up");
+    let cap = builder
+        .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cap of a ball is a solid");
+    (model, cap)
 }
 
 /// How far apart two neighbouring doubles are at `x`.

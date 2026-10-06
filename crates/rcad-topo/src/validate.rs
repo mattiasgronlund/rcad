@@ -2288,7 +2288,7 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// finer meshes are read for a sign and thrown away**; nothing a caller measures
 /// is worked out here.
 ///
-/// # A fold is retried; every other refusal still stops it
+/// # A fold is retried; every other refusal but one still stops it
 ///
 /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] is the one refusal a finer
 /// deflection is *expected* to cure, and it is cured the way a crossing is in
@@ -2299,11 +2299,40 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// mesh came back flat and whose next mesh folded, so the bulge a third mesh
 /// would have found was never asked for.
 ///
-/// **Every other refusal is still the stopping condition and not a failure**:
-/// the coarsest mesh was built and checked, and what this is looking for is a
-/// point off the flat that no mesh of this solid holds. Handing the refusal on
-/// would replace a named answer about the shape with one about a deflection
-/// nobody asked for.
+/// **Every other refusal but one is still the stopping condition and not a
+/// failure**: the coarsest mesh was built and checked, and what this is looking
+/// for is a point off the flat that no mesh of this solid holds. Handing the
+/// refusal on would replace a named answer about the shape with one about a
+/// deflection nobody asked for.
+///
+/// # Placing it took away the space is handed on
+///
+/// [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] is the one refusal that
+/// *is* the answer this is looking for. A finer mesh refused that way found the
+/// point off the flat: it encloses space where the solid was made. It is only
+/// where the placement puts it that the space is gone. Stopping there would
+/// return the zero, and the caller would then call a sound solid
+/// [`Invalid::VolumeIsNotPositive`], "its faces do not point outwards", which
+/// is the misreport `docs/decisions.md` §333.6 objects to. So it is handed on,
+/// and the caller gets the name [`SolidView::mesh`] gives the same solid.
+///
+/// **No solid is known to reach that arm, so it is a guard** (§379.5, Q783).
+/// To reach it the coarsest mesh has to enclose exactly nothing both where the
+/// solid was made and where it lands, and a finer one has to enclose space
+/// where it was made. Where it was made, a sound solid's coarsest mesh encloses
+/// exactly nothing when every point of it lies on one plane, and the shape
+/// §41.6 found that way, a cap of a ball, now carries a point off its rim's
+/// plane: a cut across a rim that is one closed edge is charged two steps.
+/// A cap whose rim is **two** half circles, which that charge does not cover,
+/// was built to look for the gap, 0.25 high and put out at `2^52` where the
+/// ulp is 1. Its coarsest mesh still encloses `912.6666666666666` where it was
+/// made, against `0` where it lands, so it is refused by name before this loop
+/// is reached
+/// (`a_thin_cap_placed_where_its_height_rounds_away_is_refused_by_name`). And
+/// with this loop logging every solid that reached it, the whole `rcad-topo`
+/// suite sent one: a model of the fuzz corpus whose coarsest mesh was flat and
+/// whose first rung was refused `DeflectionBelowWhatAMeshCanReach`, its floor
+/// at `1.2e217`. That is a search, not a proof, so the arm stays.
 ///
 /// # What stops it
 ///
@@ -2326,8 +2355,9 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// # Errors
 ///
 /// Whatever [`the_coarsest_mesh_whose_sides_do_not_cross`] makes of the solid,
-/// and [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
-/// side do not.
+/// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
+/// side do not, and [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when a
+/// finer mesh is refused that way.
 pub(crate) fn how_much_space_a_curved_solid_encloses(
     view: SolidView<'_>,
     policy: &Policy,
@@ -2349,11 +2379,26 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 }
             }
             Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
-            Err(_) => break,
+            Err(why) => {
+                hand_on_a_refusal_that_found_the_space(why)?;
+                break;
+            }
         }
         room /= 2.0;
     }
     Ok(0.0)
+}
+
+/// `Err(why)` when a finer mesh of the zero ladder was refused because it found
+/// the space and the placement took it away, and `Ok(())`, which stops the
+/// ladder, for any other refusal.
+///
+/// The doc comment of [`how_much_space_a_curved_solid_encloses`] says why.
+fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
+    if matches!(why, Error::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }) {
+        return Err(why);
+    }
+    Ok(())
 }
 
 /// The solid meshed as coarsely as a mesh gets, or — when that mesh's own sides
@@ -4022,7 +4067,8 @@ mod tests {
 
     use super::{
         Decision, Scope, a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
-        as_coarse_as_a_mesh_gets, gradient_of, winding_of, winding_round,
+        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space, winding_of,
+        winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -6011,6 +6057,43 @@ mod tests {
         assert!(
             !a_circle_round_the_axis([Surface::Torus(ring), Surface::Plane(flat)]),
             "the exact cross is not zero, so this is not a circle round the axis"
+        );
+    }
+
+    /// A finer mesh of the zero ladder refused because placing the solid took
+    /// away the space it encloses is handed on, not read as a reason to stop.
+    ///
+    /// Stopping returns the zero, and the caller then calls the solid
+    /// `VolumeIsNotPositive` (§333.6). No solid is known to send this refusal
+    /// from a finer rung, so the rung is asked directly (§379.5, Q783). The
+    /// unit ball at `1.08e16`, which lands flat, is refused `4/3` where it
+    /// was made and `0` where it lands, and those are the numbers used.
+    #[test]
+    fn a_finer_mesh_that_lost_its_space_to_the_placement_is_handed_on() {
+        let Err(Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+            enclosed_where_made,
+            enclosed_where_placed,
+        }) = hand_on_a_refusal_that_found_the_space(
+            Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+                enclosed_where_made: 4.0 / 3.0,
+                enclosed_where_placed: 0.0,
+            },
+        )
+        else {
+            panic!("the refusal was not handed on");
+        };
+        assert_eq!(
+            (enclosed_where_made, enclosed_where_placed),
+            (4.0 / 3.0, 0.0)
+        );
+
+        assert!(
+            hand_on_a_refusal_that_found_the_space(Error::DeflectionBelowWhatAMeshCanReach {
+                asked: 5.0,
+                closest: 1e217,
+            })
+            .is_ok(),
+            "the floor still stops the ladder"
         );
     }
 }
