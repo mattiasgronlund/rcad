@@ -121,6 +121,18 @@ exactly proportional to another by a factor other than `±1`. No test here
 builds one, nothing here checked whether a turn can produce one, and a closed
 edge between such a pair would be split the same way.
 
+**2026-10-05 note (Q1085, fixed by Q555, `c34513e6`): a turn does produce one.**
+A block turned about `z` by `0.29` then `0.4953981633974484`, and one turned by
+`0.45` then `0.33539816339744805`, both put a face on `x = y`, spelling it
+`(−c, c, 0, 0)` and `(−c′, c′, 0, 0)` with `c` and `c′` an ulp apart
+(`a_turned_plane_exactly_proportional_to_another.rs`). The arc's name now
+folds any ratio, not only the negation
+(`name_of_the_plane_at_any_scale` in `assemble.rs`), so the twelve fuses this
+paragraph worried about answer. Two blocks facing apart across such a pair are
+still refused — by their corners, not the arc's name — and a closed edge
+between such a pair, rather than an arc of one, is still untested; neither is
+this note's to close.
+
 ### 330.4 Whether a spelling can pair four faces crosswise
 
 §247.6 asked whether two spellings the fold leaves apart could pair the four

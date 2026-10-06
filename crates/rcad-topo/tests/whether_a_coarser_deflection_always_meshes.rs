@@ -926,10 +926,11 @@ fn a_coarser_deflection_meshes_whenever_a_finer_one_did_on_solids_drawn_at_rando
 /// turn, so the turn and the exact size are both part of it.
 ///
 /// That is the non-monotone ladder this file exists to catch, on a kind the
-/// fixed family holds but at a placement it never tries. Ignored because it
-/// fails; the justfile's `ignored_tests` has to move alongside it.
+/// fixed family holds but at a placement it never tries.
+///
+/// **Un-ignored by Q1102: the band no longer refuses.** Found passing by
+/// Q929; which change fixed it was not traced (§187.4).
 #[test]
-#[ignore = "open: a turned quarter bend refuses 1.47 to 1.57 between meshes at 1.46 and 1.58"]
 fn a_turned_quarter_bend_meshes_at_every_deflection_coarser_than_one_it_meshed_at() {
     let mut model = a_model(4.8200302726828 + 0.9357021242936023);
     let bend = rings::a_quarter_bend(&mut model, 4.8200302726828, 0.9357021242936023);

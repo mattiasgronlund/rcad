@@ -736,7 +736,7 @@ fn a_frustum_whose_top_corner_is_moved_in_its_file_reads_back_and_does_not_valid
 /// Each row is a partner, a rule, what the sound frustum gives, and what the
 /// corner moved off the wall, off the cap and a quarter turn round gives.
 #[test]
-fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more() {
+fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives() {
     use Outcome::{
         CannotTellTheCellsOfAFaceApart as CannotTell, ItBlamesItself as Blamed,
         TheSoundAnswer as Sound,

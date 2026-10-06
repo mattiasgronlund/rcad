@@ -122,6 +122,12 @@ numbers:
 Neither has been diagnosed. Each soak stopped at its first failure, so the rest
 of the factor-50 corpus has not been searched.
 
+**2026-10-05 note (Q1102): item 2's band no longer refuses, as of this base.**
+`a_turned_quarter_bend_meshes_at_every_deflection_coarser_than_one_it_meshed_at`
+meshes at 1.5 now too, and every other test in the file still passes. Which of
+the several changes since this was written fixed it was not diagnosed. Un-
+ignored in `44a6b707994866a8ff1b3eb41b6d4877975cfa9d`.
+
 ### 187.5 What is left
 
 - **The wrong leaning-bar mesh**, §187.4 item 1. It is first because the mesh
