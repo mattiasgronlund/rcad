@@ -6084,15 +6084,14 @@ mod tests {
                     };
                     let picked_by = runs
                         .iter()
-                        .find_map(|run| match run.run() {
-                            EdgeRun::PartOfWhereItCrosses { picked_by, .. }
-                                if picked_by
-                                    .iter()
-                                    .all(|picker| picker.side_of_point(on_it) == Decision::Pos) =>
-                            {
-                                Some(picked_by.clone())
-                            }
-                            _ => None,
+                        .find_map(|run| {
+                            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                                panic!("each of the two circles is picked out: {run:?}");
+                            };
+                            picked_by
+                                .iter()
+                                .all(|picker| picker.side_of_point(on_it) == Decision::Pos)
+                                .then(|| picked_by.clone())
                         })
                         .expect("one of the two circles holds the point");
                     let starts = MeetPoint::WhereAClosedCurveStarts {
